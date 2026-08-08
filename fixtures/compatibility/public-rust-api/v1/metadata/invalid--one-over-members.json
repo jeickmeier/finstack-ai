@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "metadata",
+  "operation": "parse",
+  "recipe": {
+    "kind": "object_members",
+    "count": 65,
+    "value": 1
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "too_many_members"
+  }
+}

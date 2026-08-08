@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "recipe": {
+    "kind": "scientific_array",
+    "count": 47663,
+    "literal": "1e20"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "canonical_too_large",
+    "source_bytes": 238316
+  }
+}

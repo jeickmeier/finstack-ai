@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "metadata",
+  "operation": "roundtrip",
+  "input": {
+    "text": "{\"z\":true,\"finstack.owner\":1}"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "{\"finstack.owner\":1,\"z\":true}",
+    "member_count": 2
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "duration",
+  "operation": "checked_add",
+  "input": {
+    "left_ms": "18446744073709551615",
+    "right_ms": "1"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "overflow"
+  }
+}

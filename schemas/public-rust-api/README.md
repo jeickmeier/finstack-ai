@@ -1,10 +1,14 @@
-# public-rust-api (reserved)
+# public-rust-api
 
 Owner: `me@jeickmeier.com`  
 Compatibility profile: pre-1.0 classified breakage  
 Fixtures: `fixtures/compatibility/public-rust-api/`
 
-Reserved notes root only. Authoritative public Rust API source is `crates/`
-(see `schemas/schema-families.toml` `source_root`). Public item and feature-name
-changes use the schema-change template and compatibility fixtures when
-introduced by later PRs.
+Notes root for the public Rust API family. Authoritative source is `crates/`
+(see `schemas/schema-families.toml` `source_root`). PR-006 activates the family
+with versioned compatibility fixtures for typed IDs, RawJson/Metadata, digests,
+timestamps/durations, and source-free error descriptors.
+
+Public item and feature-name changes use the schema-change template and must
+update fixtures under `fixtures/compatibility/public-rust-api/` when behavior
+or serialization contracts change.

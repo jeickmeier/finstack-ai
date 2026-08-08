@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "timestamp",
+  "operation": "parse",
+  "input": {
+    "rfc3339": "1970-01-01T00:00:60.000Z"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_rfc3339"
+  }
+}
