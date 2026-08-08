@@ -1,0 +1,8 @@
+system: Darwin
+machine: arm64
+release: 25.5.0
+rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo: cargo 1.97.1 (c980f4866 2026-06-30)
+python: Python 3.9.6
+commit_at_evidence_capture: f51671507a148666d5a42f29086d97b3d6877f93
+branch: pr-005-harnesses

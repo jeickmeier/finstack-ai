@@ -69,6 +69,33 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
+[tasks.conformance]
+description = "Run golden-trace and conformance harness tests (PR-005)"
+run = "cargo test -p finstack-ai-test --locked"
+
+[tasks.test-benchmark]
+description = "Run benchmark staging helper unit tests"
+run = "uv run --no-project python -m unittest discover -s tools/benchmark/tests -v"
+
+[tasks.lint-benchmark]
+description = "Lint benchmark helper Python sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/benchmark"
+
+[tasks.format-benchmark]
+description = "Check benchmark helper Python formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/benchmark"
+
+[tasks.benchmark-smoke]
+description = "Compile Criterion benches and run a short non-blocking smoke with metadata"
+run = """
+uv run --no-project python tools/benchmark/run.py compile
+uv run --no-project python tools/benchmark/run.py smoke
+"""
+
+[tasks.benchmark]
+description = "Run Criterion benches and stage machine-readable metadata (non-blocking)"
+run = "uv run --no-project python tools/benchmark/run.py full"
+
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
 env = { RUSTDOCFLAGS = "-D warnings" }
@@ -190,6 +217,11 @@ mise run lint-schema-governance
 mise run format-schema-governance
 mise run test-schema-governance
 mise run schema-governance
+mise run conformance
+mise run lint-benchmark
+mise run format-benchmark
+mise run test-benchmark
+uv run --no-project python tools/benchmark/run.py compile
 mise run lint-workflows
 mise run supply-chain
 mise run secret-scan

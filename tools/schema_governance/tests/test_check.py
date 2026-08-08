@@ -224,6 +224,10 @@ class CheckIdTests(unittest.TestCase):
     def test_process_family_is_required(self) -> None:
         self.assertIn("process", REQUIRED_CONTRACT_FAMILIES)
 
+    def test_pr005_harness_families_are_required(self) -> None:
+        self.assertIn("golden-trace", REQUIRED_CONTRACT_FAMILIES)
+        self.assertIn("benchmark-report", REQUIRED_CONTRACT_FAMILIES)
+
 
 class AdrInventoryTests(unittest.TestCase):
     def test_missing_adr_files_fail_gov001(self) -> None:

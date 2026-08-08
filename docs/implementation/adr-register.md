@@ -31,7 +31,7 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
 | ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
 | ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
-| ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Standalone | Not started | Missing |
+| ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Standalone | In progress | Partial (PR-005 shared conformance harness; parity deferred) |
 | ADR-008 | `declarative-capabilities` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Standalone | Not started | Missing |
 | ADR-010 | `optional-wasm-isolation` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Standalone | In progress | Partial (PR-002 wasm-host / graph checks) |

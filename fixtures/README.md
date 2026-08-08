@@ -12,5 +12,6 @@ Do not commit credential-shaped material under `examples/` or `fixtures/`.
 Secret-scan negatives are assembled only in temporary repositories by
 `mise run secret-scan-canary`.
 
-Golden-trace, crash-prefix, and port compile fixtures land in later pull
-requests. See docs/planning/03-finstack-ai-technical-design.md §2.
+Golden-trace and benchmark-report fixtures land under `compatibility/`
+(PR-005). Crash-prefix and port compile fixtures land in later pull requests.
+See docs/planning/03-finstack-ai-technical-design.md §2.

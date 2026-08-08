@@ -1,0 +1,119 @@
+$ mise run supply-chain
+exit=0
+
+STDOUT:
+controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13
+advisories ok, bans ok, licenses ok, sources ok
+
+STDERR:
+[supply-chain] $ echo "controls: Engineering Standards §9; Threat Model TM-18; …
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+   ┌─ /Users/jeickmeier/Projects/finstack-ai/Cargo.lock:96:1
+   │  
+96 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+97 │ │ syn 3.0.3 registry+https://github.com/rust-lang/crates.io-index
+   │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+   │  
+   ├ syn v2.0.119
+     ├── synstructure v0.13.2
+     │   ├── yoke-derive v0.8.2
+     │   │   └── yoke v0.8.3
+     │   │       ├── icu_collections v2.2.0
+     │   │       │   ├── icu_normalizer v2.2.0
+     │   │       │   │   └── idna_adapter v1.2.2
+     │   │       │   │       └── idna v1.1.0
+     │   │       │   │           └── jsonschema v0.40.2
+     │   │       │   │               └── finstack-ai-test v0.0.1
+     │   │       │   └── icu_properties v2.2.0
+     │   │       │       └── idna_adapter v1.2.2 (*)
+     │   │       ├── icu_provider v2.2.0
+     │   │       │   ├── icu_normalizer v2.2.0 (*)
+     │   │       │   └── icu_properties v2.2.0 (*)
+     │   │       ├── zerotrie v0.2.4
+     │   │       │   ├── icu_properties v2.2.0 (*)
+     │   │       │   └── icu_provider v2.2.0 (*)
+     │   │       └── zerovec v0.11.6
+     │   │           ├── icu_collections v2.2.0 (*)
+     │   │           ├── icu_locale_core v2.2.0
+     │   │           │   ├── icu_properties v2.2.0 (*)
+     │   │           │   └── icu_provider v2.2.0 (*)
+     │   │           ├── icu_normalizer v2.2.0 (*)
+     │   │           ├── icu_properties v2.2.0 (*)
+     │   │           ├── icu_provider v2.2.0 (*)
+     │   │           ├── potential_utf v0.1.5
+     │   │           │   └── icu_collections v2.2.0 (*)
+     │   │           └── tinystr v0.8.3
+     │   │               └── icu_locale_core v2.2.0 (*)
+     │   └── zerofrom-derive v0.1.7
+     │       └── zerofrom v0.1.8
+     │           ├── icu_collections v2.2.0 (*)
+     │           ├── icu_provider v2.2.0 (*)
+     │           ├── yoke v0.8.3 (*)
+     │           ├── zerotrie v0.2.4 (*)
+     │           └── zerovec v0.11.6 (*)
+     ├── wasm-bindgen-macro-support v0.2.127
+     │   └── wasm-bindgen-macro v0.2.127
+     │       └── wasm-bindgen v0.2.127
+     │           └── getrandom v0.3.4
+     │               ├── ahash v0.8.12
+     │               │   ├── jsonschema v0.40.2 (*)
+     │               │   └── referencing v0.40.2
+     │               │       └── jsonschema v0.40.2 (*)
+     │               ├── jsonschema v0.40.2 (*)
+     │               └── referencing v0.40.2 (*)
+     ├── yoke-derive v0.8.2 (*)
+     ├── zerocopy-derive v0.8.56
+     │   └── zerocopy v0.8.56
+     │       ├── ahash v0.8.12 (*)
+     │       └── half v2.7.1
+     │           └── ciborium-ll v0.2.2
+     │               └── ciborium v0.2.2
+     │                   └── criterion v0.8.2
+     │                       └── (dev) finstack-ai-test v0.0.1 (*)
+     ├── zerofrom-derive v0.1.7 (*)
+     └── zerovec-derive v0.11.3
+         └── zerovec v0.11.6 (*)
+   ├ syn v3.0.3
+     ├── displaydoc v0.2.7
+     │   ├── icu_collections v2.2.0
+     │   │   ├── icu_normalizer v2.2.0
+     │   │   │   └── idna_adapter v1.2.2
+     │   │   │       └── idna v1.1.0
+     │   │   │           └── jsonschema v0.40.2
+     │   │   │               └── finstack-ai-test v0.0.1
+     │   │   └── icu_properties v2.2.0
+     │   │       └── idna_adapter v1.2.2 (*)
+     │   ├── icu_locale_core v2.2.0
+     │   │   ├── icu_properties v2.2.0 (*)
+     │   │   └── icu_provider v2.2.0
+     │   │       ├── icu_normalizer v2.2.0 (*)
+     │   │       └── icu_properties v2.2.0 (*)
+     │   ├── icu_provider v2.2.0 (*)
+     │   ├── tinystr v0.8.3
+     │   │   └── icu_locale_core v2.2.0 (*)
+     │   └── zerotrie v0.2.4
+     │       ├── icu_properties v2.2.0 (*)
+     │       └── icu_provider v2.2.0 (*)
+     ├── ref-cast-impl v1.0.26
+     │   └── ref-cast v1.0.26
+     │       └── fluent-uri v0.4.1
+     │           └── referencing v0.40.2
+     │               └── jsonschema v0.40.2 (*)
+     └── serde_derive v1.0.229
+         └── serde v1.0.229
+             ├── ahash v0.8.12
+             │   ├── jsonschema v0.40.2 (*)
+             │   └── referencing v0.40.2 (*)
+             ├── ciborium v0.2.2
+             │   └── criterion v0.8.2
+             │       └── (dev) finstack-ai-test v0.0.1 (*)
+             ├── criterion v0.8.2 (*)
+             ├── email_address v0.2.9
+             │   └── jsonschema v0.40.2 (*)
+             ├── finstack-ai-test v0.0.1 (*)
+             ├── fluent-uri v0.4.1 (*)
+             ├── jsonschema v0.40.2 (*)
+             └── tinytemplate v1.2.1
+                 └── criterion v0.8.2 (*)
+
+

@@ -134,6 +134,16 @@ jobs:
           mise run format-ci
           mise run test-ci
 
+      - name: Conformance harness
+        run: mise run conformance
+
+      - name: Benchmark helpers and compile
+        run: |
+          mise run lint-benchmark
+          mise run format-benchmark
+          mise run test-benchmark
+          uv run --no-project python tools/benchmark/run.py compile
+
       - name: Python package smoke
         run: mise run build-python
 

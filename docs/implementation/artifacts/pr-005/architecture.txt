@@ -1,0 +1,18 @@
+$ mise run architecture
+exit=0
+
+STDOUT:
+finstack-ai architecture check
+repo: /Users/jeickmeier/Projects/finstack-ai
+elapsed_ms: 111.3
+
+PASS: no architecture findings
+
+STDERR:
+[architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
+----------------------------------------------------------------------
+Ran 21 tests in 0.131s
+
+OK
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+

@@ -4,3 +4,6 @@
 //! `wasm-host` pass-through feature enabled so the resolved browser graph
 //! selects the runtime WASM driver rather than `native-tokio`.
 //! `wasm-bindgen` and host adapters land with later WASM binding pull requests.
+//!
+//! PR-005 registers a deferred WASM conformance adapter in `finstack-ai-test`.
+//! That adapter reports unavailable and is not binding parity evidence.
