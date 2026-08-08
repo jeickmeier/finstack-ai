@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.11 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.12 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -30,7 +30,8 @@ The current ordinal namespace is bound to this exact plan artifact:
 | PLAN-0.8 | 0.8 | `0e3d7c824daf036b72981ebbf0c1ab46a0989f277ce2c3f5ae5be728d4b51fa1` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Superseded |
 | PLAN-0.9 | 0.9 | `6a0cc9a3887026ff902322f7051e9fb0a6050880bbc6ff91ebbeb9e5011e5262` | 2026-08-08 | 66 | 345 | 62 | Pack v0.11 `extensions/` workspace layout | Superseded |
 | PLAN-0.10 | 0.10 | `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | 2026-08-08 | 66 | 345 | 62 | Pack v0.12 centralized license layout | Superseded |
-| PLAN-0.11 | 0.11 | `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.13 PR-007 message contract freeze | Current |
+| PLAN-0.11 | 0.11 | `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.13 PR-007 message contract freeze | Superseded |
+| PLAN-0.12 | 0.12 | `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.14 ModelRef optional fields | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -54,6 +55,7 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-08 | PLAN-0.8 | PLAN-0.9 / `6a0cc9a3887026ff902322f7051e9fb0a6050880bbc6ff91ebbeb9e5011e5262` | PR-001 principal changes | PR-001 principal changes (revised; acceptance IDs unchanged) | Pack v0.11 `extensions/` layout | Pack v0.11 amendment |
 | 2026-08-08 | PLAN-0.9 | PLAN-0.10 / `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | PR-001 principal changes | PR-001 principal changes (license paths revised; acceptance IDs unchanged) | Pack v0.12 centralized license layout | Pack v0.12 amendment |
 | 2026-08-08 | PLAN-0.10 | PLAN-0.11 / `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | PR-007 principal changes / A01 | PR-007 principal changes / A01 (revised; acceptance IDs unchanged) | Pack v0.13 PR-007 message contract freeze | Pack v0.13 amendment |
+| 2026-08-08 | PLAN-0.11 | PLAN-0.12 / `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | PR-007 principal changes (`ModelRef`) | PR-007 principal changes (`ModelRef` optionals; acceptance IDs unchanged) | Pack v0.14 ModelRef optional fields | Pack v0.14 amendment |
 
 ## Acceptance dispositions
 
@@ -112,10 +114,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-006-A03 | PR-006 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-006-E-conformance-adfd96007628 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-006-A04 | PR-006 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-006-E-conformance-adfd96007628; PR-006-E-test-kernel-bc373cf935e4 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-006-A05 | PR-006 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-006-E-architecture-90b6f267a46d; PR-006-E-ci-5565fde35cf6 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-007-A01 | PR-007 | PLAN-0.11 / [PR-007](../planning/04-finstack-ai-implementation-plan.md#pr-007---implement-content-blocks-messages-and-blob-references) | Passed | me@jeickmeier.com | PR-007-E-test-kernel-63a235179fb7; PR-007-E-conformance-f0694bffee9a; PR-007-E-check-wasm-c5b673cf41ce | — | me@jeickmeier.com | 2026-08-08 |
-| PR-007-A02 | PR-007 | PLAN-0.11 / same | Passed | me@jeickmeier.com | PR-007-E-test-kernel-63a235179fb7; PR-007-E-conformance-f0694bffee9a | — | me@jeickmeier.com | 2026-08-08 |
-| PR-007-A03 | PR-007 | PLAN-0.11 / same | Passed | me@jeickmeier.com | PR-007-E-conformance-f0694bffee9a; PR-007-E-security-9f5fd54f1ad4 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-007-A04 | PR-007 | PLAN-0.11 / same | Passed | me@jeickmeier.com | PR-007-E-docs-8dc7a9a0d6c8; PR-007-E-schema-550bbf12b8a5; PR-007-E-conformance-f0694bffee9a | — | me@jeickmeier.com | 2026-08-08 |
+| PR-007-A01 | PR-007 | PLAN-0.12 / [PR-007](../planning/04-finstack-ai-implementation-plan.md#pr-007---implement-content-blocks-messages-and-blob-references) | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-007-A02 | PR-007 | PLAN-0.12 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-007-A03 | PR-007 | PLAN-0.12 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-007-A04 | PR-007 | PLAN-0.12 / same | Pending | me@jeickmeier.com | — | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

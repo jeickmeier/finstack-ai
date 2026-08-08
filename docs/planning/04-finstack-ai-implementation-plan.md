@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.11 |
+| Version | 0.12 |
 | Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Technical Design v0.11; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Technical Design v0.12; Security and Threat Model v0.4 |
 
 # Executive implementation decision
 
@@ -537,7 +537,7 @@ A separate ADR is required before merging a change that:
 
 - Define `MessageRole` values `system`, `developer`, `user`, `assistant`, and `tool` with immutable `Message` values and the TDD §7 role/block matrix.
 
-- Add tool-call and tool-result association fields, provider extension payloads (`OpaqueBlock` / `ProviderIds` / `Metadata`), `ModelRef`, and environment-supplied timestamps.
+- Add tool-call and tool-result association fields, provider extension payloads (`OpaqueBlock` / `ProviderIds` / `Metadata`), `ModelRef` (required `provider`/`model` plus independently optional `thinking_level`, `context_length`, and `fast`), and environment-supplied timestamps.
 
 - Define a `BlobRef` that carries identity, media type, length, optional name, and optional integrity digest without embedding large payloads or metadata.
 

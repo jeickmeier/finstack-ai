@@ -179,6 +179,12 @@ fn classify_parse_error(error: &serde_json::Error) -> &'static str {
     if text.contains("unknown variant") || text.contains("unknown opaque encoding") {
         return "unknown_kind";
     }
+    if text.contains("unknown field") {
+        return "unknown_field";
+    }
+    if text.contains("opaque payload must not contain") {
+        return "invalid_opaque_payload";
+    }
     if text.contains("empty, oversized, or contains NUL") {
         return "invalid_label";
     }
@@ -208,6 +214,7 @@ fn classify_message_error(error: &serde_json::Error) -> &'static str {
         "unknown_tool_association",
         "missing_tool_result",
         "invalid_label",
+        "invalid_context_length",
         "nested_tool_block",
         "text_too_large",
         "too_many_items",
@@ -219,6 +226,9 @@ fn classify_message_error(error: &serde_json::Error) -> &'static str {
                 "unknown_tool_association" => text.contains("unknown tool_call_id"),
                 "missing_tool_result" => text.contains("requires at least one tool_result"),
                 "invalid_label" => text.contains("empty, oversized, or contains NUL"),
+                "invalid_context_length" => {
+                    text.contains("context_length") && text.contains("must be between 1 and")
+                }
                 "nested_tool_block" => text.contains("cannot nest tool_call"),
                 "text_too_large" => text.contains("text length"),
                 "too_many_items" => text.contains("content item count"),

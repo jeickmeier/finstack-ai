@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "subject": "content_block",
+  "operation": "parse",
+  "input": {
+    "kind": "opaque",
+    "media_type": "application/vnd.example",
+    "payload": {
+      "encoding": "bytes",
+      "data_hex": "00",
+      "data": {"also": "present"}
+    }
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_opaque_payload"
+  }
+}

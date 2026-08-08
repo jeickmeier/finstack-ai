@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "subject": "content_block",
+  "operation": "parse",
+  "input": {
+    "kind": "image",
+    "blob": {
+      "id": "blob-1",
+      "media_type": "image/png",
+      "length": 1
+    },
+    "data_hex": "00"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "unknown_field"
+  }
+}

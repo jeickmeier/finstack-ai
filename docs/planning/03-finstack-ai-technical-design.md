@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.11 |
+| Version | 0.12 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Implementation Plan v0.11; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Implementation Plan v0.12; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -608,9 +608,18 @@ Role/block validity matrix (v1):
 ## 7.4 Model message
 
 ```rust
+pub enum ThinkingLevel {
+    Low,
+    Medium,
+    High,
+}
+
 pub struct ModelRef {
     pub provider: Arc<str>,
     pub model: Arc<str>,
+    pub thinking_level: Option<ThinkingLevel>,
+    pub context_length: Option<u64>,
+    pub fast: Option<bool>,
 }
 
 pub struct Message {
@@ -624,7 +633,7 @@ pub struct Message {
 }
 ```
 
-`ModelRef.provider` and `ModelRef.model` are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `Message.content` is bounded by the section 6.5 array-item ceiling (4,096). `created_at` is supplied by the runtime environment; the kernel never reads a clock. `Usage` is not a message field in PR-007; token/cost usage types remain owned by budget and effect-completion surfaces (PR-008/PR-011) and are deferred until those consumers freeze them.
+`ModelRef.provider` and `ModelRef.model` are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `thinking_level`, `context_length`, and `fast` are independently optional selected-configuration fields: a model reference may omit all three, carry thinking only, fast only, context length only, or any combination (including thinking and fast together). When present, `context_length` is a positive token budget in the portable exact-JSON integer range (`1..=2^53-1`); larger values are rejected rather than serialized imprecisely for JavaScript consumers. Absent optional fields are omitted from JSON (`skip_serializing_if`). `Message.content` is bounded by the section 6.5 array-item ceiling (4,096). `created_at` is supplied by the runtime environment; the kernel never reads a clock. `Usage` is not a message field in PR-007; token/cost usage types remain owned by budget and effect-completion surfaces (PR-008/PR-011) and are deferred until those consumers freeze them.
 
 Constructors and deserializers validate the role/block matrix and reject invalid combinations with stable validation error codes. Tool-association validation in the message model is pure and structural:
 

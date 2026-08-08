@@ -61,7 +61,10 @@ pub use ids::{
     RecordTag, RunId, RunTag, SessionId, SessionTag, ToolBatchId, ToolBatchTag, ToolCallId,
     ToolCallTag, ToolId, ToolTag, TurnId, TurnTag,
 };
-pub use message::{Message, MessageError, MessageRole, ModelRef, ProviderIds};
+pub use message::{
+    MODEL_CONTEXT_LENGTH_MAX, Message, MessageError, MessageRole, ModelRef, ProviderIds,
+    ThinkingLevel,
+};
 pub use raw_json::{
     METADATA_MAX_BYTES, METADATA_MAX_DEPTH, METADATA_MAX_KEY_BYTES, METADATA_MAX_MEMBERS, Metadata,
     RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH, RawJson, RawJsonError,

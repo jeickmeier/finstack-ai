@@ -8,11 +8,15 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::content::{
-    ContentBlock, ContentError, LABEL_MAX_BYTES, TEXT_MAX_BYTES, validate_content_items,
+    BoundedString, ContentBlock, ContentError, ContentItems, LABEL_MAX_BYTES, TEXT_MAX_BYTES,
+    validate_content_items,
 };
 use crate::ids::{MessageId, ToolCallId};
 use crate::raw_json::Metadata;
 use crate::time::Timestamp;
+
+/// Largest model context length that round-trips exactly through portable JSON.
+pub const MODEL_CONTEXT_LENGTH_MAX: u64 = 9_007_199_254_740_991;
 
 /// Message role in the canonical conversation model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -44,15 +48,57 @@ impl MessageRole {
     }
 }
 
-/// Provider/model identity attached to an assistant message when known.
+/// Selected thinking / reasoning effort for a model invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingLevel {
+    /// Lowest thinking effort.
+    Low,
+    /// Balanced thinking effort.
+    Medium,
+    /// Highest thinking effort.
+    High,
+}
+
+/// Provider/model identity and optional selected configuration.
+///
+/// `thinking_level`, `context_length`, and `fast` are independently optional: a
+/// reference may omit all three, or carry any combination (thinking only, fast
+/// only, or both, with or without context length).
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai_kernel::{ModelRef, ThinkingLevel};
+///
+/// let base = ModelRef::try_new("openai", "gpt-example").expect("model");
+/// assert_eq!(base.thinking_level(), None);
+///
+/// let configured = ModelRef::try_new_with_options(
+///     "openai",
+///     "gpt-example",
+///     Some(ThinkingLevel::Medium),
+///     Some(128_000),
+///     Some(true),
+/// )
+/// .expect("configured model");
+/// assert_eq!(configured.context_length(), Some(128_000));
+/// assert_eq!(configured.fast(), Some(true));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ModelRef {
     provider: Arc<str>,
     model: Arc<str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_level: Option<ThinkingLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_length: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fast: Option<bool>,
 }
 
 impl ModelRef {
-    /// Construct a model reference.
+    /// Construct a model reference without optional selected configuration.
     ///
     /// # Errors
     ///
@@ -62,9 +108,37 @@ impl ModelRef {
         provider: impl AsRef<str>,
         model: impl AsRef<str>,
     ) -> Result<Self, MessageError> {
+        Self::try_new_with_options(provider, model, None, None, None)
+    }
+
+    /// Construct a model reference with optional selected configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MessageError::InvalidLabel`] when labels are empty, oversized, or
+    /// contain NUL. Returns [`MessageError::InvalidContextLength`] when a context
+    /// length is zero or exceeds [`MODEL_CONTEXT_LENGTH_MAX`].
+    pub fn try_new_with_options(
+        provider: impl AsRef<str>,
+        model: impl AsRef<str>,
+        thinking_level: Option<ThinkingLevel>,
+        context_length: Option<u64>,
+        fast: Option<bool>,
+    ) -> Result<Self, MessageError> {
+        if let Some(value) = context_length
+            && !(1..=MODEL_CONTEXT_LENGTH_MAX).contains(&value)
+        {
+            return Err(MessageError::InvalidContextLength {
+                value,
+                max: MODEL_CONTEXT_LENGTH_MAX,
+            });
+        }
         Ok(Self {
             provider: validated_label(provider.as_ref(), "provider")?,
             model: validated_label(model.as_ref(), "model")?,
+            thinking_level,
+            context_length,
+            fast,
         })
     }
 
@@ -79,6 +153,24 @@ impl ModelRef {
     pub fn model(&self) -> &str {
         &self.model
     }
+
+    /// Optional thinking level.
+    #[must_use]
+    pub const fn thinking_level(&self) -> Option<ThinkingLevel> {
+        self.thinking_level
+    }
+
+    /// Optional context length in tokens.
+    #[must_use]
+    pub const fn context_length(&self) -> Option<u64> {
+        self.context_length
+    }
+
+    /// Optional fast-mode selection.
+    #[must_use]
+    pub const fn fast(&self) -> Option<bool> {
+        self.fast
+    }
 }
 
 impl<'de> Deserialize<'de> for ModelRef {
@@ -87,12 +179,26 @@ impl<'de> Deserialize<'de> for ModelRef {
         D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            provider: String,
-            model: String,
+            provider: BoundedString<LABEL_MAX_BYTES>,
+            model: BoundedString<LABEL_MAX_BYTES>,
+            #[serde(default)]
+            thinking_level: Option<ThinkingLevel>,
+            #[serde(default)]
+            context_length: Option<u64>,
+            #[serde(default)]
+            fast: Option<bool>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.provider, wire.model).map_err(de::Error::custom)
+        Self::try_new_with_options(
+            wire.provider.into_inner(),
+            wire.model.into_inner(),
+            wire.thinking_level,
+            wire.context_length,
+            wire.fast,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -162,17 +268,22 @@ impl<'de> Deserialize<'de> for ProviderIds {
     {
         #[derive(Deserialize)]
         #[allow(clippy::struct_field_names)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             #[serde(default)]
-            request_id: Option<String>,
+            request_id: Option<BoundedString<TEXT_MAX_BYTES>>,
             #[serde(default)]
-            response_id: Option<String>,
+            response_id: Option<BoundedString<TEXT_MAX_BYTES>>,
             #[serde(default)]
-            continuation_id: Option<String>,
+            continuation_id: Option<BoundedString<TEXT_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.request_id, wire.response_id, wire.continuation_id)
-            .map_err(de::Error::custom)
+        Self::try_new(
+            wire.request_id.map(BoundedString::into_inner),
+            wire.response_id.map(BoundedString::into_inner),
+            wire.continuation_id.map(BoundedString::into_inner),
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -220,19 +331,18 @@ impl Message {
     pub fn try_new(
         id: MessageId,
         role: MessageRole,
-        content: impl Into<Arc<[ContentBlock]>>,
+        content: Vec<ContentBlock>,
         created_at: Timestamp,
         model: Option<ModelRef>,
         provider_ids: ProviderIds,
         metadata: Metadata,
     ) -> Result<Self, MessageError> {
-        let content = content.into();
         validate_content_items(&content)?;
         validate_role_blocks(role, &content)?;
         let message = Self {
             id,
             role,
-            content,
+            content: Arc::from(content),
             created_at,
             model,
             provider_ids,
@@ -334,10 +444,11 @@ impl<'de> Deserialize<'de> for Message {
         D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             id: MessageId,
             role: MessageRole,
-            content: Vec<ContentBlock>,
+            content: ContentItems,
             created_at: Timestamp,
             #[serde(default)]
             model: Option<ModelRef>,
@@ -350,7 +461,7 @@ impl<'de> Deserialize<'de> for Message {
         Self::try_new(
             wire.id,
             wire.role,
-            wire.content,
+            wire.content.into_inner(),
             wire.created_at,
             wire.model,
             wire.provider_ids,
@@ -405,6 +516,14 @@ pub enum MessageError {
         /// Ceiling.
         max: usize,
     },
+    /// `context_length` was outside the portable positive token-budget range.
+    #[error("context_length {value} must be between 1 and {max}")]
+    InvalidContextLength {
+        /// Rejected context length.
+        value: u64,
+        /// Maximum portable JSON integer.
+        max: u64,
+    },
 }
 
 impl MessageError {
@@ -425,6 +544,7 @@ impl MessageError {
             Self::DuplicateToolAssociation { .. } => "duplicate_tool_association",
             Self::UnknownToolAssociation { .. } => "unknown_tool_association",
             Self::ProviderIdTooLarge { .. } => "provider_id_too_large",
+            Self::InvalidContextLength { .. } => "invalid_context_length",
         }
     }
 }
@@ -597,11 +717,89 @@ mod tests {
             MessageRole::Assistant,
             vec![ContentBlock::ToolCall(call)],
             Timestamp::from_unix_ms(0).expect("ts"),
-            Some(ModelRef::try_new("openai", "gpt-test").expect("model")),
+            Some(
+                ModelRef::try_new_with_options(
+                    "openai",
+                    "gpt-test",
+                    Some(ThinkingLevel::Medium),
+                    Some(128_000),
+                    Some(true),
+                )
+                .expect("model"),
+            ),
             ProviderIds::empty(),
             Metadata::empty(),
         )
         .expect("message");
         assert_eq!(message.content().len(), 1);
+    }
+
+    #[test]
+    fn model_ref_optionals_independent() {
+        let base = ModelRef::try_new("p", "m").expect("base");
+        assert_eq!(
+            serde_json::to_string(&base).expect("base JSON"),
+            r#"{"provider":"p","model":"m"}"#
+        );
+
+        for thinking_level in [None, Some(ThinkingLevel::High)] {
+            for context_length in [None, Some(8_192)] {
+                for fast in [None, Some(true)] {
+                    let model = ModelRef::try_new_with_options(
+                        "p",
+                        "m",
+                        thinking_level,
+                        context_length,
+                        fast,
+                    )
+                    .expect("combination");
+                    let json = serde_json::to_string(&model).expect("serialize");
+                    let round: ModelRef = serde_json::from_str(&json).expect("deserialize");
+                    assert_eq!(round, model);
+                    assert_eq!(round.thinking_level(), thinking_level);
+                    assert_eq!(round.context_length(), context_length);
+                    assert_eq!(round.fast(), fast);
+                }
+            }
+        }
+
+        assert_eq!(
+            ModelRef::try_new_with_options("p", "m", None, Some(0), None)
+                .unwrap_err()
+                .code(),
+            "invalid_context_length"
+        );
+    }
+
+    #[test]
+    fn model_ref_context_length_stays_in_portable_json_range() {
+        const PORTABLE_MAX: u64 = 9_007_199_254_740_991;
+        assert!(ModelRef::try_new_with_options("p", "m", None, Some(PORTABLE_MAX), None).is_ok());
+        assert_eq!(
+            ModelRef::try_new_with_options("p", "m", None, Some(PORTABLE_MAX + 1), None)
+                .unwrap_err()
+                .code(),
+            "invalid_context_length"
+        );
+    }
+
+    #[test]
+    fn messages_and_model_refs_reject_unknown_members() {
+        let unknown_model =
+            serde_json::from_str::<ModelRef>(r#"{"provider":"p","model":"m","unsupported":true}"#);
+        assert!(unknown_model.is_err());
+
+        let unknown_message = serde_json::from_str::<Message>(
+            r#"{
+                "id":"01234567-89ab-7cde-89ab-0123456789ab",
+                "role":"user",
+                "content":[],
+                "created_at":"1970-01-01T00:00:00.000Z",
+                "provider_ids":{},
+                "metadata":{},
+                "unsupported":true
+            }"#,
+        );
+        assert!(unknown_message.is_err());
     }
 }

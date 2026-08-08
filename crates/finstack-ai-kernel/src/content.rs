@@ -4,15 +4,14 @@ use core::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use serde::de;
+use serde::de::{self, IgnoredAny, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
 use thiserror::Error;
 
 use crate::digest::Digest;
 use crate::ids::ToolCallId;
-use crate::raw_json::{RawJson, raw_json_from_value};
+use crate::raw_json::RawJson;
 
 /// V1 individual text/byte-string ceiling (4 MiB; TDD §6.5).
 pub const TEXT_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -20,6 +19,244 @@ pub const TEXT_MAX_BYTES: usize = 4 * 1024 * 1024;
 pub const CONTENT_MAX_ITEMS: usize = 4_096;
 /// V1 ceiling for media-type, blob-id, tool-name, and similar short labels.
 pub const LABEL_MAX_BYTES: usize = 256;
+
+pub(crate) struct BoundedString<const MAX: usize>(String);
+
+impl<const MAX: usize> BoundedString<MAX> {
+    pub(crate) fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BoundedStringVisitor<const MAX: usize>;
+
+        impl<const MAX: usize> Visitor<'_> for BoundedStringVisitor<MAX> {
+            type Value = BoundedString<MAX>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "a UTF-8 string no longer than {MAX} bytes")
+            }
+
+            fn visit_borrowed_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX {
+                    return Err(E::custom(format_args!(
+                        "string length {} exceeds max {MAX}",
+                        value.len()
+                    )));
+                }
+                Ok(BoundedString(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > MAX {
+                    return Err(E::custom(format_args!(
+                        "string length {} exceeds max {MAX}",
+                        value.len()
+                    )));
+                }
+                Ok(BoundedString(value))
+            }
+        }
+
+        if deserializer.is_human_readable() {
+            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+            validate_json_string_length(raw.get(), MAX).map_err(de::Error::custom)?;
+            let value = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
+            return Ok(Self(value));
+        }
+
+        deserializer.deserialize_string(BoundedStringVisitor::<MAX>)
+    }
+}
+
+fn validate_json_string_length(input: &str, max: usize) -> Result<(), String> {
+    let bytes = input.as_bytes();
+    if bytes.len() < 2 || bytes.first() != Some(&b'"') || bytes.last() != Some(&b'"') {
+        return Err("expected a JSON string".to_owned());
+    }
+    let max_source = max.saturating_mul(6).saturating_add(2);
+    if bytes.len() > max_source {
+        return Err(format!(
+            "JSON string source length {} exceeds max {max_source}",
+            bytes.len()
+        ));
+    }
+
+    let mut decoded_len = 0_usize;
+    let mut index = 1_usize;
+    while index < bytes.len() - 1 {
+        if bytes[index] == b'\\' {
+            index += 1;
+            let Some(escape) = bytes.get(index).copied() else {
+                return Err("incomplete JSON string escape".to_owned());
+            };
+            match escape {
+                b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
+                    decoded_len += 1;
+                    index += 1;
+                }
+                b'u' => {
+                    let high = parse_json_hex_quad(bytes, index + 1)?;
+                    index += 5;
+                    if (0xd800..=0xdbff).contains(&high) {
+                        if bytes.get(index..index + 2) != Some(br"\u") {
+                            return Err("high surrogate requires a low surrogate".to_owned());
+                        }
+                        let low = parse_json_hex_quad(bytes, index + 2)?;
+                        if !(0xdc00..=0xdfff).contains(&low) {
+                            return Err("high surrogate requires a low surrogate".to_owned());
+                        }
+                        decoded_len += 4;
+                        index += 6;
+                    } else if (0xdc00..=0xdfff).contains(&high) {
+                        return Err("unexpected low surrogate".to_owned());
+                    } else {
+                        let scalar = char::from_u32(u32::from(high))
+                            .ok_or_else(|| "invalid Unicode scalar".to_owned())?;
+                        decoded_len += scalar.len_utf8();
+                    }
+                }
+                _ => return Err("invalid JSON string escape".to_owned()),
+            }
+        } else {
+            let remaining = &input[index..bytes.len() - 1];
+            let character = remaining
+                .chars()
+                .next()
+                .ok_or_else(|| "invalid UTF-8 JSON string".to_owned())?;
+            if character <= '\u{001f}' || character == '"' {
+                return Err("unescaped control or quote in JSON string".to_owned());
+            }
+            let length = character.len_utf8();
+            decoded_len += length;
+            index += length;
+        }
+
+        if decoded_len > max {
+            return Err(format!("string length {decoded_len} exceeds max {max}"));
+        }
+    }
+    Ok(())
+}
+
+fn parse_json_hex_quad(bytes: &[u8], start: usize) -> Result<u16, String> {
+    let end = start
+        .checked_add(4)
+        .ok_or_else(|| "invalid Unicode escape".to_owned())?;
+    let digits = bytes
+        .get(start..end)
+        .ok_or_else(|| "incomplete Unicode escape".to_owned())?;
+    let mut value = 0_u16;
+    for digit in digits {
+        value = value
+            .checked_mul(16)
+            .and_then(|accumulator| {
+                let nibble = match digit {
+                    b'0'..=b'9' => digit - b'0',
+                    b'a'..=b'f' => digit - b'a' + 10,
+                    b'A'..=b'F' => digit - b'A' + 10,
+                    _ => return None,
+                };
+                accumulator.checked_add(u16::from(nibble))
+            })
+            .ok_or_else(|| "invalid Unicode escape".to_owned())?;
+    }
+    Ok(value)
+}
+
+pub(crate) struct ContentItems(Vec<ContentBlock>);
+
+impl ContentItems {
+    pub(crate) fn into_inner(self) -> Vec<ContentBlock> {
+        self.0
+    }
+}
+
+fn reject_oversized_content_hint<E>(hint: Option<usize>) -> Result<(), E>
+where
+    E: de::Error,
+{
+    if let Some(length) = hint
+        && length > CONTENT_MAX_ITEMS
+    {
+        return Err(E::custom(ContentError::TooManyItems {
+            len: length,
+            max: CONTENT_MAX_ITEMS,
+        }));
+    }
+    Ok(())
+}
+
+fn reject_trailing_content<'de, A>(sequence: &mut A) -> Result<(), A::Error>
+where
+    A: SeqAccess<'de>,
+{
+    if sequence.next_element::<IgnoredAny>()?.is_some() {
+        return Err(de::Error::custom(ContentError::TooManyItems {
+            len: CONTENT_MAX_ITEMS + 1,
+            max: CONTENT_MAX_ITEMS,
+        }));
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for ContentItems {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ContentItemsVisitor;
+
+        impl<'de> Visitor<'de> for ContentItemsVisitor {
+            type Value = ContentItems;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "an array containing at most {CONTENT_MAX_ITEMS} content blocks"
+                )
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                reject_oversized_content_hint::<A::Error>(sequence.size_hint())?;
+
+                let capacity = sequence.size_hint().unwrap_or(0).min(CONTENT_MAX_ITEMS);
+                let mut content = Vec::with_capacity(capacity);
+                while content.len() < CONTENT_MAX_ITEMS {
+                    let Some(block) = sequence.next_element()? else {
+                        return Ok(ContentItems(content));
+                    };
+                    content.push(block);
+                }
+                reject_trailing_content(&mut sequence)?;
+                Ok(ContentItems(content))
+            }
+        }
+
+        deserializer.deserialize_seq(ContentItemsVisitor)
+    }
+}
 
 /// Reference to externally stored media bytes.
 ///
@@ -118,22 +355,23 @@ impl<'de> Deserialize<'de> for BlobRef {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            id: String,
-            media_type: String,
+            id: BoundedString<LABEL_MAX_BYTES>,
+            media_type: BoundedString<LABEL_MAX_BYTES>,
             length: u64,
             #[serde(default)]
             digest: Option<Digest>,
             #[serde(default)]
-            name: Option<String>,
+            name: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
-            wire.id,
-            wire.media_type,
+            wire.id.into_inner(),
+            wire.media_type.into_inner(),
             wire.length,
             wire.digest,
-            wire.name,
+            wire.name.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)
     }
@@ -141,6 +379,7 @@ impl<'de> Deserialize<'de> for BlobRef {
 
 /// Media content referenced by [`BlobRef`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MediaRef {
     blob: BlobRef,
 }
@@ -197,11 +436,12 @@ impl<'de> Deserialize<'de> for TextBlock {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            text: String,
+            text: BoundedString<TEXT_MAX_BYTES>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.text).map_err(de::Error::custom)
+        Self::try_new(wire.text.into_inner()).map_err(de::Error::custom)
     }
 }
 
@@ -231,12 +471,23 @@ impl<'de> Deserialize<'de> for JsonBlock {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        struct Wire {
-            value: Value,
+        #[serde(deny_unknown_fields)]
+        struct HumanWire {
+            value: StrictRawJson,
         }
-        let wire = Wire::deserialize(deserializer)?;
-        let value = raw_json_from_value(&wire.value).map_err(de::Error::custom)?;
-        Ok(Self::new(value))
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct BinaryWire {
+            value: RawJson,
+        }
+
+        if deserializer.is_human_readable() {
+            let wire = HumanWire::deserialize(deserializer)?;
+            return Ok(Self::new(wire.value.0));
+        }
+
+        let wire = BinaryWire::deserialize(deserializer)?;
+        Ok(Self::new(wire.value))
     }
 }
 
@@ -292,14 +543,37 @@ impl<'de> Deserialize<'de> for ToolCallBlock {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        struct Wire {
+        #[serde(deny_unknown_fields)]
+        struct HumanWire {
             tool_call_id: ToolCallId,
-            tool_name: String,
-            arguments: Value,
+            tool_name: BoundedString<LABEL_MAX_BYTES>,
+            arguments: StrictRawJson,
         }
-        let wire = Wire::deserialize(deserializer)?;
-        let arguments = raw_json_from_value(&wire.arguments).map_err(de::Error::custom)?;
-        Self::try_new(wire.tool_call_id, wire.tool_name, arguments).map_err(de::Error::custom)
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct BinaryWire {
+            tool_call_id: ToolCallId,
+            tool_name: BoundedString<LABEL_MAX_BYTES>,
+            arguments: RawJson,
+        }
+
+        if deserializer.is_human_readable() {
+            let wire = HumanWire::deserialize(deserializer)?;
+            return Self::try_new(
+                wire.tool_call_id,
+                wire.tool_name.into_inner(),
+                wire.arguments.0,
+            )
+            .map_err(de::Error::custom);
+        }
+
+        let wire = BinaryWire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.tool_call_id,
+            wire.tool_name.into_inner(),
+            wire.arguments,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -321,12 +595,11 @@ impl ToolResultBlock {
     /// tool-call/tool-result blocks.
     pub fn try_new(
         tool_call_id: ToolCallId,
-        content: impl Into<Arc<[ContentBlock]>>,
+        content: Vec<ContentBlock>,
         is_error: bool,
     ) -> Result<Self, ContentError> {
-        let content = content.into();
         validate_content_items(&content)?;
-        for block in content.iter() {
+        for block in &content {
             if matches!(
                 block,
                 ContentBlock::ToolCall(_) | ContentBlock::ToolResult(_)
@@ -336,7 +609,7 @@ impl ToolResultBlock {
         }
         Ok(Self {
             tool_call_id,
-            content,
+            content: Arc::from(content),
             is_error,
         })
     }
@@ -366,14 +639,16 @@ impl<'de> Deserialize<'de> for ToolResultBlock {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             tool_call_id: ToolCallId,
-            content: Vec<ContentBlock>,
+            content: ToolResultContentItems,
             #[serde(default)]
             is_error: bool,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.tool_call_id, wire.content, wire.is_error).map_err(de::Error::custom)
+        Self::try_new(wire.tool_call_id, wire.content.into_inner(), wire.is_error)
+            .map_err(de::Error::custom)
     }
 }
 
@@ -415,6 +690,21 @@ impl Serialize for OpaquePayload {
     where
         S: Serializer,
     {
+        if !serializer.is_human_readable() {
+            let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
+            match self {
+                Self::Bytes(bytes) => {
+                    state.serialize_field("encoding", "bytes")?;
+                    state.serialize_field("data", &BinaryByteRef(bytes))?;
+                }
+                Self::Json(value) => {
+                    state.serialize_field("encoding", "json")?;
+                    state.serialize_field("data", value)?;
+                }
+            }
+            return state.end();
+        }
+
         match self {
             Self::Bytes(bytes) => {
                 let mut state = serializer.serialize_struct("OpaquePayload", 2)?;
@@ -432,36 +722,100 @@ impl Serialize for OpaquePayload {
     }
 }
 
+struct BinaryByteRef<'a>(&'a [u8]);
+
+impl Serialize for BinaryByteRef<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(self.0)
+    }
+}
+
+struct BinaryBytes(Bytes);
+
+impl<'de> Deserialize<'de> for BinaryBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BinaryBytesVisitor;
+
+        impl<'de> Visitor<'de> for BinaryBytesVisitor {
+            type Value = BinaryBytes;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a byte string")
+            }
+
+            fn visit_borrowed_bytes<E>(self, value: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                self.visit_bytes(value)
+            }
+
+            fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > TEXT_MAX_BYTES {
+                    return Err(E::custom(ContentError::BytesTooLarge {
+                        len: value.len(),
+                        max: TEXT_MAX_BYTES,
+                    }));
+                }
+                Ok(BinaryBytes(Bytes::copy_from_slice(value)))
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value.len() > TEXT_MAX_BYTES {
+                    return Err(E::custom(ContentError::BytesTooLarge {
+                        len: value.len(),
+                        max: TEXT_MAX_BYTES,
+                    }));
+                }
+                Ok(BinaryBytes(Bytes::from(value)))
+            }
+        }
+
+        deserializer.deserialize_byte_buf(BinaryBytesVisitor)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OpaqueEncoding {
+    Bytes,
+    Json,
+}
+
 impl<'de> Deserialize<'de> for OpaquePayload {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            encoding: String,
-            #[serde(default)]
-            data_hex: Option<String>,
-            #[serde(default)]
-            data: Option<Value>,
+            encoding: OpaqueEncoding,
+            data: BinaryBytes,
         }
+
+        if deserializer.is_human_readable() {
+            return StrictOpaquePayload::deserialize(deserializer).map(|payload| payload.0);
+        }
+
         let wire = Wire::deserialize(deserializer)?;
-        match wire.encoding.as_str() {
-            "bytes" => {
-                let hex = wire
-                    .data_hex
-                    .ok_or_else(|| de::Error::missing_field("data_hex"))?;
-                let bytes = hex_decode(&hex).map_err(de::Error::custom)?;
-                Self::bytes(bytes).map_err(de::Error::custom)
-            }
-            "json" => {
-                let value = wire.data.ok_or_else(|| de::Error::missing_field("data"))?;
-                let json = raw_json_from_value(&value).map_err(de::Error::custom)?;
-                Ok(Self::json(json))
-            }
-            other => Err(de::Error::custom(format!(
-                "unknown opaque encoding {other}"
-            ))),
+        match wire.encoding {
+            OpaqueEncoding::Bytes => Self::bytes(wire.data.0).map_err(de::Error::custom),
+            OpaqueEncoding::Json => RawJson::parse(wire.data.0)
+                .map(Self::json)
+                .map_err(de::Error::custom),
         }
     }
 }
@@ -509,17 +863,18 @@ impl<'de> Deserialize<'de> for OpaqueBlock {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
-            media_type: String,
+            media_type: BoundedString<LABEL_MAX_BYTES>,
             payload: OpaquePayload,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.media_type, wire.payload).map_err(de::Error::custom)
+        Self::try_new(wire.media_type.into_inner(), wire.payload).map_err(de::Error::custom)
     }
 }
 
 /// Canonical provider-neutral content block.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContentBlock {
     /// Plain text.
@@ -538,6 +893,337 @@ pub enum ContentBlock {
     ToolResult(ToolResultBlock),
     /// Provider-opaque extension payload.
     Opaque(OpaqueBlock),
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ContentKind {
+    Text,
+    Json,
+    Image,
+    Audio,
+    File,
+    ToolCall,
+    ToolResult,
+    Opaque,
+}
+
+#[derive(Deserialize)]
+struct ContentKindProbe {
+    kind: ContentKind,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedTextBlock {
+    kind: ContentKind,
+    text: BoundedString<TEXT_MAX_BYTES>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedJsonBlock {
+    kind: ContentKind,
+    value: StrictRawJson,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedMediaRef {
+    kind: ContentKind,
+    blob: BlobRef,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedToolCallBlock {
+    kind: ContentKind,
+    tool_call_id: ToolCallId,
+    tool_name: BoundedString<LABEL_MAX_BYTES>,
+    arguments: StrictRawJson,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedToolResultBlock {
+    kind: ContentKind,
+    tool_call_id: ToolCallId,
+    content: ToolResultContentItems,
+    #[serde(default)]
+    is_error: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaggedOpaqueBlock {
+    kind: ContentKind,
+    media_type: BoundedString<LABEL_MAX_BYTES>,
+    payload: StrictOpaquePayload,
+}
+
+struct ToolResultContentItems(Vec<ContentBlock>);
+
+impl ToolResultContentItems {
+    fn into_inner(self) -> Vec<ContentBlock> {
+        self.0
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum NonToolContentBlock {
+    Text(TextBlock),
+    Json(JsonBlock),
+    Image(MediaRef),
+    Audio(MediaRef),
+    File(MediaRef),
+    Opaque(OpaqueBlock),
+}
+
+impl From<NonToolContentBlock> for ContentBlock {
+    fn from(value: NonToolContentBlock) -> Self {
+        match value {
+            NonToolContentBlock::Text(block) => Self::Text(block),
+            NonToolContentBlock::Json(block) => Self::Json(block),
+            NonToolContentBlock::Image(block) => Self::Image(block),
+            NonToolContentBlock::Audio(block) => Self::Audio(block),
+            NonToolContentBlock::File(block) => Self::File(block),
+            NonToolContentBlock::Opaque(block) => Self::Opaque(block),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolResultContentItems {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            return deserializer.deserialize_seq(HumanToolResultContentVisitor);
+        }
+        deserializer.deserialize_seq(BinaryToolResultContentVisitor)
+    }
+}
+
+struct HumanToolResultContentVisitor;
+
+impl<'de> Visitor<'de> for HumanToolResultContentVisitor {
+    type Value = ToolResultContentItems;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a bounded array of non-tool content blocks")
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        reject_oversized_content_hint::<A::Error>(sequence.size_hint())?;
+        let capacity = sequence.size_hint().unwrap_or(0).min(CONTENT_MAX_ITEMS);
+        let mut content = Vec::with_capacity(capacity);
+        while content.len() < CONTENT_MAX_ITEMS {
+            let Some(raw) = sequence.next_element::<Box<serde_json::value::RawValue>>()? else {
+                return Ok(ToolResultContentItems(content));
+            };
+            let probe: ContentKindProbe =
+                serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
+            if matches!(probe.kind, ContentKind::ToolCall | ContentKind::ToolResult) {
+                return Err(de::Error::custom(ContentError::NestedToolBlock));
+            }
+            let block = deserialize_human_content_block(raw.get()).map_err(de::Error::custom)?;
+            content.push(block);
+        }
+        reject_trailing_content(&mut sequence)?;
+        Ok(ToolResultContentItems(content))
+    }
+}
+
+struct BinaryToolResultContentVisitor;
+
+impl<'de> Visitor<'de> for BinaryToolResultContentVisitor {
+    type Value = ToolResultContentItems;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a bounded array of non-tool content blocks")
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        reject_oversized_content_hint::<A::Error>(sequence.size_hint())?;
+        let capacity = sequence.size_hint().unwrap_or(0).min(CONTENT_MAX_ITEMS);
+        let mut content = Vec::with_capacity(capacity);
+        while content.len() < CONTENT_MAX_ITEMS {
+            let Some(block) = sequence.next_element::<NonToolContentBlock>()? else {
+                return Ok(ToolResultContentItems(content));
+            };
+            content.push(block.into());
+        }
+        reject_trailing_content(&mut sequence)?;
+        Ok(ToolResultContentItems(content))
+    }
+}
+
+struct StrictRawJson(RawJson);
+
+impl<'de> Deserialize<'de> for StrictRawJson {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        RawJson::parse(raw.get().as_bytes())
+            .map(Self)
+            .map_err(de::Error::custom)
+    }
+}
+
+struct StrictOpaquePayload(OpaquePayload);
+
+impl<'de> Deserialize<'de> for StrictOpaquePayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            encoding: OpaqueEncoding,
+            #[serde(default)]
+            data_hex: Option<BoundedString<{ TEXT_MAX_BYTES * 2 }>>,
+            #[serde(default)]
+            data: Option<StrictRawJson>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        match wire.encoding {
+            OpaqueEncoding::Bytes => {
+                if wire.data.is_some() {
+                    return Err(de::Error::custom(
+                        "bytes opaque payload must not contain data",
+                    ));
+                }
+                let hex = wire
+                    .data_hex
+                    .ok_or_else(|| de::Error::missing_field("data_hex"))?;
+                let bytes = hex_decode(&hex.into_inner()).map_err(de::Error::custom)?;
+                OpaquePayload::bytes(bytes)
+                    .map(Self)
+                    .map_err(de::Error::custom)
+            }
+            OpaqueEncoding::Json => {
+                if wire.data_hex.is_some() {
+                    return Err(de::Error::custom(
+                        "JSON opaque payload must not contain data_hex",
+                    ));
+                }
+                let value = wire.data.ok_or_else(|| de::Error::missing_field("data"))?;
+                Ok(Self(OpaquePayload::json(value.0)))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum BinaryContentBlock {
+    Text(TextBlock),
+    Json(JsonBlock),
+    Image(MediaRef),
+    Audio(MediaRef),
+    File(MediaRef),
+    ToolCall(ToolCallBlock),
+    ToolResult(ToolResultBlock),
+    Opaque(OpaqueBlock),
+}
+
+impl From<BinaryContentBlock> for ContentBlock {
+    fn from(value: BinaryContentBlock) -> Self {
+        match value {
+            BinaryContentBlock::Text(block) => Self::Text(block),
+            BinaryContentBlock::Json(block) => Self::Json(block),
+            BinaryContentBlock::Image(block) => Self::Image(block),
+            BinaryContentBlock::Audio(block) => Self::Audio(block),
+            BinaryContentBlock::File(block) => Self::File(block),
+            BinaryContentBlock::ToolCall(block) => Self::ToolCall(block),
+            BinaryContentBlock::ToolResult(block) => Self::ToolResult(block),
+            BinaryContentBlock::Opaque(block) => Self::Opaque(block),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ContentBlock {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if !deserializer.is_human_readable() {
+            return BinaryContentBlock::deserialize(deserializer).map(Into::into);
+        }
+
+        let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+        deserialize_human_content_block(raw.get()).map_err(de::Error::custom)
+    }
+}
+
+fn deserialize_human_content_block(input: &str) -> Result<ContentBlock, String> {
+    let probe: ContentKindProbe = serde_json::from_str(input).map_err(|error| error.to_string())?;
+    match probe.kind {
+        ContentKind::Text => {
+            let wire: TaggedTextBlock =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let _ = wire.kind;
+            TextBlock::try_new(wire.text.into_inner())
+                .map(ContentBlock::Text)
+                .map_err(|error| error.to_string())
+        }
+        ContentKind::Json => {
+            let wire: TaggedJsonBlock =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let _ = wire.kind;
+            Ok(ContentBlock::Json(JsonBlock::new(wire.value.0)))
+        }
+        ContentKind::Image | ContentKind::Audio | ContentKind::File => {
+            let wire: TaggedMediaRef =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let media = MediaRef::new(wire.blob);
+            Ok(match wire.kind {
+                ContentKind::Image => ContentBlock::Image(media),
+                ContentKind::Audio => ContentBlock::Audio(media),
+                ContentKind::File => ContentBlock::File(media),
+                _ => unreachable!("matched media kind"),
+            })
+        }
+        ContentKind::ToolCall => {
+            let wire: TaggedToolCallBlock =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let _ = wire.kind;
+            ToolCallBlock::try_new(
+                wire.tool_call_id,
+                wire.tool_name.into_inner(),
+                wire.arguments.0,
+            )
+            .map(ContentBlock::ToolCall)
+            .map_err(|error| error.to_string())
+        }
+        ContentKind::ToolResult => {
+            let wire: TaggedToolResultBlock =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let _ = wire.kind;
+            ToolResultBlock::try_new(wire.tool_call_id, wire.content.into_inner(), wire.is_error)
+                .map(ContentBlock::ToolResult)
+                .map_err(|error| error.to_string())
+        }
+        ContentKind::Opaque => {
+            let wire: TaggedOpaqueBlock =
+                serde_json::from_str(input).map_err(|error| error.to_string())?;
+            let _ = wire.kind;
+            OpaqueBlock::try_new(wire.media_type.into_inner(), wire.payload.0)
+                .map(ContentBlock::Opaque)
+                .map_err(|error| error.to_string())
+        }
+    }
 }
 
 impl ContentBlock {
@@ -649,6 +1335,7 @@ fn hex_nibble(byte: u8) -> Result<u8, ContentError> {
 mod tests {
     use super::*;
     use crate::ids::ToolCallId;
+    use serde::de::value::SeqDeserializer;
 
     #[test]
     fn blob_ref_rejects_inline_semantics_and_invalid_labels() {
@@ -683,6 +1370,86 @@ mod tests {
     }
 
     #[test]
+    fn content_blocks_reject_unknown_and_inapplicable_members() {
+        let inline_media = serde_json::from_str::<ContentBlock>(
+            r#"{
+                "kind":"image",
+                "blob":{"id":"b1","media_type":"image/png","length":1},
+                "data_hex":"00"
+            }"#,
+        );
+        assert!(inline_media.is_err());
+
+        let extra_text =
+            serde_json::from_str::<ContentBlock>(r#"{"kind":"text","text":"hi","extra":true}"#);
+        assert!(extra_text.is_err());
+
+        let conflicting_opaque = serde_json::from_str::<ContentBlock>(
+            r#"{
+                "kind":"opaque",
+                "media_type":"application/vnd.example",
+                "payload":{
+                    "encoding":"bytes",
+                    "data_hex":"00",
+                    "data":{"also":"present"}
+                }
+            }"#,
+        );
+        assert!(conflicting_opaque.is_err());
+    }
+
+    #[test]
+    fn nested_raw_json_preserves_strict_source_validation() {
+        let duplicate = serde_json::from_str::<ContentBlock>(
+            r#"{
+                "kind":"tool_call",
+                "tool_call_id":"01234567-89ab-7cde-89ab-0123456789ab",
+                "tool_name":"lookup",
+                "arguments":{"q":1,"q":2}
+            }"#,
+        );
+        assert!(duplicate.is_err());
+
+        let escaped = r"\u0061".repeat(crate::raw_json::RAW_JSON_MAX_BYTES / 6 + 1);
+        let oversized_source = format!(
+            r#"{{
+                "kind":"json",
+                "value":"{escaped}"
+            }}"#
+        );
+        let oversized = serde_json::from_str::<ContentBlock>(&oversized_source);
+        assert!(oversized.is_err());
+    }
+
+    #[test]
+    fn content_block_accepts_owned_and_reader_json_inputs() {
+        let value = serde_json::json!({"kind": "text", "text": "owned"});
+        let owned: ContentBlock = serde_json::from_value(value).expect("owned value");
+        assert_eq!(owned.kind_name(), "text");
+
+        let input = br#"{"kind":"text","text":"reader"}"#;
+        let reader: ContentBlock = serde_json::from_reader(input.as_slice()).expect("reader input");
+        assert_eq!(reader.kind_name(), "text");
+    }
+
+    #[test]
+    fn nested_tool_kind_is_rejected_before_its_payload_is_decoded() {
+        let error = serde_json::from_str::<ContentBlock>(
+            r#"{
+                "kind":"tool_result",
+                "tool_call_id":"01234567-89ab-7cde-89ab-0123456789ab",
+                "content":[{
+                    "kind":"tool_result",
+                    "tool_call_id":"01234567-89ab-7cde-89ab-0123456789cd",
+                    "content":[{"kind":"reasoning","text":"must not be reached"}]
+                }]
+            }"#,
+        )
+        .expect_err("nested tool result");
+        assert!(error.to_string().contains("cannot nest"));
+    }
+
+    #[test]
     fn tool_result_rejects_nested_tool_blocks() {
         let call_id = ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
         let nested = ContentBlock::ToolCall(
@@ -702,5 +1469,32 @@ mod tests {
             TextBlock::try_new(&over).expect_err("over"),
             ContentError::TextTooLarge { .. }
         ));
+    }
+
+    #[test]
+    fn content_item_size_hint_rejects_before_reading_elements() {
+        let items = core::iter::repeat_with(|| -> serde_json::Value {
+            panic!("oversized sequence should be rejected before reading an element")
+        })
+        .take(CONTENT_MAX_ITEMS + 1);
+        let deserializer = SeqDeserializer::<_, serde_json::Error>::new(items);
+        let Err(error) = ContentItems::deserialize(deserializer) else {
+            panic!("oversized sequence unexpectedly succeeded");
+        };
+        assert!(error.to_string().contains("content item count"));
+    }
+
+    #[test]
+    fn bounded_string_checks_escaped_length_before_decoding() {
+        let exact: BoundedString<4> =
+            serde_json::from_str(r#""\u0061\u0061\u0061\u0061""#).expect("exact escapes");
+        assert_eq!(exact.into_inner(), "aaaa");
+
+        let emoji: BoundedString<4> =
+            serde_json::from_str(r#""\ud83d\ude00""#).expect("surrogate pair");
+        assert_eq!(emoji.into_inner(), "😀");
+
+        let over = serde_json::from_str::<BoundedString<4>>(r#""\u0061\u0061\u0061\u0061\u0061""#);
+        assert!(over.is_err());
     }
 }

@@ -177,12 +177,6 @@ impl<'de> Deserialize<'de> for RawJson {
     }
 }
 
-/// Parse [`RawJson`] from a buffered [`Value`] (internally tagged enum fields).
-pub(crate) fn raw_json_from_value(value: &Value) -> Result<RawJson, RawJsonError> {
-    let text = serde_json::to_vec(value).map_err(|error| RawJsonError::Parse(error.to_string()))?;
-    RawJson::parse(text)
-}
-
 /// Bounded top-level JSON object metadata.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Metadata(RawJson);

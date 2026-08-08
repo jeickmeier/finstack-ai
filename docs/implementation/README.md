@@ -25,7 +25,7 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.13 on 2026-08-08:
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.14 on 2026-08-08:
 
 - 37 decisions are accepted and indexed; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
 - Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-006 are `Done`; PR-007 is `In review`; PR-008–PR-066 are `Todo`.
