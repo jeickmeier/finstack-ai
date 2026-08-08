@@ -1,0 +1,45 @@
+---
+trigger: always_on
+description: Require focused verification, compatibility evidence, and truthful implementation handoff for every coding change.
+globs:
+---
+
+# Testing and delivery
+
+Implementation code and tests are the normal output. Use checked-in repository task definitions and CI commands. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add and document the canonical repository workflow with the tooling. Never assume a planned wrapper or task exists. Planning describes required outcomes, not proof that a command is available or passed. Run focused checks after each coherent change and the logical PR's complete affected validation before handoff.
+
+## Select tests from the changed invariant
+
+- Kernel state or reducer changes require transition-table coverage, invalid-transition cases, deterministic replay, serialization, and relevant property tests.
+- Record, effect, storage, cancellation, deadline, interaction, or recovery changes require fault/crash-prefix coverage, idempotency/conflict cases, and restart or reconciliation evidence.
+- Public APIs, schemas, journals, events, protocols, feature flags, WIT, or bindings require compatibility fixtures, shared semantic traces, target-specific conformance, and applicable fuzz or property tests for parsers, records, and protocols.
+- Async scheduling, streams, callbacks, or queues require bounds, ordering, cancellation, shutdown, backpressure, and leak checks.
+- Security-boundary changes require the applicable adversarial, authorization, permission-denial, size-limit, and secret-redaction tests from the Threat Model.
+- Compaction changes require protected-content, tool-pair atomicity, sensitivity and provenance preservation, checkpoint invalidation, canonical-history immutability, replay, cross-binding, and hard-budget safe-failure tests.
+- Performance changes begin with a fixture proven to activate the hot path and report framework cost separately from external latency.
+
+Every fixture must demonstrably activate the behavior it claims to test. Tests must be deterministic and offline by default. Do not rely on wall-clock races, unordered iteration, retries that hide flakes, external credentials, or live network access for ordinary validation. A green aggregate suite does not replace focused proof of the changed invariant.
+
+## Keep the change reviewable
+
+- Apply formatting, lint, architecture, dependency, target-build, and generated-artifact checks configured for the touched surface.
+- Build minimal and default feature sets independently when the touched package exposes features.
+- Keep generated output reproducible and separate from hand-authored logic where practical. Regenerate via the documented command only; fail the change on a dirty generated tree.
+- Update public documentation and tested examples with public API changes. Update compatibility or migration fixtures with controlled contract changes.
+- For public binding surface changes, confirm cross-binding name/code/shape parity (or an explicit tracked deferral) and refresh shared conformance fixtures when semantics change.
+- For Python binding or stub changes, run the configured type-check against the public package/stubs once that task exists; report stub/runtime drift as a failure. Before handoff, smoke-check that IDE hover/signature help shows docs for new or changed public APIs (`04-python-coding.md`).
+- For TypeScript/npm public surface changes, run the configured declaration/type-check against the published entrypoints once that task exists; report declaration drift as a failure. Before handoff, smoke-check that IDE hover shows TSDoc for new or changed public exports (`05-typescript-coding.md`).
+- Report exact commands, targets, results, and validation limits. Never claim an unavailable or unrun check passed.
+
+## Complete the implementation handoff
+
+Use `docs/implementation/README.md` for the update transaction. At minimum:
+
+- At coding start, assign the logical PR and record a real owner plus issue, branch, or pull-request reference before moving it to `Ready` or `In progress`; create task rows only for actual decomposition. If required metadata is unavailable, report the tracking gap instead of fabricating it.
+
+1. Keep the logical PR, real issue/branch/actual PR references, task, blocker, acceptance coverage, snapshot totals, and derived phase state current in `delivery-ledger.md`; do not invent external metadata to satisfy a field.
+2. Add immutable-commit validation and review records to `evidence-register.md`; preserve failures and superseded evidence.
+3. Update `adr-register.md` when code implements, verifies, or supersedes a decision.
+4. Track eligible standards waivers through every state in `exceptions-register.md`; only approved, unexpired exceptions support `Waived` acceptance.
+
+During coding, use truthful `In progress` or `In review` state and report local validation without treating an uncommitted worktree as immutable evidence. `Done`, merged commits and dates, final verification, approvals, and gate passage are post-merge or authorized-review actions. Do not mark a logical PR `Done` until mapped work is merged or validly dispositioned, acceptance and required reviews are complete at the integrated commit, and blockers are closed. Phases additionally require exit evidence; gates require a named decision and are never inferred.
