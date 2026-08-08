@@ -1,13 +1,13 @@
 {
   "format_version": 1,
-  "subject": "run_accepted",
+  "subject": "run-accepted",
   "operation": "parse",
   "input": {
     "run_id": "01234567-89ab-7cde-89ab-0123456789ab",
     "relation": {
       "root_run_id": "01234567-89ab-7cde-89ab-0123456789ab",
       "kind": "root",
-      "depth": 1
+      "depth": 0
     },
     "security": {
       "tenant_scope": "tenant-a",
@@ -31,7 +31,7 @@
     "resolved_agent_lock_digest": "b06faf8816f77394756e7beaba4c8295cf2e7b9ad10e016a1523456b9be183c1"
   },
   "expect": {
-    "ok": false,
-    "error_code": "invalid_run_relation"
+    "ok": true,
+    "run_id": "01234567-89ab-7cde-89ab-0123456789ab"
   }
 }

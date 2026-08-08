@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "subject": "append_request",
+  "subject": "append-request",
   "operation": "construct_count",
   "input": {
     "count": 257,

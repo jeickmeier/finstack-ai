@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "subject": "run_accepted",
+  "subject": "run-accepted",
   "operation": "construct_child",
   "input": {
     "parent": {

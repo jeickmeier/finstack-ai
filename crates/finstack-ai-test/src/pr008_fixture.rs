@@ -13,11 +13,11 @@ use crate::public_api_fixture::{Expect, PublicApiFixture, PublicApiFixtureError}
 /// Execute a PR-008 public-rust-api fixture subject.
 pub(crate) fn run_pr008_subject(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     match fixture.subject.as_str() {
-        "run_accepted" => run_run_accepted(fixture),
-        "effect_requested" => run_effect_requested(fixture),
-        "record_draft" => run_record_draft(fixture),
-        "append_request" => run_append_request(fixture),
-        "run_event" => run_run_event(fixture),
+        "run-accepted" => run_run_accepted(fixture),
+        "effect-requested" => run_effect_requested(fixture),
+        "record-draft" => run_record_draft(fixture),
+        "append-request" => run_append_request(fixture),
+        "run-event" => run_run_event(fixture),
         other => Err(fail(format!("unsupported pr008 subject {other}"))),
     }
 }
