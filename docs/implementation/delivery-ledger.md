@@ -122,7 +122,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-006 | Done | me@jeickmeier.com | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) merged @ `56d7777956df145213b03d2b0b5c1922db42b346` | 6 | 5/5 | PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-architecture-90b6f267a46d; PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-supply-bbbb7b4e6da4; PR-006-E-hosted-ci-9a1ccbb88ae5 | — | `56d7777956df145213b03d2b0b5c1922db42b346` / 2026-08-08 | 2026-08-08 |
 | PR-007 | Done | me@jeickmeier.com | local merge on `main` @ `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` | 7 | 4/4 | PR-007-E-test-kernel-57ac9861bcfb; PR-007-E-conformance-8b7b9c728785; PR-007-E-check-wasm-5aefa861beb5; PR-007-E-architecture-e59be4b35311; PR-007-E-docs-51eca2ecc0a3; PR-007-E-schema-final-4c7efdcf83d8; PR-007-E-supply-final-183fc11ba3c3; PR-007-E-security-1146ce970799; PR-007-E-ci-a29042aa7d6a; PR-007-E-merge-ci-acf14a6a28ca; PR-007-E-merge-wasm-3713f4641342 | — | `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` / 2026-08-08 | 2026-08-08 |
-| PR-008 | Blocked | me@jeickmeier.com | `pr-008-contract-amendment` | 1 | 0/8 | — | PR-008-B-contract-ed6437d9ed08 | — | 2026-08-08 |
+| PR-008 | Blocked | me@jeickmeier.com | [#5](https://github.com/jeickmeier/finstack-ai/pull/5) / `pr-008-contract-amendment` @ `158c0996d0ff559b39ee5cc7b6d1c8b2144aa79e` | 1 | 0/8 | — | PR-008-B-contract-ed6437d9ed08 | — | 2026-08-08 |
 | PR-009 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-010 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-011 | Todo | — | — | 0 | 0/6 | — | — | — | — |
@@ -273,7 +273,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-007-T-fixtures-4207b289689c | PR-007 | Extend public-rust-api fixtures and runner for message subjects | Done | me@jeickmeier.com | PR-007-T-content-2213b78a277b | `pr-007-content-messages` | PR-007-A01–A04 | PR-007-E-conformance-f0694bffee9a | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-007-T-wasm-5c926d2baef6 | PR-007 | Prove A01 via kernel wasm32 check and deterministic fixtures | Done | me@jeickmeier.com | PR-007-T-fixtures-4207b289689c | `pr-007-content-messages` | PR-007-A01 | PR-007-E-check-wasm-c5b673cf41ce | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-007-T-evidence-5a722ac8cbbf | PR-007 | Run validation, TM-16/TM-20 review, and bind PR-007 evidence | Done | me@jeickmeier.com | PR-007-T-review-hardening-c4e8a31d7b52; PR-007-T-wasm-5c926d2baef6 | `pr-007-content-messages-final` @ `4a0a77f668adcfa2679dc161779c4456d721c0c2` | PR-007-A01–A04 | PR-007-E-ci-a29042aa7d6a; PR-007-E-security-1146ce970799 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
-| PR-008-T-contract-70f7f6cb4af1 | PR-008 | Freeze PR-008 record/event/effect contract via pack v0.15 amendment | In review | me@jeickmeier.com | — | `pr-008-contract-amendment` | PR-008-A01–A08 | PLAN-0.13 baseline | 2026-08-08 | 2026-08-08 | — |
+| PR-008-T-contract-70f7f6cb4af1 | PR-008 | Freeze PR-008 record/event/effect contract via pack v0.15 amendment | In review | me@jeickmeier.com | — | [#5](https://github.com/jeickmeier/finstack-ai/pull/5) @ `158c0996d0ff559b39ee5cc7b6d1c8b2144aa79e` | PR-008-A01–A08 | PLAN-0.13 baseline | 2026-08-08 | 2026-08-08 | — |
 
 ## Blocker ledger
 
@@ -283,7 +283,7 @@ Blocker IDs use `<scope>-B-short-slug-xxxxxxxxxxxx`, with a stable scope such as
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PR-003-B-no-remote-ede93913b2ea | PR-003 | Hosted PR runs and immutable Linux/macOS/Windows CI evidence were blocked until a Git remote existed. | me@jeickmeier.com | 2026-08-08 | — | 2026-08-08 | https://github.com/jeickmeier/finstack-ai | Resolved | PR-003-E-hosted-ci-b7f2fe44f7c1; PR-003-E-hosted-release-smoke-be7df0f3c45c |
 | PR-007-B-contract-0c60297af156 | PR-007 | Underspecified block DTO/`ModelRef`/BlobRef-metadata/A01-evidence contract blocked coding until pack v0.13 amendment. | me@jeickmeier.com | 2026-08-08 | — | 2026-08-08 | `pr-007-content-messages` | Resolved | PLAN-0.11 / pack v0.13 amendment |
-| PR-008-B-contract-ed6437d9ed08 | PR-008 | Underspecified PR-008 public vocabulary, event taxonomy, missing DTOs, record inventory, and digest ownership blocked coding until pack v0.15 amendment. | me@jeickmeier.com | 2026-08-08 | Merge pack v0.15 after maintainer/security review; then clear Blocked | 2026-08-08 | `pr-008-contract-amendment` | Open | — |
+| PR-008-B-contract-ed6437d9ed08 | PR-008 | Underspecified PR-008 public vocabulary, event taxonomy, missing DTOs, record inventory, and digest ownership blocked coding until pack v0.15 amendment. | me@jeickmeier.com | 2026-08-08 | Merge [#5](https://github.com/jeickmeier/finstack-ai/pull/5) after maintainer/security review; then clear Blocked | 2026-08-08 | [#5](https://github.com/jeickmeier/finstack-ai/pull/5) | Open | — |
 
 Blocker status is `Open` or `Resolved`. Resolution requires an evidence reference and removal of the affected `Blocked` status in the same change.
 
