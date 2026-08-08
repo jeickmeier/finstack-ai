@@ -1,7 +1,8 @@
 # PR-003 validation artifacts
 
-Bound to branch `pr-003-ci-release-matrix`. Local command evidence was captured
-on Darwin arm64 before hosted CI attachment. Hosted Linux/macOS/Windows runs are
+Bound to commit `92217776d215c5658910b60397d0e22960466218` on branch
+`pr-003-ci-release-matrix`. Local command evidence was captured on Darwin arm64
+before hosted CI attachment. Hosted Linux/macOS/Windows runs are
 blocked by the absence of a Git remote (`PR-003-B-no-remote-ede93913b2ea`).
 
 | Artifact | Purpose |

@@ -1,6 +1,6 @@
 {
   "binary": "finstack-ai-ci-smoke",
-  "commit": "f460eeb9a0ec10ede539724ca487eda0ecd626de",
+  "commit": "92217776d215c5658910b60397d0e22960466218",
   "features": [
     "default",
     "native-tokio"
