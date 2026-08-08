@@ -56,9 +56,10 @@ cargo check -p finstack-ai-test --no-default-features --locked
 """
 
 [tasks.check-wasm]
-description = "Type-check the browser WASM binding target"
+description = "Type-check kernel and browser WASM binding for wasm32"
 run = """
 rustup target add wasm32-unknown-unknown && \
+cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked && \
 cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
 """
 
@@ -75,7 +76,7 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel and public-rust-api fixture tests (PR-006)"
+description = "Run focused kernel and public-rust-api fixture tests (PR-006/PR-007)"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked

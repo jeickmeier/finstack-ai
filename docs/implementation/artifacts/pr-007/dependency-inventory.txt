@@ -1,0 +1,40 @@
+finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+├── bytes v1.12.1
+├── serde v1.0.229
+│   ├── serde_core v1.0.229
+│   └── serde_derive v1.0.229 (proc-macro)
+│       ├── proc-macro2 v1.0.107
+│       │   └── unicode-ident v1.0.24
+│       ├── quote v1.0.47
+│       │   └── proc-macro2 v1.0.107 (*)
+│       └── syn v3.0.3
+│           ├── proc-macro2 v1.0.107 (*)
+│           ├── quote v1.0.47 (*)
+│           └── unicode-ident v1.0.24
+├── serde_json v1.0.151
+│   ├── itoa v1.0.18
+│   ├── memchr v2.8.3
+│   ├── serde_core v1.0.229
+│   └── zmij v1.0.23
+├── serde_json_canonicalizer v0.3.2
+│   ├── ryu-js v1.0.3
+│   ├── serde v1.0.229 (*)
+│   └── serde_json v1.0.151 (*)
+├── sha2 v0.10.9
+│   ├── cfg-if v1.0.4
+│   ├── cpufeatures v0.2.17
+│   │   └── libc v0.2.189
+│   └── digest v0.10.7
+│       ├── block-buffer v0.10.4
+│       │   └── generic-array v0.14.7
+│       │       └── typenum v1.20.1
+│       │       [build-dependencies]
+│       │       └── version_check v0.9.5
+│       └── crypto-common v0.1.7
+│           ├── generic-array v0.14.7 (*)
+│           └── typenum v1.20.1
+└── thiserror v2.0.20
+    └── thiserror-impl v2.0.20 (proc-macro)
+        ├── proc-macro2 v1.0.107 (*)
+        ├── quote v1.0.47 (*)
+        └── syn v3.0.3 (*)

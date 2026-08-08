@@ -1,0 +1,78 @@
+[test-kernel] $ cargo test -p finstack-ai-kernel --locked
+   Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.68s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-e6369ef635825757)
+
+running 23 tests
+test ids::tests::keys_validate_namespace_rules ... ok
+test content::tests::tool_result_rejects_nested_tool_blocks ... ok
+test digest::tests::domain_separation_changes_digest ... ok
+test message::tests::invalid_tool_associations_are_rejected ... ok
+test error::tests::error_code_requires_lowercase_snake_case ... ok
+test content::tests::blob_ref_rejects_inline_semantics_and_invalid_labels ... ok
+test message::tests::role_block_matrix_rejects_tool_result_on_user ... ok
+test ids::tests::ids_serialize_lowercase_and_reject_invalid ... ok
+test content::tests::large_declared_length_serializes_as_small_reference ... ok
+test message::tests::assistant_tool_call_allowed ... ok
+test raw_json::tests::parse_canonicalizes_and_shares_bytes_on_clone ... ok
+test content::tests::content_block_round_trip_and_unknown_kind ... ok
+test message::tests::message_round_trip_preserves_timestamp_and_file_ref ... ok
+test raw_json::tests::rejects_duplicates_trailing_data_and_depth ... ok
+test error::tests::error_descriptor_json_round_trip_preserves_stable_fields ... ok
+test time::tests::duration_js_safe_boundary ... ok
+test raw_json::tests::metadata_preserves_unknown_members_and_limits ... ok
+test time::tests::json_uses_rfc3339_text ... ok
+test time::tests::rejects_leap_seconds_and_out_of_range ... ok
+test time::tests::timestamp_round_trips_rfc3339_and_unix_ms ... ok
+test content::tests::text_exact_and_one_over_ceiling ... ok
+test raw_json::tests::serde_human_path_rejects_duplicates_and_checks_source_span ... ok
+test raw_json::tests::enforces_exact_and_one_over_source_ceiling ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests finstack_ai_kernel
+
+running 3 tests
+test crates/finstack-ai-kernel/src/message.rs - message::Message (line 183) ... ok
+test crates/finstack-ai-kernel/src/content.rs - content::BlobRef (line 31) ... ok
+test crates/finstack-ai-kernel/src/lib.rs - (line 10) ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test crates/finstack-ai-kernel/src/ids.rs - ids::Id (line 56) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+all doctests ran in 0.63s; merged doctests compilation took 0.35s
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-a74c97642773805d)
+
+running 4 tests
+test id_generation::tests::deterministic_uuidv7_from_injected_sources ... ok
+test id_generation::tests::uuidv7_propagates_random_source_failure ... ok
+test id_generation::tests::uuidv7_rejects_pre_epoch_and_out_of_range_timestamps ... ok
+test error::tests::debug_redacts_local_source_chain ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+   Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.56s
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-e7d0a5de1306608f)
+
+running 2 tests
+test deterministic_uuidv7_fakes_are_repeatable ... ok
+test public_rust_api_corpus_passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

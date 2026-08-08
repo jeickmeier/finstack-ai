@@ -1,0 +1,48 @@
+PR-007 Threat Model §18 / TM-16 / TM-20 disposition
+Date: 2026-08-08
+Reviewer: me@jeickmeier.com
+Branch: pr-007-content-messages
+
+Scope:
+- Added kernel content/message model: BlobRef, ContentBlock variants (text, json,
+  image/audio/file media refs, tool_call, tool_result, opaque), MessageRole,
+  Message, ModelRef, ProviderIds.
+- Extended public-rust-api fixtures and runner for blob_ref / content_block /
+  message subjects with frozen serialized_json vectors.
+- Extended mise check-wasm to type-check finstack-ai-kernel for wasm32.
+- Pack v0.13 amendment froze the public contract and deferred Usage and
+  Reasoning/Refusal blocks.
+- No new primary port, middleware stage, trust class, privileged host capability,
+  protocol listener, plugin permission, blob store, model adapter, or reducer.
+
+TM-16 (oversized / malicious content parsing):
+- Text/opaque-byte ceilings enforced at 4 MiB before accepting constructed values.
+- Content arrays capped at 4,096 items.
+- Labels (blob id/media_type/name, tool_name, model refs) capped at 256 bytes,
+  non-empty, NUL-rejected.
+- Nested RawJson fields reuse RawJson/Metadata ceilings.
+- Unknown ContentBlock kinds rejected; invalid role/block combinations rejected.
+- Control-change disposition: implements planned PR-007 parser/limit controls;
+  no Threat Model text change required beyond existing TM-16 row.
+
+TM-20 / ADR-036 (blob reference scope):
+- BlobRef is opaque metadata (id, media_type, length, optional digest/name).
+- No metadata authority field on BlobRef; ArtifactRef remains the durable
+  metadata wrapper.
+- Kernel never dereferences blobs; no seventh port; no store implementation.
+- Large media serializes as a small reference (fixture max_serialized_bytes=200
+  with declared length 50_000_000).
+- Control-change disposition: no control change; verifies ADR-036 / TM-20.
+
+SEC-INV-001 / SEC-INV-005 / SEC-INV-007:
+- Content remains data, not authority.
+- No secrets introduced in fixtures, metadata, or errors.
+- Bounds checked before retaining content collections and strings.
+
+§18 review trigger:
+- Adds a parser for message/content deserialization. Disposition recorded here;
+  no ADR trigger under Implementation Plan §6.3 (blob storage remains outside
+  kernel ports per ADR-036).
+
+Supply chain:
+- No new kernel dependencies. mise run supply-chain and architecture pass.

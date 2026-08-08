@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.10 |
+| Version | 0.11 |
 | Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.10; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Technical Design v0.11; Security and Threat Model v0.4 |
 
 # Executive implementation decision
 
@@ -533,17 +533,19 @@ A separate ADR is required before merging a change that:
 
 **Principal changes.**
 
-- Add text, image/blob reference, audio/blob reference, document/blob reference, and structured-data content blocks.
+- Add v1 content blocks: text, structured JSON, image/audio/file by `BlobRef`, tool call, tool result, and provider-opaque payloads (`OpaqueBlock`).
 
-- Define user, assistant, tool-result, and system/instruction message roles with immutable message entries.
+- Define `MessageRole` values `system`, `developer`, `user`, `assistant`, and `tool` with immutable `Message` values and the TDD §7 role/block matrix.
 
-- Add tool call and tool result association fields, provider extension payloads, usage placeholders, and timestamps supplied by the environment.
+- Add tool-call and tool-result association fields, provider extension payloads (`OpaqueBlock` / `ProviderIds` / `Metadata`), `ModelRef`, and environment-supplied timestamps.
 
-- Define a `BlobRef` that carries identity, media type, length, and optional integrity digest without embedding large payloads.
+- Define a `BlobRef` that carries identity, media type, length, optional name, and optional integrity digest without embedding large payloads or metadata.
+
+- Implement pure structural tool-association validation (uniqueness; optional caller-supplied known-call set). Run-state pairing remains PR-010.
 
 **Acceptance evidence.**
 
-- Message fixtures serialize identically across native and `wasm32` builds.
+- Message fixtures serialize to frozen expected bytes on native builds, and `finstack-ai-kernel` type-checks for `wasm32-unknown-unknown` (A01 evidence is compile-plus-deterministic-serialization; executed WASM fixture runners are not required for PR-007).
 
 - Invalid tool-result associations are rejected.
 
@@ -555,7 +557,7 @@ A separate ADR is required before merging a change that:
 
 **Traceability.** FR-KRN-001; Architecture sections 9 and 16; TDD section 7.
 
-**Explicitly excluded.** No blob store implementation or model wire adapter.
+**Explicitly excluded.** No blob store implementation or model wire adapter. No `Usage` type on messages (deferred to PR-008/PR-011 consumers). No `Reasoning`/`Refusal` content-block variants (deferred until a consumer freezes payload DTOs). No reducer/run-state tool pairing (PR-010).
 
 ### PR-008 - Define runtime events, journal records, and effect envelopes
 

@@ -16,7 +16,7 @@ date: "2026-08-08"
 | Version | 0.7 |
 | Status | Pre-implementation product baseline |
 | Primary audience | Product owners, framework architects, Rust/Python/WASM engineers, extension authors |
-| Related documents | Engineering Standards v0.5; Architecture Specification v0.6; Technical Design v0.10; Implementation Plan v0.10; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Architecture Specification v0.7; Technical Design v0.11; Implementation Plan v0.11; Security and Threat Model v0.4 |
 
 # Executive summary
 

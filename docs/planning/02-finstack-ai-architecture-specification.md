@@ -13,10 +13,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.6 |
+| Version | 0.7 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.10; Implementation Plan v0.10; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.11; Implementation Plan v0.11; Security and Threat Model v0.4 |
 
 # Executive architecture decision
 
@@ -1024,10 +1024,9 @@ BlobRef
   length
   digest
   optional name
-  optional metadata
 ```
 
-Blob stores are application/runtime services rather than kernel ports in the initial design. Blob references may be resolved by tools, context providers, or server layers.
+`BlobRef` does not carry metadata. Bounded non-secret metadata for durable artifacts belongs on `ArtifactRef`. Blob stores are application/runtime services rather than kernel ports in the initial design. Blob references may be resolved by tools, context providers, or server layers.
 
 The reusable non-kernel service name is `ArtifactStore`: it stages and retrieves tenant/session-scoped, digest-bearing artifact content behind `ArtifactRef` values. Authoritative journal references are committed only after the bytes are durable; a failed journal append can leave a collectable orphan, while missing or digest-mismatched referenced content is an integrity failure. Retention of referenced content must cover the configured recovery/audit period. Plain `BlobRef` values may point to external or ephemeral media but cannot carry behavior-changing replay state without an `ArtifactRef` integrity/scope wrapper.
 

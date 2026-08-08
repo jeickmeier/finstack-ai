@@ -11,6 +11,10 @@ use thiserror::Error;
 pub const DOMAIN_RAW_JSON: &str = "raw-json";
 /// Schema version embedded in the current `RawJson` digest domain.
 pub const RAW_JSON_DIGEST_SCHEMA_VERSION: u32 = 1;
+/// Fixed domain name for blob-content digests (TDD §6.4 / §7.2).
+pub const DOMAIN_BLOB_CONTENT: &str = "blob-content";
+/// Schema version embedded in the current blob-content digest domain.
+pub const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
 
 /// 32-byte SHA-256 digest.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -95,6 +99,21 @@ impl Digest {
             canonical_bytes,
         )
         .expect("fixed raw-json domain is valid")
+    }
+
+    /// Digest for exact raw blob bytes under the `blob-content` domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the fixed [`DOMAIN_BLOB_CONTENT`] registry entry were invalid.
+    #[must_use]
+    pub fn blob_content(raw_bytes: &[u8]) -> Self {
+        Self::domain_separated(
+            DOMAIN_BLOB_CONTENT,
+            BLOB_CONTENT_DIGEST_SCHEMA_VERSION,
+            raw_bytes,
+        )
+        .expect("fixed blob-content domain is valid")
     }
 }
 

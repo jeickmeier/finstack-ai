@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "subject": "message",
+  "operation": "roundtrip",
+  "input": {
+    "id": "01234567-89ab-7cde-89ab-0123456789ab",
+    "role": "user",
+    "content": [
+      {
+        "kind": "file",
+        "blob": {
+          "id": "blob-large-1",
+          "media_type": "application/pdf",
+          "length": 50000000,
+          "name": "report.pdf"
+        }
+      }
+    ],
+    "created_at": "2023-11-14T22:13:20.000Z",
+    "provider_ids": {},
+    "metadata": {}
+  },
+  "expect": {
+    "ok": true,
+    "role": "user",
+    "serialized_json": "{\"id\":\"01234567-89ab-7cde-89ab-0123456789ab\",\"role\":\"user\",\"content\":[{\"kind\":\"file\",\"blob\":{\"id\":\"blob-large-1\",\"media_type\":\"application/pdf\",\"length\":50000000,\"name\":\"report.pdf\"}}],\"created_at\":\"2023-11-14T22:13:20.000Z\",\"provider_ids\":{},\"metadata\":{}}"
+  }
+}

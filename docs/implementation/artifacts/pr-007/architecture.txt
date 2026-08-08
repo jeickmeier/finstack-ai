@@ -1,0 +1,14 @@
+[architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
+----------------------------------------------------------------------
+Ran 21 tests in 0.148s
+
+OK
+finstack-ai architecture check
+repo: /Users/jeickmeier/Projects/finstack-ai
+elapsed_ms: 126.0
+
+PASS: no architecture findings
+[check-wasm] $ rustup target add wasm32-unknown-unknown && cargo check -p finst…
+info: component rust-std for target wasm32-unknown-unknown is up to date
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s

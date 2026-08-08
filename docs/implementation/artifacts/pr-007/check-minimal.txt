@@ -1,0 +1,13 @@
+[check-minimal] $ cargo check -p finstack-ai-kernel --locked
+    Checking finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+    Checking finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+    Checking finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+    Checking finstack-ai-protocol v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-protocol)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+    Checking finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+    Checking finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+    Checking finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.51s

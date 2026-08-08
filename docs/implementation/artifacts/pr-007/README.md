@@ -1,0 +1,27 @@
+# PR-007 artifacts
+
+Validation evidence for content blocks, messages, blob references, public-rust-api
+fixtures, and pack v0.13 message-contract amendment.
+
+Branch: `pr-007-content-messages`
+
+## Acceptance mapping
+
+| Criterion | Proof |
+| --- | --- |
+| A01 | `test-kernel.txt` + `conformance.txt` frozen `serialized_json` fixtures; `check-wasm.txt` type-checks `finstack-ai-kernel` for `wasm32-unknown-unknown` |
+| A02 | `test-kernel.txt` + `conformance.txt` invalid tool-association / role-block fixtures |
+| A03 | `conformance.txt` blob-ref large-reference-only fixture (`max_serialized_bytes`) and media/file message round-trips |
+| A04 | `docs.txt` rustdoc examples; `schema-governance.txt` + public-rust-api fixtures |
+
+## Security / supply chain
+
+| Record | Artifact |
+| --- | --- |
+| TM-16 / TM-20 / §18 review | `security-review.txt` |
+| Dependency inventory | `dependency-inventory.txt` |
+| cargo-deny | `supply-chain.txt` |
+
+## Commands
+
+See individual `*.txt` logs and root `SHA256SUMS`.

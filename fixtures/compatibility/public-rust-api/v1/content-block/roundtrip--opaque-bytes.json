@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "subject": "content_block",
+  "operation": "roundtrip",
+  "input": {
+    "kind": "opaque",
+    "media_type": "provider.openai/widget",
+    "payload": {
+      "encoding": "bytes",
+      "data_hex": "616263"
+    }
+  },
+  "expect": {
+    "ok": true,
+    "kind": "opaque",
+    "serialized_json": "{\"kind\":\"opaque\",\"media_type\":\"provider.openai/widget\",\"payload\":{\"encoding\":\"bytes\",\"data_hex\":\"616263\"}}"
+  }
+}
