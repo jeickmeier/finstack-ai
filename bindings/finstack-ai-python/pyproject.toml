@@ -9,8 +9,9 @@ requires-python = ">=3.11"
 dependencies = []
 
 # Placeholder packaging until PyO3/maturin lands with the Python binding PRs.
+# Exact pin; CI also enforces constraints-build.txt hashes via uv.
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

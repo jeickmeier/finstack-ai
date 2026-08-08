@@ -1,6 +1,6 @@
-date: 2026-08-08T16:04:59Z
+date: 2026-08-08T18:18:05Z
 branch: pr-003-ci-release-matrix
-commit: 92217776d215c5658910b60397d0e22960466218
+commit_at_capture: working-tree (pre-commit review-fix)
 host: Darwin Jons-MacBook-Pro.local 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:28:34 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6050 arm64
 rustc 1.97.1 (8bab26f4f 2026-07-14)
 cargo 1.97.1 (c980f4866 2026-06-30)

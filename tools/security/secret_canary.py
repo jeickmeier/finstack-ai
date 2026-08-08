@@ -25,6 +25,18 @@ PREFIX = "finstack_canary_"
 BODY_A = "Aa0Bb1Cc2Dd3Ee4Ff5Gg6"
 BODY_B = "Hh7Ii8Jj9Kk0Ll1Mm2Nn3Oo"
 
+# Paths that must never be excluded by repository path allowlists.
+# Note: gitleaks' upstream default config still allowlists `go.sum` globally;
+# we deliberately omit that name and cover Cargo.lock / uv.lock instead.
+CANARY_PATHS = (
+    "examples/leaked-token.json",
+    "fixtures/leaked-token.json",
+    "examples/Cargo.lock",
+    "fixtures/Cargo.lock",
+    "examples/uv.lock",
+    "fixtures/uv.lock",
+)
+
 
 def assembled_token() -> str:
     """Return the runtime-only credential-shaped token."""
@@ -55,11 +67,18 @@ def write_canary_file(root: Path, relative: str) -> Path:
     """Write assembled canary content under a temporary repository path."""
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "description": "temporary canary for PR-003 secret-scan negative proof",
-        "token": assembled_token(),
-    }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if relative.endswith((".lock", ".sum")):
+        # Lockfile-shaped content still carries the canary token as a line.
+        path.write_text(
+            f"# temporary canary lockfile for PR-003\n{assembled_token()}\n",
+            encoding="utf-8",
+        )
+    else:
+        payload = {
+            "description": "temporary canary for PR-003 secret-scan negative proof",
+            "token": assembled_token(),
+        }
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path
 
 
@@ -152,10 +171,14 @@ def main() -> int:
             "canary-redaction fixture must set contract_only_not_executed = true"
         )
 
-    # Prove both application and fixture trees are covered without allowlists.
-    assert_detection("examples", "examples/leaked-token.json")
-    assert_detection("fixtures", "fixtures/leaked-token.json")
-    print("secret-scan-canary: temporary examples/ and fixtures/ detections passed")
+    # Prove application trees, fixture trees, and lockfile-shaped paths are
+    # covered without path allowlists.
+    for index, relative in enumerate(CANARY_PATHS):
+        assert_detection(f"{index}-{Path(relative).name}", relative)
+    print(
+        "secret-scan-canary: temporary examples/, fixtures/, and lockfile "
+        "detections passed"
+    )
     return 0
 
 

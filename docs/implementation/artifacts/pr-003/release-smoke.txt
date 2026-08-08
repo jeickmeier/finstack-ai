@@ -4,5 +4,5 @@
 + /Users/jeickmeier/Projects/finstack-ai/target/ci-release-build/release/finstack-ai-ci-smoke
 finstack-ai-ci-smoke 0.0.1
 staged binary: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/finstack-ai-ci-smoke
-sha256: 25bfe8a6c751421ed9b177eb455b22d3bcd64576bbf39d83bbb43c1af0d295f2
+sha256: f4b52a505b468f9834fb8b199cda4dd2382d8c81a630a5e680461264bc6799e7
 metadata: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/build-metadata.json

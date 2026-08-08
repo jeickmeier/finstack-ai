@@ -30,6 +30,13 @@ class SecretCanaryTests(unittest.TestCase):
         self.assertFalse(manifest["evidence_eligible"])
         self.assertTrue(manifest["contract_only_not_executed"])
 
+    def test_canary_paths_cover_lockfiles(self) -> None:
+        paths = set(secret_canary.CANARY_PATHS)
+        self.assertIn("examples/Cargo.lock", paths)
+        self.assertIn("fixtures/Cargo.lock", paths)
+        self.assertIn("examples/uv.lock", paths)
+        self.assertIn("fixtures/uv.lock", paths)
+
 
 if __name__ == "__main__":
     unittest.main()

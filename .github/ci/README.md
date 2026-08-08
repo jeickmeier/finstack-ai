@@ -11,7 +11,7 @@ All executable checks are canonical mise tasks. Workflows must call
 | --- | --- | --- |
 | [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, Python package smoke, release-smoke on Linux/macOS/Windows |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
-| [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; reserved non-evidentiary fuzz readiness note |
+| [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility only; fuzz remains documentation-reserved (no green placeholder job) |
 
 ## Toolchain channels (PR-003-A02)
 
@@ -20,7 +20,7 @@ All executable checks are canonical mise tasks. Workflows must call
 | stable | mise Rust `1.97.1` | every PR (`ci.yml` label `stable`) | `me@jeickmeier.com` |
 | MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (`ci.yml` label `msrv`; intentionally coincides with stable) | `me@jeickmeier.com` |
 | nightly | `nightly-2026-08-01` | every PR + weekly (`nightly.yml`) | `me@jeickmeier.com` |
-| fuzz | reserved; no targets yet | weekly readiness note only; `evidence_eligible = false` | `me@jeickmeier.com` |
+| fuzz | reserved; no targets yet | docs-only until parser/fuzz targets land; intended weekly cadence then; `evidence_eligible = false` | `me@jeickmeier.com` |
 
 ## Path filters
 
@@ -66,13 +66,15 @@ step that regenerates then fails if `git status --porcelain` is non-empty.
 
 ## Reserved matrices (`evidence_eligible = false`)
 
-| Matrix | Reservation | Activation |
-| --- | --- | --- |
-| Python wheels | CPython 3.11–3.14 and 3.14t; manylinux x86_64/aarch64, macOS arm64, Windows x64 | PR-027 |
-| Headless browser smoke | browser WASM conformance placeholders | PR-033–PR-036 |
-| Parser fuzz smoke | dated nightly ownership only until targets exist | PR introducing each parser |
-| Security-boundary suites | adversarial authorization/permission suites | owning runtime/binding/plugin PRs |
-| Benchmark regression | artifact retention configured later; not merge-blocking | PR-005 |
+These reservations are documentation-only. Do not add green placeholder jobs.
+
+| Matrix | Reservation | Cadence (once activated) | Activation | Owner |
+| --- | --- | --- | --- | --- |
+| Python wheels | CPython 3.11–3.14 and 3.14t; manylinux x86_64/aarch64, macOS arm64, Windows x64 | every PR for smoke subset; scheduled full matrix | PR-027 | `me@jeickmeier.com` |
+| Headless browser smoke | browser WASM conformance placeholders | every PR once browser package exists | PR-033–PR-036 | `me@jeickmeier.com` |
+| Parser fuzz smoke | no targets yet; no workflow job until targets exist | weekly via `nightly.yml` once targets exist | PR introducing each parser | `me@jeickmeier.com` |
+| Security-boundary suites | adversarial authorization/permission suites | every PR for owning surface | owning runtime/binding/plugin PRs | `me@jeickmeier.com` |
+| Benchmark regression | artifact retention later; not merge-blocking | scheduled / manual; non-blocking | PR-005 | `me@jeickmeier.com` |
 
 Placeholder jobs must not report passing evidence for unimplemented work.
 

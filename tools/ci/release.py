@@ -25,8 +25,19 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> 
     subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
-def git_commit() -> str:
-    """Return the current HEAD commit, or `unknown` when git is unavailable."""
+def require_ci_commit() -> bool:
+    """Return True when CI must fail closed without a git commit identity."""
+    return os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+def git_commit(*, require: bool | None = None) -> str:
+    """Return the current HEAD commit.
+
+    In CI (`CI=true` or `GITHUB_ACTIONS=true`), absence of a commit identity is
+    fatal. Locally, return `unknown` when git is unavailable.
+    """
+    if require is None:
+        require = require_ci_commit()
     try:
         completed = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -35,9 +46,18 @@ def git_commit() -> str:
             capture_output=True,
             text=True,
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError) as exc:
+        if require:
+            raise SystemExit(
+                "release-smoke requires a git commit identity in CI"
+            ) from exc
         return "unknown"
-    return completed.stdout.strip()
+    commit = completed.stdout.strip()
+    if not commit:
+        if require:
+            raise SystemExit("release-smoke received empty git commit identity in CI")
+        return "unknown"
+    return commit
 
 
 def rustc_version() -> str:
@@ -65,6 +85,41 @@ def host_triple() -> str:
         if line.startswith("host:"):
             return line.split(":", 1)[1].strip()
     raise RuntimeError("unable to determine rustc host triple")
+
+
+def cargo_package_metadata() -> dict[str, object]:
+    """Return Cargo metadata for the smoke package and its enabled features."""
+    completed = subprocess.run(
+        [
+            "cargo",
+            "metadata",
+            "--format-version",
+            "1",
+            "--locked",
+            "--no-deps",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    metadata = json.loads(completed.stdout)
+    for package in metadata.get("packages", []):
+        if package.get("name") != PACKAGE:
+            continue
+        enabled: set[str] = set()
+        for dep in package.get("dependencies", []):
+            if dep.get("name") != "finstack-ai":
+                continue
+            if dep.get("uses_default_features", True):
+                enabled.add("default")
+            enabled.update(dep.get("features") or [])
+        return {
+            "version": package["version"],
+            "features": sorted(enabled),
+            "facade_dependency": "finstack-ai",
+        }
+    raise SystemExit(f"package {PACKAGE} not found in cargo metadata")
 
 
 def sha256_file(path: Path) -> str:
@@ -99,10 +154,11 @@ def release_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 def write_metadata(artifact_dir: Path, binary: Path, digest: str) -> Path:
     """Write machine-readable build metadata beside the binary."""
+    package = cargo_package_metadata()
     metadata = {
         "package": PACKAGE,
         "binary": binary.name,
-        "version": "0.0.1",
+        "version": package["version"],
         "commit": git_commit(),
         "rustc": rustc_version(),
         "host_triple": host_triple(),
@@ -111,7 +167,8 @@ def write_metadata(artifact_dir: Path, binary: Path, digest: str) -> Path:
             "machine": platform.machine(),
             "release": platform.release(),
         },
-        "features": ["default", "native-tokio"],
+        "features": package["features"],
+        "facade_dependency": package["facade_dependency"],
         "profile": "release",
         "sha256": digest,
     }
@@ -146,6 +203,8 @@ def build_release(*, target_dir: Path) -> Path:
 
 def package_smoke() -> Path:
     """Build, execute, checksum, and stage the release-smoke artifacts."""
+    # Fail early in CI if commit identity is missing.
+    git_commit()
     build_dir = REPO_ROOT / "target" / "ci-release-build"
     binary = build_release(target_dir=build_dir)
     run([str(binary)], cwd=REPO_ROOT)

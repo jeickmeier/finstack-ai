@@ -15,7 +15,8 @@ name = "finstack-ai-ci-smoke"
 path = "src/main.rs"
 
 [dependencies]
-finstack-ai = { workspace = true }
+# Explicit native defaults: workspace.dependencies disables facade defaults.
+finstack-ai = { workspace = true, features = ["native-tokio"] }
 
 [lints]
 workspace = true

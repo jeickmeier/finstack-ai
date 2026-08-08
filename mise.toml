@@ -172,5 +172,10 @@ mise run build-python
 # Build tasks
 
 [tasks.build-python]
-description = "Build the Python binding package (sdist/wheel placeholder)"
-run = "uv build --project bindings/finstack-ai-python"
+description = "Build the Python binding package with pinned hashed setuptools"
+run = """
+uv build \
+  --project bindings/finstack-ai-python \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+"""

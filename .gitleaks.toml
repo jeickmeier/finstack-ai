@@ -1,9 +1,9 @@
 # Repository secret-scan policy for PR-003.
 # Controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1.
 #
-# Intentionally no path allowlist for examples/ or fixtures/. Committed trees
-# must remain free of credential-shaped material. Negative proof uses temporary
-# repositories created by `mise run secret-scan-canary`.
+# Intentionally no path allowlist for examples/, fixtures/, or lockfiles.
+# Committed trees must remain free of credential-shaped material. Negative
+# proof uses temporary repositories created by `mise run secret-scan-canary`.
 
 title = "finstack-ai secret scan"
 
@@ -17,12 +17,7 @@ regex = '''finstack_canary_[0-9A-Za-z]{40,}'''
 tags = ["finstack", "canary", "credential"]
 
 [allowlist]
-description = "Non-secret documentation markers and generated lock metadata"
-paths = [
-    '''go\.sum$''',
-    '''Cargo\.lock$''',
-    '''uv\.lock$''',
-]
+description = "Non-secret documentation markers only (no path exclusions)"
 regexTarget = "match"
 regexes = [
     '''secret://[A-Za-z0-9._/-]+''',

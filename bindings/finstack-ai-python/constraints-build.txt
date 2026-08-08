@@ -1,0 +1,4 @@
+# Exact, hashed build-backend pin for PR-003 Python package smoke.
+# Regenerate digests from the PyPI release JSON when bumping the pin.
+setuptools==83.0.0 \
+    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3

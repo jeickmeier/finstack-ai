@@ -1,4 +1,4 @@
-[build-python] $ uv build --project bindings/finstack-ai-python
+[build-python] $ uv build --project bindings/finstack-ai-python --build-constra…
 Building source distribution...
 running egg_info
 writing python/finstack_ai.egg-info/PKG-INFO
@@ -67,7 +67,7 @@ running install_egg_info
 Copying python/finstack_ai.egg-info to build/bdist.macosx-11.0-arm64/wheel/./finstack_ai-0.0.1-py3.14.egg-info
 running install_scripts
 creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai-0.0.1.dist-info/WHEEL
-creating '/Users/jeickmeier/Projects/finstack-ai/dist/.tmp-18x3tobr/finstack_ai-0.0.1-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+creating '/Users/jeickmeier/Projects/finstack-ai/dist/.tmp-wnb5i989/finstack_ai-0.0.1-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
 adding 'finstack_ai/__init__.py'
 adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-APACHE'
 adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-MIT'

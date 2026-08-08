@@ -1,8 +1,8 @@
 {
   "binary": "finstack-ai-ci-smoke",
-  "commit": "92217776d215c5658910b60397d0e22960466218",
+  "commit": "79c881436b20b18012fca91faa876d8b828ed0cb",
+  "facade_dependency": "finstack-ai",
   "features": [
-    "default",
     "native-tokio"
   ],
   "host_triple": "aarch64-apple-darwin",
@@ -14,6 +14,6 @@
   },
   "profile": "release",
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-  "sha256": "25bfe8a6c751421ed9b177eb455b22d3bcd64576bbf39d83bbb43c1af0d295f2",
+  "sha256": "f4b52a505b468f9834fb8b199cda4dd2382d8c81a630a5e680461264bc6799e7",
   "version": "0.0.1"
 }

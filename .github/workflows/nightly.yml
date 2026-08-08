@@ -2,8 +2,8 @@
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, weekly schedule, workflow_dispatch.
 # MSRV/stable remain the merge baseline (mise Rust 1.97.1). Nightly is advisory
-# compatibility only. Parser fuzz targets are reserved and not evidence-eligible
-# until owning parser PRs land.
+# compatibility only. Parser fuzz targets are reserved in .github/ci/README.md
+# and must not appear as green jobs until real targets exist.
 
 name: nightly
 
@@ -43,21 +43,3 @@ jobs:
 
       - name: Nightly compatibility check
         run: mise run check-nightly
-
-  reserved-fuzz-readiness:
-    name: reserved-fuzz (non-evidentiary)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Document reserved fuzz ownership
-        run: |
-          echo "status=not-implemented"
-          echo "evidence_eligible=false"
-          echo "owner=me@jeickmeier.com"
-          echo "cadence=weekly via nightly.yml once fuzz targets exist"
-          echo "activation=PR introducing each parser/fuzz target"
-          echo "This job intentionally performs no green placeholder fuzz run."

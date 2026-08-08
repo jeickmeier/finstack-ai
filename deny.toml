@@ -2,7 +2,9 @@
 # Controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13.
 
 [graph]
-all-features = false
+# Scan every feature combination so optional dependencies cannot escape
+# advisory, license, source, or ban policy (Eng Standards §9; TM-18).
+all-features = true
 no-default-features = false
 targets = [
     { triple = "x86_64-unknown-linux-gnu" },
