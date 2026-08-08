@@ -1,0 +1,2 @@
+kernel direct dependencies: []
+PASS empty forbidden set

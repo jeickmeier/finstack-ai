@@ -25,7 +25,7 @@ Index last reconciled: 2026-08-08.
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Indexed | Not started | Missing |
+| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Indexed | In progress | Partial |
 | ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Indexed | Not started | Missing |
 | ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Indexed | Not started | Missing |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Indexed | Not started | Missing |
@@ -34,8 +34,8 @@ Index last reconciled: 2026-08-08.
 | ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Indexed | Not started | Missing |
 | ADR-008 | `declarative-capabilities` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Indexed | Not started | Missing |
-| ADR-010 | `optional-wasm-isolation` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Indexed | Not started | Missing |
-| ADR-011 | `no-native-dylib-abi` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Indexed | Not started | Missing |
+| ADR-010 | `optional-wasm-isolation` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Indexed | In progress | Partial |
+| ADR-011 | `no-native-dylib-abi` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Indexed | In progress | Partial |
 | ADR-012 | `immutable-lanes` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-046–PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-013 | `at-least-once-effects` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-043, PR-046–PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Indexed | Not started | Missing |

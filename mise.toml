@@ -1,5 +1,5 @@
 [tools]
-rust = "1.97.1"
+rust = { version = "1.97.1", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
 
@@ -14,6 +14,7 @@ description = "Verify pinned toolchain is available"
 run = """
 rustc --version
 cargo --version
+rustc --print cfg --target wasm32-unknown-unknown >/dev/null
 python --version
 uv --version
 """
@@ -27,6 +28,26 @@ run = "cargo check --workspace --all-targets"
 [tasks.check-kernel]
 description = "Type-check the kernel crate only (minimal target)"
 run = "cargo check -p finstack-ai-kernel"
+
+[tasks.test-architecture]
+description = "Run architecture checker unit tests"
+run = "uv run --no-project python -m unittest discover -s tools/architecture/tests -v"
+
+[tasks.lint-architecture]
+description = "Lint architecture checker Python sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/architecture"
+
+[tasks.format-architecture]
+description = "Check architecture checker Python formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/architecture"
+
+[tasks.architecture]
+description = "Enforce architecture, dependency, and feature boundaries"
+run = """
+uv run --no-project python -m unittest discover -s tools/architecture/tests -q
+uv run --no-project python tools/architecture/check.py
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown
+"""
 
 # Build tasks
 [tasks.build-python]
