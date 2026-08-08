@@ -528,7 +528,9 @@ mod tests {
             KeyParseErrorKind::MissingNamespace
         ));
         assert!(matches!(
-            CapabilityId::parse("research").expect_err("global capability").kind,
+            CapabilityId::parse("research")
+                .expect_err("global capability")
+                .kind,
             KeyParseErrorKind::MissingNamespace
         ));
         assert!(ToolId::parse("finstack.tools.filesystem").is_ok());
