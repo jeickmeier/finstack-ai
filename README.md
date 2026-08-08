@@ -28,6 +28,7 @@ Useful tasks after bootstrap:
 - `mise run format` / `clippy` / `test` / `docs` — Rust merge gates
 - `mise run check-minimal` — kernel-only and no-default-features graphs
 - `mise run architecture` — dependency/feature boundary enforcement
+- `mise run schema-governance` — ADR inventory, contract registry, and schema/fixture coupling
 - `mise run supply-chain` / `secret-scan` / `secret-scan-canary` — Eng §8–9 / TM-04 / TM-18
 - `mise run release-smoke` — private CI release binary packaging
 - `mise run build-python` — Python binding package under `bindings/finstack-ai-python`

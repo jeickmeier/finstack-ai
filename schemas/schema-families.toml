@@ -1,0 +1,74 @@
+# Machine-readable contract-family registry for PR-004 schema governance.
+# Authoritative behavior remains in docs/planning and
+# docs/implementation/compatibility-governance.md.
+
+[families."public-rust-api"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "crates/"
+format = "rust-public-api"
+stability = "candidate-v1"
+compatibility_profile = "pre-1.0-classified-breakage"
+fixture_root = "fixtures/compatibility/public-rust-api/"
+status = "reserved"
+notes_root = "schemas/public-rust-api/"
+
+[families."agent-spec"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/agent-spec/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "strict-reject-unknown"
+fixture_root = "fixtures/compatibility/agent-spec/"
+status = "reserved"
+
+[families."journal"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/journal/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "durable-ignorable-optional-or-fatal-state"
+fixture_root = "fixtures/compatibility/journal/"
+status = "reserved"
+
+[families."runtime-events"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/runtime-events/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "durable-transient-classified"
+fixture_root = "fixtures/compatibility/runtime-events/"
+status = "reserved"
+
+[families."remote"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/remote/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "strict-inbound-negotiated-outbound"
+fixture_root = "fixtures/compatibility/remote/"
+status = "reserved"
+
+[families."process"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "schemas/process/"
+format = "json-schema-2020-12"
+stability = "candidate-v1"
+compatibility_profile = "strict-inbound-negotiated-outbound"
+fixture_root = "fixtures/compatibility/process/"
+status = "reserved"
+
+[families."wit"]
+owner = "me@jeickmeier.com"
+reviewer = "me@jeickmeier.com"
+source_root = "plugins/finstack-ai-wit/wit/"
+format = "wit"
+stability = "experimental-0.x"
+compatibility_profile = "exact-world"
+fixture_root = "fixtures/compatibility/wit/"
+status = "reserved"

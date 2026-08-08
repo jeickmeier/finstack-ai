@@ -18,6 +18,9 @@ Through pre-1.0, semantic core crates, Python/JavaScript binding distributions, 
 - Root `mise.toml` toolchain pin with bootstrap and check tasks
 - Architecture and dependency enforcement via `mise run architecture` (PR-002)
 - Cross-platform CI workflows, supply-chain/secret checks, and private release-smoke binary (PR-003)
+- Standalone ADR-001 through ADR-037 records with Threat Model cross-links (PR-004)
+- Schema/API compatibility governance: contract registry, reserved schema/fixture roots, change-classification template, and `mise run schema-governance` enforcement (PR-004)
+- Pull request template API/schema/performance/security impact sections (PR-004)
 
 ### Changed
 

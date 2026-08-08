@@ -46,6 +46,43 @@ jobs:
       - name: Lint workflows
         run: mise run lint-workflows
 
+  schema-governance:
+    name: schema-governance
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Schema governance unit tests
+        run: |
+          mise run lint-schema-governance
+          mise run format-schema-governance
+          mise run test-schema-governance
+
+      - name: Schema governance (static + diff)
+        run: |
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -n "${base}" ] && [ "${base}" != "0000000000000000000000000000000000000000" ]; then
+            SCHEMA_GOVERNANCE_BASE="${base}" mise run schema-governance
+          else
+            mise run schema-governance
+          fi
+
   rust-matrix:
     name: rust (${{ matrix.os }} / ${{ matrix.channel }})
     runs-on: ${{ matrix.os }}
