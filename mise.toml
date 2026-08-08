@@ -109,6 +109,22 @@ uv run --no-project python -m unittest discover -s tools/ci/tests -v
 uv run --no-project python -m unittest discover -s tools/security/tests -v
 """
 
+[tasks.test-schema-governance]
+description = "Run ADR/schema governance unit tests"
+run = "uv run --no-project python -m unittest discover -s tools/schema_governance/tests -v"
+
+[tasks.lint-schema-governance]
+description = "Lint schema governance Python sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/schema_governance"
+
+[tasks.format-schema-governance]
+description = "Check schema governance Python formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/schema_governance"
+
+[tasks.schema-governance]
+description = "Enforce ADR inventory, contract registry, and schema/fixture coupling"
+run = "uv run --no-project python tools/schema_governance/check.py"
+
 [tasks.lint-workflows]
 description = "Lint GitHub Actions workflow files"
 run = "actionlint"
@@ -170,6 +186,10 @@ mise run check-wasm
 mise run lint-ci
 mise run format-ci
 mise run test-ci
+mise run lint-schema-governance
+mise run format-schema-governance
+mise run test-schema-governance
+mise run schema-governance
 mise run lint-workflows
 mise run supply-chain
 mise run secret-scan

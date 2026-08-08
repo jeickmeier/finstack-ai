@@ -9,7 +9,7 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, Python package smoke, release-smoke on Linux/macOS/Windows |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, schema governance, Python package smoke, release-smoke on Linux/macOS/Windows |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility only; fuzz remains documentation-reserved (no green placeholder job) |
 
@@ -58,8 +58,27 @@ Current inventory:
 | Python binding package | hand-authored setuptools placeholder | `mise run build-python` | no generator tree yet |
 | Browser WASM binding | hand-authored crate placeholder | `mise run check-wasm` | no wasm-bindgen glue yet |
 | WIT / schema codegen | not present | deferred to owning PRs | when generators exist, CI must regenerate and fail on dirty output |
+| Schema / ADR governance | hand-authored reserved roots + checker | `mise run schema-governance` | schema path changes without fixture updates fail GOV006 when a base SHA is available; reserved README-only dirs are not conformance evidence |
 | Architecture fixtures | hand-authored case files | `mise run architecture` | fixtures must activate the claimed check |
 | Security canary-redaction fixture | contract-only fragments | `mise run secret-scan-canary` (runtime temp repos) | `evidence_eligible = false` until a redactor consumes it |
+
+### Schema governance (PR-004)
+
+Owner: `me@jeickmeier.com`
+
+Canonical tasks:
+
+- `mise run test-schema-governance`
+- `mise run lint-schema-governance` / `format-schema-governance`
+- `mise run schema-governance` (optional `--base <sha>` or `SCHEMA_GOVERNANCE_BASE`)
+
+The checker enforces ADR-001–ADR-037 inventory/links (GOV001–GOV003), contract
+registry completeness (GOV004), schema/fixture naming and coupling
+(GOV005–GOV006), and PR-template impact sections (GOV007). Hosted
+`schema-governance` uses `fetch-depth: 0` and the pull-request base SHA when
+present; workflow_dispatch/manual runs without a base still execute static
+checks. Reserved `schemas/` and `fixtures/compatibility/` directories are
+governance scaffolding only until owning PRs add payloads.
 
 When a generator lands, document its owning package command here and add a CI
 step that regenerates then fails if `git status --porcelain` is non-empty.

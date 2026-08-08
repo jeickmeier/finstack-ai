@@ -1,0 +1,26 @@
+PR-004 security review of standalone ADR trust-boundary dispositions
+Reviewer: me@jeickmeier.com
+Date: 2026-08-08
+Scope: ADR-001 through ADR-037 standalone records created under logical PR-004
+
+Method:
+- Compared each ADR security classification against the pre-seeded map in
+  docs/implementation/adr-register.md
+- Confirmed every record cites SEC-INV/TM references (or would have required
+  No direct security control), links Threat Model §18, and records a
+  control-change disposition
+- Confirmed dispositions document that creating standalone records of the
+  accepted planning baseline introduces no new trust boundary, threat, or
+  control
+- Confirmed GOV003 automation rejects incomplete security sections
+- Confirmed review remediations retained FR/NFR + Technical Design
+  traceability and Partial PR-002 evidence links for ADR-001/010/011
+
+Decision: Pass for PR-004-A05 completeness and baseline no-control-change
+disposition. No Threat Model document edit required for this PR.
+
+Residual notes:
+- Automation (GOV003) proves section completeness; this review attests the
+  security judgment for the PR-004 standalone-recording scope
+- Later implementation PRs that change listed trust boundaries must still
+  update the Threat Model or document why no threat/control changes

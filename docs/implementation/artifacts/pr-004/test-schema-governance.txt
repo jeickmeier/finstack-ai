@@ -1,0 +1,34 @@
+[test-schema-governance] $ uv run --no-project python -m unittest discover -s t…
+test_complete_inventory_passes (test_check.AdrInventoryTests.test_complete_inventory_passes) ... ok
+test_missing_adr_files_fail_gov001 (test_check.AdrInventoryTests.test_missing_adr_files_fail_gov001) ... ok
+test_missing_heading_fails_gov002 (test_check.AdrRecordTests.test_missing_heading_fails_gov002) ... ok
+test_missing_security_fails_gov003 (test_check.AdrRecordTests.test_missing_security_fails_gov003) ... ok
+test_missing_traceability_fails_gov002 (test_check.AdrRecordTests.test_missing_traceability_fails_gov002) ... ok
+test_required_headings_are_documented (test_check.AdrRecordTests.test_required_headings_are_documented) ... ok
+test_process_family_is_required (test_check.CheckIdTests.test_process_family_is_required) ... ok
+test_stable_check_ids_exist (test_check.CheckIdTests.test_stable_check_ids_exist) ... ok
+test_complete_registry_passes (test_check.ContractRegistryTests.test_complete_registry_passes) ... ok
+test_missing_family_fails_gov004 (test_check.ContractRegistryTests.test_missing_family_fails_gov004) ... ok
+test_complete_impact_sections_pass (test_check.PrTemplateTests.test_complete_impact_sections_pass) ... ok
+test_missing_impact_sections_fail_gov007 (test_check.PrTemplateTests.test_missing_impact_sections_fail_gov007) ... ok
+test_base_ref_from_environment (test_check.RunChecksIntegrationTests.test_base_ref_from_environment) ... ok
+test_run_checks_returns_diagnostics_for_empty_repo (test_check.RunChecksIntegrationTests.test_run_checks_returns_diagnostics_for_empty_repo) ... ok
+test_comment_containing_draft_uri_without_schema_field_fails (test_check.SchemaFixtureCouplingTests.test_comment_containing_draft_uri_without_schema_field_fails) ... ok
+test_invalid_schema_name_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_invalid_schema_name_fails_gov005) ... ok
+test_no_schema_files_passes_without_base (test_check.SchemaFixtureCouplingTests.test_no_schema_files_passes_without_base) ... ok
+test_readme_fixture_does_not_satisfy_coupling (test_check.SchemaFixtureCouplingTests.test_readme_fixture_does_not_satisfy_coupling) ... ok
+test_schema_change_with_same_version_fixture_passes (test_check.SchemaFixtureCouplingTests.test_schema_change_with_same_version_fixture_passes) ... ok
+test_schema_change_without_fixture_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_schema_change_without_fixture_fails_gov006) ... ok
+test_schema_delete_requires_fixture_update (test_check.SchemaFixtureCouplingTests.test_schema_delete_requires_fixture_update) ... ok
+test_schema_rename_source_requires_fixture_coverage (test_check.SchemaFixtureCouplingTests.test_schema_rename_source_requires_fixture_coverage) ... ok
+test_unregistered_family_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_unregistered_family_fails_gov006) ... ok
+test_v2_schema_not_covered_by_v1_fixture (test_check.SchemaFixtureCouplingTests.test_v2_schema_not_covered_by_v1_fixture) ... ok
+test_versioned_wit_requires_fixture (test_check.SchemaFixtureCouplingTests.test_versioned_wit_requires_fixture) ... ok
+test_versioned_wit_with_fixture_passes (test_check.SchemaFixtureCouplingTests.test_versioned_wit_with_fixture_passes) ... ok
+test_wit_path_must_be_versioned (test_check.SchemaFixtureCouplingTests.test_wit_path_must_be_versioned) ... ok
+test_wrong_draft_uri_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_wrong_draft_uri_fails_gov005) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 1.801s
+
+OK

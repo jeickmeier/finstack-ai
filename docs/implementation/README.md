@@ -28,9 +28,9 @@ If implementation reveals a required design change, mark the affected work `Bloc
 The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.12 on 2026-08-08:
 
 - 37 decisions are accepted and indexed; ADR-024 license/governance files are `Partial` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (standalone ADR text remains PR-004).
-- Phase 0 is `In progress`; PR-001 and PR-002 are `Done`; PR-003 is `In progress` on branch `pr-003-ci-release-matrix`; PR-004–PR-066 are `Todo`.
+- Phase 0 is `In progress`; PR-001–PR-003 are `Done`; PR-004 is `In review` on branch `pr-004-adrs-schema-governance` with local artifacts under [`artifacts/pr-004/`](artifacts/pr-004/); PR-005–PR-066 are `Todo`.
 - gates G0 through G8 are `Not ready`.
-- PR-001 acceptance criteria A01–A06 are `Passed` with artifacts under [`artifacts/pr-001/`](artifacts/pr-001/). PR-002 acceptance A01–A07 are closed (4 `Passed`, 3 `Not applicable` for deferred compile fixtures) with artifacts under [`artifacts/pr-002/`](artifacts/pr-002/) at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 acceptance A02/A04/A05 are `Passed` with local/review artifacts under [`artifacts/pr-003/`](artifacts/pr-003/); A01 and cross-platform A03 remain `Pending` until a GitHub remote/PR provides hosted evidence. No gate approvals or exceptions have been recorded.
+- PR-001 acceptance criteria A01–A06 are `Passed` with artifacts under [`artifacts/pr-001/`](artifacts/pr-001/). PR-002 acceptance A01–A07 are closed (4 `Passed`, 3 `Not applicable` for deferred compile fixtures) with artifacts under [`artifacts/pr-002/`](artifacts/pr-002/) at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 acceptance A01–A05 are `Passed` with artifacts under [`artifacts/pr-003/`](artifacts/pr-003/) at merge `9b0709a8cf2d96b418406f953e7bdc958925c274`. PR-004 acceptance A01–A05 remain `Pending` until rebound to an immutable merge commit. No gate approvals or exceptions have been recorded.
 
 The existence of these registers is documentation setup, not evidence that Phase 0 or PR-004 has passed.
 

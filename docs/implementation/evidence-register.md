@@ -87,6 +87,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-003-A03 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-hosted-release-smoke-be7df0f3c45c; local Darwin PR-003-E-release-smoke-5ac88e7bdf8a | — | me@jeickmeier.com | 2026-08-08 |
 | PR-003-A04 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-generated-docs-ba54420a0521 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-003-A05 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-supply-chain-9c119be89fd4; PR-003-E-secret-scan-b09efb8d60cb; PR-003-E-security-review-fc22979d5bcb | — | me@jeickmeier.com | 2026-08-08 |
+| PR-004-A01 | PR-004 | PLAN-0.10 / [PR-004](../planning/04-finstack-ai-implementation-plan.md#pr-004---record-foundational-adrs-and-schema-governance) | Pending | me@jeickmeier.com | target: local schema-governance + ADR inventory under artifacts/pr-004/ | — | — | — |
+| PR-004-A02 | PR-004 | PLAN-0.10 / same | Pending | me@jeickmeier.com | target: schema-families.toml + GOV004 under artifacts/pr-004/ | — | — | — |
+| PR-004-A03 | PR-004 | PLAN-0.10 / same | Pending | me@jeickmeier.com | target: PR template GOV007 under artifacts/pr-004/ | — | — | — |
+| PR-004-A04 | PR-004 | PLAN-0.10 / same | Pending | me@jeickmeier.com | target: unit negatives + base-aware schema-governance under artifacts/pr-004/ | — | — | — |
+| PR-004-A05 | PR-004 | PLAN-0.10 / same | Pending | me@jeickmeier.com | target: security-review.txt + GOV003 under artifacts/pr-004/ | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

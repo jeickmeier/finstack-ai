@@ -1,0 +1,392 @@
+[ci] $ mise run format
+[format] $ cargo fmt --all -- --check
+[clippy] $ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+[test] $ cargo test --workspace --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai-224fe80ed32fc34e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/finstack_ai_ci_smoke-2b368e0e32277fae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-4d4e9a96f4cae73c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_protocol-a950272d2faaf2f4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_python-156117bf1f9eddb9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-75c2dacf49a5f5e8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-6b0cc7dd89fda105)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_wasm-1f8538833a3271fd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_kernel
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_python
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_test
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[docs] $ cargo doc --workspace --no-deps --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+   Generated /Users/jeickmeier/Projects/finstack-ai/target/doc/finstack_ai/index.html and 7 other files
+[check-minimal] $ cargo check -p finstack-ai-kernel --locked
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+[architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
+----------------------------------------------------------------------
+Ran 21 tests in 0.070s
+
+OK
+finstack-ai architecture check
+repo: /Users/jeickmeier/Projects/finstack-ai
+elapsed_ms: 50.1
+
+PASS: no architecture findings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+[check-wasm] $ cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown …
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+[lint-ci] $ uv run --no-project --with ruff==0.12.11 ruff check tools/ci tools/…
+All checks passed!
+[format-ci] $ uv run --no-project --with ruff==0.12.11 ruff format --check tool…
+8 files already formatted
+[test-ci] $ uv run --no-project python -m unittest discover -s tools/ci/tests -v
+test_binary_name_uses_exe_suffix_on_windows (test_release.ReleaseHelperTests.test_binary_name_uses_exe_suffix_on_windows) ... ok
+test_cargo_package_metadata_reads_workspace_version (test_release.ReleaseHelperTests.test_cargo_package_metadata_reads_workspace_version) ... ok
+test_git_commit_fails_closed_in_ci_without_identity (test_release.ReleaseHelperTests.test_git_commit_fails_closed_in_ci_without_identity) ... ok
+test_sha256_file_is_stable (test_release.ReleaseHelperTests.test_sha256_file_is_stable) ... ok
+test_write_metadata_uses_cargo_version_and_commit (test_release.ReleaseHelperTests.test_write_metadata_uses_cargo_version_and_commit) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.022s
+
+OK
+test_assembled_token_is_not_committed_as_a_whole (test_secret_canary.SecretCanaryTests.test_assembled_token_is_not_committed_as_a_whole) ... ok
+test_canary_paths_cover_lockfiles (test_secret_canary.SecretCanaryTests.test_canary_paths_cover_lockfiles) ... ok
+test_manifest_marks_fixture_non_evidentiary (test_secret_canary.SecretCanaryTests.test_manifest_marks_fixture_non_evidentiary) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+[lint-schema-governance] $ uv run --no-project --with ruff==0.12.11 ruff check …
+All checks passed!
+[format-schema-governance] $ uv run --no-project --with ruff==0.12.11 ruff form…
+4 files already formatted
+[test-schema-governance] $ uv run --no-project python -m unittest discover -s t…
+test_complete_inventory_passes (test_check.AdrInventoryTests.test_complete_inventory_passes) ... ok
+test_missing_adr_files_fail_gov001 (test_check.AdrInventoryTests.test_missing_adr_files_fail_gov001) ... ok
+test_missing_heading_fails_gov002 (test_check.AdrRecordTests.test_missing_heading_fails_gov002) ... ok
+test_missing_security_fails_gov003 (test_check.AdrRecordTests.test_missing_security_fails_gov003) ... ok
+test_missing_traceability_fails_gov002 (test_check.AdrRecordTests.test_missing_traceability_fails_gov002) ... ok
+test_required_headings_are_documented (test_check.AdrRecordTests.test_required_headings_are_documented) ... ok
+test_process_family_is_required (test_check.CheckIdTests.test_process_family_is_required) ... ok
+test_stable_check_ids_exist (test_check.CheckIdTests.test_stable_check_ids_exist) ... ok
+test_complete_registry_passes (test_check.ContractRegistryTests.test_complete_registry_passes) ... ok
+test_missing_family_fails_gov004 (test_check.ContractRegistryTests.test_missing_family_fails_gov004) ... ok
+test_complete_impact_sections_pass (test_check.PrTemplateTests.test_complete_impact_sections_pass) ... ok
+test_missing_impact_sections_fail_gov007 (test_check.PrTemplateTests.test_missing_impact_sections_fail_gov007) ... ok
+test_base_ref_from_environment (test_check.RunChecksIntegrationTests.test_base_ref_from_environment) ... ok
+test_run_checks_returns_diagnostics_for_empty_repo (test_check.RunChecksIntegrationTests.test_run_checks_returns_diagnostics_for_empty_repo) ... ok
+test_comment_containing_draft_uri_without_schema_field_fails (test_check.SchemaFixtureCouplingTests.test_comment_containing_draft_uri_without_schema_field_fails) ... ok
+test_invalid_schema_name_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_invalid_schema_name_fails_gov005) ... ok
+test_no_schema_files_passes_without_base (test_check.SchemaFixtureCouplingTests.test_no_schema_files_passes_without_base) ... ok
+test_readme_fixture_does_not_satisfy_coupling (test_check.SchemaFixtureCouplingTests.test_readme_fixture_does_not_satisfy_coupling) ... ok
+test_schema_change_with_same_version_fixture_passes (test_check.SchemaFixtureCouplingTests.test_schema_change_with_same_version_fixture_passes) ... ok
+test_schema_change_without_fixture_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_schema_change_without_fixture_fails_gov006) ... ok
+test_schema_delete_requires_fixture_update (test_check.SchemaFixtureCouplingTests.test_schema_delete_requires_fixture_update) ... ok
+test_schema_rename_source_requires_fixture_coverage (test_check.SchemaFixtureCouplingTests.test_schema_rename_source_requires_fixture_coverage) ... ok
+test_unregistered_family_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_unregistered_family_fails_gov006) ... ok
+test_v2_schema_not_covered_by_v1_fixture (test_check.SchemaFixtureCouplingTests.test_v2_schema_not_covered_by_v1_fixture) ... ok
+test_versioned_wit_requires_fixture (test_check.SchemaFixtureCouplingTests.test_versioned_wit_requires_fixture) ... ok
+test_versioned_wit_with_fixture_passes (test_check.SchemaFixtureCouplingTests.test_versioned_wit_with_fixture_passes) ... ok
+test_wit_path_must_be_versioned (test_check.SchemaFixtureCouplingTests.test_wit_path_must_be_versioned) ... ok
+test_wrong_draft_uri_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_wrong_draft_uri_fails_gov005) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 1.883s
+
+OK
+[schema-governance] $ uv run --no-project python tools/schema_governance/check.…
+schema-governance: ok
+[lint-workflows] $ actionlint
+[supply-chain] $ echo "controls: Engineering Standards §9; Threat Model TM-18; …
+controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13
+advisories ok, bans ok, licenses ok, sources ok
+[secret-scan] $ echo "controls: Engineering Standards §8; SEC-INV-005; Threat M…
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+3:16PM INF 26 commits scanned.
+3:16PM INF scanned ~973958 bytes (973.96 KB) in 138ms
+3:16PM INF no leaks found
+[secret-scan-canary] $ echo "controls: Engineering Standards §8; SEC-INV-005; T…
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+=== canary path: examples/leaked-token.json ===
+Finding:     "token": "[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/leaked-token.json
+Line:        3
+Commit:      7aac4a4c4ff325d1420a23cd66258444a900f4e0
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:28Z
+Fingerprint: 7aac4a4c4ff325d1420a23cd66258444a900f4e0:examples/leaked-token.json:finstack-canary-credential:3
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~1000 bytes (1 KB) in 88.8ms
+3:16PM WRN leaks found: 1
+
+=== canary path: fixtures/leaked-token.json ===
+Finding:     "token": "[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/leaked-token.json
+Line:        3
+Commit:      48bd4e0489762c25060201b871a89610a8544bdb
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:29Z
+Fingerprint: 48bd4e0489762c25060201b871a89610a8544bdb:fixtures/leaked-token.json:finstack-canary-credential:3
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~1000 bytes (1 KB) in 85.5ms
+3:16PM WRN leaks found: 1
+
+=== canary path: examples/Cargo.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/Cargo.lock
+Line:        2
+Commit:      ed30708101f990842316ac88908518582e1d1eeb
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:29Z
+Fingerprint: ed30708101f990842316ac88908518582e1d1eeb:examples/Cargo.lock:finstack-canary-credential:2
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~947 bytes (947 bytes) in 84.1ms
+3:16PM WRN leaks found: 1
+
+=== canary path: fixtures/Cargo.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/Cargo.lock
+Line:        2
+Commit:      2e0b13ea617954a883adce6523d6678d827667d4
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:29Z
+Fingerprint: 2e0b13ea617954a883adce6523d6678d827667d4:fixtures/Cargo.lock:finstack-canary-credential:2
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~947 bytes (947 bytes) in 84.9ms
+3:16PM WRN leaks found: 1
+
+=== canary path: examples/uv.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/uv.lock
+Line:        2
+Commit:      00490b7c334e60752dfa886ab20b066baf1d95cf
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:29Z
+Fingerprint: 00490b7c334e60752dfa886ab20b066baf1d95cf:examples/uv.lock:finstack-canary-credential:2
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~947 bytes (947 bytes) in 83.9ms
+3:16PM WRN leaks found: 1
+
+=== canary path: fixtures/uv.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/uv.lock
+Line:        2
+Commit:      c8b1fbb4442dcdd4278a8f05a4c71620ccab4419
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T19:16:30Z
+Fingerprint: c8b1fbb4442dcdd4278a8f05a4c71620ccab4419:fixtures/uv.lock:finstack-canary-credential:2
+
+3:16PM INF 1 commits scanned.
+3:16PM INF scanned ~947 bytes (947 bytes) in 83.8ms
+3:16PM WRN leaks found: 1
+
+secret-scan-canary: temporary examples/, fixtures/, and lockfile detections passed
+[release-smoke] $ uv run --no-project python tools/ci/release.py smoke
++ cargo build --release -p finstack-ai-ci-smoke --locked
+    Finished `release` profile [optimized] target(s) in 0.00s
++ /Users/jeickmeier/Projects/finstack-ai/target/ci-release-build/release/finstack-ai-ci-smoke
+finstack-ai-ci-smoke 0.0.1
+staged binary: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/finstack-ai-ci-smoke
+sha256: f4b52a505b468f9834fb8b199cda4dd2382d8c81a630a5e680461264bc6799e7
+metadata: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/build-metadata.json
+[build-python] $ uv build --project bindings/finstack-ai-python --build-constra…
+Building source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running sdist
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running check
+creating finstack_ai-0.0.1
+creating finstack_ai-0.0.1/python/finstack_ai
+creating finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying files to finstack_ai-0.0.1...
+copying LICENSE-APACHE -> finstack_ai-0.0.1
+copying LICENSE-MIT -> finstack_ai-0.0.1
+copying README.md -> finstack_ai-0.0.1
+copying pyproject.toml -> finstack_ai-0.0.1
+copying python/finstack_ai/__init__.py -> finstack_ai-0.0.1/python/finstack_ai
+copying python/finstack_ai.egg-info/PKG-INFO -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/dependency_links.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/top_level.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+Writing finstack_ai-0.0.1/setup.cfg
+Creating tar archive
+removing 'finstack_ai-0.0.1' (and everything under it)
+Building wheel from source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+creating build/lib/finstack_ai
+copying python/finstack_ai/__init__.py -> build/lib/finstack_ai
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+installing to build/bdist.macosx-11.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-11.0-arm64/wheel
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai
+copying build/lib/finstack_ai/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./finstack_ai
+running install_egg_info
+Copying python/finstack_ai.egg-info to build/bdist.macosx-11.0-arm64/wheel/./finstack_ai-0.0.1-py3.14.egg-info
+running install_scripts
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai-0.0.1.dist-info/WHEEL
+creating '/Users/jeickmeier/Projects/finstack-ai/dist/.tmp-abolh0c8/finstack_ai-0.0.1-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+adding 'finstack_ai/__init__.py'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-APACHE'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-MIT'
+adding 'finstack_ai-0.0.1.dist-info/METADATA'
+adding 'finstack_ai-0.0.1.dist-info/WHEEL'
+adding 'finstack_ai-0.0.1.dist-info/top_level.txt'
+adding 'finstack_ai-0.0.1.dist-info/RECORD'
+removing build/bdist.macosx-11.0-arm64/wheel
+Successfully built dist/finstack_ai-0.0.1.tar.gz
+Successfully built dist/finstack_ai-0.0.1-py3-none-any.whl
