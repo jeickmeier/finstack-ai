@@ -1,6 +1,7 @@
-date: 2026-08-08T19:16:36Z
+date: 2026-08-08T19:16:51Z
 branch: pr-004-adrs-schema-governance
-worktree: dirty (pre-commit local evidence refresh)
+commit: 75537daad821f33de4a1465fbf83aa784b710cc5
+worktree: clean
 rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 cargo: cargo 1.97.1 (c980f4866 2026-06-30)
 python: Python 3.14.6

@@ -5,8 +5,9 @@ Logical PR: [PR-004](../../../planning/04-finstack-ai-implementation-plan.md#pr-
 Branch: `pr-004-adrs-schema-governance`
 
 Local validation for foundational ADR records and schema governance.
-Acceptance dispositions stay `Pending` until rebound to the immutable merge
-commit. Gate G0 stays `Not ready` until PR-005 completes.
+A01–A05 are Passed against branch tip
+`75537daad821f33de4a1465fbf83aa784b710cc5`. Logical PR `Done` awaits the
+GitHub merge commit. Gate G0 stays `Not ready` until PR-005 completes.
 
 ## Commands
 
