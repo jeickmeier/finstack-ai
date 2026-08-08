@@ -18,18 +18,20 @@ run = "mise install"
 
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
+# Keep this a single shell graph so Windows runners still execute every step
+# after `rustup` channel syncs (multiline task bodies have been truncated there).
 run = """
-rustup component add rustfmt clippy
-rustup target add wasm32-unknown-unknown
-rustc --version
-cargo --version
-rustfmt --version
-cargo clippy --version
-rustc --print cfg --target wasm32-unknown-unknown >/dev/null
-python --version
-uv --version
-"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --version
-gitleaks version
+rustup component add rustfmt clippy && \
+rustup target add wasm32-unknown-unknown && \
+rustc --version && \
+cargo --version && \
+rustfmt --version && \
+cargo clippy --version && \
+rustc --print cfg --target wasm32-unknown-unknown >/dev/null && \
+python --version && \
+uv --version && \
+\"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny\" --version && \
+gitleaks version && \
 actionlint --version
 """
 
@@ -55,7 +57,10 @@ cargo check -p finstack-ai-test --no-default-features --locked
 
 [tasks.check-wasm]
 description = "Type-check the browser WASM binding target"
-run = "cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked"
+run = """
+rustup target add wasm32-unknown-unknown && \
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+"""
 
 [tasks.format]
 description = "Check Rust formatting"
@@ -116,9 +121,9 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/archit
 [tasks.architecture]
 description = "Enforce architecture, dependency, and feature boundaries"
 run = """
-uv run --no-project python -m unittest discover -s tools/architecture/tests -q
-uv run --no-project python tools/architecture/check.py
-cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+uv run --no-project python -m unittest discover -s tools/architecture/tests -q && \
+uv run --no-project python tools/architecture/check.py && \
+mise run check-wasm
 """
 
 [tasks.lint-ci]
