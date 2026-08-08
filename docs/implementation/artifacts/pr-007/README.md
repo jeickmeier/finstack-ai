@@ -4,6 +4,7 @@ Validation evidence for content blocks, messages, blob references, public-rust-a
 fixtures, and pack v0.13 message-contract amendment.
 
 Branch: `pr-007-content-messages`
+Implementation tip: `f8670e1c74450b18c3da6b74587d5ac39eccbb23`
 
 ## Acceptance mapping
 
