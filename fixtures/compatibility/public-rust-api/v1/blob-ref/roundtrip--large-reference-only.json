@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "subject": "blob_ref",
+  "operation": "roundtrip",
+  "input": {
+    "id": "blob-large-1",
+    "media_type": "application/pdf",
+    "length": 50000000,
+    "name": "report.pdf"
+  },
+  "expect": {
+    "ok": true,
+    "length": 50000000,
+    "max_serialized_bytes": 200,
+    "serialized_json": "{\"id\":\"blob-large-1\",\"media_type\":\"application/pdf\",\"length\":50000000,\"name\":\"report.pdf\"}"
+  }
+}

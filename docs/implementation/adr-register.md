@@ -60,7 +60,7 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-033 | `explicit-interruption` | Core/runtime lead | PR-042 | Accepted | Standalone | Not started | Missing |
 | ADR-034 | `durable-middleware-outcomes` | Core/runtime lead | PR-018, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-035 | `experimental-wit-versioning` | Runtime/security owner | PR-049–PR-054, PR-062 | Accepted | Standalone | Not started | Missing |
-| ADR-036 | `blob-storage-boundary` | Ecosystem lead | PR-007, PR-022, PR-037, PR-056 | Accepted | Standalone | Not started | Missing |
+| ADR-036 | `blob-storage-boundary` | Ecosystem lead | PR-007, PR-022, PR-037, PR-056 | Accepted | Standalone | In progress | Partial |
 | ADR-037 | `middleware-compaction` | Core/runtime lead | PR-018, PR-023, PR-048, PR-056 | Accepted | Standalone | Not started | Missing |
 
 ## Security review seed
@@ -147,6 +147,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-037 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-037-middleware-compaction.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-029 | Implementation | me@jeickmeier.com | Not started | In progress | PR-006 typed identifier / RawJson / error foundations on `pr-006-kernel-value-types` | — | — |
 | 2026-08-08 | ADR-029 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-006 merged [#4](https://github.com/jeickmeier/finstack-ai/pull/4) @ `56d7777956df145213b03d2b0b5c1922db42b346` | PR-006-E-hosted-ci-9a1ccbb88ae5; PR-006-E-test-kernel-bc373cf935e4 | me@jeickmeier.com |
+| 2026-08-08 | ADR-036 | Implementation | me@jeickmeier.com | Not started | In progress | PR-007 BlobRef / no seventh-port boundary at `4a0a77f668adcfa2679dc161779c4456d721c0c2` | PR-007-E-security-1146ce970799 | — |
+| 2026-08-08 | ADR-036 | Evidence | me@jeickmeier.com | Missing | Partial | PR-007 local TM-20 / BlobRef fixtures; full Verified awaits merge + remaining mapped PRs | PR-007-E-security-1146ce970799; PR-007-E-conformance-8b7b9c728785 | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -187,7 +189,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-033 | [ADR-033-explicit-interruption.md](adrs/ADR-033-explicit-interruption.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-034 | [ADR-034-durable-middleware-outcomes.md](adrs/ADR-034-durable-middleware-outcomes.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-035 | [ADR-035-experimental-wit-versioning.md](adrs/ADR-035-experimental-wit-versioning.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-036 | [ADR-036-blob-storage-boundary.md](adrs/ADR-036-blob-storage-boundary.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-036 | [ADR-036-blob-storage-boundary.md](adrs/ADR-036-blob-storage-boundary.md) | me@jeickmeier.com | Partial (PR-007 BlobRef boundary): PR-007-E-security-1146ce970799; PR-007-E-conformance-8b7b9c728785 at `4a0a77f668adcfa2679dc161779c4456d721c0c2` | PR-004 standalone ADR; PR-007 content/messages | 2026-08-08 |
 | ADR-037 | [ADR-037-middleware-compaction.md](adrs/ADR-037-middleware-compaction.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 
 ## Supersession log

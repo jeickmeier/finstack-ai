@@ -1,0 +1,9 @@
+PR-007 validation environment
+Date (UTC): 2026-08-08T22:52:05Z
+Host: Darwin arm64 (macOS 25.5.0)
+Branch: pr-007-content-messages-final
+Implementation commit: 4a0a77f668adcfa2679dc161779c4456d721c0c2
+rustc: 1.97.1 (8bab26f4f 2026-07-14)
+cargo: 1.97.1 (c980f4866 2026-06-30)
+active toolchain: stable-aarch64-apple-darwin
+wasm32-unknown-unknown: available via rustup

@@ -7,7 +7,8 @@ Fixtures: `fixtures/compatibility/public-rust-api/`
 Notes root for the public Rust API family. Authoritative source is `crates/`
 (see `schemas/schema-families.toml` `source_root`). PR-006 activates the family
 with versioned compatibility fixtures for typed IDs, RawJson/Metadata, digests,
-timestamps/durations, and source-free error descriptors.
+timestamps/durations, and source-free error descriptors. PR-007 extends the
+family with blob-ref, content-block, and message fixtures.
 
 Public item and feature-name changes use the schema-change template and must
 update fixtures under `fixtures/compatibility/public-rust-api/` when behavior

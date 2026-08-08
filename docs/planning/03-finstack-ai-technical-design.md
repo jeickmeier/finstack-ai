@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.10 |
+| Version | 0.12 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.6; Implementation Plan v0.10; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Implementation Plan v0.12; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -362,11 +362,13 @@ A provider may supply its own request, message, or tool-call ID. These are store
 
 ```rust
 pub struct ProviderIds {
-    pub request_id: Option<String>,
-    pub response_id: Option<String>,
-    pub continuation_id: Option<String>,
+    pub request_id: Option<Arc<str>>,
+    pub response_id: Option<Arc<str>>,
+    pub continuation_id: Option<Arc<str>>,
 }
 ```
+
+Provider ID strings are opaque shared buffers. Each present string is bounded by the individual text/byte-string ceiling in section 6.5. Empty strings are rejected.
 
 ## 5.3 Transition environment
 
@@ -471,7 +473,10 @@ Constructors and decoders check the applicable byte, item, and depth limits befo
 
 ## 7.1 Content blocks
 
+The v1 shipping `ContentBlock` set is:
+
 ```rust
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text(TextBlock),
     Json(JsonBlock),
@@ -480,13 +485,49 @@ pub enum ContentBlock {
     File(MediaRef),
     ToolCall(ToolCallBlock),
     ToolResult(ToolResultBlock),
-    Reasoning(ReasoningBlock),
-    Refusal(RefusalBlock),
     Opaque(OpaqueBlock),
 }
 ```
 
-`OpaqueBlock` carries a namespaced media type and bytes/JSON for provider-specific round-tripping. Components that do not understand it must preserve it when the selected provider requires it.
+`Reasoning` and `Refusal` variants are deferred until a consumer PR freezes their payload DTOs; adding them later is an additive pre-1.0 enum extension with fixtures. Human JSON uses an explicit `kind` discriminator with snake_case variant names. Unknown `kind` values and unknown object members are rejected. Nested `ToolCall`/`ToolResult` blocks inside a `ToolResultBlock` payload are rejected.
+
+```rust
+pub struct TextBlock {
+    pub text: Arc<str>,
+}
+
+pub struct JsonBlock {
+    pub value: RawJson,
+}
+
+pub struct MediaRef {
+    pub blob: BlobRef,
+}
+
+pub struct ToolCallBlock {
+    pub tool_call_id: ToolCallId,
+    pub tool_name: Arc<str>,
+    pub arguments: RawJson,
+}
+
+pub struct ToolResultBlock {
+    pub tool_call_id: ToolCallId,
+    pub content: Arc<[ContentBlock]>,
+    pub is_error: bool,
+}
+
+pub enum OpaquePayload {
+    Bytes(Bytes),
+    Json(RawJson),
+}
+
+pub struct OpaqueBlock {
+    pub media_type: Arc<str>,
+    pub payload: OpaquePayload,
+}
+```
+
+`TextBlock.text`, opaque byte payloads, and other individual text/byte strings are bounded by the section 6.5 4 MiB ceiling. `JsonBlock.value` and `ToolCallBlock.arguments` use `RawJson` ceilings. `tool_name` and opaque/media type strings are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `OpaqueBlock` carries a namespaced media type and bytes/JSON for provider-specific round-tripping. Components that do not understand it must preserve it when the selected provider requires it. Media variants carry only a `BlobRef`; constructors and decoders reject any inline payload member.
 
 ## 7.2 Blob reference
 
@@ -500,7 +541,7 @@ pub struct BlobRef {
 }
 ```
 
-The core never dereferences a blob. Toolsets, context providers, bindings, or applications do so through their own services.
+`BlobRef` does not carry metadata. Bounded non-secret metadata for durable artifacts belongs on `ArtifactRef`. `id` and `media_type` are non-empty and at most 256 UTF-8 bytes without NUL; optional `name` uses the same bound when present. Optional integrity digests for blob bytes use the `blob-content` digest domain over the exact raw bytes. The core never dereferences a blob. Toolsets, context providers, bindings, or applications do so through their own services.
 
 Artifact, external-handle, and identity references use small transport-safe records rather than application objects:
 
@@ -545,6 +586,7 @@ pub struct AuthorizationEvidence {
 ## 7.3 Message roles
 
 ```rust
+#[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     System,
     Developer,
@@ -554,9 +596,32 @@ pub enum MessageRole {
 }
 ```
 
+Role/block validity matrix (v1):
+
+| Role | Allowed blocks |
+|---|---|
+| `System`, `Developer` | `Text`, `Json`, `Opaque` |
+| `User` | `Text`, `Json`, `Image`, `Audio`, `File`, `Opaque` |
+| `Assistant` | `Text`, `Json`, `Image`, `Audio`, `File`, `ToolCall`, `Opaque` |
+| `Tool` | `ToolResult` only; at least one `ToolResult` required |
+
 ## 7.4 Model message
 
 ```rust
+pub enum ThinkingLevel {
+    Low,
+    Medium,
+    High,
+}
+
+pub struct ModelRef {
+    pub provider: Arc<str>,
+    pub model: Arc<str>,
+    pub thinking_level: Option<ThinkingLevel>,
+    pub context_length: Option<u64>,
+    pub fast: Option<bool>,
+}
+
 pub struct Message {
     pub id: MessageId,
     pub role: MessageRole,
@@ -568,7 +633,15 @@ pub struct Message {
 }
 ```
 
-The kernel validates role/block combinations. A tool-result message must refer to known tool calls and one result must exist for every completed or reconciled call.
+`ModelRef.provider` and `ModelRef.model` are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `thinking_level`, `context_length`, and `fast` are independently optional selected-configuration fields: a model reference may omit all three, carry thinking only, fast only, context length only, or any combination (including thinking and fast together). When present, `context_length` is a positive token budget in the portable exact-JSON integer range (`1..=2^53-1`); larger values are rejected rather than serialized imprecisely for JavaScript consumers. Absent optional fields are omitted from JSON (`skip_serializing_if`). `Message.content` is bounded by the section 6.5 array-item ceiling (4,096). `created_at` is supplied by the runtime environment; the kernel never reads a clock. `Usage` is not a message field in PR-007; token/cost usage types remain owned by budget and effect-completion surfaces (PR-008/PR-011) and are deferred until those consumers freeze them.
+
+Constructors and deserializers validate the role/block matrix and reject invalid combinations with stable validation error codes. Tool-association validation in the message model is pure and structural:
+
+- every `ToolResultBlock.tool_call_id` in a `Tool` message must be unique within that message;
+- when a caller supplies an optional known-call set, every result `tool_call_id` must be present in that set;
+- missing/unknown/duplicate associations and wrong-role tool blocks are rejected.
+
+Run-state pairing—pending-call tracking, exactly-once settlement, source-order finalization, synthetic closure, cancellation, and recovery—belongs to the reducer (PR-010) and is out of scope for the message DTO layer.
 
 # 8. Agent composition types
 

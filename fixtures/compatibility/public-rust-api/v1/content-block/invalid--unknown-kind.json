@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "content_block",
+  "operation": "parse",
+  "input": {
+    "kind": "reasoning",
+    "text": "hidden"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "unknown_kind"
+  }
+}

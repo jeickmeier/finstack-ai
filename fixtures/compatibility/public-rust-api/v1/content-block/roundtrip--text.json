@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "content_block",
+  "operation": "roundtrip",
+  "input": {
+    "kind": "text",
+    "text": "hello"
+  },
+  "expect": {
+    "ok": true,
+    "kind": "text",
+    "serialized_json": "{\"kind\":\"text\",\"text\":\"hello\"}"
+  }
+}

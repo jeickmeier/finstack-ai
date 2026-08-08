@@ -1,6 +1,6 @@
 # public-rust-api fixtures
 
-Compatibility corpus for public Rust kernel value types (PR-006).
+Compatibility corpus for public Rust kernel value types (PR-006/PR-007).
 
 Layout:
 
@@ -17,6 +17,9 @@ Kinds:
 - `duration`
 - `error-descriptor`
 - `digest-known-answer`
+- `blob-ref`
+- `content-block`
+- `message`
 
 Boundary fixtures use materialization recipes (`json_string`, `scientific_array`,
 `object_members`, …). The Rust runner in `finstack-ai-test` expands recipes,

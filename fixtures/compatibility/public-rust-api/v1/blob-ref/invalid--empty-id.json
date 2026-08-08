@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "blob_ref",
+  "operation": "parse",
+  "input": {
+    "id": "",
+    "media_type": "image/png",
+    "length": 10
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_label"
+  }
+}

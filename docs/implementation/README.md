@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.12 on 2026-08-08:
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.14 on 2026-08-08:
 
-- 37 decisions are accepted and indexed; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`.
-- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-005 are `Done`; PR-006–PR-066 are `Todo`.
+- 37 decisions are accepted and indexed; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
+- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-006 are `Done`; PR-007 is `In review`; PR-008–PR-066 are `Todo`.
 - Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
-- PR-001–PR-005 acceptance criteria are closed. PR-005 artifacts (including hosted CI and G0 decision) live under [`artifacts/pr-005/`](artifacts/pr-005/). No exceptions are open.
+- PR-001–PR-006 acceptance criteria are closed. PR-007 local evidence is bound under [`artifacts/pr-007/`](artifacts/pr-007/); hosted CI and logical-PR `Done` remain outstanding. No exceptions are open.
 
 Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
 
