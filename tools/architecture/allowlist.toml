@@ -1,0 +1,24 @@
+# Architecture check exceptions (initially empty).
+# Every entry must be Approved, name an accepted ADR, and match exceptions-register.md.
+# See tools/architecture/README.md for the schema.
+
+# [[exceptions]]
+# id = "ALW-example"
+# status = "Approved"
+# check_id = "ARCH010"
+# rule = "ENG-ARCH-003"
+# subject = "exact-package-or-path"
+# adr = "ADR-001"
+# exception_id = "EX-short-slug-xxxxxxxxxxxx"
+# scope = "PR-NNN and exact surface"
+# reason = "why compliance is currently impractical"
+# risk = "concrete impact"
+# compensating_control = "enforceable temporary control"
+# owner = "person-or-team"
+# approver = "reviewer"
+# created_on = "YYYY-MM-DD"
+# expires_on = "YYYY-MM-DD"
+# removal_issue = "issue-or-task-id"
+# public_compatibility_affected = "No"
+# security_affected = "No"
+# evidence = "evidence-id-or-path"

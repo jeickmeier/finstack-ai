@@ -1,10 +1,12 @@
 # Rust
 /target/
+**/target/
 **/*.rs.bk
 
 # Python-generated files
 __pycache__/
 *.py[oc]
+.ruff_cache/
 build/
 dist/
 wheels/

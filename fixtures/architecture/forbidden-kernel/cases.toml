@@ -1,0 +1,29 @@
+# Forbidden kernel dependency cases for PR-002-A01.
+# Unit tests synthesize cargo-metadata graphs from these names; they do not
+# mutate the production workspace or download crates.
+
+[[cases]]
+name = "tokio"
+kind = "direct"
+check_id = "ARCH001"
+
+[[cases]]
+name = "reqwest"
+kind = "transitive"
+bridge = "fixture-bridge"
+check_id = "ARCH001"
+
+[[cases]]
+name = "rusqlite"
+kind = "direct"
+check_id = "ARCH001"
+
+[[cases]]
+name = "pyo3"
+kind = "direct"
+check_id = "ARCH001"
+
+[[cases]]
+name = "wasmtime"
+kind = "direct"
+check_id = "ARCH001"

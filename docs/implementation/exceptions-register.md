@@ -24,14 +24,20 @@ Only `Approved` and unexpired exceptions can support a `Waived` acceptance dispo
 
 Exception IDs use `EX-short-slug-xxxxxxxxxxxx`, where the final 12 lowercase hexadecimal characters are generated randomly when the request is created. This prevents parallel branches from claiming the same counter value. IDs are immutable and never reused.
 
-| Exception | Status | Exact rule | Affected scope / PR | Reason compliance is impractical | Risk | Compensating control | Owner | Approver | Created | Expiry date / gate | Removal issue / task | Public compatibility affected | Security affected | Evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Exception | Status | Exact rule | Affected scope / PR | Reason compliance is impractical | Risk | Compensating control | Owner | Approver | Created | Expiry date / gate | Removal issue / task | Public compatibility affected | Security affected | ADR | Architecture allowlist id | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 <!-- Example shape only; remove this comment when adding the first real row.
-| EX-short-slug-xxxxxxxxxxxx | Requested | document section and normative sentence | PR-NNN and exact surface | bounded factual reason | concrete impact | enforceable temporary control | person/team | reviewer/approver | YYYY-MM-DD | date or GN | issue or scoped task ID | Yes/No plus detail | Yes/No plus control IDs | scoped evidence ID or — |
+| EX-short-slug-xxxxxxxxxxxx | Requested | document section and normative sentence | PR-NNN and exact surface | bounded factual reason | concrete impact | enforceable temporary control | person/team | reviewer/approver | YYYY-MM-DD | date or GN | issue or scoped task ID | Yes/No plus detail | Yes/No plus control IDs | ADR-NNN or — | ALW-id or — | scoped evidence ID or — |
 -->
 
 Every field is required before approval. `No` in either impact field still requires an explicit determination; `—` is not valid for an approved exception.
+
+Architecture and dependency suppressions enforced by `mise run architecture` additionally require:
+
+- an accepted ADR identifier in the `ADR` column;
+- a matching `[[exceptions]]` entry in [`tools/architecture/allowlist.toml`](../../tools/architecture/allowlist.toml) whose `exception_id` equals this register's Exception ID; and
+- a non-waivable check ID rejection for kernel I/O / forbidden kernel dependencies (`ARCH001`) and six-port contract ownership (`ARCH002`).
 
 ## Exception event log
 

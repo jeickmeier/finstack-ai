@@ -1,5 +1,6 @@
 //! Browser WASM binding package placeholder for `finstack-ai`.
 //!
-//! `wasm-bindgen` and the `wasm-host` facade feature land with the WASM
-//! binding pull requests. This crate currently depends on the facade with
-//! default features disabled.
+//! Depends on the facade with default features disabled and only the
+//! `wasm-host` pass-through feature enabled so the resolved browser graph
+//! selects the runtime WASM driver rather than `native-tokio`.
+//! `wasm-bindgen` and host adapters land with later WASM binding pull requests.

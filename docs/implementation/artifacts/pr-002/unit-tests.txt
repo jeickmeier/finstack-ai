@@ -1,0 +1,26 @@
+test_core_roles (test_check.ClassifyTests.test_core_roles) ... ok
+test_includes_rules_and_remediation (test_check.DiagnosticFormatTests.test_includes_rules_and_remediation) ... ok
+test_rejects_runtime_to_protocol (test_check.EdgeTests.test_rejects_runtime_to_protocol) ... ok
+test_cases_toml_lists_acceptance_crates (test_check.ForbiddenCaseFileTests.test_cases_toml_lists_acceptance_crates) ... ok
+test_detects_direct_tokio (test_check.KernelForbiddenTests.test_detects_direct_tokio) ... ok
+test_detects_transitive_reqwest (test_check.KernelForbiddenTests.test_detects_transitive_reqwest) ... ok
+test_parameterized_forbidden_names (test_check.KernelForbiddenTests.test_parameterized_forbidden_names) ... ok
+test_current_workspace_passes (test_check.RealWorkspaceTests.test_current_workspace_passes) ... ok
+test_strips_comments_and_strings (test_check.SourceStripTests.test_strips_comments_and_strings) ... ok
+test_parse_allowlist_rejects_incomplete (test_check.WaiverTests.test_parse_allowlist_rejects_incomplete) ... ok
+test_required_fields (test_check.WaiverTests.test_required_fields) ... ok
+test_missing_resolve_node_emits_warning_not_failure (test_check.WasmGraphTests.test_missing_resolve_node_emits_warning_not_failure) ... ok
+test_block_comment_preserves_line_numbers (test_sources.SourceGuardTests.test_block_comment_preserves_line_numbers) ... ok
+test_detects_kernel_io (test_sources.SourceGuardTests.test_detects_kernel_io) ... ok
+test_detects_task_local (test_sources.SourceGuardTests.test_detects_task_local) ... ok
+test_detects_unbounded_channel (test_sources.SourceGuardTests.test_detects_unbounded_channel) ... ok
+test_ignores_commented_unbounded (test_sources.SourceGuardTests.test_ignores_commented_unbounded) ... ok
+test_production_tree_has_no_source_findings (test_sources.SourceGuardTests.test_production_tree_has_no_source_findings) ... ok
+test_each_required_field_removal_fails (test_waivers.WaiverFixtureTests.test_each_required_field_removal_fails) ... ok
+test_valid_waiver_fixture_complete (test_waivers.WaiverFixtureTests.test_valid_waiver_fixture_complete) ... ok
+test_wildcard_subject_rejected (test_waivers.WaiverFixtureTests.test_wildcard_subject_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.085s
+
+OK

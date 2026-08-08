@@ -75,8 +75,17 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-001-A04 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-mise-doctor-cae2f2eb7918 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-001-A05 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-ownership-review-b14626f70259 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-001-A06 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-security-md-f70391db8ac2 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-002-A01 | PR-002 | PLAN-0.10 / [PR-002](../planning/04-finstack-ai-implementation-plan.md#pr-002---add-architecture-and-dependency-enforcement) | Pending | me@jeickmeier.com | local [`artifacts/pr-002/`](artifacts/pr-002/) unit-tests + forbidden-kernel cases; bind after merge | — | — | — |
+| PR-002-A02 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | deferred: leaf provider/toolset compile proof with production ports (PR-015–PR-016); edge policy covers allowed leaf roles | — | — | — |
+| PR-002-A03 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | partial now via workspace edge policy; six-port invoke compile proof deferred to PR-014–PR-018 | — | — | — |
+| PR-002-A04 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | partial now via wasm-host feature + WASM graph check; Send/Sync vs local port-bound compile proof deferred to PR-014–PR-018 | — | — | — |
+| PR-002-A05 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | local `mise run architecture` real ≈ 0.27s | — | — | — |
+| PR-002-A06 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | allowlist + ADR linkage schema; empty production allowlist | — | — | — |
+| PR-002-A07 | PR-002 | PLAN-0.10 / same | Pending | me@jeickmeier.com | `fixtures/architecture/cases/valid-waiver.toml` field tests | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
+
+PR-002 local validation artifacts are under [`artifacts/pr-002/`](artifacts/pr-002/) on branch `pr-002-architecture-enforcement`. Acceptance remains `Pending` until an immutable reviewed commit is recorded; hosted CI wiring is PR-003.
 
 ## Evidence records
 

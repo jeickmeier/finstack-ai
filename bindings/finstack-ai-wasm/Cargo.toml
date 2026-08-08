@@ -15,7 +15,7 @@ name = "finstack_ai_wasm"
 path = "src/lib.rs"
 
 [dependencies]
-finstack-ai = { workspace = true, default-features = false }
+finstack-ai = { workspace = true, default-features = false, features = ["wasm-host"] }
 
 [lints]
 workspace = true

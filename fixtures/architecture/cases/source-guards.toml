@@ -1,0 +1,26 @@
+# Expected source-guard detections for synthetic snippets.
+
+[[snippets]]
+check_id = "ARCH008"
+label = "unbounded_channel"
+source = """
+fn bad() {
+    let _ = unbounded_channel();
+}
+"""
+
+[[snippets]]
+check_id = "ARCH009"
+label = "task_local"
+source = """
+task_local! {
+    static REQUEST: u8;
+}
+"""
+
+[[snippets]]
+check_id = "ARCH001"
+label = "kernel_fs"
+source = """
+use std::fs::File;
+"""
