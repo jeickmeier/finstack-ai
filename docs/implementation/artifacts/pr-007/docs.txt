@@ -4,10 +4,10 @@
  Documenting finstack-ai-protocol v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-protocol)
  Documenting finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
     Checking finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
- Documenting finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
  Documenting finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
+ Documenting finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
  Documenting finstack-ai-wasm v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-wasm)
- Documenting finstack-ai-python v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-python)
  Documenting finstack-ai-ci-smoke v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/fixtures/ci/release-smoke)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.50s
+ Documenting finstack-ai-python v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.66s
    Generated /Users/jeickmeier/Projects/finstack-ai/target/doc/finstack_ai/index.html and 7 other files

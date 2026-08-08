@@ -1,6 +1,6 @@
 [conformance] $ cargo test -p finstack-ai-test --locked
    Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
      Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-658cbe1caf9f6c78)
 
 running 4 tests
@@ -29,7 +29,7 @@ test durable_and_transient_events_are_distinguished ... ok
 test oversized_payload_declarations_are_rejected ... ok
 test noop_trace_loads_and_compares_byte_for_byte ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-e7d0a5de1306608f)
 
@@ -37,7 +37,7 @@ running 2 tests
 test deterministic_uuidv7_fakes_are_repeatable ... ok
 test public_rust_api_corpus_passes ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
    Doc-tests finstack_ai_test
 

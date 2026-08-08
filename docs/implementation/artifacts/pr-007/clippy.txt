@@ -1,10 +1,11 @@
 [clippy] $ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Blocking waiting for file lock on package cache
     Checking finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
     Checking finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
     Checking finstack-ai-protocol v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-protocol)
     Checking finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
     Checking finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Checking finstack-ai-wasm v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-wasm)
-    Checking finstack-ai-python v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-python)
     Checking finstack-ai-ci-smoke v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/fixtures/ci/release-smoke)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.33s
+    Checking finstack-ai-python v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-python)
+    Checking finstack-ai-wasm v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-wasm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.84s
