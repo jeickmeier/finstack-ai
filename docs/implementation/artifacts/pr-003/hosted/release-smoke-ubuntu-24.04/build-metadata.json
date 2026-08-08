@@ -1,0 +1,19 @@
+{
+  "binary": "finstack-ai-ci-smoke",
+  "commit": "f89dba78f653cea51b3b7cbec24be933280b90ca",
+  "facade_dependency": "finstack-ai",
+  "features": [
+    "native-tokio"
+  ],
+  "host_triple": "x86_64-unknown-linux-gnu",
+  "package": "finstack-ai-ci-smoke",
+  "platform": {
+    "machine": "x86_64",
+    "release": "6.17.0-1020-azure",
+    "system": "Linux"
+  },
+  "profile": "release",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "sha256": "7aef841dbc2ec31633ec8249bddc6fe22f4db952f3600c02b405426318461c49",
+  "version": "0.0.1"
+}
