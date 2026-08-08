@@ -1,7 +1,7 @@
 [conformance] $ cargo test -p finstack-ai-test --locked
    Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
-     Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-133c2b9a8c61f635)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-658cbe1caf9f6c78)
 
 running 4 tests
 test public_api_fixture::tests::metadata_key_ceiling_constant_is_visible ... ok
@@ -11,27 +11,27 @@ test public_api_fixture::tests::scientific_array_recipe_expands_under_jcs ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-     Running tests/conformance.rs (target/debug/deps/conformance-c11676d5dd7c91fb)
+     Running tests/conformance.rs (target/debug/deps/conformance-6aa7c2e137157ea1)
 
 running 3 tests
 test rust_noop_adapter_passes_noop_trace ... ok
 test rust_noop_adapter_passes_durable_vs_transient_trace ... ok
 test python_and_wasm_adapters_are_deferred_and_never_pass ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/golden_trace.rs (target/debug/deps/golden_trace-db07ced77649eb26)
+     Running tests/golden_trace.rs (target/debug/deps/golden_trace-1d551b69e97d73b0)
 
 running 5 tests
 test normalization_is_order_independent_for_object_keys ... ok
-test unknown_fields_are_rejected ... ok
 test durable_and_transient_events_are_distinguished ... ok
+test unknown_fields_are_rejected ... ok
 test oversized_payload_declarations_are_rejected ... ok
 test noop_trace_loads_and_compares_byte_for_byte ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
-     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-6c36d996ca04edcb)
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-e7d0a5de1306608f)
 
 running 2 tests
 test deterministic_uuidv7_fakes_are_repeatable ... ok

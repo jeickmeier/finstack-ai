@@ -9,14 +9,14 @@ Last updated 2026-08-08 and reconciled against documentation pack v0.12. Update 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 1 | Phase 0 `Done`; Phase 1 `In progress`; Phase 2–9 `Todo` |
-| Logical PRs | 66 | 5 | PR-001–PR-005 `Done`; PR-006 `In progress`; PR-007–PR-066 `Todo` |
+| Logical PRs | 66 | 6 | PR-001–PR-006 `Done`; PR-007–PR-066 `Todo` |
 | PR acceptance-evidence bullets | 345 | 33 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003–PR-006 A01–A05 `Passed` |
 | Phase entrance and exit bullets | 62 | 8 | Phase 0 entrance 1/1 and exit 5/5 `Passed`; Phase 1 entrance 2/2 `Passed`; Phase 1 exit 0/4 |
 | Program gates | 9 | 1 | G0 `Passed`; G1–G8 `Not ready` |
-| Implementation tasks | 26 | 26 | PR-003–PR-006 tasks complete (PR-006 pre-merge; hosted CI green on PR head) |
+| Implementation tasks | 26 | 26 | PR-003–PR-006 tasks complete |
 | Open blockers | 0 | 1 | PR-003-B-no-remote-ede93913b2ea Resolved |
 
-PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). Phase 0 is `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`. Phase 1 entrance is evidenced; PR-006 is `In progress` on [#4](https://github.com/jeickmeier/finstack-ai/pull/4) (`pr-006-kernel-value-types`) with local A01–A05 and hosted CI evidence bound; remains pre-merge.
+PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). Phase 0 is `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`. Phase 1 remains `In progress` (PR-007–PR-013 open).
 
 ## Status values
 
@@ -78,7 +78,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | Phase | Logical PRs | Entrance | Exit | Gate | Status | Owner | Active PRs | Blocker | Evidence | Updated |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
 | [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 1/1 | 5/5 | G0 | Done | me@jeickmeier.com | — | — | PH0-E-entrance-abbcbb8c4715; PH0-E-exit-2ada36eb4a4b; G0-D-foundation-ready-bcf021e4873a @ `c1108d207389a947d16e9b0dd7a76026108c01eb` | 2026-08-08 |
-| [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 2/2 | 0/4 | G1 | In progress | me@jeickmeier.com | PR-006 | — | PH1-E-entrance-g0-3467dedeb0bd; PH1-E-entrance-adrs-1284c162dae7 | 2026-08-08 |
+| [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 2/2 | 0/4 | G1 | In progress | me@jeickmeier.com | PR-007 | — | PH1-E-entrance-g0-3467dedeb0bd; PH1-E-entrance-adrs-1284c162dae7 | 2026-08-08 |
 | [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 0/2 | 0/4 | G2 | Todo | — | — | — | — | — |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
 | [Phase 4](../planning/04-finstack-ai-implementation-plan.md#12-phase-4-first-class-python-bindings) | PR-027–PR-032 | 0/2 | 0/4 | G4 | Todo | — | — | — | — | — |
@@ -120,7 +120,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-006 | In progress | me@jeickmeier.com | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) @ `abf44b7e8e02c700cbfd70343b8999b18e1af7ea` | 6 | 5/5 | PR-006-E-test-kernel-cc86be989287; PR-006-E-conformance-eedb5e11cf3d; PR-006-E-architecture-9b286d094d54; PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-supply-bbbb7b4e6da4; PR-006-E-hosted-ci-e7387a23f1aa | — | — | 2026-08-08 |
+| PR-006 | Done | me@jeickmeier.com | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) merged @ `56d7777956df145213b03d2b0b5c1922db42b346` | 6 | 5/5 | PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-architecture-90b6f267a46d; PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-supply-bbbb7b4e6da4; PR-006-E-hosted-ci-9a1ccbb88ae5 | — | `56d7777956df145213b03d2b0b5c1922db42b346` / 2026-08-08 | 2026-08-08 |
 | PR-007 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-008 | Todo | — | — | 0 | 0/8 | — | — | — | — |
 | PR-009 | Todo | — | — | 0 | 0/5 | — | — | — | — |
@@ -265,7 +265,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-006-T-json-digest-f467e33a8043 | PR-006 | Implement bounded RawJson, Metadata, and digest foundations | Done | me@jeickmeier.com | PR-006-T-ids-time-916b8ba52395 | `pr-006-kernel-value-types` | PR-006-A02; PR-006-A05 | — | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-006-T-errors-gen-640ef1351a14 | PR-006 | Implement stable errors and runtime-owned UUIDv7 generation | Done | me@jeickmeier.com | PR-006-T-ids-time-916b8ba52395 | `pr-006-kernel-value-types` | PR-006-A01; PR-006-A04; PR-006-A05 | — | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-006-T-fixtures-0ec39ba3c35b | PR-006 | Activate public-rust-api fixtures and kernel fixture runner | Done | me@jeickmeier.com | PR-006-T-json-digest-f467e33a8043; PR-006-T-errors-gen-640ef1351a14 | `pr-006-kernel-value-types` | PR-006-A01–A04 | — | 2026-08-08 | 2026-08-08 | 2026-08-08 |
-| PR-006-T-evidence-4e5cd5fd4d5e | PR-006 | Run validation, TM-16 review, and bind PR-006 evidence | Done | me@jeickmeier.com | PR-006-T-fixtures-0ec39ba3c35b | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) @ `abf44b7e8e02c700cbfd70343b8999b18e1af7ea` | PR-006-A01–A05 | PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-hosted-ci-e7387a23f1aa | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-006-T-evidence-4e5cd5fd4d5e | PR-006 | Run validation, TM-16 review, and bind PR-006 evidence | Done | me@jeickmeier.com | PR-006-T-fixtures-0ec39ba3c35b | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) @ `56d7777956df145213b03d2b0b5c1922db42b346` | PR-006-A01–A05 | PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-hosted-ci-9a1ccbb88ae5; PR-006-E-test-kernel-bc373cf935e4 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 
 ## Blocker ledger
 

@@ -2,12 +2,13 @@ PR-006 hosted CI evidence
 Date: 2026-08-08
 PR: https://github.com/jeickmeier/finstack-ai/pull/4
 Branch: pr-006-kernel-value-types
-PR head: abf44b7e8e02c700cbfd70343b8999b18e1af7ea
+PR head: 2d1307cb2426b3dc6f81cbeb8d6a65d76f9edaa4
+Merge commit: 56d7777956df145213b03d2b0b5c1922db42b346
 
-Workflows (all success):
-- ci:      https://github.com/jeickmeier/finstack-ai/actions/runs/31276518310
-- security: https://github.com/jeickmeier/finstack-ai/actions/runs/31276518305
-- nightly: https://github.com/jeickmeier/finstack-ai/actions/runs/31276518304
+Workflows (all success on PR head):
+- ci:      https://github.com/jeickmeier/finstack-ai/actions/runs/31277941268
+- security: https://github.com/jeickmeier/finstack-ai/actions/runs/31277941269
+- nightly: https://github.com/jeickmeier/finstack-ai/actions/runs/31277941262
 
 Matrix coverage observed on ci:
 - rust: ubuntu-24.04 / macos-15 / windows-2025 (stable + msrv)
@@ -20,5 +21,4 @@ Security workflow:
 Nightly workflow:
 - pinned-nightly (nightly-2026-08-01) green
 
-Logical PR remains In progress until merge. ADR-029 remains In progress until
-post-merge verified evidence.
+Logical PR-006 closed at merge 56d7777956df145213b03d2b0b5c1922db42b346. ADR-029 evidence bound post-merge.

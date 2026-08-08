@@ -4,10 +4,8 @@ Validation evidence for typed identifiers, RawJson/Metadata, digests, time
 primitives, stable errors, injectable UUIDv7 generation, and public-rust-api
 fixtures.
 
-Implementation tip (local A01–A05 evidence): `6704134d1701a3271f6c1a351e409c650b8eb8bc`
-on branch `pr-006-kernel-value-types`.
-PR head (hosted CI): `abf44b7e8e02c700cbfd70343b8999b18e1af7ea` ([#4](https://github.com/jeickmeier/finstack-ai/pull/4)).
-Merge commit fields remain post-merge.
+Implementation tip (PR head): `2d1307cb2426b3dc6f81cbeb8d6a65d76f9edaa4`
+Merge commit: `56d7777956df145213b03d2b0b5c1922db42b346` ([#4](https://github.com/jeickmeier/finstack-ai/pull/4)).
 
 ## Acceptance mapping
 

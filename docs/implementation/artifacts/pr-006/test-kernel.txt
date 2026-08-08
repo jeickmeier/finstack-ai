@@ -1,12 +1,13 @@
 [test-kernel] $ cargo test -p finstack-ai-kernel --locked
    Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
-     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-c80d545df56de65e)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-e6369ef635825757)
 
-running 12 tests
+running 14 tests
 test time::tests::duration_js_safe_boundary ... ok
-test time::tests::rejects_leap_seconds_and_out_of_range ... ok
 test time::tests::timestamp_round_trips_rfc3339_and_unix_ms ... ok
+test time::tests::rejects_leap_seconds_and_out_of_range ... ok
+test error::tests::error_code_requires_lowercase_snake_case ... ok
 test ids::tests::keys_validate_namespace_rules ... ok
 test time::tests::json_uses_rfc3339_text ... ok
 test ids::tests::ids_serialize_lowercase_and_reject_invalid ... ok
@@ -15,9 +16,10 @@ test raw_json::tests::rejects_duplicates_trailing_data_and_depth ... ok
 test raw_json::tests::parse_canonicalizes_and_shares_bytes_on_clone ... ok
 test error::tests::error_descriptor_json_round_trip_preserves_stable_fields ... ok
 test raw_json::tests::metadata_preserves_unknown_members_and_limits ... ok
+test raw_json::tests::serde_human_path_rejects_duplicates_and_checks_source_span ... ok
 test raw_json::tests::enforces_exact_and_one_over_source_ceiling ... ok
 
-test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
    Doc-tests finstack_ai_kernel
 
@@ -32,15 +34,18 @@ test crates/finstack-ai-kernel/src/ids.rs - ids::Id (line 56) - compile fail ...
 
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
-all doctests ran in 0.33s; merged doctests compilation took 0.12s
+all doctests ran in 0.32s; merged doctests compilation took 0.11s
    Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
-     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-e79ff209945880e8)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-a74c97642773805d)
 
-running 1 test
+running 4 tests
+test id_generation::tests::uuidv7_rejects_pre_epoch_and_out_of_range_timestamps ... ok
+test id_generation::tests::uuidv7_propagates_random_source_failure ... ok
 test id_generation::tests::deterministic_uuidv7_from_injected_sources ... ok
+test error::tests::debug_redacts_local_source_chain ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
    Doc-tests finstack_ai_runtime
 
@@ -51,12 +56,12 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
    Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
    Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
    Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.85s
-     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-6c36d996ca04edcb)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-e7d0a5de1306608f)
 
 running 2 tests
 test deterministic_uuidv7_fakes_are_repeatable ... ok
 test public_rust_api_corpus_passes ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
