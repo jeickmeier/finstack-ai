@@ -2,7 +2,7 @@
 title: "finstack-ai Architecture Specification"
 subtitle: "Agent microkernel, extension boundaries, bindings, durability, and deployment model"
 author: "Project Draft"
-date: "2026-08-07"
+date: "2026-08-08"
 ---
 
 # Document control
@@ -11,10 +11,10 @@ date: "2026-08-07"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.1 |
+| Version | 0.5 |
 | Status | Draft for implementation planning |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Product Requirements Document; Technical Design Document |
+| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
 
 # Executive architecture decision
 
@@ -94,7 +94,8 @@ The primary drivers, in priority order, are:
 6. optional isolation for third-party code;
 7. small minimal artifacts and dependency graphs;
 8. idiomatic developer experience in each language; and
-9. long-term compatibility of records and plugin contracts.
+9. long-term compatibility of records and plugin contracts;
+10. durable lineage and generic suspension across nested or externally completed work.
 
 # 2. Architecture principles and constraints
 
@@ -108,12 +109,17 @@ The following are architecture invariants rather than implementation preferences
 4. The canonical model/tool continuation loop is kernel behavior.
 5. Every recoverable external effect has a stable identifier.
 6. Durable records are append-only.
-7. Observers cannot alter execution.
-8. Behavior-changing extension output is normalized before entering kernel state.
-9. No unbounded queue exists in the standard runtime.
-10. Native components are resolved once and called directly.
-11. Bindings do not own independent run state machines.
-12. Adding an ordinary implementation of one of the six ports requires zero kernel source changes.
+7. Every accepted run records explicit root/parent relation metadata.
+8. Deferred work preserves its original `EffectId`; feature-specific background-job state machines are prohibited.
+9. Human/external input uses generalized typed interactions; approval is a profile, not a separate durable mechanism.
+10. No terminal run record is committed before `before_finalize` settles.
+11. Context compaction changes only the model-visible projection through `before_model` middleware; canonical conversation history remains immutable.
+12. Observers cannot alter execution.
+13. Behavior-changing extension output is normalized before entering kernel state.
+14. No unbounded queue exists in the standard runtime.
+15. Native components are resolved once and called directly.
+16. Bindings do not own independent run state machines.
+17. Adding an ordinary implementation of one of the six ports requires zero kernel source changes.
 
 ## 2.2 Layer dependency rule
 
@@ -195,7 +201,7 @@ The Rust runtime is loaded as a Python extension module. Rust-backed components 
 
 ### Browser WASM mode
 
-The kernel and a WASM-compatible runtime compile into one WebAssembly module. JavaScript supplies host adapters for model calls, tools, persistence, timers, and UI events.
+The kernel and a WASM-compatible runtime compile into one WebAssembly module. JavaScript supplies host adapters for model calls, tools, persistence, timers, and UI events. The package also offers an optional OpenAI-compatible fetch/SSE adapter, but host interfaces remain the contract.
 
 ### Native host with WASM plugins
 
@@ -223,6 +229,9 @@ The kernel owns:
 - cancellation reconciliation;
 - suspension and resume rules;
 - capability activation state;
+- run lineage and relation validation;
+- generic effect deferral and external-completion decisions;
+- typed interaction request/resolution state;
 - recovery from normalized journal records; and
 - deterministic decision and apply operations.
 
@@ -303,6 +312,7 @@ Primary responsibilities:
 - event batching and backpressure;
 - timers and deadlines;
 - cancellation propagation;
+- external-effect completion and interaction routing;
 - resource initialization and shutdown; and
 - adapter integration.
 
@@ -315,6 +325,7 @@ Primary responsibilities:
 - `AgentBuilder` and `Agent`;
 - registries and typed references;
 - `CapabilitySpec`;
+- `AgentCatalog`, `AgentInvoker`, and `BundleSpec` composition services outside the kernel;
 - serializable `AgentSpec`;
 - component resolution;
 - default policies;
@@ -365,6 +376,8 @@ Architectural responsibilities:
 
 The model port is deliberately not a generic provider registry. Registries and model selection live in the composition/runtime layers.
 
+The scripted model is the semantic reference for deterministic conformance. The reference network implementation is OpenAI-compatible with Chat Completions as its required baseline; Responses-style mapping is optional. Provider quirks stay in a versioned adapter table rather than changing the port contract.
+
 ## 6.2 Toolset
 
 A toolset owns multiple related tools. It publishes a catalog and dispatches calls.
@@ -372,7 +385,7 @@ A toolset owns multiple related tools. It publishes a catalog and dispatches cal
 Architectural responsibilities:
 
 - schema and metadata publication;
-- input validation adapter;
+- input validation adapter backed by canonical JSON Schema draft 2020-12;
 - call dispatch;
 - progress stream support;
 - side-effect and retry-safety declaration;
@@ -401,7 +414,7 @@ The provider receives an explicit budget and returns typed items with provenance
 
 Middleware alters execution at a small set of stable stages. It is used for:
 
-- approvals;
+- typed interaction and approval policies;
 - guardrails;
 - request adaptation;
 - result transformation;
@@ -510,6 +523,8 @@ Capabilities may be:
 
 Activation changes become durable lane state and are applied at safe run checkpoints. The framework favors append-only changes to preserve prompt-cache stability.
 
+The MVP implements the activation record/reducer mechanics and exposes `Always` and `Application` modes. Compact catalog rendering, activation heuristics, and the complete `Model` mode are post-MVP policy/UX work, but must ship before the 0.1.0 public preview.
+
 # 8. Run lifecycle architecture
 
 ## 8.1 Normal lifecycle
@@ -535,7 +550,7 @@ model stream -> transient progress events
         v
 [ModelEffectCompleted + assistant entry committed]
         |
-        +------ no tools ------> output processing -> completed
+        +------ no tools ------> output processing -> before_finalize
         |
         v
 before-tool middleware / approval
@@ -550,7 +565,10 @@ parallel/sequential tool execution
 [Tool completion records + result entries committed]
         |
         v
-checkpoint -> next model turn or completion
+checkpoint -> next model turn or before_finalize
+                                      |
+                                      v
+                       [terminal record committed]
 ```
 
 ## 8.2 Decision/commit/effect cycle
@@ -625,9 +643,13 @@ Rules:
 - lane names are stable application keys; and
 - operations on one lane cannot silently move another lane’s leaf.
 
+The initial data model includes lane IDs and immutable parent links. Public concurrent multi-lane APIs arrive only after the SQLite store so cross-process sequence conflicts and crash recovery can be validated against a durable implementation.
+
 ## 9.5 Run and turn state
 
-A run owns its current phase, limit counters, active effects, pending tool calls, usage, and terminal result. A turn owns one model response and its complete tool batch.
+A run owns its current phase, explicit root/parent/effect relation, limit counters, active/deferred effects, unresolved interactions, pending tool calls, usage, and terminal result. A turn owns one model response and its complete tool batch.
+
+Run relation metadata is immutable after acceptance. It provides root and parent correlation, relation kind, depth, optional budget scope, and external-work reference. It does not make child-run scheduling a kernel responsibility; `AgentInvoker` and application/runtime services own invocation and fan-out policy.
 
 # 10. Journal and recovery architecture
 
@@ -641,7 +663,9 @@ Records fall into these categories:
 - model effect request/completion;
 - assistant message entries;
 - tool batch and call request/completion;
-- approval request/decision;
+- effect deferral and external completion;
+- typed interaction request/resolution/expiry/cancellation;
+- run relation/lineage;
 - capability activation;
 - timer request/firing;
 - cancellation request/reconciliation;
@@ -664,6 +688,8 @@ On restore, each requested effect is classified as:
 - suspended: await an external completion or decision;
 - non-repeatable uncertainty: stop and require operator/application resolution.
 
+A deferred effect always retains the original `EffectId` and a non-secret external handle. Runtime-owned completion routing validates the outstanding effect, completion identity, output digest/schema, principal, deadline, and cancellation state before proposing completion records. Identical duplicates are idempotent; conflicting duplicates are durable audit errors.
+
 ## 10.4 Exactly-once statement
 
 The architecture guarantees exactly-once **record application** within a valid journal sequence. It does not guarantee exactly-once arbitrary external side effects. It supplies stable identifiers and recovery hooks so implementations can provide stronger guarantees where supported.
@@ -685,10 +711,12 @@ after_context / before_model (represented as before_model)
 after_model
 before_tool_batch
 after_tool_batch
-after_run
+before_finalize
 ```
 
 For a concise public API, `prepare_context` and `before_model` are separate because context retrieval and final request shaping have different budgets and durability implications.
+
+`before_finalize` receives a candidate terminal result before any terminal record is committed. It may accept completion, request bounded continuation/retry/interaction, suspend, or fail. Post-terminal notifications are immutable observer events; there is no behavior-changing `after_run` stage.
 
 ## 11.2 Ordering
 
@@ -709,7 +737,7 @@ Outcomes are structured values such as:
 - replace normalized request/result;
 - add instructions/context;
 - filter tools;
-- request approval;
+- request a typed interaction, including approval;
 - request retry;
 - end run with result;
 - fail run; or
@@ -720,6 +748,40 @@ Arbitrary mutation of kernel state is prohibited.
 ## 11.4 Replay safety
 
 A middleware stage that influences durable behavior must return a serializable outcome. On recovery, the recorded outcome may be reapplied without rerunning middleware unless policy explicitly marks it replay-safe and recomputable.
+
+## 11.5 Context compaction ownership
+
+Context compaction is model-request policy and therefore belongs to middleware at `before_model`. It does not belong to the kernel, because compaction strategy is application/model policy; to `ContextProvider`, because providers contribute context rather than rewrite the assembled request; to `Model`, because providers must receive an already bounded request; or to `Observer`, because compaction changes behavior.
+
+The pipeline is:
+
+```text
+canonical immutable conversation/history
+  -> prepare_context providers contribute budgeted items
+  -> runtime assembles candidate model context and reserves output budget
+  -> before_model compaction middleware
+       continue unchanged when below threshold
+       or replace the model-visible projection with a compacted projection
+  -> validate hard model/context limits
+  -> commit/dispatch model effect
+```
+
+A compaction strategy may use deterministic windowing, truncation of explicitly eligible large tool output, or model-assisted summarization. It must preserve:
+
+- system/developer and active capability instructions;
+- the current user request and active turn;
+- unresolved interactions and policy/safety context;
+- pinned context and application-declared non-compactable items;
+- valid tool-call/result pairing and source order; and
+- sensitivity, provenance, and source attribution for retained or summarized material.
+
+Each resolved agent has at most one active middleware component declaring the context-compactor role; windowing, tool-output, summarizing, or future semantic approaches are strategies owned by that component rather than competing compaction middleware. Resolution fails on duplicate compaction owners. The compactor occupies a late `before_model` tier after all instruction/context/request-shaping middleware. Middleware after it may validate, deny, suspend, or request interaction, but may not add/replace/compact model context. The runtime applies final hard-limit validation after the chain.
+
+Compaction never rewrites, deletes, or replaces canonical conversation entries. It produces a derived model-visible projection plus evidence identifying the middleware component/version, strategy/configuration digest, source range/digest, retained and summarized ranges, token estimates before/after, and cache impact.
+
+Behavior-changing compaction output is recorded through the ordinary durable middleware-outcome path. An optional incremental checkpoint is a versioned derived cache keyed by the middleware/strategy/configuration, model-context profile, and covered-history digest. The runtime may supply the latest compatible checkpoint to the middleware on later turns; missing, stale, corrupt, or incompatible checkpoints are discarded and rebuilt from canonical history. No compaction-specific kernel state machine or eighth middleware stage is introduced.
+
+Model-assisted summarization executes as the committed middleware effect, uses the run's cancellation/deadline and an explicit usage/budget scope, and returns a normalized outcome before the main model request is committed. If protected content cannot fit, summarization fails, or the final projection still exceeds the hard limit, the runtime returns a stable context-budget error or an explicitly configured safe fallback; it never silently removes protected content.
 
 # 12. Concurrency and scheduling
 
@@ -817,9 +879,17 @@ The Pydantic adapter is an outer-layer concern:
 
 The kernel never imports or assumes Pydantic.
 
+JSON Schema draft 2020-12 is the source of truth generated and normalized at registration. A default Rust validator is compiled once and used for native/WASM baseline behavior. Pydantic or another binding-native validator may materialize host objects at the binding boundary only when shared fixtures prove identical success, failure, and retry semantics.
+
 ## 13.5 Python async integration
 
 The binding provides awaitables and async iterators backed by runtime futures and bounded channels. It must detect misuse from incompatible event-loop contexts and surface a clear error rather than nesting runtimes unsafely.
+
+## 13.6 Python distribution and ABI
+
+The initial `finstack-ai` wheel bundles the curated Rust-backed OpenAI-compatible, Anthropic, and local providers while their Rust crates remain separate. Imports are lazy, optional pure-Python dependencies are extras, and CI enforces a wheel-size budget.
+
+The initial compatibility matrix is CPython 3.11-3.14 with per-version wheels plus 3.14t where supported. Classic `abi3` is intentionally not the launch strategy. Python 3.15+ `abi3t` or combined stable-ABI wheels may replace part of the matrix only after PyO3/maturin, performance, and project conformance gates pass.
 
 # 14. Browser and JavaScript WASM architecture
 
@@ -849,6 +919,10 @@ A recommended browser topology runs the WASM engine in a Web Worker. The UI thre
 ## 14.5 Browser persistence
 
 IndexedDB is implemented as a host `JournalStore` adapter. The kernel remains storage-neutral.
+
+## 14.6 Optional remote-model adapter
+
+`@finstack/ai/adapters/openai-compatible` is a tree-shakeable fetch/SSE implementation of the model host interface. It defaults to a same-origin application proxy, documents CORS behavior, and never treats browser-embedded provider API keys as an acceptable production configuration. The adapter is a battery, not a kernel network dependency.
 
 # 15. Isolated plugin architecture
 
@@ -897,6 +971,10 @@ WIT records carry stable metadata and handles. Dynamic tool arguments and schema
 
 Plugins support load, initialize, catalog, call, health, and shutdown. Long-lived listener/channel plugins are outside the first ABI and should use a process/application adapter until lifecycle semantics are mature.
 
+## 15.6 External process protocol
+
+The remote client protocol and external plugin protocol use distinct payload vocabularies and compatibility policies. Both reuse the same bounded 4-byte length prefix, versioned CBOR envelope, hello/version negotiation, and pre-allocation size checks from `finstack-ai-protocol`.
+
 # 16. Data architecture
 
 ## 16.1 In-memory representation
@@ -909,7 +987,7 @@ Native structs are used internally. `Bytes` or shared immutable buffers are favo
 |---|---|
 | Agent specs and schemas | JSON; optional YAML frontend |
 | Tool arguments and structured output | UTF-8 JSON bytes |
-| Journal/remote protocol | Versioned CBOR envelope, subject to ADR confirmation |
+| Journal/remote/process framing | Deterministic versioned CBOR envelope |
 | Diagnostic export | JSON/JSONL |
 | WIT dynamic payloads | UTF-8 JSON bytes plus typed WIT metadata |
 | Media and large results | Blob references |
@@ -932,6 +1010,8 @@ Blob stores are application/runtime services rather than kernel ports in the ini
 
 # 17. Security architecture
 
+The Security and Threat Model v0.2 is the authoritative threat/control register for these boundaries. This section owns the system placement of those controls; the Technical Design owns their concrete implementation.
+
 ## 17.1 Trust levels
 
 | Extension mode | Trust assumption |
@@ -944,7 +1024,7 @@ Blob stores are application/runtime services rather than kernel ports in the ini
 
 ## 17.2 Security enforcement boundary
 
-The kernel tracks security-relevant metadata and approval state but does not claim to sandbox. Enforcement occurs in:
+The kernel tracks security-relevant metadata and interaction state but does not claim to sandbox. Enforcement occurs in:
 
 - tool implementations;
 - middleware policy;
@@ -958,7 +1038,7 @@ Secrets are represented by scoped references where possible. They are resolved i
 
 ## 17.4 Auditability
 
-Security decisions such as approvals, policy denials, permission grants, and plugin identity are durable or observable with stable identifiers and redaction controls.
+Security decisions such as typed interaction approvals, policy denials, permission grants, and plugin identity are durable or observable with stable identifiers and redaction controls.
 
 # 18. Fault model
 
@@ -1109,6 +1189,10 @@ Architecture tests verify:
 - minimal bundle build remains valid; and
 - adding fixture extensions does not modify kernel code.
 
+## 22.3 License and project governance
+
+The project is distributed under `MIT OR Apache-2.0`. Contributions use Developer Certificate of Origin sign-off rather than a contributor license agreement. A named maintainer group owns releases and security response; ADRs are binding for architecture, and a public RFC process is required for ecosystem-facing contract changes such as journal schemas, event order, WIT worlds, and remote protocols.
+
 # 23. Deployment topologies
 
 ## 23.1 Minimal embedded
@@ -1187,18 +1271,20 @@ The first slice proves the semantic center rather than the ecosystem:
 
 - SQLite;
 - recovery fault matrix;
-- approvals;
+- generalized interactions, with approval as the first profile;
 - filesystem/shell batteries;
-- session branching foundation;
+- main-lane/session branching foundation;
+- model-activated capability catalog UX in the binding-alpha/durability-beta window;
 - structured observers.
 
 ## 24.3 Third slice
 
+- concurrent multi-lane APIs after SQLite recovery is proven;
 - WIT toolset/context plugin host;
 - remote protocol;
 - additional providers/stores;
 - workflow adapters;
-- richer capability activation.
+- provider-diversity validation of model-activated capabilities.
 
 # 25. Architecture decision summary
 
@@ -1218,6 +1304,29 @@ The first slice proves the semantic center rather than the ecosystem:
 | ADR-012 | Sessions use immutable entries and lane identifiers from the initial data model |
 | ADR-013 | Exactly-once external side effects are not claimed; stable idempotency keys are provided |
 | ADR-014 | Remote client protocol and plugin protocol remain logically distinct |
+| ADR-015 | Deterministic versioned CBOR is canonical; JSON/JSONL is diagnostic |
+| ADR-016 | SQLite durability precedes concurrent multi-lane APIs |
+| ADR-017 | Curated Rust-backed providers ship in one initial Python wheel |
+| ADR-018 | Python launches with CPython 3.11-3.14 per-version wheels plus 3.14t |
+| ADR-019 | Browser host interfaces remain canonical and an optional fetch/SSE adapter ships as a battery |
+| ADR-020 | Capability mechanics ship in MVP; model-activated catalog UX is required by public preview |
+| ADR-021 | Remote and process protocols share framing/handshake code but not message vocabularies |
+| ADR-022 | JSON Schema 2020-12 is the schema source of truth with conformant native/binding validators |
+| ADR-023 | The network reference provider is OpenAI-compatible Chat Completions; the scripted model remains semantic reference |
+| ADR-024 | The project uses MIT OR Apache-2.0, DCO, named maintainers, and ADR/RFC governance |
+| ADR-025 | Effects may defer generically and later complete under the original `EffectId` |
+| ADR-026 | Every run persists explicit root/parent/effect lineage |
+| ADR-027 | Approval is a standard profile of generalized typed interactions |
+| ADR-028 | `before_finalize` is the final behavior-changing middleware stage; post-run handling is observation only |
+| ADR-029 | Public/internal IDs use typed UUID values serialized as lowercase UUID strings; new IDs use UUIDv7 |
+| ADR-030 | Object-safe boxed futures/streams are the initial public extension ABI; concrete implementations may optimize internally |
+| ADR-031 | Browser WASM is single-threaded/worker-based by default; threaded WASM is a post-preview opt-in requiring separate evidence |
+| ADR-032 | Initial snapshots are direct versioned kernel-state CBOR projections and remain disposable derived caches |
+| ADR-033 | MVP interruption uses retry/suspend/explicit uncertainty while the Model port reserves optional reconciliation implemented with durability |
+| ADR-034 | State-changing middleware outcomes are recorded by default; only explicitly recompute-safe outcomes may rerun during replay |
+| ADR-035 | WIT v1 tool/context calls return one coarse completion; resource-based streaming is deferred |
+| ADR-036 | Blob storage remains an application/runtime service through 1.0 and does not become a seventh kernel port |
+| ADR-037 | Model-context compaction is `before_model` middleware; it preserves canonical history and records only a versioned derived projection/checkpoint |
 
 # 26. Requirements traceability
 
@@ -1230,7 +1339,7 @@ The first slice proves the semantic center rather than the ecosystem:
 | FR-MDL | Model port and provider packages |
 | FR-TLS | Toolset port, scheduler, schemas, idempotency metadata |
 | FR-CTX | Context pipeline and explicit budgets |
-| FR-MW | Seven-stage normalized middleware chain |
+| FR-MW | Seven-stage normalized middleware chain, including `before_model` compaction and `before_finalize` verification |
 | FR-DUR | Journal, commit-before-effect cycle, recovery, session/lane model |
 | FR-OBS | Immutable event batches and observer adapters |
 | FR-PY | PyO3 ownership/adapters/batching architecture |
@@ -1252,3 +1361,4 @@ A change is consistent with this architecture only when the following questions 
 8. Does it require a new public middleware stage?
 9. Does it create an unbounded queue or large payload copy?
 10. Can the minimal bundle still omit it completely?
+11. If it changes model-visible context, is it explicit `before_model` middleware that preserves canonical history, protected content, provenance, and replay evidence?

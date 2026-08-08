@@ -2,7 +2,7 @@
 title: "finstack-ai Technical Design Document"
 subtitle: "Implementation-level design for the Rust agent microkernel, runtime, bindings, and extension SDK"
 author: "Project Draft"
-date: "2026-08-07"
+date: "2026-08-08"
 ---
 
 # Document control
@@ -11,11 +11,11 @@ date: "2026-08-07"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.1 |
+| Version | 0.5 |
 | Status | Draft for implementation |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Product Requirements Document; Architecture Specification |
+| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Architecture Specification v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
 
 # 1. Technical objective
 
@@ -84,6 +84,8 @@ finstack-ai/
         cancellation.rs
         timers.rs
         shutdown.rs
+        external_completion.rs
+        interactions.rs
         adapters/
 
     finstack-ai-sdk/
@@ -100,6 +102,9 @@ finstack-ai/
         store.rs
         observer.rs
         capability.rs
+        agent_catalog.rs
+        agent_invoker.rs
+        bundle.rs
         spec.rs
         result.rs
         error.rs
@@ -256,10 +261,12 @@ pub type RunId = Id<RunTag>;
 pub type TurnId = Id<TurnTag>;
 pub type EffectId = Id<EffectTag>;
 pub type ToolCallId = Id<ToolCallTag>;
+pub type InteractionId = Id<InteractionTag>;
+pub type BudgetScopeId = Id<BudgetScopeTag>;
 pub type RecordId = Id<RecordTag>;
 ```
 
-Externally, IDs serialize as canonical lowercase UUID strings. UUIDv7 is preferred for new IDs because ordering is useful in logs and storage. Tests use an injected deterministic generator.
+Externally, IDs serialize as canonical lowercase UUID strings. New IDs use UUIDv7 because ordering is useful in logs and storage. Tests use an injected deterministic generator.
 
 ## 5.2 Provider identifiers
 
@@ -477,6 +484,10 @@ The reserved internal tool `finstack.internal.load_capability` accepts one or mo
 
 The internal tool is implemented by the runtime/kernel adapter and is not dispatched to an external toolset.
 
+## 10.4 Delivery stages
+
+The MVP implements `Always` and `Application`, reserves the `Model` enum value/internal tool identity, and makes activation a durable reducer transition. The 0.0.2-0.0.3 window adds compact catalog rendering, append-only prompt context changes, and activation heuristics across bindings. Those UX/policy pieces must pass real-provider, prompt-cache, and restart tests before the 0.1.0 public preview.
+
 # 11. Kernel state machine API
 
 ## 11.1 Command-level inputs
@@ -489,7 +500,8 @@ pub enum KernelInput {
     StageSettled(StageSettled),
     ModelSettled(ModelSettled),
     ToolBatchSettled(ToolBatchSettled),
-    ApprovalSettled(ApprovalSettled),
+    InteractionSettled(InteractionResolution),
+    ExternalEffectCompleted(ExternalEffectCompletion),
     TimerFired(TimerFired),
     CancelRequested(CancelRequested),
     EffectReconciled(EffectReconciled),
@@ -547,10 +559,35 @@ settle_after_model
 settle_before_tools
 settle_tool_batch
 settle_after_tools
-settle_after_run
+settle_before_finalize
 ```
 
 The standard run path remains visible in code and amenable to exhaustive state tests.
+
+## 11.4 Run lineage and generalized suspension
+
+```rust
+pub struct RunRelation {
+    pub root_run_id: RunId,
+    pub parent_run_id: Option<RunId>,
+    pub parent_effect_id: Option<EffectId>,
+    pub kind: RunRelationKind,
+    pub depth: u16,
+    pub budget_scope_id: Option<BudgetScopeId>,
+    pub external_work_ref: Option<Arc<str>>,
+}
+
+pub enum RunRelationKind {
+    Root,
+    ChildAgent,
+    DelegatedAgent,
+    WorkflowStep,
+}
+```
+
+`RunAccepted` always stores a relation; root runs use `RunRelationKind::Root`. The kernel validates relation shape and depth but does not invoke child agents or aggregate budgets. `AgentCatalog`, `AgentInvoker`, and runtime/application policy own those services.
+
+`AwaitingExternal` and `AwaitingInteraction` are generic suspension phases. Feature-specific background model, tool, approval, or workflow states are not added to the kernel.
 
 # 12. Journal record design
 
@@ -584,14 +621,17 @@ pub enum RecordBody {
     StageOutcomeRecorded(StageOutcomeRecorded),
     ContextPrepared(ContextPrepared),
     EffectRequested(EffectRequested),
+    EffectDeferred(EffectDeferred),
     EffectCompleted(EffectCompleted),
     EffectFailed(EffectFailed),
     EffectCancelled(EffectCancelled),
     EntryAppended(EntryAppended),
     ToolBatchOpened(ToolBatchOpened),
     ToolBatchClosed(ToolBatchClosed),
-    ApprovalRequested(ApprovalRequested),
-    ApprovalResolved(ApprovalResolved),
+    InteractionRequested(InteractionRequest),
+    InteractionResolved(InteractionResolution),
+    InteractionExpired(InteractionExpired),
+    InteractionCancelled(InteractionCancelled),
     CapabilityActivated(CapabilityActivated),
     CancellationRequested(CancellationRequested),
     RunSuspended(RunSuspended),
@@ -619,14 +659,96 @@ pub enum EffectKind {
     Tool,
     Context,
     Middleware,
-    Approval,
+    Interaction,
     Timer,
 }
 ```
 
 Completion records include the normalized output, usage, provider/tool IDs, and retry metadata. Large output is externalized through `BlobRef` before commit.
 
-## 12.4 Atomic batches
+```rust
+pub struct EffectDeferred {
+    pub effect_id: EffectId,
+    pub handle: ExternalHandleRef,
+    pub reconciliation: ReconciliationPolicy,
+    pub next_poll_at: Option<Timestamp>,
+    pub expires_at: Option<Timestamp>,
+    pub expected_output_schema: Option<Digest>,
+}
+
+pub enum ReconciliationPolicy {
+    CallbackOnly,
+    Poll,
+    CallbackOrPoll,
+    ExternalWorkflow,
+}
+
+pub struct ExternalEffectCompletion {
+    pub effect_id: EffectId,
+    pub completion_id: Arc<str>,
+    pub outcome: ExternalEffectOutcome,
+}
+
+pub enum ExternalEffectOutcome {
+    Completed {
+        output: RawJson,
+        usage: Option<Usage>,
+        artifacts: Arc<[ArtifactRef]>,
+    },
+    Failed { error: FrameworkError },
+    Cancelled { reason: Option<Arc<str>> },
+}
+```
+
+External handles contain identifiers and non-secret reconciliation metadata only. Completion routing authenticates the caller, validates the outcome against the outstanding effect, and treats a matching `completion_id` plus normalized outcome digest as idempotent. A conflicting duplicate is rejected and recorded as an audit error.
+
+## 12.4 Interaction records
+
+```rust
+pub struct InteractionRequest {
+    pub interaction_id: InteractionId,
+    pub effect_id: EffectId,
+    pub kind: InteractionKind,
+    pub prompt: Arc<[ContentBlock]>,
+    pub response_schema: RawJson,
+    pub assignee_hint: Option<AssigneeHint>,
+    pub expires_at: Option<Timestamp>,
+    pub delegatable: bool,
+    pub metadata: RawJson,
+}
+
+pub enum InteractionKind {
+    Approval,
+    Choice,
+    Form,
+    FreeText,
+    Review,
+    Custom(Arc<str>),
+}
+
+pub struct InteractionResolution {
+    pub interaction_id: InteractionId,
+    pub resolution_id: Arc<str>,
+    pub principal: PrincipalRef,
+    pub response: RawJson,
+    pub comment: Option<Arc<str>>,
+}
+
+pub struct InteractionExpired {
+    pub interaction_id: InteractionId,
+    pub expired_at: Timestamp,
+}
+
+pub struct InteractionCancelled {
+    pub interaction_id: InteractionId,
+    pub principal: Option<PrincipalRef>,
+    pub reason: Option<Arc<str>>,
+}
+```
+
+The runtime validates a resolution against the recorded schema and authorization policy before proposing `InteractionResolved`. Duplicate `resolution_id` values with the same normalized response digest are idempotent; conflicting or late resolutions fail closed and are audited. Approval helpers construct `InteractionKind::Approval`; there are no approval-only durable records.
+
+## 12.5 Atomic batches
 
 A store append accepts a batch and expected previous sequence:
 
@@ -764,6 +886,10 @@ pub struct ModelCapabilities {
 
 Provider-specific capability detail lives in namespaced metadata rather than kernel enums whenever possible.
 
+## 14.5 Reference implementations
+
+`ScriptedModel` is the semantic reference and drives all deterministic conformance fixtures. The reference network provider is OpenAI-compatible with Chat Completions as the required baseline. Responses API mapping is an optional adapter extension. A versioned quirks table captures endpoint deviations, and Anthropic fixtures act as the early check that `Model` remains provider-neutral.
+
 # 15. Toolset port design
 
 ## 15.1 Trait
@@ -824,7 +950,9 @@ A `ResolvedTool` contains:
 - optional output validator; and
 - middleware routing metadata.
 
-Validation occurs before `Toolset::call`. Python tools may use a Pydantic adapter; native tools may use Serde or a JSON Schema validator. The kernel receives only normalized validation success/failure.
+JSON Schema draft 2020-12 is the canonical schema representation. Registration normalizes each schema once and compiles the default Rust validator used by native and browser WASM paths. External references must resolve from an explicit offline registry or application-supplied retriever; validation cannot depend on ambient filesystem or network access. The initial portability subset is pinned by conformance fixtures and must intersect the strict structured-output subsets supported by reference providers.
+
+The `jsonschema` crate is the first implementation candidate because it supports draft 2020-12, reusable validators, custom retrieval, and `wasm32-unknown-unknown`; `boon` is the fallback candidate if the spike exposes size, performance, or portability problems. Python tools may retain a cached Pydantic validator, and Rust result decoders may use Serde, but binding-native validators must pass the same success/failure path and model-retry fixtures. The kernel receives only normalized validation success/failure and imports no validator.
 
 ## 15.4 Tool stream
 
@@ -904,7 +1032,7 @@ pub enum Stage {
     AfterModel,
     BeforeToolBatch,
     AfterToolBatch,
-    AfterRun,
+    BeforeFinalize,
 }
 ```
 
@@ -916,8 +1044,9 @@ pub enum StageOutcome {
     Replace(StageValue),
     AddInstructions(Arc<[InstructionSpec]>),
     AddContext(Arc<[ContextItem]>),
+    CompactContext(CompactionResult),
     FilterTools(Arc<[ToolId]>),
-    RequestApproval(ApprovalSpec),
+    RequestInteraction(InteractionSpec),
     Retry(RetryDirective),
     Suspend(SuspensionSpec),
     Complete(RunOutput),
@@ -925,7 +1054,7 @@ pub enum StageOutcome {
 }
 ```
 
-Only outcomes valid for the current stage are accepted. Invalid combinations produce a middleware contract error.
+Only outcomes valid for the current stage are accepted. `CompactContext` is valid only at `BeforeModel`; invalid combinations produce a middleware contract error.
 
 ## 17.4 Ordering resolution
 
@@ -940,9 +1069,79 @@ pub struct MiddlewareOrder {
 
 The resolver topologically sorts once. A stable sorted list is stored in `ResolvedAgent`.
 
+The `BeforeModel` tiers are ordered as request/policy shaping, context mutation, context compaction, then post-compaction validation. A descriptor that declares the context-compactor role is unique per resolved agent. Resolution fails if more than one component declares it, or if ordering constraints place a context-mutating middleware after it. Post-compaction validators may continue, fail, suspend, or request interaction but cannot return `Replace`, `AddInstructions`, `AddContext`, or `CompactContext`.
+
 ## 17.5 Durable middleware output
 
-When an outcome affects durable behavior, the runtime writes a `StageOutcomeRecorded` or `EffectCompleted` record before applying it. Middleware descriptor metadata declares whether replay may recompute an outcome; default is recorded output reuse.
+When an outcome affects durable behavior, the runtime writes a `StageOutcomeRecorded` or `EffectCompleted` record before applying it. Recorded output reuse is the default. Middleware may declare an outcome recompute-safe only when it is deterministic, side-effect-free, independent of unavailable external state, and covered by replay conformance tests.
+
+`BeforeFinalize` receives a candidate terminal result before `RunCompleted` or another terminal record is committed. It may continue, request bounded retry/continuation/interaction, suspend, or fail. Terminal notification is observer-only and cannot change state.
+
+## 17.6 Compaction middleware contract
+
+Compaction is a `BeforeModel` middleware specialization. Its `MiddlewareDescriptor` declares the unique context-compactor role and a strategy/configuration identity; this is ordering/validation metadata, not a seventh port or new stage. The runtime supplies the fully assembled candidate `ModelRequest`, the provider/model input budget, reserved output budget, protected item set, token-estimation metadata, and the latest compatible checkpoint for that middleware component when one exists.
+
+```rust
+pub struct CompactionResult {
+    pub replacement_messages: Arc<[Message]>,
+    pub evidence: CompactionEvidence,
+    pub checkpoint: Option<CompactionCheckpoint>,
+}
+
+pub struct CompactionEvidence {
+    pub strategy_id: Arc<str>,
+    pub strategy_version: u32,
+    pub configuration_digest: Digest,
+    pub model_context_profile_digest: Digest,
+    pub source_digest: Digest,
+    pub protected_item_set_digest: Digest,
+    pub covered_entry_ids: Arc<[EntryId]>,
+    pub retained_entry_ids: Arc<[EntryId]>,
+    pub projection_digest: Digest,
+    pub estimated_tokens_before: u64,
+    pub estimated_tokens_after: u64,
+    pub summary_digest: Option<Digest>,
+    pub cache_impact: PromptCacheImpact,
+}
+
+pub struct CompactionCheckpoint {
+    pub component_id: ComponentId,
+    pub strategy_id: Arc<str>,
+    pub strategy_version: u32,
+    pub configuration_digest: Digest,
+    pub model_context_profile_digest: Digest,
+    pub covered_through_entry_id: EntryId,
+    pub source_digest: Digest,
+    pub summary: CompactedSummary,
+    pub summary_digest: Digest,
+    pub sensitivity: Sensitivity,
+}
+
+pub enum CompactedSummary {
+    Inline(Arc<[Message]>),
+    Blob(BlobRef),
+}
+
+pub enum PromptCacheImpact {
+    StablePrefixPreserved,
+    MutableSuffixChanged,
+    CacheInvalidated,
+}
+```
+
+The replacement is a model-visible projection only. Canonical `ConversationEntry` values, parent links, tool calls/results, and journal records are never edited or deleted. The runtime rejects a compaction result that:
+
+- omits protected system/developer/capability instructions, the active user request, required policy context, or pinned items;
+- splits a tool call from its result or produces invalid role/source ordering;
+- exceeds the hard model-input budget after reserved output and provider overhead are applied;
+- lacks consistent source, retained-entry, strategy, configuration, or digest evidence; or
+- lowers sensitivity/provenance classification without an explicit permitted transformation.
+
+The ordinary `StageOutcomeRecorded` path persists behavior-changing evidence, the normalized replacement projection inline or by `BlobRef`, and either the reusable checkpoint or a blob reference to it. The main `EffectRequested(Model)` record contains the final request actually sent. On replay, recorded output is reused. On a later turn, a checkpoint is accepted only when its component, strategy/version, configuration digest, model-context profile, covered-history digest, and sensitivity policy match; otherwise it is ignored and compaction rebuilds from canonical history.
+
+Deterministic windowing can complete inside the middleware invocation. Model-assisted summarization runs inside the already committed middleware effect, inherits cancellation/deadline/principal context, uses an explicit budget scope, and records usage. It must not recursively invoke the same agent or compaction chain. A configured maximum compaction depth of one prevents recursive summarization loops.
+
+Threshold and hysteresis settings prevent compaction on every turn. Prompt-cache-aware strategies preserve the stable instruction prefix and compact only eligible mutable history. If compaction fails or cannot meet the hard budget without protected-content loss, the normalized outcome is a stable context-budget failure unless the application configured a tested deterministic fallback.
 
 # 18. JournalStore design
 
@@ -988,6 +1187,10 @@ snapshots(session_id, sequence, payload_cbor, digest, timestamp)
 ```
 
 Append uses one transaction and a compare/update on `current_sequence`.
+
+## 18.3 Snapshot representation
+
+The initial snapshot is a direct, versioned CBOR projection of kernel/session state plus its journal sequence and digest. It is a disposable replay cache rather than a second semantic model. A replay-optimized compact format requires new benchmark evidence and an ADR; corrupt, unknown, or stale snapshots are discarded and rebuilt from records.
 
 # 19. Observer design
 
@@ -1134,6 +1337,8 @@ pub enum ReconcileResult {
 
 Runtime policy maps the result to retry, wait, operator resolution, or failure.
 
+`StillRunning` must be backed by a committed `EffectDeferred` record before the runtime waits, polls, or accepts a callback. External completion is checked against the outstanding effect, cancellation/deadline state, completion identity, expected schema, and principal policy before it becomes kernel input.
+
 ## 23.3 Crash matrix
 
 Tests simulate process loss after every durable append and before/after every effect result. The restored run must either:
@@ -1164,7 +1369,7 @@ The runtime uses a lane guard keyed by `(session_id, lane_id)`. Only one active 
 
 ## 24.3 Initial implementation scope
 
-The data model includes lanes from the start. MVP APIs may expose only `main` plus fork/create primitives behind an experimental feature. This avoids a future journal migration from linear histories.
+The data model includes lanes from the start. MVP APIs expose `main`; experimental fork/create primitives may exist without a concurrency promise. The first durable store and main-lane crash-prefix matrix ship before public concurrent multi-lane APIs. This avoids a future journal migration from linear histories while ensuring lane ownership is validated against SQLite sequence conflicts before PR-047.
 
 # 25. Python binding design
 
@@ -1173,7 +1378,11 @@ The data model includes lanes from the start. MVP APIs may expose only `main` pl
 - PyO3 for native classes and conversion.
 - Maturin for builds and wheels.
 - `pyo3-async-runtimes` or a small equivalent bridge for awaitables.
-- CPython limited ABI considered after measuring compatibility and performance trade-offs.
+- CPython 3.11-3.14 per-version wheels for the initial GIL-enabled matrix.
+- A version-specific CPython 3.14t wheel where the target platform supports free-threading.
+- No classic `abi3` launch wheel; evaluate Python 3.15+ `abi3t` or combined stable-ABI wheels only after production CI, compatibility, and performance gates pass.
+
+The required launch platforms are manylinux x86_64/aarch64, macOS arm64, and Windows x64. Module initialization must explicitly declare and test free-threaded safety; long Rust work detaches from the interpreter and shared Python-facing state does not rely on the GIL for synchronization.
 
 ## 25.2 Python classes
 
@@ -1275,7 +1484,11 @@ Rust RawJson
   -> Python object
 ```
 
-## 25.8 Exception hierarchy
+## 25.8 Distribution composition
+
+One `finstack-ai` wheel contains the binding and curated Rust-backed OpenAI-compatible, Anthropic, and local providers. Their Rust crates remain independently versioned leaf packages, but they are linked into the same extension module to avoid relying on an unstable Rust ABI across separate wheels. Provider submodules import lazily, Pydantic remains an extra, and wheel size is a release budget.
+
+## 25.9 Exception hierarchy
 
 ```text
 FinstackError
@@ -1335,6 +1548,10 @@ The package includes a worker helper that hosts one or more agents in a Web Work
 - Large content uses blob handles.
 - Events are arrays of compact objects per batch.
 - Internal state never round-trips through JavaScript for each transition.
+
+## 26.6 Optional OpenAI-compatible adapter
+
+The npm package exports a tree-shakeable `@finstack/ai/adapters/openai-compatible` module that implements the model host ABI using browser `fetch` and SSE. Its default configuration targets a same-origin proxy URL. It owns no kernel semantics, includes `AbortSignal` propagation and CORS diagnostics, and documents that provider credentials must not be embedded in shipped browser code.
 
 # 27. WIT plugin design
 
@@ -1409,7 +1626,7 @@ interface toolset {
 }
 ```
 
-Streaming progress can be introduced through a WIT resource after validating host/guest async support. The first ABI may keep isolated tool calls coarse and return one result.
+WIT v1 tool calls are coarse and return one result. Resource-based streaming is deferred until host/guest async support, cancellation, resource cleanup, and canonical-ABI overhead are validated without changing kernel semantics.
 
 ## 27.4 Context world
 
@@ -1439,7 +1656,16 @@ The host caches compiled components by digest and runtime version. Stateful plug
 
 ## 28.1 Canonical journal encoding
 
-Provisional decision: use a strict, versioned CBOR subset for durable and remote envelopes, implemented with a maintained Serde-compatible library. Reasons:
+Use a strict, versioned deterministic CBOR profile for durable, remote, and process envelopes, implemented with a maintained Serde-compatible library. Evaluate `ciborium` first. The frozen profile requires:
+
+- definite-length items;
+- shortest-form integer and length encodings;
+- deterministic map-key ordering;
+- a documented policy for finite floats and rejection of non-finite values;
+- no duplicate map keys; and
+- schema-level size/depth limits before allocation.
+
+Reasons:
 
 - compact binary representation;
 - natural byte-string support;
@@ -1447,11 +1673,11 @@ Provisional decision: use a strict, versioned CBOR subset for durable and remote
 - deterministic framing; and
 - easier evolution than a Rust-specific encoding.
 
-A formal ADR must freeze the supported subset before stable release.
+ADR-015 freezes the profile in PR-004. PR-039 implements it and publishes binary compatibility fixtures.
 
 ## 28.2 Frame
 
-Remote streams use:
+Remote and external-process streams use the same generic frame/envelope/handshake layer:
 
 ```text
 4-byte unsigned big-endian payload length
@@ -1459,6 +1685,8 @@ CBOR envelope payload
 ```
 
 Maximum frame size is configured and checked before allocation.
+
+The envelope identifies its payload schema family. Remote session DTOs and plugin/process messages remain distinct enums with separate versions and conformance fixtures; sharing framing does not merge their semantics.
 
 ## 28.3 Diagnostic JSON
 
@@ -1558,13 +1786,15 @@ A panic is never used for user input, provider output, plugin output, or invalid
 
 # 31. Security design
 
+This section implements the control obligations in Security and Threat Model v0.2. Control ownership, tests, and residual risks must remain traceable to that register as the implementation evolves.
+
 ## 31.1 Native code
 
 Native Rust and Python components are trusted. The SDK documentation must state this plainly.
 
 ## 31.2 Tool authorization
 
-Tool implementations enforce resource boundaries. Middleware can require approval or deny calls. The runtime includes call identity and principal metadata in `ToolCallContext`.
+Tool implementations enforce resource boundaries. Middleware can require a typed interaction—using the approval profile where appropriate—or deny calls. The runtime includes call identity and principal metadata in `ToolCallContext`.
 
 ## 31.3 Principal context
 
@@ -1784,7 +2014,7 @@ Features are not used as a giant central registry of every provider/channel/tool
 - SQLite store;
 - snapshots;
 - recovery reconciliation;
-- approval suspension;
+- generalized interaction suspension, with approval as the first profile;
 - crash-prefix matrix;
 - initial lane APIs.
 
@@ -1799,6 +2029,7 @@ Features are not used as a giant central registry of every provider/channel/tool
 ## Milestone 8: Ecosystem readiness
 
 - additional providers/toolsets/stores;
+- deterministic and model-assisted `BeforeModel` compaction middleware batteries;
 - remote protocol and reference server;
 - observer adapters;
 - workflow integrations;
@@ -1810,7 +2041,7 @@ The core implementation is technically ready for public preview when:
 
 1. `finstack-ai-kernel` has no forbidden dependency.
 2. Every kernel transition has a documented input, record output, and invariant test.
-3. The native runtime never executes a recoverable effect before its request record is committed.
+3. The native runtime never executes a recoverable effect or begins an external wait before its request/deferral record is committed.
 4. All queues are bounded and tested with slow consumers.
 5. Parallel tools finalize history in source order.
 6. Cancellation and crash-prefix tests produce valid restored states.
@@ -1818,23 +2049,25 @@ The core implementation is technically ready for public preview when:
 8. Benchmarks isolate framework overhead from model/network latency.
 9. Adding a fixture provider/toolset/store requires no kernel changes.
 10. Public errors, records, events, and specs have versioned schemas.
+11. Run lineage, generic deferral, and interactions survive crash-prefix restoration across supported bindings.
+12. `before_finalize` is the last behavior-changing stage and no terminal observer can mutate execution.
+13. `BeforeModel` compaction preserves canonical history/protected content, produces binding-identical valid requests, and safely rebuilds invalid derived checkpoints.
 
-# 37. Open technical decisions requiring ADRs
+# 37. Technical decision status
 
-| Decision | Options to evaluate |
-|---|---|
-| Journal encoding | strict CBOR versus JSONL-first with later binary encoding |
-| ID representation | UUIDv7 versus ULID or internal 128-bit type with UUID projection |
-| Async trait strategy | boxed futures/streams versus GAT-based traits plus object-safe adapters |
-| Validation core | JSON Schema engine, Serde-generated validators, binding-owned validation, or hybrid |
-| Python ABI | per-version CPython wheels versus stable limited ABI where feasible |
-| WASM threading | single-thread default versus optional threads with cross-origin isolation |
-| Snapshot format | direct state CBOR versus replay-optimized compact projection |
-| Model interruption | retry-only baseline versus provider reconciliation interface in MVP |
-| Middleware replay | always record outcomes versus declarative recompute-safe middleware |
-| Remote protocol | reuse journal record envelopes versus separate client DTOs and adapters |
-| Plugin streaming | synchronous first WIT call versus resource-based async stream in v1 |
-| Blob service | application-owned only versus a seventh formal runtime service after MVP |
+All pre-implementation technical decisions are resolved. Changes to these directions require the cited ADR and evidence gate rather than silently reopening the option during implementation.
+
+| ADR | Decision | Reconsideration gate |
+|---|---|---|
+| ADR-029 | Typed UUID values serialized as lowercase UUID strings; UUIDv7 for new IDs. | Only before PR-006 schema fixtures freeze. |
+| ADR-030 | Object-safe boxed futures/streams for public extension traits; concrete internal fast paths remain allowed. | Phase 3 benchmarks must show material dispatch cost before changing the public ABI. |
+| ADR-031 | Single-threaded browser WASM with Web Workers by default; no SharedArrayBuffer requirement. | Post-preview opt-in only, after cross-origin isolation and conformance evidence. |
+| ADR-032 | Direct versioned kernel-state CBOR snapshots; snapshots remain disposable derived caches. | PR-041 benchmarks may propose a new ADR for a compact projection. |
+| ADR-033 | MVP interruption uses retry, suspension, or explicit uncertainty; the Model trait reserves optional reconciliation implemented in Phase 6. | PR-042 provider evidence determines per-provider support, not the port shape. |
+| ADR-034 | Record state-changing middleware outcomes by default; recompute only when explicitly declared safe and fixture-proven. | PR-018 descriptor/conformance review. |
+| ADR-035 | WIT v1 tool/context calls use one coarse completion; resource-based streaming is deferred. | Post-plugin-alpha evidence on async support, cleanup, and overhead. |
+| ADR-036 | Blob storage is application/runtime-owned through 1.0; no seventh kernel port. | Post-1.0 usage evidence and a new architecture ADR. |
+| ADR-037 | Model-context compaction uses `BeforeModel` middleware, never mutates canonical history, and stores versioned outcomes/checkpoints as derived data. | Before public preview only if PR-018/PR-056 conformance evidence proves the existing stage/outcome contract cannot preserve required semantics. |
 
 # 38. Technical traceability matrix
 

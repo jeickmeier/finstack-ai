@@ -2,7 +2,7 @@
 title: "finstack-ai Product Requirements Document"
 subtitle: "Rust-native agent microkernel with first-class Python and WebAssembly bindings"
 author: "Project Draft"
-date: "2026-08-07"
+date: "2026-08-08"
 ---
 
 # Document control
@@ -11,10 +11,10 @@ date: "2026-08-07"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Product Requirements Document (PRD) |
-| Version | 0.1 |
+| Version | 0.5 |
 | Status | Draft for architecture and implementation planning |
 | Primary audience | Product owners, framework architects, Rust/Python/WASM engineers, extension authors |
-| Related documents | Architecture Specification; Technical Design Document |
+| Related documents | Engineering Standards v0.2; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
 
 # Executive summary
 
@@ -59,7 +59,7 @@ and retain a clean path to:
 
 - structured tools and outputs;
 - streaming and cancellation;
-- durable runs and human approvals;
+- durable runs and typed human interactions, including approvals;
 - multiple model providers;
 - Python-defined tools;
 - browser execution;
@@ -187,7 +187,7 @@ A browser application loads the kernel/runtime as WASM, supplies a JavaScript mo
 
 ## UC-05: Durable human-in-the-loop workflow
 
-A run pauses on a tool approval, survives process restart, resumes after an external decision, and does not repeat completed effects.
+A run pauses on a typed human interaction such as an approval, choice, form, review, or correction; survives process restart; resumes after an authorized external response; and does not repeat completed effects.
 
 ## UC-06: High-concurrency agent service
 
@@ -229,7 +229,7 @@ Adding a normal provider, toolset, context source, middleware implementation, jo
 
 ## G-06: Durable by construction
 
-The state model includes stable effect identities, journal records, replay rules, and explicit suspension/resumption semantics from the first public release.
+The state model includes stable effect identities, run lineage, generic deferral, typed interactions, journal records, replay rules, and explicit suspension/resumption semantics from the first public release.
 
 ## G-07: Safe optional isolation
 
@@ -269,8 +269,10 @@ These capabilities may be built as separate products or extensions.
 | Session | Durable container for conversation entries, lanes, metadata, and run history |
 | Lane | Independently advancing position within a session; at most one active operation per lane |
 | Run | An accepted unit of agent work from input until completion, failure, cancellation, or suspension |
+| Run relation | Durable root/parent/effect lineage connecting a run to delegated, child-agent, or workflow work |
 | Turn | One model response plus the tool batch requested by that response |
-| Effect | External work requested by the kernel, such as a model call, tool execution, approval, timer, or persistence barrier |
+| Effect | External work requested by the kernel, such as a model call, tool execution, interaction, timer, or persistence barrier |
+| Interaction | Durable typed request for human or external input; approval is one standard interaction kind |
 | Event | Immutable observation emitted by execution; may be durable or transient |
 | Journal record | Durable append-only fact used to reconstruct state and recover work |
 | Extension | Executable code that registers one or more implementations with the framework |
@@ -319,7 +321,7 @@ It shall guarantee valid ordering and pairing of assistant tool calls and tool r
 
 ### FR-KRN-003: Explicit state machine
 
-Runs shall have explicit, inspectable states including accepted, preparing, requesting-model, executing-tools, awaiting-approval, sleeping, cancelling, completed, failed, and suspended.
+Runs shall have explicit, inspectable states including accepted, preparing, requesting-model, executing-tools, awaiting-interaction, awaiting-external, sleeping, cancelling, completed, failed, and suspended.
 
 ### FR-KRN-004: Deterministic decisions
 
@@ -327,11 +329,11 @@ Given the same state and normalized input, the kernel shall produce the same dur
 
 ### FR-KRN-005: Stable identifiers
 
-The kernel shall assign stable identifiers for sessions, lanes, runs, turns, model requests, tool batches, tool calls, effects, and journal records.
+The kernel shall assign stable identifiers for sessions, lanes, runs, turns, model requests, tool batches, tool calls, effects, interactions, and journal records.
 
 ### FR-KRN-006: Event ordering
 
-The kernel shall define a binding-independent order for run, turn, message, model, tool, approval, limit, cancellation, and completion events.
+The kernel shall define a binding-independent order for run, turn, message, model, tool, interaction, limit, cancellation, and completion events.
 
 ### FR-KRN-007: Transient and durable events
 
@@ -351,11 +353,23 @@ The kernel shall distinguish retryable model failures, retryable tool failures, 
 
 ### FR-KRN-011: Structured output
 
-The framework shall support plain text, raw JSON, schema-validated structured output, and application-defined result decoders.
+The framework shall support plain text, raw JSON, schema-validated structured output, and application-defined result decoders. JSON Schema draft 2020-12 shall be the portable schema source of truth; validators may be native to a binding only when they pass the shared validation/retry conformance fixtures.
 
 ### FR-KRN-012: Internal tools
 
 The kernel may expose a small number of internal tools required for universal mechanics, such as on-demand capability activation. Product-specific tools shall not live in the kernel.
+
+### FR-KRN-013: Generic deferred effects
+
+Any supported model, tool, interaction, or externally hosted operation shall be able to defer completion while preserving the original `EffectId`, a non-secret external handle, reconciliation policy, expiry/poll metadata, and expected result contract. Deferral shall suspend through generic effect semantics rather than feature-specific run states.
+
+### FR-KRN-014: Run lineage
+
+Every accepted run shall persist an explicit relation containing its root run, optional parent run/effect, relation kind, depth, and optional budget scope. Cancellation, deadlines, principal context, and budget attribution shall propagate according to declared child/delegation policy and remain reconstructable after restart.
+
+### FR-KRN-015: Generalized interactions
+
+The kernel shall define durable, typed interaction request and resolution semantics for approval, choice, form, free text, review, and namespaced custom interactions. Approval-specific APIs may be ergonomic wrappers but shall not create a separate persistence path.
 
 ## 9.2 Runtime and effect execution
 
@@ -386,6 +400,10 @@ Model providers, HTTP clients, stores, and toolsets shall be reusable across run
 ### FR-RT-007: Timers and clocks
 
 Sleep, retry delays, deadlines, and time shall be abstracted so tests and durable workflow integrations can inject deterministic or durable clocks.
+
+### FR-RT-008: External completion routing
+
+The runtime shall accept authenticated external effect completions and interaction resolutions through explicit routers. Duplicate completions shall be idempotent when their identity and digest match; conflicting duplicates shall fail closed and remain auditable.
 
 ## 9.3 Extension registration
 
@@ -421,7 +439,7 @@ A capability shall be able to contribute instructions and references to toolsets
 
 ### FR-CAP-002: Activation
 
-Capabilities shall support always-on, application-activated, and model-activated modes.
+Capabilities shall support always-on, application-activated, and model-activated modes. The MVP shall include durable activation records and the always-on/application modes. The compact model-activated catalog experience may mature after the native MVP but is required for the 0.1.0 public preview.
 
 ### FR-CAP-003: Catalog
 
@@ -451,7 +469,7 @@ Higher-level capabilities shall be able to select provider-native functionality 
 
 ### FR-MDL-004: First-party providers
 
-The first stable distribution shall include separate packages for at least one OpenAI-compatible provider, Anthropic-compatible provider, and local/OpenAI-compatible endpoint. Provider packages shall not be dependencies of the kernel.
+The first stable distribution shall include separate Rust crates for at least one OpenAI-compatible provider, Anthropic-compatible provider, and local/OpenAI-compatible endpoint. Those curated Rust-backed providers shall be bundled into the initial `finstack-ai` Python wheel; provider crates shall not be dependencies of the kernel.
 
 ### FR-MDL-005: Test model
 
@@ -495,7 +513,7 @@ The framework shall define stable ordering and precedence for system instruction
 
 ### FR-CTX-003: Budgeting
 
-Context providers shall receive a budget and shall not silently exceed it. The runtime shall be able to truncate, reject, or request compaction according to policy.
+Context providers shall receive a budget and shall not silently exceed it. After context assembly, the runtime shall invoke configured `before_model` compaction middleware when the candidate request exceeds its policy threshold. If no eligible strategy can satisfy the model budget, the runtime shall return a stable context-budget error rather than silently discard required content.
 
 ### FR-CTX-004: Memory as optional policy
 
@@ -513,7 +531,7 @@ The stable middleware interface shall expose no more than seven behavior-changin
 4. after model;
 5. before tool batch;
 6. after tool batch; and
-7. after run.
+7. before finalize.
 
 ### FR-MW-002: Deterministic outcomes
 
@@ -529,7 +547,15 @@ The stable middleware ABI shall not include per-token callbacks. Fine-grained st
 
 ### FR-MW-005: Approval policy
 
-Human approval shall be expressible as middleware that converts a tool batch or call into a durable approval effect.
+Human approval shall be expressible as middleware that converts a tool batch or call into a durable interaction whose kind is `approval`.
+
+### FR-MW-006: Pre-terminal verification
+
+`before_finalize` shall run after a candidate result exists and before any terminal record is committed. It may accept completion, request a bounded continuation/retry/interaction, or fail the run. Post-terminal notifications are observer events and cannot change execution.
+
+### FR-MW-007: Context compaction ownership
+
+Compaction that changes the model-visible conversation or context projection shall be implemented as `before_model` middleware. It may use deterministic windowing or model-assisted summarization, but it shall not rewrite or delete canonical conversation history. Its behavior-changing result and any reusable checkpoint shall be normalized, versioned, attributable, and recorded when durability/replay requires it. `ContextProvider` implementations contribute context; observers only observe; neither owns compaction policy.
 
 ## 9.9 Sessions, journals, and recovery
 
@@ -571,7 +597,11 @@ At most one active operation shall write a lane at a time. Different lanes may r
 
 ### FR-DUR-010: Suspension and resume
 
-Runs shall be able to suspend on approval, durable timer, deferred model response, external tool completion, or process shutdown, and later resume from a defined boundary.
+Runs shall be able to suspend on an interaction, durable timer, generic deferred effect, external completion, or process shutdown, and later resume from a defined boundary.
+
+### FR-DUR-011: Lineage and outstanding-work recovery
+
+Journal replay shall reconstruct run relations, deferred handles, unresolved interactions, and their cancellation/deadline state without consulting transient process memory.
 
 ## 9.10 Observability
 
@@ -613,7 +643,7 @@ Public types shall favor immutable shared data and `Bytes`-style buffers where u
 
 ### FR-PY-001: Native wheel
 
-The Python package `finstack_ai` shall be distributed as prebuilt wheels for supported platforms and shall not require a Rust compiler for normal installation.
+The Python package `finstack_ai` shall be distributed as prebuilt wheels for CPython 3.11 through 3.14 and shall not require a Rust compiler for normal installation. The initial release matrix shall use per-version wheels and include a CPython 3.14 free-threaded build where the target platform supports it.
 
 ### FR-PY-002: Core classes
 
@@ -669,6 +699,10 @@ A reference IndexedDB journal adapter shall be possible without adding browser s
 
 Equivalent scripted inputs shall produce the same durable record sequence and normalized event order in native Rust and WASM.
 
+### FR-WASM-007: Optional remote-model adapter
+
+Host interfaces remain the browser contract. The npm package shall additionally provide one tree-shakeable fetch/SSE OpenAI-compatible adapter intended for a same-origin application proxy. It shall not encourage or require embedding provider secrets in browser code.
+
 ## 9.14 Isolated plugins
 
 ### FR-PLG-001: WIT ABI
@@ -685,7 +719,7 @@ The host shall support memory ceilings, fuel or epoch interruption, table/instan
 
 ### FR-PLG-004: External process protocol
 
-A later optional process adapter may use the same semantic interfaces over a versioned local protocol for languages or isolation needs unsuitable for WASM.
+A later optional process adapter may use the same semantic interfaces over a versioned local protocol for languages or isolation needs unsuitable for WASM. It shall reuse the remote protocol's bounded frame, envelope, and hello/version-negotiation layer while retaining a distinct plugin message vocabulary.
 
 ### FR-PLG-005: No native dynamic library ABI
 
@@ -777,13 +811,15 @@ The kernel shall support current stable Rust on Linux, macOS, Windows, and `wasm
 
 ### NFR-PORT-002
 
-The standard Python package shall target supported CPython versions and provide wheels for common x86_64 and ARM64 platforms.
+The standard Python package shall initially target CPython 3.11-3.14 plus free-threaded 3.14t, with wheels for manylinux x86_64/aarch64, macOS arm64, and Windows x64. Classic `abi3` shall not replace this matrix. An `abi3t`/combined stable-ABI strategy may be adopted for Python 3.15+ only after PyO3/maturin support, performance, and the project CI matrix are production-ready.
 
 ### NFR-PORT-003
 
 Platform-specific provider, filesystem, sandbox, or service code shall not enter the kernel dependency graph.
 
 ## 10.4 Security
+
+The Security and Threat Model v0.2 refines these outcomes into threat assumptions, control obligations, residual risks, and gate evidence. Those controls must remain within the product and architecture boundaries defined by this PRD.
 
 ### NFR-SEC-001
 
@@ -957,12 +993,12 @@ finstack-ai-plugin-host     # optional Wasmtime component host
 ## 12.2 Python packages
 
 ```text
-finstack-ai                 # imported as finstack_ai
-finstack-ai-pydantic        # optional schema adapter if separated
-finstack-ai-provider-*      # optional provider-specific wheels/packages
+finstack-ai                 # finstack_ai plus curated Rust-backed providers
+finstack-ai[pydantic]       # optional binding-native validation ergonomics
+finstack-ai-provider-*      # reserved for future callback/split providers
 ```
 
-The initial Python distribution may bundle a curated set of Rust-backed components for convenience, but the kernel’s package boundaries must remain intact.
+The initial Python distribution bundles the curated OpenAI-compatible, Anthropic, and local Rust-backed providers in one wheel. Rust crate boundaries remain intact, provider imports are lazy, optional pure-Python dependencies use extras, and CI enforces a wheel-size budget. A separately distributed Rust-backed provider cannot rely on Rust trait ABI compatibility across independent extension modules.
 
 ## 12.3 JavaScript packages
 
@@ -983,7 +1019,7 @@ finstack:ai-observer@1.0.0   # only if observer isolation is justified
 
 ## Phase A: Semantic kernel
 
-- Finalize message, identifier, run-state, event, effect, and journal models.
+- Finalize message, identifier, run-state, run-relation, interaction, event, deferred-effect, and journal models.
 - Implement deterministic decision/apply engine.
 - Implement scripted traces and property tests.
 - Compile the kernel for native Rust and WASM.
@@ -1010,7 +1046,7 @@ finstack:ai-observer@1.0.0   # only if observer isolation is justified
 - SQLite journal store.
 - Recovery and suspension tests.
 - Filesystem and shell toolsets.
-- Approval middleware.
+- General interaction routing with approval as the first middleware profile.
 - Structured log observer.
 - Session/lane APIs.
 
@@ -1036,7 +1072,7 @@ The MVP is complete when all of the following are available:
 1. A deterministic kernel with a stable trace fixture format.
 2. A native runtime that can complete text-only and tool-using runs.
 3. Streaming, cancellation, limits, and parallel/sequential tool execution.
-4. Stable identifiers and an in-memory journal.
+4. Stable identifiers, run lineage, generic deferral/interaction records, and an in-memory journal.
 5. One native model provider and one native toolset.
 6. Rust, Python, and browser WASM APIs using the same kernel.
 7. Rust-backed Python and WASM paths that batch events.
@@ -1055,6 +1091,10 @@ The MVP does not require SQLite, multi-lane execution, a WIT plugin host, remote
 - Tool results remain in source order under parallel execution.
 - Cancellation produces valid message history at every tested boundary.
 - Every journal prefix produced by fault-injection tests restores or returns a documented corruption error.
+- Child/delegated run lineage, outstanding interactions, and deferred effects reconstruct identically across bindings.
+- Duplicate external completions are idempotent and conflicting duplicates fail with an auditable error.
+- `before_finalize` can prevent terminal commit, while post-terminal observers cannot alter the result.
+- `before_model` compaction produces the same model-visible projection across supported bindings, preserves mandatory instructions and tool-call/result validity, and leaves canonical history unchanged.
 
 ## 15.2 Performance
 
@@ -1109,6 +1149,7 @@ The MVP does not require SQLite, multi-lane execution, a WIT plugin host, remote
 |---|---|---|
 | Microkernel becomes a service locator | Complexity without product value | Limit ports to six; resolve once; architecture gate for new ports |
 | Middleware surface expands endlessly | ABI instability and unclear behavior | Seven stable stages; immutable inputs by default; normalized outcomes |
+| Compaction becomes hidden history mutation | Lost auditability, replay drift, or removed safety context | Own policy in `before_model` middleware; preserve canonical history; record versioned outcomes/checkpoints and protected-content tests |
 | Python callbacks dominate execution | Poor performance and GIL contention | Rust-backed batteries; coarse calls; batch events; document callback costs |
 | WASM ABI copies large payloads | Latency and memory pressure | Blob references, byte buffers, batching, size limits |
 | Durability semantics overreach | False exactly-once guarantees | Explicit at-least-once model; stable idempotency keys; side-effect classification |
@@ -1119,20 +1160,24 @@ The MVP does not require SQLite, multi-lane execution, a WIT plugin host, remote
 | Plugin security is assumed rather than enforced | Unsafe third-party ecosystem | Default-deny WIT host, explicit permissions, resource limits, signed packages later |
 | “Equally fast” is interpreted literally | Unrealistic expectations | Define near-native Rust-backed path; measure callback paths separately |
 
-# 18. Open product decisions
+# 18. Resolved foundational product decisions
 
-The following decisions should be resolved through short architecture decision records before their implementation becomes difficult to change:
+These directions are approved for planning. PR-004 records the corresponding short ADRs before Phase 1 implementation; later PRs implement the decisions without reopening them implicitly.
 
-1. Whether the MVP journal canonical encoding is CBOR or JSONL, while retaining JSON diagnostic export.
-2. Whether multi-lane execution ships before or after the first SQLite store.
-3. Whether Python provider packages are bundled into the main wheel or distributed separately.
-4. Which stable Python versions and limited-ABI strategy to support initially.
-5. Whether browser WASM ships with a default remote-model adapter or only host interfaces.
-6. Whether on-demand capability activation is in MVP or the first post-MVP release.
-7. Whether the first external process protocol shares framing with the remote session protocol.
-8. Whether structured-output validation is provided by a kernel-neutral schema engine or binding-specific adapters plus Rust validators.
-9. Which first-party model provider should be the reference implementation.
-10. The final project license and governance model.
+| # | ADR | Decision | Delivery point |
+|---|---|---|---|
+| 1 | ADR-015 | Use deterministic, versioned CBOR as the canonical journal and protocol envelope; retain lossless JSON/JSONL diagnostic projection. | Profile frozen in PR-004; implemented in PR-039. |
+| 2 | ADR-016 | Ship the first SQLite store before public multi-lane concurrency. Lane IDs and immutable parent-linked entries remain in the Phase 1 data model. | PR-040 precedes PR-047. |
+| 3 | ADR-017 | Bundle curated Rust-backed providers in the single initial Python wheel while retaining separate Rust crates. | Finalized before PR-027. |
+| 4 | ADR-018 | Support CPython 3.11-3.14 with per-version wheels and 3.14t where supported; skip classic `abi3` initially and gate Python 3.15+ `abi3t` adoption on production evidence. | Matrix approved before PR-027. |
+| 5 | ADR-019 | Keep browser host interfaces as the contract and ship one optional fetch/SSE OpenAI-compatible adapter for same-origin proxies. | PR-034. |
+| 6 | ADR-020 | Put durable activation mechanics plus always/application modes in MVP; complete model-activated catalog UX after MVP and before 0.1.0. | PR-012/PR-022 foundations; PR-032/PR-038 binding UX; PR-048 durability gate. |
+| 7 | ADR-021 | Share bounded framing, envelope, and handshake code between remote and process protocols, but keep their message vocabularies distinct. | Generic framing in PR-058; process vocabulary later. |
+| 8 | ADR-022 | Use JSON Schema draft 2020-12 as the source of truth, a default precompiled Rust validator, and optional binding-native validators behind shared fixtures. | ADR before PR-012; adapters in PR-031 and peers. |
+| 9 | ADR-023 | Use an OpenAI-compatible Chat Completions baseline as the reference network provider; keep the scripted model as the semantic reference and Responses mapping optional. | PR-024. |
+| 10 | ADR-024 | Dual-license under MIT OR Apache-2.0, use DCO sign-off, and govern through a named maintainer group plus the existing ADR/RFC process. | License/governance files in PR-001; ADR in PR-004. |
+
+For decision 4, the support floor aligns with the [current CPython lifecycle](https://devguide.python.org/versions/), and the future stable-ABI direction follows [PEP 803](https://peps.python.org/pep-0803/) and the [PyO3 ABI guidance](https://pyo3.rs/main/building-and-distribution). The initial matrix remains version-specific until the project's own performance and compatibility gates pass.
 
 # 19. Requirements traceability summary
 
@@ -1157,13 +1202,21 @@ The following decisions should be resolved through short architecture decision r
 
 **Capability:** A declarative bundle of instructions and component references, potentially activated on demand.
 
-**Effect:** External work requested by the kernel and identified durably, such as a model call, tool invocation, approval, or timer.
+**Context compaction:** A `before_model` middleware transformation that produces a bounded model-visible projection while preserving canonical conversation history, protected content, attribution, and replay evidence.
+
+**Effect:** External work requested by the kernel and identified durably, such as a model call, tool invocation, interaction, or timer.
+
+**Deferred effect:** An effect that has durably returned a non-secret external handle and will complete later through reconciliation, polling, or an authenticated callback.
 
 **Extension:** Code that registers implementations of one or more framework ports.
 
 **Journal:** Append-only durable record sequence from which session and run state can be reconstructed.
 
+**Interaction:** A durable typed request for human or external input. Approval is the standard boolean/policy interaction profile.
+
 **Lane:** Independently advancing conversation position within a session, with at most one active operation.
+
+**Run relation:** Durable root/parent/effect lineage used for cancellation, deadlines, budget attribution, and audit correlation across nested or delegated runs.
 
 **Observer:** Read-only consumer of immutable event batches.
 

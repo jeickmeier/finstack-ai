@@ -1,6 +1,6 @@
 ---
 title: "finstack-ai Future Capabilities Design Validation"
-subtitle: "Subagents, delegation, memory, knowledge retrieval, human workflows, and minimum-change microkernel recommendations"
+subtitle: "Subagents, delegation, memory, knowledge retrieval, context compaction, human workflows, and minimum-change microkernel recommendations"
 author: "Project Draft"
 date: "2026-08-08"
 ---
@@ -75,23 +75,25 @@ Appendix C. Glossary
 |---|---|
 | Product | finstack-ai |
 | Document | Future Capabilities Design Validation |
-| Version | 0.1 |
-| Status | Draft for architecture validation and implementation planning |
+| Version | 0.3 |
+| Status | Validated; P0 recommendations incorporated into the authoritative baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, framework architects, implementation teams, extension authors, and AI coding agents |
-| Related documents | Product Requirements Document v0.1; Architecture Specification v0.1; Technical Design v0.1; Implementation Plan v0.1 |
+| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
+
+This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; the Engineering Standards v0.2, related v0.5 PRD/Architecture/Technical Design, accepted ADRs, Security and Threat Model v0.2, and Implementation Plan v0.5 are authoritative for the incorporated requirements, controls, and delivery sequence.
 
 # Executive design verdict
 
 The current **agent microkernel** direction is the correct foundation for the future capabilities examined in this document. The six existing ports—`Model`, `Toolset`, `ContextProvider`, `Middleware`, `JournalStore`, and `Observer`—are sufficient. None of the capabilities reviewed requires a seventh primary extension port, a generic workflow graph inside the kernel, or feature-specific kernel concepts for memory, retrieval, channels, code execution, or multi-agent products.
 
-The design does, however, benefit from three small semantic refinements before the journal and public contracts freeze:
+The primary baseline incorporates three small semantic refinements before the journal and public contracts freeze:
 
 1. **General deferred-effect semantics.** Any model, tool, interaction, or externally hosted operation must be able to return a durable external handle, suspend the run, and later complete the same `EffectId` without inventing a feature-specific record path.
 2. **Run lineage.** A run should carry optional parent/root relationship metadata so subagents and delegated agent work can propagate cancellation, deadlines, budget attribution, audit identity, and recovery correlation.
 3. **Generalized interactions.** The proposed approval primitive should become an `Interaction` primitive. Approval remains a standard interaction profile, while the same mechanism supports forms, questions, choices, reviews, corrections, and externally assigned human tasks.
 
-A fourth change is primarily a contract clarification rather than new machinery: the final behavior-changing middleware stage should be named or defined as **`before_finalize`**, making it explicit that verification and policy middleware may prevent terminal completion before the terminal record is committed.
+A fourth incorporated change is primarily a contract clarification rather than new machinery: the final behavior-changing middleware stage is **`before_finalize`**, making it explicit that verification and policy middleware may prevent terminal completion before the terminal record is committed.
 
 Everything else belongs above or outside the kernel:
 
@@ -345,6 +347,51 @@ Cancellation propagates down the run relationship by default. Detached work must
 
 Budget aggregation should initially be a runtime service. The kernel continues to enforce per-run limits and records usage. A `BudgetScopeId` allows a parent and child runs to be aggregated without placing pricing or shared-ledger policy in the kernel.
 
+## 3.7 Context compaction is middleware policy
+
+Compaction that changes what the next model sees belongs in `before_model` middleware. This is the only existing extension boundary that both receives the assembled model-visible context and is allowed to return a normalized behavior-changing replacement before the model effect is committed.
+
+It does not belong elsewhere:
+
+- the kernel owns canonical conversation validity, not application/model-specific context-loss policy;
+- a `ContextProvider` contributes budgeted external context but should not rewrite conversation history or other providers' contributions;
+- a `Model` adapter must receive an already bounded request and should not silently alter shared semantics;
+- an `Observer` cannot change execution; and
+- a `JournalStore` persists truth and may optimize storage, but storage compaction is distinct from model-context compaction.
+
+Recommended flow:
+
+```text
+immutable conversation tree + active run context
+  -> prepare_context providers
+  -> assemble candidate model request and hard/reserved budgets
+  -> before_model middleware chain
+       policy/guardrail shaping
+       compaction threshold check
+       deterministic windowing or model-assisted summarization
+       normalized compacted projection + evidence/checkpoint
+  -> validate provider limit
+  -> commit and execute the main model effect
+```
+
+The compaction outcome must preserve mandatory instructions, current user intent, active policy/safety context, pinned items, interaction state, and complete tool-call/result pairs. It retains source attribution and sensitivity for summaries. If protected content cannot fit, the correct result is an explicit context-budget failure or a configured safe fallback—not silent deletion.
+
+A resolved agent has at most one middleware component declaring the context-compactor role. Its internal strategy may combine windowing, tool-output handling, and summarization. It runs in a late `before_model` tier after all context/request mutation; any later middleware is validation-only and cannot change the projection. Duplicate compaction owners or ordering constraints that place a context mutator after compaction fail agent construction.
+
+Canonical conversation entries remain immutable and fully inspectable. Compaction creates only a derived model-visible projection. A recorded middleware outcome identifies the component and strategy version, configuration/model-profile/source/protected-set/projection digests, covered/retained entries, token estimates, summary digest, and prompt-cache impact. An optional incremental checkpoint is a disposable derived cache: later turns may reuse it only when component, strategy, configuration, model-context profile, covered history, and sensitivity policy still match; otherwise middleware rebuilds it from canonical history.
+
+Model-assisted summarization executes within a committed middleware effect, inherits cancellation/deadline/principal/budget context, and records usage. It cannot recursively invoke the same compaction chain. The baseline should include deterministic sliding-window and large-tool-output strategies; summarizing, semantic, hierarchical, or domain-specific strategies remain replaceable middleware batteries.
+
+Three uses of “compaction” must stay distinct:
+
+| Concern | Owner | Semantic effect |
+|---|---|---|
+| Model-context compaction | `before_model` middleware | Changes only the next model-visible projection and is recorded when durable behavior depends on it. |
+| Journal/storage compaction or pruning | Store/runtime maintenance plus application retention policy | Must preserve required recovery/audit meaning; never substitutes for context policy. |
+| Event/progress coalescing | Runtime/binding transport | Reduces transient delivery volume without changing durable semantics. |
+
+**Design verdict:** supported by the existing middleware port and `before_model` stage. Clarify the normalized outcome/checkpoint contract; add no new port, kernel phase, or eighth middleware stage.
+
 # 4. Capability accommodation summary
 
 | Capability | Fit | Main building blocks | Smallest required change |
@@ -359,6 +406,7 @@ Budget aggregation should initially be a runtime service. The kernel continues t
 | Sandboxed code/computer use | Strong | Toolset, WIT/process isolation, blobs, progress | None |
 | Multi-channel routing | Strong | Application adapters, session server, lanes, principals | None |
 | Guardrails/evaluations/verification | Strong with clarification | Middleware, observer, toolsets | Clarify `before_finalize` stage |
+| Cross-cutting context compaction | Strong with clarification | `before_model` middleware, model limits, recorded outcome/checkpoint | Clarify ownership and derived-checkpoint contract; no new stage |
 
 The conclusion is deliberately conservative: no feature-specific port or generic workflow engine is needed in the kernel.
 
@@ -789,7 +837,7 @@ A run may need:
 - acceptance of a result; or
 - escalation to another role.
 
-The current approval-specific concept is too narrow. It should become a generalized `Interaction` effect.
+The prior approval-specific concept was too narrow. The authoritative baseline now uses a generalized `Interaction` effect.
 
 ## 9.3 Interaction lifecycle
 
@@ -1140,7 +1188,7 @@ candidate final result
   -> terminal record only after middleware accepts
 ```
 
-The current `after_run` name is ambiguous. It should be replaced by or explicitly defined as `before_finalize` for behavior-changing middleware. Post-terminal work belongs to observers.
+The former `after_run` name was ambiguous. The authoritative baseline uses `before_finalize` for behavior-changing middleware; post-terminal work belongs to observers.
 
 ## 14.4 Evaluations
 
@@ -1628,7 +1676,7 @@ These are reusable services, not kernel ports.
 
 # 19. Implementation-plan impact
 
-The current 66-PR implementation plan remains valid. The following amendments minimize rework.
+The v0.5 66-PR implementation plan remains valid and incorporates the following amendments. This table is retained as a verification map between the validation findings and the authoritative delivery sequence.
 
 | Existing PR | Recommended amendment |
 |---|---|
@@ -1636,9 +1684,9 @@ The current 66-PR implementation plan remains valid. The following amendments mi
 | PR-009/010 | Ensure reducer can enter and leave `AwaitingExternal` without feature-specific branches |
 | PR-011 | Include cancellation/deadline behavior for deferred effects and interactions |
 | PR-014 | Add runtime command routing for external completion and deterministic duplicate handling |
-| PR-018 | Define `before_finalize`; ensure middleware can request continuation before terminal commit |
+| PR-018 | Define `before_finalize` and the normalized `before_model` compaction outcome/checkpoint contract |
 | PR-021/022 | Add `AgentCatalog`, `AgentInvoker` service wiring, and non-kernel `BundleSpec` |
-| PR-023 | Add conformance helpers for child runs, deferred completion, and interaction schemas |
+| PR-023 | Add conformance helpers for child runs, deferred completion, interaction schemas, and compaction projections |
 | PR-030/034 | Bind external completion, child-run handles, and interaction APIs coarsely |
 | PR-039 | Freeze the generalized records rather than approval-only records |
 | PR-042 | Use generic deferred-effect reconciliation for background model responses |
@@ -1646,7 +1694,8 @@ The current 66-PR implementation plan remains valid. The following amendments mi
 | PR-044 | Rename and implement durable interactions; ship approval as the first profile |
 | PR-046/047 | Persist and expose run lineage; add child-run/lane stress tests |
 | PR-049/050 | Keep WIT v1 limited to toolset/context; do not expose full agent invocation initially |
-| PR-056 | Include first-party reference memory/RAG and verification capability patterns or examples |
+| PR-056 | Implement deterministic window/tool-output and model-assisted compaction middleware plus reference memory/RAG and verification patterns |
+| PR-057 | Expose compaction trigger, before/after budget, strategy, failure, checkpoint, and prompt-cache-impact diagnostics without logging compacted content by default |
 | PR-059 | Map workflow waits and callbacks to interactions/deferred effects rather than custom semantics |
 
 ## 19.1 Suggested post-preview battery sequence
@@ -1681,8 +1730,9 @@ Rust, Python, and browser WASM should produce equivalent durable records and pub
 9. memory recall contribution with deterministic ordering;
 10. RAG results with provenance and blob references;
 11. `before_finalize` rejecting a candidate result and causing another turn;
-12. channel/client disconnect while a durable run continues; and
-13. long-running sandbox job using callback or polling reconciliation.
+12. channel/client disconnect while a durable run continues;
+13. long-running sandbox job using callback or polling reconciliation; and
+14. `before_model` compaction producing the same protected, valid model-visible projection while canonical history remains unchanged.
 
 ## 20.2 Crash-prefix tests
 
@@ -1695,7 +1745,8 @@ Crash tests should be generated before and after:
 - `EffectDeferred` commit;
 - external completion receipt;
 - interaction request commit;
-- interaction resolution receipt; and
+- interaction resolution receipt;
+- compaction middleware effect request, summary completion, normalized outcome/checkpoint commit, and main model-effect request; and
 - pre-finalize middleware outcome commit.
 
 Every prefix must restore to completed, retryable, suspended, cancelled, failed, or explicit uncertain state.
@@ -1710,8 +1761,11 @@ Useful properties include:
 - an interaction resolution must match its recorded schema;
 - run lineage is acyclic;
 - depth and root IDs remain consistent;
-- capability activation occurs only at safe checkpoints; and
-- context-provider order is deterministic regardless of completion order.
+- capability activation occurs only at safe checkpoints;
+- context-provider order is deterministic regardless of completion order;
+- compaction never removes protected items or splits tool-call/result pairs;
+- a compaction checkpoint is reusable only for the same strategy/configuration and covered-history digest; and
+- compaction changes no canonical conversation entry or parent link.
 
 ## 20.4 Performance tests
 
@@ -1722,8 +1776,9 @@ Measure:
 - memory/RAG provider fan-out and budget assembly;
 - external completion resume latency;
 - Python interaction and child-run handle overhead;
-- WASM event batching for child streams; and
-- journal replay with deep run lineage.
+- WASM event batching for child streams;
+- journal replay with deep run lineage; and
+- deterministic and model-assisted compaction latency, allocation, token reduction, checkpoint reuse, and prompt-cache impact.
 
 The benchmark should isolate framework overhead from network/model latency.
 
@@ -1769,18 +1824,24 @@ Journal records contain opaque identifiers and non-secret reconciliation metadat
 
 Bundle resolution must surface conflicts in tool permissions, memory scope, middleware order, store ownership, and interaction routing before agent construction.
 
+## 21.11 Treating compaction as history mutation or provider behavior
+
+Compaction must not rewrite canonical conversation entries, hide policy-required content, or occur silently inside a model adapter. Model-visible compaction is explicit `before_model` middleware with protected-item rules, recorded evidence, replay behavior, and a safe failure path. Journal pruning and event coalescing remain separate concerns.
+
 # 22. Final decision and acceptance checklist
 
 ## 22.1 Final decision
 
 The current microkernel architecture is fit for the future capability set reviewed here. The framework should proceed without adding new primary ports or a general workflow graph.
 
-Before public journal/API contracts freeze, implement or specify:
+The authoritative v0.5 baseline specifies, and the implementation plan schedules before public journal/API contracts freeze:
 
 - generic deferred effects;
 - run lineage;
 - generalized interactions; and
 - a pre-terminal `before_finalize` middleware stage.
+
+Context compaction is explicitly assigned to the existing `before_model` middleware stage. Its output/checkpoint is derived and versioned, canonical history remains immutable, and no new port or middleware stage is required.
 
 Add `AgentCatalog`, `AgentInvoker`, `BundleSpec`, interaction routing, external completion routing, budget aggregation, and artifact services in the SDK/runtime/application layers.
 
@@ -1795,6 +1856,7 @@ The design is ready for these future capabilities when all answers below are yes
 | Can an interaction collect typed input beyond approve/deny? | Yes |
 | Can memory and RAG contribute context without mutating history? | Yes |
 | Can a verification policy prevent terminal completion? | Yes |
+| Can model context be compacted without mutating canonical history or hiding the policy owner? | Yes, through `before_model` middleware |
 | Can workflows compose runs without replacing run semantics? | Yes |
 | Can native components stay direct-call and registry-free in the hot path? | Yes |
 | Can Python/WASM expose the same behavior through coarse handles/events? | Yes |
@@ -1815,6 +1877,7 @@ The design is ready for these future capabilities when all answers below are yes
 | Sandbox/computer use | Tool effects, blobs, progress, cancellation | Toolset | Process/WASI/remote sandbox host |
 | Multi-channel | Sessions, lanes, principals, events | Context/tool/middleware as needed | Channel adapters, session server |
 | Guardrails/evals | Events, middleware checkpoints, terminal transition | Middleware, Observer, Toolset | Eval runners, policy/config services |
+| Context compaction | Immutable history, recorded middleware outcome | Middleware (`before_model`) | Token estimator, optional summary model, derived checkpoint/artifact cache |
 
 # Appendix B. Example bundle specifications
 
@@ -1905,6 +1968,8 @@ The design is ready for these future capabilities when all answers below are yes
 **Bundle:** Deployment/application composition of agents, capabilities, required components, and defaults.
 
 **Capability:** Declarative behavior assembled from instructions and references to registered toolsets, context providers, and middleware.
+
+**Context compaction:** A `before_model` middleware policy that derives a bounded model-visible projection from immutable canonical history and records sufficient evidence/checkpoint data for attribution and replay.
 
 **Deferred effect:** Requested external work that has not produced a final result but has a durable handle and future completion path.
 
