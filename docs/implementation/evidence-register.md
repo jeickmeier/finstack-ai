@@ -92,7 +92,7 @@ PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. 
 
 PR-002 acceptance is closed against `ee9754fe2d0f015181dcefa97e715392aadd28ed`. Artifacts live under [`artifacts/pr-002/`](artifacts/pr-002/). A02–A04 are `Not applicable` because compile-fixture proofs were intentionally deferred to PR-014–PR-018; package-edge / wasm-host checks remain in scope for PR-002. Hosted CI wiring is PR-003.
 
-PR-003 acceptance is closed against hosted PR head `c2f4e79498c17dcea334d0e67b41289474cd2acd` on https://github.com/jeickmeier/finstack-ai/pull/1 (A01–A05 Passed). Hosted A01/A03 evidence: PR-003-E-hosted-ci-b7f2fe44f7c1 and PR-003-E-hosted-release-smoke-be7df0f3c45c. Blocker PR-003-B-no-remote-ede93913b2ea is Resolved. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
+PR-003 acceptance is closed and the logical PR is `Done` at merge `9b0709a8cf2d96b418406f953e7bdc958925c274` ([#1](https://github.com/jeickmeier/finstack-ai/pull/1); A01–A05 Passed). Hosted A01/A03 evidence was bound from green PR head `c2f4e79498c17dcea334d0e67b41289474cd2acd` and reconfirmed green at merge head `87e137c52ea7d738cda20eb949b3c7d51467e58c` (ci run 31272341190). Blocker PR-003-B-no-remote-ede93913b2ea is Resolved. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
 
 ## Evidence records
 
