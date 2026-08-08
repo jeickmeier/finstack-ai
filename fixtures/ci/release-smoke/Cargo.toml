@@ -1,0 +1,22 @@
+[package]
+name = "finstack-ai-ci-smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Private CI-only release smoke binary for finstack-ai"
+publish = false
+
+[[bin]]
+name = "finstack-ai-ci-smoke"
+path = "src/main.rs"
+
+[dependencies]
+# Explicit native defaults: workspace.dependencies disables facade defaults.
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+
+[lints]
+workspace = true

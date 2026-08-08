@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-ci-smoke"
+version = "0.0.1"
+dependencies = [
+ "finstack-ai",
+]
+
+[[package]]
 name = "finstack-ai-kernel"
 version = "0.0.1"
 

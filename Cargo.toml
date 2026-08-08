@@ -8,7 +8,17 @@ members = [
     "crates/finstack-ai-test",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
+    "fixtures/ci/release-smoke",
 ]
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = "symbols"
+panic = "abort"
+opt-level = 3
+debug = false
+incremental = false
 
 [workspace.package]
 version = "0.0.1"

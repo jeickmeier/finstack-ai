@@ -19,10 +19,12 @@
 - [ ] Acceptance evidence updated when criteria are claimed ([evidence register](../docs/implementation/evidence-register.md))
 - [ ] Commits are DCO signed-off (`git commit -s`)
 - [ ] Affected `mise run` / `cargo` checks documented below (include `mise run architecture` when boundaries change)
+- [ ] Hosted CI workflows considered (see [`.github/ci/README.md`](./ci/README.md)); supply-chain/secret jobs name TM/ENG controls when security-relevant
 
 ## Verification
 
 ```text
+# Prefer: mise run ci
 # Commands run and results
 ```
 

@@ -1,9 +1,24 @@
-# Minimal cargo-deny policy stub for Phase 0.
-# CI wiring and fuller advisories/ban graphs land with PR-003.
+# cargo-deny policy for Phase 0 / PR-003.
+# Controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13.
 
 [graph]
-all-features = false
+# Scan every feature combination so optional dependencies cannot escape
+# advisory, license, source, or ban policy (Eng Standards §9; TM-18).
+all-features = true
 no-default-features = false
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "wasm32-unknown-unknown" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
 
 [licenses]
 version = 2
@@ -11,14 +26,23 @@ allow = [
     "MIT",
     "Apache-2.0",
 ]
+# Additional common OSI licenses may be added when a dependency first needs them.
+# Keep the allowlist tight; unmatched allowances become cargo-deny warnings.
 confidence-threshold = 0.8
+exceptions = []
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+wildcards = "deny"
 highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = []
+skip = []
+skip-tree = []
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
