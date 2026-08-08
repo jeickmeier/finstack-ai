@@ -3,7 +3,8 @@
 //! Phase 0 (PR-005) provides the golden-trace fixture language, a target-neutral
 //! conformance runner, and Criterion benchmark helpers. PR-006 adds deterministic
 //! clock/random fakes and the `public-rust-api` fixture runner. PR-007 extends that
-//! runner with content-block, blob-ref, and message subjects.
+//! runner with content-block, blob-ref, and message subjects. PR-008 adds
+//! run/effect/record/event subjects.
 
 #![warn(missing_docs)]
 
@@ -11,6 +12,7 @@ mod conformance;
 mod fakes;
 mod message_fixture;
 mod paths;
+mod pr008_fixture;
 mod public_api_fixture;
 mod scripted_model;
 mod trace_fixture;

@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "subject": "effect_requested",
+  "operation": "construct",
+  "input": {
+    "effect_id": "01234567-89ab-7cde-89ab-0123456789ab",
+    "kind": "model",
+    "output_contract": {
+      "kind": "model_response",
+      "schema_version": 1,
+      "schema_digest": "f8173424c08358c7a6adb8dee8899871057e5e39f3c598bf182b2c2a3af658fe"
+    },
+    "input": {
+      "model": {
+        "request": { "a": 1 }
+      }
+    }
+  },
+  "expect": {
+    "ok": true,
+    "input_digest": "c59ec0a2d3310a96d14147f8ea38ec979fe0623a5aa3ad6f15981ae26e67eab7"
+  }
+}

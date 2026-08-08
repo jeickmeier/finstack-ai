@@ -1,0 +1,330 @@
+//! Value-only run limits and cost policy (TDD §22.1).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use serde::de;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::ids::LimitKey;
+use crate::refs::{RefsError, validated_label};
+use crate::time::Duration;
+
+/// Limit dimension used by reserved limit-reached surfaces.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LimitDimension {
+    /// Model requests.
+    ModelRequests,
+    /// Turns.
+    Turns,
+    /// Tool calls.
+    ToolCalls,
+    /// Parallel tools.
+    ParallelTools,
+    /// Input tokens.
+    InputTokens,
+    /// Output tokens.
+    OutputTokens,
+    /// Context bytes.
+    ContextBytes,
+    /// Output bytes.
+    OutputBytes,
+    /// Retries.
+    Retries,
+    /// Wall time.
+    WallTime,
+    /// Cost.
+    Cost,
+    /// Extension counter.
+    Extension {
+        /// Namespaced key.
+        key: LimitKey,
+    },
+}
+
+/// Unknown-usage policy for cost limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnknownUsagePolicy {
+    /// Fail closed when usage is unknown.
+    FailClosed,
+    /// Suspend for an operator/application decision.
+    SuspendForDecision,
+    /// Allow within a reserved maximum.
+    AllowWithinReservedMaximum,
+}
+
+/// Cost ceiling with pricing policy metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+pub struct CostLimit {
+    unit: Arc<str>,
+    #[serde(serialize_with = "serialize_micros")]
+    micros: u64,
+    pricing_policy_version: Arc<str>,
+    unknown_usage: UnknownUsagePolicy,
+}
+
+impl CostLimit {
+    /// Construct a cost limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LimitsError::InvalidLabel`] when unit/policy labels fail rules.
+    pub fn try_new(
+        unit: impl AsRef<str>,
+        micros: u64,
+        pricing_policy_version: impl AsRef<str>,
+        unknown_usage: UnknownUsagePolicy,
+    ) -> Result<Self, LimitsError> {
+        Ok(Self {
+            unit: validated_label(unit.as_ref(), "unit").map_err(LimitsError::from)?,
+            micros,
+            pricing_policy_version: validated_label(
+                pricing_policy_version.as_ref(),
+                "pricing_policy_version",
+            )
+            .map_err(LimitsError::from)?,
+            unknown_usage,
+        })
+    }
+
+    /// Borrow the unit.
+    #[must_use]
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+
+    /// Return micros.
+    #[must_use]
+    pub fn micros(&self) -> u64 {
+        self.micros
+    }
+
+    /// Borrow the pricing policy version.
+    #[must_use]
+    pub fn pricing_policy_version(&self) -> &str {
+        &self.pricing_policy_version
+    }
+
+    /// Return unknown-usage policy.
+    #[must_use]
+    pub fn unknown_usage(&self) -> UnknownUsagePolicy {
+        self.unknown_usage
+    }
+}
+
+impl<'de> Deserialize<'de> for CostLimit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            unit: String,
+            #[serde(deserialize_with = "deserialize_micros")]
+            micros: u64,
+            pricing_policy_version: String,
+            unknown_usage: UnknownUsagePolicy,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.unit,
+            wire.micros,
+            wire.pricing_policy_version,
+            wire.unknown_usage,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+/// Value-only run limits stored on `RunAccepted` (enforcement is PR-011).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunLimits {
+    /// Max model requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_model_requests: Option<u64>,
+    /// Max turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u64>,
+    /// Max tool calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tool_calls: Option<u64>,
+    /// Max parallel tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_parallel_tools: Option<u32>,
+    /// Max input tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_tokens: Option<u64>,
+    /// Max output tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    /// Max context bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_context_bytes: Option<u64>,
+    /// Max output bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<u64>,
+    /// Max retries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+    /// Max wall time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wall_time: Option<Duration>,
+    /// Max cost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost: Option<CostLimit>,
+    /// Extension counter ceilings.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extension_counters: BTreeMap<LimitKey, u64>,
+}
+
+impl RunLimits {
+    /// Empty limits (no ceilings).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            max_model_requests: None,
+            max_turns: None,
+            max_tool_calls: None,
+            max_parallel_tools: None,
+            max_input_tokens: None,
+            max_output_tokens: None,
+            max_context_bytes: None,
+            max_output_bytes: None,
+            max_retries: None,
+            max_wall_time: None,
+            max_cost: None,
+            extension_counters: BTreeMap::new(),
+        }
+    }
+
+    /// True when every field of `child` is less than or equal to `self` where both are set.
+    ///
+    /// Absent parent ceilings do not constrain children. Present child ceilings must not
+    /// exceed the parent. Extension keys present only on the child are allowed only when
+    /// the parent map is empty; otherwise child keys must be a subset and values attenuated.
+    #[must_use]
+    pub fn allows_child_attenuation(&self, child: &Self) -> bool {
+        opt_le(self.max_model_requests, child.max_model_requests)
+            && opt_le(self.max_turns, child.max_turns)
+            && opt_le(self.max_tool_calls, child.max_tool_calls)
+            && opt_le(self.max_parallel_tools, child.max_parallel_tools)
+            && opt_le(self.max_input_tokens, child.max_input_tokens)
+            && opt_le(self.max_output_tokens, child.max_output_tokens)
+            && opt_le(self.max_context_bytes, child.max_context_bytes)
+            && opt_le(self.max_output_bytes, child.max_output_bytes)
+            && opt_le(self.max_retries, child.max_retries)
+            && opt_duration_le(self.max_wall_time, child.max_wall_time)
+            && cost_le(self.max_cost.as_ref(), child.max_cost.as_ref())
+            && counters_attenuated(&self.extension_counters, &child.extension_counters)
+    }
+}
+
+/// Limits validation errors.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LimitsError {
+    /// Label failed validation.
+    #[error(transparent)]
+    InvalidLabel(#[from] RefsError),
+}
+
+impl LimitsError {
+    /// Stable error code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidLabel(inner) => inner.code(),
+        }
+    }
+}
+
+fn opt_le<T: PartialOrd>(parent: Option<T>, child: Option<T>) -> bool {
+    match (parent, child) {
+        (Some(p), Some(c)) => c <= p,
+        (None, _) | (Some(_), None) => true,
+    }
+}
+
+fn opt_duration_le(parent: Option<Duration>, child: Option<Duration>) -> bool {
+    match (parent, child) {
+        (Some(p), Some(c)) => c.as_millis() <= p.as_millis(),
+        (None, _) | (Some(_), None) => true,
+    }
+}
+
+fn cost_le(parent: Option<&CostLimit>, child: Option<&CostLimit>) -> bool {
+    match (parent, child) {
+        (Some(p), Some(c)) => c.unit() == p.unit() && c.micros() <= p.micros(),
+        (None, _) | (Some(_), None) => true,
+    }
+}
+
+fn counters_attenuated(parent: &BTreeMap<LimitKey, u64>, child: &BTreeMap<LimitKey, u64>) -> bool {
+    if parent.is_empty() {
+        return true;
+    }
+    child.iter().all(|(key, value)| {
+        parent
+            .get(key)
+            .is_some_and(|parent_value| value <= parent_value)
+    })
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn serialize_micros<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
+
+fn deserialize_micros<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    if text.is_empty()
+        || (text.len() > 1 && text.starts_with('0'))
+        || !text.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(de::Error::custom(
+            "micros must be a canonical decimal string",
+        ));
+    }
+    text.parse::<u64>()
+        .map_err(|_| de::Error::custom("micros overflow or invalid"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_limits_must_attenuate() {
+        let parent = RunLimits {
+            max_turns: Some(10),
+            max_cost: Some(
+                CostLimit::try_new("USD", 1000, "p1", UnknownUsagePolicy::FailClosed)
+                    .expect("cost"),
+            ),
+            ..RunLimits::empty()
+        };
+        let ok = RunLimits {
+            max_turns: Some(5),
+            max_cost: Some(
+                CostLimit::try_new("USD", 500, "p1", UnknownUsagePolicy::FailClosed).expect("cost"),
+            ),
+            ..RunLimits::empty()
+        };
+        let bad = RunLimits {
+            max_turns: Some(11),
+            ..RunLimits::empty()
+        };
+        assert!(parent.allows_child_attenuation(&ok));
+        assert!(!parent.allows_child_attenuation(&bad));
+    }
+}

@@ -277,6 +277,8 @@ define_key_tag!(BundleTag, "bundle", false);
 define_key_tag!(ComponentTag, "component", true);
 define_key_tag!(CapabilityTag, "capability", true);
 define_key_tag!(ToolTag, "tool", true);
+define_key_tag!(LimitTag, "limit", true);
+define_key_tag!(EffectOutputTag, "effect-output", true);
 
 /// Maximum UTF-8 byte length for a namespaced key (TDD §4).
 pub const KEY_MAX_BYTES: usize = 128;
@@ -498,6 +500,10 @@ pub type ComponentId = Key<ComponentTag>;
 pub type CapabilityId = Key<CapabilityTag>;
 /// Registered tool name key.
 pub type ToolId = Key<ToolTag>;
+/// Namespaced extension/limit counter key.
+pub type LimitKey = Key<LimitTag>;
+/// Namespaced custom effect-output kind key.
+pub type EffectOutputKey = Key<EffectOutputTag>;
 
 #[cfg(test)]
 mod tests {

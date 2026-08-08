@@ -1,4 +1,4 @@
-//! PR-006 public-rust-api compatibility corpus.
+//! Public-rust-api compatibility corpus (PR-006–PR-008).
 
 use finstack_ai_kernel::Timestamp;
 use finstack_ai_runtime::UuidV7Generator;
@@ -8,8 +8,8 @@ use finstack_ai_test::{FixedClock, PatternRandomSource, run_all_public_api_fixtu
 fn public_rust_api_corpus_passes() {
     let count = run_all_public_api_fixtures().expect("public-rust-api fixtures");
     assert_eq!(
-        count, 38,
-        "expected the PR-006/PR-007 public-rust-api corpus size, found {count}"
+        count, 50,
+        "expected the PR-006–PR-008 public-rust-api corpus size, found {count}"
     );
 }
 
