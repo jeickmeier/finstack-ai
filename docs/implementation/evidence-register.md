@@ -92,7 +92,7 @@ PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. 
 
 PR-002 acceptance is closed against `ee9754fe2d0f015181dcefa97e715392aadd28ed`. Artifacts live under [`artifacts/pr-002/`](artifacts/pr-002/). A02–A04 are `Not applicable` because compile-fixture proofs were intentionally deferred to PR-014–PR-018; package-edge / wasm-host checks remain in scope for PR-002. Hosted CI wiring is PR-003.
 
-PR-003 acceptance is partially closed against review-fix `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22` (A02/A04/A05 Passed with local/review evidence). A01 and cross-platform A03 remain `Pending` until hosted CI evidence exists; blocked by PR-003-B-no-remote-ede93913b2ea. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
+PR-003 acceptance is partially closed on `main` after local merge `d3d8d1e01bd665276847da5c8a94a01567813956` (A02/A04/A05 Passed against review-fix `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22`). A01 and cross-platform A03 remain `Pending` until hosted CI evidence exists; blocked by PR-003-B-no-remote-ede93913b2ea. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
 
 ## Evidence records
 
