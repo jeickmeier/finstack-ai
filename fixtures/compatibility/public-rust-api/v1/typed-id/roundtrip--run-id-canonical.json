@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "run_id",
+  "operation": "roundtrip",
+  "input": {
+    "canonical": "01234567-89ab-7cde-89ab-0123456789ab"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "01234567-89ab-7cde-89ab-0123456789ab",
+    "reject_as": ["session_id"]
+  }
+}

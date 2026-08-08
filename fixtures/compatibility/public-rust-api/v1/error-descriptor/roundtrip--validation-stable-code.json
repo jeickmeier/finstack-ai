@@ -1,0 +1,25 @@
+{
+  "format_version": 1,
+  "subject": "error_descriptor",
+  "operation": "roundtrip",
+  "input": {
+    "code": "raw_json_too_large",
+    "message": "JSON source span exceeded the v1 ceiling",
+    "category": "validation",
+    "retryable": false,
+    "identifiers": {
+      "run_id": "01234567-89ab-7cde-89ab-0123456789ab"
+    },
+    "safe_details": {
+      "limit_bytes": 1048576,
+      "observed_bytes": 1048577
+    }
+  },
+  "expect": {
+    "ok": true,
+    "code": "raw_json_too_large",
+    "category": "validation",
+    "retryable": false,
+    "safe_details_jcs": "{\"limit_bytes\":1048576,\"observed_bytes\":1048577}"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "duration",
+  "operation": "project",
+  "input": {
+    "millis": 9007199254740991
+  },
+  "expect": {
+    "ok": true,
+    "millis": 9007199254740991,
+    "javascript_number": 9007199254740991
+  }
+}

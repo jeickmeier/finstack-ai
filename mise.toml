@@ -74,8 +74,17 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
+[tasks.test-kernel]
+description = "Run focused kernel and public-rust-api fixture tests (PR-006)"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-kernel --locked
+cargo test -p finstack-ai-runtime --locked
+cargo test -p finstack-ai-test --test public_rust_api --locked
+"""
+
 [tasks.conformance]
-description = "Run golden-trace and conformance harness tests (PR-005)"
+description = "Run golden-trace and conformance harness tests (PR-005/PR-006)"
 run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]

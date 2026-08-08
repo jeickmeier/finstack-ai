@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "digest",
+  "operation": "digest",
+  "input": {
+    "text": "{\"b\":2,\"a\":1}"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "{\"a\":1,\"b\":2}",
+    "digest_hex": "312bf4e09bef53abdda7c0ff2f279405efe21ac24dce8c2117a5d521b68a9030"
+  }
+}

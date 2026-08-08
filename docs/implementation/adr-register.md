@@ -53,7 +53,7 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Not started | Missing |
+| ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | In progress | Missing |
 | ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | Not started | Missing |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-032 | `disposable-snapshots` | Durability/ecosystem lead | PR-041 | Accepted | Standalone | Not started | Missing |
@@ -145,6 +145,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-035 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-035-experimental-wit-versioning.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-036 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-036-blob-storage-boundary.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-037 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-037-middleware-compaction.md | — | me@jeickmeier.com |
+| 2026-08-08 | ADR-029 | Implementation | me@jeickmeier.com | Not started | In progress | PR-006 typed identifier / RawJson / error foundations on `pr-006-kernel-value-types` | — | — |
 
 ## Current record and evidence links
 
@@ -178,7 +179,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-026 | [ADR-026-run-lineage.md](adrs/ADR-026-run-lineage.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-027 | [ADR-027-typed-interactions.md](adrs/ADR-027-typed-interactions.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | Missing (implementation in progress on `pr-006-kernel-value-types`) | PR-004 standalone ADR; PR-006 delivery | 2026-08-08 |
 | ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-031 | [ADR-031-worker-based-wasm.md](adrs/ADR-031-worker-based-wasm.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-032 | [ADR-032-disposable-snapshots.md](adrs/ADR-032-disposable-snapshots.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |

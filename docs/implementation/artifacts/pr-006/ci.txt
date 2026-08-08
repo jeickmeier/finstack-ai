@@ -1,0 +1,806 @@
+[ci] $ mise run format
+[format] $ cargo fmt --all -- --check
+[clippy] $ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+[test] $ cargo test --workspace --locked
+   Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+   Compiling finstack-ai-protocol v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-protocol)
+   Compiling finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
+   Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
+   Compiling finstack-ai-python v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-python)
+   Compiling finstack-ai-wasm v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/bindings/finstack-ai-wasm)
+   Compiling finstack-ai-ci-smoke v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/fixtures/ci/release-smoke)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai-53dd72dc6102afec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/finstack_ai_ci_smoke-316cb05f0c8553c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-38928cf2b2bca6cd)
+
+running 12 tests
+test time::tests::duration_js_safe_boundary ... ok
+test time::tests::rejects_leap_seconds_and_out_of_range ... ok
+test time::tests::timestamp_round_trips_rfc3339_and_unix_ms ... ok
+test digest::tests::domain_separation_changes_digest ... ok
+test ids::tests::keys_validate_namespace_rules ... ok
+test ids::tests::ids_serialize_lowercase_and_reject_invalid ... ok
+test time::tests::json_uses_rfc3339_text ... ok
+test raw_json::tests::rejects_duplicates_trailing_data_and_depth ... ok
+test error::tests::error_descriptor_json_round_trip_preserves_stable_fields ... ok
+test raw_json::tests::parse_canonicalizes_and_shares_bytes_on_clone ... ok
+test raw_json::tests::metadata_preserves_unknown_members_and_limits ... ok
+test raw_json::tests::enforces_exact_and_one_over_source_ceiling ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_protocol-3a6dfe09fb2a6603)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_python-c17ee6229919afbd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-fc7c7a1264124f85)
+
+running 1 test
+test id_generation::tests::deterministic_uuidv7_from_injected_sources ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-33620bfabfd78cff)
+
+running 4 tests
+test public_api_fixture::tests::metadata_key_ceiling_constant_is_visible ... ok
+test public_api_fixture::tests::json_string_recipe_materializes_exact_source_span ... ok
+test trace_fixture::tests::normalize_sorts_object_keys ... ok
+test public_api_fixture::tests::scientific_array_recipe_expands_under_jcs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/conformance.rs (target/debug/deps/conformance-54275eb1bfe33524)
+
+running 3 tests
+test rust_noop_adapter_passes_noop_trace ... ok
+test rust_noop_adapter_passes_durable_vs_transient_trace ... ok
+test python_and_wasm_adapters_are_deferred_and_never_pass ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/golden_trace.rs (target/debug/deps/golden_trace-73a5d7d578113c81)
+
+running 5 tests
+test normalization_is_order_independent_for_object_keys ... ok
+test unknown_fields_are_rejected ... ok
+test durable_and_transient_events_are_distinguished ... ok
+test oversized_payload_declarations_are_rejected ... ok
+test noop_trace_loads_and_compares_byte_for_byte ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-8a9ebcebbd2df515)
+
+running 2 tests
+test deterministic_uuidv7_fakes_are_repeatable ... ok
+test public_rust_api_corpus_passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_wasm-7b80e9a3b0a41f92)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_kernel
+
+running 1 test
+test crates/finstack-ai-kernel/src/lib.rs - (line 9) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test crates/finstack-ai-kernel/src/ids.rs - ids::Id (line 56) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+all doctests ran in 0.35s; merged doctests compilation took 0.13s
+   Doc-tests finstack_ai_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_python
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_test
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[docs] $ cargo doc --workspace --no-deps --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+   Generated /Users/jeickmeier/Projects/finstack-ai/target/doc/finstack_ai/index.html and 7 other files
+[check-minimal] $ cargo check -p finstack-ai-kernel --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+[architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
+----------------------------------------------------------------------
+Ran 21 tests in 0.136s
+
+OK
+finstack-ai architecture check
+repo: /Users/jeickmeier/Projects/finstack-ai
+elapsed_ms: 110.1
+
+PASS: no architecture findings
+[check-wasm] $ rustup target add wasm32-unknown-unknown && cargo check -p finst…
+info: component rust-std for target wasm32-unknown-unknown is up to date
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+[check-wasm] $ rustup target add wasm32-unknown-unknown && cargo check -p finst…
+info: component rust-std for target wasm32-unknown-unknown is up to date
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+[lint-ci] $ uv run --no-project --with ruff==0.12.11 ruff check tools/ci tools/…
+All checks passed!
+[format-ci] $ uv run --no-project --with ruff==0.12.11 ruff format --check tool…
+8 files already formatted
+[test-ci] $ uv run --no-project python -m unittest discover -s tools/ci/tests -v
+test_binary_name_uses_exe_suffix_on_windows (test_release.ReleaseHelperTests.test_binary_name_uses_exe_suffix_on_windows) ... ok
+test_cargo_package_metadata_reads_workspace_version (test_release.ReleaseHelperTests.test_cargo_package_metadata_reads_workspace_version) ... ok
+test_git_commit_fails_closed_in_ci_without_identity (test_release.ReleaseHelperTests.test_git_commit_fails_closed_in_ci_without_identity) ... ok
+test_sha256_file_is_stable (test_release.ReleaseHelperTests.test_sha256_file_is_stable) ... ok
+test_write_metadata_uses_cargo_version_and_commit (test_release.ReleaseHelperTests.test_write_metadata_uses_cargo_version_and_commit) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.019s
+
+OK
+test_assembled_token_is_not_committed_as_a_whole (test_secret_canary.SecretCanaryTests.test_assembled_token_is_not_committed_as_a_whole) ... ok
+test_canary_paths_cover_lockfiles (test_secret_canary.SecretCanaryTests.test_canary_paths_cover_lockfiles) ... ok
+test_manifest_marks_fixture_non_evidentiary (test_secret_canary.SecretCanaryTests.test_manifest_marks_fixture_non_evidentiary) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+[lint-schema-governance] $ uv run --no-project --with ruff==0.12.11 ruff check …
+All checks passed!
+[format-schema-governance] $ uv run --no-project --with ruff==0.12.11 ruff form…
+4 files already formatted
+[test-schema-governance] $ uv run --no-project python -m unittest discover -s t…
+test_complete_inventory_passes (test_check.AdrInventoryTests.test_complete_inventory_passes) ... ok
+test_missing_adr_files_fail_gov001 (test_check.AdrInventoryTests.test_missing_adr_files_fail_gov001) ... ok
+test_missing_heading_fails_gov002 (test_check.AdrRecordTests.test_missing_heading_fails_gov002) ... ok
+test_missing_security_fails_gov003 (test_check.AdrRecordTests.test_missing_security_fails_gov003) ... ok
+test_missing_traceability_fails_gov002 (test_check.AdrRecordTests.test_missing_traceability_fails_gov002) ... ok
+test_required_headings_are_documented (test_check.AdrRecordTests.test_required_headings_are_documented) ... ok
+test_pr005_harness_families_are_required (test_check.CheckIdTests.test_pr005_harness_families_are_required) ... ok
+test_process_family_is_required (test_check.CheckIdTests.test_process_family_is_required) ... ok
+test_stable_check_ids_exist (test_check.CheckIdTests.test_stable_check_ids_exist) ... ok
+test_complete_registry_passes (test_check.ContractRegistryTests.test_complete_registry_passes) ... ok
+test_missing_family_fails_gov004 (test_check.ContractRegistryTests.test_missing_family_fails_gov004) ... ok
+test_complete_impact_sections_pass (test_check.PrTemplateTests.test_complete_impact_sections_pass) ... ok
+test_missing_impact_sections_fail_gov007 (test_check.PrTemplateTests.test_missing_impact_sections_fail_gov007) ... ok
+test_base_ref_from_environment (test_check.RunChecksIntegrationTests.test_base_ref_from_environment) ... ok
+test_run_checks_returns_diagnostics_for_empty_repo (test_check.RunChecksIntegrationTests.test_run_checks_returns_diagnostics_for_empty_repo) ... ok
+test_comment_containing_draft_uri_without_schema_field_fails (test_check.SchemaFixtureCouplingTests.test_comment_containing_draft_uri_without_schema_field_fails) ... ok
+test_invalid_schema_name_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_invalid_schema_name_fails_gov005) ... ok
+test_no_schema_files_passes_without_base (test_check.SchemaFixtureCouplingTests.test_no_schema_files_passes_without_base) ... ok
+test_readme_fixture_does_not_satisfy_coupling (test_check.SchemaFixtureCouplingTests.test_readme_fixture_does_not_satisfy_coupling) ... ok
+test_schema_change_with_same_version_fixture_passes (test_check.SchemaFixtureCouplingTests.test_schema_change_with_same_version_fixture_passes) ... ok
+test_schema_change_without_fixture_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_schema_change_without_fixture_fails_gov006) ... ok
+test_schema_delete_requires_fixture_update (test_check.SchemaFixtureCouplingTests.test_schema_delete_requires_fixture_update) ... ok
+test_schema_rename_source_requires_fixture_coverage (test_check.SchemaFixtureCouplingTests.test_schema_rename_source_requires_fixture_coverage) ... ok
+test_unregistered_family_fails_gov006 (test_check.SchemaFixtureCouplingTests.test_unregistered_family_fails_gov006) ... ok
+test_v2_schema_not_covered_by_v1_fixture (test_check.SchemaFixtureCouplingTests.test_v2_schema_not_covered_by_v1_fixture) ... ok
+test_versioned_wit_requires_fixture (test_check.SchemaFixtureCouplingTests.test_versioned_wit_requires_fixture) ... ok
+test_versioned_wit_with_fixture_passes (test_check.SchemaFixtureCouplingTests.test_versioned_wit_with_fixture_passes) ... ok
+test_wit_path_must_be_versioned (test_check.SchemaFixtureCouplingTests.test_wit_path_must_be_versioned) ... ok
+test_wrong_draft_uri_fails_gov005 (test_check.SchemaFixtureCouplingTests.test_wrong_draft_uri_fails_gov005) ... ok
+
+----------------------------------------------------------------------
+Ran 29 tests in 1.564s
+
+OK
+[schema-governance] $ uv run --no-project python tools/schema_governance/check.…
+schema-governance: ok
+[conformance] $ cargo test -p finstack-ai-test --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_test-133c2b9a8c61f635)
+
+running 4 tests
+test public_api_fixture::tests::metadata_key_ceiling_constant_is_visible ... ok
+test public_api_fixture::tests::json_string_recipe_materializes_exact_source_span ... ok
+test trace_fixture::tests::normalize_sorts_object_keys ... ok
+test public_api_fixture::tests::scientific_array_recipe_expands_under_jcs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/conformance.rs (target/debug/deps/conformance-c11676d5dd7c91fb)
+
+running 3 tests
+test rust_noop_adapter_passes_durable_vs_transient_trace ... ok
+test rust_noop_adapter_passes_noop_trace ... ok
+test python_and_wasm_adapters_are_deferred_and_never_pass ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/golden_trace.rs (target/debug/deps/golden_trace-db07ced77649eb26)
+
+running 5 tests
+test normalization_is_order_independent_for_object_keys ... ok
+test unknown_fields_are_rejected ... ok
+test durable_and_transient_events_are_distinguished ... ok
+test oversized_payload_declarations_are_rejected ... ok
+test noop_trace_loads_and_compares_byte_for_byte ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-6c36d996ca04edcb)
+
+running 2 tests
+test deterministic_uuidv7_fakes_are_repeatable ... ok
+test public_rust_api_corpus_passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+   Doc-tests finstack_ai_test
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[lint-benchmark] $ uv run --no-project --with ruff==0.12.11 ruff check tools/be…
+All checks passed!
+[format-benchmark] $ uv run --no-project --with ruff==0.12.11 ruff format --che…
+4 files already formatted
+[test-benchmark] $ uv run --no-project python -m unittest discover -s tools/ben…
+test_build_metadata_includes_required_identity_fields (test_run.MetadataTests.test_build_metadata_includes_required_identity_fields) ... ok
+test_validate_metadata_accepts_fixture_shape (test_run.MetadataTests.test_validate_metadata_accepts_fixture_shape) ... ok
+test_validate_metadata_rejects_unknown_fields (test_run.MetadataTests.test_validate_metadata_rejects_unknown_fields) ... ok
+test_write_metadata_is_sorted_json (test_run.MetadataTests.test_write_metadata_is_sorted_json) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+OK
++ cargo bench -p finstack-ai-test --bench conformance --locked --no-run
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling version_check v0.9.5
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling serde v1.0.229
+   Compiling memchr v2.8.3
+   Compiling autocfg v1.5.1
+   Compiling zmij v1.0.23
+   Compiling zerocopy v0.8.56
+   Compiling serde_json v1.0.151
+   Compiling itoa v1.0.18
+   Compiling writeable v0.6.3
+   Compiling smallvec v1.15.2
+   Compiling typenum v1.20.1
+   Compiling litemap v0.8.2
+   Compiling icu_normalizer_data v2.2.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_properties_data v2.2.0
+   Compiling getrandom v0.3.4
+   Compiling ref-cast v1.0.26
+   Compiling regex-syntax v0.8.11
+   Compiling parking_lot_core v0.9.12
+   Compiling generic-array v0.14.7
+   Compiling num-traits v0.2.19
+   Compiling aho-corasick v1.1.5
+   Compiling ahash v0.8.12
+   Compiling find-msvc-tools v0.1.10
+   Compiling thiserror v2.0.20
+   Compiling shlex v2.0.1
+   Compiling scopeguard v1.2.0
+   Compiling cc v1.4.2
+   Compiling lock_api v0.4.14
+   Compiling equivalent v1.0.2
+   Compiling unicode-general-category v1.1.0
+   Compiling regex-automata v0.4.18
+   Compiling foldhash v0.2.0
+   Compiling once_cell v1.21.4
+   Compiling syn v3.0.3
+   Compiling syn v2.0.119
+   Compiling ryu-js v1.0.3
+   Compiling borrow-or-share v0.2.4
+   Compiling allocator-api2 v0.2.21
+   Compiling bit-vec v0.8.0
+   Compiling bit-set v0.8.0
+   Compiling hashbrown v0.16.1
+   Compiling alloca v0.4.0
+   Compiling clap_lex v1.1.0
+   Compiling cpufeatures v0.2.17
+   Compiling either v1.17.0
+   Compiling vsimd v0.8.0
+   Compiling bytes v1.12.1
+   Compiling ciborium-io v0.2.2
+   Compiling anstyle v1.0.14
+   Compiling percent-encoding v2.3.2
+   Compiling outref v0.5.2
+   Compiling lazy_static v1.5.0
+   Compiling uuid-simd v0.8.0
+   Compiling clap_builder v4.6.6
+   Compiling itertools v0.13.0
+   Compiling same-file v1.0.6
+   Compiling data-encoding v2.11.1
+   Compiling cast v0.3.0
+   Compiling num-cmp v0.1.0
+   Compiling uuid v1.24.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling bytecount v0.6.9
+   Compiling serde_derive v1.0.229
+   Compiling displaydoc v0.2.7
+   Compiling ref-cast-impl v1.0.26
+   Compiling digest v0.10.7
+   Compiling thiserror-impl v2.0.20
+   Compiling sha2 v0.10.9
+   Compiling walkdir v2.5.0
+   Compiling page_size v0.6.0
+   Compiling parking_lot v0.12.5
+   Compiling synstructure v0.13.2
+   Compiling regex v1.13.1
+   Compiling fancy-regex v0.17.0
+   Compiling criterion-plot v0.8.2
+   Compiling num-integer v0.1.46
+   Compiling num-complex v0.4.6
+   Compiling anes v0.1.6
+   Compiling num-bigint v0.4.8
+   Compiling num-iter v0.1.46
+   Compiling clap v4.6.6
+   Compiling oorandom v11.1.5
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling zerocopy-derive v0.8.56
+   Compiling zerofrom v0.1.8
+   Compiling num-rational v0.4.2
+   Compiling yoke v0.8.3
+   Compiling num v0.4.3
+   Compiling fluent-uri v0.4.1
+   Compiling serde_json_canonicalizer v0.3.2
+   Compiling email_address v0.2.9
+   Compiling tinytemplate v1.2.1
+   Compiling fraction v0.15.4
+   Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_collections v2.2.0
+   Compiling icu_locale_core v2.2.0
+   Compiling icu_provider v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling half v2.7.1
+   Compiling referencing v0.40.2
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling jsonschema v0.40.2
+   Compiling criterion v0.8.2
+   Compiling finstack-ai-test v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-test)
+    Finished `bench` profile [optimized] target(s) in 27.22s
+  Executable benches/conformance.rs (target/release/deps/conformance-c726ba4edd510cd8)
+benchmark: compile ok
+[lint-workflows] $ actionlint
+[supply-chain] $ echo "controls: Engineering Standards §9; Threat Model TM-18; …
+controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13
+warning[duplicate]: found 2 duplicate entries for crate 'syn'
+    ┌─ /Users/jeickmeier/Projects/finstack-ai/Cargo.lock:105:1
+    │  
+105 │ ╭ syn 2.0.119 registry+https://github.com/rust-lang/crates.io-index
+106 │ │ syn 3.0.3 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰───────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ syn v2.0.119
+      ├── synstructure v0.13.2
+      │   ├── yoke-derive v0.8.2
+      │   │   └── yoke v0.8.3
+      │   │       ├── icu_collections v2.2.0
+      │   │       │   ├── icu_normalizer v2.2.0
+      │   │       │   │   └── idna_adapter v1.2.2
+      │   │       │   │       └── idna v1.1.0
+      │   │       │   │           └── jsonschema v0.40.2
+      │   │       │   │               └── finstack-ai-test v0.0.1
+      │   │       │   └── icu_properties v2.2.0
+      │   │       │       └── idna_adapter v1.2.2 (*)
+      │   │       ├── icu_provider v2.2.0
+      │   │       │   ├── icu_normalizer v2.2.0 (*)
+      │   │       │   └── icu_properties v2.2.0 (*)
+      │   │       ├── zerotrie v0.2.4
+      │   │       │   ├── icu_properties v2.2.0 (*)
+      │   │       │   └── icu_provider v2.2.0 (*)
+      │   │       └── zerovec v0.11.6
+      │   │           ├── icu_collections v2.2.0 (*)
+      │   │           ├── icu_locale_core v2.2.0
+      │   │           │   ├── icu_properties v2.2.0 (*)
+      │   │           │   └── icu_provider v2.2.0 (*)
+      │   │           ├── icu_normalizer v2.2.0 (*)
+      │   │           ├── icu_properties v2.2.0 (*)
+      │   │           ├── icu_provider v2.2.0 (*)
+      │   │           ├── potential_utf v0.1.5
+      │   │           │   └── icu_collections v2.2.0 (*)
+      │   │           └── tinystr v0.8.3
+      │   │               └── icu_locale_core v2.2.0 (*)
+      │   └── zerofrom-derive v0.1.7
+      │       └── zerofrom v0.1.8
+      │           ├── icu_collections v2.2.0 (*)
+      │           ├── icu_provider v2.2.0 (*)
+      │           ├── yoke v0.8.3 (*)
+      │           ├── zerotrie v0.2.4 (*)
+      │           └── zerovec v0.11.6 (*)
+      ├── wasm-bindgen-macro-support v0.2.127
+      │   └── wasm-bindgen-macro v0.2.127
+      │       └── wasm-bindgen v0.2.127
+      │           └── getrandom v0.3.4
+      │               ├── ahash v0.8.12
+      │               │   ├── jsonschema v0.40.2 (*)
+      │               │   └── referencing v0.40.2
+      │               │       └── jsonschema v0.40.2 (*)
+      │               ├── finstack-ai-runtime v0.0.1
+      │               │   ├── finstack-ai v0.0.1
+      │               │   │   ├── finstack-ai-ci-smoke v0.0.1
+      │               │   │   ├── finstack-ai-python v0.0.1
+      │               │   │   └── finstack-ai-wasm v0.0.1
+      │               │   └── finstack-ai-test v0.0.1 (*)
+      │               ├── jsonschema v0.40.2 (*)
+      │               └── referencing v0.40.2 (*)
+      ├── yoke-derive v0.8.2 (*)
+      ├── zerocopy-derive v0.8.56
+      │   └── zerocopy v0.8.56
+      │       ├── ahash v0.8.12 (*)
+      │       └── half v2.7.1
+      │           └── ciborium-ll v0.2.2
+      │               └── ciborium v0.2.2
+      │                   └── criterion v0.8.2
+      │                       └── (dev) finstack-ai-test v0.0.1 (*)
+      ├── zerofrom-derive v0.1.7 (*)
+      └── zerovec-derive v0.11.3
+          └── zerovec v0.11.6 (*)
+    ├ syn v3.0.3
+      ├── displaydoc v0.2.7
+      │   ├── icu_collections v2.2.0
+      │   │   ├── icu_normalizer v2.2.0
+      │   │   │   └── idna_adapter v1.2.2
+      │   │   │       └── idna v1.1.0
+      │   │   │           └── jsonschema v0.40.2
+      │   │   │               └── finstack-ai-test v0.0.1
+      │   │   └── icu_properties v2.2.0
+      │   │       └── idna_adapter v1.2.2 (*)
+      │   ├── icu_locale_core v2.2.0
+      │   │   ├── icu_properties v2.2.0 (*)
+      │   │   └── icu_provider v2.2.0
+      │   │       ├── icu_normalizer v2.2.0 (*)
+      │   │       └── icu_properties v2.2.0 (*)
+      │   ├── icu_provider v2.2.0 (*)
+      │   ├── tinystr v0.8.3
+      │   │   └── icu_locale_core v2.2.0 (*)
+      │   └── zerotrie v0.2.4
+      │       ├── icu_properties v2.2.0 (*)
+      │       └── icu_provider v2.2.0 (*)
+      ├── ref-cast-impl v1.0.26
+      │   └── ref-cast v1.0.26
+      │       └── fluent-uri v0.4.1
+      │           └── referencing v0.40.2
+      │               └── jsonschema v0.40.2 (*)
+      ├── serde_derive v1.0.229
+      │   └── serde v1.0.229
+      │       ├── ahash v0.8.12
+      │       │   ├── jsonschema v0.40.2 (*)
+      │       │   └── referencing v0.40.2 (*)
+      │       ├── ciborium v0.2.2
+      │       │   └── criterion v0.8.2
+      │       │       └── (dev) finstack-ai-test v0.0.1 (*)
+      │       ├── criterion v0.8.2 (*)
+      │       ├── email_address v0.2.9
+      │       │   └── jsonschema v0.40.2 (*)
+      │       ├── finstack-ai-kernel v0.0.1
+      │       │   ├── finstack-ai-protocol v0.0.1
+      │       │   ├── finstack-ai-runtime v0.0.1
+      │       │   │   ├── finstack-ai v0.0.1
+      │       │   │   │   ├── finstack-ai-ci-smoke v0.0.1
+      │       │   │   │   ├── finstack-ai-python v0.0.1
+      │       │   │   │   └── finstack-ai-wasm v0.0.1
+      │       │   │   └── finstack-ai-test v0.0.1 (*)
+      │       │   └── finstack-ai-test v0.0.1 (*)
+      │       ├── finstack-ai-test v0.0.1 (*)
+      │       ├── fluent-uri v0.4.1 (*)
+      │       ├── jsonschema v0.40.2 (*)
+      │       ├── serde_json_canonicalizer v0.3.2
+      │       │   └── finstack-ai-kernel v0.0.1 (*)
+      │       └── tinytemplate v1.2.1
+      │           └── criterion v0.8.2 (*)
+      └── thiserror-impl v2.0.20
+          └── thiserror v2.0.20
+              ├── finstack-ai-kernel v0.0.1 (*)
+              ├── finstack-ai-runtime v0.0.1 (*)
+              └── finstack-ai-test v0.0.1 (*)
+
+advisories ok, bans ok, licenses ok, sources ok
+[secret-scan] $ echo "controls: Engineering Standards §8; SEC-INV-005; Threat M…
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+4:15PM INF 35 commits scanned.
+4:15PM INF scanned ~1391200 bytes (1.39 MB) in 145ms
+4:15PM INF no leaks found
+[secret-scan-canary] $ echo "controls: Engineering Standards §8; SEC-INV-005; T…
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1
+=== canary path: examples/leaked-token.json ===
+Finding:     "token": "[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/leaked-token.json
+Line:        3
+Commit:      9995312887710e7240702ce46166b549660413e3
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:34Z
+Fingerprint: 9995312887710e7240702ce46166b549660413e3:examples/leaked-token.json:finstack-canary-credential:3
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~1000 bytes (1 KB) in 83.8ms
+4:15PM WRN leaks found: 1
+
+=== canary path: fixtures/leaked-token.json ===
+Finding:     "token": "[1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/leaked-token.json
+Line:        3
+Commit:      c43d7dede81bdc2a7a80d42330bd2c1cee136fc5
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:34Z
+Fingerprint: c43d7dede81bdc2a7a80d42330bd2c1cee136fc5:fixtures/leaked-token.json:finstack-canary-credential:3
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~1000 bytes (1 KB) in 80.2ms
+4:15PM WRN leaks found: 1
+
+=== canary path: examples/Cargo.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/Cargo.lock
+Line:        2
+Commit:      eb513a7f728908ccbd91a7b56e89b832bbcb49db
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:35Z
+Fingerprint: eb513a7f728908ccbd91a7b56e89b832bbcb49db:examples/Cargo.lock:finstack-canary-credential:2
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~947 bytes (947 bytes) in 79.9ms
+4:15PM WRN leaks found: 1
+
+=== canary path: fixtures/Cargo.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/Cargo.lock
+Line:        2
+Commit:      84b4e61ce3cb47caa23d3f21e7dd7027df87f7c3
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:35Z
+Fingerprint: 84b4e61ce3cb47caa23d3f21e7dd7027df87f7c3:fixtures/Cargo.lock:finstack-canary-credential:2
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~947 bytes (947 bytes) in 83.7ms
+4:15PM WRN leaks found: 1
+
+=== canary path: examples/uv.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        examples/uv.lock
+Line:        2
+Commit:      f17135ee50e2f0dbf224fe07d36a63fbe903be19
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:35Z
+Fingerprint: f17135ee50e2f0dbf224fe07d36a63fbe903be19:examples/uv.lock:finstack-canary-credential:2
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~947 bytes (947 bytes) in 79.6ms
+4:15PM WRN leaks found: 1
+
+=== canary path: fixtures/uv.lock ===
+Finding:     [1;3;mREDACTED[0m
+Secret:      [1;3;mREDACTED[0m
+RuleID:      finstack-canary-credential
+Entropy:     5.348394
+Tags:        [finstack canary credential]
+File:        fixtures/uv.lock
+Line:        2
+Commit:      89fe1f03ae223794f427aa5a88d74be3f17b244e
+Author:      CI Canary
+Email:       ci-canary@example.com
+Date:        2026-08-08T20:15:35Z
+Fingerprint: 89fe1f03ae223794f427aa5a88d74be3f17b244e:fixtures/uv.lock:finstack-canary-credential:2
+
+4:15PM INF 1 commits scanned.
+4:15PM INF scanned ~947 bytes (947 bytes) in 75.4ms
+4:15PM WRN leaks found: 1
+
+secret-scan-canary: temporary examples/, fixtures/, and lockfile detections passed
+[release-smoke] $ uv run --no-project python tools/ci/release.py smoke
++ cargo build --release -p finstack-ai-ci-smoke --locked
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling libc v0.2.189
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling serde v1.0.229
+   Compiling cfg-if v1.0.4
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling thiserror v2.0.20
+   Compiling getrandom v0.3.4
+   Compiling ryu-js v1.0.3
+   Compiling bytes v1.12.1
+   Compiling uuid v1.24.0
+   Compiling generic-array v0.14.7
+   Compiling syn v3.0.3
+   Compiling cpufeatures v0.2.17
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.20
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling serde_json_canonicalizer v0.3.2
+   Compiling finstack-ai-kernel v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-kernel)
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+   Compiling finstack-ai v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai)
+   Compiling finstack-ai-ci-smoke v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/fixtures/ci/release-smoke)
+    Finished `release` profile [optimized] target(s) in 4.64s
++ /Users/jeickmeier/Projects/finstack-ai/target/ci-release-build/release/finstack-ai-ci-smoke
+finstack-ai-ci-smoke 0.0.1
+staged binary: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/finstack-ai-ci-smoke
+sha256: 3e435dba3ff7f0dab11538ef03d8435da44cadc78446e66a3236f7a737a476e4
+metadata: /Users/jeickmeier/Projects/finstack-ai/target/ci-release/build-metadata.json
+[build-python] $ uv build --project bindings/finstack-ai-python --build-constra…
+Building source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running sdist
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running check
+creating finstack_ai-0.0.1
+creating finstack_ai-0.0.1/python/finstack_ai
+creating finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying files to finstack_ai-0.0.1...
+copying LICENSE-APACHE -> finstack_ai-0.0.1
+copying LICENSE-MIT -> finstack_ai-0.0.1
+copying README.md -> finstack_ai-0.0.1
+copying pyproject.toml -> finstack_ai-0.0.1
+copying python/finstack_ai/__init__.py -> finstack_ai-0.0.1/python/finstack_ai
+copying python/finstack_ai.egg-info/PKG-INFO -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/dependency_links.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/top_level.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+Writing finstack_ai-0.0.1/setup.cfg
+Creating tar archive
+removing 'finstack_ai-0.0.1' (and everything under it)
+Building wheel from source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+creating build/lib/finstack_ai
+copying python/finstack_ai/__init__.py -> build/lib/finstack_ai
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+installing to build/bdist.macosx-11.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-11.0-arm64/wheel
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai
+copying build/lib/finstack_ai/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./finstack_ai
+running install_egg_info
+Copying python/finstack_ai.egg-info to build/bdist.macosx-11.0-arm64/wheel/./finstack_ai-0.0.1-py3.14.egg-info
+running install_scripts
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai-0.0.1.dist-info/WHEEL
+creating '/Users/jeickmeier/Projects/finstack-ai/dist/.tmp-zokbtfi1/finstack_ai-0.0.1-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+adding 'finstack_ai/__init__.py'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-APACHE'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-MIT'
+adding 'finstack_ai-0.0.1.dist-info/METADATA'
+adding 'finstack_ai-0.0.1.dist-info/WHEEL'
+adding 'finstack_ai-0.0.1.dist-info/top_level.txt'
+adding 'finstack_ai-0.0.1.dist-info/RECORD'
+removing build/bdist.macosx-11.0-arm64/wheel
+Successfully built dist/finstack_ai-0.0.1.tar.gz
+Successfully built dist/finstack_ai-0.0.1-py3-none-any.whl

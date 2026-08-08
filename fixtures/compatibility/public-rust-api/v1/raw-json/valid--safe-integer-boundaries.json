@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "input": {
+    "text": "[9007199254740991,-9007199254740991]"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "[9007199254740991,-9007199254740991]"
+  }
+}

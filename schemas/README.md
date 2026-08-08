@@ -15,7 +15,7 @@ JSON Schema draft 2020-12 is the portable schema source of truth
 
 | Family | Root | Status |
 | --- | --- | --- |
-| Public Rust API notes (source is `crates/`) | [`public-rust-api/`](public-rust-api/) | reserved notes |
+| Public Rust API notes (source is `crates/`) | [`public-rust-api/`](public-rust-api/) | active notes (PR-006; fixtures under `fixtures/compatibility/public-rust-api/`) |
 | AgentSpec / bundle / locks | [`agent-spec/`](agent-spec/) | reserved |
 | Journal records / snapshots | [`journal/`](journal/) | reserved |
 | Runtime events | [`runtime-events/`](runtime-events/) | reserved |

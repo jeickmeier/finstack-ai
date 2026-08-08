@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "recipe": {
+    "kind": "json_string",
+    "fill_char": "b",
+    "source_bytes": 1048576
+  },
+  "expect": {
+    "ok": true,
+    "source_bytes": 1048576,
+    "canonical_bytes": 1048576
+  }
+}

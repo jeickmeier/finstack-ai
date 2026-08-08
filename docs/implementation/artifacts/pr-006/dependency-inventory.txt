@@ -1,0 +1,29 @@
+PR-006 dependency inventory (reviewed)
+Date: 2026-08-08
+Branch: pr-006-kernel-value-types
+
+Workspace additions / pins:
+- bytes 1.12.1
+- sha2 0.10.9
+- thiserror 2.0.20
+- uuid 1.24.0 (default-features=false, features=["std"]; runtime only)
+- serde_json_canonicalizer 0.3.2
+- getrandom 0.3.4 (runtime native-tokio only)
+- serde features extended with "rc" for Arc<str> ErrorCode/message fields
+
+finstack-ai-kernel direct deps:
+- bytes, serde, serde_json, serde_json_canonicalizer, sha2, thiserror
+- Explicit non-deps: uuid, getrandom, tokio, wasm-bindgen
+
+finstack-ai-runtime direct deps:
+- finstack-ai-kernel, thiserror, uuid
+- optional getrandom via feature native-tokio
+
+finstack-ai-test direct deps added:
+- thiserror (fixture error type)
+
+Audit notes:
+- uuid kept out of kernel to avoid ARCH001 path finstack-ai-kernel -> uuid -> wasm-bindgen
+  in unfiltered cargo metadata resolve.
+- No kernel feature enables OS randomness or clocks.
+- cargo-deny (mise run supply-chain) passes with existing license allowlist.

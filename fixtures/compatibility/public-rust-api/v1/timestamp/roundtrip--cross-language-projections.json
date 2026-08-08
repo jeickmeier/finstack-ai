@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "subject": "timestamp",
+  "operation": "project",
+  "input": {
+    "unix_ms": 0
+  },
+  "expect": {
+    "ok": true,
+    "unix_ms": 0,
+    "rfc3339": "1970-01-01T00:00:00.000Z",
+    "cbor_integer": 0,
+    "python": {
+      "aware_utc_datetime": "1970-01-01T00:00:00.000Z",
+      "int_ms": 0
+    },
+    "javascript": {
+      "number_ms": 0
+    },
+    "leap_second_policy": "unix_time_no_leap_seconds"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "input": {
+    "text": "{\"e\\u0301\":1,\"é\":2}"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "{\"e\u0301\":1,\"é\":2}"
+  }
+}

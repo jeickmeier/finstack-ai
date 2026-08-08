@@ -10,7 +10,7 @@ format = "rust-public-api"
 stability = "candidate-v1"
 compatibility_profile = "pre-1.0-classified-breakage"
 fixture_root = "fixtures/compatibility/public-rust-api/"
-status = "reserved"
+status = "active"
 notes_root = "schemas/public-rust-api/"
 
 [families."agent-spec"]
