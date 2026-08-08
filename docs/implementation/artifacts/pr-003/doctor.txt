@@ -1,0 +1,10 @@
+[doctor] $ rustc --version
+rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo 1.97.1 (c980f4866 2026-06-30)
+Python 3.14.6
+uv 0.10.11 (006b56b12 2026-03-16)
+cargo-deny 0.20.2
+8.30.1
+1.7.12
+installed by downloading from release page
+built with go1.26.1 compiler for darwin/arm64

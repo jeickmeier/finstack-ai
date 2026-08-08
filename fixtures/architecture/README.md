@@ -9,5 +9,5 @@ production workspace.
 | `forbidden-kernel/` | Forbidden kernel dependency names for synthetic metadata tests |
 
 Compile-time six-port / native-vs-WASM port-bound proofs are deferred until the
-production port traits exist (PR-014–PR-018). Run checks via `mise run architecture`.
-CI workflow wiring arrives in PR-003.
+production port traits exist (PR-014–PR-018). Run checks via `mise run architecture`
+(hosted in `.github/workflows/ci.yml`).

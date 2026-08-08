@@ -16,6 +16,8 @@ Through pre-1.0, semantic core crates, Python/JavaScript binding distributions, 
 - Leaf directories under `extensions/` (providers, toolsets, stores, observers), plus `plugins/`, `examples/`, and `fixtures/`
 - Canonical dual-license texts under `licenses/`, plus DCO, governance, security, and contribution documentation
 - Root `mise.toml` toolchain pin with bootstrap and check tasks
+- Architecture and dependency enforcement via `mise run architecture` (PR-002)
+- Cross-platform CI workflows, supply-chain/secret checks, and private release-smoke binary (PR-003)
 
 ### Changed
 

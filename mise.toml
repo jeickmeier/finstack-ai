@@ -2,6 +2,9 @@
 rust = { version = "1.97.1", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
+"github:EmbarkStudios/cargo-deny" = "0.20.2"
+"aqua:gitleaks/gitleaks" = "8.30.1"
+"aqua:rhysd/actionlint" = "1.7.12"
 
 # Install and environment check tasks
 
@@ -17,17 +20,50 @@ cargo --version
 rustc --print cfg --target wasm32-unknown-unknown >/dev/null
 python --version
 uv --version
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --version
+gitleaks version
+actionlint --version
 """
 
 # Code checks
 
 [tasks.check]
 description = "Type-check the full Cargo workspace"
-run = "cargo check --workspace --all-targets"
+run = "cargo check --workspace --all-targets --locked"
 
 [tasks.check-kernel]
 description = "Type-check the kernel crate only (minimal target)"
-run = "cargo check -p finstack-ai-kernel"
+run = "cargo check -p finstack-ai-kernel --locked"
+
+[tasks.check-minimal]
+description = "Type-check minimal-feature and kernel-only graphs"
+run = """
+cargo check -p finstack-ai-kernel --locked
+cargo check -p finstack-ai-runtime --no-default-features --locked
+cargo check -p finstack-ai --no-default-features --locked
+cargo check -p finstack-ai-protocol --locked
+cargo check -p finstack-ai-test --no-default-features --locked
+"""
+
+[tasks.check-wasm]
+description = "Type-check the browser WASM binding target"
+run = "cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked"
+
+[tasks.format]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks.clippy]
+description = "Lint the Cargo workspace with warnings denied"
+run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+
+[tasks.test]
+description = "Run Cargo workspace tests"
+run = "cargo test --workspace --locked"
+
+[tasks.docs]
+description = "Build workspace rustdoc with warnings denied"
+run = "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"
 
 [tasks.test-architecture]
 description = "Run architecture checker unit tests"
@@ -46,10 +82,95 @@ description = "Enforce architecture, dependency, and feature boundaries"
 run = """
 uv run --no-project python -m unittest discover -s tools/architecture/tests -q
 uv run --no-project python tools/architecture/check.py
-cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+"""
+
+[tasks.lint-ci]
+description = "Lint CI helper Python sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/ci tools/security"
+
+[tasks.format-ci]
+description = "Check CI helper Python formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/ci tools/security"
+
+[tasks.test-ci]
+description = "Run CI and security helper unit tests"
+run = """
+uv run --no-project python -m unittest discover -s tools/ci/tests -v
+uv run --no-project python -m unittest discover -s tools/security/tests -v
+"""
+
+[tasks.lint-workflows]
+description = "Lint GitHub Actions workflow files"
+run = "actionlint"
+
+# Supply chain and secrets
+
+[tasks.supply-chain]
+description = "Run cargo-deny supply-chain policy (Eng Standards §9; TM-18)"
+run = """
+echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13"
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
+"""
+
+[tasks.secret-scan]
+description = "Scan repository history and tree for secrets (SEC-INV-005; TM-04)"
+run = """
+echo "controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1"
+gitleaks detect --source . --config .gitleaks.toml --verbose --redact --no-banner
+"""
+
+[tasks.secret-scan-canary]
+description = "Prove secret scan fails on temporary example/fixture canaries"
+run = """
+echo "controls: Engineering Standards §8; SEC-INV-005; Threat Model TM-04; Threat Model §§10,13.1"
+uv run --no-project python tools/security/secret_canary.py
+"""
+
+# Release smoke
+
+[tasks.release-smoke]
+description = "Build and package the private CI release-smoke binary"
+run = "uv run --no-project python tools/ci/release.py smoke"
+
+[tasks.release-reproducible]
+description = "Compare two clean Linux release builds of the CI smoke binary"
+run = "uv run --no-project python tools/ci/release.py reproducible"
+
+# Nightly and aggregates
+
+[tasks.check-nightly]
+description = "Compile the workspace with the pinned dated Rust nightly"
+run = """
+rustup toolchain install nightly-2026-08-01 --profile minimal --component rustfmt --component clippy
+rustup target add --toolchain nightly-2026-08-01 wasm32-unknown-unknown
+cargo +nightly-2026-08-01 check --workspace --all-targets --locked
+cargo +nightly-2026-08-01 check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+"""
+
+[tasks.ci]
+description = "Run the local CI aggregate used by contributors"
+run = """
+mise run format
+mise run clippy
+mise run test
+mise run docs
+mise run check-minimal
+mise run architecture
+mise run check-wasm
+mise run lint-ci
+mise run format-ci
+mise run test-ci
+mise run lint-workflows
+mise run supply-chain
+mise run secret-scan
+mise run secret-scan-canary
+mise run release-smoke
+mise run build-python
 """
 
 # Build tasks
+
 [tasks.build-python]
 description = "Build the Python binding package (sdist/wheel placeholder)"
 run = "uv build --project bindings/finstack-ai-python"

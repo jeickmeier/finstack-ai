@@ -1,0 +1,3 @@
+[docs] $ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
+   Generated /Users/jeickmeier/Projects/finstack-ai/target/doc/finstack_ai/index.html and 7 other files

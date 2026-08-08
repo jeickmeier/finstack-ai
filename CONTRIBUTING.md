@@ -10,7 +10,15 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tools and tasks.
 2. From the repository root: `mise install`
 3. Verify: `mise run doctor`
 
-Prefer `mise run <task>` over ad-hoc wrappers once a task exists. See [`mise.toml`](mise.toml) and [`README.md`](README.md).
+Prefer `mise run <task>` over ad-hoc wrappers once a task exists. See [`mise.toml`](mise.toml), [`README.md`](README.md), and [`.github/ci/README.md`](.github/ci/README.md).
+
+Before opening a pull request, run at least:
+
+```bash
+mise run ci
+```
+
+Hosted workflows (`ci.yml`, `security.yml`, `nightly.yml`) invoke the same task names. Do not reimplement checks in workflow YAML.
 
 ## Developer Certificate of Origin (DCO)
 

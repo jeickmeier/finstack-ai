@@ -1,0 +1,63 @@
+# Pinned nightly compatibility for PR-003.
+# Owner: me@jeickmeier.com
+# Cadence: every pull request, weekly schedule, workflow_dispatch.
+# MSRV/stable remain the merge baseline (mise Rust 1.97.1). Nightly is advisory
+# compatibility only. Parser fuzz targets are reserved and not evidence-eligible
+# until owning parser PRs land.
+
+name: nightly
+
+on:
+  pull_request:
+  schedule:
+    - cron: "37 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pinned-nightly:
+    name: pinned-nightly (nightly-2026-08-01)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Nightly compatibility check
+        run: mise run check-nightly
+
+  reserved-fuzz-readiness:
+    name: reserved-fuzz (non-evidentiary)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Document reserved fuzz ownership
+        run: |
+          echo "status=not-implemented"
+          echo "evidence_eligible=false"
+          echo "owner=me@jeickmeier.com"
+          echo "cadence=weekly via nightly.yml once fuzz targets exist"
+          echo "activation=PR introducing each parser/fuzz target"
+          echo "This job intentionally performs no green placeholder fuzz run."

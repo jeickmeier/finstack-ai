@@ -12,8 +12,8 @@ mise run format-architecture   # Ruff format check
 uv run --no-project python tools/architecture/check.py
 ```
 
-PR-003 wires `mise run architecture` into hosted CI. Until then, treat a local
-nonzero exit as the failing gate referenced by PR-002 acceptance.
+Hosted CI invokes `mise run architecture` from [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
+Treat a nonzero exit as a failing merge gate.
 
 ## Layout
 
@@ -53,12 +53,12 @@ of scope for PR-002 and arrives with the kernel.
 3. Mirror it in `allowlist.toml` with the same `exception_id`, exact `subject`, and `adr`.
 4. `ARCH001` and `ARCH002` are non-waivable.
 
-## CI handoff (PR-003)
+## CI
 
-Hosted jobs should invoke the same task name:
+Hosted jobs invoke the same task name:
 
 ```bash
 mise run architecture
 ```
 
-Do not reimplement the policy in workflow YAML.
+Do not reimplement the policy in workflow YAML. See [`.github/ci/README.md`](../../.github/ci/README.md).

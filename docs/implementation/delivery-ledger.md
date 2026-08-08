@@ -9,14 +9,14 @@ Last updated 2026-08-08 and reconciled against documentation pack v0.12. Update 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 0 | Phase 0 `In progress`; others `Todo` |
-| Logical PRs | 66 | 1 | PR-001 `Done`; PR-002–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 6 | PR-001 A01–A06 `Passed`; remainder not yet owned |
+| Logical PRs | 66 | 2 | PR-001–PR-002 `Done`; PR-003 `In progress`; PR-004–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 16 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003 A02/A04/A05 `Passed`, A01/A03 `Pending` |
 | Phase entrance and exit bullets | 62 | 0 | No coverage recorded |
 | Program gates | 9 | 0 | All `Not ready` |
-| Implementation tasks | 0 | 0 | Add only when a logical PR is decomposed |
-| Open blockers | 0 | 0 | None recorded |
+| Implementation tasks | 6 | 5 | PR-003 local implementation complete; hosted evidence task open |
+| Open blockers | 1 | 0 | PR-003-B-no-remote-ede93913b2ea |
 
-PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` with six passed acceptance criteria. Phase 0 and G0 remain incomplete until PR-002–PR-005 finish.
+PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. Phase 0 and G0 remain incomplete until PR-003–PR-005 finish.
 
 ## Status values
 
@@ -77,7 +77,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Phase | Logical PRs | Entrance | Exit | Gate | Status | Owner | Active PRs | Blocker | Evidence | Updated |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
-| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | — | — | PR-001–PR-002 Done; PR-003–PR-005 Todo | 2026-08-08 |
+| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | PR-003 | PR-003-B-no-remote-ede93913b2ea | PR-001–PR-002 Done; PR-003 In progress; PR-004–PR-005 Todo | 2026-08-08 |
 | [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 0/2 | 0/4 | G1 | Todo | — | — | — | — | — |
 | [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 0/2 | 0/4 | G2 | Todo | — | — | — | — | — |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
@@ -112,7 +112,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-001 | Done | me@jeickmeier.com | `main` @ `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (direct commit; no GitHub PR) | 0 | 6/6 | PR-001-E-dep-direction-1fe94f769044; PR-001-E-cargo-check-3e6a85e8d27f; PR-001-E-kernel-deps-1d8c0f41d158; PR-001-E-mise-doctor-cae2f2eb7918; PR-001-E-ownership-review-b14626f70259; PR-001-E-security-md-f70391db8ac2 | — | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` / 2026-08-08 | 2026-08-08 |
 | PR-002 | Done | me@jeickmeier.com | `main` @ `ee9754fe2d0f015181dcefa97e715392aadd28ed` (local merge of `pr-002-architecture-enforcement`; no GitHub remote/PR) | 0 | 7/7 | PR-002-E-architecture-6ed3268e6ff5; PR-002-E-unit-tests-fc419e9d2920; PR-002-E-wasm-binding-5253da7a99f9; PR-002-E-dep-direction-321ce9b2b4b4; PR-002-E-kernel-deps-2745bac40199; PR-002-E-waiver-fa6bff499990; PR-002-E-review-627382618b20 | — | `ee9754fe2d0f015181dcefa97e715392aadd28ed` / 2026-08-08 | 2026-08-08 |
-| PR-003 | Todo | — | — | 0 | 0/5 | — | — | — | — |
+| PR-003 | In progress | me@jeickmeier.com | branch `pr-003-ci-release-matrix` (no GitHub remote/PR yet) | 6 | 3/5 | PR-003-E-channel-ownership-3ada3f6cab05; PR-003-E-generated-docs-ba54420a0521; PR-003-E-supply-chain-01e376e9f82a; PR-003-E-secret-scan-37002e564f23; PR-003-E-security-review-9d2dc7548b4f; PR-003-E-release-smoke-86364cc1b512 | PR-003-B-no-remote-ede93913b2ea | — | 2026-08-08 |
 | PR-004 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-005 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 
@@ -241,10 +241,12 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 
 | Task | Logical PR | Summary | Status | Owner | Depends on | Issue / branch / actual PR / change | Acceptance refs | Evidence refs | Opened | Updated | Completed / disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| PR-NNN-T-short-slug-xxxxxxxxxxxx | PR-NNN | concise executable work | Ready | person/team | scoped task ID or — | links | PR-NNN-Ann | scoped evidence ID | YYYY-MM-DD | YYYY-MM-DD | — |
--->
+| PR-003-T-tracking-333044ed64e8 | PR-003 | Open ledger tracking, pending acceptance, and hosted-CI blocker | Done | me@jeickmeier.com | — | `pr-003-ci-release-matrix` | PR-003-A01–A05 | — | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-003-T-tasks-40f4012de0ea | PR-003 | Add pinned mise tasks and contributor command docs | Done | me@jeickmeier.com | PR-003-T-tracking-333044ed64e8 | `pr-003-ci-release-matrix` | PR-003-A01–A02 | — | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-003-T-release-c6167c9102e8 | PR-003 | Add private facade-dependent release-smoke binary and reproducibility tooling | Done | me@jeickmeier.com | PR-003-T-tasks-40f4012de0ea | `pr-003-ci-release-matrix` | PR-003-A03 | PR-003-E-release-smoke-86364cc1b512 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-003-T-security-a1fff419af88 | PR-003 | Implement cargo-deny, secret scan, and isolated canary-negative tests | Done | me@jeickmeier.com | PR-003-T-tasks-40f4012de0ea | `pr-003-ci-release-matrix` | PR-003-A05 | PR-003-E-supply-chain-01e376e9f82a; PR-003-E-secret-scan-37002e564f23 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-003-T-workflows-0f6986484139 | PR-003 | Add CI/security/nightly workflows and reservation docs | Done | me@jeickmeier.com | PR-003-T-tasks-40f4012de0ea; PR-003-T-release-c6167c9102e8; PR-003-T-security-a1fff419af88 | `pr-003-ci-release-matrix` | PR-003-A01–A04 | PR-003-E-channel-ownership-3ada3f6cab05; PR-003-E-generated-docs-ba54420a0521 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-003-T-evidence-4d511b278623 | PR-003 | Run local/hosted verification, security review, and bind evidence | In progress | me@jeickmeier.com | PR-003-T-workflows-0f6986484139 | `pr-003-ci-release-matrix` | PR-003-A01–A05 | local artifacts under `artifacts/pr-003/`; hosted attach blocked | 2026-08-08 | 2026-08-08 | — |
 
 ## Blocker ledger
 
@@ -252,10 +254,7 @@ Blocker IDs use `<scope>-B-short-slug-xxxxxxxxxxxx`, with a stable scope such as
 
 | Blocker | Scope | Description | Owner | Opened | Next action | Review date | Issue | Status | Resolution evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| PR-NNN-B-short-slug-xxxxxxxxxxxx | PR-NNN or scoped task ID | concise blocking condition | person/team | YYYY-MM-DD | concrete action | YYYY-MM-DD | link | Open | — |
--->
+| PR-003-B-no-remote-ede93913b2ea | PR-003 | No Git remote is configured, so hosted PR runs and immutable Linux/macOS/Windows CI evidence cannot be produced yet. | me@jeickmeier.com | 2026-08-08 | Add a GitHub remote, open a PR from `pr-003-ci-release-matrix`, and attach workflow run evidence. | 2026-08-15 | — | Open | — |
 
 Blocker status is `Open` or `Resolved`. Resolution requires an evidence reference and removal of the affected `Blocked` status in the same change.
 

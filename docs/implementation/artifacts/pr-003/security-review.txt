@@ -1,0 +1,26 @@
+PR-003 Threat Model §18 build/release review
+Date: 2026-08-08
+Reviewer: me@jeickmeier.com
+Scope: introduction of hosted CI workflows, supply-chain policy, secret scanning,
+release-smoke artifact retention, and reproducible release profile.
+
+Triggers considered (Threat Model §18):
+- changes build/release identities, registries, signing, or provenance
+
+Findings:
+1. No crates.io, PyPI, or npm publication workflow is introduced.
+2. No signing keys, registry tokens, or release credentials are available to
+   pull-request jobs. Workflow permissions are contents: read only.
+3. Actions are pinned by full commit SHA; tools are pinned in root mise.toml.
+4. Release artifacts are CI retention uploads (30 days) of a private unpublished
+   fixture binary (`finstack-ai-ci-smoke`), not a public release identity.
+5. Secret scanning covers repository history/tree and fails closed on credential
+   material under examples/ and fixtures/ via temporary canary negatives.
+6. cargo-deny enforces advisories, licenses, sources, and wildcard bans
+   (Engineering Standards §9; TM-18).
+7. No change to package registries, signing roots, or provenance attestations
+   beyond documenting future SBOM/provenance work for later PRs.
+
+Decision: Accept for merge once hosted Linux/macOS/Windows workflow evidence is
+attached. No ADR required. Residual risk: without a Git remote, hosted PR
+evidence cannot yet be produced (blocker PR-003-B-no-remote-ede93913b2ea).

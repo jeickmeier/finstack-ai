@@ -1,0 +1,80 @@
+[build-python] $ uv build --project bindings/finstack-ai-python
+Building source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running sdist
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running check
+creating finstack_ai-0.0.1
+creating finstack_ai-0.0.1/python/finstack_ai
+creating finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying files to finstack_ai-0.0.1...
+copying LICENSE-APACHE -> finstack_ai-0.0.1
+copying LICENSE-MIT -> finstack_ai-0.0.1
+copying README.md -> finstack_ai-0.0.1
+copying pyproject.toml -> finstack_ai-0.0.1
+copying python/finstack_ai/__init__.py -> finstack_ai-0.0.1/python/finstack_ai
+copying python/finstack_ai.egg-info/PKG-INFO -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/dependency_links.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/top_level.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+copying python/finstack_ai.egg-info/SOURCES.txt -> finstack_ai-0.0.1/python/finstack_ai.egg-info
+Writing finstack_ai-0.0.1/setup.cfg
+Creating tar archive
+removing 'finstack_ai-0.0.1' (and everything under it)
+Building wheel from source distribution...
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+running bdist_wheel
+running build
+running build_py
+creating build/lib/finstack_ai
+copying python/finstack_ai/__init__.py -> build/lib/finstack_ai
+running egg_info
+writing python/finstack_ai.egg-info/PKG-INFO
+writing dependency_links to python/finstack_ai.egg-info/dependency_links.txt
+writing top-level names to python/finstack_ai.egg-info/top_level.txt
+reading manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+adding license file 'LICENSE-MIT'
+adding license file 'LICENSE-APACHE'
+writing manifest file 'python/finstack_ai.egg-info/SOURCES.txt'
+installing to build/bdist.macosx-11.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-11.0-arm64/wheel
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai
+copying build/lib/finstack_ai/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./finstack_ai
+running install_egg_info
+Copying python/finstack_ai.egg-info to build/bdist.macosx-11.0-arm64/wheel/./finstack_ai-0.0.1-py3.14.egg-info
+running install_scripts
+creating build/bdist.macosx-11.0-arm64/wheel/finstack_ai-0.0.1.dist-info/WHEEL
+creating '/Users/jeickmeier/Projects/finstack-ai/dist/.tmp-18x3tobr/finstack_ai-0.0.1-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+adding 'finstack_ai/__init__.py'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-APACHE'
+adding 'finstack_ai-0.0.1.dist-info/licenses/LICENSE-MIT'
+adding 'finstack_ai-0.0.1.dist-info/METADATA'
+adding 'finstack_ai-0.0.1.dist-info/WHEEL'
+adding 'finstack_ai-0.0.1.dist-info/top_level.txt'
+adding 'finstack_ai-0.0.1.dist-info/RECORD'
+removing build/bdist.macosx-11.0-arm64/wheel
+Successfully built dist/finstack_ai-0.0.1.tar.gz
+Successfully built dist/finstack_ai-0.0.1-py3-none-any.whl

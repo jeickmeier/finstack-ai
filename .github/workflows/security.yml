@@ -1,0 +1,84 @@
+# Supply-chain and secret checks for PR-003.
+# Owner: me@jeickmeier.com
+# Cadence: every pull request, pushes to main, weekly schedule, workflow_dispatch.
+# Controls: Engineering Standards §§8-9; SEC-INV-005; TM-04; TM-18; Threat Model §§10,12-13.
+
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supply-chain:
+    name: supply-chain (Eng §9 / TM-18)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: cargo-deny / supply-chain
+        run: mise run supply-chain
+
+  secret-scan:
+    name: secret-scan (SEC-INV-005 / TM-04)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Repository secret scan
+        run: mise run secret-scan
+
+  secret-scan-canary:
+    name: secret-scan-canary (SEC-INV-005 / TM-04)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Temporary examples/fixtures canary negatives
+        run: mise run secret-scan-canary

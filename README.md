@@ -25,13 +25,17 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tool installs and 
 
 Useful tasks after bootstrap:
 
-- `mise run check` — `cargo check` for the full workspace
-- `mise run check-kernel` — kernel-only check (minimal target)
-- `mise run build-python` — build the Python binding package under `bindings/finstack-ai-python`
+- `mise run format` / `clippy` / `test` / `docs` — Rust merge gates
+- `mise run check-minimal` — kernel-only and no-default-features graphs
+- `mise run architecture` — dependency/feature boundary enforcement
+- `mise run supply-chain` / `secret-scan` / `secret-scan-canary` — Eng §8–9 / TM-04 / TM-18
+- `mise run release-smoke` — private CI release binary packaging
+- `mise run build-python` — Python binding package under `bindings/finstack-ai-python`
+- `mise run ci` — local aggregate of the checks above
 
 The installable Python package lives under `bindings/finstack-ai-python`, not the repository root. Prefer `mise run build-python`, or from the root: `uv build --package finstack-ai`.
 
-Tool versions and tasks live in [`mise.toml`](mise.toml). Prefer `mise run <task>` over ad-hoc wrappers. Architecture enforcement and CI matrix tasks land in later Phase 0 pull requests.
+Tool versions and tasks live in [`mise.toml`](mise.toml). Prefer `mise run <task>` over ad-hoc wrappers. Hosted CI workflows and the reserved matrix documentation live under [`.github/ci/README.md`](.github/ci/README.md).
 
 ## Workspace layout
 
