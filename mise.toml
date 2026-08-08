@@ -18,20 +18,20 @@ run = "mise install"
 
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
-# Keep this a single shell graph so Windows runners still execute every step
-# after `rustup` channel syncs (multiline task bodies have been truncated there).
+# Prefer PATH-resolved tools and avoid `/dev/null` redirects so the same
+# command works when mise executes tasks via cmd.exe on Windows.
 run = """
-rustup component add rustfmt clippy && \
-rustup target add wasm32-unknown-unknown && \
-rustc --version && \
-cargo --version && \
-rustfmt --version && \
-cargo clippy --version && \
-rustc --print cfg --target wasm32-unknown-unknown >/dev/null && \
-python --version && \
-uv --version && \
-\"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny\" --version && \
-gitleaks version && \
+rustup component add rustfmt clippy
+rustup target add wasm32-unknown-unknown
+rustc --version
+cargo --version
+rustfmt --version
+cargo clippy --version
+rustc --print cfg --target wasm32-unknown-unknown
+python --version
+uv --version
+cargo-deny --version
+gitleaks version
 actionlint --version
 """
 
