@@ -65,7 +65,8 @@ run = "cargo test --workspace --locked"
 
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
-run = "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc --workspace --no-deps --locked"
 
 [tasks.test-architecture]
 description = "Run architecture checker unit tests"
