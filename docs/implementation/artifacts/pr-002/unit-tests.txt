@@ -21,6 +21,6 @@ test_valid_waiver_fixture_complete (test_waivers.WaiverFixtureTests.test_valid_w
 test_wildcard_subject_rejected (test_waivers.WaiverFixtureTests.test_wildcard_subject_rejected) ... ok
 
 ----------------------------------------------------------------------
-Ran 21 tests in 0.085s
+Ran 21 tests in 0.096s
 
 OK

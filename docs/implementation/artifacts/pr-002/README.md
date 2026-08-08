@@ -1,15 +1,15 @@
-# PR-002 local validation artifacts
+# PR-002 validation artifacts
 
-Captured on branch `pr-002-architecture-enforcement` before merge. These prove
-`mise run architecture` locally. Hosted CI attachment is PR-003. Treat digests as
-provisional until bound to an immutable merge commit in the evidence register.
+Bound to merge commit `ee9754fe2d0f015181dcefa97e715392aadd28ed` on `main`
+(local merge of `pr-002-architecture-enforcement`; no GitHub remote/PR available).
+Hosted CI attachment of `mise run architecture` is PR-003.
 
 Compile-time six-port / native-vs-WASM port-bound fixtures were intentionally
-omitted; those proofs wait for production port traits in PR-014–PR-018.
+omitted from PR-002; those proofs wait for production port traits in PR-014–PR-018.
 
 | Artifact | Purpose |
 | --- | --- |
-| `environment.txt` | Tool versions |
+| `environment.txt` | Tool versions and reviewed commit |
 | `architecture.txt` | Full `mise run architecture` output + `/usr/bin/time -p` |
 | `unit-tests.txt` | Architecture checker unit tests |
 | `wasm-binding.txt` | Production `finstack-ai-wasm` target check |
@@ -19,5 +19,4 @@ omitted; those proofs wait for production port traits in PR-014–PR-018.
 | `cargo-metadata.json` | Locked workspace metadata snapshot |
 | `SHA256SUMS` | Digests of the files above |
 
-Observed wall-clock for `mise run architecture` is recorded in `architecture.txt`
-(limit: < 60s).
+Observed wall-clock for `mise run architecture`: **real 0.32s** (limit: < 60s).

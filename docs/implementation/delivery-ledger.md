@@ -77,7 +77,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Phase | Logical PRs | Entrance | Exit | Gate | Status | Owner | Active PRs | Blocker | Evidence | Updated |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
-| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | PR-002 | — | PR-001 Done; PR-002 In progress; PR-003–PR-005 Todo | 2026-08-08 |
+| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | — | — | PR-001–PR-002 Done; PR-003–PR-005 Todo | 2026-08-08 |
 | [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 0/2 | 0/4 | G1 | Todo | — | — | — | — | — |
 | [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 0/2 | 0/4 | G2 | Todo | — | — | — | — | — |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
@@ -111,7 +111,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-001 | Done | me@jeickmeier.com | `main` @ `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (direct commit; no GitHub PR) | 0 | 6/6 | PR-001-E-dep-direction-1fe94f769044; PR-001-E-cargo-check-3e6a85e8d27f; PR-001-E-kernel-deps-1d8c0f41d158; PR-001-E-mise-doctor-cae2f2eb7918; PR-001-E-ownership-review-b14626f70259; PR-001-E-security-md-f70391db8ac2 | — | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` / 2026-08-08 | 2026-08-08 |
-| PR-002 | In progress | me@jeickmeier.com | branch `pr-002-architecture-enforcement` | 0 | 0/7 | — | — | — | 2026-08-08 |
+| PR-002 | Done | me@jeickmeier.com | `main` @ `ee9754fe2d0f015181dcefa97e715392aadd28ed` (local merge of `pr-002-architecture-enforcement`; no GitHub remote/PR) | 0 | 7/7 | PR-002-E-architecture-6ed3268e6ff5; PR-002-E-unit-tests-fc419e9d2920; PR-002-E-wasm-binding-5253da7a99f9; PR-002-E-dep-direction-321ce9b2b4b4; PR-002-E-kernel-deps-2745bac40199; PR-002-E-waiver-fa6bff499990; PR-002-E-review-627382618b20 | — | `ee9754fe2d0f015181dcefa97e715392aadd28ed` / 2026-08-08 | 2026-08-08 |
 | PR-003 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-004 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-005 | Todo | — | — | 0 | 0/5 | — | — | — | — |

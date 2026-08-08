@@ -1,14 +1,14 @@
 finstack-ai architecture check
 repo: /Users/jeickmeier/Projects/finstack-ai
-elapsed_ms: 44.8
+elapsed_ms: 45.0
 
 PASS: no architecture findings
 [architecture] $ uv run --no-project python -m unittest discover -s tools/archi…
 ----------------------------------------------------------------------
-Ran 21 tests in 0.080s
+Ran 21 tests in 0.060s
 
 OK
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s
 real 0.32
-user 0.03
+user 0.04
 sys 0.03
