@@ -26,6 +26,6 @@ Follow the language rules in `.agents/rules/03-rust-coding.md`, `04-python-codin
 
 ## Build, Test, and Review
 
-Use checked-in task definitions and CI commands. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add the canonical repository workflow with that tooling. Never assume a planned task exists. Run focused checks while coding, then every affected crate, feature, target, architecture, compatibility, and security check required before handoff.
+Use checked-in mise tasks and CI commands (`mise run <task>`). Root `mise.toml` owns tool pins and repository tasks; do not add `rust-toolchain.toml` or a Cargo `xtask`. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add the canonical mise task with that tooling. Never assume a planned task exists. Run focused checks while coding, then every affected crate, feature, target, architecture, compatibility, and security check required before handoff.
 
 Use short imperative commit subjects. Pull requests follow Implementation Plan sections 6.1–6.2. Update implementation registers only for facts created or changed by the work. Never manufacture ownership, links, evidence, review, approval, or completion.

@@ -5,6 +5,8 @@ author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
+# finstack-ai Architecture Specification
+
 # Document control
 
 | Field | Value |
@@ -14,7 +16,7 @@ date: "2026-08-08"
 | Version | 0.6 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
+| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
 
 # Executive architecture decision
 
@@ -1033,7 +1035,7 @@ The reusable non-kernel service name is `ArtifactStore`: it stages and retrieves
 
 # 17. Security architecture
 
-The Security and Threat Model v0.3 is the authoritative threat/control register for these boundaries. This section owns the system placement of those controls; the Technical Design owns their concrete implementation.
+The Security and Threat Model v0.4 is the authoritative threat/control register for these boundaries. This section owns the system placement of those controls; the Technical Design owns their concrete implementation.
 
 ## 17.1 Trust levels
 
@@ -1349,7 +1351,7 @@ The first slice proves the semantic center rather than the ecosystem:
 | ADR-032 | Initial snapshots are direct versioned kernel-state CBOR projections and remain disposable derived caches |
 | ADR-033 | MVP interruption uses retry/suspend/explicit uncertainty while the Model port reserves optional reconciliation implemented with durability |
 | ADR-034 | State-changing middleware outcomes are recorded by default; only explicitly recompute-safe outcomes may rerun during replay |
-| ADR-035 | WIT plugin alpha uses experimental @0.x tool/context packages with one coarse completion; @1.0.0 worlds freeze only at the framework 1.0 gate and resource-based streaming remains deferred |
+| ADR-035 | WIT plugin alpha uses experimental @0.x tool/context packages with one coarse completion; @1.0.0 worlds freeze only at the framework `1.0.0` gate and resource-based streaming remains deferred |
 | ADR-036 | Blob storage remains an application/runtime service through 1.0 and does not become a seventh kernel port |
 | ADR-037 | Model-context compaction is `before_model` middleware; it preserves canonical history and records only a versioned derived projection/checkpoint |
 

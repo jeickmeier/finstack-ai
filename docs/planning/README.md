@@ -1,4 +1,4 @@
-# finstack-ai documentation pack v0.8
+# finstack-ai documentation pack v0.10
 
 This package contains the implementation-oriented design set for **finstack-ai**, a Rust-based agent microkernel with first-class Rust, Python, and WebAssembly interfaces.
 
@@ -27,6 +27,20 @@ The documentation set has one authority chain:
 
 This README is a routing and authority document, not an additional source of product or technical requirements. A conflict between primary documents blocks the affected implementation work until it is reconciled. Changes to public semantics, records, protocols, extension boundaries, or support policy must update document versions, traceability, ADR status, and implementation gates in the same review unit.
 
-## Version note
+## Version model
 
-Version 0.8 is the reconciled pre-implementation baseline. It closes dependency/feature direction, canonical data and digest rules, durable command/recovery contracts, authorization propagation, bundle and child-run composition, middleware/compaction recovery, WIT/release versioning, and public-preview scope; it also removes pending guidance sections and advances every controlled document version. Version 0.7 assigned model-context compaction to `before_model` middleware and defined its normalized outcome/checkpoint, immutability, safety, delivery, threat-control, and conformance rules. Version 0.6 added the normative Engineering Standards and the pre-implementation Security and Threat Model. Version 0.5 incorporated generic deferred effects, run lineage, generalized interactions, and `before_finalize`. Documentation pack v0.4 resolved the ten foundational product decisions that were previously open.
+The pack version and controlled-document versions are independent counters. The pack version advances whenever the reconciled baseline changes. An individual document advances only when its controlled requirements, decisions, mechanisms, controls, or sequencing change; title, link, and related-document metadata corrections do not by themselves require a document-version bump.
+
+| Controlled document | Current version |
+| --- | ---: |
+| Engineering Standards | 0.4 |
+| Product Requirements Document | 0.7 |
+| Architecture Specification | 0.6 |
+| Technical Design | 0.8 |
+| Implementation Plan | 0.8 |
+| Security and Threat Model | 0.4 |
+| Future Capabilities Design Validation | 0.4 |
+
+## Version history
+
+Version 0.10 adopts mise as the sole repository toolchain pin and task entrypoint, removes the planned `rust-toolchain.toml` / Cargo `xtask` path, and records bootstrap via `mise install` / `mise run doctor`. Version 0.9 reconciles gate sign-off coverage, performance ownership, cost encoding, metadata and payload bounds, threat-to-PR traceability, contingency scope, schedule ranges, and delivery-model crosswalks. Version 0.8 closed dependency/feature direction, canonical data and digest rules, durable command/recovery contracts, authorization propagation, bundle and child-run composition, middleware/compaction recovery, WIT/release versioning, and public-preview scope. Version 0.7 assigned model-context compaction to `before_model` middleware and defined its normalized outcome/checkpoint, immutability, safety, delivery, threat-control, and conformance rules. Version 0.6 added the normative Engineering Standards and the pre-implementation Security and Threat Model. Version 0.5 incorporated generic deferred effects, run lineage, generalized interactions, and `before_finalize`. Documentation pack v0.4 resolved the ten foundational product decisions that were previously open.

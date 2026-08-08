@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-The initial source inventory is 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.8 inventory is 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -26,16 +26,25 @@ The current ordinal namespace is bound to this exact plan artifact:
 
 | Baseline | Plan version | SHA-256 | Effective date | Logical PRs | PR criteria | Phase criteria | Amendment | State |
 | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |
-| PLAN-0.6 | 0.6 | `237b624f53488cb625c598e2affaf0bae484e7ae33da26d06516135b14b93cff` | 2026-08-08 | 66 | 342 | 62 | Initial implementation baseline | Current |
+| PLAN-0.6 | 0.6 | `237b624f53488cb625c598e2affaf0bae484e7ae33da26d06516135b14b93cff` | 2026-08-08 | 66 | 342 | 62 | Initial implementation baseline | Superseded |
+| PLAN-0.8 | 0.8 | `4467fd52d09dc3e49200ae09d4b023656b7dcbac9b09670c2859b83a8009842c` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
 | Date | Prior baseline | New baseline / digest | Old criterion | New criterion or disposition | Amendment | Reconciled by |
 | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| YYYY-MM-DD | PLAN-0.6 | PLAN-0.7 / SHA-256 | PR-NNN-Axx | PR-NNN-Ayy, Removed, or Replaced | versioned plan change | reviewer |
--->
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / `4467fd52d09dc3e49200ae09d4b023656b7dcbac9b09670c2859b83a8009842c` | PH0-ENT-A01 | PH0-ENT-A01 (clarified) | Pack v0.9 gate sequencing | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-001-A05 | PR-001-A05 (revised) | Pack v0.10 mise bootstrap | Pack v0.10 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-005-A05 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-006-A02 | PR-006-A02 (revised) | Pack v0.9 metadata bounds | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-008-A08 | PR-008-A08 (revised) | Pack v0.9 record bounds | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-011-A02 | PR-011-A02 (revised) | Pack v0.9 cost encoding | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-026-A05 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-038-A06 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A02 | PR-039-A02 (revised) | Pack v0.9 cost projection | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A03 | PR-039-A03 (revised) | Pack v0.9 CBOR boundaries | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-057-A02 | PR-057-A02 (revised) | Pack v0.9 redaction coverage | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-063-A02 | PR-063-A02 (revised) | Pack v0.9 performance ownership | Pack v0.9 amendment |
 
 ## Acceptance dispositions
 

@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Engineering Standards |
-| Version | 0.3 |
+| Version | 0.4 |
 | Status | Normative pre-implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, contributors, implementation teams, reviewers, and AI coding agents |
-| Related documents | Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
 
 # 1. Purpose and authority
 
@@ -83,6 +83,15 @@ protocol codec      leaf providers/tools/observers/plugin hosts
 - Stable Rust is the production baseline. Nightly-only tools may support fuzzing, sanitizers, or diagnostics but must not be required by consumers.
 - `rustfmt`, workspace Clippy policy, documentation tests, and target checks are merge gates.
 - Public crates must set `rust-version`, license, repository, documentation, and feature metadata consistently.
+
+## 4.1.1 Repository toolchain and tasks
+
+- Root `mise.toml` is the canonical pin for contributor and CI tool versions. Do not add `rust-toolchain.toml` or a parallel pin file that can drift from mise.
+- Checked-in repository tasks are mise tasks. Documentation, CI, and agents must cite `mise run <task>` once a task exists.
+- A Cargo `xtask` crate or equivalent second orchestration layer is prohibited. Prefer direct tool invocations (`cargo`, `uv`, formatters, linters) from thin mise tasks.
+- Task scripts must stay sparse and fast. Complex shell or multi-step orchestration is allowed only when a direct one-liner cannot express the required check.
+- Python local commands use `uv` under the mise-managed toolchain. Node/npm pins arrive with browser/JavaScript binding work, not earlier.
+- Until an explicit MSRV decision is recorded for published crates, the stable Rust version pinned in `mise.toml` is the developer and CI channel.
 
 ## 4.2 Safety and panics
 

@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Security and Threat Model |
-| Version | 0.3 |
+| Version | 0.4 |
 | Status | Pre-implementation security baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Engineering Standards v0.3 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.8; Implementation Plan v0.8; Engineering Standards v0.4 |
 
 # 1. Purpose and authority
 
@@ -176,11 +176,11 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | TM-13 | Snapshot injects stale or forged state. | Versioned state-CBOR; journal position and state hash; validate before use; discard/rebuild on mismatch; snapshots never authoritative. | Mutation, mismatch, deletion, and replay-equivalence tests; PR-041. |
 | TM-14 | Cancellation/deadline race permits a late privileged effect or completion. | Durable cancellation intent; effect state check at dispatch and settlement; idempotent cleanup; explicit late-result policy; framework-authored cancelled closures carry no tool output/success claim and fabricated successful/tool-produced results are prohibited. | Boundary fault injection and late-result matrix; PR-011, PR-015, PR-045, PR-048. |
 | TM-15 | Child runs evade principal, budget, depth, deadline, or cancellation policy. | Immutable run relation; maximum depth; explicit propagation policy; budget scope; child invocation owned by authenticated runtime/SDK service. | Lineage property tests and restart/concurrency stress; PR-008, PR-011, PR-022, PR-046/047. |
-| TM-16 | Oversized or malicious schema/JSON/blob causes memory or parser denial of service. | Pre-allocation byte/depth/count limits; bounded validation; digest/reference large blobs; no automatic recursive remote fetch; streaming limits. | Fuzzing and size/depth boundary tests; PR-006/007, PR-013, PR-020, PR-039, PR-058. |
-| TM-17 | Observer/exporter failure, blockage, or payload leak changes behavior. | Observers are non-semantic; bounded exporter queues; redacted event views; drop/disconnect policy for progress; protect durable completion. | Slow/failing observer and redaction tests; PR-019, PR-057. |
+| TM-16 | Oversized or malicious schema/JSON/blob causes memory or parser denial of service. | Pre-allocation byte/depth/count limits; bounded validation; digest/reference large blobs; no automatic recursive remote fetch; streaming limits. | Fuzzing and size/depth boundary tests; PR-006 through PR-008, PR-013, PR-020, PR-039, PR-058. |
+| TM-17 | Observer/exporter failure, blockage, or payload leak changes behavior. | Observers are non-semantic; bounded exporter queues; redacted event views; drop/disconnect policy for progress; protect durable completion. | Slow/failing observer and redaction tests; PR-017, PR-018, PR-057. |
 | TM-18 | Dependency or release compromise ships malicious code. | Reviewed dependencies; source/license/advisory policy; immutable CI actions/tools; least-privilege release credentials; SBOM, checksums, signatures/provenance, reproducible release. | Supply-chain CI and release rehearsal; PR-003, PR-060, PR-061, PR-065/066. |
 | TM-19 | Tenant/session identifiers are swapped at an application or workflow boundary. | Bind authenticated principal and tenant scope to acquired session/run handles; authorize every resume/inspect/cancel/resolve action; avoid user-selected ownership fields. | Cross-tenant negative tests in server/workflow adapters; PR-045, PR-058, PR-059. |
-| TM-20 | Artifact/blob reference grants unintended data access. | Opaque scoped references; authorization on dereference; content type/size/digest metadata; separate read/write grants; malware/content scanning hook for deployments that require it. | Reference-confusion, cross-scope, digest, and size tests in artifact adapters; PR-020, PR-037, PR-056, PR-058. |
+| TM-20 | Artifact/blob reference grants unintended data access. | Opaque scoped references; authorization on dereference; content type/size/digest metadata; separate read/write grants; malware/content scanning hook for deployments that require it. | Reference-confusion, cross-scope, digest, and size tests in artifact adapters; PR-022, PR-037, PR-056, PR-058. |
 | TM-21 | Compaction removes safety/policy context, distorts provenance, or leaks sensitive history through summaries/checkpoints. | Unique late-tier `before_model` middleware ownership; protected/non-compactable item set; tool-pair atomicity; inherited sensitivity/provenance; version/config/model-profile/source/protected-set/projection digests; canonical history immutability; redacted diagnostics; safe failure when budget cannot be met. | Adversarial compaction, checkpoint invalidation, secret-canary, replay, and cross-binding tests; PR-018, PR-023, PR-048, PR-056/057. |
 
 # 8. Surface-specific control requirements
@@ -389,7 +389,7 @@ These are owned deployment inputs with fixed fail-closed framework behavior; the
 | Security area | Product requirements | Architecture/TDD | Implementation |
 |---|---|---|---|
 | Trust classes and isolation | NFR-SEC-001/002; FR-PLG | Architecture sections 15 and 17; TDD section 27 | PR-049 through PR-054 |
-| Secrets and redaction | NFR-SEC-003/005; FR-OBS | Architecture sections 17 and 19; TDD sections 19 and 31 | PR-019, PR-057, PR-060 |
+| Secrets and redaction | NFR-SEC-003/005; FR-OBS | Architecture sections 17 and 19; TDD sections 19 and 31 | PR-003, PR-014, PR-022, PR-024, PR-039, PR-057, PR-060 |
 | Scoped resource authority | NFR-SEC-004; FR-TLS; FR-PLG | Architecture sections 6, 15, and 17 | PR-025, PR-052, PR-056 |
 | Completion and interaction integrity | FR-KRN-013/015; FR-RT-008; FR-DUR | Architecture sections 10 and 12; TDD sections 11-13 and 23 | PR-014, PR-039, PR-042 through PR-045, PR-048 |
 | Durability integrity | NFR-REL; FR-DUR | Architecture sections 10 and 20; TDD sections 18 and 23 | PR-039 through PR-048 |

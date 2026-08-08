@@ -10,7 +10,7 @@ Apply with `01-engineering-conformance.md` and `02-testing-and-delivery.md`. Bin
 
 ## Production-safe Python
 
-- Follow the checked-in Python toolchain, formatter, linter, type-checker, packaging policy, and task commands once configured (Maturin/PyO3 for the native binding). Prefer `uv run` for local Python commands.
+- Follow the checked-in Python toolchain, formatter, linter, type-checker, packaging policy, and mise task commands once configured (Maturin/PyO3 for the native binding). Prefer `uv run` under the mise-managed toolchain for local Python commands.
 - Bindings are coarse adapters: expose handles, awaitables, and normalized commands. Do not reimplement continuation, recovery, interaction, lineage, or event-order semantics in Python.
 - Annotate public modules, classes, methods, and functions with precise type hints. Prefer `typing`/`collections.abc` protocols over inheritance from C-extension base types; keep Pydantic and other extras optional and lazy where design requires.
 - Map framework errors to the stable `FinstackError` hierarchy with `code`, identifiers, retryability, and safe details. Do not invent incompatible exception semantics or leak secrets in messages.

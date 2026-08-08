@@ -6,7 +6,7 @@ globs:
 
 # Testing and delivery
 
-Implementation code and tests are the normal output. Use checked-in repository task definitions and CI commands. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add and document the canonical repository workflow with the tooling. Never assume a planned wrapper or task exists. Planning describes required outcomes, not proof that a command is available or passed. Run focused checks after each coherent change and the logical PR's complete affected validation before handoff.
+Implementation code and tests are the normal output. Use checked-in mise tasks and CI commands (`mise run <task>`). Root `mise.toml` owns tool pins and repository tasks; do not add `rust-toolchain.toml` or a Cargo `xtask`. During PR-001–PR-003, standard tool commands needed to validate newly created artifacts are allowed; add and document the canonical mise task with that tooling. Never assume a planned wrapper or task exists. Planning describes required outcomes, not proof that a command is available or passed. Keep task scripts sparse and fast. Run focused checks after each coherent change and the logical PR's complete affected validation before handoff.
 
 ## Select tests from the changed invariant
 

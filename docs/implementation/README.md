@@ -25,7 +25,7 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers are initialized from documentation pack v0.8 on 2026-08-08:
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.10 on 2026-08-08:
 
 - 37 decisions are accepted and indexed; no standalone ADR files or implementation evidence exist yet.
 - 10 phases and 66 logical PRs are `Todo`.

@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-08 and reconciled against documentation pack v0.8. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-08 and reconciled against documentation pack v0.10. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 0 | All `Todo` |
 | Logical PRs | 66 | 0 | All `Todo` |
-| PR acceptance-evidence bullets | 342 | 0 | No coverage recorded |
+| PR acceptance-evidence bullets | 345 | 0 | No coverage recorded |
 | Phase entrance and exit bullets | 62 | 0 | No coverage recorded |
 | Program gates | 9 | 0 | All `Not ready` |
 | Implementation tasks | 0 | 0 | Add only when a logical PR is decomposed |
@@ -114,7 +114,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-002 | Todo | — | — | 0 | 0/7 | — | — | — | — |
 | PR-003 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-004 | Todo | — | — | 0 | 0/5 | — | — | — | — |
-| PR-005 | Todo | — | — | 0 | 0/4 | — | — | — | — |
+| PR-005 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 
 ### Phase 1
 
@@ -150,7 +150,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-023 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-024 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-025 | Todo | — | — | 0 | 0/5 | — | — | — | — |
-| PR-026 | Todo | — | — | 0 | 0/4 | — | — | — | — |
+| PR-026 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 
 ### Phase 4
 
@@ -172,7 +172,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-035 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-036 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-037 | Todo | — | — | 0 | 0/5 | — | — | — | — |
-| PR-038 | Todo | — | — | 0 | 0/5 | — | — | — | — |
+| PR-038 | Todo | — | — | 0 | 0/6 | — | — | — | — |
 
 ### Phase 6
 

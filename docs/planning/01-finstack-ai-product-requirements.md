@@ -5,16 +5,18 @@ author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
+# finstack-ai Product Requirements Document
+
 # Document control
 
 | Field | Value |
 |---|---|
 | Product | `finstack-ai` |
 | Document | Product Requirements Document (PRD) |
-| Version | 0.6 |
+| Version | 0.7 |
 | Status | Pre-implementation product baseline |
 | Primary audience | Product owners, framework architects, Rust/Python/WASM engineers, extension authors |
-| Related documents | Engineering Standards v0.3; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
+| Related documents | Engineering Standards v0.4; Architecture Specification v0.6; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
 
 # Executive summary
 
@@ -751,7 +753,7 @@ Providers, toolsets, stores, workflow adapters, and plugin hosts shall be separa
 
 ## 10.1 Performance
 
-The following are engineering targets to be measured in a published benchmark environment; they are not assumed facts before implementation.
+The following are engineering targets to be measured in versioned published benchmark environments; they are not assumed facts before implementation. Implementation Plan PR-063 owns evidence for NFR-PERF-001 through NFR-PERF-007 and ratifies the 1.0 reference workloads and budgets. Before PR-063 they drive warning/regression reporting; at G8 every applicable target must pass or have an approved unexpired exception. NFR-PERF-007 is a conformance rule rather than a numeric budget.
 
 ### NFR-PERF-001: Kernel transition overhead
 
@@ -819,7 +821,7 @@ Platform-specific provider, filesystem, sandbox, or service code shall not enter
 
 ## 10.4 Security
 
-The Security and Threat Model v0.3 refines these outcomes into threat assumptions, control obligations, residual risks, and gate evidence. Those controls must remain within the product and architecture boundaries defined by this PRD.
+The Security and Threat Model v0.4 refines these outcomes into threat assumptions, control obligations, residual risks, and gate evidence. Those controls must remain within the product and architecture boundaries defined by this PRD.
 
 ### NFR-SEC-001
 
@@ -1014,7 +1016,7 @@ finstack:ai-toolset@0.0.4
 finstack:ai-context@0.0.4
 ```
 
-The plugin-alpha packages track the workspace `0.0.4` release and remain explicitly experimental 0.x interfaces. `@1.0.0` worlds are published only at the framework 1.0 gate after compatibility/security evidence. Observer isolation is outside the 1.0 baseline and requires a later ADR rather than a conditional package placeholder.
+The plugin-alpha packages track the workspace `0.0.4` release and remain explicitly experimental 0.x interfaces. `@1.0.0` worlds are published only at the framework `1.0.0` gate after compatibility/security evidence. Observer isolation is outside the 1.0 baseline and requires a later ADR rather than a conditional package placeholder.
 
 # 13. Delivery phases
 

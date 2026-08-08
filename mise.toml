@@ -1,0 +1,17 @@
+[tools]
+rust = "1.97.1"
+python = "3.14"
+uv = "0.10.11"
+
+[tasks.install]
+description = "Install pinned project tools"
+run = "mise install"
+
+[tasks.doctor]
+description = "Verify pinned toolchain is available"
+run = """
+rustc --version
+cargo --version
+python --version
+uv --version
+"""

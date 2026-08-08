@@ -5,61 +5,7 @@ author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
-```{=openxml}
-<w:p><w:r><w:br w:type="page"/></w:r></w:p>
-```
-
-# Contents
-
-Document control
-
-Executive design verdict
-
-1. Purpose, scope, and review method
-
-2. Baseline architecture under review
-
-3. Cross-cutting extension patterns
-
-4. Capability accommodation summary
-
-5. Subagents
-
-6. Delegated work
-
-7. Memory system
-
-8. RAG and knowledge-base search
-
-9. Workflow and human-in-the-loop interaction
-
-10. Scheduled, background, and long-running work
-
-11. Multi-agent teams and fan-out/fan-in
-
-12. Sandboxed code execution and computer use
-
-13. Multi-channel ingress and conversation routing
-
-14. Guardrails, evaluations, and verification loops
-
-15. Capability and bundle composition model
-
-16. Reference bundles
-
-17. Conformance and future-proofing tests
-
-18. Risks and architectural anti-patterns
-
-19. Final decision and acceptance checklist
-
-Appendix A. Feature-to-primitive traceability
-
-Appendix B. Glossary
-
-```{=openxml}
-<w:p><w:r><w:br w:type="page"/></w:r></w:p>
-```
+# finstack-ai Future Capabilities Design Validation
 
 # Document control
 
@@ -71,9 +17,9 @@ Appendix B. Glossary
 | Status | Validated supporting design; incorporated into the authoritative baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, framework architects, implementation teams, extension authors, and AI coding agents |
-| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
+| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
 
-This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; Engineering Standards v0.3, the v0.6 PRD/Architecture/Technical Design, accepted ADRs, Security and Threat Model v0.3, and Implementation Plan v0.6 are authoritative for the incorporated requirements, controls, and delivery sequence.
+This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; Engineering Standards v0.4, Product Requirements v0.7, Architecture Specification v0.6, Technical Design v0.8, accepted ADRs, Security and Threat Model v0.4, and Implementation Plan v0.8 are authoritative for the incorporated requirements, controls, and delivery sequence.
 
 # Executive design verdict
 

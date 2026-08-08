@@ -5,17 +5,19 @@ author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
+# finstack-ai Technical Design Document
+
 # Document control
 
 | Field | Value |
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.6 |
+| Version | 0.8 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Architecture Specification v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
+| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Architecture Specification v0.6; Implementation Plan v0.8; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -47,7 +49,7 @@ These paths implement the same logical ports and return normalized values to the
 ```text
 finstack-ai/
   Cargo.toml
-  rust-toolchain.toml
+  mise.toml                 # sole toolchain pin + repository tasks; no rust-toolchain.toml
   deny.toml
 
   crates/
@@ -190,6 +192,8 @@ finstack-ai/
     browser-minimal/
     durable-interaction/
 ```
+
+Root `mise.toml` pins contributor/CI tools and hosts repository tasks. Do not add `rust-toolchain.toml`. Node/npm pins arrive with browser/JavaScript binding packages, not in the initial root pin set.
 
 # 3. Crate dependency policy
 
@@ -405,11 +409,24 @@ Validation occurs on construction. Parsed `serde_json::Value` is created only wh
 
 The portable JCS numeric domain is finite IEEE-754 binary64. Canonicalization parses and serializes numbers under RFC 8785/ECMAScript rules; overflow is rejected. Schemas must encode exact integers outside `-(2^53-1)..=(2^53-1)`, precision-sensitive decimals, and monetary quantities as strings or typed non-JSON fields rather than JSON numbers. Durable typed CBOR DTOs may use their declared wider integer types. Cross-language fixtures cover the safe-integer boundaries, `i64`/`u64` string encodings, exponent normalization, rounding-equivalent lexical forms, negative zero, underflow/overflow, and non-finite rejection.
 
-## 6.2 Shared buffers
+## 6.2 `Metadata`
+
+Public and durable metadata uses one bounded opaque object rather than unconstrained language maps:
+
+```rust
+#[repr(transparent)]
+pub struct Metadata(RawJson);
+```
+
+`Metadata::parse` requires a top-level JSON object and `{}` is the default. It inherits strict `RawJson` validation. Equality and semantic digests use JCS canonical bytes; canonical CBOR carries those JCS bytes as a byte string, while human and diagnostic JSON emits the object itself. Every unknown member is preserved during round-trip even when a consumer ignores it. Metadata is included in the enclosing object's digest and never grants authority; a member that changes behavior requires an explicitly versioned enclosing contract.
+
+V1 metadata is limited to 64 KiB of canonical bytes, 64 top-level members, 128 UTF-8 bytes per key, and depth 16. Keys are namespaced outside a field owner's documented stable keys. `ErrorDescriptor.safe_details`, `AuthorizationContext.safe_claims`, and artifact metadata are non-secret. Child-run metadata cannot change principal, tenant, deadline, placement, or budget. Provider message metadata is exposed only to its owning adapter unless a versioned portable member says otherwise.
+
+## 6.3 Shared buffers
 
 Messages, schemas, and results use `Arc<str>`, `Bytes`, or `Arc<[T]>` where sharing is common. Public APIs avoid exposing borrowed lifetimes that cannot map to Python or WASM.
 
-## 6.3 Digest contract
+## 6.4 Digest contract
 
 ```rust
 pub struct Digest([u8; 32]);
@@ -424,6 +441,23 @@ The v1 digest algorithm is SHA-256, serialized as lowercase 64-character hexadec
 The domain name is fixed per use (`raw-json`, `record-payload`, `effect-input`, `effect-output`, `blob-content`, `snapshot-state`, `middleware-chain`, `agent-spec`, or another versioned registry entry). JSON uses the strict RFC 8785 bytes above; durable DTOs use the frozen canonical CBOR profile; blob content uses the exact raw bytes. A digest comparison never mixes domains or schema versions. Cross-language known-answer fixtures include key-order/whitespace-equivalent JSON, duplicate-key rejection, numeric edge cases, Unicode, empty/large blobs, and every durable record family.
 
 `finstack-ai-kernel::digest` owns `Digest`, the domain registry, SHA-256 wrapper, and strict canonical-JSON normalization used by semantic DTOs. Runtime and SDK call that module; protocol applies the same type to its canonical-CBOR bytes; leaf adapters do not implement competing hash/JCS rules. PR-003/PR-006 pin/audit the hash dependency and known-answer corpus.
+
+## 6.5 V1 semantic payload bounds
+
+The following are default and hard v1 schema ceilings. Deployments may configure lower creation or ingress limits, but replay decoders must continue accepting every valid committed v1 value up to these ceilings.
+
+| Dimension | V1 ceiling |
+|---|---:|
+| Canonical record envelope | 8 MiB |
+| Atomic append batch | 16 MiB and 256 records |
+| Individual text or byte string | 4 MiB |
+| Array items | 4,096 |
+| Map entries | 256 |
+| Canonical-CBOR nesting depth | 32 |
+| `RawJson` value | 1 MiB and depth 32 |
+| `Metadata` value | 64 KiB, 64 top-level members, 128-byte keys, depth 16 |
+
+Constructors and decoders check the applicable byte, item, and depth limits before allocation and return a stable error; they never truncate semantic input. Replay-required content larger than these ceilings uses a scoped `ArtifactRef`. Protocol, plugin, provider, tool, and deployment limits may be stricter; the 16 KiB pre-authentication frame ceiling remains independent. Raising a hard schema ceiling after release is a compatibility change with new boundary fixtures.
 
 # 7. Content and message model
 
@@ -846,6 +880,13 @@ pub struct ArtifactScope {
     pub sensitivity: Sensitivity,
 }
 
+pub struct ArtifactMetadata {
+    pub kind: Arc<str>,
+    pub media_type: Arc<str>,
+    pub name: Option<Arc<str>>,
+    pub attributes: Metadata,
+}
+
 pub trait ArtifactStore: PortObject {
     fn stage_put(
         &self,
@@ -1216,7 +1257,7 @@ pub enum LimitValue {
     Duration(Duration),
     Cost {
         unit: Arc<str>,
-        micros: u128,
+        micros: u64,
         pricing_policy_version: Arc<str>,
     },
 }
@@ -1228,7 +1269,7 @@ pub struct TimerFired {
 }
 ```
 
-All arrays and strings above use the configured record bounds. Repeating an equal cancellation request or timer firing is idempotent; conflicting reuse of an ID is an invariant error. `CancellationReconciled.uncertain_effects` forces `Suspended` rather than a fabricated `RunCancelled`. `LimitReached` requires matching value variants for its dimension and is committed before limit-driven suspension or terminalization.
+All arrays, maps, strings, raw JSON, metadata, records, and append batches above use the v1 ceilings in section 6.5. Repeating an equal cancellation request or timer firing is idempotent; conflicting reuse of an ID is an invariant error. `CancellationReconciled.uncertain_effects` forces `Suspended` rather than a fabricated `RunCancelled`. `LimitReached` requires matching value variants for its dimension and is committed before limit-driven suspension or terminalization.
 
 ## 12.3 Effect records
 
@@ -1668,6 +1709,18 @@ pub trait Toolset: PortObject {
 ## 15.2 Tool metadata
 
 ```rust
+pub enum ApprovalRequirement {
+    Policy,
+    Required,
+    NotRequired,
+}
+
+pub struct ApprovalMetadata {
+    pub requirement: ApprovalRequirement,
+    pub reason: Option<Arc<str>>,
+    pub attributes: Metadata,
+}
+
 pub struct ToolSpec {
     pub id: ToolId,
     pub model_name: Arc<str>,
@@ -1684,7 +1737,7 @@ pub struct ToolSpec {
 }
 ```
 
-`model_name` is the name exposed to the LLM and must be unique in the resolved agent. `ToolId` remains stable across aliases.
+`model_name` is the name exposed to the LLM and must be unique in the resolved agent. `ToolId` remains stable across aliases. `ApprovalMetadata` is a bounded policy hint, not an authorization grant: `Required` cannot be bypassed, while `Policy` and `NotRequired` remain subject to stricter host or middleware policy.
 
 ## 15.3 Validation
 
@@ -2124,7 +2177,7 @@ pub struct RunLimits {
 
 pub struct CostLimit {
     pub unit: Arc<str>,
-    pub micros: u128,
+    pub micros: u64,
     pub pricing_policy_version: Arc<str>,
     pub unknown_usage: UnknownUsagePolicy,
 }
@@ -2136,7 +2189,7 @@ pub enum UnknownUsagePolicy {
 }
 ```
 
-Cost uses non-negative integer millionths of an ISO-4217 currency or a namespaced application credit unit; floating-point money is prohibited. The pricing-policy version and provider/model price inputs used for each charge are recorded with normalized usage. Counter increments are monotonic checked integers; overflow is a `counter_overflow` failure, never wraparound. Extension counter keys are namespaced, registered with their maxima during agent resolution, capped at 32 keys per resolved agent in v1, and incremented only through normalized kernel input. `EffectCompleted` usage drives aggregation; crossing a hard bound commits `LimitReached` before terminalization or suspension according to the declared unknown-usage policy.
+Cost uses non-negative `u64` integer millionths of an ISO-4217 currency or a namespaced application credit unit; floating-point money is prohibited. The v1 maximum is `u64::MAX`, all aggregation is checked, and overflow is a stable limit failure rather than wraparound. JSON/JSONL and JavaScript-facing schemas encode `micros` as a canonical decimal string; Python may expose an exact integer. The pricing-policy version and provider/model price inputs used for each charge are recorded with normalized usage. Counter increments are monotonic checked integers; overflow is a `counter_overflow` failure, never wraparound. Extension counter keys are namespaced, registered with their maxima during agent resolution, capped at 32 keys per resolved agent in v1, and incremented only through normalized kernel input. `EffectCompleted` usage drives aggregation; crossing a hard bound commits `LimitReached` before terminalization or suspension according to the declared unknown-usage policy.
 
 ## 22.2 Cancellation token tree
 
@@ -2620,6 +2673,7 @@ Use `ciborium` behind a project-owned codec wrapper for the strict, versioned de
 
 - definite-length items;
 - shortest-form integer and length encodings;
+- integers representable directly by CBOR major types 0 and 1 only; bignum tags 2 and 3 are rejected in v1;
 - deterministic map-key ordering;
 - finite floats only, encoded in the shortest IEEE-754 width that preserves the value exactly; negative zero is preserved as distinct from positive zero; non-finite values are rejected;
 - no duplicate map keys; and
@@ -2633,7 +2687,7 @@ Reasons:
 - deterministic framing; and
 - easier evolution than a Rust-specific encoding.
 
-ADR-015 freezes the profile in PR-004. PR-039 implements it and publishes binary compatibility fixtures, including nested maps built in different insertion orders, integer/float width boundaries, negative zero, and rejection of duplicate keys and non-finite values.
+ADR-015 freezes the profile in PR-004. PR-039 implements it and publishes binary compatibility fixtures, including nested maps built in different insertion orders, integer/float width boundaries through `u64::MAX`, negative zero, and rejection of bignum tags, duplicate keys, and non-finite values.
 
 ## 28.2 Frame
 
@@ -2669,7 +2723,7 @@ No live event may overtake the barrier. Transient progress before reconnect is n
 
 ## 28.3 Diagnostic JSON
 
-Every envelope and record has a lossless diagnostic JSON projection. JSONL export supports debugging, migrations, and support cases.
+Every envelope and record has a lossless diagnostic JSON projection. JSONL export supports debugging, migrations, and support cases. A typed `micros` value is always an unsigned base-10 string with no leading zero except `"0"`; decoders reject JSON numbers, signs, overflow, and non-canonical leading zeros.
 
 ## 28.4 Schema evolution
 
@@ -2680,6 +2734,7 @@ Every envelope and record has a lossless diagnostic JSON projection. JSONL expor
 | Inbound remote/process commands and authentication messages | Reject unknown fields and unknown variants before state lookup. | Explicit protocol/command version negotiation; no permissive command decoding. |
 | Outbound remote events/responses | Accept only schema-declared ignorable optionals; retain opaque values where proxy/re-export is supported. | Additive optionals within negotiated version; semantic changes require new version. |
 | WIT records/worlds | Structural interface is exact; unknown fields do not exist in a compiled world. | Breaking/additive interface changes follow the package/world version policy and adapter matrix. |
+| `Metadata` objects | Preserve every unknown member during round-trip; consumers may ignore members they do not own, but metadata never grants authority. | Add opaque members within the enclosing field contract; a behavior-changing member requires an enclosing schema/version change and fixtures. |
 | Diagnostic metadata / JSONL projections | Retain when round-tripping; consumers may ignore documented diagnostic keys. | Must not influence replay semantics. |
 | Golden trace/compatibility fixtures | Reject unknown fields. | Fixture schema version changes explicitly with a converter or regenerated reviewed corpus. |
 
@@ -2780,7 +2835,7 @@ A panic is never used for user input, provider output, plugin output, or invalid
 
 # 31. Security design
 
-This section implements the control obligations in Security and Threat Model v0.3. Control ownership, tests, and residual risks must remain traceable to that register as the implementation evolves.
+This section implements the control obligations in Security and Threat Model v0.4. Control ownership, tests, and residual risks must remain traceable to that register as the implementation evolves.
 
 ## 31.1 Native code
 
@@ -3103,7 +3158,7 @@ All pre-implementation technical decisions are resolved. Changes to these direct
 | ADR-032 | Direct versioned kernel-state CBOR snapshots; snapshots remain disposable derived caches. | PR-041 benchmarks may propose a new ADR for a compact projection. |
 | ADR-033 | MVP interruption uses retry, suspension, or explicit uncertainty; the Model trait reserves optional reconciliation implemented in Phase 6. | PR-042 provider evidence determines per-provider support, not the port shape. |
 | ADR-034 | Record state-changing middleware outcomes by default; recompute only when explicitly declared safe and fixture-proven. | PR-018 descriptor/conformance review. |
-| ADR-035 | WIT plugin alpha uses experimental @0.x tool/context packages and one coarse completion; @1.0.0 worlds freeze only at the framework 1.0 gate, with resource streaming deferred. | Post-plugin-alpha evidence on async support, cleanup, overhead, and compatibility. |
+| ADR-035 | WIT plugin alpha uses experimental @0.x tool/context packages and one coarse completion; @1.0.0 worlds freeze only at the framework `1.0.0` gate, with resource streaming deferred. | Post-plugin-alpha evidence on async support, cleanup, overhead, and compatibility. |
 | ADR-036 | Blob storage is application/runtime-owned through 1.0; no seventh kernel port. | Post-1.0 usage evidence and a new architecture ADR. |
 | ADR-037 | Model-context compaction uses `BeforeModel` middleware, never mutates canonical history, and stores versioned outcomes/checkpoints as derived data. | Before public preview only if PR-018/PR-056 conformance evidence proves the existing stage/outcome contract cannot preserve required semantics. |
 
