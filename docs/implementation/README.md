@@ -27,12 +27,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.12 on 2026-08-08:
 
-- 37 decisions are accepted and indexed; ADR-024 license/governance files are `Partial` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (standalone ADR text remains PR-004).
-- Phase 0 is `In progress`; PR-001–PR-004 are `Done`; PR-005 is `In review` on branch `pr-005-harnesses` with local artifacts under [`artifacts/pr-005/`](artifacts/pr-005/); PR-006–PR-066 are `Todo`.
-- gates G0 through G8 are `Not ready`.
-- PR-001 acceptance criteria A01–A06 are `Passed` with artifacts under [`artifacts/pr-001/`](artifacts/pr-001/). PR-002 acceptance A01–A07 are closed (4 `Passed`, 3 `Not applicable` for deferred compile fixtures) with artifacts under [`artifacts/pr-002/`](artifacts/pr-002/) at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 acceptance A01–A05 are `Passed` with artifacts under [`artifacts/pr-003/`](artifacts/pr-003/) at merge `9b0709a8cf2d96b418406f953e7bdc958925c274`. PR-004 acceptance A01–A05 are `Passed` with artifacts under [`artifacts/pr-004/`](artifacts/pr-004/) at merge `9b13fe02d4cf41305daa20195eb0a537f85f9712`. PR-005 acceptance A01–A04 are `Passed` locally; A05 remains `Pending` until the named G0 decision after merge. No gate approvals or exceptions have been recorded.
+- 37 decisions are accepted and indexed; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`.
+- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-005 are `Done`; PR-006–PR-066 are `Todo`.
+- Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
+- PR-001–PR-005 acceptance criteria are closed. PR-005 artifacts (including hosted CI and G0 decision) live under [`artifacts/pr-005/`](artifacts/pr-005/). No exceptions are open.
 
-The existence of these registers is documentation setup, not evidence that Phase 0 or PR-004 has passed.
+Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
 
 ## Update discipline
 

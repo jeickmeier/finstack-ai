@@ -96,7 +96,13 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-005-A02 | PR-005 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-005-E-conformance-cbbe1f123fea | — | me@jeickmeier.com | 2026-08-08 |
 | PR-005-A03 | PR-005 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-005-E-benchmark-064298d926a0 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-005-A04 | PR-005 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-005-E-conformance-cbbe1f123fea; PR-005-E-schema-d48af29171bb | — | me@jeickmeier.com | 2026-08-08 |
-| PR-005-A05 | PR-005 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-005-A05 | PR-005 | PLAN-0.10 / same | Passed | me@jeickmeier.com | G0-D-foundation-ready-bcf021e4873a; PH0-E-exit-2ada36eb4a4b | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-ENT-A01 | Phase 0 | PLAN-0.10 / [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | Passed | me@jeickmeier.com | PH0-E-entrance-abbcbb8c4715 | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-EXIT-A01 | Phase 0 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PH0-E-exit-2ada36eb4a4b; PR-003-E-hosted-ci-b7f2fe44f7c1; PR-005-E-hosted-ci-994e52f8f0de | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-EXIT-A02 | Phase 0 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PH0-E-exit-2ada36eb4a4b; PR-002-E-architecture-6ed3268e6ff5 | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-EXIT-A03 | Phase 0 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PH0-E-exit-2ada36eb4a4b; PR-005-E-conformance-cbbe1f123fea; PR-005-E-benchmark-064298d926a0 | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-EXIT-A04 | Phase 0 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PH0-E-exit-2ada36eb4a4b; PR-004-E-schema-governance-4c7efdcf83d8 | — | me@jeickmeier.com | 2026-08-08 |
+| PH0-EXIT-A05 | Phase 0 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PH0-E-exit-2ada36eb4a4b; PR-003-E-channel-ownership-7d912e4d6ce2; PR-003-E-security-review-fc22979d5bcb; PR-004-E-security-review-965513c26e6f; PR-005-E-security-review-0bda5e478fb1 | — | me@jeickmeier.com | 2026-08-08 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
@@ -106,7 +112,7 @@ PR-003 acceptance is closed and the logical PR is `Done` at merge `9b0709a8cf2d9
 
 PR-004 acceptance is closed and the logical PR is `Done` at merge `9b13fe02d4cf41305daa20195eb0a537f85f9712` ([#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). Local evidence was bound at PR head `75537daad821f33de4a1465fbf83aa784b710cc5` / docs tip `7634342b93e57aae0f93e17fd685b2e954584c1a`; hosted `ci`/`security`/`nightly` were green on that head (ci run 31274063724). Artifacts live under [`artifacts/pr-004/`](artifacts/pr-004/).
 
-PR-005 A01–A04 are locally evidenced on branch `pr-005-harnesses` with artifacts under [`artifacts/pr-005/`](artifacts/pr-005/). A05 / G0 remain pending a named gate decision after Phase 0 exit evidence at an immutable merged commit.
+PR-005 acceptance is closed and the logical PR is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb` ([#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). Local A01–A04 evidence was bound at implementation commit `e97ac9b543cb8e3b1465b1d1ae76c8fdede51009`; hosted CI was green on PR head `9b183e9baa574e30972568a6a8b26510630bb10b` (ci run 31275172068; security 31275172072; nightly 31275172064). Phase 0 entrance/exit and G0 are closed against that merge via `G0-D-foundation-ready-bcf021e4873a`. Artifacts live under [`artifacts/pr-005/`](artifacts/pr-005/).
 
 ## Evidence records
 
@@ -149,6 +155,9 @@ PR-005 A01–A04 are locally evidenced on branch `pr-005-harnesses` with artifac
 | PR-005-E-ci-local-bf37275bab12 | 2026-08-08 | PR-005 | Local command | `mise run ci` (includes conformance + benchmark compile) | Darwin arm64; rustc/cargo 1.97.1; python 3.14 | `e97ac9b543cb8e3b1465b1d1ae76c8fdede51009` | Pass | [`artifacts/pr-005/ci.txt`](artifacts/pr-005/ci.txt) sha256 `138b6acc3690bba2e383e84179e19cff76487a5f6ccb7ae1442557e2dc25dfa1` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 | PR-005-E-supply-chain-6796d4c42c41 | 2026-08-08 | PR-005 | Local command | `mise run supply-chain` after Unicode-3.0/MIT-0/Zlib allowlist for jsonschema graph | Darwin arm64; cargo-deny 0.20.2 | `e97ac9b543cb8e3b1465b1d1ae76c8fdede51009` | Pass | [`artifacts/pr-005/supply-chain.txt`](artifacts/pr-005/supply-chain.txt) sha256 `e1a86fbaa0bc76e0d3ca5c6e7bfed60b312307f7c0000d7b501d3b2077451a56` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 | PR-005-E-security-review-0bda5e478fb1 | 2026-08-08 | PR-005 | Manual review | Threat Model §18 disposition for fixture parser + dependency allowlist (TM-16/TM-18) | Files on branch `pr-005-harnesses` | `e97ac9b543cb8e3b1465b1d1ae76c8fdede51009` | Pass | [`artifacts/pr-005/security-review.txt`](artifacts/pr-005/security-review.txt) sha256 `b263278ce618b3c19965e5d9797af9925cfc9f4b839a112a27f56bf96e126808` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-005-E-hosted-ci-994e52f8f0de | 2026-08-08 | PR-005 | Hosted CI | GitHub Actions PR runs for `ci.yml` (incl. conformance/benchmark compile + schema-governance), `security.yml`, and `nightly.yml` | ubuntu-24.04 / macos-15 / windows-2025; GitHub-hosted | `9b183e9baa574e30972568a6a8b26510630bb10b` | Pass | [`artifacts/pr-005/hosted-ci.txt`](artifacts/pr-005/hosted-ci.txt) sha256 `3487c93b43cedb12fcd90ea02fba5fd4f06d321e3925dbb8a7926a7518af44dd`; runs 31275172068 / 31275172072 / 31275172064; merge `c1108d207389a947d16e9b0dd7a76026108c01eb` ([#3](https://github.com/jeickmeier/finstack-ai/pull/3)) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PH0-E-entrance-abbcbb8c4715 | 2026-08-08 | Phase 0 | Manual review | Confirm versioned Eng Standards/PRD/Architecture/TDD/Threat Model baselines present under `docs/planning/` (PLAN-0.10) | Files at merge commit | `c1108d207389a947d16e9b0dd7a76026108c01eb` | Pass | [`artifacts/pr-005/g0-decision.txt`](artifacts/pr-005/g0-decision.txt) sha256 `ff0c489f9dc2208b6dcb2f74b82c6d62dff12907bc81f50e2c2b2cf9c521c39f` (entrance section); plan digest in PLAN-0.10 baseline row | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PH0-E-exit-2ada36eb4a4b | 2026-08-08 | Phase 0 | Manual review | Phase 0 exit A01–A05 against merged PR-001–PR-005 evidence set at G0 | Files + linked PR evidence at merge | `c1108d207389a947d16e9b0dd7a76026108c01eb` | Pass | [`artifacts/pr-005/g0-decision.txt`](artifacts/pr-005/g0-decision.txt) sha256 `ff0c489f9dc2208b6dcb2f74b82c6d62dff12907bc81f50e2c2b2cf9c521c39f`; linked PR-001–PR-005 evidence IDs | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 
 An evidence record is valid only when another contributor can identify what ran or was reviewed, against which immutable revision, in which relevant environment, with what result, and where the durable output is stored. A bare statement such as “tests pass,” an unlinked local result, or evidence from a superseded commit cannot close acceptance.
 
@@ -167,10 +176,7 @@ Large outputs belong in durable artifacts. This register stores their identity, 
 
 | Decision | Gate | Date | Result | Approver | Reviewed commit(s) | Evidence set | Open exceptions | Residual risk / conditions | Remediation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| GN-D-short-slug-xxxxxxxxxxxx | GN | YYYY-MM-DD | Passed/Failed | named approver | immutable commits | scoped evidence IDs | scoped exception ID or None | accepted conditions or None | issue/task or — |
--->
+| G0-D-foundation-ready-bcf021e4873a | G0 | 2026-08-08 | Passed | me@jeickmeier.com | merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR head `9b183e9baa574e30972568a6a8b26510630bb10b` | PH0-E-entrance-abbcbb8c4715; PH0-E-exit-2ada36eb4a4b; PR-001–PR-005 acceptance evidence; PR-005-E-hosted-ci-994e52f8f0de; PR-005-E-security-review-0bda5e478fb1 | None | None for G0 foundation scope; Phase 1 may begin | — |
 
 A passing decision requires the approver to verify the gate's plan requirements, phase exit evidence, applicable Security and Threat Model controls, compatibility obligations, and exception status. The decision row itself satisfies a final logical PR's gate-sign-off criterion; that criterion is not a prerequisite to recording the decision. The [delivery ledger](delivery-ledger.md) is updated to `Passed` only after this row exists.
 

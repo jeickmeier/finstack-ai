@@ -1,0 +1,11 @@
+PR-005 hosted CI evidence
+Date: 2026-08-08
+PR: https://github.com/jeickmeier/finstack-ai/pull/3
+PR head: 9b183e9baa574e30972568a6a8b26510630bb10b
+Merge commit: c1108d207389a947d16e9b0dd7a76026108c01eb
+ci.yml run: 31275172068
+security.yml run: 31275172072
+nightly.yml run: 31275172064
+
+All required checks passed on Linux/macOS/Windows (stable+msrv), schema-governance,
+supply-chain, secret-scan(+canary), release-smoke, and pinned nightly.
