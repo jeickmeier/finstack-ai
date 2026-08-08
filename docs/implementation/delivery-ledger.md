@@ -9,14 +9,14 @@ Last updated 2026-08-08 and reconciled against documentation pack v0.12. Update 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 0 | Phase 0 `In progress`; others `Todo` |
-| Logical PRs | 66 | 3 | PR-001–PR-003 `Done`; PR-004 `In review`; PR-005–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 23 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003 A01–A05 `Passed`; PR-004 A01–A05 `Passed` (awaiting merge) |
+| Logical PRs | 66 | 4 | PR-001–PR-004 `Done`; PR-005–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 23 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003 A01–A05 `Passed`; PR-004 A01–A05 `Passed` |
 | Phase entrance and exit bullets | 62 | 0 | No coverage recorded |
 | Program gates | 9 | 0 | All `Not ready` |
-| Implementation tasks | 13 | 13 | PR-003 and PR-004 tasks complete (PR-004 awaiting merge) |
+| Implementation tasks | 13 | 13 | PR-003 and PR-004 tasks complete |
 | Open blockers | 0 | 1 | PR-003-B-no-remote-ede93913b2ea Resolved |
 
-PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `In review` on branch `pr-004-adrs-schema-governance` at `75537daad821f33de4a1465fbf83aa784b710cc5` with A01–A05 Passed under [`artifacts/pr-004/`](artifacts/pr-004/). Logical PR `Done` awaits the GitHub merge commit. Phase 0 and G0 remain incomplete until PR-005 finishes.
+PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). Phase 0 and G0 remain incomplete until PR-005 finishes.
 
 ## Status values
 
@@ -77,7 +77,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Phase | Logical PRs | Entrance | Exit | Gate | Status | Owner | Active PRs | Blocker | Evidence | Updated |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
-| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | PR-004 | — | PR-001–PR-003 Done; PR-004 In review; PR-005 Todo | 2026-08-08 |
+| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | PR-005 | — | PR-001–PR-004 Done; PR-005 Todo | 2026-08-08 |
 | [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 0/2 | 0/4 | G1 | Todo | — | — | — | — | — |
 | [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 0/2 | 0/4 | G2 | Todo | — | — | — | — | — |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
@@ -113,7 +113,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-001 | Done | me@jeickmeier.com | `main` @ `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (direct commit; no GitHub PR) | 0 | 6/6 | PR-001-E-dep-direction-1fe94f769044; PR-001-E-cargo-check-3e6a85e8d27f; PR-001-E-kernel-deps-1d8c0f41d158; PR-001-E-mise-doctor-cae2f2eb7918; PR-001-E-ownership-review-b14626f70259; PR-001-E-security-md-f70391db8ac2 | — | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` / 2026-08-08 | 2026-08-08 |
 | PR-002 | Done | me@jeickmeier.com | `main` @ `ee9754fe2d0f015181dcefa97e715392aadd28ed` (local merge of `pr-002-architecture-enforcement`; no GitHub remote/PR) | 0 | 7/7 | PR-002-E-architecture-6ed3268e6ff5; PR-002-E-unit-tests-fc419e9d2920; PR-002-E-wasm-binding-5253da7a99f9; PR-002-E-dep-direction-321ce9b2b4b4; PR-002-E-kernel-deps-2745bac40199; PR-002-E-waiver-fa6bff499990; PR-002-E-review-627382618b20 | — | `ee9754fe2d0f015181dcefa97e715392aadd28ed` / 2026-08-08 | 2026-08-08 |
 | PR-003 | Done | me@jeickmeier.com | [#1](https://github.com/jeickmeier/finstack-ai/pull/1) merged @ `9b0709a8cf2d96b418406f953e7bdc958925c274` | 7 | 5/5 | PR-003-E-hosted-ci-b7f2fe44f7c1; PR-003-E-hosted-release-smoke-be7df0f3c45c; PR-003-E-channel-ownership-7d912e4d6ce2; PR-003-E-generated-docs-ba54420a0521; PR-003-E-supply-chain-9c119be89fd4; PR-003-E-secret-scan-b09efb8d60cb; PR-003-E-security-review-fc22979d5bcb; PR-003-E-release-smoke-5ac88e7bdf8a | — | `9b0709a8cf2d96b418406f953e7bdc958925c274` / 2026-08-08 | 2026-08-08 |
-| PR-004 | In review | me@jeickmeier.com | branch `pr-004-adrs-schema-governance` @ `75537daad821f33de4a1465fbf83aa784b710cc5` | 6 | 5/5 | PR-004-E-schema-governance-4c7efdcf83d8; PR-004-E-unit-tests-7ef93e2201a8; PR-004-E-security-review-965513c26e6f; PR-004-E-ci-local-1db7faa0aa17 | — | — | 2026-08-08 |
+| PR-004 | Done | me@jeickmeier.com | [#2](https://github.com/jeickmeier/finstack-ai/pull/2) merged @ `9b13fe02d4cf41305daa20195eb0a537f85f9712` | 6 | 5/5 | PR-004-E-schema-governance-4c7efdcf83d8; PR-004-E-unit-tests-7ef93e2201a8; PR-004-E-security-review-965513c26e6f; PR-004-E-ci-local-1db7faa0aa17; PR-004-E-hosted-ci-31274063724 | — | `9b13fe02d4cf41305daa20195eb0a537f85f9712` / 2026-08-08 | 2026-08-08 |
 | PR-005 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 
 ### Phase 1
@@ -250,7 +250,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-004-T-adrs-4aabc549ac5f | PR-004 | Materialize standalone ADR-001 through ADR-037 with security cross-links | Done | me@jeickmeier.com | PR-004-T-tracking-8a01f5662f4c | `pr-004-adrs-schema-governance` | PR-004-A01; PR-004-A05 | local schema-governance + security-review | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-004-T-schema-f1eb2fb50ac3 | PR-004 | Add contract registry, reserved schema/fixture roots, and change template | Done | me@jeickmeier.com | PR-004-T-tracking-8a01f5662f4c | `pr-004-adrs-schema-governance` | PR-004-A02; PR-004-A04 | local schema-governance GOV004 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 | PR-004-T-ci-ccc7ea14f888 | PR-004 | Wire PR template, local CI, and hosted schema-governance enforcement | Done | me@jeickmeier.com | PR-004-T-checker-6c8746c6141c; PR-004-T-schema-f1eb2fb50ac3 | `pr-004-adrs-schema-governance` | PR-004-A03; PR-004-A04 | local schema-governance GOV007 + ci.yml job | 2026-08-08 | 2026-08-08 | 2026-08-08 |
-| PR-004-T-evidence-ac51c9bc1666 | PR-004 | Run focused/full validation and bind local review evidence | Done | me@jeickmeier.com | PR-004-T-adrs-4aabc549ac5f; PR-004-T-ci-ccc7ea14f888 | `pr-004-adrs-schema-governance` | PR-004-A01–A05 | artifacts/pr-004/ (pre-merge local) | 2026-08-08 | 2026-08-08 | 2026-08-08 |
+| PR-004-T-evidence-ac51c9bc1666 | PR-004 | Run focused/full validation and bind local review evidence | Done | me@jeickmeier.com | PR-004-T-adrs-4aabc549ac5f; PR-004-T-ci-ccc7ea14f888 | [#2](https://github.com/jeickmeier/finstack-ai/pull/2) @ `9b13fe02d4cf41305daa20195eb0a537f85f9712` | PR-004-A01–A05 | PR-004-E-schema-governance-4c7efdcf83d8; PR-004-E-unit-tests-7ef93e2201a8; PR-004-E-security-review-965513c26e6f; PR-004-E-ci-local-1db7faa0aa17; PR-004-E-hosted-ci-31274063724 | 2026-08-08 | 2026-08-08 | 2026-08-08 |
 
 ## Blocker ledger
 

@@ -4,10 +4,15 @@ Logical PR: [PR-004](../../../planning/04-finstack-ai-implementation-plan.md#pr-
 
 Branch: `pr-004-adrs-schema-governance`
 
-Local validation for foundational ADR records and schema governance.
-A01–A05 are Passed against branch tip
-`75537daad821f33de4a1465fbf83aa784b710cc5`. Logical PR `Done` awaits the
-GitHub merge commit. Gate G0 stays `Not ready` until PR-005 completes.
+Local and hosted validation for foundational ADR records and schema
+governance. Logical PR-004 is `Done` at merge
+`9b13fe02d4cf41305daa20195eb0a537f85f9712`
+([#2](https://github.com/jeickmeier/finstack-ai/pull/2)).
+
+A01–A05 are Passed against PR implementation tip
+`75537daad821f33de4a1465fbf83aa784b710cc5`. Hosted CI was green on PR head
+`7634342b93e57aae0f93e17fd685b2e954584c1a` (see `hosted-ci.txt`). Gate G0
+stays `Not ready` until PR-005 completes.
 
 ## Commands
 
