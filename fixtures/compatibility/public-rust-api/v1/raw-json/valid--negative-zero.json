@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "input": {
+    "text": "[-0,0]"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "[0,0]"
+  }
+}

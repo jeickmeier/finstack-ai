@@ -9,7 +9,7 @@ use std::sync::Arc;
 use finstack_ai_kernel::ErrorDescriptor;
 
 /// Runtime error with an optional local diagnostic source chain.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FrameworkError {
     /// Source-free serializable descriptor.
     pub descriptor: ErrorDescriptor,
@@ -47,6 +47,19 @@ impl FrameworkError {
     }
 }
 
+impl fmt::Debug for FrameworkError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never dump unredacted source chains from Debug (may contain secrets).
+        f.debug_struct("FrameworkError")
+            .field("descriptor", &self.descriptor)
+            .field(
+                "source",
+                &self.source.as_ref().map(|_| "<redacted local source>"),
+            )
+            .finish()
+    }
+}
+
 impl fmt::Display for FrameworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.descriptor)
@@ -58,5 +71,34 @@ impl StdError for FrameworkError {
         self.source
             .as_ref()
             .map(|error| error.as_ref() as &(dyn StdError + 'static))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor};
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("secret token=abc123")]
+    struct SecretSource;
+
+    #[test]
+    fn debug_redacts_local_source_chain() {
+        let error = FrameworkError::from_descriptor(
+            ErrorDescriptor::new(
+                "validation_failed",
+                "input rejected",
+                ErrorCategory::Validation,
+                false,
+            )
+            .expect("descriptor"),
+        )
+        .with_source(SecretSource);
+        let debug = format!("{error:?}");
+        assert!(debug.contains("<redacted local source>"));
+        assert!(!debug.contains("abc123"));
+        assert!(!debug.contains("secret token"));
+        assert!(error.source().is_some());
     }
 }

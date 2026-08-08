@@ -4,6 +4,7 @@ use core::fmt;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::ids::{
     AppendBatchId, ArtifactId, BudgetReservationId, BudgetScopeId, CancellationRequestId, EffectId,
@@ -13,7 +14,7 @@ use crate::ids::{
 use crate::raw_json::Metadata;
 
 /// Stable machine-readable error code string.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct ErrorCode(Arc<str>);
 
@@ -22,9 +23,14 @@ impl ErrorCode {
     ///
     /// Codes are lowercase `snake_case` identifiers and must remain identical across
     /// bindings.
-    #[must_use]
-    pub fn new(code: impl AsRef<str>) -> Self {
-        Self(Arc::<str>::from(code.as_ref()))
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCodeError`] when the code is empty or not lowercase `snake_case`.
+    pub fn new(code: impl AsRef<str>) -> Result<Self, ErrorCodeError> {
+        let code = code.as_ref();
+        validate_error_code(code)?;
+        Ok(Self(Arc::<str>::from(code)))
     }
 
     /// Borrow the code text.
@@ -50,6 +56,49 @@ impl AsRef<str> for ErrorCode {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
+}
+
+impl<'de> Deserialize<'de> for ErrorCode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let text = String::deserialize(deserializer)?;
+        Self::new(text).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Invalid [`ErrorCode`] text.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid error code (expected lowercase snake_case): {code}")]
+pub struct ErrorCodeError {
+    /// Rejected code text.
+    pub code: String,
+}
+
+fn validate_error_code(code: &str) -> Result<(), ErrorCodeError> {
+    let invalid = || ErrorCodeError {
+        code: code.to_owned(),
+    };
+    let mut chars = code.chars();
+    let Some(first) = chars.next() else {
+        return Err(invalid());
+    };
+    if !first.is_ascii_lowercase() {
+        return Err(invalid());
+    }
+    let mut prev_underscore = false;
+    for ch in chars {
+        match ch {
+            'a'..='z' | '0'..='9' => prev_underscore = false,
+            '_' if !prev_underscore => prev_underscore = true,
+            _ => return Err(invalid()),
+        }
+    }
+    if prev_underscore {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 /// Stable error category (TDD §30.2).
@@ -202,21 +251,24 @@ pub struct ErrorDescriptor {
 
 impl ErrorDescriptor {
     /// Construct a descriptor with empty identifiers and metadata.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCodeError`] when `code` is not lowercase `snake_case`.
     pub fn new(
         code: impl AsRef<str>,
         message: impl AsRef<str>,
         category: ErrorCategory,
         retryable: bool,
-    ) -> Self {
-        Self {
-            code: ErrorCode::new(code),
+    ) -> Result<Self, ErrorCodeError> {
+        Ok(Self {
+            code: ErrorCode::new(code)?,
             message: Arc::<str>::from(message.as_ref()),
             category,
             retryable,
             identifiers: ErrorIdentifiers::default(),
             safe_details: Metadata::empty(),
-        }
+        })
     }
 }
 
@@ -249,7 +301,8 @@ mod tests {
             "JSON source span exceeded the v1 ceiling",
             ErrorCategory::Validation,
             false,
-        );
+        )
+        .expect("descriptor");
         descriptor.identifiers.run_id =
             Some(RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"));
         descriptor.safe_details =
@@ -262,5 +315,18 @@ mod tests {
         assert!(!round.retryable);
         assert_eq!(round.category, ErrorCategory::Validation);
         assert!(round.identifiers.session_id.is_none());
+    }
+
+    #[test]
+    fn error_code_requires_lowercase_snake_case() {
+        assert!(ErrorCode::new("raw_json_too_large").is_ok());
+        assert!(ErrorCode::new("a").is_ok());
+        assert!(ErrorCode::new("RawJson").is_err());
+        assert!(ErrorCode::new("raw-json").is_err());
+        assert!(ErrorCode::new("_leading").is_err());
+        assert!(ErrorCode::new("trailing_").is_err());
+        assert!(ErrorCode::new("double__underscore").is_err());
+        assert!(ErrorCode::new("").is_err());
+        assert!(serde_json::from_str::<ErrorCode>("\"Not_Snake\"").is_err());
     }
 }

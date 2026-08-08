@@ -7,7 +7,10 @@ use finstack_ai_test::{FixedClock, PatternRandomSource, run_all_public_api_fixtu
 #[test]
 fn public_rust_api_corpus_passes() {
     let count = run_all_public_api_fixtures().expect("public-rust-api fixtures");
-    assert!(count >= 14, "expected the PR-006 corpus, found {count}");
+    assert_eq!(
+        count, 22,
+        "expected the PR-006 public-rust-api corpus size, found {count}"
+    );
 }
 
 #[test]

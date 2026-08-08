@@ -82,10 +82,13 @@ pub enum Recipe {
     },
     /// JSON array repeating a numeric literal (used for JCS expansion).
     ScientificArray {
-        /// Number of array elements.
+        /// Number of repeated leading array elements.
         count: usize,
         /// Numeric literal text (for example `1e20`).
         literal: String,
+        /// Optional trailing literals joined after the repeated prefix.
+        #[serde(default)]
+        extras: Vec<String>,
     },
     /// Exact UTF-8 source text.
     Literal {
@@ -126,19 +129,27 @@ pub fn load_public_api_fixture(
 }
 
 /// Discover all versioned `public-rust-api` fixture files.
-#[must_use]
-pub fn discover_public_api_fixtures() -> Vec<PathBuf> {
+///
+/// # Errors
+///
+/// Returns [`PublicApiFixtureError::Io`] when a fixture directory cannot be read.
+pub fn discover_public_api_fixtures() -> Result<Vec<PathBuf>, PublicApiFixtureError> {
     let root = compatibility_fixture("public-rust-api/v1");
     let mut paths = Vec::new();
     if !root.is_dir() {
-        return paths;
+        return Ok(paths);
     }
     let mut stack = vec![root];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        let entries = fs::read_dir(&dir).map_err(|error| PublicApiFixtureError::Io {
+            path: dir.display().to_string(),
+            message: error.to_string(),
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| PublicApiFixtureError::Io {
+                path: dir.display().to_string(),
+                message: error.to_string(),
+            })?;
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
@@ -148,7 +159,7 @@ pub fn discover_public_api_fixtures() -> Vec<PathBuf> {
         }
     }
     paths.sort();
-    paths
+    Ok(paths)
 }
 
 /// Execute one fixture and return `Ok(())` when expectations hold.
@@ -183,7 +194,7 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
 ///
 /// Returns the first fixture failure.
 pub fn run_all_public_api_fixtures() -> Result<usize, PublicApiFixtureError> {
-    let paths = discover_public_api_fixtures();
+    let paths = discover_public_api_fixtures()?;
     if paths.is_empty() {
         return Err(PublicApiFixtureError::Failed(
             "no public-rust-api fixtures discovered".into(),
@@ -243,11 +254,16 @@ fn materialize(recipe: &Recipe) -> Result<String, PublicApiFixtureError> {
             }
             Ok(format!("{{\"{key}\":1}}"))
         }
-        Recipe::ScientificArray { count, literal } => {
-            let body = std::iter::repeat_n(literal.as_str(), *count)
-                .collect::<Vec<_>>()
-                .join(",");
-            Ok(format!("[{body}]"))
+        Recipe::ScientificArray {
+            count,
+            literal,
+            extras,
+        } => {
+            let mut parts = std::iter::repeat_n(literal.as_str(), *count)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            parts.extend(extras.iter().cloned());
+            Ok(format!("[{}]", parts.join(",")))
         }
         Recipe::Literal { text } => Ok(text.clone()),
     }
@@ -454,7 +470,23 @@ fn run_raw_json(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError>
             }
             Ok(())
         }
-        Err(error) => assert_error_code(&fixture.expect, raw_json_error_code(&error)),
+        Err(error) => {
+            assert_error_code(&fixture.expect, raw_json_error_code(&error))?;
+            if let Some(expected) = fixture.expect.extras.get("canonical_bytes") {
+                let expected = json_usize(expected, "expect.canonical_bytes")?;
+                match error {
+                    RawJsonError::CanonicalTooLarge { len, .. } if len == expected => Ok(()),
+                    RawJsonError::CanonicalTooLarge { len, .. } => Err(fail(format!(
+                        "canonical_bytes {len} != expect.canonical_bytes {expected}"
+                    ))),
+                    other => Err(fail(format!(
+                        "expect.canonical_bytes requires CanonicalTooLarge, got {other}"
+                    ))),
+                }
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 
@@ -771,9 +803,10 @@ mod tests {
         let text = materialize(&Recipe::ScientificArray {
             count: 2,
             literal: "1e20".into(),
+            extras: vec!["1e10".into()],
         })
         .expect("materialize");
-        assert_eq!(text, "[1e20,1e20]");
+        assert_eq!(text, "[1e20,1e20,1e10]");
         let raw = RawJson::parse(&text).expect("parse");
         assert!(raw.as_bytes().len() > text.len());
     }

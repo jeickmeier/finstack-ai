@@ -132,6 +132,24 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FailingRandom;
+
+    impl RandomSource for FailingRandom {
+        fn fill_bytes(&self, _buf: &mut [u8]) -> Result<(), IdGenerationError> {
+            Err(IdGenerationError::Source("entropy unavailable".into()))
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingClock(IdGenerationError);
+
+    impl Clock for FailingClock {
+        fn now(&self) -> Result<Timestamp, IdGenerationError> {
+            Err(self.0.clone())
+        }
+    }
+
     #[test]
     fn deterministic_uuidv7_from_injected_sources() {
         let clock = FixedClock(Timestamp::from_unix_ms(1_704_067_200_000).expect("ts"));
@@ -151,5 +169,34 @@ mod tests {
             first.to_canonical_string(),
             expected_uuid.as_hyphenated().to_string()
         );
+    }
+
+    #[test]
+    fn uuidv7_propagates_random_source_failure() {
+        let clock = FixedClock(Timestamp::from_unix_ms(1_704_067_200_000).expect("ts"));
+        let generator = UuidV7Generator::new(clock, FailingRandom);
+        let err = generator
+            .generate::<finstack_ai_kernel::RunTag>()
+            .expect_err("random");
+        assert!(matches!(err, IdGenerationError::Source(_)));
+    }
+
+    #[test]
+    fn uuidv7_rejects_pre_epoch_and_out_of_range_timestamps() {
+        let pre_epoch = FixedClock(Timestamp::from_unix_ms(-1).expect("pre-epoch in range"));
+        let generator = UuidV7Generator::new(pre_epoch, FixedRandom([0; 10]));
+        let err = generator
+            .generate::<finstack_ai_kernel::RunTag>()
+            .expect_err("pre-epoch");
+        assert!(matches!(err, IdGenerationError::Source(_)));
+
+        let clock = FailingClock(IdGenerationError::Time(TimeError::OutOfRange {
+            value: i64::MAX,
+        }));
+        let generator = UuidV7Generator::new(clock, FixedRandom([0; 10]));
+        let err = generator
+            .generate::<finstack_ai_kernel::RunTag>()
+            .expect_err("range");
+        assert!(matches!(err, IdGenerationError::Time(_)));
     }
 }

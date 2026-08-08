@@ -58,8 +58,19 @@ impl Digest {
     ///
     /// Encoding:
     /// `"finstack-ai" NUL domain-name NUL schema-version-u32-be NUL canonical-bytes`
-    #[must_use]
-    pub fn domain_separated(domain: &str, schema_version: u32, canonical_bytes: &[u8]) -> Self {
+    ///
+    /// Domain names must be non-empty and must not contain NUL bytes so the
+    /// encoding remains unambiguous.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DigestError::InvalidDomain`] when `domain` is empty or contains NUL.
+    pub fn domain_separated(
+        domain: &str,
+        schema_version: u32,
+        canonical_bytes: &[u8],
+    ) -> Result<Self, DigestError> {
+        validate_domain(domain)?;
         let mut hasher = Sha256::new();
         hasher.update(b"finstack-ai");
         hasher.update([0]);
@@ -68,10 +79,14 @@ impl Digest {
         hasher.update(schema_version.to_be_bytes());
         hasher.update([0]);
         hasher.update(canonical_bytes);
-        Self(hasher.finalize().into())
+        Ok(Self(hasher.finalize().into()))
     }
 
     /// Digest for RFC 8785 canonical JSON under the `raw-json` domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the fixed [`DOMAIN_RAW_JSON`] registry entry were invalid.
     #[must_use]
     pub fn raw_json(canonical_bytes: &[u8]) -> Self {
         Self::domain_separated(
@@ -79,6 +94,7 @@ impl Digest {
             RAW_JSON_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
+        .expect("fixed raw-json domain is valid")
     }
 }
 
@@ -103,6 +119,21 @@ pub enum DigestError {
         /// Rejected input.
         input: String,
     },
+    /// Domain name was empty or contained a NUL byte.
+    #[error("invalid digest domain: {domain:?}")]
+    InvalidDomain {
+        /// Rejected domain text.
+        domain: String,
+    },
+}
+
+fn validate_domain(domain: &str) -> Result<(), DigestError> {
+    if domain.is_empty() || domain.as_bytes().contains(&0) {
+        return Err(DigestError::InvalidDomain {
+            domain: domain.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn hex_nibble(byte: u8) -> Result<u8, DigestError> {
@@ -140,12 +171,20 @@ mod tests {
     #[test]
     fn domain_separation_changes_digest() {
         let payload = br#"{"a":1}"#;
-        let a = Digest::domain_separated("raw-json", 1, payload);
-        let b = Digest::domain_separated("record-payload", 1, payload);
-        let c = Digest::domain_separated("raw-json", 2, payload);
+        let a = Digest::domain_separated("raw-json", 1, payload).expect("a");
+        let b = Digest::domain_separated("record-payload", 1, payload).expect("b");
+        let c = Digest::domain_separated("raw-json", 2, payload).expect("c");
         assert_ne!(a, b);
         assert_ne!(a, c);
         assert_eq!(a, Digest::raw_json(payload));
         assert_eq!(Digest::from_hex(&a.to_hex()).expect("hex"), a);
+        assert!(matches!(
+            Digest::domain_separated("raw\0json", 1, payload).expect_err("nul"),
+            DigestError::InvalidDomain { .. }
+        ));
+        assert!(matches!(
+            Digest::domain_separated("", 1, payload).expect_err("empty"),
+            DigestError::InvalidDomain { .. }
+        ));
     }
 }

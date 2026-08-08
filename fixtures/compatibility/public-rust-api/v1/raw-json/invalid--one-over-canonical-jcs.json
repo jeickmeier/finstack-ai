@@ -4,12 +4,14 @@
   "operation": "parse",
   "recipe": {
     "kind": "scientific_array",
-    "count": 47663,
-    "literal": "1e20"
+    "count": 47662,
+    "literal": "1e20",
+    "extras": ["1e10"]
   },
   "expect": {
     "ok": false,
     "error_code": "canonical_too_large",
-    "source_bytes": 238316
+    "source_bytes": 238316,
+    "canonical_bytes": 1048577
   }
 }

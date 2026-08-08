@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "raw_json",
+  "operation": "parse",
+  "input": {
+    "text": "[1e2,1.0,100e-2]"
+  },
+  "expect": {
+    "ok": true,
+    "canonical": "[100,1,1]"
+  }
+}

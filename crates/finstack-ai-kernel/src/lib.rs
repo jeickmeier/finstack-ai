@@ -28,7 +28,7 @@ mod raw_json;
 mod time;
 
 pub use digest::{DOMAIN_RAW_JSON, Digest, DigestError, RAW_JSON_DIGEST_SCHEMA_VERSION};
-pub use error::{ErrorCategory, ErrorCode, ErrorDescriptor, ErrorIdentifiers};
+pub use error::{ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorIdentifiers};
 pub use ids::{
     AgentId, AgentTag, AppendBatchId, AppendBatchTag, ArtifactId, ArtifactTag, BudgetReservationId,
     BudgetReservationTag, BudgetScopeId, BudgetScopeTag, BundleId, BundleTag,

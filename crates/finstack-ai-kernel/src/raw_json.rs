@@ -149,9 +149,15 @@ impl Serialize for RawJson {
     where
         S: serde::Serializer,
     {
-        let value: Value =
-            serde_json::from_slice(self.as_bytes()).map_err(serde::ser::Error::custom)?;
-        value.serialize(serializer)
+        if serializer.is_human_readable() {
+            // Human/diagnostic JSON emits the structured value.
+            let value: Value =
+                serde_json::from_slice(self.as_bytes()).map_err(serde::ser::Error::custom)?;
+            value.serialize(serializer)
+        } else {
+            // Durable CBOR carries the canonical JCS UTF-8 bytes as a byte string.
+            serializer.serialize_bytes(self.as_bytes())
+        }
     }
 }
 
@@ -160,17 +166,14 @@ impl<'de> Deserialize<'de> for RawJson {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = Value::deserialize(deserializer)?;
-        let canonical =
-            serde_json_canonicalizer::to_vec(&value).map_err(serde::de::Error::custom)?;
-        if canonical.len() > RAW_JSON_MAX_BYTES {
-            return Err(serde::de::Error::custom(RawJsonError::CanonicalTooLarge {
-                len: canonical.len(),
-                max: RAW_JSON_MAX_BYTES,
-            }));
+        if deserializer.is_human_readable() {
+            // Preserve source text (including duplicate keys) before strict parse.
+            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+            Self::parse(raw.get().as_bytes()).map_err(serde::de::Error::custom)
+        } else {
+            let bytes = Vec::<u8>::deserialize(deserializer)?;
+            Self::parse(bytes).map_err(serde::de::Error::custom)
         }
-        // Re-run through the strict path for depth/duplicate safety of Value trees.
-        Self::parse(canonical).map_err(serde::de::Error::custom)
     }
 }
 
@@ -253,6 +256,7 @@ impl Serialize for Metadata {
     where
         S: serde::Serializer,
     {
+        // TDD §6.2: human JSON emits the object; canonical CBOR carries JCS bytes.
         self.0.serialize(serializer)
     }
 }
@@ -262,10 +266,13 @@ impl<'de> Deserialize<'de> for Metadata {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = Value::deserialize(deserializer)?;
-        let canonical =
-            serde_json_canonicalizer::to_vec(&value).map_err(serde::de::Error::custom)?;
-        Self::parse(canonical).map_err(serde::de::Error::custom)
+        if deserializer.is_human_readable() {
+            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
+            Self::parse(raw.get().as_bytes()).map_err(serde::de::Error::custom)
+        } else {
+            let bytes = Vec::<u8>::deserialize(deserializer)?;
+            Self::parse(bytes).map_err(serde::de::Error::custom)
+        }
     }
 }
 
@@ -590,5 +597,29 @@ mod tests {
         let long_key = format!(r#"{{"{}":1}}"#, "k".repeat(METADATA_MAX_KEY_BYTES + 1));
         assert!(Metadata::parse(long_key).is_err());
         assert_eq!(Metadata::empty().as_str(), "{}");
+    }
+
+    #[test]
+    fn serde_human_path_rejects_duplicates_and_checks_source_span() {
+        #[derive(Debug, Deserialize)]
+        struct Wrap {
+            #[allow(dead_code)]
+            value: RawJson,
+        }
+        assert!(
+            serde_json::from_str::<Wrap>(r#"{"value":{"a":1,"a":2}}"#)
+                .expect_err("dup")
+                .to_string()
+                .contains("duplicate")
+        );
+        let over = format!(r#"{{"value":"{}"}}"#, "a".repeat(RAW_JSON_MAX_BYTES - 1));
+        assert!(
+            serde_json::from_str::<Wrap>(&over)
+                .expect_err("source")
+                .to_string()
+                .contains("source span")
+        );
+        let meta = Metadata::parse(r#"{"a":1}"#).expect("meta");
+        assert_eq!(serde_json::to_string(&meta).expect("ser"), r#"{"a":1}"#);
     }
 }

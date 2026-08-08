@@ -254,24 +254,29 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 pub trait KeyTag: Send + Sync + 'static {
     /// Stable family name used in diagnostics.
     const NAME: &'static str;
+    /// Whether values must contain a `.` namespace separator (TDD §4).
+    const REQUIRES_NAMESPACE: bool;
 }
 
 macro_rules! define_key_tag {
-    ($tag:ident, $name:literal) => {
+    ($tag:ident, $name:literal, $requires_namespace:expr) => {
         #[doc = concat!("Tag for [`", stringify!($tag), "`]-family keys.")]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum $tag {}
         impl KeyTag for $tag {
             const NAME: &'static str = $name;
+            const REQUIRES_NAMESPACE: bool = $requires_namespace;
         }
     };
 }
 
-define_key_tag!(AgentTag, "agent");
-define_key_tag!(BundleTag, "bundle");
-define_key_tag!(ComponentTag, "component");
-define_key_tag!(CapabilityTag, "capability");
-define_key_tag!(ToolTag, "tool");
+// Local aliases are allowed for agent/bundle keys; globally registered
+// component/tool/capability identities must be namespaced (TDD §4).
+define_key_tag!(AgentTag, "agent", false);
+define_key_tag!(BundleTag, "bundle", false);
+define_key_tag!(ComponentTag, "component", true);
+define_key_tag!(CapabilityTag, "capability", true);
+define_key_tag!(ToolTag, "tool", true);
 
 /// Maximum UTF-8 byte length for a namespaced key (TDD §4).
 pub const KEY_MAX_BYTES: usize = 128;
@@ -287,16 +292,19 @@ impl<T: KeyTag> Key<T> {
     /// Parse and validate a namespaced key.
     ///
     /// Accepted forms:
-    /// - local aliases matching `[a-z][a-z0-9._-]{0,127}`
+    /// - local aliases matching `[a-z][a-z0-9._-]{0,127}` when the family allows them
     /// - namespaced ids containing at least one `.` with the same character set
+    ///
+    /// Globally registered [`ComponentId`], [`ToolId`], and [`CapabilityId`] values
+    /// always require a `.` namespace separator (TDD §4).
     ///
     /// # Errors
     ///
-    /// Returns [`KeyParseError`] when the value is empty, oversized, or contains
-    /// disallowed characters.
+    /// Returns [`KeyParseError`] when the value is empty, oversized, missing a
+    /// required namespace, or contains disallowed characters.
     pub fn parse(input: impl AsRef<str>) -> Result<Self, KeyParseError> {
         let input = input.as_ref();
-        validate_key(input).map_err(|kind| KeyParseError {
+        validate_key(input, T::REQUIRES_NAMESPACE).map_err(|kind| KeyParseError {
             family: T::NAME,
             input: input.to_owned(),
             kind,
@@ -409,9 +417,11 @@ pub enum KeyParseErrorKind {
     BadStart,
     /// Contained a character outside `[a-z0-9._-]`.
     BadChar,
+    /// Family requires a `.` namespace separator.
+    MissingNamespace,
 }
 
-fn validate_key(input: &str) -> Result<(), KeyParseErrorKind> {
+fn validate_key(input: &str, requires_namespace: bool) -> Result<(), KeyParseErrorKind> {
     if input.is_empty() {
         return Err(KeyParseErrorKind::Empty);
     }
@@ -425,11 +435,18 @@ fn validate_key(input: &str) -> Result<(), KeyParseErrorKind> {
     if !first.is_ascii_lowercase() {
         return Err(KeyParseErrorKind::BadStart);
     }
+    let mut saw_dot = false;
     for ch in chars {
         let ok = ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '_' | '-');
         if !ok {
             return Err(KeyParseErrorKind::BadChar);
         }
+        if ch == '.' {
+            saw_dot = true;
+        }
+    }
+    if requires_namespace && !saw_dot {
+        return Err(KeyParseErrorKind::MissingNamespace);
     }
     Ok(())
 }
@@ -502,10 +519,19 @@ mod tests {
 
     #[test]
     fn keys_validate_namespace_rules() {
-        let local = ToolId::parse("filesystem").expect("local");
-        assert_eq!(local.as_str(), "filesystem");
+        let local = AgentId::parse("research-agent").expect("local alias");
+        assert_eq!(local.as_str(), "research-agent");
         let namespaced = ComponentId::parse("finstack.model.openai-compatible").expect("ns");
         assert!(namespaced.as_str().contains('.'));
+        assert!(matches!(
+            ToolId::parse("filesystem").expect_err("global tool").kind,
+            KeyParseErrorKind::MissingNamespace
+        ));
+        assert!(matches!(
+            CapabilityId::parse("research").expect_err("global capability").kind,
+            KeyParseErrorKind::MissingNamespace
+        ));
+        assert!(ToolId::parse("finstack.tools.filesystem").is_ok());
         assert!(matches!(
             ToolId::parse("").expect_err("empty").kind,
             KeyParseErrorKind::Empty
@@ -515,7 +541,7 @@ mod tests {
             KeyParseErrorKind::BadStart
         ));
         assert!(matches!(
-            ToolId::parse("a".repeat(KEY_MAX_BYTES + 1))
+            AgentId::parse("a".repeat(KEY_MAX_BYTES + 1))
                 .expect_err("long")
                 .kind,
             KeyParseErrorKind::TooLong
