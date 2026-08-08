@@ -8,6 +8,7 @@ uv = "0.10.11"
 "aqua:rhysd/actionlint" = "1.7.12"
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
+# Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
 [task_config]
 shell = "bash -c"
 
