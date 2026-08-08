@@ -15,6 +15,9 @@ run = "mise install"
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
 run = """
+# Ensure required components even when a cached rustup toolchain omits them.
+rustup component add rustfmt clippy
+rustup target add wasm32-unknown-unknown
 rustc --version
 cargo --version
 rustfmt --version
