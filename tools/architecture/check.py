@@ -29,14 +29,28 @@ DEFAULT_ALLOWLIST = TOOL_DIR / "allowlist.toml"
 
 
 def resolve_tool(name: str) -> str:
-    """Resolve a CLI tool for subprocess use (Windows-safe with mise)."""
-    found = shutil.which(name)
-    if found:
-        return found
-    if os.name == "nt":
-        found = shutil.which(f"{name}.exe")
+    """Resolve a CLI tool for subprocess use when PATH is incomplete under uv.
+
+    On Windows CI, ``uv run`` can drop ``CARGO_HOME/bin`` from PATH even though
+    the outer mise/GitHub Actions environment still exports ``CARGO_HOME``.
+    """
+    exe = f"{name}.exe" if os.name == "nt" else name
+    for candidate_name in (name, exe):
+        found = shutil.which(candidate_name)
         if found:
             return found
+
+    if name in {"cargo", "rustc", "rustup"}:
+        roots: list[Path] = []
+        cargo_home = os.environ.get("CARGO_HOME")
+        if cargo_home:
+            roots.append(Path(cargo_home))
+        roots.append(Path.home() / ".cargo")
+        for root in roots:
+            candidate = root / "bin" / exe
+            if candidate.is_file():
+                return str(candidate)
+
     mise = shutil.which("mise") or (shutil.which("mise.exe") if os.name == "nt" else None)
     if mise:
         proc = subprocess.run(
@@ -48,9 +62,9 @@ def resolve_tool(name: str) -> str:
         path = proc.stdout.strip()
         if proc.returncode == 0 and path:
             return path
-    raise FileNotFoundError(
-        f"{name} executable not found on PATH; ensure mise tools are installed"
-    )
+
+    raise FileNotFoundError(f"{name} executable not found on PATH; ensure mise tools are installed")
+
 
 # Stable check IDs mapped to governing standards.
 CHECK_RULES: dict[str, tuple[str, ...]] = {
