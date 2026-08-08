@@ -1,4 +1,4 @@
-# finstack-ai documentation pack v0.10
+# finstack-ai documentation pack v0.12
 
 This package contains the implementation-oriented design set for **finstack-ai**, a Rust-based agent microkernel with first-class Rust, Python, and WebAssembly interfaces.
 
@@ -33,14 +33,14 @@ The pack version and controlled-document versions are independent counters. The 
 
 | Controlled document | Current version |
 | --- | ---: |
-| Engineering Standards | 0.4 |
+| Engineering Standards | 0.5 |
 | Product Requirements Document | 0.7 |
 | Architecture Specification | 0.6 |
-| Technical Design | 0.8 |
-| Implementation Plan | 0.8 |
+| Technical Design | 0.10 |
+| Implementation Plan | 0.10 |
 | Security and Threat Model | 0.4 |
 | Future Capabilities Design Validation | 0.4 |
 
 ## Version history
 
-Version 0.10 adopts mise as the sole repository toolchain pin and task entrypoint, removes the planned `rust-toolchain.toml` / Cargo `xtask` path, and records bootstrap via `mise install` / `mise run doctor`. Version 0.9 reconciles gate sign-off coverage, performance ownership, cost encoding, metadata and payload bounds, threat-to-PR traceability, contingency scope, schedule ranges, and delivery-model crosswalks. Version 0.8 closed dependency/feature direction, canonical data and digest rules, durable command/recovery contracts, authorization propagation, bundle and child-run composition, middleware/compaction recovery, WIT/release versioning, and public-preview scope. Version 0.7 assigned model-context compaction to `before_model` middleware and defined its normalized outcome/checkpoint, immutability, safety, delivery, threat-control, and conformance rules. Version 0.6 added the normative Engineering Standards and the pre-implementation Security and Threat Model. Version 0.5 incorporated generic deferred effects, run lineage, generalized interactions, and `before_finalize`. Documentation pack v0.4 resolved the ten foundational product decisions that were previously open.
+Version 0.12 centralizes canonical MIT and Apache-2.0 texts under `licenses/` while package manifests retain the `MIT OR Apache-2.0` SPDX expression. Version 0.11 places trusted native leaf batteries under `extensions/` (providers, toolsets, stores, observers) while keeping isolated WIT/Wasmtime packages under `plugins/`, clarifying the core-versus-addon repository split. Version 0.10 adopts mise as the sole repository toolchain pin and task entrypoint, removes the planned `rust-toolchain.toml` / Cargo `xtask` path, and records bootstrap via `mise install` / `mise run doctor`. Version 0.9 reconciles gate sign-off coverage, performance ownership, cost encoding, metadata and payload bounds, threat-to-PR traceability, contingency scope, schedule ranges, and delivery-model crosswalks. Version 0.8 closed dependency/feature direction, canonical data and digest rules, durable command/recovery contracts, authorization propagation, bundle and child-run composition, middleware/compaction recovery, WIT/release versioning, and public-preview scope. Version 0.7 assigned model-context compaction to `before_model` middleware and defined its normalized outcome/checkpoint, immutability, safety, delivery, threat-control, and conformance rules. Version 0.6 added the normative Engineering Standards and the pre-implementation Security and Threat Model. Version 0.5 incorporated generic deferred effects, run lineage, generalized interactions, and `before_finalize`. Documentation pack v0.4 resolved the ten foundational product decisions that were previously open.

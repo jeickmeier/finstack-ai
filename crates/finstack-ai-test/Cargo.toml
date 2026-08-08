@@ -1,0 +1,18 @@
+[package]
+name = "finstack-ai-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/finstack-ai-test"
+authors.workspace = true
+description = "Scripted models, fakes, and conformance utilities for finstack-ai"
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false }
+
+[lints]
+workspace = true

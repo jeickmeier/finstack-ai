@@ -3,6 +3,8 @@ rust = "1.97.1"
 python = "3.14"
 uv = "0.10.11"
 
+# Install and environment check tasks
+
 [tasks.install]
 description = "Install pinned project tools"
 run = "mise install"
@@ -15,3 +17,18 @@ cargo --version
 python --version
 uv --version
 """
+
+# Code checks
+
+[tasks.check]
+description = "Type-check the full Cargo workspace"
+run = "cargo check --workspace --all-targets"
+
+[tasks.check-kernel]
+description = "Type-check the kernel crate only (minimal target)"
+run = "cargo check -p finstack-ai-kernel"
+
+# Build tasks
+[tasks.build-python]
+description = "Build the Python binding package (sdist/wheel placeholder)"
+run = "uv build --project bindings/finstack-ai-python"

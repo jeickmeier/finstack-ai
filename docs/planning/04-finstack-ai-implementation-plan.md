@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.8 |
+| Version | 0.10 |
 | Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.8; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.10; Security and Threat Model v0.4 |
 
 # Executive implementation decision
 
@@ -289,9 +289,9 @@ A separate ADR is required before merging a change that:
 
 - Create the Cargo workspace with `finstack-ai-kernel`, `finstack-ai-runtime`, public SDK/facade package `finstack-ai` (library `finstack_ai`), and `finstack-ai-protocol`; do not create a competing `finstack-ai-sdk` package.
 
-- Add placeholder binding packages for Python and browser WASM, plus leaf directories for providers, toolsets, stores, examples, and test fixtures.
+- Add placeholder binding packages for Python and browser WASM, plus `extensions/` leaf directories for providers, toolsets, stores, and observers; keep isolated WIT/Wasmtime under `plugins/`; add `examples/` and test-fixture directories.
 
-- Add `LICENSE-MIT`, `LICENSE-APACHE`, dual-license metadata (`MIT OR Apache-2.0`), DCO sign-off instructions, `GOVERNANCE.md`, `SECURITY.md`, contribution guide, coding conventions, workspace lints, and a minimal project README. Keep root `mise.toml` as the sole toolchain pin and task entrypoint; do not add `rust-toolchain.toml` or a Cargo `xtask` crate.
+- Add canonical `licenses/LICENSE-MIT` and `licenses/LICENSE-APACHE` files, dual-license metadata (`MIT OR Apache-2.0`), DCO sign-off instructions, `GOVERNANCE.md`, `SECURITY.md`, contribution guide, coding conventions, workspace lints, and a minimal project README. Keep root `mise.toml` as the sole toolchain pin and task entrypoint; do not add `rust-toolchain.toml` or a Cargo `xtask` crate.
 
 - Adopt the Engineering Standards and Security and Threat Model as repository-governed inputs; link their exception, review-trigger, and evidence rules from contribution templates.
 

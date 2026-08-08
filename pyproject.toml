@@ -1,7 +1,11 @@
-[project]
-name = "finstack-ai"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
+# Virtual uv workspace root (not an installable package).
+# Bare `uv build` at the repository root is unsupported; build the member instead:
+#   mise run build-python
+#   uv build --package finstack-ai
+#   uv build --project bindings/finstack-ai-python
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["bindings/finstack-ai-python"]

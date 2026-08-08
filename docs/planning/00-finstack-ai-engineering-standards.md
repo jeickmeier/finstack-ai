@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Engineering Standards |
-| Version | 0.4 |
+| Version | 0.5 |
 | Status | Normative pre-implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, contributors, implementation teams, reviewers, and AI coding agents |
-| Related documents | Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.6; Technical Design v0.10; Implementation Plan v0.10; Security and Threat Model v0.4 |
 
 # 1. Purpose and authority
 
@@ -50,7 +50,7 @@ The allowed dependency direction is:
 kernel <- runtime + six port contracts <- SDK/bindings/reference applications
    ^                ^
    |                |
-protocol codec      leaf providers/tools/observers/plugin hosts
+protocol codec      extensions/ leaf batteries + plugins/ hosts
    ^                |
    +---- durable store implementations also depend on protocol codec
 ```
@@ -68,7 +68,7 @@ protocol codec      leaf providers/tools/observers/plugin hosts
 ## 3.2 Package boundaries
 
 - Every package must have one clear responsibility and an identified owner.
-- Optional batteries and integrations must be leaf packages or feature-gated adapters.
+- Optional batteries and integrations must be leaf packages under `extensions/` (providers, toolsets, stores, observers) or feature-gated adapters. Isolated WIT/Wasmtime packages remain under `plugins/` and must not be mixed with trusted in-process batteries.
 - Default and minimal feature sets must be tested independently.
 - `finstack-ai-runtime` keeps target-neutral port contracts available without Tokio. The facade's default `native-tokio` feature selects the runtime Tokio driver; browser-WASM depends on the facade with default features disabled and the non-default `wasm-host` pass-through feature.
 - Functional capability features must be additive. The target-driver selectors `native-tokio` and `wasm-host` are mutually exclusive for browser builds and are enforced by target checks. Enabling one provider or battery must not silently enable unrelated providers, databases, telemetry, Python, Wasmtime, or browser code.

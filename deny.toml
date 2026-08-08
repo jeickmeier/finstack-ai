@@ -1,0 +1,24 @@
+# Minimal cargo-deny policy stub for Phase 0.
+# CI wiring and fuller advisories/ban graphs land with PR-003.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

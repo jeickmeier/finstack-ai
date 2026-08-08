@@ -16,7 +16,7 @@ date: "2026-08-08"
 | Version | 0.6 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Technical Design v0.8; Implementation Plan v0.8; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.10; Implementation Plan v0.10; Security and Threat Model v0.4 |
 
 # Executive architecture decision
 

@@ -4,19 +4,19 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-08 and reconciled against documentation pack v0.10. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-08 and reconciled against documentation pack v0.12. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
-| Phases | 10 | 0 | All `Todo` |
-| Logical PRs | 66 | 0 | All `Todo` |
-| PR acceptance-evidence bullets | 345 | 0 | No coverage recorded |
+| Phases | 10 | 0 | Phase 0 `In progress`; others `Todo` |
+| Logical PRs | 66 | 0 | PR-001 `In progress`; others `Todo` |
+| PR acceptance-evidence bullets | 345 | 0 | PR-001 criteria owned as `Pending` (see evidence register) |
 | Phase entrance and exit bullets | 62 | 0 | No coverage recorded |
 | Program gates | 9 | 0 | All `Not ready` |
 | Implementation tasks | 0 | 0 | Add only when a logical PR is decomposed |
 | Open blockers | 0 | 0 | None recorded |
 
-Documentation setup is not implementation completion. In particular, Phase 0, PR-001, and PR-004 remain `Todo` until their own acceptance evidence exists.
+Documentation setup is not implementation completion. PR-001 workspace skeleton work is `In progress`; acceptance remains open until verified evidence is recorded against an immutable commit. Phase 0 and G0 remain incomplete until PR-001–PR-005 finish.
 
 ## Status values
 
@@ -77,7 +77,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Phase | Logical PRs | Entrance | Exit | Gate | Status | Owner | Active PRs | Blocker | Evidence | Updated |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
-| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | Todo | — | — | — | — | — |
+| [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 0/1 | 0/5 | G0 | In progress | me@jeickmeier.com | PR-001 | — | evidence register Pending rows | 2026-08-08 |
 | [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 0/2 | 0/4 | G1 | Todo | — | — | — | — | — |
 | [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 0/2 | 0/4 | G2 | Todo | — | — | — | — | — |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
@@ -110,7 +110,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-001 | Todo | — | — | 0 | 0/6 | — | — | — | — |
+| PR-001 | In progress | me@jeickmeier.com | Local working tree only; no GitHub issue/PR yet | 0 | 0/6 | Acceptance Pending; evidence deferred until immutable commit | — | — | 2026-08-08 |
 | PR-002 | Todo | — | — | 0 | 0/7 | — | — | — | — |
 | PR-003 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-004 | Todo | — | — | 0 | 0/5 | — | — | — | — |

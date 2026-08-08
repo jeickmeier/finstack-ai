@@ -22,7 +22,7 @@ Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-py
 
 - `finstack-ai-kernel` is synchronous and I/O-free. It owns semantic IDs, state, normalized inputs, records, events, effects, and the pure decision/apply model.
 - `finstack-ai-runtime` owns the six port contracts and effect execution. The SDK owns registration, resolution, composition, and ergonomic public APIs.
-- Protocol, persistence, providers, tools, observers, bindings, and plugin hosts stay outside the kernel. Leaf integrations depend on contracts, never the reverse.
+- Protocol, persistence, providers, tools, observers, bindings, and plugin hosts stay outside the kernel. Trusted native leaf batteries live under `extensions/`; isolated WIT/Wasmtime packages live under `plugins/`. Leaf integrations depend on contracts, never the reverse.
 - `finstack-ai-runtime` has `default = []`; the facade defaults to `native-tokio`; WASM uses the facade with `default-features = false` plus `wasm-host`; contract-only leaves disable drivers. Protocol may depend on kernel DTOs only for codec or journal needs; runtime and SDK do not depend on protocol for in-process values. Persistent-store implementations and remote, server, client, or process adapters may combine the applicable runtime or SDK contracts with protocol.
 - Do not add a miscellaneous shared-types or utilities crate to conceal a dependency cycle. A shared utility abstraction requires an accepted current need and at least three independent crate consumers.
 - Review every new direct kernel dependency for determinism, target portability, transitive size, maintenance, license, and minimal-graph impact. Optional integrations must not enlarge the minimal dependency graph.

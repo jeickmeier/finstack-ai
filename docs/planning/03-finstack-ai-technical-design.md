@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.8 |
+| Version | 0.10 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.4; Product Requirements Document v0.7; Architecture Specification v0.6; Implementation Plan v0.8; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.6; Implementation Plan v0.10; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -51,6 +51,9 @@ finstack-ai/
   Cargo.toml
   mise.toml                 # sole toolchain pin + repository tasks; no rust-toolchain.toml
   deny.toml
+  licenses/
+    LICENSE-MIT
+    LICENSE-APACHE
 
   crates/
     finstack-ai-kernel/
@@ -158,7 +161,25 @@ finstack-ai/
       src/
       js/
 
-  plugins/
+  extensions/                 # trusted native leaf batteries (in-process port implementations)
+    providers/
+      finstack-ai-provider-openai-compatible/
+      finstack-ai-provider-anthropic/
+      finstack-ai-provider-test/
+
+    toolsets/
+      finstack-ai-tools-filesystem/
+      finstack-ai-tools-shell/
+
+    stores/
+      finstack-ai-store-memory/
+      finstack-ai-store-sqlite/
+
+    observers/
+      finstack-ai-observer-log/
+      finstack-ai-observer-otel/
+
+  plugins/                    # optional isolated WIT/Wasmtime path (not native batteries)
     finstack-ai-wit/
       wit/v0.0.4/
         finstack-ai-types/types.wit
@@ -169,23 +190,6 @@ finstack-ai/
     finstack-ai-plugin-host/
       src/
 
-  providers/
-    finstack-ai-provider-openai-compatible/
-    finstack-ai-provider-anthropic/
-    finstack-ai-provider-test/
-
-  toolsets/
-    finstack-ai-tools-filesystem/
-    finstack-ai-tools-shell/
-
-  stores/
-    finstack-ai-store-memory/
-    finstack-ai-store-sqlite/
-
-  observers/
-    finstack-ai-observer-log/
-    finstack-ai-observer-otel/
-
   examples/
     rust-minimal/
     python-minimal/
@@ -194,6 +198,8 @@ finstack-ai/
 ```
 
 Root `mise.toml` pins contributor/CI tools and hosts repository tasks. Do not add `rust-toolchain.toml`. Node/npm pins arrive with browser/JavaScript binding packages, not in the initial root pin set.
+
+Native providers, toolsets, stores, and observers live under `extensions/` so the repository root keeps a clear core-versus-addon split. `plugins/` remains reserved for the optional isolated WIT/Wasmtime host and worlds; do not place trusted in-process batteries there.
 
 # 3. Crate dependency policy
 

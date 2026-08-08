@@ -1,0 +1,22 @@
+[package]
+name = "finstack-ai-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/finstack-ai-runtime"
+authors.workspace = true
+description = "Runtime ports and effect execution for finstack-ai"
+
+[features]
+default = []
+native-tokio = []
+wasm-host = []
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+
+[lints]
+workspace = true

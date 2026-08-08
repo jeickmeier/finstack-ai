@@ -18,16 +18,18 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.8 inventory is 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.10 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
 The current ordinal namespace is bound to this exact plan artifact:
 
 | Baseline | Plan version | SHA-256 | Effective date | Logical PRs | PR criteria | Phase criteria | Amendment | State |
-| --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |
 | PLAN-0.6 | 0.6 | `237b624f53488cb625c598e2affaf0bae484e7ae33da26d06516135b14b93cff` | 2026-08-08 | 66 | 342 | 62 | Initial implementation baseline | Superseded |
-| PLAN-0.8 | 0.8 | `0e3d7c824daf036b72981ebbf0c1ab46a0989f277ce2c3f5ae5be728d4b51fa1` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Current |
+| PLAN-0.8 | 0.8 | `0e3d7c824daf036b72981ebbf0c1ab46a0989f277ce2c3f5ae5be728d4b51fa1` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Superseded |
+| PLAN-0.9 | 0.9 | `6a0cc9a3887026ff902322f7051e9fb0a6050880bbc6ff91ebbeb9e5011e5262` | 2026-08-08 | 66 | 345 | 62 | Pack v0.11 `extensions/` workspace layout | Superseded |
+| PLAN-0.10 | 0.10 | `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | 2026-08-08 | 66 | 345 | 62 | Pack v0.12 centralized license layout | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -48,6 +50,8 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A04 | PR-039-A04 (revised) | Pack v0.9 decoder bounds | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-057-A02 | PR-057-A02 (revised) | Pack v0.9 redaction coverage | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-063-A02 | PR-063-A02 (revised) | Pack v0.9 performance ownership | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.8 | PLAN-0.9 / `6a0cc9a3887026ff902322f7051e9fb0a6050880bbc6ff91ebbeb9e5011e5262` | PR-001 principal changes | PR-001 principal changes (revised; acceptance IDs unchanged) | Pack v0.11 `extensions/` layout | Pack v0.11 amendment |
+| 2026-08-08 | PLAN-0.9 | PLAN-0.10 / `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | PR-001 principal changes | PR-001 principal changes (license paths revised; acceptance IDs unchanged) | Pack v0.12 centralized license layout | Pack v0.12 amendment |
 
 ## Acceptance dispositions
 
@@ -65,19 +69,19 @@ When a versioned amendment changes criterion order or inventory, append every af
 
 | Criterion | Scope | Plan version / link | Status | Owner | Evidence | Exception | Reviewer | Reviewed date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| PR-001-A01 | PR-001 | PLAN-0.10 / [PR-001](../planning/04-finstack-ai-implementation-plan.md#pr-001---create-the-workspace-and-package-skeleton) | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A02 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A03 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A04 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A05 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A06 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
 
-<!-- Example shape only; remove this comment when adding the first real row.
-| PR-NNN-Ann | PR-NNN | plan version and link | Pending | person/team | — | — | — | — |
--->
+PR-001 criteria are owned and ready for evidence after an immutable commit. Do not attach acceptance evidence from an uncommitted working tree.
 
 ## Evidence records
 
 | Evidence | Produced date | Scope | Type | Command, job, or review | Environment / target | Commit | Result | Artifact, log, or digest | Produced by | Verified by | Verified date | Supersedes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| PR-NNN-E-short-slug-xxxxxxxxxxxx | YYYY-MM-DD | PR-NNN-Axx or other stable scope | test/lint/benchmark/security/review/release | exact command or durable CI/review link | OS, toolchain, runtime, feature set | full commit | Pass/Fail/Informational | durable link and digest where applicable | person/job | reviewer | YYYY-MM-DD | scoped evidence ID or — |
--->
 
 An evidence record is valid only when another contributor can identify what ran or was reviewed, against which immutable revision, in which relevant environment, with what result, and where the durable output is stored. A bare statement such as “tests pass,” an unlinked local result, or evidence from a superseded commit cannot close acceptance.
 

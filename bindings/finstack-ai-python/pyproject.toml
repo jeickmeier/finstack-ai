@@ -1,0 +1,17 @@
+[project]
+name = "finstack-ai"
+version = "0.0.1"
+description = "Python bindings for the finstack-ai agent engine"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+requires-python = ">=3.11"
+dependencies = []
+
+# Placeholder packaging until PyO3/maturin lands with the Python binding PRs.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["python"]

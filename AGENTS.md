@@ -2,7 +2,7 @@
 
 ## Project Structure and Module Organization
 
-Implement the workspace defined by `docs/planning/03-finstack-ai-technical-design.md` sections 2–4; do not invent a competing layout. The kernel owns deterministic semantic state, records, events, and effects. The runtime owns ports and effect execution. The SDK owns composition. Protocol codecs, bindings, stores, providers, tools, observers, and plugin hosts remain outward-facing or leaf packages.
+Implement the workspace defined by `docs/planning/03-finstack-ai-technical-design.md` sections 2–4; do not invent a competing layout. The kernel owns deterministic semantic state, records, events, and effects. The runtime owns ports and effect execution. The SDK owns composition. Protocol codecs and bindings remain outward-facing. Trusted native stores, providers, tools, and observers live under `extensions/`; isolated WIT/Wasmtime hosts live under `plugins/`.
 
 `docs/planning/` is the implementation contract and is read-only during normal coding. `docs/implementation/` tracks current work and proof. Agent rules:
 

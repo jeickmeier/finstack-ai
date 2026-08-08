@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/finstack-ai-kernel",
+    "crates/finstack-ai-runtime",
+    "crates/finstack-ai",
+    "crates/finstack-ai-protocol",
+    "crates/finstack-ai-test",
+    "bindings/finstack-ai-python",
+    "bindings/finstack-ai-wasm",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/finstack-ai/finstack-ai"
+homepage = "https://github.com/finstack-ai/finstack-ai"
+authors = ["finstack-ai maintainers <me@jeickmeier.com>"]
+description = "Deterministic agent microkernel, runtime, and bindings"
+
+[workspace.metadata.finstack-ai]
+license-files = ["licenses/LICENSE-MIT", "licenses/LICENSE-APACHE"]
+
+[workspace.dependencies]
+finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "0.0.1" }
+finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.0.1", default-features = false }
+finstack-ai = { path = "crates/finstack-ai", version = "0.0.1", default-features = false }
+finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.0.1" }
+finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.0.1" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

@@ -48,7 +48,7 @@ Index last reconciled: 2026-08-08.
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Indexed | Not started | Missing |
 | ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Indexed | Not started | Missing |
 | ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Accepted | Indexed | Not started | Missing |
-| ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Indexed | Not started | Missing |
+| ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Indexed | In progress | Missing |
 | ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Indexed | Not started | Missing |
@@ -104,10 +104,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 
 | Date | ADR | Axis | Assigned to | Previous value | New value | Change reference | Evidence | Reviewed by |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| YYYY-MM-DD | ADR-NNN | Decision/Record/Implementation/Evidence/Assignment | person/team | Not started | In progress | issue or PR URL | scoped evidence ID | reviewer |
--->
+| 2026-08-08 | ADR-024 | Implementation | me@jeickmeier.com | Not started | In progress | PR-001 license/governance files | — | — |
+| 2026-08-08 | ADR-024 | Evidence | me@jeickmeier.com | Missing | Partial | PR-001 license/governance files (ADR text still PR-004) | — | — |
+| 2026-08-08 | ADR-024 | Evidence | me@jeickmeier.com | Partial | Missing | Revert uncommitted Partial claim; durable evidence awaits immutable commit | — | — |
 
 ## Current record and evidence links
 
@@ -115,10 +114,7 @@ Add a row when an ADR gains a standalone record, an active assignee, or implemen
 
 | ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
 | --- | --- | --- | --- | --- | --- |
-
-<!-- Example shape only; remove this comment when adding the first real row.
-| ADR-NNN | `adrs/ADR-NNN-short-topic.md` | person/team | scoped evidence IDs | issue or PR URL | YYYY-MM-DD |
--->
+| ADR-024 | — (Indexed only; standalone ADR text is PR-004) | me@jeickmeier.com | — (implementation files present in working tree; no commit-backed evidence yet) | PR-001 license/governance files | 2026-08-08 |
 
 ## Supersession log
 
