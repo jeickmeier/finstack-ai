@@ -189,7 +189,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-033 | [ADR-033-explicit-interruption.md](adrs/ADR-033-explicit-interruption.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-034 | [ADR-034-durable-middleware-outcomes.md](adrs/ADR-034-durable-middleware-outcomes.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-035 | [ADR-035-experimental-wit-versioning.md](adrs/ADR-035-experimental-wit-versioning.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-036 | [ADR-036-blob-storage-boundary.md](adrs/ADR-036-blob-storage-boundary.md) | me@jeickmeier.com | Partial (PR-007 BlobRef boundary): PR-007-E-security-1146ce970799; PR-007-E-conformance-8b7b9c728785 at `4a0a77f668adcfa2679dc161779c4456d721c0c2` | PR-004 standalone ADR; PR-007 content/messages | 2026-08-08 |
+| ADR-036 | [ADR-036-blob-storage-boundary.md](adrs/ADR-036-blob-storage-boundary.md) | me@jeickmeier.com | Partial (PR-007 BlobRef boundary): PR-007-E-security-1146ce970799; PR-007-E-conformance-8b7b9c728785; PR-007-E-merge-ci-acf14a6a28ca at merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` | PR-004 standalone ADR; PR-007 content/messages | 2026-08-08 |
 | ADR-037 | [ADR-037-middleware-compaction.md](adrs/ADR-037-middleware-compaction.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 
 ## Supersession log

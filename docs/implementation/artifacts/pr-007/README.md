@@ -5,6 +5,7 @@ fixtures, and pack v0.14 message-contract amendment.
 
 Branch: `pr-007-content-messages-final`
 Implementation tip: `4a0a77f668adcfa2679dc161779c4456d721c0c2`
+Integrated on `main`: `81a8706aeeca6a47ab0d64bc0bef681d6efc4621`
 
 ## Acceptance mapping
 
@@ -14,6 +15,8 @@ Implementation tip: `4a0a77f668adcfa2679dc161779c4456d721c0c2`
 | A02 | `test-kernel.txt` + `conformance.txt` invalid tool-association / role-block fixtures |
 | A03 | `conformance.txt` blob-ref large-reference-only fixture (`max_serialized_bytes`) and media/file message round-trips |
 | A04 | `docs.txt` rustdoc examples; `schema-governance.txt` + public-rust-api fixtures |
+
+Post-merge verification: `merge-ci.txt` + `merge-check-wasm.txt`.
 
 ## Security / supply chain
 

@@ -9,14 +9,14 @@ Last updated 2026-08-08 and reconciled against documentation pack v0.14. Update 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 1 | Phase 0 `Done`; Phase 1 `In progress`; Phase 2–9 `Todo` |
-| Logical PRs | 66 | 6 | PR-001–PR-006 `Done`; PR-007 `In review`; PR-008–PR-066 `Todo` |
+| Logical PRs | 66 | 7 | PR-001–PR-007 `Done`; PR-008–PR-066 `Todo` |
 | PR acceptance-evidence bullets | 345 | 37 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003–PR-006 A01–A05 `Passed`; PR-007 A01–A04 `Passed` against immutable local evidence |
 | Phase entrance and exit bullets | 62 | 8 | Phase 0 entrance 1/1 and exit 5/5 `Passed`; Phase 1 entrance 2/2 `Passed`; Phase 1 exit 0/4 |
 | Program gates | 9 | 1 | G0 `Passed`; G1–G8 `Not ready` |
-| Implementation tasks | 33 | 33 | PR-003–PR-007 implementation and immutable local evidence tasks complete; PR-007 remains `In review` pending integration |
+| Implementation tasks | 33 | 33 | PR-003–PR-007 implementation and evidence tasks complete |
 | Open blockers | 0 | 1 | PR-003-B-no-remote-ede93913b2ea Resolved; PR-007-B-contract-0c60297af156 Resolved |
 
-PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). Phase 0 is `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`. Phase 1 remains `In progress` (PR-007–PR-013 open).
+PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). PR-007 is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). Phase 0 is `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`. Phase 1 remains `In progress` (PR-008–PR-013 open).
 
 ## Status values
 
@@ -121,7 +121,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-006 | Done | me@jeickmeier.com | [#4](https://github.com/jeickmeier/finstack-ai/pull/4) merged @ `56d7777956df145213b03d2b0b5c1922db42b346` | 6 | 5/5 | PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-architecture-90b6f267a46d; PR-006-E-ci-5565fde35cf6; PR-006-E-security-c463d4eef6a2; PR-006-E-supply-bbbb7b4e6da4; PR-006-E-hosted-ci-9a1ccbb88ae5 | — | `56d7777956df145213b03d2b0b5c1922db42b346` / 2026-08-08 | 2026-08-08 |
-| PR-007 | In review | me@jeickmeier.com | `pr-007-content-messages-final` @ `4a0a77f668adcfa2679dc161779c4456d721c0c2` | 7 | 4/4 | PR-007-E-test-kernel-57ac9861bcfb; PR-007-E-conformance-8b7b9c728785; PR-007-E-check-wasm-5aefa861beb5; PR-007-E-architecture-e59be4b35311; PR-007-E-docs-51eca2ecc0a3; PR-007-E-schema-final-4c7efdcf83d8; PR-007-E-supply-final-183fc11ba3c3; PR-007-E-security-1146ce970799; PR-007-E-ci-a29042aa7d6a | — | — | 2026-08-08 |
+| PR-007 | Done | me@jeickmeier.com | local merge on `main` @ `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` | 7 | 4/4 | PR-007-E-test-kernel-57ac9861bcfb; PR-007-E-conformance-8b7b9c728785; PR-007-E-check-wasm-5aefa861beb5; PR-007-E-architecture-e59be4b35311; PR-007-E-docs-51eca2ecc0a3; PR-007-E-schema-final-4c7efdcf83d8; PR-007-E-supply-final-183fc11ba3c3; PR-007-E-security-1146ce970799; PR-007-E-ci-a29042aa7d6a; PR-007-E-merge-ci-acf14a6a28ca; PR-007-E-merge-wasm-3713f4641342 | — | `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` / 2026-08-08 | 2026-08-08 |
 | PR-008 | Todo | — | — | 0 | 0/8 | — | — | — | — |
 | PR-009 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-010 | Todo | — | — | 0 | 0/4 | — | — | — | — |
