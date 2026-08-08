@@ -82,9 +82,9 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-002-A05 | PR-002 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-002-E-architecture-6ed3268e6ff5 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-002-A06 | PR-002 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-002-E-review-627382618b20 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-002-A07 | PR-002 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-002-E-waiver-fa6bff499990 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-003-A01 | PR-003 | PLAN-0.10 / [PR-003](../planning/04-finstack-ai-implementation-plan.md#pr-003---establish-the-cross-platform-ci-and-release-build-matrix) | Pending | me@jeickmeier.com | Hosted PR workflow runs for `ci.yml`, `security.yml`, and `nightly.yml` with no unsafe path skips | — | — | — |
+| PR-003-A01 | PR-003 | PLAN-0.10 / [PR-003](../planning/04-finstack-ai-implementation-plan.md#pr-003---establish-the-cross-platform-ci-and-release-build-matrix) | Passed | me@jeickmeier.com | PR-003-E-hosted-ci-b7f2fe44f7c1 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-003-A02 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-channel-ownership-7d912e4d6ce2 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-003-A03 | PR-003 | PLAN-0.10 / same | Pending | me@jeickmeier.com | Private `finstack-ai-ci-smoke` on Linux/macOS/Windows via hosted CI; local Darwin smoke recorded as PR-003-E-release-smoke-5ac88e7bdf8a | — | — | — |
+| PR-003-A03 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-hosted-release-smoke-be7df0f3c45c; local Darwin PR-003-E-release-smoke-5ac88e7bdf8a | — | me@jeickmeier.com | 2026-08-08 |
 | PR-003-A04 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-generated-docs-ba54420a0521 | — | me@jeickmeier.com | 2026-08-08 |
 | PR-003-A05 | PR-003 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-003-E-supply-chain-9c119be89fd4; PR-003-E-secret-scan-b09efb8d60cb; PR-003-E-security-review-fc22979d5bcb | — | me@jeickmeier.com | 2026-08-08 |
 
@@ -92,7 +92,7 @@ PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. 
 
 PR-002 acceptance is closed against `ee9754fe2d0f015181dcefa97e715392aadd28ed`. Artifacts live under [`artifacts/pr-002/`](artifacts/pr-002/). A02–A04 are `Not applicable` because compile-fixture proofs were intentionally deferred to PR-014–PR-018; package-edge / wasm-host checks remain in scope for PR-002. Hosted CI wiring is PR-003.
 
-PR-003 acceptance is partially closed on `main` after local merge `d3d8d1e01bd665276847da5c8a94a01567813956` (A02/A04/A05 Passed against review-fix `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22`). A01 and cross-platform A03 remain `Pending` until hosted CI evidence exists; blocked by PR-003-B-no-remote-ede93913b2ea. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
+PR-003 acceptance is closed against hosted PR head `c2f4e79498c17dcea334d0e67b41289474cd2acd` on https://github.com/jeickmeier/finstack-ai/pull/1 (A01–A05 Passed). Hosted A01/A03 evidence: PR-003-E-hosted-ci-b7f2fe44f7c1 and PR-003-E-hosted-release-smoke-be7df0f3c45c. Blocker PR-003-B-no-remote-ede93913b2ea is Resolved. Artifacts live under [`artifacts/pr-003/`](artifacts/pr-003/).
 
 ## Evidence records
 
@@ -122,6 +122,8 @@ PR-003 acceptance is partially closed on `main` after local merge `d3d8d1e01bd66
 | PR-003-E-supply-chain-9c119be89fd4 | 2026-08-08 | PR-003 | Local command | `mise run supply-chain` with `deny.toml` `all-features = true` | Darwin arm64; cargo-deny 0.20.2 | `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22` | Pass | [`artifacts/pr-003/supply-chain.txt`](artifacts/pr-003/supply-chain.txt) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | PR-003-E-supply-chain-01e376e9f82a |
 | PR-003-E-secret-scan-b09efb8d60cb | 2026-08-08 | PR-003 | Local command | `mise run secret-scan`; `mise run secret-scan-canary` including Cargo.lock/uv.lock paths | Darwin arm64; gitleaks 8.30.1 | `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22` | Pass | [`artifacts/pr-003/secret-scan.txt`](artifacts/pr-003/secret-scan.txt); [`secret-scan-canary.txt`](artifacts/pr-003/secret-scan-canary.txt) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | PR-003-E-secret-scan-37002e564f23 |
 | PR-003-E-security-review-fc22979d5bcb | 2026-08-08 | PR-003 | Manual review | Threat Model §18 review updated for review-fix remediation | Files on branch `pr-003-ci-release-matrix` | `7c9d1a4b1d485f8bcd187e5a95301c6e1a840e22` | Pass | [`artifacts/pr-003/security-review.txt`](artifacts/pr-003/security-review.txt) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | PR-003-E-security-review-9d2dc7548b4f |
+| PR-003-E-hosted-ci-b7f2fe44f7c1 | 2026-08-08 | PR-003 | Hosted CI | GitHub Actions PR runs for `ci.yml`, `security.yml`, and `nightly.yml` (no path skips) | ubuntu-24.04 / macos-15 / windows-2025; GitHub-hosted | `c2f4e79498c17dcea334d0e67b41289474cd2acd` | Pass | [`artifacts/pr-003/hosted-ci.txt`](artifacts/pr-003/hosted-ci.txt); runs 31272018190 / 31272018192 / 31272018209 | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-003-E-hosted-release-smoke-be7df0f3c45c | 2026-08-08 | PR-003 | Hosted CI | `release-smoke` jobs + uploaded artifacts for Linux/macOS/Windows | ubuntu-24.04 / macos-15 / windows-2025; rustc 1.97.1 | `c2f4e79498c17dcea334d0e67b41289474cd2acd` | Pass | [`artifacts/pr-003/hosted-release-smoke.txt`](artifacts/pr-003/hosted-release-smoke.txt); [`hosted/`](artifacts/pr-003/hosted/) metadata digests | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 
 An evidence record is valid only when another contributor can identify what ran or was reviewed, against which immutable revision, in which relevant environment, with what result, and where the durable output is stored. A bare statement such as “tests pass,” an unlinked local result, or evidence from a superseded commit cannot close acceptance.
 

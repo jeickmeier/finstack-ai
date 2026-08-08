@@ -1,0 +1,33 @@
+PR-003-A01 hosted pull-request workflow evidence
+Date: 2026-08-08
+Actual PR: https://github.com/jeickmeier/finstack-ai/pull/1
+Branch: pr-003a-hosted-ci-evidence
+Head commit: c2f4e79498c17dcea334d0e67b41289474cd2acd
+Path filters: none on required checks (ci.yml / security.yml / nightly.yml)
+
+Workflow runs (event=pull_request, conclusion=success):
+- ci:      https://github.com/jeickmeier/finstack-ai/actions/runs/31272018190
+- security: https://github.com/jeickmeier/finstack-ai/actions/runs/31272018192
+- nightly:  https://github.com/jeickmeier/finstack-ai/actions/runs/31272018209
+
+ci jobs (all SUCCESS):
+- workflow-lint (actionlint)
+- rust (ubuntu-24.04 / stable)
+- rust (ubuntu-24.04 / msrv)
+- rust (macos-15 / stable)
+- rust (macos-15 / msrv)
+- rust (windows-2025 / stable)
+- rust (windows-2025 / msrv)
+- release-smoke (ubuntu-24.04)
+- release-smoke (macos-15)
+- release-smoke (windows-2025)
+
+security jobs (all SUCCESS):
+- supply-chain (Eng §9 / TM-18)
+- secret-scan (SEC-INV-005 / TM-04)
+- secret-scan-canary (SEC-INV-005 / TM-04)
+
+nightly jobs (all SUCCESS):
+- pinned-nightly (nightly-2026-08-01)
+
+Result: Pass for PR-003-A01

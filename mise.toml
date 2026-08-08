@@ -1,10 +1,14 @@
 [tools]
-rust = { version = "1.97.1", targets = "wasm32-unknown-unknown" }
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:rhysd/actionlint" = "1.7.12"
+
+# Prefer bash so multiline tasks stay portable on Windows CI runners.
+[task_config]
+shell = "bash -c"
 
 # Install and environment check tasks
 
@@ -15,8 +19,12 @@ run = "mise install"
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
 run = """
+rustup component add rustfmt clippy
+rustup target add wasm32-unknown-unknown
 rustc --version
 cargo --version
+rustfmt --version
+cargo clippy --version
 rustc --print cfg --target wasm32-unknown-unknown >/dev/null
 python --version
 uv --version
@@ -63,7 +71,8 @@ run = "cargo test --workspace --locked"
 
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
-run = "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc --workspace --no-deps --locked"
 
 [tasks.test-architecture]
 description = "Run architecture checker unit tests"

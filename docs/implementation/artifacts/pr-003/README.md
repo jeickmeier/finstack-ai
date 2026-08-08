@@ -1,29 +1,21 @@
 # PR-003 validation artifacts
 
-Local command evidence for branch `pr-003-ci-release-matrix` on Darwin arm64.
-Hosted Linux/macOS/Windows runs remain blocked by the absence of a Git remote
-(`PR-003-B-no-remote-ede93913b2ea`).
+Local command evidence plus hosted GitHub Actions evidence for logical PR-003.
 
-Review-fix refresh covers secret-scan lockfile coverage, cargo-deny
-`all-features`, pinned Python build backend, release metadata derivation, hosted
-`lint-workflows`, reservation cadences, and removal of the green reserved-fuzz
-placeholder job.
+Hosted A01/A03 evidence comes from actual PR-003a:
+https://github.com/jeickmeier/finstack-ai/pull/1
+Head `c2f4e79498c17dcea334d0e67b41289474cd2acd`.
 
 | Artifact | Purpose |
 | --- | --- |
-| `environment.txt` | Host/toolchain snapshot |
-| `supply-chain.txt` | cargo-deny with all-features (Eng §9 / TM-18) |
-| `secret-scan.txt` | Clean repository gitleaks scan |
-| `secret-scan-canary.txt` | Temporary examples/fixtures/lockfile negatives |
-| `release-smoke.txt` | Private facade-dependent release binary (Darwin) |
-| `release-SHA256SUMS` / `build-metadata.json` | Release artifact digests/metadata |
-| `test-ci.txt` | CI/security helper unit tests |
-| `lint-workflows.txt` | `actionlint` |
-| `build-python.txt` | Python package smoke with hashed setuptools pin |
+| `environment.txt` | Local host/toolchain snapshot |
+| `supply-chain.txt` | Local cargo-deny with all-features |
+| `secret-scan.txt` / `secret-scan-canary.txt` | Local gitleaks + canaries |
+| `release-smoke.txt` / `build-metadata.json` / `release-SHA256SUMS` | Local Darwin release smoke |
+| `hosted-ci.txt` | Hosted PR runs for `ci` / `security` / `nightly` (A01) |
+| `hosted-release-smoke.txt` | Hosted Linux/macOS/Windows release-smoke (A03) |
+| `hosted/release-smoke-*/` | Retained build-metadata + SHA256SUMS per OS |
 | `security-review.txt` | Threat Model §18 build/release review |
-| `SHA256SUMS` | Digests of the files above |
+| `SHA256SUMS` | Digests of the checked-in files above |
 
-Validation limits:
-- Rust crate unit tests currently pass vacuously (placeholder crates).
-- `release-reproducible` is Linux-only and was skipped on Darwin.
-- Hosted workflow run URLs are unavailable until a remote/PR exists.
+Binaries are not retained in git; they remain on the Actions run artifacts (30-day retention) and are identified by the recorded SHA-256 digests.

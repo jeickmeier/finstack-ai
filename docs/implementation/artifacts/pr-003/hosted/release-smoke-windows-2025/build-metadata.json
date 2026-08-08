@@ -1,0 +1,19 @@
+{
+  "binary": "finstack-ai-ci-smoke.exe",
+  "commit": "f89dba78f653cea51b3b7cbec24be933280b90ca",
+  "facade_dependency": "finstack-ai",
+  "features": [
+    "native-tokio"
+  ],
+  "host_triple": "x86_64-pc-windows-msvc",
+  "package": "finstack-ai-ci-smoke",
+  "platform": {
+    "machine": "AMD64",
+    "release": "2025Server",
+    "system": "Windows"
+  },
+  "profile": "release",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "sha256": "c9f43379f1775e1f35ee6c3ebc4ddd10162cc8217c488b82661e074e0d65aa93",
+  "version": "0.0.1"
+}
