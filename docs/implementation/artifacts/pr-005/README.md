@@ -3,7 +3,8 @@
 Local validation evidence for golden-trace, conformance, and benchmark harnesses.
 
 Branch: `pr-005-harnesses`
-Captured against worktree tip `f51671507a148666d5a42f29086d97b3d6877f93` (pre-merge; bind to immutable PR/merge heads when available).
+Implementation commit: `e97ac9b543cb8e3b1465b1d1ae76c8fdede51009`
+Local command logs were captured immediately before that commit and rebound to it for A01–A04.
 
 ## Acceptance mapping
 
