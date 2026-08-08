@@ -6,6 +6,10 @@ uv = "0.10.11"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:rhysd/actionlint" = "1.7.12"
 
+# Prefer bash so multiline tasks stay portable on Windows CI runners.
+[task_config]
+shell = "bash -c"
+
 # Install and environment check tasks
 
 [tasks.install]
@@ -15,7 +19,6 @@ run = "mise install"
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
 run = """
-# Ensure required components even when a cached rustup toolchain omits them.
 rustup component add rustfmt clippy
 rustup target add wasm32-unknown-unknown
 rustc --version
