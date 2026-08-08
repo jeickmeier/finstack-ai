@@ -9,3 +9,30 @@ package = false
 
 [tool.uv.workspace]
 members = ["bindings/finstack-ai-python"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tools", "bindings/finstack-ai-python/python"]
+python_classes = ["*Tests", "Test*"]
+testpaths = [
+  "tools/architecture/tests",
+  "tools/ci/tests",
+  "tools/security/tests",
+  "tools/schema_governance/tests",
+  "tools/benchmark/tests",
+  "bindings/finstack-ai-python/tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = [
+  "tools/architecture",
+  "tools/ci",
+  "tools/security",
+  "tools/schema_governance",
+  "tools/benchmark",
+  "bindings/finstack-ai-python/python/finstack_ai",
+]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+skip_empty = true

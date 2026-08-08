@@ -5,16 +5,10 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
-import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-TOOL_DIR = REPO_ROOT / "tools" / "schema_governance"
-sys.path.insert(0, str(TOOL_DIR.parent))
-
-from schema_governance.check import (  # noqa: E402
+from schema_governance.check import (
     CHECK_RULES,
     REQUIRED_ADR_HEADINGS,
     REQUIRED_CONTRACT_FAMILIES,
@@ -29,10 +23,10 @@ from schema_governance.check import (  # noqa: E402
     run_checks,
 )
 
-VALID_SCHEMA = (
-    '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n'
-    '  "type": "object"\n}\n'
-)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TOOL_DIR = REPO_ROOT / "tools" / "schema_governance"
+
+VALID_SCHEMA = '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n  "type": "object"\n}\n'
 
 
 def _write(path: Path, text: str) -> None:
@@ -50,80 +44,10 @@ def _minimal_adr(
     extra: str = "",
     include_traceability: bool = True,
 ) -> str:
-    affected = """## Affected requirements, design, and delivery
-
-- Affected requirements: FR-KRN
-- Affected Technical Design: Technical Design §2
-- Architecture Specification §25
-- Implementation Plan PR-004
-- Planned delivery: PR-004
-"""
+    affected = "## Affected requirements, design, and delivery\n\n- Affected requirements: FR-KRN\n- Affected Technical Design: Technical Design §2\n- Architecture Specification §25\n- Implementation Plan PR-004\n- Planned delivery: PR-004\n"
     if not include_traceability:
-        affected = """## Affected requirements, design, and delivery
-
-- Architecture Specification §25
-- Implementation Plan PR-004
-- Planned delivery: PR-004
-"""
-    return f"""# ADR-{number:03d}: {topic}
-
-## Status
-
-Accepted
-
-## Date
-
-2026-08-08
-
-## Accountable role
-
-Core/runtime lead
-
-## Decision owners
-
-me@jeickmeier.com
-
-## Context
-
-Baseline decision captured for governance.
-
-## Decision
-
-{topic} is the accepted direction.
-
-## Consequences
-
-Later PRs must not silently reinterpret this decision.
-
-## Rejected alternatives
-
-Competing designs were rejected in the planning baseline.
-
-## Compatibility and schema-change classification
-
-Policy / non-schema decision unless noted.
-
-## Security classification
-
-- References: {security}
-- Threat Model review trigger: [§18](../../planning/06-finstack-ai-security-threat-model.md#18-review-triggers)
-- Control-change disposition: {disposition}
-
-{affected}
-## Supersession metadata
-
-None. This ADR supersedes no prior ADR and is not superseded.
-
-## Reconsideration conditions
-
-{reconsideration}
-
-## Approval and implementation-evidence links
-
-- Approval: accepted in the planning baseline (Architecture Specification §25)
-- Implementation evidence: Missing until mapped delivery work completes
-{extra}
-"""
+        affected = "## Affected requirements, design, and delivery\n\n- Architecture Specification §25\n- Implementation Plan PR-004\n- Planned delivery: PR-004\n"
+    return f"# ADR-{number:03d}: {topic}\n\n## Status\n\nAccepted\n\n## Date\n\n2026-08-08\n\n## Accountable role\n\nCore/runtime lead\n\n## Decision owners\n\nme@jeickmeier.com\n\n## Context\n\nBaseline decision captured for governance.\n\n## Decision\n\n{topic} is the accepted direction.\n\n## Consequences\n\nLater PRs must not silently reinterpret this decision.\n\n## Rejected alternatives\n\nCompeting designs were rejected in the planning baseline.\n\n## Compatibility and schema-change classification\n\nPolicy / non-schema decision unless noted.\n\n## Security classification\n\n- References: {security}\n- Threat Model review trigger: [§18](../../planning/06-finstack-ai-security-threat-model.md#18-review-triggers)\n- Control-change disposition: {disposition}\n\n{affected}\n## Supersession metadata\n\nNone. This ADR supersedes no prior ADR and is not superseded.\n\n## Reconsideration conditions\n\n{reconsideration}\n\n## Approval and implementation-evidence links\n\n- Approval: accepted in the planning baseline (Architecture Specification §25)\n- Implementation evidence: Missing until mapped delivery work completes\n{extra}\n"
 
 
 def _register_markdown(topics: dict[int, str]) -> str:
@@ -131,29 +55,16 @@ def _register_markdown(topics: dict[int, str]) -> str:
     for number in range(1, 38):
         topic = topics[number]
         rows.append(
-            f"| ADR-{number:03d} | `{topic}` | Core/runtime lead | PR-004 | "
-            f"Accepted | Standalone | Not started | Missing |"
+            f"| ADR-{number:03d} | `{topic}` | Core/runtime lead | PR-004 | Accepted | Standalone | Not started | Missing |"
         )
     body = "\n".join(rows)
     links = "\n".join(
-        f"| ADR-{n:03d} | [ADR-{n:03d}-{topics[n]}.md](adrs/ADR-{n:03d}-{topics[n]}.md) | "
-        f"me@jeickmeier.com | — | PR-004 | 2026-08-08 |"
-        for n in range(1, 38)
+        (
+            f"| ADR-{n:03d} | [ADR-{n:03d}-{topics[n]}.md](adrs/ADR-{n:03d}-{topics[n]}.md) | me@jeickmeier.com | — | PR-004 | 2026-08-08 |"
+            for n in range(1, 38)
+        )
     )
-    return f"""# ADR database
-
-## Decision and implementation index
-
-| ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-{body}
-
-## Current record and evidence links
-
-| ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
-| --- | --- | --- | --- | --- | --- | --- |
-{links}
-"""
+    return f"# ADR database\n\n## Decision and implementation index\n\n| ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n{body}\n\n## Current record and evidence links\n\n| ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |\n| --- | --- | --- | --- | --- | --- | --- |\n{links}\n"
 
 
 def _schema_families_toml() -> str:
@@ -187,7 +98,7 @@ def _schema_families_toml() -> str:
 
 def _pr_template() -> str:
     sections = "\n\n".join(
-        f"## {heading}\n\n-" for heading in REQUIRED_PR_IMPACT_HEADINGS
+        (f"## {heading}\n\n-" for heading in REQUIRED_PR_IMPACT_HEADINGS)
     )
     return f"## Summary\n\n-\n\n{sections}\n"
 
@@ -208,7 +119,7 @@ def _seed_registry_paths(root: Path) -> None:
         )
 
 
-class CheckIdTests(unittest.TestCase):
+class CheckIdTests:
     def test_stable_check_ids_exist(self) -> None:
         for check_id in (
             "GOV001",
@@ -219,17 +130,17 @@ class CheckIdTests(unittest.TestCase):
             "GOV006",
             "GOV007",
         ):
-            self.assertIn(check_id, CHECK_RULES)
+            assert check_id in CHECK_RULES
 
     def test_process_family_is_required(self) -> None:
-        self.assertIn("process", REQUIRED_CONTRACT_FAMILIES)
+        assert "process" in REQUIRED_CONTRACT_FAMILIES
 
     def test_pr005_harness_families_are_required(self) -> None:
-        self.assertIn("golden-trace", REQUIRED_CONTRACT_FAMILIES)
-        self.assertIn("benchmark-report", REQUIRED_CONTRACT_FAMILIES)
+        assert "golden-trace" in REQUIRED_CONTRACT_FAMILIES
+        assert "benchmark-report" in REQUIRED_CONTRACT_FAMILIES
 
 
-class AdrInventoryTests(unittest.TestCase):
+class AdrInventoryTests:
     def test_missing_adr_files_fail_gov001(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -239,7 +150,7 @@ class AdrInventoryTests(unittest.TestCase):
             )
             _write(root / "docs/implementation/adrs/README.md", "# ADR records\n")
             diagnostics = check_adr_inventory(root)
-            self.assertTrue(any(d.check_id == "GOV001" for d in diagnostics))
+            assert any((d.check_id == "GOV001" for d in diagnostics))
 
     def test_complete_inventory_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,10 +165,10 @@ class AdrInventoryTests(unittest.TestCase):
                 )
                 _write(path, _minimal_adr(number, topic))
             diagnostics = check_adr_inventory(root)
-            self.assertFalse(any(d.check_id == "GOV001" for d in diagnostics))
+            assert not any((d.check_id == "GOV001" for d in diagnostics))
 
 
-class AdrRecordTests(unittest.TestCase):
+class AdrRecordTests:
     def test_missing_heading_fails_gov002(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -272,7 +183,7 @@ class AdrRecordTests(unittest.TestCase):
                     text,
                 )
             diagnostics = check_adr_records(root)
-            self.assertTrue(any(d.check_id == "GOV002" for d in diagnostics))
+            assert any((d.check_id == "GOV002" for d in diagnostics))
 
     def test_missing_traceability_fails_gov002(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -287,11 +198,11 @@ class AdrRecordTests(unittest.TestCase):
                     _minimal_adr(number, topic, include_traceability=False),
                 )
             diagnostics = check_adr_records(root)
-            self.assertTrue(
-                any(d.check_id == "GOV002" and "FR-" in d.message for d in diagnostics)
+            assert any(
+                (d.check_id == "GOV002" and "FR-" in d.message for d in diagnostics)
             )
-            self.assertTrue(
-                any(
+            assert any(
+                (
                     d.check_id == "GOV002" and "Technical Design" in d.message
                     for d in diagnostics
                 )
@@ -311,44 +222,36 @@ class AdrRecordTests(unittest.TestCase):
                     text,
                 )
             diagnostics = check_adr_records(root)
-            self.assertTrue(any(d.check_id == "GOV003" for d in diagnostics))
+            assert any((d.check_id == "GOV003" for d in diagnostics))
 
     def test_required_headings_are_documented(self) -> None:
-        self.assertIn("Decision", REQUIRED_ADR_HEADINGS)
-        self.assertIn("Security classification", REQUIRED_ADR_HEADINGS)
+        assert "Decision" in REQUIRED_ADR_HEADINGS
+        assert "Security classification" in REQUIRED_ADR_HEADINGS
 
 
-class ContractRegistryTests(unittest.TestCase):
+class ContractRegistryTests:
     def test_missing_family_fails_gov004(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write(
                 root / "schemas/schema-families.toml",
-                '[families."agent-spec"]\n'
-                'owner = "me@jeickmeier.com"\n'
-                'reviewer = "me@jeickmeier.com"\n'
-                'source_root = "schemas/agent-spec/"\n'
-                'format = "json-schema-2020-12"\n'
-                'stability = "candidate-v1"\n'
-                'compatibility_profile = "strict-reject-unknown"\n'
-                'fixture_root = "fixtures/compatibility/agent-spec/"\n'
-                'status = "reserved"\n',
+                '[families."agent-spec"]\nowner = "me@jeickmeier.com"\nreviewer = "me@jeickmeier.com"\nsource_root = "schemas/agent-spec/"\nformat = "json-schema-2020-12"\nstability = "candidate-v1"\ncompatibility_profile = "strict-reject-unknown"\nfixture_root = "fixtures/compatibility/agent-spec/"\nstatus = "reserved"\n',
             )
             diagnostics = check_contract_registry(root)
-            self.assertTrue(any(d.check_id == "GOV004" for d in diagnostics))
+            assert any((d.check_id == "GOV004" for d in diagnostics))
 
     def test_complete_registry_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _seed_registry_paths(root)
             diagnostics = check_contract_registry(root)
-            self.assertFalse(any(d.check_id == "GOV004" for d in diagnostics))
+            assert not any((d.check_id == "GOV004" for d in diagnostics))
             families = parse_schema_families(root / "schemas/schema-families.toml")
-            self.assertEqual(set(families), set(REQUIRED_CONTRACT_FAMILIES))
-            self.assertEqual(families["public-rust-api"]["source_root"], "crates/")
+            assert set(families) == set(REQUIRED_CONTRACT_FAMILIES)
+            assert families["public-rust-api"]["source_root"] == "crates/"
 
 
-class SchemaFixtureCouplingTests(unittest.TestCase):
+class SchemaFixtureCouplingTests:
     def _git_repo(self) -> Path:
         root = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
@@ -367,32 +270,24 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         _seed_registry_paths(root)
         subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", "base"],
-            cwd=root,
-            check=True,
-            capture_output=True,
+            ["git", "commit", "-m", "base"], cwd=root, check=True, capture_output=True
         )
         return root
 
-    def tearDown(self) -> None:
+    def teardown_method(self) -> None:
         root = getattr(self, "_tmp_root", None)
         if root is not None and root.exists():
             shutil.rmtree(root)
 
     def _head(self, root: Path) -> str:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=root,
-            text=True,
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip()
 
     def _commit(self, root: Path, message: str) -> None:
         subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", message],
-            cwd=root,
-            check=True,
-            capture_output=True,
+            ["git", "commit", "-m", message], cwd=root, check=True, capture_output=True
         )
 
     def test_no_schema_files_passes_without_base(self) -> None:
@@ -400,9 +295,7 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
             root = Path(tmp)
             _seed_registry_paths(root)
             diagnostics = check_schema_fixture_coupling(root, base_ref=None)
-            self.assertFalse(
-                any(d.check_id in {"GOV005", "GOV006"} for d in diagnostics)
-            )
+            assert not any((d.check_id in {"GOV005", "GOV006"} for d in diagnostics))
 
     def test_schema_change_without_fixture_fails_gov006(self) -> None:
         root = self._git_repo()
@@ -411,8 +304,8 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         _write(root / "schemas/agent-spec/v1/agent-spec.schema.json", VALID_SCHEMA)
         self._commit(root, "schema only")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
+        assert any(
+            (
                 d.check_id == "GOV006" and "agent-spec@v1" in d.subject
                 for d in diagnostics
             )
@@ -430,7 +323,7 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         )
         self._commit(root, "schema and fixture")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertFalse(any(d.check_id == "GOV006" for d in diagnostics))
+        assert not any((d.check_id == "GOV006" for d in diagnostics))
 
     def test_v2_schema_not_covered_by_v1_fixture(self) -> None:
         root = self._git_repo()
@@ -444,8 +337,8 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         )
         self._commit(root, "cross version mismatch")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
+        assert any(
+            (
                 d.check_id == "GOV006" and "agent-spec@v2" in d.subject
                 for d in diagnostics
             )
@@ -457,13 +350,12 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         base = self._head(root)
         _write(root / "schemas/agent-spec/v1/agent-spec.schema.json", VALID_SCHEMA)
         _write(
-            root / "fixtures/compatibility/agent-spec/v1/README.md",
-            "# not a fixture\n",
+            root / "fixtures/compatibility/agent-spec/v1/README.md", "# not a fixture\n"
         )
         self._commit(root, "readme only")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
+        assert any(
+            (
                 d.check_id == "GOV006" and "agent-spec@v1" in d.subject
                 for d in diagnostics
             )
@@ -481,19 +373,18 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         )
         self._commit(root, "bad schema name")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(any(d.check_id == "GOV005" for d in diagnostics))
+        assert any((d.check_id == "GOV005" for d in diagnostics))
 
     def test_wrong_draft_uri_fails_gov005(self) -> None:
         root = self._git_repo()
         self._tmp_root = root
         _write(
             root / "schemas/agent-spec/v1/agent-spec.schema.json",
-            '{\n  "$schema": "https://json-schema.org/draft-07/schema",\n'
-            '  "type": "object"\n}\n',
+            '{\n  "$schema": "https://json-schema.org/draft-07/schema",\n  "type": "object"\n}\n',
         )
         diagnostics = check_schema_fixture_coupling(root, base_ref=None)
-        self.assertTrue(
-            any(d.check_id == "GOV005" and "$schema" in d.message for d in diagnostics)
+        assert any(
+            (d.check_id == "GOV005" and "$schema" in d.message for d in diagnostics)
         )
 
     def test_comment_containing_draft_uri_without_schema_field_fails(self) -> None:
@@ -501,14 +392,11 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         self._tmp_root = root
         _write(
             root / "schemas/agent-spec/v1/agent-spec.schema.json",
-            "{\n"
-            '  "description": "mentions https://json-schema.org/draft/2020-12/schema",\n'
-            '  "type": "object"\n'
-            "}\n",
+            '{\n  "description": "mentions https://json-schema.org/draft/2020-12/schema",\n  "type": "object"\n}\n',
         )
         diagnostics = check_schema_fixture_coupling(root, base_ref=None)
-        self.assertTrue(
-            any(d.check_id == "GOV005" and "$schema" in d.message for d in diagnostics)
+        assert any(
+            (d.check_id == "GOV005" and "$schema" in d.message for d in diagnostics)
         )
 
     def test_unregistered_family_fails_gov006(self) -> None:
@@ -517,16 +405,15 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         base = self._head(root)
         _write(root / "schemas/mystery/v1/thing.schema.json", VALID_SCHEMA)
         _write(
-            root / "fixtures/compatibility/mystery/v1/thing/valid--minimal.json",
-            "{}\n",
+            root / "fixtures/compatibility/mystery/v1/thing/valid--minimal.json", "{}\n"
         )
         self._commit(root, "unregistered family")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
+        assert any(
+            (
                 d.check_id == "GOV006"
                 and "not registered" in d.message
-                and d.subject == "mystery"
+                and (d.subject == "mystery")
                 for d in diagnostics
             )
         )
@@ -545,8 +432,8 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         (root / "schemas/agent-spec/v1/agent-spec.schema.json").unlink()
         self._commit(root, "delete schema only")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
+        assert any(
+            (
                 d.check_id == "GOV006" and "agent-spec@v1" in d.subject
                 for d in diagnostics
             )
@@ -567,16 +454,13 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         dst = root / "schemas/agent-spec/v2/agent-spec.schema.json"
         dst.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
-            ["git", "mv", str(src), str(dst)],
-            cwd=root,
-            check=True,
-            capture_output=True,
+            ["git", "mv", str(src), str(dst)], cwd=root, check=True, capture_output=True
         )
         self._commit(root, "rename v1 to v2 without fixtures")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
         subjects = {d.subject for d in diagnostics if d.check_id == "GOV006"}
-        self.assertIn("agent-spec@v1", subjects)
-        self.assertIn("agent-spec@v2", subjects)
+        assert "agent-spec@v1" in subjects
+        assert "agent-spec@v2" in subjects
 
     def test_wit_path_must_be_versioned(self) -> None:
         root = self._git_repo()
@@ -585,8 +469,8 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         _write(root / "plugins/finstack-ai-wit/wit/world.wit", "package demo;\n")
         self._commit(root, "unversioned wit")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(d.check_id == "GOV005" and d.path.endswith(".wit") for d in diagnostics)
+        assert any(
+            (d.check_id == "GOV005" and d.path.endswith(".wit") for d in diagnostics)
         )
 
     def test_versioned_wit_requires_fixture(self) -> None:
@@ -599,11 +483,8 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         )
         self._commit(root, "wit only")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertTrue(
-            any(
-                d.check_id == "GOV006" and "wit@v0.1.0" in d.subject
-                for d in diagnostics
-            )
+        assert any(
+            (d.check_id == "GOV006" and "wit@v0.1.0" in d.subject for d in diagnostics)
         )
 
     def test_versioned_wit_with_fixture_passes(self) -> None:
@@ -620,33 +501,33 @@ class SchemaFixtureCouplingTests(unittest.TestCase):
         )
         self._commit(root, "wit and fixture")
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
-        self.assertFalse(any(d.check_id == "GOV006" for d in diagnostics))
-        self.assertFalse(any(d.check_id == "GOV005" for d in diagnostics))
+        assert not any((d.check_id == "GOV006" for d in diagnostics))
+        assert not any((d.check_id == "GOV005" for d in diagnostics))
 
 
-class PrTemplateTests(unittest.TestCase):
+class PrTemplateTests:
     def test_missing_impact_sections_fail_gov007(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write(root / ".github/PULL_REQUEST_TEMPLATE.md", "## Summary\n\n-\n")
             diagnostics = check_pr_template(root)
-            self.assertTrue(any(d.check_id == "GOV007" for d in diagnostics))
+            assert any((d.check_id == "GOV007" for d in diagnostics))
 
     def test_complete_impact_sections_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write(root / ".github/PULL_REQUEST_TEMPLATE.md", _pr_template())
             diagnostics = check_pr_template(root)
-            self.assertFalse(any(d.check_id == "GOV007" for d in diagnostics))
+            assert not any((d.check_id == "GOV007" for d in diagnostics))
 
 
-class RunChecksIntegrationTests(unittest.TestCase):
+class RunChecksIntegrationTests:
     def test_run_checks_returns_diagnostics_for_empty_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             diagnostics = run_checks(root)
-            self.assertTrue(diagnostics)
-            self.assertTrue(all(isinstance(d, Diagnostic) for d in diagnostics))
+            assert diagnostics
+            assert all((isinstance(d, Diagnostic) for d in diagnostics))
 
     def test_base_ref_from_environment(self) -> None:
         previous = os.environ.get("SCHEMA_GOVERNANCE_BASE")
@@ -656,16 +537,11 @@ class RunChecksIntegrationTests(unittest.TestCase):
                 root = Path(tmp)
                 _seed_registry_paths(root)
                 diagnostics = check_schema_fixture_coupling(root, base_ref=None)
-                self.assertTrue(
-                    any(d.check_id in {"GOV005", "GOV006"} for d in diagnostics)
-                    or any("git" in d.message.lower() for d in diagnostics)
-                )
+                assert any(
+                    (d.check_id in {"GOV005", "GOV006"} for d in diagnostics)
+                ) or any(("git" in d.message.lower() for d in diagnostics))
         finally:
             if previous is None:
                 os.environ.pop("SCHEMA_GOVERNANCE_BASE", None)
             else:
                 os.environ["SCHEMA_GOVERNANCE_BASE"] = previous
-
-
-if __name__ == "__main__":
-    unittest.main()

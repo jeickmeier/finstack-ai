@@ -5,8 +5,8 @@ Makes the microkernel boundary mechanically enforceable.
 ## Commands
 
 ```bash
-mise run architecture          # unit tests + policy check + wasm binding target check
-mise run test-architecture     # Python unit tests only
+mise run architecture          # pytest + policy check + wasm binding target check
+mise run test-architecture     # Python tests only (pytest)
 mise run lint-architecture     # Ruff lint
 mise run format-architecture   # Ruff format check
 uv run --no-project python tools/architecture/check.py

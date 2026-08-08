@@ -3,6 +3,7 @@ rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy",
 python = "3.14"
 uv = "0.10.11"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:taiki-e/cargo-llvm-cov" = { version = "0.8.7", version_prefix = "v" }
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "aqua:rhysd/actionlint" = "1.7.12"
 
@@ -21,12 +22,13 @@ description = "Verify pinned toolchain is available"
 # Prefer PATH-resolved tools and avoid `/dev/null` redirects so the same
 # command works when mise executes tasks via cmd.exe on Windows.
 run = """
-rustup component add rustfmt clippy
+rustup component add rustfmt clippy llvm-tools-preview
 rustup target add wasm32-unknown-unknown
 rustc --version
 cargo --version
 rustfmt --version
 cargo clippy --version
+"$(mise where github:taiki-e/cargo-llvm-cov)/cargo-llvm-cov" llvm-cov --version
 rustc --print cfg --target wasm32-unknown-unknown
 python --version
 uv --version
@@ -90,7 +92,7 @@ run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]
 description = "Run benchmark staging helper unit tests"
-run = "uv run --no-project python -m unittest discover -s tools/benchmark/tests -v"
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/benchmark/tests -v"
 
 [tasks.lint-benchmark]
 description = "Lint benchmark helper Python sources"
@@ -118,7 +120,7 @@ run = "cargo doc --workspace --no-deps --locked"
 
 [tasks.test-architecture]
 description = "Run architecture checker unit tests"
-run = "uv run --no-project python -m unittest discover -s tools/architecture/tests -v"
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/architecture/tests -v"
 
 [tasks.lint-architecture]
 description = "Lint architecture checker Python sources"
@@ -131,7 +133,7 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/archit
 [tasks.architecture]
 description = "Enforce architecture, dependency, and feature boundaries"
 run = """
-uv run --no-project python -m unittest discover -s tools/architecture/tests -q && \
+uv run --no-project --with pytest==9.1.1 pytest tools/architecture/tests -q && \
 uv run --no-project python tools/architecture/check.py && \
 mise run check-wasm
 """
@@ -146,14 +148,11 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/ci too
 
 [tasks.test-ci]
 description = "Run CI and security helper unit tests"
-run = """
-uv run --no-project python -m unittest discover -s tools/ci/tests -v
-uv run --no-project python -m unittest discover -s tools/security/tests -v
-"""
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/ci/tests tools/security/tests -v"
 
 [tasks.test-schema-governance]
 description = "Run ADR/schema governance unit tests"
-run = "uv run --no-project python -m unittest discover -s tools/schema_governance/tests -v"
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/schema_governance/tests -v"
 
 [tasks.lint-schema-governance]
 description = "Lint schema governance Python sources"
@@ -170,6 +169,60 @@ run = "uv run --no-project python tools/schema_governance/check.py"
 [tasks.lint-workflows]
 description = "Lint GitHub Actions workflow files"
 run = "actionlint"
+
+# Diagnostic coverage (no percentage gate; Eng Standards §10.2)
+
+[tasks.coverage-rust]
+description = "Generate Rust workspace coverage (HTML + LCOV under target/coverage/rust)"
+run = """
+set -euo pipefail
+rustup component add llvm-tools-preview
+mkdir -p target/coverage/rust
+LLVM_COV="$(mise where github:taiki-e/cargo-llvm-cov)/cargo-llvm-cov"
+"${LLVM_COV}" llvm-cov --workspace --locked \
+  --lcov --output-path target/coverage/rust/lcov.info
+"${LLVM_COV}" llvm-cov report \
+  --html --output-dir target/coverage/rust
+"""
+
+[tasks.coverage-python]
+description = "Generate Python helper and binding-smoke coverage under target/coverage/python"
+run = """
+set -euo pipefail
+mkdir -p target/coverage/python/html
+uv run --no-project --with pytest==9.1.1 --with pytest-cov==7.1.0 \
+  pytest \
+  --cov \
+  --cov-report=term-missing \
+  --cov-report=html:target/coverage/python/html \
+  --cov-report=xml:target/coverage/python/coverage.xml
+"""
+
+[tasks.coverage-wasm]
+description = "Scaffold WASM coverage artifact (pending real wasm-bindgen-test suite)"
+run = """
+set -euo pipefail
+mkdir -p target/coverage/wasm
+cat > target/coverage/wasm/PENDING.md <<'EOF'
+# WASM coverage pending
+
+Real WASM coverage is deferred until `finstack-ai-wasm` (and/or kernel-on-wasm
+execution) has a `wasm-bindgen-test` or equivalent suite.
+
+Until then:
+- compile gate: `mise run check-wasm`
+- this task writes this scaffold artifact and exits 0 so CI can upload it
+EOF
+"""
+
+[tasks.coverage]
+description = "Run Rust, Python, and WASM coverage tasks (diagnostic reports only)"
+run = """
+set -euo pipefail
+mise run coverage-rust
+mise run coverage-python
+mise run coverage-wasm
+"""
 
 # Supply chain and secrets
 

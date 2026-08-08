@@ -106,6 +106,7 @@ Canonical tasks:
 - `mise run test-benchmark` / `lint-benchmark` / `format-benchmark`
 - `mise run benchmark-smoke` — compile + short Criterion run with metadata
 - `mise run benchmark` — full non-blocking Criterion run with metadata under `target/benchmark/`
+- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (uploaded by the Ubuntu `coverage` job; no percentage gate; WASM is a scaffold until real wasm tests exist)
 
 Metadata schema: `schemas/benchmark-report/v1/metadata.schema.json`.  
 Artifacts include compiler, target, commit, feature set, and machine metadata

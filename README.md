@@ -32,6 +32,7 @@ Useful tasks after bootstrap:
 - `mise run supply-chain` / `secret-scan` / `secret-scan-canary` — Eng §8–9 / TM-04 / TM-18
 - `mise run release-smoke` — private CI release binary packaging
 - `mise run build-python` — Python binding package under `bindings/finstack-ai-python`
+- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (no percentage gate)
 - `mise run ci` — local aggregate of the checks above
 
 The installable Python package lives under `bindings/finstack-ai-python`, not the repository root. Prefer `mise run build-python`, or from the root: `uv build --package finstack-ai`.
