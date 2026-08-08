@@ -1,7 +1,7 @@
 ---
 title: "finstack-ai Engineering Standards"
 subtitle: "Normative implementation, quality, compatibility, and review rules"
-author: "Project Draft"
+author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Engineering Standards |
-| Version | 0.2 |
+| Version | 0.3 |
 | Status | Normative pre-implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, contributors, implementation teams, reviewers, and AI coding agents |
-| Related documents | Product Requirements Document v0.5; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
+| Related documents | Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
 
 # 1. Purpose and authority
 
@@ -47,10 +47,12 @@ The words **must**, **must not**, **required**, **should**, and **may** are norm
 The allowed dependency direction is:
 
 ```text
-kernel <- runtime <- SDK/bindings/reference applications
-   ^          ^
-   |          |
-port contracts   leaf providers/tools/stores/observers/plugin hosts
+kernel <- runtime + six port contracts <- SDK/bindings/reference applications
+   ^                ^
+   |                |
+protocol codec      leaf providers/tools/observers/plugin hosts
+   ^                |
+   +---- durable store implementations also depend on protocol codec
 ```
 
 | ID | Rule | Required evidence |
@@ -68,7 +70,8 @@ port contracts   leaf providers/tools/stores/observers/plugin hosts
 - Every package must have one clear responsibility and an identified owner.
 - Optional batteries and integrations must be leaf packages or feature-gated adapters.
 - Default and minimal feature sets must be tested independently.
-- Features must be additive. Enabling one provider or battery must not silently enable unrelated providers, databases, telemetry, Python, Wasmtime, or browser code.
+- `finstack-ai-runtime` keeps target-neutral port contracts available without Tokio. The facade's default `native-tokio` feature selects the runtime Tokio driver; browser-WASM depends on the facade with default features disabled and the non-default `wasm-host` pass-through feature.
+- Functional capability features must be additive. The target-driver selectors `native-tokio` and `wasm-host` are mutually exclusive for browser builds and are enforced by target checks. Enabling one provider or battery must not silently enable unrelated providers, databases, telemetry, Python, Wasmtime, or browser code.
 - Cyclic crate dependencies and facade-to-leaf backreferences are prohibited.
 - Generated bindings or schemas must be isolated from hand-authored source and reproducible from a documented command.
 
@@ -119,6 +122,7 @@ port contracts   leaf providers/tools/stores/observers/plugin hosts
 | ENG-SEM-009 | Parallel tool execution may finish out of order, but semantic history and final events preserve source order. |
 | ENG-SEM-010 | Snapshots are disposable versioned state-CBOR caches; the journal remains authoritative. |
 | ENG-SEM-011 | Model-context compaction has one explicit late-tier `before_model` middleware owner per resolved agent, preserves protected content and canonical history, and records versioned evidence/checkpoints when behavior depends on it. |
+| ENG-SEM-012 | The only pre-commit storage write permitted is idempotent content-addressed artifact staging: it has no externally visible authority/business effect, is unreachable until a journal reference commits, and has digest verification plus bounded orphan collection. All other recoverable external work follows ENG-SEM-003. |
 
 Every record-changing PR must update reducer transition tests, replay fixtures, schema compatibility fixtures, and crash-prefix coverage where the transition touches durability or external work. Compaction changes additionally require protected-content, tool-pairing, checkpoint invalidation, binding-parity, and canonical-history immutability tests.
 
@@ -169,7 +173,7 @@ Rust owns kernel and runtime semantics. Bindings expose handles and normalized c
 
 ## 7.4 WIT and isolated extensions
 
-- WIT v1 remains limited to coarse toolset/context calls and final completion/error semantics.
+- The initial experimental WIT 0.x interface remains limited to coarse toolset/context calls and final completion/error semantics.
 - A component cannot invoke a full agent or create competing run-lineage semantics unless a future ADR expands the ABI.
 - Wasmtime, signatures, WASI permissions, and compilation caches remain in optional leaf packages.
 - Resource, payload, time, fuel, and instance limits are mandatory for untrusted components.
@@ -184,7 +188,7 @@ The `Security and Threat Model` owns threat assumptions and security control obl
 - authentication must finish before remote frames, external completions, or interaction resolutions are trusted;
 - authorization decisions must bind the principal, tenant/scope, target session/run/effect/interaction, and permitted action;
 - untrusted input must be bounded before allocation and parsed without panics;
-- durable and observer payloads require redaction and metadata-only modes; and
+- observer payloads and diagnostic/export projections of durable data require redaction and metadata-only modes; v1 authoritative records retain or securely reference replay-required state and expose no field-level redaction/tombstone mutation; whole-session destruction is a deployment retention operation that permanently removes resumability; and
 - security-sensitive changes must update the threat model and tests in the same review.
 
 # 9. Dependency and supply-chain standards

@@ -1,7 +1,7 @@
 ---
 title: "finstack-ai Security and Threat Model"
 subtitle: "Assets, trust boundaries, threats, controls, and verification obligations"
-author: "Project Draft"
+author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Security and Threat Model |
-| Version | 0.2 |
+| Version | 0.3 |
 | Status | Pre-implementation security baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.5; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Engineering Standards v0.2 |
+| Related documents | Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Engineering Standards v0.3 |
 
 # 1. Purpose and authority
 
@@ -163,8 +163,8 @@ A malicious host application, OS administrator, or fully trusted native extensio
 |---|---|---|---|
 | TM-01 | Prompt injection or poisoned retrieval causes unauthorized action. | Treat content as data; provenance; explicit tool/resource policy; schema validation; optional interaction/verification before sensitive effects. | Adversarial context/tool-policy fixtures; PR-016, PR-018, PR-056. |
 | TM-02 | Model fabricates, mutates, or floods tool calls. | Validate names/schemas; enforce call, size, cost, and concurrency limits; reject unknown tools; preserve source ordering; policy before dispatch. | Tool scheduler and malformed-call tests; PR-010, PR-015, PR-018. |
-| TM-03 | Filesystem or shell tool escapes intended scope. | Root-confined canonical paths; symlink/race tests; allow/deny command policy; minimal environment; bounded output/time; optional external sandbox. | Traversal, symlink, environment, injection, timeout, and flood tests; PR-025, PR-056. |
-| TM-04 | Secrets leak through prompts, errors, journals, events, artifacts, or telemetry. | Secret references; explicit reveal boundaries; structured redaction; metadata-only modes; deny secret fields in bundles; safe error display. | Canary-secret and redaction tests; PR-019, PR-024, PR-034, PR-057, PR-060. |
+| TM-03 | Filesystem or shell tool escapes intended scope. | Handle-relative no-follow/capability-style filesystem access; symlink/rename race tests; allow/deny command policy; minimal environment; bounded output/time; optional external sandbox. | Traversal, symlink, environment, injection, timeout, and flood tests; PR-025, PR-056. |
+| TM-04 | Secrets leak through prompts, errors, journals, events, artifacts, or telemetry. | Secret references; explicit reveal boundaries; structured redaction and metadata-only observer/diagnostic/export views; secure references in authoritative records; deny secret fields in bundles; safe error display. | Canary-secret and redaction tests; PR-019, PR-024, PR-034, PR-057, PR-060. |
 | TM-05 | Browser bundle exposes provider credentials or sensitive persistent data. | Same-origin proxy pattern; no embedded provider key; documented CSP/CORS/storage policy; explicit IndexedDB sensitivity and deletion behavior. | Static bundle/example scanning and browser security fixtures; PR-034, PR-037, PR-038. |
 | TM-06 | Malicious native/Python/JS extension is mistaken for isolated code. | Explicit trust labels; opt-in registration; documentation that in-process extensions inherit host authority; isolate untrusted code through T3 path. | API docs, starter review, trust-boundary tests; PR-021, PR-030, PR-034, PR-060. |
 | TM-07 | WIT/plugin escapes sandbox or exhausts host. | Deny-by-default WASI; explicit linked capabilities; no ambient preopens/network; fuel/epoch deadlines; memory/table/instance limits; trap containment. | Hostile component suite; PR-049 through PR-054. |
@@ -174,7 +174,7 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | TM-11 | Unauthorized or replayed interaction resolution approves an action. | Assignee/principal authorization; interaction/effect/session scope; response schema; resolution identity/digest; expiry/cancellation check; immutable audit. | Approval, form, delegation, expiry, late/conflict fixtures; PR-044, PR-048. |
 | TM-12 | Journal tampering, truncation, reordering, or incompatible decoding corrupts state. | Atomic append; sequence/version checks; deterministic encoding; checksums; strict bounds; corruption classification; authoritative journal; migration fixtures; protected backend. | Crash-prefix, corruption, historical-fixture, and backup/restore tests; PR-039 through PR-041, PR-048. |
 | TM-13 | Snapshot injects stale or forged state. | Versioned state-CBOR; journal position and state hash; validate before use; discard/rebuild on mismatch; snapshots never authoritative. | Mutation, mismatch, deletion, and replay-equivalence tests; PR-041. |
-| TM-14 | Cancellation/deadline race permits a late privileged effect or completion. | Durable cancellation intent; effect state check at dispatch and settlement; idempotent cleanup; explicit late-result policy; no fabricated tool result. | Boundary fault injection and late-result matrix; PR-011, PR-015, PR-045, PR-048. |
+| TM-14 | Cancellation/deadline race permits a late privileged effect or completion. | Durable cancellation intent; effect state check at dispatch and settlement; idempotent cleanup; explicit late-result policy; framework-authored cancelled closures carry no tool output/success claim and fabricated successful/tool-produced results are prohibited. | Boundary fault injection and late-result matrix; PR-011, PR-015, PR-045, PR-048. |
 | TM-15 | Child runs evade principal, budget, depth, deadline, or cancellation policy. | Immutable run relation; maximum depth; explicit propagation policy; budget scope; child invocation owned by authenticated runtime/SDK service. | Lineage property tests and restart/concurrency stress; PR-008, PR-011, PR-022, PR-046/047. |
 | TM-16 | Oversized or malicious schema/JSON/blob causes memory or parser denial of service. | Pre-allocation byte/depth/count limits; bounded validation; digest/reference large blobs; no automatic recursive remote fetch; streaming limits. | Fuzzing and size/depth boundary tests; PR-006/007, PR-013, PR-020, PR-039, PR-058. |
 | TM-17 | Observer/exporter failure, blockage, or payload leak changes behavior. | Observers are non-semantic; bounded exporter queues; redacted event views; drop/disconnect policy for progress; protect durable completion. | Slow/failing observer and redaction tests; PR-019, PR-057. |
@@ -351,7 +351,7 @@ Phase 0 establishes a private reporting path, named response owner, severity rub
 
 Security fixes that alter durable meaning or public protocols still require compatibility handling. Embargoed details may be reconciled into public ADRs and this threat model when disclosure is safe.
 
-# 15. Explicitly deferred deployment choices
+# 15. Deployment configuration gates
 
 The following choices are required before deploying the affected surface but do not block kernel implementation:
 
@@ -368,7 +368,23 @@ The following choices are required before deploying the affected surface but do 
 
 Each choice must fail closed or remain disabled when the deployment has not configured a safe policy.
 
-# 16. Traceability
+These are owned deployment inputs with fixed fail-closed framework behavior; they do not reopen the kernel, port, journal, protocol, or security-boundary design.
+
+# 16. Residual risk register
+
+| Residual risk | Boundary/owner | Required treatment |
+|---|---|---|
+| Trusted native Rust, Python, JavaScript, or host code can read process memory and subvert application policy. | Application/deployer | Minimize trusted code, isolate high-risk work, restrict credentials/OS identity, and do not describe in-process code as sandboxed. |
+| Journal checksum chains detect accidental corruption and unsynchronized modification but do not authenticate history against an attacker able to rewrite records, metadata, snapshots, and the head together. | Store/deployer | Protect storage with access control/encryption/backup; use external signatures/anchoring when adversarial tamper evidence is required. |
+| External model/tool/workflow effects can remain at-least-once or explicitly uncertain despite stable IDs and reconciliation. | Adapter/application | Use provider idempotency where available, expose uncertainty, and require operator/application resolution for non-repeatable outcomes. |
+| Identity proofing, IdP compromise, KMS/secrets/DLP, tenant policy, retention/legal hold, and network controls remain deployment systems. | Deployer | Complete section 15 gates and operational reviews before affected features are enabled. |
+| Browser local storage, memory, and UI data are exposed to the origin, device profile, extensions, and XSS within browser protections. | Browser application | Strong CSP/dependency hygiene, no provider secrets, scoped storage, explicit deletion, and same-origin proxy patterns. |
+| Wasmtime, OS sandbox, container, shell, browser/computer-use, and scanning controls may contain vulnerabilities or policy gaps. | Host/battery/deployer | Patch, defense in depth, least authority, independent review, and disable privileged batteries by default. |
+| SQLite acknowledgement ultimately depends on OS/filesystem/hardware honoring the documented flush contract. | Store/deployer | Use supported durable storage, test backup/restore/power-loss assumptions, surface relaxed mode, and maintain external backups. |
+| Models and retrieved content remain untrusted and can still cause harmful suggestions within granted capabilities. | Product/application | Least-privilege tools, provenance, interaction/verification for sensitive actions, monitoring, and product-specific evaluation. |
+| Bounded parsers/queues reduce but do not eliminate remote resource-exhaustion and traffic-amplification risk. | Server/deployer | Authentication, rate/concurrency limits, network controls, quotas, monitoring, and capacity planning. |
+
+# 17. Traceability
 
 | Security area | Product requirements | Architecture/TDD | Implementation |
 |---|---|---|---|
@@ -377,12 +393,12 @@ Each choice must fail closed or remain disabled when the deployment has not conf
 | Scoped resource authority | NFR-SEC-004; FR-TLS; FR-PLG | Architecture sections 6, 15, and 17 | PR-025, PR-052, PR-056 |
 | Completion and interaction integrity | FR-KRN-013/015; FR-RT-008; FR-DUR | Architecture sections 10 and 12; TDD sections 11-13 and 23 | PR-014, PR-039, PR-042 through PR-045, PR-048 |
 | Durability integrity | NFR-REL; FR-DUR | Architecture sections 10 and 20; TDD sections 18 and 23 | PR-039 through PR-048 |
-| Remote protocol | FR-RS; NFR-COMP | Architecture sections 16-17 and 20; TDD section 28 | PR-058 |
+| Remote protocol | UC-06; FR-RT-008; FR-DUR; NFR-COMP | Architecture sections 16-17 and 20; TDD section 28 | PR-058 |
 | Binding safety | FR-PY; FR-WASM; NFR-PORT | Architecture sections 13-14; TDD sections 25-26 | PR-027 through PR-038 |
 | Context compaction integrity | FR-CTX-003; FR-MW-007; NFR-SEC-003/005 | Architecture section 11.5; TDD section 17.6 | PR-018, PR-023, PR-048, PR-056/057 |
 | Supply chain | PRD release criteria and risk register | Architecture section 22; TDD CI/release design | PR-003, PR-060/061, PR-065/066 |
 
-# 17. Review triggers
+# 18. Review triggers
 
 This threat model must be reviewed when a change:
 

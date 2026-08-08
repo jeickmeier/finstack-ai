@@ -1,7 +1,7 @@
 ---
 title: "finstack-ai Architecture Specification"
 subtitle: "Agent microkernel, extension boundaries, bindings, durability, and deployment model"
-author: "Project Draft"
+author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
@@ -11,10 +11,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.5 |
-| Status | Draft for implementation planning |
+| Version | 0.6 |
+| Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
+| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
 
 # Executive architecture decision
 
@@ -301,8 +301,11 @@ validation
 
 The standard native runtime. It is responsible for effect execution and coordination.
 
+The crate has a target-neutral contract/core surface and no default driver feature. Native facade builds enable the `native-tokio` driver. Browser-WASM builds select the local `wasm-host` surface with facade defaults disabled, so Tokio and native-only I/O adapters never enter the WASM dependency graph. This is one logical runtime contract and semantic engine, not a second JavaScript run loop.
+
 Primary responsibilities:
 
+- ownership of the six object-safe port contracts used for effect execution;
 - Tokio task management;
 - model stream consumption;
 - tool scheduling;
@@ -313,19 +316,24 @@ Primary responsibilities:
 - timers and deadlines;
 - cancellation propagation;
 - external-effect completion and interaction routing;
+- optional budget-scope aggregation through an application-supplied `BudgetLedger`;
+- scoped artifact/blob routing through an application-supplied `ArtifactStore` service;
 - resource initialization and shutdown; and
 - adapter integration.
 
-## 5.3 `finstack-ai-sdk`
+## 5.3 `finstack-ai` (SDK/facade crate)
 
-The ergonomic composition layer exposed to most Rust users.
+The ergonomic composition layer exposed to most Rust users. Its Cargo package is `finstack-ai`, its Rust library/import name is `finstack_ai`, and there is no separate public `finstack-ai-sdk` package.
+
+The facade owns target-driver feature selection and declares its runtime dependency with `default-features = false`. Its default `native-tokio` feature passes through to `finstack-ai-runtime/native-tokio`; its non-default `wasm-host` feature passes through to `finstack-ai-runtime/wasm-host`. Browser bindings depend on the facade with default features disabled and `wasm-host` enabled. Target checks reject native Tokio/I/O dependencies or simultaneous native/host drivers in the browser-WASM graph.
 
 Primary responsibilities:
 
 - `AgentBuilder` and `Agent`;
+- ergonomic adapters and public re-exports of runtime port contracts;
 - registries and typed references;
 - `CapabilitySpec`;
-- `AgentCatalog`, `AgentInvoker`, and `BundleSpec` composition services outside the kernel;
+- `AgentCatalog`, `AgentInvoker`, `BundleSpec`, and `BundleResolver` composition services outside the kernel;
 - serializable `AgentSpec`;
 - component resolution;
 - default policies;
@@ -336,9 +344,9 @@ Primary responsibilities:
 
 ## 5.4 `finstack-ai-protocol`
 
-Versioned types and encodings shared by journal backends and optional remote clients.
+This crate owns the project codec, framing/handshake primitives, diagnostic journal encoding, and distinct versioned DTO families for remote sessions and external processes. It may depend on public kernel semantic DTOs where journal encoding requires them; remote/process DTOs map at outward adapters and never become kernel or in-process runtime contracts.
 
-It must remain separate from the runtime so stores and clients can work with records without importing Tokio or provider code.
+It remains separate from the runtime so codec tooling and clients do not import Tokio or provider code. The runtime, SDK, and in-memory store do not depend on protocol merely to exchange typed Rust values. A persistent store such as SQLite may depend outward on both the runtime-owned `JournalStore` contract and the protocol codec to encode/verify the single canonical journal format; this leaf dependency does not flow back into runtime or SDK.
 
 ## 5.5 Binding crates
 
@@ -444,7 +452,7 @@ Implementations may include:
 
 Observers receive immutable event batches. They support logging, metrics, tracing, billing capture, audit capture, or test assertions.
 
-Observers are explicitly unable to block or mutate run decisions unless configured as a backpressure-sensitive sink outside the kernel.
+Observers are explicitly unable to block or mutate run decisions. Bounded delivery backpressure may delay/disconnect an observer subscription but cannot gate semantic execution; correctness-critical audit facts use journal/runtime security paths instead.
 
 # 7. Composition architecture
 
@@ -491,10 +499,13 @@ AgentSpec
   -> middleware ordering
   -> tool catalog assembly
   -> model compatibility checks
+  -> exact version/config/schema lock emission
   -> ResolvedAgent
 ```
 
 After resolution, ordinary run execution does not traverse string-based registries.
+
+Every successful resolution emits a versioned `ResolvedAgentLock` containing the semantic-engine version, exact component/capability selections, source spec/bundle and effective-configuration digests, middleware-chain digest, and relevant schema digests. It is credential-free, exportable, and required for exact reconstruction. Missing or incompatible locked selections fail before run acceptance. `BundleSpec` adds only finite requirements/alternatives/conflicts and fixed configuration layering; package installation/resolution remains outside the runtime hot path.
 
 ## 7.3 Capabilities
 
@@ -542,13 +553,13 @@ before-run middleware
 context providers + prepare-context middleware
         |
         v
-[ModelEffectRequested record committed]
+[EffectRequested(Model) record committed]
         |
         v
 model stream -> transient progress events
         |
         v
-[ModelEffectCompleted + assistant entry committed]
+[EffectCompleted(Model) + EntryAppended(assistant) committed]
         |
         +------ no tools ------> output processing -> before_finalize
         |
@@ -556,13 +567,13 @@ model stream -> transient progress events
 before-tool middleware / approval
         |
         v
-[ToolBatchRequested record committed]
+[ToolBatchOpened + EffectRequested(Tool) records committed]
         |
         v
 parallel/sequential tool execution
         |
         v
-[Tool completion records + result entries committed]
+[EffectCompleted/Failed/Cancelled(Tool) + result entries + ToolBatchClosed committed]
         |
         v
 checkpoint -> next model turn or before_finalize
@@ -651,6 +662,10 @@ A run owns its current phase, explicit root/parent/effect relation, limit counte
 
 Run relation metadata is immutable after acceptance. It provides root and parent correlation, relation kind, depth, optional budget scope, and external-work reference. It does not make child-run scheduling a kernel responsibility; `AgentInvoker` and application/runtime services own invocation and fan-out policy.
 
+Every `RunAccepted` also persists an audit-safe initiating principal/tenant reference, authentication method/assurance, authorization policy version and decision ID, effective deadline/limits, propagation policy, and resolved-agent lock digest. Child contexts may only attenuate principal scopes, deadlines, and budget; tenant changes require a new authenticated boundary.
+
+Child invocation allocates and commits a complete child locator—tenant/session/lane/run plus remote service/opaque route when applicable—in a unique parent mapping keyed by `(parent_run_id, parent_effect_id)` before child acceptance. Retried equal requests attach to that mapping; conflicting requests fail closed. The child accepts the mapped locator/`RunId` idempotently, so a crash between journals cannot create duplicate children, no ID is derived from an effect, and recovery never requires a global run-ID scan.
+
 # 10. Journal and recovery architecture
 
 ## 10.1 Durable record categories
@@ -688,7 +703,11 @@ On restore, each requested effect is classified as:
 - suspended: await an external completion or decision;
 - non-repeatable uncertainty: stop and require operator/application resolution.
 
-A deferred effect always retains the original `EffectId` and a non-secret external handle. Runtime-owned completion routing validates the outstanding effect, completion identity, output digest/schema, principal, deadline, and cancellation state before proposing completion records. Identical duplicates are idempotent; conflicting duplicates are durable audit errors.
+A deferred effect always retains the original `EffectId` and a non-secret external handle. Every external-completion or interaction-resolution command reaches the runtime with an authenticated tenant scope and explicit `(SessionId, LaneId, RunId, EffectId|InteractionId)` locator; signed opaque callback tokens are resolved to that locator at ingress. Routers never scan journals by globally supplied effect/interaction ID. They load the named session and validate scope, outstanding target, command identity, output digest/schema, principal, deadline, and cancellation state before proposing completion records.
+
+Identical duplicates are idempotent. For a known authorized locator, a conflicting duplicate or invalid late command appends a durable rejection/audit record that does not change run state. Authentication failures, scope mismatches, malformed callback tokens, and unknown locators go only to the required security-audit sink to prevent journal probing or existence disclosure; failure of required audit recording fails the command closed.
+
+Accepted command identity/digest settlements remain derivable from journal records and snapshots. Outstanding targets cannot be pruned; terminal settlement tombstones are retained for at least the callback-token/idempotency horizon. After that declared horizon, callback tokens are expired and late commands are rejected/audited without a claim of indefinite duplicate recognition.
 
 ## 10.4 Exactly-once statement
 
@@ -707,7 +726,7 @@ The first major version supports seven behavior-changing stages:
 ```text
 before_run
 prepare_context
-after_context / before_model (represented as before_model)
+before_model
 after_model
 before_tool_batch
 after_tool_batch
@@ -781,7 +800,7 @@ Compaction never rewrites, deletes, or replaces canonical conversation entries. 
 
 Behavior-changing compaction output is recorded through the ordinary durable middleware-outcome path. An optional incremental checkpoint is a versioned derived cache keyed by the middleware/strategy/configuration, model-context profile, and covered-history digest. The runtime may supply the latest compatible checkpoint to the middleware on later turns; missing, stale, corrupt, or incompatible checkpoints are discarded and rebuilt from canonical history. No compaction-specific kernel state machine or eighth middleware stage is introduced.
 
-Model-assisted summarization executes as the committed middleware effect, uses the run's cancellation/deadline and an explicit usage/budget scope, and returns a normalized outcome before the main model request is committed. If protected content cannot fit, summarization fails, or the final projection still exceeds the hard limit, the runtime returns a stable context-budget error or an explicitly configured safe fallback; it never silently removes protected content.
+Model-assisted summarization is a separately requested Model subeffect linked to the already committed middleware effect. The middleware returns a normalized subeffect request rather than calling a provider; the runtime commits, executes/reconciles, records usage, and resumes the same middleware cursor before the main model request is committed. The secondary model must be authorized for the full source sensitivity, tenant, residency, and egress policy. Protected messages remain ID/byte-identical and generated summaries are unprivileged derived context, never System/Developer authority. If protected content cannot fit, summarization fails, or the final projection still exceeds the locked model-context profile, the runtime returns a stable context-budget error or an explicitly configured safe fallback; it never silently removes protected content.
 
 # 12. Concurrency and scheduling
 
@@ -817,7 +836,7 @@ Queue categories use different policies:
 | Model stream progress | Coalesce; optionally drop intermediate deltas |
 | Tool progress | Coalesce/drop intermediate progress |
 | Public completion events | Block within bounded deadline; never silently drop |
-| Observer queue | Configurable block, drop-progress, spill, or disconnect |
+| Observer queue | Configurable bounded block, drop-progress, or disconnect; no v1 spill queue |
 | Python/WASM event batches | Bounded batches with backpressure signal |
 
 ## 12.4 Cancellation propagation
@@ -914,7 +933,7 @@ JavaScript adapters implement model, toolset, context, store, clock, and observe
 
 ## 14.4 Worker topology
 
-A recommended browser topology runs the WASM engine in a Web Worker. The UI thread communicates through message batches. This prevents model/tool orchestration and record replay from blocking rendering.
+The default browser topology runs the WASM engine in a Web Worker. The UI thread communicates through message batches. This prevents model/tool orchestration and record replay from blocking rendering. Main-thread execution is supported only as an explicitly documented host-compatible mode with the same bounds and conformance tests; it is not the production default.
 
 ## 14.5 Browser persistence
 
@@ -1008,9 +1027,13 @@ BlobRef
 
 Blob stores are application/runtime services rather than kernel ports in the initial design. Blob references may be resolved by tools, context providers, or server layers.
 
+The reusable non-kernel service name is `ArtifactStore`: it stages and retrieves tenant/session-scoped, digest-bearing artifact content behind `ArtifactRef` values. Authoritative journal references are committed only after the bytes are durable; a failed journal append can leave a collectable orphan, while missing or digest-mismatched referenced content is an integrity failure. Retention of referenced content must cover the configured recovery/audit period. Plain `BlobRef` values may point to external or ephemeral media but cannot carry behavior-changing replay state without an `ArtifactRef` integrity/scope wrapper.
+
+`BudgetLedger` aggregates reservations and usage across related run budget scopes. Neither service is a seventh primary port: the kernel never invokes them, applications may omit or replace them, and their policy does not alter universal reducer semantics.
+
 # 17. Security architecture
 
-The Security and Threat Model v0.2 is the authoritative threat/control register for these boundaries. This section owns the system placement of those controls; the Technical Design owns their concrete implementation.
+The Security and Threat Model v0.3 is the authoritative threat/control register for these boundaries. This section owns the system placement of those controls; the Technical Design owns their concrete implementation.
 
 ## 17.1 Trust levels
 
@@ -1065,7 +1088,7 @@ A failed durable append prevents the associated state transition and effect exec
 
 ## 18.4 Observer failures
 
-Observers may be configured as best-effort or required. Best-effort observer failure cannot fail a run. Required audit sinks may apply backpressure or fail before execution according to application policy.
+Observer delivery may use bounded blocking, progress dropping, or disconnect policies, but observer failure cannot change a run decision, prevent an effect, or alter a terminal result. Version 1 has no observer spill queue. Correctness-critical audit facts are committed journal records. A server/runtime security-audit sink may fail an unauthenticated or unknown-target external command closed before it becomes kernel input; that ingress service is not an `Observer` and does not retroactively change accepted execution.
 
 ## 18.5 Consumer disconnection
 
@@ -1109,11 +1132,13 @@ Crates follow semantic versioning. The pre-1.0 phase may evolve quickly, but bre
 
 ## 20.2 Journal schema
 
-Every record envelope contains format version and record kind version. Unknown optional fields are retained or ignored according to documented rules. Unknown record kinds are not silently skipped when they affect state reconstruction.
+Every record envelope contains format version and record kind version. Durable fields are additive within a kind version only when its schema marks them semantically ignorable and decoders preserve their canonical bytes/opaque value for re-export; an unknown state-bearing field or record kind is fatal to replay until a supported version/migration exists. Strict configuration and inbound command schemas reject unknown fields. Diagnostic metadata may be retained or ignored as declared. The Technical Design compatibility matrix is authoritative per schema family.
+
+Semantic timestamps and record/batch IDs are supplied by the normalized transition environment and remain frozen across retries; stores may add a separate commit timestamp but cannot rewrite semantic time. Append batches have stable identities. On an ambiguous acknowledgement, exact replay of a previously committed batch returns its original receipt before optimistic-sequence checks, while content mismatch is corruption.
 
 ## 20.3 Python and JavaScript APIs
 
-Binding APIs are versioned independently but tied to one semantic engine version. Stable error codes and event type names are treated as public compatibility surfaces.
+Through pre-1.0, the semantic core crates and Rust/Python/JavaScript binding distributions use one lockstep workspace release version and compatibility matrix. After 1.0, a binding distribution may release independently only when it declares the compatible semantic-engine range and passes the shared fixtures. Stable error codes and event type names are public compatibility surfaces in every release mode.
 
 ## 20.4 WIT
 
@@ -1318,13 +1343,13 @@ The first slice proves the semantic center rather than the ecosystem:
 | ADR-026 | Every run persists explicit root/parent/effect lineage |
 | ADR-027 | Approval is a standard profile of generalized typed interactions |
 | ADR-028 | `before_finalize` is the final behavior-changing middleware stage; post-run handling is observation only |
-| ADR-029 | Public/internal IDs use typed UUID values serialized as lowercase UUID strings; new IDs use UUIDv7 |
+| ADR-029 | Allocated runtime entity IDs use typed UUID values serialized as lowercase UUID strings and new values use UUIDv7; human-selected agent/component/capability/tool/bundle keys remain validated namespaced strings |
 | ADR-030 | Object-safe boxed futures/streams are the initial public extension ABI; concrete implementations may optimize internally |
 | ADR-031 | Browser WASM is single-threaded/worker-based by default; threaded WASM is a post-preview opt-in requiring separate evidence |
 | ADR-032 | Initial snapshots are direct versioned kernel-state CBOR projections and remain disposable derived caches |
 | ADR-033 | MVP interruption uses retry/suspend/explicit uncertainty while the Model port reserves optional reconciliation implemented with durability |
 | ADR-034 | State-changing middleware outcomes are recorded by default; only explicitly recompute-safe outcomes may rerun during replay |
-| ADR-035 | WIT v1 tool/context calls return one coarse completion; resource-based streaming is deferred |
+| ADR-035 | WIT plugin alpha uses experimental @0.x tool/context packages with one coarse completion; @1.0.0 worlds freeze only at the framework 1.0 gate and resource-based streaming remains deferred |
 | ADR-036 | Blob storage remains an application/runtime service through 1.0 and does not become a seventh kernel port |
 | ADR-037 | Model-context compaction is `before_model` middleware; it preserves canonical history and records only a versioned derived projection/checkpoint |
 

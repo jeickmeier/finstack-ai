@@ -1,7 +1,7 @@
 ---
 title: "finstack-ai Product Requirements Document"
 subtitle: "Rust-native agent microkernel with first-class Python and WebAssembly bindings"
-author: "Project Draft"
+author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
@@ -11,10 +11,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Product Requirements Document (PRD) |
-| Version | 0.5 |
-| Status | Draft for architecture and implementation planning |
+| Version | 0.6 |
+| Status | Pre-implementation product baseline |
 | Primary audience | Product owners, framework architects, Rust/Python/WASM engineers, extension authors |
-| Related documents | Engineering Standards v0.2; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
+| Related documents | Engineering Standards v0.3; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
 
 # Executive summary
 
@@ -321,11 +321,11 @@ It shall guarantee valid ordering and pairing of assistant tool calls and tool r
 
 ### FR-KRN-003: Explicit state machine
 
-Runs shall have explicit, inspectable states including accepted, preparing, requesting-model, executing-tools, awaiting-interaction, awaiting-external, sleeping, cancelling, completed, failed, and suspended.
+Runs shall use the canonical phases `accepted`, `before-run`, `preparing-context`, `before-model`, `awaiting-model`, `after-model`, `before-tool-batch`, `awaiting-tools`, `after-tool-batch`, `before-finalize`, `awaiting-interaction`, `awaiting-external`, `sleeping`, `cancelling`, `suspended`, `completed`, `failed`, and `cancelled`, with only the Technical Design transition table permitted.
 
 ### FR-KRN-004: Deterministic decisions
 
-Given the same state and normalized input, the kernel shall produce the same durable records, effect requests, and ordered public events.
+Given the same state and normalized input, `decide` shall produce the same durable record drafts and post-commit actions. Given the same committed batch, `apply` shall produce the same ordered durable-derived public events. Transient progress events are runtime-sequenced and need not reproduce provider timing during replay.
 
 ### FR-KRN-005: Stable identifiers
 
@@ -439,7 +439,7 @@ A capability shall be able to contribute instructions and references to toolsets
 
 ### FR-CAP-002: Activation
 
-Capabilities shall support always-on, application-activated, and model-activated modes. The MVP shall include durable activation records and the always-on/application modes. The compact model-activated catalog experience may mature after the native MVP but is required for the 0.1.0 public preview.
+Capabilities shall support always-on, application-activated, and model-activated modes. The MVP shall include durable activation records and the always-on/application modes. The compact model-activated catalog experience may mature after the native developer-preview slice but is required for the 0.1.0 public preview.
 
 ### FR-CAP-003: Catalog
 
@@ -745,7 +745,7 @@ Applications shall be able to persist the resolved component identifiers and ver
 
 ### FR-SPEC-005: Separate packages
 
-Providers, toolsets, stores, workflow adapters, and plugin hosts shall be separately versioned packages. Cargo feature flags shall not be the primary product packaging mechanism.
+Providers, toolsets, stores, workflow adapters, and plugin hosts shall be separate package artifacts with explicit version and compatibility metadata. Bundled first-party packages follow the lockstep workspace version through pre-1.0; third-party packages are independently versioned, and post-1.0 first-party decoupling requires published engine-compatibility ranges. Cargo feature flags shall not be the primary product packaging mechanism.
 
 # 10. Non-functional requirements
 
@@ -819,7 +819,7 @@ Platform-specific provider, filesystem, sandbox, or service code shall not enter
 
 ## 10.4 Security
 
-The Security and Threat Model v0.2 refines these outcomes into threat assumptions, control obligations, residual risks, and gate evidence. Those controls must remain within the product and architecture boundaries defined by this PRD.
+The Security and Threat Model v0.3 refines these outcomes into threat assumptions, control obligations, residual risks, and gate evidence. Those controls must remain within the product and architecture boundaries defined by this PRD.
 
 ### NFR-SEC-001
 
@@ -839,7 +839,7 @@ File, network, subprocess, and secret permissions shall be independently scopeab
 
 ### NFR-SEC-005
 
-Journal and observer payloads shall support redaction and metadata-only modes.
+Observer streams and diagnostic/export projections of journals shall support redaction and metadata-only modes. Authoritative records must retain or securely reference all state required for replay. Version 1 exposes no field-level mutation, redaction, or tombstone operation over authoritative records; deployment-owned whole-session destruction is permitted only after outstanding work and callback credentials are closed/expired and permanently removes resumability. Any future selective authoritative-redaction feature requires an ADR, new versioned record/schema and migration semantics, and updated security/privacy evidence.
 
 ## 10.5 Compatibility
 
@@ -883,8 +883,8 @@ Bindings shall remain idiomatic rather than mirroring Rust types mechanically.
 
 ```rust
 use finstack_ai::{Agent, Capability, Result};
-use finstack_ai_provider_openai::OpenAi;
-use finstack_ai_tools_fs::FileSystem;
+use finstack_ai_provider_openai_compatible::OpenAiCompatible;
+use finstack_ai_tools_filesystem::FileSystem;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -893,7 +893,7 @@ async fn main() -> Result<()> {
         .toolset("filesystem")
         .build();
 
-    let agent = Agent::builder(OpenAi::from_env()?)
+    let agent = Agent::builder(OpenAiCompatible::from_env()?)
         .register_toolset("filesystem", FileSystem::scoped("."))
         .capability(coding)
         .build()?;
@@ -1010,10 +1010,11 @@ The initial Python distribution bundles the curated OpenAI-compatible, Anthropic
 ## 12.4 WIT packages
 
 ```text
-finstack:ai-toolset@1.0.0
-finstack:ai-context@1.0.0
-finstack:ai-observer@1.0.0   # only if observer isolation is justified
+finstack:ai-toolset@0.0.4
+finstack:ai-context@0.0.4
 ```
+
+The plugin-alpha packages track the workspace `0.0.4` release and remain explicitly experimental 0.x interfaces. `@1.0.0` worlds are published only at the framework 1.0 gate after compatibility/security evidence. Observer isolation is outside the 1.0 baseline and requires a later ADR rather than a conditional package placeholder.
 
 # 13. Delivery phases
 
@@ -1162,7 +1163,7 @@ The MVP does not require SQLite, multi-lane execution, a WIT plugin host, remote
 
 # 18. Resolved foundational product decisions
 
-These directions are approved for planning. PR-004 records the corresponding short ADRs before Phase 1 implementation; later PRs implement the decisions without reopening them implicitly.
+These directions are the planning baseline. PR-004 records the corresponding accepted ADRs before Phase 1 implementation; later PRs implement the decisions without reopening them implicitly.
 
 | # | ADR | Decision | Delivery point |
 |---|---|---|---|

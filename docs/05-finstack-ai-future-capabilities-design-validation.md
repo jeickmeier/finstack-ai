@@ -1,7 +1,7 @@
 ---
 title: "finstack-ai Future Capabilities Design Validation"
-subtitle: "Subagents, delegation, memory, knowledge retrieval, context compaction, human workflows, and minimum-change microkernel recommendations"
-author: "Project Draft"
+subtitle: "Subagents, delegation, memory, knowledge retrieval, context compaction, human workflows, and validated microkernel composition"
+author: "finstack-ai project"
 date: "2026-08-08"
 ---
 
@@ -47,23 +47,15 @@ Executive design verdict
 
 16. Reference bundles
 
-17. Minimum core changes recommended
+17. Conformance and future-proofing tests
 
-18. Proposed type and record changes
+18. Risks and architectural anti-patterns
 
-19. Implementation-plan impact
-
-20. Conformance and future-proofing tests
-
-21. Risks and architectural anti-patterns
-
-22. Final decision and acceptance checklist
+19. Final decision and acceptance checklist
 
 Appendix A. Feature-to-primitive traceability
 
-Appendix B. Example bundle specifications
-
-Appendix C. Glossary
+Appendix B. Glossary
 
 ```{=openxml}
 <w:p><w:r><w:br w:type="page"/></w:r></w:p>
@@ -75,25 +67,24 @@ Appendix C. Glossary
 |---|---|
 | Product | finstack-ai |
 | Document | Future Capabilities Design Validation |
-| Version | 0.3 |
-| Status | Validated; P0 recommendations incorporated into the authoritative baseline |
+| Version | 0.4 |
+| Status | Validated supporting design; incorporated into the authoritative baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, framework architects, implementation teams, extension authors, and AI coding agents |
-| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Architecture Specification v0.5; Technical Design v0.5; Implementation Plan v0.5; Security and Threat Model v0.2 |
+| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Implementation Plan v0.6; Security and Threat Model v0.3 |
 
-This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; the Engineering Standards v0.2, related v0.5 PRD/Architecture/Technical Design, accepted ADRs, Security and Threat Model v0.2, and Implementation Plan v0.5 are authoritative for the incorporated requirements, controls, and delivery sequence.
+This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; Engineering Standards v0.3, the v0.6 PRD/Architecture/Technical Design, accepted ADRs, Security and Threat Model v0.3, and Implementation Plan v0.6 are authoritative for the incorporated requirements, controls, and delivery sequence.
 
 # Executive design verdict
 
 The current **agent microkernel** direction is the correct foundation for the future capabilities examined in this document. The six existing ports—`Model`, `Toolset`, `ContextProvider`, `Middleware`, `JournalStore`, and `Observer`—are sufficient. None of the capabilities reviewed requires a seventh primary extension port, a generic workflow graph inside the kernel, or feature-specific kernel concepts for memory, retrieval, channels, code execution, or multi-agent products.
 
-The primary baseline incorporates three small semantic refinements before the journal and public contracts freeze:
+The primary baseline contains four cross-cutting semantic decisions:
 
 1. **General deferred-effect semantics.** Any model, tool, interaction, or externally hosted operation must be able to return a durable external handle, suspend the run, and later complete the same `EffectId` without inventing a feature-specific record path.
-2. **Run lineage.** A run should carry optional parent/root relationship metadata so subagents and delegated agent work can propagate cancellation, deadlines, budget attribution, audit identity, and recovery correlation.
-3. **Generalized interactions.** The proposed approval primitive should become an `Interaction` primitive. Approval remains a standard interaction profile, while the same mechanism supports forms, questions, choices, reviews, corrections, and externally assigned human tasks.
-
-A fourth incorporated change is primarily a contract clarification rather than new machinery: the final behavior-changing middleware stage is **`before_finalize`**, making it explicit that verification and policy middleware may prevent terminal completion before the terminal record is committed.
+2. **Run lineage.** Every run carries explicit root/parent/effect relationship metadata so subagents and delegated work propagate cancellation, deadlines, budget attribution, audit identity, and recovery correlation.
+3. **Generalized interactions.** `Interaction` is the durable primitive. Approval remains a standard profile, while the same mechanism supports forms, questions, choices, reviews, corrections, and externally assigned human tasks.
+4. **Pre-terminal verification.** The final behavior-changing middleware stage is **`before_finalize`**, so verification and policy middleware can prevent terminal completion before the terminal record is committed.
 
 Everything else belongs above or outside the kernel:
 
@@ -120,7 +111,7 @@ The result is a design that remains concise while accommodating broad future pro
 
 ## 1.1 Purpose
 
-This document stress-tests the proposed finstack-ai architecture against capabilities likely to be required after the initial release. It answers four questions for each capability:
+This document records the stress test of the finstack-ai baseline against capabilities likely to be required after the initial release. It answers four questions for each capability:
 
 1. Can it be implemented using the current kernel and six extension ports?
 2. Which pieces should be capabilities, extensions, runtime services, applications, or isolated plugins?
@@ -236,7 +227,7 @@ The reviewed capabilities repeatedly use the same small set of patterns. Standar
 
 ## 3.1 Capability, extension, bundle, and agent
 
-These terms should remain distinct.
+These terms remain distinct.
 
 | Term | Meaning |
 |---|---|
@@ -252,19 +243,7 @@ A memory system is usually an extension plus one or more capabilities. A researc
 
 Subagents and multi-agent teams require one agent to invoke another without making agent invocation a seventh extension port.
 
-The recommended runtime service is:
-
-```rust
-pub trait AgentInvoker: Send + Sync {
-    fn start_child(
-        &self,
-        ctx: ChildRunContext,
-        request: ChildRunRequest,
-    ) -> BoxFuture<'static, Result<ChildRunHandle, AgentInvokeError>>;
-}
-```
-
-`AgentInvoker` is a host/runtime service, not an implementation family. It starts the same kernel run machine with another `ResolvedAgent` and a durable run relationship. A built-in `AgentToolset` can expose selected agents to a parent model as ordinary tools.
+`AgentInvoker` is the host/runtime service defined by Technical Design section 9.4, not an implementation family or seventh port. It starts or attaches to the same kernel run machine with another `ResolvedAgent`, a complete durable child locator, and an idempotent parent-effect mapping. A built-in `AgentToolset` can expose selected agents to a parent model as ordinary tools.
 
 ## 3.3 Deferred external completion
 
@@ -277,7 +256,7 @@ Several future features cannot complete during the original process lifetime:
 - a long-running sandbox job; or
 - a delegated agent hosted elsewhere.
 
-These should share one effect lifecycle:
+These share one effect lifecycle:
 
 ```text
 EffectRequested
@@ -299,7 +278,7 @@ The same `EffectId` remains authoritative from request through completion. Featu
 
 ## 3.4 Human and external interactions
 
-A yes/no approval is only one form of external input. The durable primitive should support:
+A yes/no approval is only one form of external input. The durable interaction primitive supports:
 
 - approve or deny;
 - choose one or more options;
@@ -310,29 +289,15 @@ A yes/no approval is only one form of external input. The durable primitive shou
 - acknowledge a warning; and
 - assign or delegate a task.
 
-The kernel should own pending/resolved/cancelled/expired state. Presentation, identity resolution, notifications, escalation, and inboxes remain outside.
+The kernel owns pending/resolved/cancelled/expired state. Presentation, identity resolution, notifications, escalation, and inboxes remain outside.
 
 ## 3.5 Artifacts, sources, and provenance
 
-Memory, RAG, delegation, sandboxing, and multi-agent work all produce large or attributable results. The existing `BlobRef` mechanism should be paired with a reusable non-kernel `ArtifactRef` metadata shape:
-
-```text
-ArtifactRef
-  blob_ref
-  logical type
-  title/name
-  producer run/effect/tool
-  source/provenance references
-  content digest
-  access classification
-  optional version and parent artifact
-```
-
-The kernel continues to persist references, not large payloads. Artifact stores remain runtime/application services.
+Memory, RAG, delegation, sandboxing, and multi-agent work all produce large or attributable results. Technical Design sections 7.2 and 9.4 define the scoped, digest-bearing `ArtifactRef`/`ArtifactStore` boundary and write-before-reference recovery rules. The kernel continues to persist references, not large payloads; artifact stores remain runtime/application services.
 
 ## 3.6 Identity, cancellation, deadlines, and budgets
 
-Every nested or externally completed operation should receive an explicit invocation context:
+Every nested or externally completed operation receives an explicit invocation context:
 
 - root, parent, and current run IDs;
 - parent effect ID when applicable;
@@ -345,7 +310,7 @@ Every nested or externally completed operation should receive an explicit invoca
 
 Cancellation propagates down the run relationship by default. Detached work must be explicitly requested and audited.
 
-Budget aggregation should initially be a runtime service. The kernel continues to enforce per-run limits and records usage. A `BudgetScopeId` allows a parent and child runs to be aggregated without placing pricing or shared-ledger policy in the kernel.
+Budget aggregation is a runtime service with idempotent reserve/reconcile/charge/release operations. The kernel continues to enforce per-run limits and record usage. A `BudgetScopeId` aggregates parent/child runs without placing pricing or shared-ledger policy in the kernel.
 
 ## 3.7 Context compaction is middleware policy
 
@@ -359,7 +324,7 @@ It does not belong elsewhere:
 - an `Observer` cannot change execution; and
 - a `JournalStore` persists truth and may optimize storage, but storage compaction is distinct from model-context compaction.
 
-Recommended flow:
+Accepted flow:
 
 ```text
 immutable conversation tree + active run context
@@ -380,7 +345,7 @@ A resolved agent has at most one middleware component declaring the context-comp
 
 Canonical conversation entries remain immutable and fully inspectable. Compaction creates only a derived model-visible projection. A recorded middleware outcome identifies the component and strategy version, configuration/model-profile/source/protected-set/projection digests, covered/retained entries, token estimates, summary digest, and prompt-cache impact. An optional incremental checkpoint is a disposable derived cache: later turns may reuse it only when component, strategy, configuration, model-context profile, covered history, and sensitivity policy still match; otherwise middleware rebuilds it from canonical history.
 
-Model-assisted summarization executes within a committed middleware effect, inherits cancellation/deadline/principal/budget context, and records usage. It cannot recursively invoke the same compaction chain. The baseline should include deterministic sliding-window and large-tool-output strategies; summarizing, semantic, hierarchical, or domain-specific strategies remain replaceable middleware batteries.
+Model-assisted summarization is a separately committed/reconciled Model subeffect linked to the middleware effect, inherits cancellation/deadline/principal/budget context, and records usage before resuming the middleware cursor. It cannot recursively invoke the same compaction chain. The baseline includes deterministic sliding-window and large-tool-output strategies; summarizing, semantic, hierarchical, or domain-specific strategies remain replaceable middleware batteries.
 
 Three uses of “compaction” must stay distinct:
 
@@ -390,23 +355,23 @@ Three uses of “compaction” must stay distinct:
 | Journal/storage compaction or pruning | Store/runtime maintenance plus application retention policy | Must preserve required recovery/audit meaning; never substitutes for context policy. |
 | Event/progress coalescing | Runtime/binding transport | Reduces transient delivery volume without changing durable semantics. |
 
-**Design verdict:** supported by the existing middleware port and `before_model` stage. Clarify the normalized outcome/checkpoint contract; add no new port, kernel phase, or eighth middleware stage.
+**Design verdict:** supported by the existing middleware port and `before_model` stage. The authoritative normalized outcome/checkpoint/subeffect contract adds no new port, kernel phase, or eighth middleware stage.
 
 # 4. Capability accommodation summary
 
-| Capability | Fit | Main building blocks | Smallest required change |
+| Capability | Fit | Main building blocks | Incorporated accommodation |
 |---|---|---|---|
-| Subagents | Strong | `AgentInvoker`, `AgentToolset`, lanes, child runs | Add run lineage metadata |
-| Delegated work | Strong after refinement | Toolset, deferred effect, interaction, external worker | General deferred-effect lifecycle |
+| Subagents | Strong | `AgentInvoker`, `AgentToolset`, lanes, child runs | Explicit run lineage metadata |
+| Delegated work | Strong; incorporated baseline | Toolset, deferred effect, interaction, external worker | General deferred-effect lifecycle |
 | Memory system | Strong | Context provider, toolset, middleware, observer, private store | None |
 | RAG / knowledge search | Strong | Context provider, search toolset, blob/provenance | None |
-| Workflow HITL | Strong after refinement | External workflow, interactions, timers, suspension | Generalize approval to interaction |
-| Background/long-running work | Strong after refinement | Server/scheduler, timers, deferred effects | General deferred-effect lifecycle |
-| Multi-agent teams | Strong | Child runs, lanes, runtime fan-out, artifacts | Run lineage metadata |
+| Workflow HITL | Strong; incorporated baseline | External workflow, interactions, timers, suspension | Generalized interactions |
+| Background/long-running work | Strong; incorporated baseline | Server/scheduler, timers, deferred effects | General deferred-effect lifecycle |
+| Multi-agent teams | Strong | Child runs, lanes, runtime fan-out, artifacts | Explicit run lineage metadata |
 | Sandboxed code/computer use | Strong | Toolset, WIT/process isolation, blobs, progress | None |
 | Multi-channel routing | Strong | Application adapters, session server, lanes, principals | None |
-| Guardrails/evaluations/verification | Strong with clarification | Middleware, observer, toolsets | Clarify `before_finalize` stage |
-| Cross-cutting context compaction | Strong with clarification | `before_model` middleware, model limits, recorded outcome/checkpoint | Clarify ownership and derived-checkpoint contract; no new stage |
+| Guardrails/evaluations/verification | Strong; incorporated baseline | Middleware, observer, toolsets | `before_finalize` stage |
+| Cross-cutting context compaction | Strong; incorporated baseline | `before_model` middleware, model limits, recorded outcome/checkpoint | Derived projection/checkpoint/subeffect contract; no new stage |
 
 The conclusion is deliberately conservative: no feature-specific port or generic workflow engine is needed in the kernel.
 
@@ -425,7 +390,7 @@ A subagent is a named agent definition invoked by another agent or application t
 
 A subagent may be synchronous, parallel, durable, remotely hosted, or detached. The first implementation should prioritize synchronous and parallel child runs, with durable parent-child correlation.
 
-## 5.2 Recommended composition
+## 5.2 Reference composition
 
 ```text
 Subagent capability bundle
@@ -441,7 +406,7 @@ Subagent capability bundle
     depth, cost, tool, tenant, or approval policy
 ```
 
-`AgentCatalog` and `AgentInvoker` belong in `finstack-ai-sdk`/`finstack-ai-runtime`. They are not kernel ports because they invoke the same framework rather than supply an external implementation of a kernel operation.
+`AgentCatalog` belongs in the `finstack-ai` SDK/facade and `AgentInvoker` in `finstack-ai-runtime`. They are not kernel ports because they invoke the same framework rather than supply an external implementation of a kernel operation.
 
 ## 5.3 Execution sequence
 
@@ -452,7 +417,7 @@ parent model emits delegate_to_researcher(task)
 parent tool effect committed with EffectId E
     |
     v
-AgentToolset derives child RunId from E and requests AgentInvoker
+runtime commits one complete UUIDv7 child locator for E and requests AgentInvoker
     |
     v
 child lane/session and RunAccepted committed with parent relation
@@ -467,7 +432,7 @@ child terminal result and usage returned to AgentToolset
 parent tool completion committed and parent continues
 ```
 
-The deterministic child ID prevents duplicate child runs if the parent tool invocation is retried after a crash.
+The durable unique `(parent_run_id, parent_effect_id)` mapping and exact request digest prevent duplicate child runs. Retries reuse the mapped locator; no `RunId` is derived from an effect.
 
 ## 5.4 Session and lane choices
 
@@ -479,11 +444,11 @@ Three placement modes are useful:
 | New child session | Strong isolation, different agent/tool/store policies | Context must be passed by reference or copied intentionally |
 | Remote child session | Independent service or tenant boundary | Requires remote protocol and deferred completion |
 
-The default should be a new lane anchored to the parent lane leaf when the store and agent policies are compatible. A new session is safer when tool permissions, tenancy, retention, or storage differ.
+The default is a new lane anchored to the parent lane leaf only when tenant, store, retention, permission, and agent policies are compatible. Otherwise resolution selects a new child session; remote placement persists its service/opaque route.
 
 ## 5.5 Durability and recovery
 
-The parent tool effect and child run must not become two unrelated journals. The child `RunAccepted` record should include:
+The parent tool effect and child run do not become unrelated journals. The prepared mapping and child `RunAccepted` include:
 
 - `root_run_id`;
 - `parent_run_id`;
@@ -497,12 +462,12 @@ On recovery:
 
 1. If the child completed, return its existing terminal result.
 2. If the child is active or suspended, reconnect or resume it.
-3. If the child was never accepted, create it using the deterministic derived ID.
+3. If the child was never accepted, accept the complete previously prepared locator and UUIDv7 IDs.
 4. If the child has an uncertain non-repeatable state, propagate suspension to the parent.
 
 ## 5.6 Cancellation, limits, and recursion
 
-The runtime should enforce:
+The runtime enforces:
 
 - maximum child depth;
 - maximum total child runs per root run;
@@ -524,7 +489,7 @@ Browser WASM can support child runs in a worker-backed runtime. Child models/too
 
 ## 5.8 Design verdict
 
-**Supported with a runtime/SDK addition and one small kernel refinement.** Add run lineage metadata. Do not add a `Subagent` port or a separate subagent state machine.
+**Supported by the incorporated runtime/SDK services and run-lineage records.** There is no `Subagent` port or separate subagent state machine.
 
 # 6. Delegated work
 
@@ -573,7 +538,7 @@ A delegation toolset may expose:
 - `list_delegated_tasks`; and
 - `collect_task_result`.
 
-Two interaction styles should be supported.
+Two interaction styles are supported.
 
 ### Handle-returning delegation
 
@@ -585,17 +550,7 @@ Two interaction styles should be supported.
 
 ## 6.4 External completion
 
-The runtime should expose an authenticated API similar to:
-
-```rust
-pub async fn complete_external_effect(
-    effect_id: EffectId,
-    completion: ExternalEffectCompletion,
-    principal: Principal,
-) -> Result<CompletionReceipt>;
-```
-
-The runtime validates:
+The authenticated external-completion router uses the Technical Design `OperationLocator`, `AuthorizationEvidence`, and `ExternalEffectCompletionCommand`; it never scans journals by an `EffectId` alone. The runtime validates:
 
 - effect remains outstanding;
 - completion principal is authorized;
@@ -628,15 +583,15 @@ The kernel needs only a normalized final/deferred/uncertain status. The extensio
 
 ## 6.7 Design verdict
 
-**Supported after adding a general deferred-effect lifecycle.** Do not add delegation-specific journal records or a `Delegation` port.
+**Supported by the incorporated general deferred-effect lifecycle.** There are no delegation-specific journal records or `Delegation` port.
 
 # 7. Memory system
 
 ## 7.1 Memory taxonomy
 
-“Memory” should not be represented as one framework object. Different forms have different consistency and security needs.
+“Memory” is not represented as one framework object. Different forms have different consistency and security needs.
 
-| Memory type | Meaning | Recommended implementation |
+| Memory type | Meaning | Design placement |
 |---|---|---|
 | Working memory | Current run state and recent context | Kernel run/session state |
 | Conversation memory | Durable transcript and branches | Conversation tree and `JournalStore` |
@@ -647,7 +602,7 @@ The kernel needs only a normalized final/deferred/uncertain status. The extensio
 
 The authoritative journal must not silently become the long-term semantic memory database. Journal stores preserve framework truth; memory extensions preserve derived or application-owned knowledge.
 
-## 7.2 Recommended memory extension
+## 7.2 Reference memory composition
 
 ```text
 MemoryExtension
@@ -855,7 +810,7 @@ RunSuspended(awaiting interaction)
         +---- UI/inbox/channel/workflow routes request
         |
         v
-InteractionResolved / Rejected / Expired / Cancelled
+InteractionResolved (including approve/deny) / Expired / Cancelled
         |
         v
 validated response becomes normalized kernel input
@@ -900,7 +855,7 @@ Assignment, reminders, delegation, queues, comments, and service-level objective
 
 ## 9.7 Design verdict
 
-**Supported with one small kernel refinement.** Generalize approval to interaction. Keep workflow graphs, inboxes, notifications, and business state outside the kernel.
+**Supported by the incorporated interaction lifecycle.** Approval is one interaction profile; workflow graphs, inboxes, notifications, and business state remain outside the kernel.
 
 # 10. Scheduled, background, and long-running work
 
@@ -956,7 +911,7 @@ Recurring runs should normally use new run IDs and explicit shared memory or art
 
 ## 10.6 Design verdict
 
-**Supported after general deferred-effect semantics.** Scheduling and recurrence remain server/application responsibilities. Do not add cron or a job scheduler to the kernel.
+**Supported by the incorporated deferred-effect semantics.** Scheduling and recurrence remain server/application responsibilities. Cron and job scheduling stay outside the kernel.
 
 # 11. Multi-agent teams and fan-out/fan-in
 
@@ -1120,9 +1075,9 @@ The lane model already supports independent threads sharing an agent and, where 
 
 Channel delivery retries should be deduplicated at the server/adapter boundary using the external message ID. The run API may accept an optional idempotency key, but channel protocol details should not enter the kernel.
 
-## 13.4 Principal and authorization
+## 13.4 Principal reference and authorization
 
-The normalized `Principal` flows into run, tool, context, and interaction calls. Toolsets and retrieval providers enforce the granted tenant/user scope. Human interactions can be routed back to the originating channel or to a separate approval inbox.
+The normalized `PrincipalRef` and `AuthorizationEvidence` flow through the runtime call context for run, tool, context, and interaction operations. Toolsets and retrieval providers enforce the granted tenant/user scope. Human interactions can be routed back to the originating channel or to a separate approval inbox.
 
 ## 13.5 Delivery semantics
 
@@ -1176,7 +1131,7 @@ Examples include:
 - require fresh data before finalizing a financial report; and
 - require structured validation of an artifact.
 
-The final behavior-changing stage must occur before the terminal record. Recommended semantics:
+The final behavior-changing stage occurs before the terminal record. Baseline semantics:
 
 ```text
 candidate final result
@@ -1196,7 +1151,7 @@ Observers can capture traces and artifacts for offline evaluation. Test/evaluati
 
 ## 14.5 Design verdict
 
-**Supported with a contract clarification.** Define a pre-terminal `before_finalize` stage. No evaluation or guardrail port is needed.
+**Supported by the incorporated `before_finalize` contract.** No evaluation or guardrail port is needed.
 
 # 15. Capability and bundle composition model
 
@@ -1212,26 +1167,11 @@ Observers can capture traces and artifacts for offline evaluation. Test/evaluati
 - optional server/channel components; and
 - compatibility constraints.
 
-That unit should be a non-kernel `BundleSpec`.
+That unit is the non-kernel `BundleSpec`.
 
-## 15.2 Proposed `BundleSpec`
+## 15.2 Baseline `BundleSpec`
 
-```rust
-pub struct BundleSpec {
-    pub schema_version: u16,
-    pub id: BundleId,
-    pub version: Version,
-    pub agents: Vec<AgentSpec>,
-    pub capabilities: Vec<CapabilitySpec>,
-    pub required_components: Vec<ComponentRequirement>,
-    pub optional_components: Vec<ComponentRequirement>,
-    pub defaults: BundleDefaults,
-    pub config_schema: Option<SchemaRef>,
-    pub compatibility: CompatibilityRequirements,
-}
-```
-
-The bundle references implementations; it does not contain native handles or execute code.
+Technical Design section 8.3 owns the canonical `BundleSpec`, finite `BundleRequirement` and `BundleConflict` model, and `ResolvedAgentLock`. This supporting document does not duplicate those wire shapes. A bundle references serializable agent/capability definitions and implementation requirements; it contains no native handles and executes no code.
 
 ## 15.3 Dependency types
 
@@ -1249,7 +1189,7 @@ Do not build a general-purpose package solver into the runtime. Package installa
 
 ## 15.4 Configuration layering
 
-Recommended precedence:
+Configuration precedence is fixed:
 
 ```text
 component defaults
@@ -1429,293 +1369,9 @@ Capabilities
 
 Channels map identities to lanes. Memory and knowledge providers receive the normalized principal. Escalations either create interactions or delegated work items.
 
-# 17. Minimum core changes recommended
+# 17. Conformance and future-proofing tests
 
-## 17.1 KC-01: General deferred-effect lifecycle
-
-**Priority:** Required before journal v1 freezes.
-
-### Problem
-
-The PRD expects suspension on external tool completion and deferred model responses, but the technical record/type sketches do not yet define a first-class deferred outcome for every effect.
-
-### Change
-
-Add a generic deferred record/state and external completion input. The same mechanism applies to model, tool, interaction, and extension-hosted effects.
-
-```text
-EffectRequested
-EffectDeferred
-EffectCompleted | EffectFailed | EffectCancelled
-```
-
-`EffectDeferred` contains an opaque external handle reference, optional next-poll time, expiry, reconciliation strategy, and output-schema digest. Secret resume credentials are stored by the host, not in public journal payloads.
-
-### Why it belongs in the kernel
-
-Suspension, duplicate completion, cancellation, event ordering, and recovery must be identical across all bindings and effect implementations.
-
-### What it avoids
-
-- delegation-specific records;
-- provider-specific suspended states;
-- workflow-specific callbacks;
-- sandbox-job special cases; and
-- ad hoc long-poll loops.
-
-## 17.2 KC-02: Run lineage metadata
-
-**Priority:** Recommended before session/lane journal contracts freeze.
-
-### Problem
-
-Lanes can represent subagents, but run records do not explicitly relate parent and child runs.
-
-### Change
-
-Add optional `RunRelation` to `RunAccepted` and public run metadata.
-
-```text
-root_run_id
-parent_run_id
-parent_effect_id
-relation kind
-nesting depth
-optional budget scope
-optional delegation/work-item reference
-```
-
-### Why it belongs in the kernel
-
-Lineage affects audit correlation, cancellation trees, durable recovery, and interpretation of nested usage. It must survive process boundaries and bindings.
-
-### What remains outside
-
-Agent selection, fan-out policy, child result aggregation, and shared budget enforcement remain runtime/SDK concerns.
-
-## 17.3 KC-03: Generalize approval to interaction
-
-**Priority:** Recommended before PR-044 is implemented.
-
-### Problem
-
-A yes/no approval primitive cannot cleanly represent typed questions, review/edit cycles, selection, clarification, or externally assigned human tasks.
-
-### Change
-
-Replace approval-specific durable records/effect kind with a general `Interaction` request/resolution. Provide `ApprovalInteraction` as a built-in schema/profile.
-
-### Why it belongs in the kernel
-
-Pending external input, expiry, cancellation, authorization, duplicate resolution, and resumption are universal state-machine semantics.
-
-### What remains outside
-
-UI rendering, inboxes, assignee lookup, notifications, reminders, delegation, and escalation remain application services.
-
-## 17.4 KC-04: Clarify the final middleware stage
-
-**Priority:** Required contract clarification; minimal or no data-model change.
-
-### Problem
-
-`after_run` may imply that terminal state has already committed, which would prevent verification or policy from requesting another turn.
-
-### Change
-
-Use `before_finalize` for behavior-changing terminal review. Post-terminal side effects are observer responsibilities.
-
-```text
-candidate result -> before_finalize -> terminal record
-```
-
-### Why it matters
-
-Verification loops, human review before acceptance, structured policy checks, and evidence requirements all depend on a clear pre-terminal boundary.
-
-## 17.5 No additional primary port
-
-The review explicitly rejects adding:
-
-- `Subagent`;
-- `Memory`;
-- `RAG`;
-- `Workflow`;
-- `Human`;
-- `Scheduler`;
-- `Channel`;
-- `Guardrail`; or
-- `Sandbox`
-
-as primary kernel ports.
-
-Each can be composed from current ports plus runtime/application services.
-
-# 18. Proposed type and record changes
-
-## 18.1 Run relation
-
-```rust
-pub struct RunRelation {
-    pub root_run_id: RunId,
-    pub parent_run_id: Option<RunId>,
-    pub parent_effect_id: Option<EffectId>,
-    pub kind: RunRelationKind,
-    pub depth: u16,
-    pub budget_scope_id: Option<BudgetScopeId>,
-    pub external_work_ref: Option<Arc<str>>,
-}
-
-pub enum RunRelationKind {
-    Root,
-    ChildAgent,
-    DelegatedAgent,
-    WorkflowStep,
-}
-```
-
-`RunAccepted` stores the relation. `Root` is explicit to simplify trace processing.
-
-## 18.2 Deferred effect
-
-```rust
-pub struct EffectDeferred {
-    pub effect_id: EffectId,
-    pub handle: ExternalHandleRef,
-    pub reconciliation: ReconciliationPolicy,
-    pub next_poll_at: Option<Timestamp>,
-    pub expires_at: Option<Timestamp>,
-    pub expected_output_schema: Option<Digest>,
-}
-
-pub enum ReconciliationPolicy {
-    CallbackOnly,
-    Poll,
-    CallbackOrPoll,
-    ExternalWorkflow,
-}
-```
-
-The public handle may contain a provider/job identifier but never a bearer secret. Host-private credentials are keyed by `EffectId`.
-
-External completion enters through a runtime command:
-
-```rust
-pub struct ExternalEffectCompletion {
-    pub effect_id: EffectId,
-    pub completion_id: Arc<str>,
-    pub output: RawJson,
-    pub usage: Option<Usage>,
-    pub artifacts: Arc<[ArtifactRef]>,
-}
-```
-
-Duplicate `completion_id` or identical output digest is idempotent. A conflicting duplicate is an audit error.
-
-## 18.3 Interaction
-
-```rust
-pub struct InteractionRequest {
-    pub interaction_id: InteractionId,
-    pub kind: InteractionKind,
-    pub prompt: Arc<[ContentBlock]>,
-    pub response_schema: RawJson,
-    pub assignee_hint: Option<AssigneeHint>,
-    pub expires_at: Option<Timestamp>,
-    pub delegatable: bool,
-    pub metadata: RawJson,
-}
-
-pub enum InteractionKind {
-    Approval,
-    Choice,
-    Form,
-    FreeText,
-    Review,
-    Custom(Arc<str>),
-}
-
-pub struct InteractionResolution {
-    pub interaction_id: InteractionId,
-    pub status: InteractionResolutionStatus,
-    pub principal: PrincipalRef,
-    pub response: Option<RawJson>,
-    pub comment: Option<Arc<str>>,
-}
-```
-
-The runtime validates the response against the recorded schema before committing resolution.
-
-## 18.4 Record changes
-
-Recommended `RecordBody` updates:
-
-```text
-EffectDeferred
-InteractionRequested
-InteractionResolved
-InteractionExpired
-InteractionCancelled
-```
-
-Approval-specific public records become compatibility aliases or pre-1.0 replacements. `RunSuspended` retains a normalized reason referencing the outstanding effect or interaction.
-
-## 18.5 Runtime additions outside the kernel
-
-```text
-AgentCatalog
-AgentInvoker
-ExternalCompletionRouter
-InteractionRouter
-BudgetLedger
-ArtifactStore service
-BundleResolver
-```
-
-These are reusable services, not kernel ports.
-
-# 19. Implementation-plan impact
-
-The v0.5 66-PR implementation plan remains valid and incorporates the following amendments. This table is retained as a verification map between the validation findings and the authoritative delivery sequence.
-
-| Existing PR | Recommended amendment |
-|---|---|
-| PR-008 | Include `EffectDeferred`, generalized interaction records, run lineage fields, and fixtures |
-| PR-009/010 | Ensure reducer can enter and leave `AwaitingExternal` without feature-specific branches |
-| PR-011 | Include cancellation/deadline behavior for deferred effects and interactions |
-| PR-014 | Add runtime command routing for external completion and deterministic duplicate handling |
-| PR-018 | Define `before_finalize` and the normalized `before_model` compaction outcome/checkpoint contract |
-| PR-021/022 | Add `AgentCatalog`, `AgentInvoker` service wiring, and non-kernel `BundleSpec` |
-| PR-023 | Add conformance helpers for child runs, deferred completion, interaction schemas, and compaction projections |
-| PR-030/034 | Bind external completion, child-run handles, and interaction APIs coarsely |
-| PR-039 | Freeze the generalized records rather than approval-only records |
-| PR-042 | Use generic deferred-effect reconciliation for background model responses |
-| PR-043 | Use the same mechanism for external/long-running tool completion |
-| PR-044 | Rename and implement durable interactions; ship approval as the first profile |
-| PR-046/047 | Persist and expose run lineage; add child-run/lane stress tests |
-| PR-049/050 | Keep WIT v1 limited to toolset/context; do not expose full agent invocation initially |
-| PR-056 | Implement deterministic window/tool-output and model-assisted compaction middleware plus reference memory/RAG and verification patterns |
-| PR-057 | Expose compaction trigger, before/after budget, strategy, failure, checkpoint, and prompt-cache-impact diagnostics without logging compacted content by default |
-| PR-059 | Map workflow waits and callbacks to interactions/deferred effects rather than custom semantics |
-
-## 19.1 Suggested post-preview battery sequence
-
-After the core public preview, implement higher-level batteries in this order:
-
-1. `finstack-ai-memory` reference capability with in-memory/SQLite test store.
-2. `finstack-ai-knowledge` retrieval interfaces and one reference search/index adapter.
-3. `finstack-ai-agents` with `AgentCatalog`, `AgentToolset`, child-run policies, and fan-out helpers.
-4. `finstack-ai-interactions` UI-neutral request router plus CLI/web examples.
-5. `finstack-ai-workflow` examples/adapters for one durable workflow system.
-6. `finstack-ai-sandbox` reference process or WASI code-execution toolset.
-7. Channel/server examples mapping external thread identities to lanes.
-8. `finstack-ai-evals` trace fixtures, offline scorers, and verification middleware examples.
-
-These packages prove the architecture without broadening the kernel.
-
-# 20. Conformance and future-proofing tests
-
-## 20.1 Cross-binding semantic fixtures
+## 17.1 Cross-binding semantic fixtures
 
 Rust, Python, and browser WASM should produce equivalent durable records and public events for:
 
@@ -1734,7 +1390,7 @@ Rust, Python, and browser WASM should produce equivalent durable records and pub
 13. long-running sandbox job using callback or polling reconciliation; and
 14. `before_model` compaction producing the same protected, valid model-visible projection while canonical history remains unchanged.
 
-## 20.2 Crash-prefix tests
+## 17.2 Crash-prefix tests
 
 Crash tests should be generated before and after:
 
@@ -1751,11 +1407,11 @@ Crash tests should be generated before and after:
 
 Every prefix must restore to completed, retryable, suspended, cancelled, failed, or explicit uncertain state.
 
-## 20.3 Property tests
+## 17.3 Property tests
 
 Useful properties include:
 
-- one child `RunId` per parent `EffectId` under deterministic invocation;
+- one complete child locator per `(parent_run_id, parent_effect_id)` mapping, with equal retries reusing the prepared UUIDv7 identifiers and conflicting request digests failing closed;
 - no outstanding tool call receives more than one conflicting result;
 - a deferred effect cannot complete after terminal cancellation unless policy explicitly accepts late results;
 - an interaction resolution must match its recorded schema;
@@ -1767,7 +1423,7 @@ Useful properties include:
 - a compaction checkpoint is reusable only for the same strategy/configuration and covered-history digest; and
 - compaction changes no canonical conversation entry or parent link.
 
-## 20.4 Performance tests
+## 17.4 Performance tests
 
 Measure:
 
@@ -1782,59 +1438,59 @@ Measure:
 
 The benchmark should isolate framework overhead from network/model latency.
 
-# 21. Risks and architectural anti-patterns
+# 18. Risks and architectural anti-patterns
 
-## 21.1 Turning the kernel into a workflow engine
+## 18.1 Turning the kernel into a workflow engine
 
 Adding generic nodes, edges, conditions, compensation, scheduling, or business variables to the kernel would expand its responsibility beyond one agent run. Keep workflows above the run API.
 
-## 21.2 Treating every feature as a new port
+## 18.2 Treating every feature as a new port
 
 Ports are stable implementation families, not feature labels. Memory, RAG, channels, and subagents compose existing ports.
 
-## 21.3 Hiding nested runs inside opaque tools
+## 18.3 Hiding nested runs inside opaque tools
 
 A tool may invoke a child agent, but durable implementations must record explicit run lineage. Otherwise cancellation, usage, audit, and recovery become unreliable.
 
-## 21.4 Allowing arbitrary middleware mutation
+## 18.4 Allowing arbitrary middleware mutation
 
 Capabilities should return normalized outcomes. They must not mutate session/kernel state directly or retain mutable references across awaits.
 
-## 21.5 Synchronous re-entrant lane execution
+## 18.5 Synchronous re-entrant lane execution
 
 A parent tool must not synchronously acquire a child operation on the same busy lane. Child runs use a new lane/session and are scheduled by `AgentInvoker` to avoid deadlocks.
 
-## 21.6 Copying full child transcripts into parent context
+## 18.6 Copying full child transcripts into parent context
 
 Return summaries, structured outputs, and artifacts. Full transcripts remain inspectable but opt-in.
 
-## 21.7 Using observers for required side effects
+## 18.7 Using observers for required side effects
 
 Memory writes, audit-required approvals, and business actions that must affect correctness cannot rely solely on best-effort observers. Use tools, middleware effects, or external workflows with stable IDs.
 
-## 21.8 Making WIT the native hot path
+## 18.8 Making WIT the native hot path
 
 Trusted native extensions use direct Rust traits. WIT/process boundaries are for isolation and independent distribution.
 
-## 21.9 Storing external secrets in journal handles
+## 18.9 Storing external secrets in journal handles
 
 Journal records contain opaque identifiers and non-secret reconciliation metadata. Credentials remain in host secret stores.
 
-## 21.10 Feature bundles that hide incompatible policies
+## 18.10 Feature bundles that hide incompatible policies
 
 Bundle resolution must surface conflicts in tool permissions, memory scope, middleware order, store ownership, and interaction routing before agent construction.
 
-## 21.11 Treating compaction as history mutation or provider behavior
+## 18.11 Treating compaction as history mutation or provider behavior
 
 Compaction must not rewrite canonical conversation entries, hide policy-required content, or occur silently inside a model adapter. Model-visible compaction is explicit `before_model` middleware with protected-item rules, recorded evidence, replay behavior, and a safe failure path. Journal pruning and event coalescing remain separate concerns.
 
-# 22. Final decision and acceptance checklist
+# 19. Final decision and acceptance checklist
 
-## 22.1 Final decision
+## 19.1 Final decision
 
-The current microkernel architecture is fit for the future capability set reviewed here. The framework should proceed without adding new primary ports or a general workflow graph.
+The current microkernel architecture is fit for the future capability set reviewed here. The baseline proceeds without new primary ports or a general workflow graph.
 
-The authoritative v0.5 baseline specifies, and the implementation plan schedules before public journal/API contracts freeze:
+The authoritative baseline specifies, and the implementation plan schedules before public journal/API contracts freeze:
 
 - generic deferred effects;
 - run lineage;
@@ -1843,9 +1499,9 @@ The authoritative v0.5 baseline specifies, and the implementation plan schedules
 
 Context compaction is explicitly assigned to the existing `before_model` middleware stage. Its output/checkpoint is derived and versioned, canonical history remains immutable, and no new port or middleware stage is required.
 
-Add `AgentCatalog`, `AgentInvoker`, `BundleSpec`, interaction routing, external completion routing, budget aggregation, and artifact services in the SDK/runtime/application layers.
+The SDK/runtime/application layers own `AgentCatalog`, `AgentInvoker`, `BundleSpec`, interaction routing, external completion routing, budget aggregation, and artifact services.
 
-## 22.2 Architecture acceptance checklist
+## 19.2 Architecture acceptance checklist
 
 The design is ready for these future capabilities when all answers below are yes.
 
@@ -1867,103 +1523,25 @@ The design is ready for these future capabilities when all answers below are yes
 
 | Feature | Kernel primitives | Ports | Runtime/application services |
 |---|---|---|---|
-| Subagents | Runs, effects, lanes, lineage, events | Model, Toolset, Store, Observer | AgentCatalog, AgentInvoker, budget ledger |
-| Delegation | Effects, deferral, suspension, interactions | Toolset, Middleware, Store | Work-item service, completion router |
+| Subagents | Runs, effects, lanes, lineage, events | Model, Toolset, JournalStore, Observer | AgentCatalog, AgentInvoker, budget ledger |
+| Delegation | Effects, deferral, suspension, interactions | Toolset, Middleware, JournalStore | Work-item service, completion router |
 | Memory | Sessions/messages, capability activation | ContextProvider, Toolset, Middleware, Observer | Memory store/index |
 | RAG | Context budgets, blobs, events | ContextProvider, Toolset | Ingestion/indexing service |
-| HITL workflow | Interactions, timers, suspension, journal | Middleware, Toolset, Store | Workflow engine, inbox/router |
-| Background work | Runs, timers, deferral, cancellation | Model, Toolset, Store | Scheduler/server/workers |
+| HITL workflow | Interactions, timers, suspension, journal | Middleware, Toolset, JournalStore | Workflow engine, inbox/router |
+| Background work | Runs, timers, deferral, cancellation | Model, Toolset, JournalStore | Scheduler/server/workers |
 | Multi-agent teams | Runs, lanes, lineage, effects | Model, Toolset, Observer | Fan-out coordinator, AgentInvoker |
 | Sandbox/computer use | Tool effects, blobs, progress, cancellation | Toolset | Process/WASI/remote sandbox host |
 | Multi-channel | Sessions, lanes, principals, events | Context/tool/middleware as needed | Channel adapters, session server |
 | Guardrails/evals | Events, middleware checkpoints, terminal transition | Middleware, Observer, Toolset | Eval runners, policy/config services |
 | Context compaction | Immutable history, recorded middleware outcome | Middleware (`before_model`) | Token estimator, optional summary model, derived checkpoint/artifact cache |
 
-# Appendix B. Example bundle specifications
-
-## B.1 Research bundle
-
-```json
-{
-  "schema_version": 1,
-  "id": "finstack.research",
-  "version": "0.1.0",
-  "agents": ["coordinator", "researcher", "verifier"],
-  "capabilities": [
-    "knowledge.auto_context",
-    "knowledge.search",
-    "memory.read",
-    "subagents.research",
-    "verification.citations"
-  ],
-  "required_components": [
-    "model.primary",
-    "model.research",
-    "context.knowledge",
-    "toolset.knowledge",
-    "toolset.agent_invocation",
-    "middleware.citation_verification",
-    "store.journal"
-  ]
-}
-```
-
-## B.2 Human-reviewed action bundle
-
-```json
-{
-  "schema_version": 1,
-  "id": "finstack.reviewed-action",
-  "version": "0.1.0",
-  "agents": ["operator"],
-  "capabilities": [
-    "enterprise.context",
-    "interaction.review",
-    "interaction.action_approval",
-    "audit.events"
-  ],
-  "required_components": [
-    "middleware.review",
-    "middleware.approval",
-    "toolset.enterprise_actions",
-    "observer.audit",
-    "store.journal"
-  ]
-}
-```
-
-## B.3 Coding bundle
-
-```json
-{
-  "schema_version": 1,
-  "id": "finstack.coding",
-  "version": "0.1.0",
-  "agents": ["coder", "reviewer"],
-  "capabilities": [
-    "repository.context",
-    "filesystem",
-    "sandbox.shell",
-    "subagents.review",
-    "verification.tests"
-  ],
-  "required_components": [
-    "context.repository",
-    "toolset.filesystem",
-    "toolset.sandbox",
-    "toolset.agent_invocation",
-    "middleware.test_verification"
-  ]
-}
-```
-
-# Appendix C. Glossary
+# Appendix B. Glossary
 
 **AgentCatalog:** Runtime/SDK registry of pre-resolved agents that may be invoked as children.
 
 **AgentInvoker:** Runtime service that starts and monitors child runs using the normal kernel.
 
-**Artifact:** Large or versioned work product referenced by metadata and a `BlobRef`.
+**Artifact:** Large or versioned work product represented by a scoped, digest-bearing `ArtifactRef` backed by a `BlobRef`.
 
 **Bundle:** Deployment/application composition of agents, capabilities, required components, and defaults.
 

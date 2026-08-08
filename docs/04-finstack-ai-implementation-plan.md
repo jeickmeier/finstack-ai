@@ -1,15 +1,16 @@
 ---
 title: "finstack-ai Implementation Plan"
 subtitle: "Build phases, pull request sequence, delivery gates, and release roadmap"
-version: "0.5"
-status: "Draft for implementation planning"
+author: "finstack-ai project"
+version: "0.6"
+status: "Implementation baseline"
 date: "2026-08-08"
 related-documents:
-  - finstack-ai-Engineering-Standards-v0.2
-  - finstack-ai-PRD-v0.5
-  - finstack-ai-Architecture-v0.5
-  - finstack-ai-Technical-Design-v0.5
-  - finstack-ai-Security-Threat-Model-v0.2
+  - finstack-ai-Engineering-Standards-v0.3
+  - finstack-ai-PRD-v0.6
+  - finstack-ai-Architecture-v0.6
+  - finstack-ai-Technical-Design-v0.6
+  - finstack-ai-Security-Threat-Model-v0.3
 ---
 
 # Document control
@@ -18,11 +19,11 @@ related-documents:
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.5 |
-| Status | Draft for implementation planning |
+| Version | 0.6 |
+| Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.2; Product Requirements Document v0.5; Architecture Specification v0.5; Technical Design v0.5; Security and Threat Model v0.2 |
+| Related documents | Engineering Standards v0.3; Product Requirements Document v0.6; Architecture Specification v0.6; Technical Design v0.6; Security and Threat Model v0.3 |
 
 # Executive implementation decision
 
@@ -94,11 +95,15 @@ A PR should not be combined with the next logical PR when the combination would 
 
 ## 2.1 MVP and preview boundary
 
-The **native MVP** is reached at the end of Phase 3. It includes the deterministic kernel, standard runtime, Rust SDK, one OpenAI-compatible provider, a calculator toolset, a constrained filesystem toolset, streaming, tools, limits, cancellation, structured output, run lineage, generic deferral/interaction semantics, `before_finalize`, in-memory journaling, tests, examples, and native benchmarks.
+The **native developer-preview slice** is reached at the end of Phase 3. It includes the deterministic kernel, standard runtime, Rust SDK, one OpenAI-compatible provider, a calculator toolset, a constrained filesystem toolset, streaming, tools, limits, cancellation, structured output, run lineage, generic deferral/interaction semantics, `before_finalize`, in-memory journaling, tests, examples, and native benchmarks. It is not the product MVP defined by PRD section 14.
+
+The **product MVP** is reached at the end of Phase 5/G4, after the Python and browser WASM packages, shared-kernel/cross-binding conformance, binding event batching, binding/callback benchmark categories, and extension-author documentation complete every PRD section 14 criterion. It may remain an alpha and does not include SQLite, public multi-lane APIs, WIT plugins, or the remote server.
 
 The **public preview** is reached at the end of Phase 8. It additionally includes first-class Python and browser WASM packages, SQLite durability and recovery, typed interaction routing with approval as the first profile, externally completed effects, initial multi-lane sessions, the complete model-activated capability catalog experience, isolated WIT plugins, more providers and batteries, a remote protocol/reference server, one durable-workflow integration, production observers, documentation, provenance, and published compatibility scope.
 
-## 2.2 Explicitly deferred beyond 1.0 unless separately approved
+## 2.2 Deferred beyond the 1.0 baseline
+
+These items are outside the accepted 1.0 scope. Adding one requires a later versioned PRD/plan amendment and, where it changes architecture or compatibility, an accepted ADR.
 
 - a public plugin marketplace and automatic update service;
 - a broad catalog of chat channels and finished assistant applications;
@@ -129,7 +134,7 @@ The following ranges are planning tools, not delivery commitments. They assume e
 ## 3.1 Staffing scenarios
 
 - **One senior engineer with substantial AI assistance:** approximately 14-20 months to 1.0, with the native developer preview targeted first and some ecosystem scope likely deferred.
-- **Three-person core team:** approximately 7-10 months to 1.0. Recommended role hats are kernel/runtime, bindings, and durability/ecosystem, with shared review.
+- **Three-person core team:** approximately 7-10 months to 1.0. Role ownership is kernel/runtime, bindings, and durability/ecosystem, with shared review.
 - **Five-person team:** approximately 5-8 months to 1.0 if API ownership is clear. Additional staffing does not safely compress Phase 1 because the semantic kernel is the main coordination bottleneck.
 
 A documentation/security/release contributor can reduce the end-of-program bottleneck even if that role is part-time.
@@ -270,9 +275,7 @@ A separate ADR is required before merging a change that:
 ## Entrance criteria
 
 
-- Approved Engineering Standards v0.2, PRD v0.5, Architecture Specification v0.5, Technical Design v0.5, and Security and Threat Model v0.2.
-
-- Repository ownership, licensing, and initial maintainer roles agreed.
+- Versioned, internally reconciled Engineering Standards, PRD, Architecture Specification, Technical Design, and Security and Threat Model baselines are present; G0 records maintainer acceptance before implementation work merges.
 
 
 ## Exit criteria
@@ -301,7 +304,7 @@ A separate ADR is required before merging a change that:
 **Principal changes.**
 
 
-- Create the Cargo workspace with `finstack-ai-kernel`, `finstack-ai-runtime`, `finstack-ai-sdk`, and `finstack-ai-protocol`.
+- Create the Cargo workspace with `finstack-ai-kernel`, `finstack-ai-runtime`, public SDK/facade package `finstack-ai` (library `finstack_ai`), and `finstack-ai-protocol`; do not create a competing `finstack-ai-sdk` package.
 
 - Add placeholder binding packages for Python and browser WASM, plus leaf directories for providers, toolsets, stores, examples, and test fixtures.
 
@@ -309,7 +312,7 @@ A separate ADR is required before merging a change that:
 
 - Adopt the Engineering Standards and Security and Threat Model as repository-governed inputs; link their exception, review-trigger, and evidence rules from contribution templates.
 
-- Adopt lockstep pre-1.0 package versions and a single root changelog.
+- Adopt one lockstep pre-1.0 version for the semantic core crates, Python/JavaScript binding distributions, and bundled first-party leaf crates, plus a single root changelog; any post-1.0 decoupling requires explicit engine-compatibility ranges and shared conformance evidence.
 
 
 **Acceptance evidence.**
@@ -350,6 +353,10 @@ A separate ADR is required before merging a change that:
 
 - Add source-level guards for concrete provider/tool/store imports in kernel modules and for central provider/tool match registries.
 
+- Enforce the fixed crate direction `kernel <- runtime (including the six port contracts) <- SDK <- bindings/applications`; require leaf providers/tools/observers to implement runtime-owned contracts, allow persistent store leaves to depend on the runtime store contract plus protocol codec, keep protocol parallel/outward with only public kernel DTO dependencies, and reject kernel/runtime/SDK dependencies on protocol for in-process execution.
+
+- Enforce runtime/facade feature separation: runtime has no default driver; the facade depends on runtime with defaults disabled; facade `native-tokio` (facade default) and `wasm-host` pass through to the corresponding runtime driver; contract-only leaves enable neither; browser WASM depends on the facade with defaults disabled and only `wasm-host`; and its graph contains no Tokio/native-I/O dependency.
+
 - Create checks for unbounded async channels and public task-local request context.
 
 - Add a review checklist file used by pull request templates.
@@ -363,6 +370,10 @@ A separate ADR is required before merging a change that:
 - A fixture branch that adds `tokio`, `reqwest`, `rusqlite`, `pyo3`, or `wasmtime` to the kernel fails CI with a clear diagnostic.
 
 - A fixture provider and toolset can be added without editing kernel code.
+
+- A compile-only fixture proves the runtime invokes each runtime-owned port trait while the SDK and leaf implementation crates depend only in the allowed direction; no SDK/runtime cycle is possible.
+
+- Native `Send + Sync` and browser-local port/future/stream compile fixtures pass with the same normalized method/data contracts, and the resolved WASM dependency graph contains no Tokio.
 
 - Architecture checks run in less than one minute on a normal CI runner.
 
@@ -553,13 +564,15 @@ A separate ADR is required before merging a change that:
 **Principal changes.**
 
 
-- Implement typed run, session, lane, turn, message, tool-call, effect, event, and record identifiers.
+- Implement typed session, lane, run, turn, message, model-request, tool-batch, tool-call, effect, interaction, event, budget-scope, and record identifiers.
 
 - Implement `RawJson` over shared immutable bytes with validated and unchecked constructors separated.
 
 - Define stable error codes, categories, retryability metadata, and diagnostic context without source-language exceptions.
 
 - Add deterministic ID injection for tests and a production UUIDv7 implementation behind a small clock/random interface.
+
+- Implement canonical UTC Unix-epoch-millisecond `Timestamp` and non-negative millisecond `Duration` types with checked range/arithmetic and cross-language conversions.
 
 
 **Acceptance evidence.**
@@ -568,6 +581,8 @@ A separate ADR is required before merging a change that:
 - All IDs serialize canonically and reject type confusion in Rust APIs.
 
 - Raw JSON can cross clone boundaries without copying the payload.
+
+- Native/Python/JavaScript/CBOR/JSON fixtures agree on timestamp/duration range, precision, UTC/RFC-3339 mapping, leap-second policy, and overflow rejection.
 
 - Errors round-trip through JSON fixtures with stable codes.
 
@@ -637,9 +652,17 @@ A separate ADR is required before merging a change that:
 
 - Define record batches, state version preconditions, effect idempotency keys, and event sequence numbers.
 
+- Freeze SHA-256 domain-separated digest semantics, strict RFC 8785 normalization for `RawJson`, canonical-CBOR record digests, runtime-owned semantic timestamps, and separate optional store commit timestamps.
+
+- Keep durable wall-clock due/deadline values distinct from non-serialized monotonic elapsed time.
+
 - Add `RunRelation`, `EffectDeferred`, generalized interaction request/resolution/expiry/cancellation records, and non-secret external-handle metadata.
 
-- Add schema fixtures and forward-compatible unknown-field rejection rules for v1.
+- Require every effect/deferral to carry a non-optional versioned output kind/schema digest that survives unchanged through external completion.
+
+- Define `RunAccepted` with durable principal/tenant/authentication-policy evidence, effective deadline/limits, propagation policy, and resolved-agent lock digest.
+
+- Add the TDD per-family compatibility matrix: strict AgentSpec/config and inbound-command rejection, schema-declared/preserved ignorable durable optionals, fatal unknown state-bearing data, exact WIT worlds, and retain-or-ignore diagnostic metadata.
 
 
 **Acceptance evidence.**
@@ -649,7 +672,13 @@ A separate ADR is required before merging a change that:
 
 - Every recoverable effect request has a stable `EffectId` and normalized input hash.
 
+- Every event carries schema/kind versions and the applicable model-request/tool-batch correlation IDs; every record carries envelope/kind versions and a cross-language payload digest.
+
+- Durable-derived UUIDv7 event IDs are allocated with and persisted on their source record by a versioned ordinal mapping; replay reuses them, while transient event IDs are explicitly non-replay-stable.
+
 - Every `RunAccepted` fixture has valid root/parent/effect lineage, and approval uses the interaction schema rather than dedicated records.
+
+- Restart fixtures reconstruct the initiating security context and prove child principal scopes, deadlines, and budgets can only be attenuated.
 
 - Record ordering is deterministic under an injected transition environment.
 
@@ -674,9 +703,9 @@ A separate ADR is required before merging a change that:
 **Principal changes.**
 
 
-- Implement explicit run phases for accepted, preparing, awaiting model, awaiting external completion, awaiting interaction, applying model response, before-finalize, completed, failed, and cancelled.
+- Implement the exact TDD `RunPhase` enum and transition table: accepted, before-run, preparing-context, before-model, awaiting-model, after-model, before-tool-batch, awaiting-tools, after-tool-batch, before-finalize, awaiting-interaction, awaiting-external, sleeping, cancelling, suspended, completed, failed, and cancelled.
 
-- Add command-level inputs and `decide` output containing record batches, public events, and model effects.
+- Add command-level inputs and the exact TDD `Decision` output: record drafts, post-commit actions/effects, and diagnostics. Durable public events are derived only by `apply` after commit; transient progress is sequenced by the runtime.
 
 - Add `apply` functions that mutate state only from committed records.
 
@@ -723,7 +752,7 @@ A separate ADR is required before merging a change that:
 
 - Ensure every accepted tool call receives exactly one durable result or synthetic closure result.
 
-- Add continuation rules for returning tool results to the model and terminating all-terminate batches.
+- Add continuation rules for returning tool results to the model and for the explicit policy outcome where a settled batch terminates the run instead of continuing.
 
 - Allow tool effects to defer under the same `EffectDeferred`/external-completion path used by models; unresolved calls remain suspended rather than receiving fabricated completion.
 
@@ -758,21 +787,25 @@ A separate ADR is required before merging a change that:
 **Principal changes.**
 
 
-- Add step, token, cost, tool-call, wall-clock/deadline, and output-size limits.
+- Add model-request, turn, tool-call/concurrency, input/output token, context/output byte, retry, wall-clock/deadline, integer-micro-unit cost, and bounded namespaced extension-counter limits.
 
 - Add cancellation intent, cancellation acknowledgement, reconciliation state, and stable cancellation reasons.
 
 - Represent retry decisions, backoff requests, attempt counters, retry budgets, and terminal classification.
 
-- Define precedence when cancellation, limits, model output, and tool completion race.
+- Implement the TDD terminal-race precedence table; implementation work must not redefine ordering ad hoc.
 
 - Define lineage-based cancellation/deadline/budget propagation and cancellation/expiry behavior for deferred effects and interactions.
+
+- Implement the fixed `RunPropagationPolicy` rules and persist authorization decision references; do not infer propagation from transient application state.
 
 
 **Acceptance evidence.**
 
 
 - Every limit is tested at below, exact, and above-boundary values.
+
+- Cost fixtures use integer millionths plus pricing-policy version and cover unknown usage policies; extension counters are registered/bounded, monotonic, replay-stable, and fail on overflow.
 
 - Cancellation is idempotent and replay-safe from every run phase.
 
@@ -924,7 +957,13 @@ A separate ADR is required before merging a change that:
 
 - Define runtime task ownership, run handles, shutdown behavior, and faulted-runtime state.
 
-- Add `ExternalCompletionRouter` and `InteractionRouter` command paths with authentication hooks, schema/authorization validation, and deterministic duplicate handling before kernel input.
+- Add `ExternalCompletionRouter` and `InteractionRouter` command paths whose authenticated commands carry tenant scope plus an explicit session/lane/run/target locator; bind signed opaque callback tokens at ingress, prohibit global target-ID journal scans, and perform schema/authorization validation plus deterministic duplicate handling before kernel input.
+
+- Validate and decode every callback against the outstanding effect's kind/version/schema digest before constructing typed kernel input; absent or mismatched contracts fail closed.
+
+- Add the required security-audit sink path and the non-state-changing durable rejection record for known authorized targets.
+
+- Define bounded/idempotent `SecurityAuditSink` event/receipt semantics with stable IDs, redacted locator/payload digests, deadlines, health reporting, and no raw token/content fields; require it whenever external ingress is enabled.
 
 - Add fault injection before commit, after commit, before dispatch, and after effect completion.
 
@@ -940,7 +979,11 @@ A separate ADR is required before merging a change that:
 
 - The no-durability configuration uses the same loop with the in-memory store.
 
-- Identical external completions are idempotent; conflicting completions fail closed and produce an auditable diagnostic without mutating the run.
+- Identical external completions are idempotent; known-target conflicts fail closed and append a durable rejection record without changing run state, while authentication/scope/unknown-locator failures are captured by the required security-audit sink without revealing target existence.
+
+- Restart tests route completion and interaction commands directly from their locators without an in-memory index or a journal scan, and required-audit failure rejects the command.
+
+- Pure embedded mode can omit the sink only because it exposes no external ingress; enabling remote completion/interaction/server ingress without a healthy sink fails construction/readiness.
 
 
 **Dependencies.** Phase 1.
@@ -962,6 +1005,8 @@ A separate ADR is required before merging a change that:
 
 
 - Add the object-safe `Model` trait, request type, model capabilities, model metadata, and normalized stream items.
+
+- Define/lock `ModelContextProfile` per resolved provider/model: hard input bytes, context/output token ceilings, reserved output/provider overhead, and exact or conservative estimator identity/version with override precedence that can only tighten ceilings.
 
 - Implement a scripted model used by golden traces, retries, suspensions, malformed streams, and cancellation tests.
 
@@ -1002,7 +1047,7 @@ A separate ADR is required before merging a change that:
 
 - Add `Toolset`, `ToolSpec`, argument validation adapter, tool call context, output streaming, and idempotency metadata.
 
-- Implement the default Rust JSON Schema draft 2020-12 validator, compiled once per registration and usable in native/WASM builds with offline or application-supplied reference resolution.
+- Implement the default Rust JSON Schema draft 2020-12 validator with `jsonschema` 0.40, compiled once per registration and usable in native/WASM builds with host-supplied offline reference resolution and no implicit network fetch.
 
 - Implement sequential and parallel execution groups with bounded concurrency and cancellation token children.
 
@@ -1094,6 +1139,10 @@ A separate ADR is required before merging a change that:
 
 - Define `before_model` `CompactContext` as a normalized middleware outcome with a unique context-compactor descriptor role, late-stage ordering rules, protected-item validation, strategy/configuration/source evidence, token estimates, prompt-cache impact, and an optional versioned derived checkpoint.
 
+- Commit each context/middleware invocation with stable component/version/config, chain fingerprint/index, input digest, recovery class, and deadline before calling it; add reconcile hooks and resume the chain only from committed cursors.
+
+- Add `RequestCompactionModel` as the only model-assisted path: commit/reconcile a related Model subeffect, authorize it for source sensitivity/residency/egress, record budgeted usage, then resume the same middleware identity.
+
 
 **Acceptance evidence.**
 
@@ -1111,6 +1160,8 @@ A separate ADR is required before merging a change that:
 - A fixture compaction middleware can replace only the model-visible projection, cannot remove protected content or split tool-call/result pairs, and never changes canonical conversation entries.
 
 - Duplicate compaction owners or context-mutating middleware ordered after compaction fail agent resolution with a precise diagnostic.
+
+- Crash-prefix fixtures at every context/middleware component and compaction child-model boundary reuse committed outcomes/cursors, never perform unrecorded provider I/O, and suspend explicit non-repeatable uncertainty.
 
 
 **Dependencies.** PR-014 and PR-017.
@@ -1134,6 +1185,8 @@ A separate ADR is required before merging a change that:
 - Create a runtime cancellation-token tree for run, model request, tool batch, and individual tool calls.
 
 - Implement deadline propagation and a clock/timer adapter usable by tests and durable runtimes.
+
+- Convert persisted wall deadlines to monotonic waits per process; add forward/backward wall-jump fixtures so adjustments cannot silently extend an active deadline.
 
 - Implement retry scheduling with jitter supplied outside the kernel and attempts persisted by kernel records.
 
@@ -1248,6 +1301,8 @@ A separate ADR is required before merging a change that:
 
 - Add namespacing, duplicate policy, aliases, lifecycle hooks, and resolution diagnostics.
 
+- Support ready handles and typed async construction factories; invoke selected factories once under construction cancellation/deadline, surface failures before run start, and retain only ready handles in `ResolvedAgent`.
+
 - Create immutable `ResolvedAgent` and `ResolvedRunPlan` structures.
 
 - Verify that no registry lookup occurs per token or per tool progress event.
@@ -1261,6 +1316,8 @@ A separate ADR is required before merging a change that:
 - Resolution is deterministic independent of hash-map iteration order.
 
 - Resolved handles are direct `Arc` trait objects for native components.
+
+- Factory-backed and ready-handle registrations resolve to the same immutable hot-path shape, and no factory runs after the first run is accepted.
 
 - Fixture extensions can be added without editing central lists.
 
@@ -1289,15 +1346,29 @@ A separate ADR is required before merging a change that:
 
 - Implement spec validation, defaults, version fields, environment-independent resolution, and human-readable diagnostics.
 
-- Add non-kernel `BundleSpec` composition plus `AgentCatalog`/`AgentInvoker` references for child/delegated runs without putting invocation policy in the kernel.
+- Define the canonical `BundleSpec` finite requirement/conflict model and fixed configuration precedence; consume exact installation locks rather than adding a general package solver.
+
+- Emit/export/import a credential-free `ResolvedAgentLock` with engine, exact component/capability versions, compatibility selections, effective config, middleware-chain, and schema digests.
+
+- Add Rust `RunResult::decode<T: DeserializeOwned>` tied to the committed structured-output schema digest, with stable path-aware decode errors and no rerun/mutation.
+
+- Add non-kernel `BundleSpec`/`BundleResolver` composition, `AgentCatalog`/`AgentInvoker` references for child/delegated runs, optional `BudgetLedger` aggregation, and scoped `ArtifactStore` service handles without putting their policy in the kernel.
+
+- Define `BudgetLedger` reserve/reconcile/charge/release receipts with reservation/effect idempotency keys, request digests, fail-closed unknown outcomes, and journaled ordering before child/effect dispatch.
+
+- Implement the child invocation handshake: allocate/commit one complete same-session, isolated-session, or remote child locator (all UUIDv7 session/lane/run IDs plus non-secret remote route where applicable) per `(parent_run_id, parent_effect_id)` before child acceptance, then idempotently start-or-attach the exact child; never derive/scan by run ID.
 
 - Ship `Always` and `Application` activation modes; retain the reserved `Model` mode and prevalidated compact catalog metadata without requiring either in the minimal path.
+
+- Rebuild and validate an immutable resolved run plan at activation checkpoints; reject duplicate compactors/post-compactor mutation and invalidate checkpoints when chain/config/profile digests change.
 
 
 **Acceptance evidence.**
 
 
 - Equivalent builder and JSON spec inputs resolve to the same agent fingerprint.
+
+- Rust and JSON use explicit `CapabilityRef` objects; every reference resolves to a locked bundle/catalog definition.
 
 - Unknown fields, incompatible versions, duplicate capability IDs, and unresolved references fail before run start.
 
@@ -1306,6 +1377,18 @@ A separate ADR is required before merging a change that:
 - Capabilities contain no executable function pointers in the serialized form.
 
 - Bundle conflicts and unresolved agent references fail during resolution, and child-run relation policy is explicit before invocation.
+
+- Crash/race fixtures around parent preparation and child acceptance create exactly one complete child locator/run for an equal request across every placement and durably reject a conflicting digest without global lookup.
+
+- A resolved lock round-trips exactly and reconstructs the same fingerprint; missing/incompatible versions, schemas, or allowed config selections fail before a run, and exported locks contain no secrets.
+
+- Typed Rust result decoding passes success/type/path/error fixtures against the same validated bytes and schema digest used by Python/WASM parity tests.
+
+- Bundles that require budget aggregation or artifacts fail construction when the corresponding scoped service is absent; minimal agents require neither service.
+
+- Crash/race fixtures cannot double-reserve/charge or start a child before its required reservation settles; equal ledger retries return the original receipt and conflicting digests fail closed.
+
+- Artifact fixtures prove write-before-journal ordering, scope authorization, content-digest verification, orphan cleanup after failed appends, retention pinning, and integrity failure for a missing/corrupt referenced artifact.
 
 
 **Dependencies.** PR-021.
@@ -1416,15 +1499,17 @@ A separate ADR is required before merging a change that:
 
 - Add read, write, edit, list, glob, and content-search filesystem tools scoped to an authorized root.
 
-- Resolve symlinks before authorization; add protected and denied path patterns; bound reads and search output.
+- Use handle-relative directory operations with no-follow/openat-style protections (or an equivalent platform capability API), authorize the opened handle/object rather than a pre-open canonical path, and enforce protected/denied patterns plus read/search bounds.
 
-- Use blob references or bounded spill files for oversized results.
+- Stage oversized results through the scoped digest-verifying `ArtifactStore`; do not create ad hoc untracked spill files.
 
 
 **Acceptance evidence.**
 
 
 - Path traversal, symlink escape, protected files, and oversized output tests pass.
+
+- Rename/symlink-swap race fixtures between authorization and open/read/write cannot escape the root on any supported platform; unsupported safe primitives fail closed.
 
 - Tool specs are generated once and reused across turns.
 
@@ -1452,6 +1537,8 @@ A separate ADR is required before merging a change that:
 
 
 - Add minimal, coding, and service examples plus a small diagnostic CLI example.
+
+- Publish the composition crate as Cargo package `finstack-ai` / library `finstack_ai`; examples and leaf-crate names use the canonical `finstack-ai-provider-openai-compatible` and `finstack-ai-tools-filesystem` packages.
 
 - Publish native benchmarks, binary-size reports, memory profiles, and architecture diagrams.
 
@@ -1658,6 +1745,8 @@ A separate ADR is required before merging a change that:
 
 - Expose coarse child-run handles, interaction request/resolution, and authenticated external-completion APIs without Python reimplementing routing semantics.
 
+- Treat lineage/interaction/external-completion binding shapes as pre-beta against scripted/in-memory semantics; do not claim durable restart support in this PR.
+
 
 **Acceptance evidence.**
 
@@ -1670,7 +1759,7 @@ A separate ADR is required before merging a change that:
 
 - A Python callback cannot retain a stale run context after settlement.
 
-- Python lineage/interactions/deferred-completion traces match Rust, including restart and duplicate-completion behavior where the store is durable.
+- Python lineage/interactions/deferred-completion traces match Rust for the Phase 4 in-memory/scripted surface. PR-048 is the blocking durable restart, pruning, and duplicate-completion parity gate.
 
 
 **Dependencies.** PR-028 and PR-029.
@@ -1754,7 +1843,7 @@ A separate ADR is required before merging a change that:
 
 - `Always`, `Application`, and `Model` activation pass Python/shared traces without rewriting the stable prompt prefix.
 
-- Release checkpoint `0.0.2a` or equivalent is available.
+- The Python half of the exact `0.0.2 alpha` checkpoint is release-candidate ready; the checkpoint is cut only after Phase 5 also passes.
 
 
 **Dependencies.** PR-004/ADR-020 and PR-027 through PR-031.
@@ -1814,6 +1903,8 @@ A separate ADR is required before merging a change that:
 
 - Define feature and target boundaries between kernel, native runtime, and WASM runtime.
 
+- Compile the runtime-owned logical port contracts with native `Send + Sync`/sendable futures and wasm-local object/future/stream aliases; select facade `wasm-host` with defaults disabled and verify the pass-through runtime feature.
+
 - Add npm packaging, TypeScript definition generation, browser test harness, and bundle-size reporting.
 
 - Expose build/version metadata and a minimal engine health check.
@@ -1823,6 +1914,8 @@ A separate ADR is required before merging a change that:
 
 
 - The package builds for `wasm32-unknown-unknown` without Tokio, native sockets, or filesystem assumptions.
+
+- Compile fixtures implement every logical port with a non-`Send` JavaScript promise/stream proxy on WASM and with `Send + Sync` handles on native, without changing DTOs or method semantics.
 
 - A no-op scripted trace runs in a headless browser.
 
@@ -1853,6 +1946,8 @@ A separate ADR is required before merging a change that:
 
 - Implement normalization of JS results into kernel inputs and stable error codes.
 
+- Keep all JavaScript adapter objects on the owning worker/local executor; no unsafe `Send`/`Sync` assertions or cross-worker JS handles are permitted.
+
 - Support AbortSignal propagation and bounded stream adapters.
 
 - Publish a tree-shakeable `@finstack/ai/adapters/openai-compatible` fetch/SSE adapter implementing the model host interface, defaulted to a same-origin proxy URL.
@@ -1860,6 +1955,8 @@ A separate ADR is required before merging a change that:
 - Avoid exposing mutable kernel internals or entire state snapshots to host callbacks.
 
 - Expose coarse child-run handles, interaction request/resolution, and external-completion adapters through the same normalized runtime commands.
+
+- Mark durability-dependent adapter APIs pre-beta and validate them here only against scripted/in-memory semantics; PR-048 owns cross-binding durable acceptance.
 
 
 **Acceptance evidence.**
@@ -1876,6 +1973,8 @@ A separate ADR is required before merging a change that:
 - The optional remote adapter passes streaming/cancellation fixtures and its examples contain no browser-embedded provider secret.
 
 - JavaScript lineage/interactions/deferred-completion traces match native semantics without per-progress-event callbacks.
+
+- No Phase 5 acceptance claim implies SQLite/IndexedDB crash durability; those cases become release-blocking in PR-048 after JournalStore v1 freezes.
 
 
 **Dependencies.** PR-004/ADR-019 and PR-033.
@@ -1929,7 +2028,7 @@ A separate ADR is required before merging a change that:
 ### PR-036 - Add Web Worker helpers, backpressure, and cancellation tests
 
 
-**Purpose.** Make the recommended browser topology safe under high-volume streaming.
+**Purpose.** Make the default Web Worker browser topology safe under high-volume streaming.
 
 
 **Principal changes.**
@@ -1968,7 +2067,7 @@ A separate ADR is required before merging a change that:
 ### PR-037 - Implement IndexedDB reference storage and browser demo
 
 
-**Purpose.** Demonstrate durable browser-hosted sessions without putting browser APIs in the kernel.
+**Purpose.** Demonstrate experimental browser persistence without putting browser APIs in the kernel, before JournalStore v1 freezes.
 
 
 **Principal changes.**
@@ -1982,17 +2081,21 @@ A separate ADR is required before merging a change that:
 
 - Add schema upgrade and corrupted-record diagnostics.
 
+- Label the adapter/schema provisional; PR-048 must migrate and re-run it against PR-039 JournalStore v1 before any supported durability claim.
+
 
 **Acceptance evidence.**
 
 
 - A completed session survives page reload.
 
-- A deliberately interrupted run restores to a documented resumable or terminal state.
+- A deliberately interrupted scripted run restores to a documented provisional state; this is not the durable-beta acceptance matrix.
 
 - Store writes are ordered and version-checked.
 
 - The demo uses only public package APIs.
+
+- Package/readme metadata identifies browser persistence as experimental until PR-048 revalidation.
 
 
 **Dependencies.** PR-034 through PR-036 and journal interfaces available from Phase 2.
@@ -2037,7 +2140,7 @@ A separate ADR is required before merging a change that:
 
 - All three activation modes pass browser/shared traces, including cache-stable context append behavior.
 
-- Release checkpoint `0.0.2-wasm-alpha` or equivalent is available.
+- The exact cross-binding `0.0.2 alpha` checkpoint is available after both Phase 4 and Phase 5 acceptance evidence passes.
 
 
 **Dependencies.** PR-004/ADR-020, the independently reviewable shared activation-UX slice described in PR-032, and PR-033 through PR-037.
@@ -2097,9 +2200,13 @@ A separate ADR is required before merging a change that:
 
 - Finalize append, load, snapshot, compare-and-append, scan, and metadata operations.
 
-- Implement ADR-015's deterministic CBOR profile with definite lengths, shortest encodings, deterministic map ordering, duplicate-key/non-finite-float rejection policy, strict depth/size limits, and lossless JSON/JSONL diagnostic projection.
+- Define append-batch identity and ambiguous-acknowledgement recovery: retries reuse frozen batch/record IDs, semantic timestamps, payloads, and digests; stores return the original receipt for an exact committed batch before evaluating expected sequence and classify mismatched reuse as corruption.
+
+- Implement ADR-015's deterministic CBOR profile with `ciborium` behind the project codec wrapper: validate and recursively sort map keys using RFC 8949 ordering before library encoding; enforce definite lengths, shortest lossless integer/finite-float encodings, preservation of negative zero, duplicate-key/non-finite-float rejection, strict depth/size limits, and lossless JSON/JSONL diagnostic projection. Do not rely on the library writer alone for canonicalization.
 
 - Add checksums/state versions and corruption classification.
+
+- Add per-record payload/envelope checksums and a session checksum chain/head covering all replay-semantic fields while excluding diagnostic store commit time.
 
 - Publish compatibility fixtures for every record variant.
 
@@ -2113,11 +2220,19 @@ A separate ADR is required before merging a change that:
 
 - Binary fixtures are byte-identical across native targets, and their JSON projection round-trips without semantic loss.
 
+- Nested maps created in different insertion orders encode identically; fixtures cover integer/float width boundaries, negative zero, and non-finite rejection.
+
 - Unknown versions and malformed lengths fail before large allocation.
+
+- Reordered, truncated, payload-modified, or wrong-head journal fixtures fail checksum/sequence verification before record application.
 
 - Store implementations do not redefine record semantics.
 
+- SQLite and other persistent stores consume the shared protocol codec rather than duplicating canonical-CBOR rules; runtime/SDK dependency graphs remain protocol-free.
+
 - The compatibility test suite runs against historical fixtures.
+
+- Fault injection after durable commit but before acknowledgement proves retry returns the original receipt exactly once; concurrent new batches still receive deterministic sequence conflicts.
 
 
 **Dependencies.** PR-014 and ADR-015 from PR-004.
@@ -2140,6 +2255,8 @@ A separate ADR is required before merging a change that:
 
 - Add SQLite schema, migrations, WAL settings, transaction boundaries, indexes, and connection ownership.
 
+- Make WAL + `synchronous=FULL` (plus supported platform full-fsync controls) the acknowledged durable mode; label NORMAL/OFF or non-flush-guaranteeing storage as relaxed/non-durable in config and health output.
+
 - Implement atomic record batches, optimistic state-version checks, snapshots, metadata, and pruning policy hooks.
 
 - Add busy handling, disk-full, corrupt database, abrupt process exit, and concurrent reader tests.
@@ -2151,6 +2268,8 @@ A separate ADR is required before merging a change that:
 
 
 - Committed batches are all-or-nothing under injected failures.
+
+- Acknowledged durable-mode commits survive the supported power-loss/storage-fault harness assumptions; process-kill and simulated power-loss tests are reported separately, and relaxed mode never advertises NFR-REL-001.
 
 - A second writer receives a deterministic conflict/busy result.
 
@@ -2201,7 +2320,7 @@ A separate ADR is required before merging a change that:
 **Dependencies.** PR-039 and PR-040.
 
 
-**Traceability.** FR-DUR snapshots; Architecture section 10.5; TDD section 23.
+**Traceability.** FR-DUR snapshots; Architecture section 10.5; TDD section 18.3.
 
 
 **Explicitly excluded.** No compaction that deletes required journal history.
@@ -2347,6 +2466,8 @@ A separate ADR is required before merging a change that:
 
 - Define restore behavior for overdue timers and cancelled deferred effects or interactions.
 
+- Recompute monotonic waits from persisted wall due-times on restart, fire overdue timers through one idempotent durable timer completion, and diagnose/clamp backward-clock anomalies.
+
 
 **Acceptance evidence.**
 
@@ -2388,13 +2509,15 @@ A separate ADR is required before merging a change that:
 
 - Persist and expose run relations for the root operation and any child/delegated runs without treating lanes as the lineage model.
 
+- Persist/recover the prepared parent-effect to child-UUIDv7 mapping and child security/propagation context across same-session lanes and child sessions.
+
 
 **Acceptance evidence.**
 
 
 - Entry parent chains never change after commit.
 
-- Deleting operation logs leaves a valid conversation tree.
+- Deleting only non-authoritative derived projections leaves a valid conversation tree; operation/journal records required for recovery, audit, settlement idempotency, or retention policy are never treated as disposable logs.
 
 - The main lane restores its leaf and active/suspended operation correctly.
 
@@ -2468,6 +2591,8 @@ A separate ADR is required before merging a change that:
 
 - Add journal/store migration tooling, backup/restore commands, corruption reports, and recovery diagnostics.
 
+- Persist/rebuild the external-command settlement identity/digest index in snapshots and retain tombstones through the callback-token/idempotency horizon across pruning and migration.
+
 - Run shared durability traces through Rust, Python, and browser storage where supported.
 
 - Add restart/crash-prefix fixtures for application/model capability activation and prove activation is applied only at safe checkpoints.
@@ -2482,13 +2607,23 @@ A separate ADR is required before merging a change that:
 
 - Migration fixtures cover every released pre-beta schema.
 
+- Duplicate completion/resolution classification is unchanged after restart, snapshot restore, migration, and permitted journal pruning; outstanding tokens are never pruned and post-horizon tokens are explicitly expired.
+
 - Lineage, interaction, generic deferral, duplicate external completion, `before_finalize`, and lane scenarios pass restart tests.
+
+- Child-invocation crash prefixes before/after preparation and acceptance always attach to one mapped UUIDv7 child; principal/deadline/budget attenuation reconstructs without process memory.
+
+- Budget reservation/charge/release crash prefixes reconcile by stable IDs and never double-allocate, double-charge, or silently grant on unknown ledger state.
 
 - Model-activated catalog state survives restart without duplicating instructions or rewriting a stable prompt prefix.
 
 - Recorded compaction outcomes replay without rerunning summarization, while stale/missing checkpoints rebuild from unchanged canonical history.
 
-- Release checkpoint `0.0.3-beta` and gate G5 - Durable Beta - are approved.
+- Required compaction projections stored out of line survive restart through a verified durable `ArtifactRef`; missing/corrupt required content faults recovery, while only explicitly disposable checkpoints may rebuild.
+
+- Python and browser adapter surfaces from PR-030/PR-034/PR-037 pass the same durable restart, migration, settlement-idempotency, and interaction/deferred-effect fixtures where the target store supports them; provisional labels remain where a target cannot meet the gate.
+
+- Release checkpoint `0.0.3` (beta) and gate G5 - Durable Beta - have passed.
 
 
 **Dependencies.** PR-032/PR-038 for the binding-alpha activation UX, and PR-039 through PR-047 for durability. Binding-specific durability cases may merge conditionally, but the 0.0.3 beta gate requires the complete matrix.
@@ -2519,7 +2654,7 @@ A separate ADR is required before merging a change that:
 
 - Phase 6 record/effect context available.
 
-- WIT versioning ADR approved.
+- ADR-035's experimental 0.x-to-1.0 WIT versioning and coarse-completion policy accepted in the baseline.
 
 
 ## Exit criteria
@@ -2537,24 +2672,26 @@ A separate ADR is required before merging a change that:
 ## Pull request sequence
 
 
-### PR-049 - Define WIT v1 common types and toolset world
+### PR-049 - Define the initial WIT common types and toolset world
 
 
-**Purpose.** Create the smallest stable external ABI around coarse toolset calls.
+**Purpose.** Create the smallest experimental pre-1.0 external ABI around coarse toolset calls.
 
 
 **Principal changes.**
 
 
-- Define plugin metadata, API version, call context, raw JSON bytes, blob references, tool specs, tool calls, progress batches, results, and errors.
+- Define plugin metadata, 0.x API version, sanitized principal/tenant/scope/budget call context, raw JSON bytes, blob references, parity-complete tool specs, tool calls, one final result, and errors.
 
 - Define a toolset world with catalog and call operations using component resources where stateful.
+
+- Define the versioned `finstack:ai-host` logging/blob interfaces and explicit `finstack:ai-types` imports used by guest packages; linking them grants no ambient WASI authority.
 
 - Add generated binding checks and cross-language fixture components.
 
 - Document canonical ABI copying limits and payload-size rules.
 
-- Keep WIT v1 at ADR-035's coarse completion boundary: a component invocation returns a final result/error, and progress is advisory rather than a resumable kernel effect stream.
+- Keep the initial WIT world at ADR-035's coarse completion boundary: a component invocation returns one final result/error and exposes no progress/resumable kernel effect stream.
 
 
 **Acceptance evidence.**
@@ -2564,17 +2701,21 @@ A separate ADR is required before merging a change that:
 
 - A reference toolset lists and executes multiple tools.
 
+- Catalog digest, execution mode, approval policy, result ceiling, side-effect/retry metadata, and sanitized authorization context map to native semantics; omitted/invalid security metadata fails registration rather than receiving permissive defaults.
+
 - Oversized frames/payloads are rejected before allocation.
 
 - The WIT package has explicit compatibility and deprecation rules.
 
-- No WIT v1 component world can invoke a full nested agent or persist its own competing run-lineage semantics.
+- Plugin alpha publishes @0.x packages only; @1.0.0 generation is blocked until the framework 1.0 gate.
+
+- No initial WIT component world can invoke a full nested agent or persist its own competing run-lineage semantics.
 
 
 **Dependencies.** PR-021, PR-023, and PR-039.
 
 
-**Traceability.** FR-PLG toolset surface; TDD sections 27.1-27.3.
+**Traceability.** FR-PLG toolset surface; TDD sections 27.1-27.4.
 
 
 **Explicitly excluded.** No model provider world or arbitrary host filesystem access.
@@ -2617,7 +2758,7 @@ A separate ADR is required before merging a change that:
 **Dependencies.** PR-049.
 
 
-**Traceability.** FR-PLG; Architecture sections 15.1 and 15.5.
+**Traceability.** FR-PLG; Architecture sections 15.1 and 15.5; TDD section 27.5.
 
 
 **Explicitly excluded.** No general middleware world until replay and security semantics are proven.
@@ -2656,7 +2797,7 @@ A separate ADR is required before merging a change that:
 **Dependencies.** PR-049 and PR-050.
 
 
-**Traceability.** FR-PLG execution; TDD sections 27.5-27.6.
+**Traceability.** FR-PLG execution; TDD sections 27.6-27.7.
 
 
 **Explicitly excluded.** No registry download or marketplace.
@@ -2767,7 +2908,7 @@ A separate ADR is required before merging a change that:
 
 - Reference plugins pass on supported desktop targets.
 
-- Release checkpoint `0.0.4-plugin-alpha` and gate G6 - Plugin Alpha - are approved.
+- Release checkpoint `0.0.4` (plugin alpha) and gate G6 - Plugin Alpha - have passed.
 
 
 **Dependencies.** PR-049 through PR-053.
@@ -2896,6 +3037,8 @@ A separate ADR is required before merging a change that:
 
 - Model-assisted summarization uses an explicit model/budget scope, cannot recursively invoke the same compaction chain, and has cancellation/recovery tests.
 
+- Protected instructions remain byte/ID-identical; generated summaries remain provenance-bearing unprivileged context, and unauthorized sensitivity/residency/egress to a secondary model fails before dispatch.
+
 
 **Dependencies.** PR-025, ContextProvider/Middleware ports, and durability where required.
 
@@ -2966,7 +3109,13 @@ A separate ADR is required before merging a change that:
 
 - Add a reference Unix-socket/TCP-local server with authentication hooks and single-writer session routing.
 
+- Define the bounded pre-auth vocabulary/16-KiB ceiling, parse/auth deadlines and attempt caps, loopback/Unix-socket default, TLS 1.3+ and authentication requirement for non-loopback TCP, and downgrade floor.
+
+- Add authenticated command IDs/digests and idempotency receipts, authorization per locator, reconnect snapshot-tail-barrier-live ordering, and bounded credit-window flow control.
+
 - Add Rust and TypeScript client helpers plus protocol conformance tests.
+
+- Require the bounded `SecurityAuditSink` in reference-server readiness and exercise malformed/unknown/scope-mismatch audit receipts without leaking target existence.
 
 
 **Acceptance evidence.**
@@ -2976,7 +3125,9 @@ A separate ADR is required before merging a change that:
 
 - Unknown protocol versions fail before session acquisition.
 
-- Authentication completes before protocol bytes are trusted.
+- Only the bounded hello/auth/close vocabulary is parsed before authentication; no session/target lookup occurs, oversized/malformed input fails before allocation, and all post-auth commands are scoped/authorized.
+
+- The server refuses non-loopback plaintext operation and downgrade below policy; reconnect never interleaves live events before the snapshot/tail barrier, and slow clients resume from a durable cursor without dropping terminal completion.
 
 - Protocol adapters do not expose store-private or kernel-private structures.
 
@@ -3025,7 +3176,7 @@ A separate ADR is required before merging a change that:
 **Dependencies.** PR-045, PR-048, and runtime driver interfaces.
 
 
-**Traceability.** PRD UC-09; Architecture section 23.
+**Traceability.** PRD UC-09; Architecture sections 2.3, 9.5, and 10.
 
 
 **Explicitly excluded.** No requirement to support every workflow engine before v0.1.
@@ -3161,7 +3312,7 @@ A separate ADR is required before merging a change that:
 **Principal changes.**
 
 
-- Review and freeze Rust APIs, AgentSpec, error codes, event/record schemas, Python API, JS API, remote protocol, and WIT v1.
+- Review and freeze Rust APIs, AgentSpec, error codes, event/record schemas, Python API, JS API, remote protocol, and the WIT 1.0 interface.
 
 - Add automated compatibility checks, deprecated aliases, migration commands, and fixture converters where promised.
 
@@ -3185,7 +3336,7 @@ A separate ADR is required before merging a change that:
 **Dependencies.** PR-061 and preview feedback.
 
 
-**Traceability.** NFR-COMPAT; schema governance.
+**Traceability.** NFR-COMP; schema governance.
 
 
 **Explicitly excluded.** No permanent compatibility promise for explicitly experimental packages.
@@ -3375,7 +3526,7 @@ Performance measurement starts in Phase 0 and becomes release-blocking only afte
 - WIT canonical ABI and Wasmtime overhead; and
 - external network/model/tool latency.
 
-Real model latency must never be used to hide framework overhead. Proposed 1.0 budgets are reviewed after Phase 3 measurements rather than hard-coded before evidence exists.
+Real model latency must never be used to hide framework overhead. PR-064 sets the 1.0 budgets from the Phase 3-and-later measurement corpus; before that gate, the measurement method and regression reporting are normative but numeric 1.0 thresholds are intentionally unset.
 
 ## 18.3 Security program
 
@@ -3389,19 +3540,18 @@ Security work is continuous:
 - the Threat Model is refreshed against implemented controls and published with provenance, SBOM, deployment guidance, and the response process in Phase 8; and
 - independent review closes before 1.0.
 
-# 19. Scope cut lines and contingency sequencing
+# 19. Scope control and contingency sequencing
 
 When staffing or schedule is constrained, scope should be cut in the following order while preserving architectural integrity.
 
-## 19.1 Safe cuts before public preview
+## 19.1 Safe reductions that preserve public-preview scope
 
 1. Defer full multi-lane concurrency while retaining lane IDs and the main-lane data model.
 2. Ship only one durable workflow integration.
-3. Limit WIT v1 to toolsets and context providers.
-4. Defer the reference remote server while retaining the protocol schema and in-process APIs.
-5. Ship two providers rather than three.
-6. Defer shell tools while retaining calculator and constrained filesystem tools.
-7. Limit browser persistence to an example adapter rather than a supported package.
+3. Keep the initial WIT interface limited to toolsets and context providers.
+4. Ship two providers rather than three.
+5. Defer shell tools while retaining calculator and constrained filesystem tools.
+6. Limit browser persistence to an example adapter rather than a supported package.
 
 ## 19.2 Items that must not be cut
 
@@ -3417,12 +3567,14 @@ When staffing or schedule is constrained, scope should be cut in the following o
 - explicit run lineage, generic deferred effects, generalized interactions, and a pre-terminal `before_finalize` behavior stage; and
 - benchmark separation of framework overhead from external latency.
 
-## 19.3 Fallback release shapes
+## 19.3 Pre-preview fallback release shapes
 
-- **Rust-first preview:** end after Phase 3 if bindings are delayed; do not advertise cross-language parity.
-- **Rust/Python preview:** ship Phase 4 before browser WASM if Python demand is materially higher, while keeping WASM kernel tests active.
-- **Non-durable alpha:** acceptable only before public preview; public preview must include the effect journal and at least SQLite recovery.
-- **No-plugin public preview:** possible if WIT security or tooling is not ready, provided plugin packages are clearly deferred and the native/Python/WASM extension model is complete.
+- **Rust-first `0.0.x` developer release:** end after Phase 3 if bindings are delayed; do not advertise cross-language parity.
+- **Rust/Python `0.0.x` alpha:** ship Phase 4 before browser WASM if Python demand is materially higher, while keeping WASM kernel tests active.
+- **Non-durable `0.0.x` alpha:** acceptable only before public preview; public preview includes the effect journal and at least SQLite recovery.
+- **Plugin-delayed `0.0.x` alpha:** continue native/Python/WASM adoption work if WIT security or tooling is not ready, but do not label the release `0.1.0` or pass G7.
+
+The `0.1.0` public-preview scope in section 2.1 and the G7/Phase 8 exit criteria remain fixed: isolated WIT plugins and a usable remote protocol/reference server are required. Replacing that scope requires a versioned PRD and Implementation Plan amendment with updated compatibility promises and gate evidence; contingency sequencing alone cannot do so.
 
 # 20. Risk register for implementation
 
@@ -3474,7 +3626,7 @@ The implementation program is complete for 1.0 only when:
 
 # 23. First 30 days
 
-The recommended first-month sequence for a new implementation team is:
+The baseline first-month sequence for a new implementation team is:
 
 ## Week 1
 
