@@ -4,8 +4,8 @@ Validation evidence for typed identifiers, RawJson/Metadata, digests, time
 primitives, stable errors, injectable UUIDv7 generation, and public-rust-api
 fixtures.
 
-Implementation tip (local A01–A05 evidence): see `environment.txt` `commit` and
-git history on branch `pr-006-kernel-value-types`.
+Implementation tip (local A01–A05 evidence): `6704134d1701a3271f6c1a351e409c650b8eb8bc`
+on branch `pr-006-kernel-value-types`.
 Hosted CI and merge commit fields are recorded after the PR head is green.
 
 ## Acceptance mapping
