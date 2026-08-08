@@ -18,6 +18,8 @@ run = "mise install"
 
 [tasks.doctor]
 description = "Verify pinned toolchain is available"
+# Prefer PATH-resolved tools and avoid `/dev/null` redirects so the same
+# command works when mise executes tasks via cmd.exe on Windows.
 run = """
 rustup component add rustfmt clippy
 rustup target add wasm32-unknown-unknown
@@ -25,10 +27,10 @@ rustc --version
 cargo --version
 rustfmt --version
 cargo clippy --version
-rustc --print cfg --target wasm32-unknown-unknown >/dev/null
+rustc --print cfg --target wasm32-unknown-unknown
 python --version
 uv --version
-"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --version
+cargo-deny --version
 gitleaks version
 actionlint --version
 """
@@ -55,7 +57,10 @@ cargo check -p finstack-ai-test --no-default-features --locked
 
 [tasks.check-wasm]
 description = "Type-check the browser WASM binding target"
-run = "cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked"
+run = """
+rustup target add wasm32-unknown-unknown && \
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+"""
 
 [tasks.format]
 description = "Check Rust formatting"
@@ -68,6 +73,33 @@ run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
 [tasks.test]
 description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
+
+[tasks.conformance]
+description = "Run golden-trace and conformance harness tests (PR-005)"
+run = "cargo test -p finstack-ai-test --locked"
+
+[tasks.test-benchmark]
+description = "Run benchmark staging helper unit tests"
+run = "uv run --no-project python -m unittest discover -s tools/benchmark/tests -v"
+
+[tasks.lint-benchmark]
+description = "Lint benchmark helper Python sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/benchmark"
+
+[tasks.format-benchmark]
+description = "Check benchmark helper Python formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/benchmark"
+
+[tasks.benchmark-smoke]
+description = "Compile Criterion benches and run a short non-blocking smoke with metadata"
+run = """
+uv run --no-project python tools/benchmark/run.py compile
+uv run --no-project python tools/benchmark/run.py smoke
+"""
+
+[tasks.benchmark]
+description = "Run Criterion benches and stage machine-readable metadata (non-blocking)"
+run = "uv run --no-project python tools/benchmark/run.py full"
 
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
@@ -89,9 +121,9 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/archit
 [tasks.architecture]
 description = "Enforce architecture, dependency, and feature boundaries"
 run = """
-uv run --no-project python -m unittest discover -s tools/architecture/tests -q
-uv run --no-project python tools/architecture/check.py
-cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+uv run --no-project python -m unittest discover -s tools/architecture/tests -q && \
+uv run --no-project python tools/architecture/check.py && \
+mise run check-wasm
 """
 
 [tasks.lint-ci]
@@ -190,6 +222,11 @@ mise run lint-schema-governance
 mise run format-schema-governance
 mise run test-schema-governance
 mise run schema-governance
+mise run conformance
+mise run lint-benchmark
+mise run format-benchmark
+mise run test-benchmark
+uv run --no-project python tools/benchmark/run.py compile
 mise run lint-workflows
 mise run supply-chain
 mise run secret-scan

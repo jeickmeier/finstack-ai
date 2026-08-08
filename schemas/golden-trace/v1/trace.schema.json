@@ -1,0 +1,535 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/golden-trace/v1/trace.schema.json",
+  "title": "GoldenTrace",
+  "description": "Language-neutral golden trace fixture (PR-005; TDD \u00a732.2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "trace_id",
+    "initial_agent_spec",
+    "initial_session_records",
+    "scripted_outcomes",
+    "transition_env",
+    "expected"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "initial_agent_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    },
+    "initial_session_records": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "payload": {
+            "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+          },
+          "payload_declaration": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "declared_envelope_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8388608
+              },
+              "declared_batch_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16777216
+              },
+              "declared_batch_records": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 256
+              },
+              "declared_string_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4194304
+              },
+              "declared_array_items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4096
+              },
+              "declared_map_entries": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 256
+              },
+              "declared_nesting_depth": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 32
+              },
+              "declared_raw_json_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              "declared_metadata_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            }
+          }
+        }
+      }
+    },
+    "scripted_outcomes": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://finstack.ai/schemas/golden-trace/v1/scripted-input.schema.json",
+      "title": "ScriptedInput",
+      "description": "Deterministic scripted model/tool/timer outcomes for golden traces (PR-005; TDD \u00a732).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "steps"
+      ],
+      "properties": {
+        "format_version": {
+          "const": 1
+        },
+        "steps": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "model_chunk",
+                  "tool_call",
+                  "tool_result",
+                  "cancellation",
+                  "error",
+                  "timer"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 4194304
+              },
+              "tool_name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "result": {},
+              "error_code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9223372036854775807
+              },
+              "payload_declaration": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "declared_envelope_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8388608
+                  },
+                  "declared_batch_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 16777216
+                  },
+                  "declared_batch_records": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_string_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4194304
+                  },
+                  "declared_array_items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4096
+                  },
+                  "declared_map_entries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_nesting_depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 32
+                  },
+                  "declared_raw_json_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "declared_metadata_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65536
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transition_env": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamps_ms",
+        "ids"
+      ],
+      "properties": {
+        "timestamps_ms": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "ids": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "durable_records",
+        "normalized_events",
+        "effects",
+        "final_state",
+        "final_result",
+        "state_hash"
+      ],
+      "properties": {
+        "durable_records": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "payload": {
+                "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+              },
+              "payload_declaration": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "declared_envelope_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8388608
+                  },
+                  "declared_batch_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 16777216
+                  },
+                  "declared_batch_records": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_string_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4194304
+                  },
+                  "declared_array_items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4096
+                  },
+                  "declared_map_entries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_nesting_depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 32
+                  },
+                  "declared_raw_json_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "declared_metadata_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65536
+                  }
+                }
+              }
+            }
+          }
+        },
+        "normalized_events": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "durability"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "durability": {
+                "type": "string",
+                "enum": [
+                  "durable",
+                  "transient"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "payload": {
+                "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+              },
+              "payload_declaration": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "declared_envelope_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8388608
+                  },
+                  "declared_batch_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 16777216
+                  },
+                  "declared_batch_records": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_string_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4194304
+                  },
+                  "declared_array_items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4096
+                  },
+                  "declared_map_entries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_nesting_depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 32
+                  },
+                  "declared_raw_json_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "declared_metadata_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65536
+                  }
+                }
+              }
+            }
+          }
+        },
+        "effects": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "payload": {
+                "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+              },
+              "payload_declaration": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "declared_envelope_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8388608
+                  },
+                  "declared_batch_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 16777216
+                  },
+                  "declared_batch_records": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_string_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4194304
+                  },
+                  "declared_array_items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4096
+                  },
+                  "declared_map_entries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 256
+                  },
+                  "declared_nesting_depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 32
+                  },
+                  "declared_raw_json_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1048576
+                  },
+                  "declared_metadata_bytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65536
+                  }
+                }
+              }
+            }
+          }
+        },
+        "final_state": {
+          "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+        },
+        "final_result": {
+          "description": "Opaque expected value retained by fixture harness; not a Phase-1 semantic type."
+        },
+        "state_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Opaque expected state hash string for fixture comparison; not computed by Phase 0 harness."
+        }
+      }
+    }
+  }
+}

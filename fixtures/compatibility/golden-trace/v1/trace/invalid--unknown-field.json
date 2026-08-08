@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "trace_id": "noop",
+  "initial_agent_spec": {},
+  "initial_session_records": [],
+  "scripted_outcomes": {
+    "format_version": 1,
+    "steps": []
+  },
+  "transition_env": {
+    "timestamps_ms": [],
+    "ids": []
+  },
+  "expected": {
+    "durable_records": [],
+    "normalized_events": [],
+    "effects": [],
+    "final_state": null,
+    "final_result": null,
+    "state_hash": "noop-state-hash"
+  },
+  "extra_field": 1
+}

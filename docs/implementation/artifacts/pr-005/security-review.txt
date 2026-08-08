@@ -1,0 +1,21 @@
+PR-005 Threat Model §18 / TM-16 disposition
+Date: 2026-08-08
+Reviewer: me@jeickmeier.com
+Commit (worktree tip at review): f51671507a148666d5a42f29086d97b3d6877f93
+Branch: pr-005-harnesses
+
+Scope:
+- Added offline JSON Schema 2020-12 fixture validation via jsonschema 0.40 (default features off).
+- Added Criterion benchmark staging and non-blocking workflow.
+- No new primary port, middleware stage, trust class, privileged host capability, protocol listener, plugin permission, or release identity change.
+
+TM-16 (oversized / malicious schema/JSON):
+- Fixture schemas reject unknown fields and oversized payload declarations against TDD §6.5 ceilings.
+- Validation occurs before fixture acceptance; no ambient network schema retrieval.
+- Control-change disposition: No control change beyond implementing planned fixture-boundary evidence for PR-005-A04; production semantic ceilings remain Phase 1 (PR-008).
+
+TM-18 (supply chain):
+- cargo-deny allowlist extended for OSI-approved Unicode-3.0, MIT-0, and Zlib required by jsonschema transitive deps.
+- mise run supply-chain passes at this tip.
+
+G0 remains Not ready until Phase 0 exit evidence and a named gate decision are recorded after merge.

@@ -13,6 +13,16 @@ description = "Scripted models, fakes, and conformance utilities for finstack-ai
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
+jsonschema = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "conformance"
+harness = false
 
 [lints]
 workspace = true

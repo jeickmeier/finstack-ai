@@ -21,6 +21,9 @@ Through pre-1.0, semantic core crates, Python/JavaScript binding distributions, 
 - Standalone ADR-001 through ADR-037 records with Threat Model cross-links (PR-004)
 - Schema/API compatibility governance: contract registry, reserved schema/fixture roots, change-classification template, and `mise run schema-governance` enforcement (PR-004)
 - Pull request template API/schema/performance/security impact sections (PR-004)
+- Golden-trace and scripted-input schemas, fixtures, and Rust conformance harness (PR-005)
+- Criterion benchmark groups with machine-readable metadata and non-blocking `benchmark.yml` (PR-005)
+- `mise run conformance`, `benchmark`, and `benchmark-smoke` tasks (PR-005)
 
 ### Changed
 

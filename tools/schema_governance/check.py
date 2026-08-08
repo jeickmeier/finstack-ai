@@ -56,6 +56,8 @@ REQUIRED_CONTRACT_FAMILIES: tuple[str, ...] = (
     "remote",
     "process",
     "wit",
+    "golden-trace",
+    "benchmark-report",
 )
 
 REQUIRED_PR_IMPACT_HEADINGS: tuple[str, ...] = (

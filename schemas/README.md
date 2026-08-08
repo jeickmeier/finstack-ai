@@ -1,8 +1,8 @@
 # Schema directories
 
-Reserved roots for versioned public contracts. PR-004 creates ownership,
-compatibility promises, and fixture locations only. No schema payloads,
-validators, codecs, or WIT packages are implemented here.
+Versioned public-contract schema roots. PR-004 reserved ownership and
+fixture locations; PR-005 activates `golden-trace` and `benchmark-report`
+payload schemas. Remaining families stay reserved until their owning PRs.
 
 ## Layout
 
@@ -22,6 +22,8 @@ JSON Schema draft 2020-12 is the portable schema source of truth
 | Remote protocol DTOs | [`remote/`](remote/) | reserved |
 | Process protocol DTOs | [`process/`](process/) | reserved |
 | WIT packages | [`../plugins/finstack-ai-wit/wit/`](../plugins/finstack-ai-wit/wit/) | reserved (canonical future source under `wit/v<x.y.z>/`) |
+| Golden traces / scripted inputs | [`golden-trace/`](golden-trace/) | active (PR-005) |
+| Benchmark report metadata | [`benchmark-report/`](benchmark-report/) | active (PR-005) |
 
 Registry: [`schema-families.toml`](schema-families.toml).  
 Governance: [`../docs/implementation/compatibility-governance.md`](../docs/implementation/compatibility-governance.md).  

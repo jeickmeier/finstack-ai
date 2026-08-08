@@ -1,0 +1,17 @@
+$ mise run test-benchmark
+exit=0
+
+STDOUT:
+
+STDERR:
+[test-benchmark] $ uv run --no-project python -m unittest discover -s tools/ben…
+test_build_metadata_includes_required_identity_fields (test_run.MetadataTests.test_build_metadata_includes_required_identity_fields) ... ok
+test_validate_metadata_accepts_fixture_shape (test_run.MetadataTests.test_validate_metadata_accepts_fixture_shape) ... ok
+test_validate_metadata_rejects_unknown_fields (test_run.MetadataTests.test_validate_metadata_rejects_unknown_fields) ... ok
+test_write_metadata_is_sorted_json (test_run.MetadataTests.test_write_metadata_is_sorted_json) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+OK
+

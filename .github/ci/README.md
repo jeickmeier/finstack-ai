@@ -9,9 +9,10 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, schema governance, Python package smoke, release-smoke on Linux/macOS/Windows |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, schema governance, conformance compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility only; fuzz remains documentation-reserved (no green placeholder job) |
+| [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
 
 ## Toolchain channels (PR-003-A02)
 
@@ -93,7 +94,24 @@ These reservations are documentation-only. Do not add green placeholder jobs.
 | Headless browser smoke | browser WASM conformance placeholders | every PR once browser package exists | PR-033–PR-036 | `me@jeickmeier.com` |
 | Parser fuzz smoke | no targets yet; no workflow job until targets exist | weekly via `nightly.yml` once targets exist | PR introducing each parser | `me@jeickmeier.com` |
 | Security-boundary suites | adversarial authorization/permission suites | every PR for owning surface | owning runtime/binding/plugin PRs | `me@jeickmeier.com` |
-| Benchmark regression | artifact retention later; not merge-blocking | scheduled / manual; non-blocking | PR-005 | `me@jeickmeier.com` |
+| Benchmark regression | activated as scheduled/manual artifact collection; not merge-blocking; no threshold enforcement | Mondays 06:17 UTC + `workflow_dispatch` via `benchmark.yml`; PR CI only compiles benches (`tools/benchmark/run.py compile`) | PR-005 | `me@jeickmeier.com` |
+
+### Benchmark harness (PR-005)
+
+Owner: `me@jeickmeier.com`
+
+Canonical tasks:
+
+- `mise run conformance` — golden-trace / conformance unit+integration tests
+- `mise run test-benchmark` / `lint-benchmark` / `format-benchmark`
+- `mise run benchmark-smoke` — compile + short Criterion run with metadata
+- `mise run benchmark` — full non-blocking Criterion run with metadata under `target/benchmark/`
+
+Metadata schema: `schemas/benchmark-report/v1/metadata.schema.json`.  
+Artifacts include compiler, target, commit, feature set, and machine metadata
+(PR-005-A03). Flamegraphs remain optional until regression thresholds exist.
+`evidence_eligible` for merge gates remains false for performance budgets;
+metadata shape evidence is eligible for PR-005-A03.
 
 Placeholder jobs must not report passing evidence for unimplemented work.
 

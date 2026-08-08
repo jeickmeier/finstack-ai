@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "package": "finstack-ai-test",
+  "workload": "conformance-noop-load-normalize-compare",
+  "commit": "0123456789abcdef",
+  "rustc": "rustc 1.97.1",
+  "target": "aarch64-apple-darwin",
+  "host_triple": "aarch64-apple-darwin",
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "release": "25.5.0"
+  },
+  "features": [],
+  "profile": "bench",
+  "sample_settings": {
+    "measurement_time_secs": 1.0,
+    "sample_size": 10,
+    "warm_up_time_secs": 0.5
+  },
+  "artifact_paths": {
+    "raw_samples_dir": "target/benchmark/raw",
+    "metadata_file": "target/benchmark/metadata.json"
+  },
+  "generated_at_unix_ms": 0,
+  "mystery": true
+}

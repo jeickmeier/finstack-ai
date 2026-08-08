@@ -1,0 +1,42 @@
+{
+  "format_version": 1,
+  "trace_id": "durable-vs-transient",
+  "initial_agent_spec": {},
+  "initial_session_records": [],
+  "scripted_outcomes": {
+    "format_version": 1,
+    "steps": []
+  },
+  "transition_env": {
+    "timestamps_ms": [],
+    "ids": []
+  },
+  "expected": {
+    "durable_records": [
+      {
+        "kind": "run_accepted",
+        "id": "rec-1"
+      }
+    ],
+    "normalized_events": [
+      {
+        "kind": "run_accepted",
+        "durability": "durable",
+        "id": "evt-d1"
+      },
+      {
+        "kind": "model_delta",
+        "durability": "transient",
+        "id": "evt-t1"
+      }
+    ],
+    "effects": [],
+    "final_state": {
+      "phase": "completed"
+    },
+    "final_result": {
+      "ok": true
+    },
+    "state_hash": "fixture-opaque-hash-1"
+  }
+}

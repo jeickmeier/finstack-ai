@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/benchmark-report/v1/metadata.schema.json",
+  "title": "BenchmarkMetadata",
+  "description": "Machine-readable Criterion benchmark metadata (PR-005; TDD \u00a733.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "package",
+    "workload",
+    "commit",
+    "rustc",
+    "target",
+    "host_triple",
+    "platform",
+    "features",
+    "profile",
+    "sample_settings",
+    "artifact_paths",
+    "generated_at_unix_ms"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "package": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "workload": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 64
+    },
+    "rustc": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "host_triple": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "machine",
+        "release"
+      ],
+      "properties": {
+        "system": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "machine": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "features": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "profile": {
+      "type": "string",
+      "enum": [
+        "bench",
+        "release",
+        "dev"
+      ]
+    },
+    "sample_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measurement_time_secs",
+        "sample_size"
+      ],
+      "properties": {
+        "measurement_time_secs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sample_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "warm_up_time_secs": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "artifact_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_samples_dir",
+        "metadata_file"
+      ],
+      "properties": {
+        "raw_samples_dir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "metadata_file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "flamegraph_dir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "generated_at_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 4096
+    }
+  }
+}

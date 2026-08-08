@@ -29,5 +29,8 @@ fixtures/compatibility/<family>/migrations/v<from>-to-v<to>--<slug>.{before,afte
 | Remote DTOs | [`remote/`](remote/) |
 | Process DTOs | [`process/`](process/) |
 | WIT | [`wit/`](wit/) |
+| Golden traces | [`golden-trace/`](golden-trace/) |
+| Benchmark reports | [`benchmark-report/`](benchmark-report/) |
 
 Reserved README-only directories are not passing conformance evidence.
+Active PR-005 corpora under `golden-trace/` and `benchmark-report/` are.
