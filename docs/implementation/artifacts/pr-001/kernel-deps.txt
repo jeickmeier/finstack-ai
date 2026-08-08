@@ -1,0 +1,3 @@
+kernel dependencies: []
+forbidden hits: []
+PASS no forbidden kernel dependencies

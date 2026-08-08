@@ -69,19 +69,25 @@ When a versioned amendment changes criterion order or inventory, append every af
 
 | Criterion | Scope | Plan version / link | Status | Owner | Evidence | Exception | Reviewer | Reviewed date |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PR-001-A01 | PR-001 | PLAN-0.10 / [PR-001](../planning/04-finstack-ai-implementation-plan.md#pr-001---create-the-workspace-and-package-skeleton) | Pending | me@jeickmeier.com | — | — | — | — |
-| PR-001-A02 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
-| PR-001-A03 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
-| PR-001-A04 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
-| PR-001-A05 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
-| PR-001-A06 | PR-001 | PLAN-0.10 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-001-A01 | PR-001 | PLAN-0.10 / [PR-001](../planning/04-finstack-ai-implementation-plan.md#pr-001---create-the-workspace-and-package-skeleton) | Passed | me@jeickmeier.com | PR-001-E-dep-direction-1fe94f769044 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-001-A02 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-cargo-check-3e6a85e8d27f | — | me@jeickmeier.com | 2026-08-08 |
+| PR-001-A03 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-kernel-deps-1d8c0f41d158 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-001-A04 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-mise-doctor-cae2f2eb7918 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-001-A05 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-ownership-review-b14626f70259 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-001-A06 | PR-001 | PLAN-0.10 / same | Passed | me@jeickmeier.com | PR-001-E-security-md-f70391db8ac2 | — | me@jeickmeier.com | 2026-08-08 |
 
-PR-001 criteria are owned and ready for evidence after an immutable commit. Do not attach acceptance evidence from an uncommitted working tree.
+PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
 ## Evidence records
 
 | Evidence | Produced date | Scope | Type | Command, job, or review | Environment / target | Commit | Result | Artifact, log, or digest | Produced by | Verified by | Verified date | Supersedes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| PR-001-E-dep-direction-1fe94f769044 | 2026-08-08 | PR-001 | Local command | `cargo metadata --format-version 1` + workspace edge assertion | Darwin arm64; rustc/cargo 1.97.1 (`environment.txt`) | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/`](artifacts/pr-001/) `dependency-direction.txt` sha256 `fe777c14e61c21f41535e465fa7eec585ec1b35facc4b63fe566e54ca607e026`; `cargo-metadata.json` sha256 `c64923139ab02812544da4e1bdf113bf68e5c647ab008da2a254fe505f1f682f` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-001-E-cargo-check-3e6a85e8d27f | 2026-08-08 | PR-001 | Local command | `cargo check --workspace --all-targets`; `cargo check -p finstack-ai-kernel` | Darwin arm64; rustc/cargo 1.97.1 | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/cargo-check.txt`](artifacts/pr-001/cargo-check.txt) sha256 `0d2dcea452af6e8fcab54f40cd8c92cdefff15c8b334ec2910e6412fa6211c26` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-001-E-kernel-deps-1d8c0f41d158 | 2026-08-08 | PR-001 | Local command | Kernel dependency inventory from `cargo metadata` (forbidden set empty) | Darwin arm64; rustc/cargo 1.97.1 | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/kernel-deps.txt`](artifacts/pr-001/kernel-deps.txt) sha256 `7dd89503a66614cafdd08c63050b00b28639e6b86f806c2d9471e77c533bc8ca` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-001-E-mise-doctor-cae2f2eb7918 | 2026-08-08 | PR-001 | Local command | `mise run install`; `mise run doctor` | Darwin arm64; mise tools rust 1.97.1, python 3.14.6, uv 0.10.11 | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/mise-install.txt`](artifacts/pr-001/mise-install.txt) sha256 `3d93bbf76a6716cd61c97a3f711a0a9bfcf1b2208ce0b0234eca8fc416ab4502`; [`mise-doctor.txt`](artifacts/pr-001/mise-doctor.txt) sha256 `b97d92e7d7636fd9e6a9ced0e9496c78cad2ab53fbaec1914a3fdaa84866fcae` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-001-E-ownership-review-b14626f70259 | 2026-08-08 | PR-001 | Manual review | Review `GOVERNANCE.md` + `CONTRIBUTING.md` ownership/DCO | Files at reviewed commit | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/ownership-security-review.txt`](artifacts/pr-001/ownership-security-review.txt) sha256 `6b41e0e37adb1d09c4a5c51613da432de89edcdcb120cd05980bbf013be0182e` (A05) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-001-E-security-md-f70391db8ac2 | 2026-08-08 | PR-001 | Manual review | Review `SECURITY.md` private path, supported-version placeholder, response owner vs Threat Model §14 | Files at reviewed commit | `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` | Pass | [`artifacts/pr-001/ownership-security-review.txt`](artifacts/pr-001/ownership-security-review.txt) sha256 `6b41e0e37adb1d09c4a5c51613da432de89edcdcb120cd05980bbf013be0182e` (A06) | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 
 An evidence record is valid only when another contributor can identify what ran or was reviewed, against which immutable revision, in which relevant environment, with what result, and where the durable output is stored. A bare statement such as “tests pass,” an unlinked local result, or evidence from a superseded commit cannot close acceptance.
 

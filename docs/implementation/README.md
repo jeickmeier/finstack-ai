@@ -27,10 +27,10 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.12 on 2026-08-08:
 
-- 37 decisions are accepted and indexed; ADR-024 license/governance files are in progress under PR-001 (standalone ADR text remains PR-004).
-- Phase 0 / PR-001 are `In progress`; remaining logical PRs are `Todo`.
+- 37 decisions are accepted and indexed; ADR-024 license/governance files are `Partial` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862` (standalone ADR text remains PR-004).
+- Phase 0 is `In progress`; PR-001 is `Done`; PR-002–PR-066 are `Todo`.
 - gates G0 through G8 are `Not ready`.
-- PR-001 acceptance criteria are owned as `Pending`; durable evidence is deferred until an immutable commit. No gate approvals or exceptions have been recorded.
+- PR-001 acceptance criteria A01–A06 are `Passed` with artifacts under [`artifacts/pr-001/`](artifacts/pr-001/). No gate approvals or exceptions have been recorded.
 
 The existence of these registers is documentation setup, not evidence that Phase 0 or PR-004 has passed.
 

@@ -48,7 +48,7 @@ Index last reconciled: 2026-08-08.
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Indexed | Not started | Missing |
 | ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Indexed | Not started | Missing |
 | ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Accepted | Indexed | Not started | Missing |
-| ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Indexed | In progress | Missing |
+| ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Indexed | In progress | Partial |
 | ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Indexed | Not started | Missing |
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Indexed | Not started | Missing |
@@ -107,6 +107,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-024 | Implementation | me@jeickmeier.com | Not started | In progress | PR-001 license/governance files | — | — |
 | 2026-08-08 | ADR-024 | Evidence | me@jeickmeier.com | Missing | Partial | PR-001 license/governance files (ADR text still PR-004) | — | — |
 | 2026-08-08 | ADR-024 | Evidence | me@jeickmeier.com | Partial | Missing | Revert uncommitted Partial claim; durable evidence awaits immutable commit | — | — |
+| 2026-08-08 | ADR-024 | Evidence | me@jeickmeier.com | Missing | Partial | PR-001 license/governance files at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`; standalone ADR text remains PR-004 | PR-001-E-ownership-review-b14626f70259; PR-001-E-security-md-f70391db8ac2 | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -114,7 +115,7 @@ Add a row when an ADR gains a standalone record, an active assignee, or implemen
 
 | ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
 | --- | --- | --- | --- | --- | --- |
-| ADR-024 | — (Indexed only; standalone ADR text is PR-004) | me@jeickmeier.com | — (implementation files present in working tree; no commit-backed evidence yet) | PR-001 license/governance files | 2026-08-08 |
+| ADR-024 | — (Indexed only; standalone ADR text is PR-004) | me@jeickmeier.com | Commit `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`: `licenses/LICENSE-MIT`, `licenses/LICENSE-APACHE`, `GOVERNANCE.md`, `SECURITY.md`, `CONTRIBUTING.md`; evidence IDs PR-001-E-ownership-review-b14626f70259, PR-001-E-security-md-f70391db8ac2 | PR-001 license/governance files | 2026-08-08 |
 
 ## Supersession log
 

@@ -1,0 +1,11 @@
+workspace edges (depender -> dependency):
+  finstack-ai -> finstack-ai-runtime
+  finstack-ai-protocol -> finstack-ai-kernel
+  finstack-ai-python -> finstack-ai
+  finstack-ai-runtime -> finstack-ai-kernel
+  finstack-ai-test -> finstack-ai-kernel
+  finstack-ai-test -> finstack-ai-runtime
+  finstack-ai-wasm -> finstack-ai
+extra []
+missing []
+PASS approved dependency direction only
