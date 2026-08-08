@@ -185,17 +185,18 @@ Phase 3: Rust SDK/native preview
    |-------------------|-------------------|
    v                   v                   v
 Phase 4: Python     Phase 5: WASM      Phase 6: durability
-   |                   |                   |
-   |-------------------|-------------------|
-                       |
-                Phase 7: plugins
-                       |
-                Phase 8: preview
-                       |
-                Phase 9: 1.0
+   |                   |                   | \
+   |                   |                   |  +-- after PR-039 + Phase 3 port freeze
+   |                   |                   |                   |
+   |                   |                   |             Phase 7: plugins
+   |                   |                   |                   |
+   |-------------------|-------------------|-------------------|
+                                       Phase 8: preview
+                                               |
+                                        Phase 9: 1.0
 ```
 
-Durability store work may begin after Phase 2, and WIT design may begin after the six port traits are candidate-stable. Neither should force changes into the Phase 1 kernel without an ADR.
+Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
 
 # 6. Pull request operating model
 
@@ -512,7 +513,7 @@ A separate ADR is required before merging a change that:
 
 - All IDs serialize canonically and reject type confusion in Rust APIs.
 
-- Raw JSON and metadata cross clone boundaries without copying payload bytes; fixtures enforce their exact byte/member/key/depth ceilings and preserve unknown metadata members.
+- Raw JSON and metadata cross clone boundaries without copying payload bytes; fixtures enforce exact and one-over source-span and canonical-JCS byte ceilings plus member/key/depth ceilings, and preserve unknown metadata members.
 
 - Native/Python/JavaScript/CBOR/JSON fixtures agree on timestamp/duration range, precision, UTC/RFC-3339 mapping, leap-second policy, and overflow rejection.
 
@@ -598,11 +599,11 @@ A separate ADR is required before merging a change that:
 
 - Record ordering is deterministic under an injected transition environment.
 
-- Schema fixture diffs are merge-blocking; exact-limit and one-over-limit fixtures cover every v1 record and batch ceiling.
+- Schema fixture diffs are merge-blocking; constructors and schema fixtures prove exact-limit and one-over-limit logical record-count, collection-item, raw-JSON/metadata-byte, and depth ceilings. Canonical-CBOR envelope/batch byte limits and malicious declared-length enforcement belong to PR-039.
 
 **Dependencies.** PR-006 and PR-007.
 
-**Traceability.** FR-KRN-006, FR-KRN-007; FR-DUR foundations; TDD sections 12 and 20.
+**Traceability.** FR-KRN-006, FR-KRN-007; FR-DUR foundations; TDD sections 6.5, 12, and 20.
 
 **Explicitly excluded.** No store or runtime commit loop.
 
@@ -694,7 +695,7 @@ A separate ADR is required before merging a change that:
 
 - Every limit is tested at below, exact, and above-boundary values.
 
-- Cost fixtures use integer millionths plus pricing-policy version and cover `0`, `2^53-1`, `2^53`, `u64::MAX`, overflow rejection, canonical JSON-string round-trip, and unknown usage policies; extension counters are registered/bounded, monotonic, replay-stable, and fail on overflow.
+- Cost fixtures use integer millionths plus pricing-policy version and cover `0`, `2^53-1`, `2^53`, `u64::MAX`, canonical JSON-string round-trip, and unknown usage policies. Checked aggregate overflow commits terminal `RunFailed` with code `cost_overflow`, category `limit`, and `retryable = false`, without `LimitReached` or a fabricated observed cost; extension counters are registered/bounded, monotonic, replay-stable, and fail on overflow.
 
 - Cancellation is idempotent and replay-safe from every run phase.
 
@@ -900,7 +901,7 @@ A separate ADR is required before merging a change that:
 
 - Parallel completion order does not change durable history.
 
-- Tool arguments are validated once at the chosen boundary.
+- Tool arguments are validated once at the chosen boundary; approval fixtures prove `Required` cannot be weakened, stricter host or middleware policy overrides `Policy` and `NotRequired`, and approval or general metadata attributes grant no authority.
 
 - The default Rust validator and any fixture validator produce identical normalized retry outcomes for the portable schema subset.
 
@@ -1160,11 +1161,11 @@ A separate ADR is required before merging a change that:
 
 - Crash/race fixtures cannot double-reserve/charge or start a child before its required reservation settles; equal ledger retries return the original receipt and conflicting digests fail closed.
 
-- Artifact fixtures prove write-before-journal ordering, scope authorization, content-digest verification, orphan cleanup after failed appends, retention pinning, and integrity failure for a missing/corrupt referenced artifact.
+- Artifact fixtures prove write-before-journal ordering, scope authorization, content-digest verification, orphan cleanup after failed appends, retention pinning, and integrity failure for a missing/corrupt referenced artifact. They also prove exact `ArtifactMetadata`-to-`ArtifactRef`/`BlobRef` preservation, section 6.5 boundary rejection without truncation, and that attributes cannot grant authority.
 
 **Dependencies.** PR-021.
 
-**Traceability.** FR-CAP and FR-SPEC; TDD sections 8, 10, and 29.
+**Traceability.** FR-CAP and FR-SPEC; TDD sections 6.5, 8, 9, 10, and 29.
 
 **Explicitly excluded.** No remote spec registry, visual configuration UI, or final model-activated catalog rendering/heuristics.
 
@@ -1818,7 +1819,7 @@ A separate ADR is required before merging a change that:
 
 - Nested maps created in different insertion orders encode identically; fixtures cover `0`, `2^53-1`, `2^53`, and `u64::MAX`, bignum-tag/overflow rejection, float-width boundaries, negative zero, and non-finite rejection.
 
-- Unknown versions and malformed lengths fail before large allocation.
+- Exact-limit and one-over-limit canonical envelope byte, checked sum-of-envelope batch byte, batch-record-count, collection-item, and nesting-depth fixtures are enforced during decode; backend/transport overhead is excluded, and unknown versions or malicious declared lengths fail before allocation.
 
 - Reordered, truncated, payload-modified, or wrong-head journal fixtures fail checksum/sequence verification before record application.
 
@@ -1832,7 +1833,7 @@ A separate ADR is required before merging a change that:
 
 **Dependencies.** PR-014 and ADR-015 from PR-004.
 
-**Traceability.** FR-DUR-001/002; TDD sections 18 and 28.
+**Traceability.** FR-DUR-001/002; TDD sections 6.5, 18, and 28.
 
 **Explicitly excluded.** No specific database.
 

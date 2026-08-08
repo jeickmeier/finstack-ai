@@ -27,22 +27,25 @@ The current ordinal namespace is bound to this exact plan artifact:
 | Baseline | Plan version | SHA-256 | Effective date | Logical PRs | PR criteria | Phase criteria | Amendment | State |
 | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |
 | PLAN-0.6 | 0.6 | `237b624f53488cb625c598e2affaf0bae484e7ae33da26d06516135b14b93cff` | 2026-08-08 | 66 | 342 | 62 | Initial implementation baseline | Superseded |
-| PLAN-0.8 | 0.8 | `4467fd52d09dc3e49200ae09d4b023656b7dcbac9b09670c2859b83a8009842c` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Current |
+| PLAN-0.8 | 0.8 | `0e3d7c824daf036b72981ebbf0c1ab46a0989f277ce2c3f5ae5be728d4b51fa1` | 2026-08-08 | 66 | 345 | 62 | Documentation packs v0.9-v0.10 reconciliation | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
 | Date | Prior baseline | New baseline / digest | Old criterion | New criterion or disposition | Amendment | Reconciled by |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / `4467fd52d09dc3e49200ae09d4b023656b7dcbac9b09670c2859b83a8009842c` | PH0-ENT-A01 | PH0-ENT-A01 (clarified) | Pack v0.9 gate sequencing | Pack v0.9 amendment |
-| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-001-A05 | PR-001-A05 (revised) | Pack v0.10 mise bootstrap | Pack v0.10 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / `0e3d7c824daf036b72981ebbf0c1ab46a0989f277ce2c3f5ae5be728d4b51fa1` | PH0-ENT-A01 | PH0-ENT-A01 (clarified) | Pack v0.9 gate sequencing | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-001-A04 | PR-001-A04 (revised) | Pack v0.10 mise bootstrap | Pack v0.10 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-005-A05 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-006-A02 | PR-006-A02 (revised) | Pack v0.9 metadata bounds | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-008-A08 | PR-008-A08 (revised) | Pack v0.9 record bounds | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-011-A02 | PR-011-A02 (revised) | Pack v0.9 cost encoding | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-016-A04 | PR-016-A04 (revised) | Pack v0.9 approval-policy floor | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-022-A12 | PR-022-A12 (revised) | Pack v0.9 artifact metadata contract | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-026-A05 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | — | PR-038-A06 (added) | Pack v0.9 gate sign-off alignment | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A02 | PR-039-A02 (revised) | Pack v0.9 cost projection | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A03 | PR-039-A03 (revised) | Pack v0.9 CBOR boundaries | Pack v0.9 amendment |
+| 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-039-A04 | PR-039-A04 (revised) | Pack v0.9 decoder bounds | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-057-A02 | PR-057-A02 (revised) | Pack v0.9 redaction coverage | Pack v0.9 amendment |
 | 2026-08-08 | PLAN-0.6 | PLAN-0.8 / same digest | PR-063-A02 | PR-063-A02 (revised) | Pack v0.9 performance ownership | Pack v0.9 amendment |
 
@@ -98,7 +101,7 @@ Large outputs belong in durable artifacts. This register stores their identity, 
 | GN-D-short-slug-xxxxxxxxxxxx | GN | YYYY-MM-DD | Passed/Failed | named approver | immutable commits | scoped evidence IDs | scoped exception ID or None | accepted conditions or None | issue/task or — |
 -->
 
-A passing decision requires the approver to verify the gate's plan requirements, phase exit evidence, applicable Security and Threat Model controls, compatibility obligations, and exception status. The [delivery ledger](delivery-ledger.md) is updated to `Passed` only after this row exists.
+A passing decision requires the approver to verify the gate's plan requirements, phase exit evidence, applicable Security and Threat Model controls, compatibility obligations, and exception status. The decision row itself satisfies a final logical PR's gate-sign-off criterion; that criterion is not a prerequisite to recording the decision. The [delivery ledger](delivery-ledger.md) is updated to `Passed` only after this row exists.
 
 ## Corrections and retention
 

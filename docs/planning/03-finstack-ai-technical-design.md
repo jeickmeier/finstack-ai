@@ -405,7 +405,7 @@ impl RawJson {
 
 Validation occurs on construction. Parsed `serde_json::Value` is created only when required. This avoids repeated structure/string conversions across providers and bindings.
 
-`RawJson::parse` uses a bounded strict parser: duplicate object keys, trailing data, excessive depth/size, and non-JSON numeric values are rejected. Original validated bytes may be retained for provider round-tripping, but equality/idempotency digests use RFC 8785 JSON Canonicalization Scheme bytes. Unicode strings are not normalized beyond JSON decoding, so visually similar but byte-distinct code points remain distinct.
+`RawJson::parse` uses a bounded strict parser: duplicate object keys, trailing data, excessive depth/size, and non-JSON numeric values are rejected. For serialized input, the source span is length-checked before parsing and both the source bytes and resulting RFC 8785 canonical bytes must fit the section 6.5 ceiling. Programmatic construction must satisfy the same canonical-byte ceiling. Original validated bytes may be retained for provider round-tripping, but equality/idempotency digests use RFC 8785 JSON Canonicalization Scheme bytes. Unicode strings are not normalized beyond JSON decoding, so visually similar but byte-distinct code points remain distinct.
 
 The portable JCS numeric domain is finite IEEE-754 binary64. Canonicalization parses and serializes numbers under RFC 8785/ECMAScript rules; overflow is rejected. Schemas must encode exact integers outside `-(2^53-1)..=(2^53-1)`, precision-sensitive decimals, and monetary quantities as strings or typed non-JSON fields rather than JSON numbers. Durable typed CBOR DTOs may use their declared wider integer types. Cross-language fixtures cover the safe-integer boundaries, `i64`/`u64` string encodings, exponent normalization, rounding-equivalent lexical forms, negative zero, underflow/overflow, and non-finite rejection.
 
@@ -420,7 +420,7 @@ pub struct Metadata(RawJson);
 
 `Metadata::parse` requires a top-level JSON object and `{}` is the default. It inherits strict `RawJson` validation. Equality and semantic digests use JCS canonical bytes; canonical CBOR carries those JCS bytes as a byte string, while human and diagnostic JSON emits the object itself. Every unknown member is preserved during round-trip even when a consumer ignores it. Metadata is included in the enclosing object's digest and never grants authority; a member that changes behavior requires an explicitly versioned enclosing contract.
 
-V1 metadata is limited to 64 KiB of canonical bytes, 64 top-level members, 128 UTF-8 bytes per key, and depth 16. Keys are namespaced outside a field owner's documented stable keys. `ErrorDescriptor.safe_details`, `AuthorizationContext.safe_claims`, and artifact metadata are non-secret. Child-run metadata cannot change principal, tenant, deadline, placement, or budget. Provider message metadata is exposed only to its owning adapter unless a versioned portable member says otherwise.
+V1 metadata is limited to 64 KiB each for its serialized source span and canonical JCS bytes, 64 top-level members, 128 UTF-8 bytes per key, and depth 16. The source-span limit is checked before parsing; programmatic construction enforces the canonical-byte limit. Keys are namespaced outside a field owner's documented stable keys. `ErrorDescriptor.safe_details`, `AuthorizationContext.safe_claims`, and artifact metadata are non-secret. Child-run metadata cannot change principal, tenant, deadline, placement, or budget. Provider message metadata is exposed only to its owning adapter unless a versioned portable member says otherwise.
 
 ## 6.3 Shared buffers
 
@@ -457,7 +457,9 @@ The following are default and hard v1 schema ceilings. Deployments may configure
 | `RawJson` value | 1 MiB and depth 32 |
 | `Metadata` value | 64 KiB, 64 top-level members, 128-byte keys, depth 16 |
 
-Constructors and decoders check the applicable byte, item, and depth limits before allocation and return a stable error; they never truncate semantic input. Replay-required content larger than these ceilings uses a scoped `ArtifactRef`. Protocol, plugin, provider, tool, and deployment limits may be stricter; the 16 KiB pre-authentication frame ceiling remains independent. Raising a hard schema ceiling after release is a compatibility change with new boundary fixtures.
+The canonical record-envelope size is the byte length of the complete canonical-CBOR `RecordEnvelope`. The atomic append-batch byte size is the checked sum of its committed canonical record-envelope lengths, excluding transport framing, database pages, transaction metadata, and other backend overhead; it must satisfy both the 16 MiB sum and independent 256-record cap. No separate canonical batch encoding is implied.
+
+Constructors and decoders check the applicable byte, item, and depth limits before allocation and return a stable error; they never truncate semantic input. For `RawJson` and `Metadata` parsed from serialized input, both the source span and canonical JCS bytes must fit their respective byte ceiling. Replay-required content larger than these ceilings uses a scoped `ArtifactRef`. Protocol, plugin, provider, tool, and deployment limits may be stricter; the 16 KiB pre-authentication frame ceiling remains independent. Raising a hard schema ceiling after release is a compatibility change with new boundary fixtures.
 
 # 7. Content and message model
 
@@ -904,6 +906,8 @@ pub trait ArtifactStore: PortObject {
 ```
 
 For any artifact referenced by a durable behavior-changing record, `stage_put` must durably store the exact bytes and return a content-addressed reference before the journal batch is appended. The runtime verifies length, SHA-256 `content_digest`, and scope binding. A failed journal append may leave an unreferenced staged object; stores garbage-collect such orphans only after a configured grace period. Journal retention pins referenced content for at least the recoverability/audit period. A missing, wrong-scope, or digest-mismatched required artifact is an integrity/recovery error and is never silently recomputed. Only explicitly disposable derived caches such as compatible compaction checkpoints may be discarded and rebuilt.
+
+`stage_put` maps `ArtifactMetadata.kind` verbatim to `ArtifactRef.kind`, `media_type` and `name` to the returned `BlobRef`, and `attributes` to `ArtifactRef.metadata`. It sets `BlobRef.length` from the exact stored bytes and `BlobRef.digest` to the same SHA-256 digest carried by `ArtifactRef.content_digest`. Every field is preserved within the section 6.5 bounds; the store rejects an invalid or oversized value instead of truncating, rewriting, or dropping it. Metadata attributes remain non-secret and non-authoritative: they cannot widen the supplied scope or grant read/write authority.
 
 This is the narrow ENG-SEM-012 preparatory-write exception: the key is the content/domain digest, repeated writes are byte-identical and idempotent, staged content is not discoverable or authoritative before a journal reference, no permission/business action occurs, and both staging bytes/concurrency plus orphan age/total storage are bounded. Disk-full or staging failure prevents the referencing record from committing. All other service/provider work requires committed intent first.
 
@@ -1441,7 +1445,7 @@ pub struct InteractionRequest {
     pub assignee_hint: Option<AssigneeHint>,
     pub expires_at: Option<Timestamp>,
     pub delegatable: bool,
-    pub metadata: RawJson,
+    pub metadata: Metadata,
 }
 
 pub enum InteractionKind {
@@ -2189,7 +2193,7 @@ pub enum UnknownUsagePolicy {
 }
 ```
 
-Cost uses non-negative `u64` integer millionths of an ISO-4217 currency or a namespaced application credit unit; floating-point money is prohibited. The v1 maximum is `u64::MAX`, all aggregation is checked, and overflow is a stable limit failure rather than wraparound. JSON/JSONL and JavaScript-facing schemas encode `micros` as a canonical decimal string; Python may expose an exact integer. The pricing-policy version and provider/model price inputs used for each charge are recorded with normalized usage. Counter increments are monotonic checked integers; overflow is a `counter_overflow` failure, never wraparound. Extension counter keys are namespaced, registered with their maxima during agent resolution, capped at 32 keys per resolved agent in v1, and incremented only through normalized kernel input. `EffectCompleted` usage drives aggregation; crossing a hard bound commits `LimitReached` before terminalization or suspension according to the declared unknown-usage policy.
+Cost uses non-negative `u64` integer millionths of an ISO-4217 currency or a namespaced application credit unit; floating-point money is prohibited. The v1 maximum is `u64::MAX` and all aggregation is checked. If an aggregate overflows, the kernel commits terminal `RunFailed` with `ErrorDescriptor.code = cost_overflow`, `category = limit`, and `retryable = false`; it never wraps, emits `LimitReached`, or fabricates a `LimitValue::Cost.observed` value. JSON/JSONL and JavaScript-facing schemas encode `micros` as a canonical decimal string; Python may expose an exact integer. The pricing-policy version and provider/model price inputs used for each charge are recorded with normalized usage. Counter increments are monotonic checked integers; overflow is a `counter_overflow` failure, never wraparound. Extension counter keys are namespaced, registered with their maxima during agent resolution, capped at 32 keys per resolved agent in v1, and incremented only through normalized kernel input. `EffectCompleted` usage drives aggregation; crossing a representable hard bound commits `LimitReached` before terminalization or suspension according to the declared unknown-usage policy.
 
 ## 22.2 Cancellation token tree
 
