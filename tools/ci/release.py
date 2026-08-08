@@ -19,6 +19,31 @@ BINARY_NAME = "finstack-ai-ci-smoke"
 ARTIFACT_DIR = REPO_ROOT / "target" / "ci-release"
 
 
+def resolve_tool(name: str) -> str:
+    """Resolve a CLI tool for subprocess use (Windows-safe with mise)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.name == "nt":
+        found = shutil.which(f"{name}.exe")
+        if found:
+            return found
+    mise = shutil.which("mise") or (shutil.which("mise.exe") if os.name == "nt" else None)
+    if mise:
+        proc = subprocess.run(
+            [mise, "which", name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        path = proc.stdout.strip()
+        if proc.returncode == 0 and path:
+            return path
+    raise FileNotFoundError(
+        f"{name} executable not found on PATH; ensure mise tools are installed"
+    )
+
+
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> None:
     """Run a command and fail loudly on non-zero exit."""
     print("+", " ".join(command), flush=True)
@@ -63,7 +88,7 @@ def git_commit(*, require: bool | None = None) -> str:
 def rustc_version() -> str:
     """Return the active rustc version string."""
     completed = subprocess.run(
-        ["rustc", "--version"],
+        [resolve_tool("rustc"), "--version"],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -75,7 +100,7 @@ def rustc_version() -> str:
 def host_triple() -> str:
     """Return the host target triple from rustc."""
     completed = subprocess.run(
-        ["rustc", "-vV"],
+        [resolve_tool("rustc"), "-vV"],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -91,7 +116,7 @@ def cargo_package_metadata() -> dict[str, object]:
     """Return Cargo metadata for the smoke package and its enabled features."""
     completed = subprocess.run(
         [
-            "cargo",
+            resolve_tool("cargo"),
             "metadata",
             "--format-version",
             "1",
@@ -185,7 +210,7 @@ def build_release(*, target_dir: Path) -> Path:
     env = release_env({"CARGO_TARGET_DIR": str(target_dir)})
     run(
         [
-            "cargo",
+            resolve_tool("cargo"),
             "build",
             "--release",
             "-p",

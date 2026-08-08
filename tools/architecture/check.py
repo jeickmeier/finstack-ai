@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -24,6 +26,31 @@ TOOL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOL_DIR.parents[1]
 DEFAULT_POLICY = TOOL_DIR / "policy.toml"
 DEFAULT_ALLOWLIST = TOOL_DIR / "allowlist.toml"
+
+
+def resolve_tool(name: str) -> str:
+    """Resolve a CLI tool for subprocess use (Windows-safe with mise)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.name == "nt":
+        found = shutil.which(f"{name}.exe")
+        if found:
+            return found
+    mise = shutil.which("mise") or (shutil.which("mise.exe") if os.name == "nt" else None)
+    if mise:
+        proc = subprocess.run(
+            [mise, "which", name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        path = proc.stdout.strip()
+        if proc.returncode == 0 and path:
+            return path
+    raise FileNotFoundError(
+        f"{name} executable not found on PATH; ensure mise tools are installed"
+    )
 
 # Stable check IDs mapped to governing standards.
 CHECK_RULES: dict[str, tuple[str, ...]] = {
@@ -289,7 +316,7 @@ def run_cargo_metadata(
 ) -> dict[str, Any]:
     """Invoke cargo metadata and return parsed JSON."""
     cmd = [
-        "cargo",
+        resolve_tool("cargo"),
         "metadata",
         "--format-version",
         "1",
