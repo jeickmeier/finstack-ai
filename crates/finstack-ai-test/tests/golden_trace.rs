@@ -1,8 +1,8 @@
 //! Integration tests for golden-trace loading and validation (PR-005).
 
 use finstack_ai_test::{
-    compare_normalized_bytes, compatibility_fixture, load_golden_trace, load_noop_trace,
-    normalize_json_value, validate_against_schema, DurabilityClass, TraceError,
+    DurabilityClass, TraceError, compare_normalized_bytes, compatibility_fixture,
+    load_golden_trace, load_noop_trace, normalize_json_value, validate_against_schema,
 };
 use serde_json::json;
 

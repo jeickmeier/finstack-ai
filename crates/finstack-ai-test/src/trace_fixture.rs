@@ -213,8 +213,8 @@ impl GoldenTrace {
     ///
     /// Returns [`TraceError::Parse`] when serialization fails.
     pub fn to_normalized_bytes(&self) -> Result<Vec<u8>, TraceError> {
-        let value = serde_json::to_value(self)
-            .map_err(|error| TraceError::Parse(error.to_string()))?;
+        let value =
+            serde_json::to_value(self).map_err(|error| TraceError::Parse(error.to_string()))?;
         Ok(normalize_json_value(&value))
     }
 }
@@ -241,7 +241,9 @@ pub fn load_golden_trace(path: impl AsRef<Path>) -> Result<GoldenTrace, TraceErr
 ///
 /// Propagates [`load_golden_trace`] failures.
 pub fn load_noop_trace() -> Result<GoldenTrace, TraceError> {
-    load_golden_trace(compatibility_fixture("golden-trace/v1/trace/valid--noop.json"))
+    load_golden_trace(compatibility_fixture(
+        "golden-trace/v1/trace/valid--noop.json",
+    ))
 }
 
 /// Validate a JSON value against a repository schema family/kind.

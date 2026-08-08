@@ -1,8 +1,8 @@
 //! Conformance runner and adapter tests (PR-005).
 
 use finstack_ai_test::{
-    compatibility_fixture, AdapterCapability, ConformanceAdapter, ConformanceRunner,
-    DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
+    AdapterCapability, ConformanceAdapter, ConformanceRunner, DeferredBindingAdapter,
+    NoOpRustAdapter, TargetKind, compatibility_fixture,
 };
 
 #[test]

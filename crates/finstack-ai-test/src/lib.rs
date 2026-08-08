@@ -12,13 +12,13 @@ mod scripted_model;
 mod trace_fixture;
 
 pub use conformance::{
-    AdapterCapability, AdapterOutcome, ConformanceAdapter, ConformanceReport,
-    ConformanceRunner, DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
+    AdapterCapability, AdapterOutcome, ConformanceAdapter, ConformanceReport, ConformanceRunner,
+    DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
 };
 pub use paths::{compatibility_fixture, repo_root, schema_path};
 pub use scripted_model::{ScriptedInput, ScriptedStep, ScriptedStepKind};
 pub use trace_fixture::{
-    compare_normalized_bytes, load_golden_trace, load_noop_trace, normalize_json_value,
-    validate_against_schema, DurabilityClass, EffectExpectation, ExpectedTrace, GoldenTrace,
-    NormalizedEvent, PayloadDeclaration, TraceError, TraceRecord, TransitionEnv,
+    DurabilityClass, EffectExpectation, ExpectedTrace, GoldenTrace, NormalizedEvent,
+    PayloadDeclaration, TraceError, TraceRecord, TransitionEnv, compare_normalized_bytes,
+    load_golden_trace, load_noop_trace, normalize_json_value, validate_against_schema,
 };

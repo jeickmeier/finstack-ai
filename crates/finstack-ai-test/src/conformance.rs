@@ -7,9 +7,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::trace_fixture::{
-    compare_normalized_bytes, load_golden_trace, GoldenTrace, TraceError,
-};
+use crate::trace_fixture::{GoldenTrace, TraceError, compare_normalized_bytes, load_golden_trace};
 
 /// Supported conformance target kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

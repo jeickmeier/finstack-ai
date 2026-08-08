@@ -5,10 +5,10 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use finstack_ai_test::{
-    compare_normalized_bytes, load_noop_trace, normalize_json_value, ConformanceRunner,
-    NoOpRustAdapter,
+    ConformanceRunner, NoOpRustAdapter, compare_normalized_bytes, load_noop_trace,
+    normalize_json_value,
 };
 
 fn conformance_noop(c: &mut Criterion) {
