@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.15 on 2026-08-08 (PR-008 contract freeze drafted on `pr-008-contract-amendment`, pending maintainer/security review and merge):
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.15 on 2026-08-08 (PR-008 contract freeze on `pr-008-contract-amendment` / [#5](https://github.com/jeickmeier/finstack-ai/pull/5)):
 
 - 37 decisions are accepted and indexed; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
-- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-007 are `Done`; PR-008 is `Blocked` on `PR-008-B-contract-ed6437d9ed08`; PR-009–PR-066 are `Todo`.
+- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-007 are `Done`; PR-008 is `Ready` (`PR-008-B-contract-ed6437d9ed08` Resolved on this branch); PR-009–PR-066 are `Todo`.
 - Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
-- PR-001–PR-007 acceptance criteria are closed. PR-007 evidence is bound under [`artifacts/pr-007/`](artifacts/pr-007/). No exceptions are open.
+- PR-001–PR-007 acceptance criteria are closed. PR-007 evidence is bound under [`artifacts/pr-007/`](artifacts/pr-007/). No exceptions are open. No open blockers.
 
 Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
 
