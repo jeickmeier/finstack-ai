@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.12 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.13 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -31,7 +31,8 @@ The current ordinal namespace is bound to this exact plan artifact:
 | PLAN-0.9 | 0.9 | `6a0cc9a3887026ff902322f7051e9fb0a6050880bbc6ff91ebbeb9e5011e5262` | 2026-08-08 | 66 | 345 | 62 | Pack v0.11 `extensions/` workspace layout | Superseded |
 | PLAN-0.10 | 0.10 | `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | 2026-08-08 | 66 | 345 | 62 | Pack v0.12 centralized license layout | Superseded |
 | PLAN-0.11 | 0.11 | `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.13 PR-007 message contract freeze | Superseded |
-| PLAN-0.12 | 0.12 | `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.14 ModelRef optional fields | Current |
+| PLAN-0.12 | 0.12 | `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.14 ModelRef optional fields | Superseded |
+| PLAN-0.13 | 0.13 | `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | 2026-08-08 | 66 | 345 | 62 | Pack v0.15 PR-008 contract freeze | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -56,6 +57,7 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-08 | PLAN-0.9 | PLAN-0.10 / `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | PR-001 principal changes | PR-001 principal changes (license paths revised; acceptance IDs unchanged) | Pack v0.12 centralized license layout | Pack v0.12 amendment |
 | 2026-08-08 | PLAN-0.10 | PLAN-0.11 / `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | PR-007 principal changes / A01 | PR-007 principal changes / A01 (revised; acceptance IDs unchanged) | Pack v0.13 PR-007 message contract freeze | Pack v0.13 amendment |
 | 2026-08-08 | PLAN-0.11 | PLAN-0.12 / `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | PR-007 principal changes (`ModelRef`) | PR-007 principal changes (`ModelRef` optionals; acceptance IDs unchanged) | Pack v0.14 ModelRef optional fields | Pack v0.14 amendment |
+| 2026-08-08 | PLAN-0.12 | PLAN-0.13 / `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | PR-008 principal changes / A01 / A03 | PR-008 principal changes / A01 / A03 (revised; acceptance IDs unchanged; payload-digest evidence moved to PR-039) | Pack v0.15 PR-008 contract freeze | Pack v0.15 amendment |
 
 ## Acceptance dispositions
 

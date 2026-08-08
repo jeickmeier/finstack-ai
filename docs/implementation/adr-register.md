@@ -39,7 +39,7 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-012 | `immutable-lanes` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-013 | `at-least-once-effects` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-043, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Standalone | Not started | Missing |
-| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-039 implementation | Accepted | Standalone | Not started | Missing |
+| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Not started | Missing |
 | ADR-016 | `sqlite-before-multilane` | Durability/ecosystem lead | PR-040 before PR-047 | Accepted | Standalone | Not started | Missing |
 | ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | Not started | Missing |
 | ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | Not started | Missing |

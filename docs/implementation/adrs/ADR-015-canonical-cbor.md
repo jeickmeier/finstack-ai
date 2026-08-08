@@ -64,13 +64,13 @@ Journal/protocol encoding profile; canonical CBOR with diagnostic JSON/JSONL pro
 - Affected Technical Design: Technical Design §28 (canonical CBOR)
 
 - Architecture Specification §25 decision summary: [link](../../planning/02-finstack-ai-architecture-specification.md#25-architecture-decision-summary)
-- Implementation Plan logical PR-004 and mapped delivery: PR-004 profile; PR-039 implementation
+- Implementation Plan logical PR-004 and mapped delivery: PR-004 profile; PR-008 freezes digest domain constants and semantic `RecordDraft`/`RecordEnvelope` field shapes without a CBOR codec; PR-039 implements the codec, payload digests, checksums, and binary fixtures
 - Engineering Standards public-contract and ADR-trigger rules apply where this decision defines a compatibility or architecture gate
 
 ### PRD §18 delivery detail
 
 - Product decision: Use deterministic, versioned CBOR as the canonical journal and protocol envelope; retain lossless JSON/JSONL diagnostic projection.
-- Delivery point: Profile frozen in PR-004; implemented in PR-039.
+- Delivery point: Profile frozen in PR-004; semantic digest domains and record field shapes referenced from PR-008; codec/digest/checksum implementation in PR-039. Pack v0.15 clarifies that PR-008 must not implement canonical-CBOR encoding or claim cross-language payload-digest evidence.
 - Source: [PRD §18](../../planning/01-finstack-ai-product-requirements.md#18-resolved-foundational-product-decisions)
 
 ## Supersession metadata

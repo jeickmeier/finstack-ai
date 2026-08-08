@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.12 |
+| Version | 0.13 |
 | Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Technical Design v0.12; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.8; Technical Design v0.13; Security and Threat Model v0.4 |
 
 # Executive implementation decision
 
@@ -565,13 +565,15 @@ A separate ADR is required before merging a change that:
 
 **Principal changes.**
 
-- Create versioned `RunEvent`, `JournalRecord`, `EffectRequest`, and `EffectResult` envelopes.
+- Create versioned `RunEvent`, `RecordDraft` / `RecordEnvelope` / `RecordBody`, `EffectRequested`, and `EffectCompleted` / `EffectFailed` / `EffectCancelled` envelopes using Technical Design vocabulary (not the non-normative aliases `JournalRecord`, `EffectRequest`, or `EffectResult`).
 
-- Classify each event as durable, transient, diagnostic, or binding-local.
+- Classify every `RunEvent` as durable-derived or transient only. Diagnostics and binding-local notifications remain outside runtime-event schemas.
 
-- Define record batches, state version preconditions, effect idempotency keys, and event sequence numbers.
+- Freeze the PR-008-owned record inventory only: `RunAccepted`; effect lifecycle five (`EffectRequested`, `EffectDeferred`, `EffectCompleted`, `EffectFailed`, `EffectCancelled`); interaction four (`InteractionRequested`, `InteractionResolved`, `InteractionExpired`, `InteractionCancelled`). Later PRs own remaining `RecordBody` variants.
 
-- Freeze SHA-256 domain-separated digest semantics, strict RFC 8785 normalization for `RawJson`, canonical-CBOR record digests, runtime-owned semantic timestamps, and separate optional store commit timestamps.
+- Define record batches, expected-sequence preconditions, effect idempotency / completion IDs, durable and transient event sequence numbers, `AllocatedIds`, `ComponentRef` / `Version` / `MiddlewareRef`, `Usage`, `EffectInput`, `RetrySafety`, `RunEventKind` / `RunEventBody`, derived-event ordinal mapping, and the v1 run-relation depth ceiling (16).
+
+- Freeze SHA-256 digest domain constants for record/effect surfaces, strict RFC 8785 normalization for `RawJson`, runtime-owned semantic timestamps, and separate optional store commit timestamps. Do not implement canonical-CBOR encoding, payload-digest calculation/verification, envelope checksums, or binary size fixtures in PR-008 (owned by PR-039 / ADR-015).
 
 - Keep durable wall-clock due/deadline values distinct from non-serialized monotonic elapsed time.
 
@@ -583,7 +585,7 @@ A separate ADR is required before merging a change that:
 
 - Add the TDD per-family compatibility matrix: strict AgentSpec/config and inbound-command rejection, schema-declared/preserved ignorable durable optionals, fatal unknown state-bearing data, exact WIT worlds, and retain-or-ignore diagnostic metadata.
 
-- Freeze the v1 semantic payload ceilings for record envelopes, append batches, strings/bytes, collections, nesting, raw JSON, and metadata; oversized semantic input fails before allocation and is never truncated.
+- Freeze the v1 semantic payload ceilings for logical record counts, strings/bytes, collections, nesting, raw JSON, and metadata; oversized semantic input fails before allocation and is never truncated.
 
 **Acceptance evidence.**
 
@@ -591,7 +593,7 @@ A separate ADR is required before merging a change that:
 
 - Every recoverable effect request has a stable `EffectId` and normalized input hash.
 
-- Every event carries schema/kind versions and the applicable model-request/tool-batch correlation IDs; every record carries envelope/kind versions and a cross-language payload digest.
+- Every event carries schema/kind versions and the applicable model-request/tool-batch correlation IDs; every record draft/envelope carries format/kind versions. Cross-language canonical-CBOR payload-digest and envelope-checksum evidence belongs to PR-039.
 
 - Durable-derived UUIDv7 event IDs are allocated with and persisted on their source record by a versioned ordinal mapping; replay reuses them, while transient event IDs are explicitly non-replay-stable.
 
@@ -605,9 +607,9 @@ A separate ADR is required before merging a change that:
 
 **Dependencies.** PR-006 and PR-007.
 
-**Traceability.** FR-KRN-006, FR-KRN-007; FR-DUR foundations; TDD sections 6.5, 12, and 20.
+**Traceability.** FR-KRN-006, FR-KRN-007; FR-DUR foundations; TDD sections 6.5, 12, and 20; Architecture section 19.2.
 
-**Explicitly excluded.** No store or runtime commit loop.
+**Explicitly excluded.** No store or runtime commit loop. No canonical-CBOR codec, payload-digest calculation/verification, envelope checksum chain, or binary record fixtures (PR-039). No non-owned `RecordBody` variants.
 
 ### PR-009 - Implement the model-only run reducer
 
@@ -1805,13 +1807,15 @@ A separate ADR is required before merging a change that:
 
 - Implement ADR-015's deterministic CBOR profile with `ciborium` behind the project codec wrapper: validate and recursively sort map keys using RFC 8949 ordering before library encoding; enforce definite lengths, shortest lossless major-type integer/finite-float encodings, rejection of bignum tags 2/3, preservation of negative zero, duplicate-key/non-finite-float rejection, strict v1 depth/size/item limits, and lossless JSON/JSONL diagnostic projection. Do not rely on the library writer alone for canonicalization.
 
+- Calculate and verify `RecordEnvelope.payload_digest` (`record-payload` domain) and envelope/session checksum chains over canonical-CBOR bytes; publish cross-language known-answer digest fixtures for every durable record family activated by that time. This is the acceptance home for cross-language payload-digest evidence deferred from PR-008-A03.
+
 - Add checksums/state versions and corruption classification.
 
 - Add per-record payload/envelope checksums and a session checksum chain/head covering all replay-semantic fields while excluding diagnostic store commit time.
 
 - Publish compatibility fixtures for every record variant.
 
-- Freeze the v1 lineage, generic `EffectDeferred`, interaction, and `before_finalize` record variants together with the rest of the semantic journal.
+- Freeze the remaining store/session/lane/snapshot journal variants together with the semantic journal already frozen by earlier PRs (PR-008 owns lineage/effect/interaction envelopes; PR-039 does not redefine those semantics).
 
 **Acceptance evidence.**
 
@@ -1822,6 +1826,8 @@ A separate ADR is required before merging a change that:
 - Nested maps created in different insertion orders encode identically; fixtures cover `0`, `2^53-1`, `2^53`, and `u64::MAX`, bignum-tag/overflow rejection, float-width boundaries, negative zero, and non-finite rejection.
 
 - Exact-limit and one-over-limit canonical envelope byte, checked sum-of-envelope batch byte, batch-record-count, collection-item, and nesting-depth fixtures are enforced during decode; backend/transport overhead is excluded, and unknown versions or malicious declared lengths fail before allocation.
+
+- Every committed record carries a cross-language `payload_digest` and envelope checksum verified from canonical-CBOR bytes; known-answer fixtures cover PR-008-owned families and later activated variants.
 
 - Reordered, truncated, payload-modified, or wrong-head journal fixtures fail checksum/sequence verification before record application.
 
@@ -1835,7 +1841,7 @@ A separate ADR is required before merging a change that:
 
 **Dependencies.** PR-014 and ADR-015 from PR-004.
 
-**Traceability.** FR-DUR-001/002; TDD sections 6.5, 18, and 28.
+**Traceability.** FR-DUR-001/002; TDD sections 6.5, 12.1, 18, and 28; ADR-015.
 
 **Explicitly excluded.** No specific database.
 
