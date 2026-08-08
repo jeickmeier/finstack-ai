@@ -230,7 +230,7 @@ Actual PR status is `Planned`, `Draft`, `Open`, `In review`, `Merged`, or `Close
 
 | Actual PR | Logical PR | Status | Owner | Issue | Branch / URL | Head commit | Merged commit | Opened | Updated | Merged | Evidence / disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PR-003a (pending GitHub number) | PR-003 | Open | me@jeickmeier.com | — | `pr-003a-hosted-ci-evidence` | — | — | 2026-08-08 | 2026-08-08 | — | Hosted A01/A03 evidence capture |
+| [#1](https://github.com/jeickmeier/finstack-ai/pull/1) | PR-003 | Open | me@jeickmeier.com | — | `pr-003a-hosted-ci-evidence` / https://github.com/jeickmeier/finstack-ai/pull/1 | `0a4f3f1` tip (see PR head) | — | 2026-08-08 | 2026-08-08 | — | Hosted A01/A03 evidence capture |
 
 ## Implementation task ledger
 

@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.97.1", targets = "wasm32-unknown-unknown" }
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
@@ -17,6 +17,8 @@ description = "Verify pinned toolchain is available"
 run = """
 rustc --version
 cargo --version
+rustfmt --version
+cargo clippy --version
 rustc --print cfg --target wasm32-unknown-unknown >/dev/null
 python --version
 uv --version
