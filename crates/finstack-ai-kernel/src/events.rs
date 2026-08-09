@@ -1055,10 +1055,23 @@ fn run_event_body_from_record(
         RecordBody::RunFailed(value) => RunEventBody::RunFailed {
             error: value.error.clone(),
         },
+        RecordBody::LimitReached(value) => RunEventBody::LimitReached {
+            dimension: value.dimension.clone(),
+        },
+        RecordBody::RunSuspended(value) => RunEventBody::RunSuspended {
+            reason_code: Some(Arc::from(value.reason_code.as_str())),
+        },
+        RecordBody::RunCancelled(value) => RunEventBody::RunCancelled {
+            request_id: Some(value.request_id),
+        },
         RecordBody::StageOutcomeRecorded(_)
         | RecordBody::ContextPrepared(_)
         | RecordBody::ToolBatchOpened(_)
         | RecordBody::ToolBatchClosed(_)
+        | RecordBody::CancellationRequested(_)
+        | RecordBody::CancellationReconciled(_)
+        | RecordBody::RetryScheduled(_)
+        | RecordBody::TimerFired(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1100,10 +1113,20 @@ fn record_correlations(
             effect: value.effect_id,
             tool_call: None,
         },
+        RecordBody::RunCancelled(_) | RecordBody::RunSuspended(_) | RecordBody::LimitReached(_) => {
+            ResolvedEventCorrelations {
+                turn: correlations.model_turn,
+                model_request: correlations.model_request,
+                tool_batch: correlations.tool_batch,
+                effect: body_effect_id,
+                tool_call: correlations.tool_call,
+            }
+        }
         RecordBody::EffectRequested(_)
         | RecordBody::EffectDeferred(_)
         | RecordBody::EffectCompleted(_)
         | RecordBody::EffectFailed(_)
+        | RecordBody::EffectCancelled(_)
             if is_tool_effect_record(body) =>
         {
             ResolvedEventCorrelations {
@@ -1117,7 +1140,8 @@ fn record_correlations(
         RecordBody::EffectRequested(_)
         | RecordBody::EffectDeferred(_)
         | RecordBody::EffectCompleted(_)
-        | RecordBody::EffectFailed(_) => ResolvedEventCorrelations {
+        | RecordBody::EffectFailed(_)
+        | RecordBody::EffectCancelled(_) => ResolvedEventCorrelations {
             turn: correlations.model_turn,
             model_request: correlations.model_request,
             tool_batch: None,
@@ -1154,6 +1178,9 @@ fn is_tool_effect_record(body: &RecordBody) -> bool {
         RecordBody::EffectFailed(failed) => {
             failed.output_contract().kind == EffectOutputKind::ToolResult
         }
+        RecordBody::EffectCancelled(cancelled) => {
+            cancelled.output_contract().kind == EffectOutputKind::ToolResult
+        }
         _ => false,
     }
 }
@@ -1169,6 +1196,9 @@ fn is_model_effect_record(body: &RecordBody) -> bool {
         }
         RecordBody::EffectFailed(failed) => {
             failed.output_contract().kind == EffectOutputKind::ModelResponse
+        }
+        RecordBody::EffectCancelled(cancelled) => {
+            cancelled.output_contract().kind == EffectOutputKind::ModelResponse
         }
         _ => false,
     }
@@ -1304,10 +1334,17 @@ pub fn derived_event_kind(
         RecordBody::ToolCallSettled(_) => unreachable!("handled above"),
         RecordBody::RunCompleted(_) => RunEventKind::RunCompleted,
         RecordBody::RunFailed(_) => RunEventKind::RunFailed,
+        RecordBody::LimitReached(_) => RunEventKind::LimitReached,
+        RecordBody::RunSuspended(_) => RunEventKind::RunSuspended,
+        RecordBody::RunCancelled(_) => RunEventKind::RunCancelled,
         RecordBody::StageOutcomeRecorded(_)
         | RecordBody::ContextPrepared(_)
         | RecordBody::ToolBatchOpened(_)
-        | RecordBody::ToolBatchClosed(_) => {
+        | RecordBody::ToolBatchClosed(_)
+        | RecordBody::CancellationRequested(_)
+        | RecordBody::CancellationReconciled(_)
+        | RecordBody::RetryScheduled(_)
+        | RecordBody::TimerFired(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

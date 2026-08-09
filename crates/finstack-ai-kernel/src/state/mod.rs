@@ -13,12 +13,17 @@ use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRI
 use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES};
 use crate::digest::Digest;
 use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
-use crate::entries::{ContextPrepared, RunCompleted, RunFailed, Stage, StageCursor};
+use crate::entries::{
+    ContextPrepared, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
+    StageCursor, TimerFired,
+};
 use crate::error::ErrorDescriptor;
 use crate::ids::{EffectId, LaneId, MessageId, ModelRequestId, SessionId, ToolCallId, TurnId};
+use crate::limits::{LimitReached, LimitUsage};
 use crate::message::Message;
 use crate::reducer::KernelError;
-use crate::run::RunAccepted;
+use crate::run::{CancellationRequest, RunAccepted};
+use crate::time::Timestamp;
 use crate::tools::{
     ActiveToolBatch, ActiveToolCallStatus, ToolBatchClosed, ToolCallIdentity, ToolCallPlan,
     ToolSettlementFingerprint, ToolSettlementKind,
@@ -191,6 +196,40 @@ pub enum TerminalState {
     Completed(RunCompleted),
     /// Failed terminal.
     Failed(RunFailed),
+    /// Cancelled terminal.
+    Cancelled(RunCancelled),
+}
+
+/// Replay-derived cancellation control state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CancellationState {
+    /// Winning request.
+    pub request: CancellationRequest,
+    /// Phase held when cancellation gained control.
+    pub prior_phase: RunPhase,
+    /// Cumulative completed effects.
+    pub completed_effects: Arc<[EffectId]>,
+    /// Cumulative cancelled effects.
+    pub cancelled_effects: Arc<[EffectId]>,
+    /// Cumulative uncertain effects.
+    pub uncertain_effects: Arc<[EffectId]>,
+    /// Effects still awaiting reconciliation.
+    pub outstanding_effects: Arc<[EffectId]>,
+}
+
+/// Replay-derived semantic retry state.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetryState {
+    /// Number of committed additional attempts.
+    pub attempts: u32,
+    /// Timer currently gating a retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<RetryScheduled>,
+    /// Terminal timer firings retained for duplicate/conflict classification.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub timer_firings: BTreeMap<EffectId, TimerFired>,
 }
 
 /// Sorted state-hash projection entry for one stage settlement.
@@ -288,7 +327,7 @@ impl<'de> Deserialize<'de> for CompletionIdentityHashEntryV1 {
 }
 
 /// Complete authoritative state derived only from committed records.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct KernelState {
     /// State schema version.
     pub state_version: u16,
@@ -300,6 +339,8 @@ pub struct KernelState {
     pub lane_id: Option<LaneId>,
     /// Immutable accepted run payload.
     pub accepted: Option<RunAccepted>,
+    /// Semantic timestamp of the accepted record.
+    pub accepted_at: Option<Timestamp>,
     /// Current run phase.
     pub phase: Option<RunPhase>,
     /// Zero-based model cycle.
@@ -326,9 +367,27 @@ pub struct KernelState {
     pub tool_settlements: BTreeMap<EffectId, ToolSettlementFingerprint>,
     /// Most recently closed batch awaiting after-tool settlement.
     pub last_tool_batch: Option<ToolBatchClosed>,
+    /// Replay-derived cumulative limit usage.
+    pub limit_usage: LimitUsage,
+    /// Active or completed cancellation control state.
+    pub cancellation: Option<CancellationState>,
+    /// Replay-derived semantic retry state.
+    pub retry: RetryState,
+    /// Most recent reached limit.
+    pub last_limit: Option<LimitReached>,
+    /// Active suspension payload.
+    pub suspension: Option<RunSuspended>,
     /// Applied terminal payload.
     pub terminal: Option<TerminalState>,
 }
+
+impl PartialEq for KernelState {
+    fn eq(&self, other: &Self) -> bool {
+        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+    }
+}
+
+impl Eq for KernelState {}
 
 impl Default for KernelState {
     fn default() -> Self {
@@ -338,6 +397,7 @@ impl Default for KernelState {
             session_id: None,
             lane_id: None,
             accepted: None,
+            accepted_at: None,
             phase: None,
             cycle: 0,
             current_turn: None,
@@ -351,6 +411,11 @@ impl Default for KernelState {
             tool_calls: BTreeMap::new(),
             tool_settlements: BTreeMap::new(),
             last_tool_batch: None,
+            limit_usage: LimitUsage::default(),
+            cancellation: None,
+            retry: RetryState::default(),
+            last_limit: None,
+            suspension: None,
             terminal: None,
         }
     }
@@ -363,6 +428,10 @@ impl KernelState {
     ///
     /// Returns [`KernelError::InvalidInputPayload`] when a semantic collection
     /// exceeds its frozen v1 ceiling.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "state validation keeps all cross-field replay invariants in one fail-closed boundary"
+    )]
     pub fn validate(&self) -> Result<(), KernelError> {
         if self.messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
             return Err(KernelError::InvalidInputPayload {
@@ -376,6 +445,7 @@ impl KernelState {
             ("completion_identities", self.completion_identities.len()),
             ("tool_calls", self.tool_calls.len()),
             ("tool_settlements", self.tool_settlements.len()),
+            ("timer_firings", self.retry.timer_firings.len()),
         ] {
             if length > SEMANTIC_MAP_MAX_ENTRIES {
                 return Err(KernelError::InvalidInputPayload {
@@ -398,14 +468,137 @@ impl KernelState {
             || !self.tool_calls.is_empty()
             || !self.tool_settlements.is_empty()
             || self.last_tool_batch.is_some();
-        if !matches!(self.state_version, 1 | 2) || (self.state_version == 1 && has_tool_state) {
+        let has_control_state = self.cancellation.is_some()
+            || self.retry != RetryState::default()
+            || self.last_limit.is_some()
+            || self.suspension.is_some()
+            || matches!(self.terminal, Some(TerminalState::Cancelled(_)));
+        if !matches!(self.state_version, 1..=3)
+            || (self.state_version == 1 && has_tool_state)
+            || (self.state_version < 3 && has_control_state)
+        {
             return Err(KernelError::InvalidInputPayload {
                 field: "state_version",
                 reason_code: "unsupported_or_inconsistent",
             });
         }
-        if self.state_version == 2 {
+        if self.state_version >= 2 && has_tool_state {
             self.validate_tool_state()?;
+        }
+        if self.state_version == 3 {
+            if self.accepted.is_some() != self.accepted_at.is_some() {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "accepted_at",
+                    reason_code: "inconsistent",
+                });
+            }
+            if self.cancellation.is_some()
+                != matches!(
+                    self.phase,
+                    Some(RunPhase::Cancelling | RunPhase::Suspended | RunPhase::Cancelled)
+                )
+                && self.cancellation.is_some()
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "cancellation",
+                    reason_code: "inconsistent",
+                });
+            }
+            if self.limit_usage.extension_counters.len() > crate::RunLimits::MAX_EXTENSION_COUNTERS
+                || self.accepted.as_ref().is_some_and(|accepted| {
+                    self.limit_usage
+                        .extension_counters
+                        .keys()
+                        .any(|key| !accepted.limits().extension_counters.contains_key(key))
+                })
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "limit_usage.extension_counters",
+                    reason_code: "unregistered_or_too_many_entries",
+                });
+            }
+            if self
+                .last_limit
+                .as_ref()
+                .is_some_and(|limit| limit.validate().is_err())
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "last_limit",
+                    reason_code: "invalid_value_kind",
+                });
+            }
+            if self.retry.pending.as_ref().is_some_and(|pending| {
+                pending.attempt != self.retry.attempts || self.phase != Some(RunPhase::Sleeping)
+            }) || (self.phase == Some(RunPhase::Sleeping) && self.retry.pending.is_none())
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "retry",
+                    reason_code: "inconsistent",
+                });
+            }
+            if let Some(cancellation) = &self.cancellation {
+                for (field, values) in [
+                    (
+                        "cancellation.completed_effects",
+                        cancellation.completed_effects.as_ref(),
+                    ),
+                    (
+                        "cancellation.cancelled_effects",
+                        cancellation.cancelled_effects.as_ref(),
+                    ),
+                    (
+                        "cancellation.uncertain_effects",
+                        cancellation.uncertain_effects.as_ref(),
+                    ),
+                    (
+                        "cancellation.outstanding_effects",
+                        cancellation.outstanding_effects.as_ref(),
+                    ),
+                ] {
+                    if values.len() > SEMANTIC_ARRAY_MAX_ITEMS
+                        || values.windows(2).any(|pair| pair[0] >= pair[1])
+                    {
+                        return Err(KernelError::InvalidInputPayload {
+                            field,
+                            reason_code: "invalid_effect_set",
+                        });
+                    }
+                }
+                let classified = cancellation
+                    .completed_effects
+                    .iter()
+                    .chain(cancellation.cancelled_effects.iter())
+                    .chain(cancellation.uncertain_effects.iter())
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>();
+                let classified_len = cancellation.completed_effects.len()
+                    + cancellation.cancelled_effects.len()
+                    + cancellation.uncertain_effects.len();
+                if classified.len() != classified_len
+                    || cancellation
+                        .outstanding_effects
+                        .iter()
+                        .any(|id| classified.contains(id))
+                {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "cancellation",
+                        reason_code: "overlapping_effect_sets",
+                    });
+                }
+            }
+            let terminal_phase_matches = matches!(
+                (&self.terminal, self.phase),
+                (Some(TerminalState::Completed(_)), Some(RunPhase::Completed))
+                    | (Some(TerminalState::Failed(_)), Some(RunPhase::Failed))
+                    | (Some(TerminalState::Cancelled(_)), Some(RunPhase::Cancelled))
+                    | (None, _)
+            );
+            if !terminal_phase_matches {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "terminal",
+                    reason_code: "inconsistent_phase",
+                });
+            }
         }
         Ok(())
     }
@@ -696,8 +889,17 @@ impl KernelState {
                 model_hash_entries(&self.model_settlements),
                 completion_hash_entries(&self.completion_identities),
             ))
-        } else {
+        } else if self.state_version == 2 {
             serde_json_canonicalizer::to_vec(&KernelStateHashV2::from_state(
+                self,
+                stage_hash_entries(&self.stage_settlements),
+                model_hash_entries(&self.model_settlements),
+                completion_hash_entries(&self.completion_identities),
+                tool_call_hash_entries(&self.tool_calls),
+                tool_settlement_hash_entries(&self.tool_settlements),
+            ))
+        } else {
+            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV3::from_state(
                 self,
                 stage_hash_entries(&self.stage_settlements),
                 model_hash_entries(&self.model_settlements),
@@ -770,6 +972,43 @@ struct KernelStateWireV2<'a> {
     terminal: Option<&'a TerminalState>,
 }
 
+#[derive(Serialize)]
+struct KernelStateWireV3<'a> {
+    state_version: u16,
+    last_applied_sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane_id: Option<LaneId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted: Option<&'a RunAccepted>,
+    accepted_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<RunPhase>,
+    cycle: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_turn: Option<&'a CurrentTurn>,
+    messages: &'a [Message],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_model_effect: Option<&'a PendingModelEffect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_candidate: Option<&'a TerminalCandidate>,
+    stage_settlements: Vec<StageSettlementHashEntryV1>,
+    model_settlements: Vec<ModelSettlementHashEntryV1>,
+    completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    active_tool_batch: Option<&'a ActiveToolBatch>,
+    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    last_tool_batch: Option<&'a ToolBatchClosed>,
+    limit_usage: &'a LimitUsage,
+    cancellation: Option<&'a CancellationState>,
+    retry: &'a RetryState,
+    last_limit: Option<&'a LimitReached>,
+    suspension: Option<&'a RunSuspended>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<&'a TerminalState>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KernelStateWireOwned {
@@ -781,6 +1020,8 @@ struct KernelStateWireOwned {
     lane_id: Option<LaneId>,
     #[serde(default)]
     accepted: Option<RunAccepted>,
+    #[serde(default)]
+    accepted_at: NullableField<Timestamp>,
     #[serde(default)]
     phase: Option<RunPhase>,
     cycle: u64,
@@ -803,6 +1044,16 @@ struct KernelStateWireOwned {
         RequiredField<BoundedVec<ToolSettlementHashEntryV2, SEMANTIC_MAP_MAX_ENTRIES>>,
     #[serde(default)]
     last_tool_batch: NullableField<ToolBatchClosed>,
+    #[serde(default)]
+    limit_usage: RequiredField<LimitUsage>,
+    #[serde(default)]
+    cancellation: NullableField<CancellationState>,
+    #[serde(default)]
+    retry: RequiredField<RetryState>,
+    #[serde(default)]
+    last_limit: NullableField<LimitReached>,
+    #[serde(default)]
+    suspension: NullableField<RunSuspended>,
     #[serde(default)]
     terminal: Option<TerminalState>,
 }
@@ -869,7 +1120,7 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
-        } else {
+        } else if self.state_version == 2 {
             KernelStateWireV2 {
                 state_version: self.state_version,
                 last_applied_sequence: self.last_applied_sequence,
@@ -892,6 +1143,35 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
+        } else {
+            KernelStateWireV3 {
+                state_version: self.state_version,
+                last_applied_sequence: self.last_applied_sequence,
+                session_id: self.session_id,
+                lane_id: self.lane_id,
+                accepted: self.accepted.as_ref(),
+                accepted_at: self.accepted_at,
+                phase: self.phase,
+                cycle: self.cycle,
+                current_turn: self.current_turn.as_ref(),
+                messages: &self.messages,
+                pending_model_effect: self.pending_model_effect.as_ref(),
+                terminal_candidate: self.terminal_candidate.as_ref(),
+                stage_settlements: stage_hash_entries(&self.stage_settlements),
+                model_settlements: model_hash_entries(&self.model_settlements),
+                completion_identities: completion_hash_entries(&self.completion_identities),
+                active_tool_batch: self.active_tool_batch.as_ref(),
+                tool_calls: tool_call_hash_entries(&self.tool_calls),
+                tool_settlements: tool_settlement_hash_entries(&self.tool_settlements),
+                last_tool_batch: self.last_tool_batch.as_ref(),
+                limit_usage: &self.limit_usage,
+                cancellation: self.cancellation.as_ref(),
+                retry: &self.retry,
+                last_limit: self.last_limit.as_ref(),
+                suspension: self.suspension.as_ref(),
+                terminal: self.terminal.as_ref(),
+            }
+            .serialize(serializer)
         }
     }
 }
@@ -906,13 +1186,19 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1 | 2) {
+        if !matches!(wire.state_version, 1..=3) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
         let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
             || matches!(&wire.tool_calls, RequiredField::Present(_))
             || matches!(&wire.tool_settlements, RequiredField::Present(_))
             || matches!(&wire.last_tool_batch, NullableField::Present(_));
+        let control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
+            || matches!(&wire.limit_usage, RequiredField::Present(_))
+            || matches!(&wire.cancellation, NullableField::Present(_))
+            || matches!(&wire.retry, RequiredField::Present(_))
+            || matches!(&wire.last_limit, NullableField::Present(_))
+            || matches!(&wire.suspension, NullableField::Present(_));
         if wire.state_version == 1 && tool_fields_present {
             return Err(de::Error::custom("v1 kernel state contains tool fields"));
         }
@@ -920,8 +1206,24 @@ impl<'de> Deserialize<'de> for KernelState {
             && matches!(&wire.tool_calls, RequiredField::Present(_))
             && matches!(&wire.tool_settlements, RequiredField::Present(_))
             && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if wire.state_version == 2 && !all_tool_fields_present {
+        if matches!(wire.state_version, 2 | 3) && !all_tool_fields_present {
             return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
+        }
+        let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
+            && matches!(&wire.limit_usage, RequiredField::Present(_))
+            && matches!(&wire.cancellation, NullableField::Present(_))
+            && matches!(&wire.retry, RequiredField::Present(_))
+            && matches!(&wire.last_limit, NullableField::Present(_))
+            && matches!(&wire.suspension, NullableField::Present(_));
+        if wire.state_version < 3 && control_fields_present {
+            return Err(de::Error::custom(
+                "v1/v2 kernel state contains control fields",
+            ));
+        }
+        if wire.state_version == 3 && !all_control_fields_present {
+            return Err(de::Error::custom(
+                "v3 kernel state is missing control fields",
+            ));
         }
         let mut stage_settlements = BTreeMap::new();
         for entry in wire.stage_settlements.into_inner() {
@@ -1016,6 +1318,10 @@ impl<'de> Deserialize<'de> for KernelState {
             session_id: wire.session_id,
             lane_id: wire.lane_id,
             accepted: wire.accepted,
+            accepted_at: match wire.accepted_at {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
             phase: wire.phase,
             cycle: wire.cycle,
             current_turn: wire.current_turn,
@@ -1032,6 +1338,26 @@ impl<'de> Deserialize<'de> for KernelState {
             tool_calls,
             tool_settlements,
             last_tool_batch: match wire.last_tool_batch {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            limit_usage: match wire.limit_usage {
+                RequiredField::Missing => LimitUsage::default(),
+                RequiredField::Present(value) => value,
+            },
+            cancellation: match wire.cancellation {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            retry: match wire.retry {
+                RequiredField::Missing => RetryState::default(),
+                RequiredField::Present(value) => value,
+            },
+            last_limit: match wire.last_limit {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            suspension: match wire.suspension {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
             },

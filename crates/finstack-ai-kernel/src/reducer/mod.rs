@@ -16,9 +16,9 @@ use serde::Serialize;
 
 pub use decision::{CommittedBatch, Decision, KernelError, PostCommitAction};
 pub use input::{
-    AcceptRun, ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
-    KernelInput, ModelSettled, ModelSettlement, ReducerStageOutcome, StageSettled,
-    ToolBatchSettled, ToolSettlement,
+    AcceptRun, CancelRequested, CancellationReconciledInput, ExternalEffectCompletedInput,
+    ExternalEffectCompletion, ExternalEffectOutcome, KernelInput, ModelSettled, ModelSettlement,
+    ReducerStageOutcome, StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 
 use crate::entries::RunFailed;

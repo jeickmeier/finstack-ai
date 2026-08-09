@@ -433,6 +433,9 @@ fn stage_fingerprint(cursor: StageCursor, outcome: &ReducerStageOutcome) -> Valu
         ReducerStageOutcome::ContinueModel { .. } => {
             json!({"continue_model": {"cursor": cursor}})
         }
+        ReducerStageOutcome::Retry(directive) => {
+            json!({"retry": {"cursor": cursor, "directive": directive}})
+        }
         ReducerStageOutcome::Fail(error) => {
             json!({"fail": {"cursor": cursor, "error": error}})
         }

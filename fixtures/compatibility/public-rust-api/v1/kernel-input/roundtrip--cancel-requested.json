@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "cancel_requested": {
+      "initiator": "runtime_shutdown",
+      "reason": "operator_shutdown"
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

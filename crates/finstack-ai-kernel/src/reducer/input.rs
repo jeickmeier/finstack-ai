@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::decision::KernelError;
+use crate::RetryDirective;
 use crate::StageCursor;
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
@@ -13,15 +14,17 @@ use crate::effects::{
     RetrySafety,
 };
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, LaneId, ModelRequestId, SessionId, ToolBatchId, TurnId};
+use crate::ids::{
+    CancellationRequestId, EffectId, LaneId, ModelRequestId, SessionId, ToolBatchId, TurnId,
+};
 use crate::message::Message;
 use crate::raw_json::RawJson;
 use crate::refs::{ArtifactRef, Usage};
-use crate::run::RunAccepted;
+use crate::run::{CancellationInitiator, RunAccepted};
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchContinuation, ToolCallPlan};
 
-/// Complete concrete command vocabulary owned through PR-010.
+/// Complete concrete command vocabulary owned through PR-011.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum KernelInput {
@@ -35,6 +38,68 @@ pub enum KernelInput {
     ExternalEffectCompleted(ExternalEffectCompletedInput),
     /// Settle one direct call in the active tool batch.
     ToolBatchSettled(ToolBatchSettled),
+    /// Request durable cancellation intent.
+    CancelRequested(CancelRequested),
+    /// Submit bounded cancellation reconciliation progress.
+    CancellationReconciled(CancellationReconciledInput),
+    /// Fire the exact pending semantic timer.
+    TimerFired(TimerFiredInput),
+}
+
+/// Normalized cancellation request; the request ID is allocated by `TransitionEnv`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CancelRequested {
+    /// Authenticated cancellation source.
+    pub initiator: CancellationInitiator,
+    /// Optional safe bounded reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<Arc<str>>,
+}
+
+impl<'de> Deserialize<'de> for CancelRequested {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            initiator: CancellationInitiator,
+            #[serde(default)]
+            reason: Option<BoundedString<LABEL_MAX_BYTES>>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            initiator: wire.initiator,
+            reason: wire.reason.map(|value| Arc::from(value.into_inner())),
+        })
+    }
+}
+
+/// Cumulative cancellation reconciliation input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CancellationReconciledInput {
+    /// Winning request identity.
+    pub request_id: CancellationRequestId,
+    /// Effects completed before cancellation closure.
+    pub completed_effects: Arc<[EffectId]>,
+    /// Effects acknowledged cancelled.
+    pub cancelled_effects: Arc<[EffectId]>,
+    /// Effects with uncertain external outcome.
+    pub uncertain_effects: Arc<[EffectId]>,
+}
+
+/// Runtime-supplied semantic timer firing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimerFiredInput {
+    /// Matching timer effect.
+    pub effect_id: EffectId,
+    /// Frozen due time.
+    pub due_at: Timestamp,
+    /// Runtime-observed firing time.
+    pub fired_at: Timestamp,
 }
 
 /// Normalized run-acceptance command.
@@ -100,6 +165,8 @@ pub enum ReducerStageOutcome {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<Arc<str>>,
     },
+    /// Schedule one bounded whole-run semantic retry.
+    Retry(RetryDirective),
     /// Normalize an aggregate stage failure.
     Fail(ErrorDescriptor),
 }
@@ -150,6 +217,7 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
             ToolBatchPrepared(ToolBatchPreparedWire),
             FinalizeAccepted,
             ContinueModel(ContinueModelWire),
+            Retry(RetryDirective),
             Fail(ErrorDescriptor),
         }
 
@@ -173,6 +241,7 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
             Wire::ContinueModel(value) => Self::ContinueModel {
                 reason: value.reason.map(|reason| Arc::from(reason.into_inner())),
             },
+            Wire::Retry(value) => Self::Retry(value),
             Wire::Fail(error) => Self::Fail(error),
         })
     }

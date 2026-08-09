@@ -1,4 +1,4 @@
-//! Public-API compatibility fixtures for PR-009 and PR-010 reducer contracts.
+//! Public-API compatibility fixtures for PR-009 through PR-011 reducer contracts.
 
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, CommittedBatch, KernelInput, KernelState, RECORD_KIND_VERSION,
@@ -19,7 +19,7 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "kernel-input" => run_kernel_input(fixture),
         "committed-batch" => run_committed_batch(fixture),
         "kernel-state" => run_kernel_state(fixture),
-        "pr009-record" | "pr010-record" => run_record(fixture),
+        "pr009-record" | "pr010-record" | "pr011-record" => run_record(fixture),
         other => Err(fail(format!("unsupported PR-009 subject {other}"))),
     }
 }

@@ -48,6 +48,12 @@ enum StageSettlementFingerprintV1<'a> {
     ContinueModel {
         cursor: StageCursor,
     },
+    Retry {
+        cursor: StageCursor,
+        classification: crate::RetryClassification,
+        backoff: crate::Duration,
+        policy_version: &'a str,
+    },
     Fail(Box<StageFailFingerprintV1<'a>>),
 }
 
@@ -319,6 +325,12 @@ pub(super) fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> 
         ReducerStageOutcome::ContinueModel { .. } => StageSettlementFingerprintV1::ContinueModel {
             cursor: input.cursor,
         },
+        ReducerStageOutcome::Retry(directive) => StageSettlementFingerprintV1::Retry {
+            cursor: input.cursor,
+            classification: directive.classification,
+            backoff: directive.backoff,
+            policy_version: &directive.policy_version,
+        },
         ReducerStageOutcome::Fail(error) => {
             StageSettlementFingerprintV1::Fail(Box::new(StageFailFingerprintV1 {
                 cursor: input.cursor,
@@ -386,6 +398,31 @@ pub(super) fn stage_record_digest(
             }
             StageSettlementFingerprintV1::ContinueModel {
                 cursor: outcome.cursor,
+            }
+        }
+        StageDisposition::RetryScheduled { .. } => {
+            let Some(crate::RecordBody::RetryScheduled(retry)) =
+                sibling.map(crate::RecordEnvelope::body)
+            else {
+                return Err(KernelError::InvalidRecordOrder);
+            };
+            StageSettlementFingerprintV1::Retry {
+                cursor: outcome.cursor,
+                classification: retry.classification,
+                backoff: crate::Duration::from_millis(
+                    retry
+                        .due_at
+                        .as_unix_ms()
+                        .checked_sub(
+                            sibling
+                                .ok_or(KernelError::InvalidRecordOrder)?
+                                .timestamp()
+                                .as_unix_ms(),
+                        )
+                        .and_then(|value| u64::try_from(value).ok())
+                        .ok_or(KernelError::InvalidRecordOrder)?,
+                ),
+                policy_version: &retry.policy_version,
             }
         }
         StageDisposition::Failed { error } => {

@@ -46,6 +46,11 @@ pub enum PostCommitAction {
         /// Committed effect identity.
         effect_id: EffectId,
     },
+    /// Signal cancellation for an already requested effect.
+    CancelEffect {
+        /// Committed effect identity.
+        effect_id: EffectId,
+    },
 }
 
 /// Atomic store result supplied to [`crate::Kernel::apply`].

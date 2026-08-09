@@ -923,6 +923,12 @@ fn project_observed(
                 payload: None,
                 payload_declaration: None,
             },
+            PostCommitAction::CancelEffect { effect_id } => EffectExpectation {
+                kind: "cancel_effect".to_owned(),
+                id: Some(effect_id.to_canonical_string()),
+                payload: None,
+                payload_declaration: None,
+            },
         })
         .collect();
     let terminal = project_reducer_terminal(kernel)?;

@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::content::{BoundedString, LABEL_MAX_BYTES};
 use crate::digest::Digest;
-use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, MessageId, ModelRequestId, ToolBatchId, TurnId};
+use crate::error::{ErrorCode, ErrorDescriptor};
+use crate::ids::{CancellationRequestId, EffectId, MessageId, ModelRequestId, ToolBatchId, TurnId};
 use crate::message::Message;
+use crate::time::{Duration, Timestamp};
 
 /// One of the seven normalized middleware boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -81,11 +83,224 @@ pub enum StageDisposition {
         /// Checked next cycle number.
         next_cycle: u64,
     },
+    /// A bounded semantic retry was scheduled.
+    RetryScheduled {
+        /// One-based additional attempt number.
+        attempt: u32,
+        /// Timer effect that gates the next cycle.
+        timer_effect_id: EffectId,
+        /// Semantic due time.
+        due_at: Timestamp,
+    },
     /// The aggregate stage failed.
     Failed {
         /// Safe, source-free failure descriptor.
         error: ErrorDescriptor,
     },
+}
+
+/// Stable semantic retry family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryClassification {
+    /// Model failure retry.
+    Model,
+    /// Tool failure retry.
+    Tool,
+    /// Structured-validation retry reserved for PR-012.
+    Validation,
+    /// Framework failure retry.
+    Framework,
+}
+
+/// Normalized retry decision accepted at `before_finalize`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RetryDirective {
+    /// Failure family.
+    pub classification: RetryClassification,
+    /// Deterministic backoff before the next cycle.
+    pub backoff: Duration,
+    /// Versioned policy identity.
+    pub policy_version: Arc<str>,
+}
+
+impl RetryDirective {
+    /// Construct a retry directive with a bounded non-empty policy version.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntryError::InvalidLabel`] for an invalid policy version.
+    pub fn try_new(
+        classification: RetryClassification,
+        backoff: Duration,
+        policy_version: impl AsRef<str>,
+    ) -> Result<Self, EntryError> {
+        let policy_version = policy_version.as_ref();
+        if policy_version.is_empty()
+            || policy_version.len() > LABEL_MAX_BYTES
+            || policy_version.as_bytes().contains(&0)
+        {
+            return Err(EntryError::InvalidLabel);
+        }
+        Ok(Self {
+            classification,
+            backoff,
+            policy_version: Arc::from(policy_version),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for RetryDirective {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            classification: RetryClassification,
+            backoff: Duration,
+            policy_version: BoundedString<LABEL_MAX_BYTES>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.classification,
+            wire.backoff,
+            wire.policy_version.into_inner(),
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Durable semantic retry and timer intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RetryScheduled {
+    /// Failed model cycle.
+    pub cycle: u64,
+    /// One-based additional attempt number.
+    pub attempt: u32,
+    /// Failure family.
+    pub classification: RetryClassification,
+    /// Versioned policy identity.
+    pub policy_version: Arc<str>,
+    /// Timer effect identity.
+    pub timer_effect_id: EffectId,
+    /// Semantic due time.
+    pub due_at: Timestamp,
+    /// Safe failure being retried.
+    pub prior_error: ErrorDescriptor,
+}
+
+impl RetryScheduled {
+    /// Construct validated durable retry intent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntryError`] when the attempt, policy version, or error is invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        cycle: u64,
+        attempt: u32,
+        classification: RetryClassification,
+        policy_version: impl AsRef<str>,
+        timer_effect_id: EffectId,
+        due_at: Timestamp,
+        prior_error: ErrorDescriptor,
+    ) -> Result<Self, EntryError> {
+        if attempt == 0 {
+            return Err(EntryError::InvalidAttempt);
+        }
+        let directive = RetryDirective::try_new(classification, Duration::ZERO, policy_version)?;
+        prior_error
+            .validate()
+            .map_err(|_| EntryError::InvalidError)?;
+        Ok(Self {
+            cycle,
+            attempt,
+            classification,
+            policy_version: directive.policy_version,
+            timer_effect_id,
+            due_at,
+            prior_error,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for RetryScheduled {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            cycle: u64,
+            attempt: u32,
+            classification: RetryClassification,
+            policy_version: BoundedString<LABEL_MAX_BYTES>,
+            timer_effect_id: EffectId,
+            due_at: Timestamp,
+            prior_error: ErrorDescriptor,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.cycle,
+            wire.attempt,
+            wire.classification,
+            wire.policy_version.into_inner(),
+            wire.timer_effect_id,
+            wire.due_at,
+            wire.prior_error,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Durable semantic timer firing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimerFired {
+    /// Matching timer effect.
+    pub effect_id: EffectId,
+    /// Frozen due time.
+    pub due_at: Timestamp,
+    /// Runtime-observed semantic firing time.
+    pub fired_at: Timestamp,
+}
+
+/// Durable non-terminal suspension.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunSuspended {
+    /// Stable safe reason code.
+    pub reason_code: ErrorCode,
+    /// Winning cancellation request when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancellation_request_id: Option<CancellationRequestId>,
+}
+
+/// Durable cancelled terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunCancelled {
+    /// Winning cancellation request.
+    pub request_id: CancellationRequestId,
+    /// Stable safe reason code.
+    pub reason_code: ErrorCode,
+}
+
+/// PR-011 entry/control payload construction failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum EntryError {
+    /// A bounded label was empty, oversized, or contained NUL.
+    #[error("invalid label")]
+    InvalidLabel,
+    /// Retry attempt zero is reserved for the original execution.
+    #[error("invalid retry attempt")]
+    InvalidAttempt,
+    /// Embedded durable error is invalid.
+    #[error("invalid durable error")]
+    InvalidError,
 }
 
 /// Durable aggregate stage-settlement record.

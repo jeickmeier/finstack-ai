@@ -13,11 +13,11 @@ date: "2026-08-09"
 |---|---|
 | Product | finstack-ai |
 | Document | Security and Threat Model |
-| Version | 0.5 |
+| Version | 0.6 |
 | Status | Pre-implementation security baseline |
 | Date | 2026-08-09 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.15; Implementation Plan v0.15; Engineering Standards v0.5 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.16; Implementation Plan v0.16; Engineering Standards v0.5 |
 
 # 1. Purpose and authority
 
@@ -174,8 +174,8 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | TM-11 | Unauthorized or replayed interaction resolution approves an action. | Assignee/principal authorization; interaction/effect/session scope; response schema; resolution identity/digest; expiry/cancellation check; immutable audit. | Approval, form, delegation, expiry, late/conflict fixtures; PR-044, PR-048. |
 | TM-12 | Journal tampering, truncation, reordering, or incompatible decoding corrupts state. | Atomic append; sequence/version checks; deterministic encoding; checksums; strict bounds; corruption classification; authoritative journal; migration fixtures; protected backend. | Crash-prefix, corruption, historical-fixture, and backup/restore tests; PR-039 through PR-041, PR-048. |
 | TM-13 | Snapshot injects stale or forged state. | Versioned state-CBOR; journal position and state hash; validate before use; discard/rebuild on mismatch; snapshots never authoritative. | Mutation, mismatch, deletion, and replay-equivalence tests; PR-041. |
-| TM-14 | Cancellation/deadline race permits a late privileged effect or completion. | Durable cancellation intent; effect state check at dispatch and settlement; idempotent cleanup; explicit late-result policy; framework-authored cancelled closures carry no tool output/success claim and fabricated successful/tool-produced results are prohibited. | Boundary fault injection and late-result matrix; PR-011, PR-015, PR-045, PR-048. |
-| TM-15 | Child runs evade principal, budget, depth, deadline, or cancellation policy. | Immutable run relation; maximum depth; explicit propagation policy; budget scope; child invocation owned by authenticated runtime/SDK service. | Lineage property tests and restart/concurrency stress; PR-008, PR-011, PR-022, PR-046/047. |
+| TM-14 | Cancellation/deadline race permits a late privileged effect or completion. | Durable cancellation intent before signalling; committed-order precedence; exact outstanding-effect reconciliation; duplicate/conflict indexes; uncertainty suspends; dispatch and settlement rechecks; framework-authored cancelled closures carry no tool output/success claim and fabricated successful/tool-produced results are prohibited. PR-011 owns the pure kernel transition and source-ordered closure; PR-015/PR-045/PR-048 own runtime signalling, routing, and durable recovery. | PR-011 every-phase cancellation, bounded reconciliation, crash-prefix, race-permutation, synthetic-closure, and late-result matrix; later runtime/recovery fault injection in PR-015, PR-045, PR-048. |
+| TM-15 | Child runs evade principal, budget, depth, deadline, or cancellation policy. | Immutable run relation; maximum depth; exact parent identity; fixed propagation policy; minimum deadline; budget scope; persisted authorization decision; detach only when the accepted decision explicitly preauthorizes it; child invocation owned by authenticated runtime/SDK service. PR-011 proves the normalized per-child decision and does not claim cross-run fan-out. | PR-011 lineage/tenant/principal/deadline/budget property tests; restart/concurrency and actual dispatch stress in PR-022, PR-046/047. |
 | TM-16 | Oversized or malicious schema/JSON/blob causes memory or parser denial of service. | Pre-allocation byte/depth/count limits; bounded validation; digest/reference large blobs; no automatic recursive remote fetch; streaming limits. | Fuzzing and size/depth boundary tests; PR-006 through PR-008, PR-013, PR-020, PR-039, PR-058. |
 | TM-17 | Observer/exporter failure, blockage, or payload leak changes behavior. | Observers are non-semantic; bounded exporter queues; redacted event views; drop/disconnect policy for progress; protect durable completion. | Slow/failing observer and redaction tests; PR-017, PR-018, PR-057. |
 | TM-18 | Dependency or release compromise ships malicious code. | Reviewed dependencies; source/license/advisory policy; immutable CI actions/tools; least-privilege release credentials; SBOM, checksums, signatures/provenance, reproducible release. | Supply-chain CI and release rehearsal; PR-003, PR-060, PR-061, PR-065/066. |

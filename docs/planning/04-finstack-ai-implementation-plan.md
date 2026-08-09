@@ -13,11 +13,11 @@ date: "2026-08-09"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.15 |
+| Version | 0.16 |
 | Status | Implementation baseline |
 | Date | 2026-08-09 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.15; Security and Threat Model v0.5 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.16; Security and Threat Model v0.6 |
 
 # Executive implementation decision
 
@@ -691,13 +691,19 @@ A separate ADR is required before merging a change that:
 
 - Add model-request, turn, tool-call/concurrency, input/output token, context/output byte, retry, wall-clock/deadline, checked `u64` integer-micro-unit cost, and bounded namespaced extension-counter limits.
 
+- Observe exact limit dimensions at the committed semantic boundaries frozen in TDD section 22.6; exact maxima are allowed, the first representable value above a maximum wins, overflow never wraps, and `max_parallel_tools` is kernel plan admission rather than a runtime executor guarantee.
+
 - Add cancellation intent, cancellation acknowledgement, reconciliation state, and stable cancellation reasons.
 
 - Represent retry decisions, backoff requests, attempt counters, retry budgets, and terminal classification.
 
+- Implement retry as a durable whole-run semantic retry requested at `before_finalize`: record the retry and timer intent before action, enforce `max_retries`, and begin a fresh model cycle only after an equal timer firing. Low-level effect re-execution and real sleeping remain runtime/recovery scope.
+
 - Implement the TDD terminal-race precedence table; implementation work must not redefine ordering ad hoc.
 
 - Define lineage-based cancellation/deadline/budget propagation and cancellation/expiry behavior for deferred effects and interactions.
+
+- Add the exact PR-011 input/record/event/state vocabulary from TDD section 22.6, including incremental cancellation reconciliation, `RunSuspended`, `RunCancelled`, and conditional strict `kernel-state` v3 while preserving all v1/v2 hashes.
 
 - Implement the fixed `RunPropagationPolicy` rules and persist authorization decision references; do not infer propagation from transient application state.
 
@@ -719,7 +725,7 @@ A separate ADR is required before merging a change that:
 
 **Traceability.** FR-KRN-008 through FR-KRN-010; TDD section 22.
 
-**Explicitly excluded.** No Tokio cancellation tokens or real timers.
+**Explicitly excluded.** No Tokio cancellation tokens, real clocks/timers/sleeping, executor/semaphore, runtime/store commit loop, low-level effect re-execution, actual child dispatch, cross-run budget service, interaction router, bindings, or PR-012 structured-output/control-tool behavior.
 
 ### PR-012 - Add structured output and internal control tools
 

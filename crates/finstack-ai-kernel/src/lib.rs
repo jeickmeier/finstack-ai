@@ -139,8 +139,9 @@ pub use effects::{
     ReconciliationPolicy, RetrySafety,
 };
 pub use entries::{
-    ContextPrepared, ContextPreparedError, EntryAppended, RunCompleted, RunFailed, Stage,
-    StageCursor, StageDisposition, StageOutcomeRecorded,
+    ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
+    RetryDirective, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
+    StageCursor, StageDisposition, StageOutcomeRecorded, TimerFired,
 };
 pub use error::{
     ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorDescriptorError,
@@ -162,7 +163,10 @@ pub use ids::{
     SessionTag, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
     TurnTag,
 };
-pub use limits::{CostLimit, LimitDimension, LimitsError, RunLimits, UnknownUsagePolicy};
+pub use limits::{
+    CostLimit, LimitDimension, LimitReached, LimitUsage, LimitValue, LimitsError, RunLimits,
+    UnknownUsagePolicy,
+};
 pub use message::{
     MODEL_CONTEXT_LENGTH_MAX, Message, MessageError, MessageRole, ModelRef, ProviderIds,
     ThinkingLevel,
@@ -176,9 +180,10 @@ pub use records::{
     RecordBody, RecordDraft, RecordEnvelope, RecordError,
 };
 pub use reducer::{
-    AcceptRun, CommittedBatch, Decision, ExternalEffectCompletedInput, ExternalEffectCompletion,
-    ExternalEffectOutcome, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
-    PostCommitAction, ReducerStageOutcome, StageSettled, ToolBatchSettled, ToolSettlement,
+    AcceptRun, CancelRequested, CancellationReconciledInput, CommittedBatch, Decision,
+    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Kernel,
+    KernelError, KernelInput, ModelSettled, ModelSettlement, PostCommitAction, ReducerStageOutcome,
+    StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 pub use refs::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
@@ -186,15 +191,16 @@ pub use refs::{
     Sensitivity, Usage, Version,
 };
 pub use run::{
-    BudgetPropagation, CancellationPropagation, DeadlinePropagation, MAX_RUN_RELATION_DEPTH,
+    BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
+    CancellationRequest, CancellationRequested, DeadlinePropagation, MAX_RUN_RELATION_DEPTH,
     PrincipalPropagation, RunAccepted, RunError, RunPropagationPolicy, RunRelation,
     RunRelationKind, RunSecurityContext,
 };
 pub use state::{
-    CompletionIdentity, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
+    CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
     ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
-    PendingModelEffect, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
-    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
+    PendingModelEffect, RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate,
+    TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,

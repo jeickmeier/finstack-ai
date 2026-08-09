@@ -13,11 +13,11 @@ date: "2026-08-09"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.15 |
+| Version | 0.16 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.15; Security and Threat Model v0.5 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.16; Security and Threat Model v0.6 |
 
 # 1. Technical objective
 
@@ -1173,7 +1173,7 @@ pub struct ExternalEffectCompletedInput {
 }
 ```
 
-The code block above is the complete concrete PR-009 Rust enum. PR-010 extends it with the tool contract below. The later input **inventory** continues to reserve `CancelRequested` and `TimerFired` (PR-011), capability activation (PR-012), and interaction/reconciliation/resume inputs for their mapped later PRs.
+The code block above is the complete concrete PR-009 Rust enum. PR-010 extends it with the tool contract below. PR-011 materializes `CancelRequested`, `CancellationReconciled`, `TimerFired`, and `ReducerStageOutcome::Retry` exactly as section 22.6 defines. The later input inventory continues to reserve capability activation (PR-012) and interaction/resume inputs for their mapped later PRs.
 
 ### 11.1.1 PR-010 tool command and policy contract
 
@@ -1598,10 +1598,11 @@ Direct and external settlements with otherwise equal values intentionally differ
 ```rust
 pub enum PostCommitAction {
     ExecuteEffect { effect_id: EffectId },
+    CancelEffect { effect_id: EffectId },
 }
 ```
 
-An `ExecuteEffect` action must have exactly one preceding sibling `EffectRequested` draft with the same ID in the decision. Actions preserve request-record order. A runtime may execute an action only after the complete decision batch commits and `apply` succeeds; an empty or failed append executes none.
+An `ExecuteEffect` action must have exactly one preceding sibling `EffectRequested` draft with the same ID in the decision. A `CancelEffect` action must reference an effect that was already outstanding when the sibling `CancellationRequested` draft gained control; it never authorizes first dispatch or effect re-execution. Actions preserve request-record order. A runtime may execute an action only after the complete decision batch commits and `apply` succeeds; an empty or failed append executes none.
 
 `decide` treats every `AllocatedIds` vector as an ordered queue and never generates or derives a UUID. It consumes:
 
@@ -2049,6 +2050,12 @@ Delivery ownership for `RecordBody` variants is staged by logical PR. **PR-008 o
 - `ToolCallSettled`
 - `ToolBatchClosed`
 
+**PR-011 additionally owns and materializes**:
+
+- `CancellationRequested`, `CancellationReconciled`
+- `LimitReached`, `RetryScheduled`, `TimerFired`
+- `RunSuspended`, `RunCancelled`
+
 All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-011 limits/cancellation/budget, PR-012 capabilities, and PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
 
 The PR-009 payloads are:
@@ -2238,6 +2245,7 @@ pub struct LimitReached {
     pub dimension: LimitDimension,
     pub observed: LimitValue,
     pub maximum: LimitValue,
+    pub usage: LimitUsage,
     pub usage_digest: Digest,
 }
 
@@ -2274,7 +2282,7 @@ pub struct TimerFired {
 }
 ```
 
-All arrays, maps, strings, raw JSON, metadata, records, and append batches above use the v1 ceilings in section 6.5. Repeating an equal cancellation request or timer firing is idempotent; conflicting reuse of an ID is an invariant error. `CancellationReconciled.uncertain_effects` forces `Suspended` rather than a fabricated `RunCancelled`. `LimitReached` requires matching value variants for its dimension and is committed before limit-driven suspension or terminalization.
+All arrays, maps, strings, raw JSON, metadata, records, and append batches above use the v1 ceilings in section 6.5. Repeating an equal cancellation request or timer firing is idempotent; conflicting reuse of an ID is an invariant error. `CancellationReconciled.uncertain_effects` forces `Suspended` rather than a fabricated `RunCancelled`. `LimitReached` requires matching value variants for its dimension and is committed before limit-driven suspension or terminalization. Its complete bounded `usage` snapshot is required because one triggering boundary may update more than one cumulative dimension; `usage_digest` must equal the canonical digest of that snapshot so replay never attempts to infer omitted counters from a digest.
 
 ## 12.3 Effect records
 
@@ -3297,8 +3305,15 @@ For each durable record kind, a versioned ordinal table defines zero or more der
 | `ToolBatchClosed` | none |
 | `RunCompleted` | 0 → `RunCompleted` |
 | `RunFailed` | 0 → `RunFailed` |
+| `CancellationRequested` | none |
+| `CancellationReconciled` | none |
+| `LimitReached` | 0 → `LimitReached` |
+| `RetryScheduled` | none |
+| `TimerFired` | none |
+| `RunSuspended` | 0 → `RunSuspended` |
+| `RunCancelled` | 0 → `RunCancelled` |
 
-PR-008 freezes and implements constructors/fixtures for its rows plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). PR-009 adds its five rows; PR-010 adds the three tool-record rows. `StageOutcomeRecorded`, `ContextPrepared`, `ToolBatchOpened`, and `ToolBatchClosed` are semantic bookkeeping with no public event and therefore carry empty `derived_event_ids`. Later PRs append rows for their owned record kinds (`LimitReached`, `RunCancelled`, and others) without renumbering existing rows for a given `kind_version`.
+PR-008 freezes and implements constructors/fixtures for its rows plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). PR-009 adds its five rows; PR-010 adds the three tool-record rows; PR-011 adds the seven control rows shown above. `StageOutcomeRecorded`, `ContextPrepared`, `ToolBatchOpened`, `ToolBatchClosed`, `CancellationRequested`, `CancellationReconciled`, `RetryScheduled`, and `TimerFired` are semantic bookkeeping with no public event and therefore carry empty `derived_event_ids`. Later PRs append their rows without renumbering existing rows for a given `kind_version`.
 
 For PR-009, `MessageFinalized` takes `turn_id`, `model_request_id`, and `effect_id` from `EntryAppended`; `RunCompleted` and `RunFailed` take their optional/applicable correlations from the terminal payload. Model `EffectRequested`, `EffectDeferred`, `EffectCompleted`, and `EffectFailed` events take the same correlations from the outstanding `PendingModelEffect` established by the matching before-model outcome. Those full model-effect event bodies are `Sensitivity::Confidential`; the compact `MessageFinalized`, `RunCompleted`, and safe-descriptor-only `RunFailed` bodies are `Sensitivity::Internal`. No PR-009 event publishes assistant message content. A later change to these projections or classifications requires compatibility fixtures and threat-model review.
 
@@ -3415,6 +3430,156 @@ The lane's committed journal order, not task wake order, decides races. Optimist
 | Same normalized decision observes multiple uncommitted causes | invariant/security contract failure, hard limit, explicit cancellation, ordinary completion/retry | Apply the first applicable cause in that order. |
 
 Once cancellation controls a tool batch, the runtime reconciles active calls and commits exactly one real result or framework-authored `Cancelled` closure for every accepted call before `RunCancelled`, preserving source order and marking the closure as synthetic with no tool output/success claim. Fabricating a successful/tool-produced result is prohibited. A late equivalent external command remains idempotent under the settlement index; a conflicting one follows the durable rejection rules.
+
+## 22.6 PR-011 concrete kernel contract
+
+PR-011 materializes kernel-owned termination semantics only. It does not run a clock, sleep, signal a task, dispatch a child, execute an effect, append to a store, or route an interaction. The runtime supplies semantic timestamps and normalized reconciliation inputs; post-commit actions remain authorizations for later runtime work.
+
+### 22.6.1 Normalized inputs and durable payloads
+
+PR-011 extends the concrete `KernelInput` and `ReducerStageOutcome` vocabularies with these strict externally tagged `snake_case`, deny-unknown shapes:
+
+```rust
+pub enum KernelInput {
+    // PR-009 and PR-010 variants unchanged
+    CancelRequested(CancelRequested),
+    CancellationReconciled(CancellationReconciledInput),
+    TimerFired(TimerFiredInput),
+}
+
+pub struct CancelRequested {
+    pub initiator: CancellationInitiator,
+    pub reason: Option<Arc<str>>,
+}
+
+pub struct CancellationReconciledInput {
+    pub request_id: CancellationRequestId,
+    pub completed_effects: Arc<[EffectId]>,
+    pub cancelled_effects: Arc<[EffectId]>,
+    pub uncertain_effects: Arc<[EffectId]>,
+}
+
+pub struct TimerFiredInput {
+    pub effect_id: EffectId,
+    pub due_at: Timestamp,
+    pub fired_at: Timestamp,
+}
+
+pub enum ReducerStageOutcome {
+    // existing variants unchanged
+    Retry(RetryDirective),
+}
+
+pub struct RetryDirective {
+    pub classification: RetryClassification,
+    pub backoff: Duration,
+    pub policy_version: Arc<str>,
+}
+
+pub enum RetryClassification {
+    Model,
+    Tool,
+    Validation,
+    Framework,
+}
+
+pub struct RetryScheduled {
+    pub cycle: u64,
+    pub attempt: u32,
+    pub classification: RetryClassification,
+    pub policy_version: Arc<str>,
+    pub timer_effect_id: EffectId,
+    pub due_at: Timestamp,
+    pub prior_error: ErrorDescriptor,
+}
+
+pub struct RunSuspended {
+    pub reason_code: Arc<str>,
+    pub cancellation_request_id: Option<CancellationRequestId>,
+}
+
+pub struct RunCancelled {
+    pub request_id: CancellationRequestId,
+    pub reason_code: Arc<str>,
+}
+```
+
+The cancellation request ID is allocated from `TransitionEnv.ids.cancellation_request_ids`; equal decision retry reuses the same environment. A principal-initiated request is authorized only when its principal and `AuthorizationEvidence` exactly match the accepted run security context. `ParentRun` must name the accepted parent and is invalid for a root. `Deadline` is accepted only when `TransitionEnv.now >= effective_deadline`; runtime shutdown is accepted for any non-terminal run. Reasons and policy versions use the ordinary label ceiling and exclude secrets.
+
+`CancellationReconciledInput` arrays are individually sorted by canonical `EffectId`, duplicate-free, pairwise disjoint, and contain only effects outstanding when cancellation won. Reconciliation may arrive in bounded chunks; equal members are idempotent, but an effect cannot change classification. `uncertain_effects` commits `RunSuspended { reason_code: "cancellation_uncertain" }` and never fabricates cancellation success. The durable `CancellationReconciled` record contains the replay-derived cumulative sets after the input is applied.
+
+`Retry` is permitted only at `BeforeFinalize` for a failed candidate whose descriptor is retryable. `Validation` is reserved for PR-012 and is rejected until that PR supplies a validation-failure candidate. The directive schedules a whole-run semantic retry: it consumes one additional run retry, records the decision and timer intent, and after a valid timer firing begins a fresh model cycle with fresh turn/request/effect IDs. It does not reinterpret or redispatch a terminally settled external effect. Low-level transport/execution retry retains the original effect identity and is runtime/recovery work; it cannot emit a second terminal settlement into the kernel.
+
+The first semantic attempt is `0`; `RetryScheduled.attempt` is the one-based count of additional run attempts and must be `prior_retries + 1`. `max_retries` bounds those additional attempts. `due_at = TransitionEnv.now.checked_add(backoff)` and overflow is `invalid_input_payload`. A timer firing is equal-duplicate only when all three fields match the scheduled timer; ID reuse or changed timestamps conflict. `fired_at < due_at` is rejected. The kernel records timer intent before the `ExecuteEffect` action for the timer. It never reads wall time itself.
+
+PR-011 materializes these additional `RecordBody` variants:
+
+```rust
+CancellationRequested(CancellationRequested),
+CancellationReconciled(CancellationReconciled),
+LimitReached(LimitReached),
+RetryScheduled(RetryScheduled),
+TimerFired(TimerFired),
+RunSuspended(RunSuspended),
+RunCancelled(RunCancelled),
+```
+
+`CancellationRequested`, `CancellationReconciled`, `RetryScheduled`, and `TimerFired` derive no public event. `LimitReached`, `RunSuspended`, and `RunCancelled` each derive their existing compact public event at ordinal zero. Existing ordinals never change. `RunSuspended` and `RunCancelled` events are `Internal`; they expose only the compact safe fields already defined by section 20.2.
+
+### 22.6.2 Limit observation and aggregation
+
+Exact maxima are allowed. The first representable observation greater than its maximum commits `LimitReached` before limit-driven terminalization or suspension; exact equality does not terminate. Observation points are fixed:
+
+| Dimension | Replay-derived observation |
+|---|---|
+| model requests | number of committed model `EffectRequested` records |
+| turns | number of committed `ContextPrepared` records |
+| tool calls | number of source calls accepted by committed `ToolBatchOpened`, including synthetic plans |
+| parallel tools | largest execution group admitted by `ToolBatchOpened`; PR-011 rejects a plan whose group exceeds the maximum before any group effect action |
+| input/output tokens | checked sums of present normalized `EffectCompleted.usage` counters |
+| context bytes | checked sum of RFC 8785 JCS bytes of each committed `ContextPrepared.messages` array |
+| output bytes | checked sum of canonical `RawJson` bytes in each committed `EffectCompleted.output` |
+| retries | number of committed `RetryScheduled` records |
+| wall time | non-negative difference between current semantic time and the `RunAccepted` record timestamp; effective deadline expires at `now >= deadline` |
+| cost | checked sum of matching `CostAmount.micros` |
+| extension | checked sum of each normalized usage entry registered in `RunLimits.extension_counters` |
+
+Only `EffectCompleted.usage` changes token, cost, or extension counters. Missing token counters are unknown but not themselves an error. When a cost limit exists and completion usage has no cost, `FailClosed` fails with `unknown_cost_usage`; `SuspendForDecision` suspends with the same reason code; `AllowWithinReservedMaximum` conservatively reserves the remaining configured maximum and records no fabricated observed charge. A present cost must exactly match configured unit and pricing-policy version or fail `cost_policy_mismatch`.
+
+Every extension usage key must be registered by `RunLimits`; an unregistered key fails `unregistered_extension_counter`. Extension values are deltas. Checked addition overflow fails terminally with `counter_overflow`. Checked token, byte, request, turn, tool, retry, or duration overflow fails with `<dimension>_overflow`. Cost overflow uses the already mandated `cost_overflow` behavior. Overflow failures do not emit `LimitReached` because no representable observation exists.
+
+Representable hard-limit crossings fail terminally with code `limit_reached`, category `limit`, and `retryable = false`, except missing cost under `SuspendForDecision`, which records `RunSuspended`. Deadline expiry fails with code `deadline_exceeded`, category `deadline`, and `retryable = false`, after a `LimitReached(WallTime)` record. No prohibited post-commit effect action is returned.
+
+`max_parallel_tools` is kernel plan admission, not an executor semaphore or a global/per-tool runtime scheduling claim. PR-015 retains real concurrent execution and dispatch-time rechecks.
+
+### 22.6.3 Cancellation closure and propagation
+
+`CancellationRequested` wins before ordinary completion/retry. The decision records durable intent and returns cancellation post-commit actions only for presently requested effects. Undispatched tool calls are immediately converted to source-associated synthetic cancelled closures. Already buffered real results remain real reconciliation evidence. Requested or deferred effects remain unresolved until a reconciliation input classifies them.
+
+Each accepted tool call receives exactly one source-ordered tool message before `RunCancelled`. A synthetic cancelled tool result is framework-authored, `is_error = true`, contains no tool-produced output or success claim, and carries `ErrorDescriptor { code: "cancelled", category: cancellation, retryable: false }`. Its `ToolCallSettled.synthetic` flag is true. Active model cancellation records `EffectCancelled` but no assistant message. A late equal completion after the effect has been classified is an idempotent diagnostic; a conflicting completion fails closed.
+
+The kernel owns one run at a time and therefore emits no child-dispatch action. Parent propagation is a pure authorization/validation rule over the child's persisted `RunRelation`, `RunPropagationPolicy`, `RunSecurityContext`, deadline, and budget scope. `Cascade` accepts a `ParentRun` cancellation from the exact parent. `DetachOnlyIfPreauthorized` rejects that cancellation only when the child's accepted authorization decision ID is prefixed `detach:` and the tenant, depth, parent, deadline, and budget attenuation invariants still hold. Actual cross-run routing remains PR-045/PR-046. PR-011 conformance proves the normalized child decision, not a runtime fan-out service.
+
+Interactions have no active reducer state before PR-044. PR-011 accepts cancellation only for an already represented outstanding interaction effect; otherwise interaction routing remains excluded. Deferred model/tool effects use their original effect identity and follow the same completed/cancelled/uncertain reconciliation sets.
+
+### 22.6.4 Conditional kernel-state v3
+
+Every history containing no PR-011-owned record retains its exact existing state version and state hash: tool-free histories remain v1 and tool-bearing histories remain v2. Applying the first PR-011-owned record upgrades transactionally to `state_version = 3`; it never rewrites a prior record or hash.
+
+V3 is SHA-256 under domain `kernel-state`, schema version 3, over a dedicated recursive-explicit-null JCS projection. It contains every v2 field in the same order and adds these exact fields immediately before `terminal`:
+
+```rust
+pub accepted_at: Option<Timestamp>,
+pub limit_usage: LimitUsage,
+pub cancellation: Option<CancellationState>,
+pub retry: RetryState,
+pub last_limit: Option<LimitReached>,
+pub suspension: Option<RunSuspended>,
+```
+
+V3 always includes the v2 tool fields even when empty. `CancellationState` retains the winning request, prior phase, cumulative sorted completed/cancelled/uncertain effect IDs, and outstanding effect IDs. `RetryState` retains the committed retry count and optional pending `RetryScheduled`. `LimitUsage` retains every cumulative dimension and the sorted extension map; `max_parallel_tools` records the maximum admitted group size, not transient task count.
+
+V1/v2 reject v3 fields. V3 rejects a missing field, duplicate map key, unsupported version, impossible phase/control combination, unregistered extension key, decreasing counter, or capacity violation. Upgrade is one-way; no silent down-conversion exists. Adding candidate v3 is a classified pre-1.0 contract evolution, not a change to compatibility policy, so no new ADR is required. An older reader must reject PR-011 records/state; rollback after persistence requires a pre-PR-011 journal or a reader that understands v3.
 
 # 23. Recovery algorithm
 

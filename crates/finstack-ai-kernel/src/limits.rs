@@ -9,8 +9,9 @@ use thiserror::Error;
 
 use crate::bounds::BoundedMap;
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
+use crate::digest::Digest;
 use crate::ids::LimitKey;
-use crate::refs::{RefsError, validated_label};
+use crate::refs::{CostAmount, RefsError, validated_label};
 use crate::time::Duration;
 
 /// Limit dimension used by reserved limit-reached surfaces.
@@ -44,6 +45,217 @@ pub enum LimitDimension {
         /// Namespaced key.
         key: LimitKey,
     },
+}
+
+/// Typed observed or configured value carried by [`LimitReached`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitValue {
+    /// Count-like dimension.
+    Count(u64),
+    /// Byte dimension.
+    Bytes(u64),
+    /// Duration dimension.
+    Duration(Duration),
+    /// Exact integer-micro-unit cost dimension.
+    Cost(CostAmount),
+}
+
+/// Replay-derived cumulative limit usage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitUsage {
+    /// Committed model requests.
+    pub model_requests: u64,
+    /// Committed turns.
+    pub turns: u64,
+    /// Accepted tool calls.
+    pub tool_calls: u64,
+    /// Largest admitted tool execution group.
+    pub max_parallel_tools: u32,
+    /// Cumulative input tokens.
+    pub input_tokens: u64,
+    /// Cumulative output tokens.
+    pub output_tokens: u64,
+    /// Cumulative canonical context bytes.
+    pub context_bytes: u64,
+    /// Cumulative canonical output bytes.
+    pub output_bytes: u64,
+    /// Additional semantic retry attempts.
+    pub retries: u32,
+    /// Latest replay-derived wall duration.
+    pub wall_time: Duration,
+    /// Cumulative exact cost, when a cost policy is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<CostAmount>,
+    /// Cumulative registered extension counters.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extension_counters: BTreeMap<LimitKey, u64>,
+}
+
+impl Default for LimitUsage {
+    fn default() -> Self {
+        Self {
+            model_requests: 0,
+            turns: 0,
+            tool_calls: 0,
+            max_parallel_tools: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            context_bytes: 0,
+            output_bytes: 0,
+            retries: 0,
+            wall_time: Duration::from_millis(0),
+            cost: None,
+            extension_counters: BTreeMap::new(),
+        }
+    }
+}
+
+impl LimitUsage {
+    /// Compute canonical bytes for replay-stable limit evidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LimitsError::Serialize`] when canonicalization fails.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, LimitsError> {
+        serde_json_canonicalizer::to_vec(self).map_err(|_| LimitsError::Serialize)
+    }
+
+    /// Compute the durable usage digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LimitsError::Serialize`] when canonicalization or hashing fails.
+    pub fn digest(&self) -> Result<Digest, LimitsError> {
+        let bytes = self.canonical_bytes()?;
+        Digest::domain_separated("limit-usage", 1, &bytes).map_err(|_| LimitsError::Serialize)
+    }
+}
+
+impl<'de> Deserialize<'de> for LimitUsage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            model_requests: u64,
+            turns: u64,
+            tool_calls: u64,
+            max_parallel_tools: u32,
+            input_tokens: u64,
+            output_tokens: u64,
+            context_bytes: u64,
+            output_bytes: u64,
+            retries: u32,
+            wall_time: Duration,
+            #[serde(default)]
+            cost: Option<CostAmount>,
+            #[serde(default)]
+            extension_counters: BoundedMap<LimitKey, u64, { RunLimits::MAX_EXTENSION_COUNTERS }>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            model_requests: wire.model_requests,
+            turns: wire.turns,
+            tool_calls: wire.tool_calls,
+            max_parallel_tools: wire.max_parallel_tools,
+            input_tokens: wire.input_tokens,
+            output_tokens: wire.output_tokens,
+            context_bytes: wire.context_bytes,
+            output_bytes: wire.output_bytes,
+            retries: wire.retries,
+            wall_time: wire.wall_time,
+            cost: wire.cost,
+            extension_counters: wire.extension_counters.into_inner(),
+        })
+    }
+}
+
+/// Durable evidence that one configured limit was crossed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitReached {
+    /// Crossed dimension.
+    pub dimension: LimitDimension,
+    /// First representable observation above the maximum.
+    pub observed: LimitValue,
+    /// Configured maximum.
+    pub maximum: LimitValue,
+    /// Complete bounded cumulative usage at the decision boundary.
+    pub usage: LimitUsage,
+    /// Digest of cumulative usage at the decision boundary.
+    pub usage_digest: Digest,
+}
+
+impl LimitReached {
+    /// Validate that observed and maximum values match the dimension family.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LimitsError::ValueKindMismatch`] for mismatched value variants.
+    pub fn validate(&self) -> Result<(), LimitsError> {
+        let matches = match self.dimension {
+            LimitDimension::ContextBytes | LimitDimension::OutputBytes => {
+                matches!(
+                    (&self.observed, &self.maximum),
+                    (LimitValue::Bytes(_), LimitValue::Bytes(_))
+                )
+            }
+            LimitDimension::WallTime => {
+                matches!(
+                    (&self.observed, &self.maximum),
+                    (LimitValue::Duration(_), LimitValue::Duration(_))
+                )
+            }
+            LimitDimension::Cost => {
+                matches!(
+                    (&self.observed, &self.maximum),
+                    (LimitValue::Cost(_), LimitValue::Cost(_))
+                )
+            }
+            _ => matches!(
+                (&self.observed, &self.maximum),
+                (LimitValue::Count(_), LimitValue::Count(_))
+            ),
+        };
+        if !matches {
+            return Err(LimitsError::ValueKindMismatch);
+        }
+        if self.usage.digest()? != self.usage_digest {
+            return Err(LimitsError::UsageDigestMismatch);
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for LimitReached {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            dimension: LimitDimension,
+            observed: LimitValue,
+            maximum: LimitValue,
+            usage: LimitUsage,
+            usage_digest: Digest,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let value = Self {
+            dimension: wire.dimension,
+            observed: wire.observed,
+            maximum: wire.maximum,
+            usage: wire.usage,
+            usage_digest: wire.usage_digest,
+        };
+        value.validate().map_err(de::Error::custom)?;
+        Ok(value)
+    }
 }
 
 /// Unknown-usage policy for cost limits.
@@ -314,6 +526,15 @@ pub enum LimitsError {
         /// Maximum entry count.
         max: usize,
     },
+    /// Canonical limit evidence could not be represented.
+    #[error("limit evidence serialization failed")]
+    Serialize,
+    /// Limit value variant does not match its dimension.
+    #[error("limit value kind does not match dimension")]
+    ValueKindMismatch,
+    /// Limit usage snapshot does not match its digest.
+    #[error("limit usage digest mismatch")]
+    UsageDigestMismatch,
 }
 
 impl LimitsError {
@@ -323,6 +544,9 @@ impl LimitsError {
         match self {
             Self::InvalidLabel(inner) => inner.code(),
             Self::TooManyEntries { .. } => "too_many_entries",
+            Self::Serialize => "limit_serialize_failed",
+            Self::ValueKindMismatch => "limit_value_kind_mismatch",
+            Self::UsageDigestMismatch => "limit_usage_digest_mismatch",
         }
     }
 }

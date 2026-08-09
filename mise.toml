@@ -84,7 +84,7 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel/runtime and public-Rust-API tests through PR-010"
+description = "Run focused kernel/runtime and public-Rust-API tests through PR-011"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
@@ -93,7 +93,7 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.conformance]
-description = "Run PR-009 reducer traces and public compatibility through PR-010"
+description = "Run PR-009 reducer traces and public compatibility through PR-011"
 run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]

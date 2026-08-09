@@ -23,8 +23,8 @@ use crate::events::{EventCorrelations, RunEvent};
 use crate::message::MessageRole;
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RecordBody, RecordEnvelope};
 use crate::state::{
-    CompletionIdentity, CurrentTurn, KernelState, ModelSettlementFingerprint, ModelSettlementKind,
-    PendingModelEffect, RunPhase, TerminalCandidate, TerminalState,
+    CancellationState, CompletionIdentity, CurrentTurn, KernelState, ModelSettlementFingerprint,
+    ModelSettlementKind, PendingModelEffect, RunPhase, TerminalCandidate, TerminalState,
 };
 use crate::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchOutcome, ToolCallIdentity,
@@ -328,23 +328,99 @@ fn validate_batch_shape(
                 )
             })
         }
-        Some(RunPhase::BeforeFinalize) => finalize_shape(state, records),
-        Some(
-            RunPhase::Accepted
-            | RunPhase::AwaitingInteraction
-            | RunPhase::Sleeping
-            | RunPhase::Cancelling
-            | RunPhase::Suspended,
-        ) => false,
+        Some(RunPhase::BeforeFinalize) => {
+            finalize_shape(state, records) || retry_shape(state, records)
+        }
+        Some(RunPhase::Sleeping) => timer_fired_shape(state, records),
+        Some(RunPhase::Cancelling) => reconciliation_shape(state, records),
+        Some(RunPhase::Accepted | RunPhase::AwaitingInteraction | RunPhase::Suspended) => false,
         Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled) => {
             return Err(KernelError::TerminalStateImmutable);
         }
     };
-    if valid {
+    let cancellation_shape = state.accepted.is_some()
+        && state.cancellation.is_none()
+        && matches!(records, [record] if matches!(record.body(), RecordBody::CancellationRequested(_)));
+    let limit_shape = matches!(
+        records,
+        [limit, terminal]
+            if matches!(limit.body(), RecordBody::LimitReached(_))
+                && matches!(terminal.body(), RecordBody::RunFailed(_))
+    );
+    let control_failure_shape = matches!(
+        records,
+        [record] if matches!(record.body(), RecordBody::RunFailed(failed)
+            if matches!(failed.error.category, crate::ErrorCategory::Limit | crate::ErrorCategory::Deadline))
+            || matches!(record.body(), RecordBody::RunSuspended(_))
+    );
+    if valid || cancellation_shape || limit_shape || control_failure_shape {
         Ok(())
     } else {
         Err(KernelError::InvalidRecordOrder)
     }
+}
+
+fn retry_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    let [stage_record, retry_record, requested] = records else {
+        return false;
+    };
+    matches!(
+        (stage_record.body(), retry_record.body(), requested.body()),
+        (
+            RecordBody::StageOutcomeRecorded(StageOutcomeRecorded {
+                cursor,
+                disposition: StageDisposition::RetryScheduled { attempt, timer_effect_id, due_at },
+                ..
+            }),
+            RecordBody::RetryScheduled(scheduled),
+            RecordBody::EffectRequested(effect),
+        ) if *cursor == (StageCursor { cycle: state.cycle, stage: Stage::BeforeFinalize })
+            && scheduled.attempt == *attempt
+            && scheduled.timer_effect_id == *timer_effect_id
+            && scheduled.due_at == *due_at
+            && effect.effect_id() == *timer_effect_id
+            && effect.kind() == EffectKind::Timer
+            && matches!(effect.input(), crate::EffectInput::Timer { due_at: effect_due } if effect_due == due_at)
+    )
+}
+
+fn timer_fired_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    matches!(
+        records,
+        [record] if matches!(
+            (state.retry.pending.as_ref(), record.body()),
+            (Some(pending), RecordBody::TimerFired(fired))
+                if pending.timer_effect_id == fired.effect_id && pending.due_at == fired.due_at
+        )
+    )
+}
+
+fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    let Some(cancellation) = state.cancellation.as_ref() else {
+        return false;
+    };
+    let Some(reconciled_index) = records
+        .iter()
+        .position(|record| matches!(record.body(), RecordBody::CancellationReconciled(_)))
+    else {
+        return false;
+    };
+    if records[..reconciled_index].iter().any(|record| {
+        !matches!(record.body(), RecordBody::EffectCancelled(cancelled)
+            if cancellation.outstanding_effects.contains(&cancelled.effect_id()))
+    }) {
+        return false;
+    }
+    matches!(
+        records[reconciled_index].body(),
+        RecordBody::CancellationReconciled(value)
+            if value.request_id == cancellation.request.request_id
+    ) && records.get(reconciled_index + 1).is_none_or(|record| {
+        matches!(
+            record.body(),
+            RecordBody::RunSuspended(_) | RecordBody::RunCancelled(_)
+        )
+    }) && records.len() <= reconciled_index + 2
 }
 
 fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
@@ -826,16 +902,22 @@ fn terminal_failed_matches(state: &KernelState, failed: &RunFailed) -> bool {
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the replay dispatcher exhaustively covers the frozen record vocabulary"
+)]
 fn apply_record(
     state: &mut KernelState,
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    update_wall_usage(state, record.timestamp())?;
     match record.body() {
         RecordBody::RunAccepted(accepted) => {
             state.session_id = Some(record.session_id());
             state.lane_id = Some(record.lane_id());
             state.accepted = Some(accepted.clone());
+            state.accepted_at = Some(record.timestamp());
             state.phase = Some(RunPhase::Accepted);
         }
         RecordBody::StageOutcomeRecorded(outcome) => apply_stage_outcome(state, outcome)?,
@@ -852,6 +934,21 @@ fn apply_record(
                 final_message_id: None,
             });
             state.phase = Some(RunPhase::BeforeModel);
+            state.limit_usage.turns = state
+                .limit_usage
+                .turns
+                .checked_add(1)
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            let context_bytes = serde_json_canonicalizer::to_vec(&context.messages.as_ref())
+                .map_err(|_| KernelError::InvalidRecordOrder)?
+                .len();
+            state.limit_usage.context_bytes = state
+                .limit_usage
+                .context_bytes
+                .checked_add(
+                    u64::try_from(context_bytes).map_err(|_| KernelError::InvalidRecordOrder)?,
+                )
+                .ok_or(KernelError::InvalidRecordOrder)?;
         }
         RecordBody::EffectRequested(requested) => {
             apply_effect_requested(state, requested)?;
@@ -860,12 +957,32 @@ fn apply_record(
             apply_effect_deferred(state, deferred)?;
         }
         RecordBody::EffectCompleted(completed) => {
+            apply_completed_usage(state, completed)?;
             apply_effect_completed(state, completed, next)?;
         }
         RecordBody::EntryAppended(entry) => {
             apply_entry_appended(state, entry)?;
         }
         RecordBody::ToolBatchOpened(opened) => {
+            state.limit_usage.tool_calls = state
+                .limit_usage
+                .tool_calls
+                .checked_add(
+                    u64::try_from(opened.calls.len())
+                        .map_err(|_| KernelError::InvalidRecordOrder)?,
+                )
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            let mut group_counts = std::collections::BTreeMap::<u32, u32>::new();
+            for call in opened.calls.iter() {
+                let count = group_counts.entry(call.group_index).or_default();
+                *count = count
+                    .checked_add(1)
+                    .ok_or(KernelError::InvalidRecordOrder)?;
+            }
+            state.limit_usage.max_parallel_tools = state
+                .limit_usage
+                .max_parallel_tools
+                .max(group_counts.values().copied().max().unwrap_or(0));
             apply_tool_batch_opened(state, opened)?;
         }
         RecordBody::ToolCallSettled(settled) => {
@@ -884,9 +1001,124 @@ fn apply_record(
         RecordBody::RunFailed(failed) => {
             state.terminal = Some(TerminalState::Failed(failed.clone()));
             state.phase = Some(RunPhase::Failed);
+            if matches!(
+                failed.error.category,
+                crate::ErrorCategory::Limit | crate::ErrorCategory::Deadline
+            ) {
+                state.state_version = 3;
+            }
         }
-        RecordBody::EffectCancelled(_)
-        | RecordBody::InteractionRequested(_)
+        RecordBody::CancellationRequested(requested) => {
+            let mut outstanding = Vec::new();
+            if let Some(pending) = &state.pending_model_effect {
+                outstanding.push(pending.requested.effect_id());
+            }
+            if let Some(batch) = &state.active_tool_batch {
+                outstanding.extend(batch.calls.iter().filter_map(|call| match call.status {
+                    ActiveToolCallStatus::Requested { .. } => Some(call.assigned.effect_id),
+                    _ => None,
+                }));
+            }
+            outstanding.sort_unstable();
+            outstanding.dedup();
+            state.cancellation = Some(CancellationState {
+                request: requested.request.clone(),
+                prior_phase: state.phase.ok_or(KernelError::InvalidRecordOrder)?,
+                completed_effects: Arc::from([]),
+                cancelled_effects: Arc::from([]),
+                uncertain_effects: Arc::from([]),
+                outstanding_effects: outstanding.into(),
+            });
+            state.phase = Some(RunPhase::Cancelling);
+            state.state_version = 3;
+        }
+        RecordBody::CancellationReconciled(reconciled) => {
+            let cancellation = state
+                .cancellation
+                .as_mut()
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            if cancellation.request.request_id != reconciled.request_id {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            cancellation.completed_effects = reconciled.completed_effects.clone();
+            cancellation.cancelled_effects = reconciled.cancelled_effects.clone();
+            cancellation.uncertain_effects = reconciled.uncertain_effects.clone();
+            let classified: BTreeSet<_> = reconciled
+                .completed_effects
+                .iter()
+                .chain(reconciled.cancelled_effects.iter())
+                .chain(reconciled.uncertain_effects.iter())
+                .copied()
+                .collect();
+            cancellation.outstanding_effects = cancellation
+                .outstanding_effects
+                .iter()
+                .filter(|effect_id| !classified.contains(effect_id))
+                .copied()
+                .collect::<Vec<_>>()
+                .into();
+            state.state_version = 3;
+        }
+        RecordBody::RetryScheduled(retry) => {
+            state.retry.attempts = retry.attempt;
+            state.retry.pending = Some(retry.clone());
+            state.limit_usage.retries = retry.attempt;
+            state.phase = Some(RunPhase::Sleeping);
+            state.state_version = 3;
+        }
+        RecordBody::TimerFired(fired) => {
+            let pending = state
+                .retry
+                .pending
+                .take()
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            if pending.timer_effect_id != fired.effect_id
+                || pending.due_at != fired.due_at
+                || fired.fired_at < fired.due_at
+            {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            state
+                .retry
+                .timer_firings
+                .insert(fired.effect_id, fired.clone());
+            state.cycle = state
+                .cycle
+                .checked_add(1)
+                .ok_or(KernelError::CycleOverflow)?;
+            state.current_turn = None;
+            state.pending_model_effect = None;
+            state.terminal_candidate = None;
+            state.phase = Some(RunPhase::PreparingContext);
+            state.state_version = 3;
+        }
+        RecordBody::LimitReached(limit) => {
+            apply_limit_reached(state, limit)?;
+            state.last_limit = Some(limit.clone());
+            state.state_version = 3;
+        }
+        RecordBody::RunSuspended(suspended) => {
+            state.suspension = Some(suspended.clone());
+            state.phase = Some(RunPhase::Suspended);
+            state.state_version = 3;
+        }
+        RecordBody::RunCancelled(cancelled) => {
+            state.terminal = Some(TerminalState::Cancelled(cancelled.clone()));
+            state.phase = Some(RunPhase::Cancelled);
+            state.state_version = 3;
+        }
+        RecordBody::EffectCancelled(cancelled) => {
+            let pending = state
+                .pending_model_effect
+                .as_ref()
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            cancelled
+                .validate_against(&pending.requested)
+                .map_err(|_| KernelError::InvalidRecordOrder)?;
+            state.pending_model_effect = None;
+            state.state_version = 3;
+        }
+        RecordBody::InteractionRequested(_)
         | RecordBody::InteractionResolved(_)
         | RecordBody::InteractionExpired(_)
         | RecordBody::InteractionCancelled(_) => {
@@ -896,10 +1128,43 @@ fn apply_record(
     Ok(())
 }
 
+fn apply_limit_reached(
+    state: &mut KernelState,
+    reached: &crate::LimitReached,
+) -> Result<(), KernelError> {
+    reached
+        .validate()
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    state.limit_usage = reached.usage.clone();
+    Ok(())
+}
+
 fn apply_effect_requested(
     state: &mut KernelState,
     requested: &crate::EffectRequested,
 ) -> Result<(), KernelError> {
+    if requested.kind() == EffectKind::Timer {
+        let pending = state
+            .retry
+            .pending
+            .as_ref()
+            .ok_or(KernelError::InvalidRecordOrder)?;
+        if pending.timer_effect_id != requested.effect_id()
+            || requested.output_contract().kind != EffectOutputKind::TimerFiring
+            || !matches!(requested.input(), crate::EffectInput::Timer { due_at } if *due_at == pending.due_at)
+        {
+            return Err(KernelError::InvalidRecordOrder);
+        }
+        state.phase = Some(RunPhase::Sleeping);
+        return Ok(());
+    }
+    if requested.kind() == EffectKind::Model {
+        state.limit_usage.model_requests = state
+            .limit_usage
+            .model_requests
+            .checked_add(1)
+            .ok_or(KernelError::InvalidRecordOrder)?;
+    }
     if requested.kind() == EffectKind::Tool {
         let batch = state
             .active_tool_batch
@@ -951,6 +1216,79 @@ fn apply_effect_requested(
         deferred: None,
     });
     state.phase = Some(RunPhase::AwaitingModel);
+    Ok(())
+}
+
+fn update_wall_usage(state: &mut KernelState, now: crate::Timestamp) -> Result<(), KernelError> {
+    let Some(accepted_at) = state.accepted_at else {
+        return Ok(());
+    };
+    let elapsed = now
+        .as_unix_ms()
+        .checked_sub(accepted_at.as_unix_ms())
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    state.limit_usage.wall_time = crate::Duration::from_millis(elapsed);
+    Ok(())
+}
+
+fn apply_completed_usage(
+    state: &mut KernelState,
+    completed: &crate::EffectCompleted,
+) -> Result<(), KernelError> {
+    state.limit_usage.output_bytes = state
+        .limit_usage
+        .output_bytes
+        .checked_add(
+            u64::try_from(completed.output().as_bytes().len())
+                .map_err(|_| KernelError::InvalidRecordOrder)?,
+        )
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    let Some(usage) = completed.usage() else {
+        return Ok(());
+    };
+    if let Some(value) = usage.input_tokens() {
+        state.limit_usage.input_tokens = state
+            .limit_usage
+            .input_tokens
+            .checked_add(value)
+            .ok_or(KernelError::InvalidRecordOrder)?;
+    }
+    if let Some(value) = usage.output_tokens() {
+        state.limit_usage.output_tokens = state
+            .limit_usage
+            .output_tokens
+            .checked_add(value)
+            .ok_or(KernelError::InvalidRecordOrder)?;
+    }
+    if let Some(value) = usage.cost() {
+        let current = state
+            .limit_usage
+            .cost
+            .as_ref()
+            .map_or(0, crate::CostAmount::micros);
+        let micros = current
+            .checked_add(value.micros())
+            .ok_or(KernelError::InvalidRecordOrder)?;
+        state.limit_usage.cost = Some(
+            crate::CostAmount::try_new(value.unit(), micros, value.pricing_policy_version())
+                .map_err(|_| KernelError::InvalidRecordOrder)?,
+        );
+    }
+    for (key, delta) in usage.extension_counters() {
+        let current = state
+            .limit_usage
+            .extension_counters
+            .get(key)
+            .copied()
+            .unwrap_or(0);
+        state.limit_usage.extension_counters.insert(
+            key.clone(),
+            current
+                .checked_add(*delta)
+                .ok_or(KernelError::InvalidRecordOrder)?,
+        );
+    }
     Ok(())
 }
 
@@ -1618,7 +1956,8 @@ fn apply_stage_outcome(
         }
         StageDisposition::ContextPrepared { .. }
         | StageDisposition::ToolBatchPrepared { .. }
-        | StageDisposition::FinalizeAccepted => {}
+        | StageDisposition::FinalizeAccepted
+        | StageDisposition::RetryScheduled { .. } => {}
         StageDisposition::ModelRequested {
             model_request_id,
             effect_id,

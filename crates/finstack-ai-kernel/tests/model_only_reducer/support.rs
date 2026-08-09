@@ -4,8 +4,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, CommittedBatch,
     ComponentId, ContentBlock, ContextPrepared, DeadlinePropagation, Decision, Digest,
-    EffectCompleted, EffectDeferred, EffectKind, EffectOutputContract, EffectOutputKind,
-    EntryAppended, ErrorCategory, ErrorDescriptor, ExternalEffectCompletedInput,
+    EffectCompleted, EffectDeferred, EffectFailed, EffectKind, EffectOutputContract,
+    EffectOutputKind, EntryAppended, ErrorCategory, ErrorDescriptor, ExternalEffectCompletedInput,
     ExternalEffectCompletion, ExternalEffectOutcome, ExternalHandleRef, Id, IdTag, Kernel,
     KernelError, KernelInput, Message, MessageRole, Metadata, ModelSettled, ModelSettlement,
     ModelSettlementKind, ModelTextDelta, PostCommitAction, PrincipalPropagation, PrincipalRef,
@@ -132,11 +132,52 @@ fn transition_env(
     }
 }
 
+fn cancellation_env(
+    now_ms: i64,
+    record_ids: &[u64],
+    event_ids: &[u64],
+    cancellation_request_ids: &[u64],
+) -> TransitionEnv {
+    TransitionEnv {
+        now: timestamp(now_ms),
+        ids: AllocatedIds::try_new(
+            record_ids
+                .iter()
+                .copied()
+                .map(id::<finstack_ai_kernel::RecordTag>)
+                .collect(),
+            event_ids
+                .iter()
+                .copied()
+                .map(id::<finstack_ai_kernel::EventTag>)
+                .collect(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            cancellation_request_ids
+                .iter()
+                .copied()
+                .map(id::<finstack_ai_kernel::CancellationRequestTag>)
+                .collect(),
+        )
+        .expect("bounded cancellation ids"),
+    }
+}
+
 fn empty_env(now_ms: i64) -> TransitionEnv {
     transition_env(now_ms, &[], &[], &[], &[], &[], &[])
 }
 
 fn root_acceptance() -> RunAccepted {
+    root_acceptance_with(RunLimits::empty(), None)
+}
+
+fn root_acceptance_with(limits: RunLimits, deadline: Option<Timestamp>) -> RunAccepted {
     let run_id = id::<finstack_ai_kernel::RunTag>(RUN);
     RunAccepted::try_new(
         run_id,
@@ -151,8 +192,8 @@ fn root_acceptance() -> RunAccepted {
             None,
         )
         .expect("security context"),
-        None,
-        RunLimits::empty(),
+        deadline,
+        limits,
         RunPropagationPolicy {
             cancellation: CancellationPropagation::Cascade,
             deadline: DeadlinePropagation::MinimumOfParentAndChild,
@@ -870,5 +911,7 @@ mod matrix;
 mod settlements;
 #[path = "successful.rs"]
 mod successful;
+#[path = "termination.rs"]
+mod termination;
 #[path = "tool_batches.rs"]
 mod tool_batches;

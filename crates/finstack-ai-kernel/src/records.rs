@@ -13,11 +13,15 @@ use crate::effects::{
     InteractionRequest, InteractionResolution,
 };
 use crate::entries::{
-    ContextPrepared, EntryAppended, RunCompleted, RunFailed, StageOutcomeRecorded,
+    ContextPrepared, EntryAppended, RetryScheduled, RunCancelled, RunCompleted, RunFailed,
+    RunSuspended, StageOutcomeRecorded, TimerFired,
 };
 use crate::error::ErrorDescriptorError;
 use crate::ids::{AppendBatchId, EventId, LaneId, RecordId, RunId, SessionId};
-use crate::run::{RunAccepted, RunError, RunRelationKind};
+use crate::limits::LimitReached;
+use crate::run::{
+    CancellationReconciled, CancellationRequested, RunAccepted, RunError, RunRelationKind,
+};
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolBatchOutcome, ToolCallSettled};
 
@@ -438,7 +442,7 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
     }
 }
 
-/// Record bodies owned through PR-010.
+/// Record bodies owned through PR-011.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {
@@ -474,10 +478,24 @@ pub enum RecordBody {
     ToolCallSettled(ToolCallSettled),
     /// Complete tool-batch closure.
     ToolBatchClosed(ToolBatchClosed),
+    /// Durable cancellation intent.
+    CancellationRequested(CancellationRequested),
+    /// Cumulative cancellation reconciliation.
+    CancellationReconciled(CancellationReconciled),
+    /// Hard limit crossing.
+    LimitReached(LimitReached),
+    /// Semantic retry and timer intent.
+    RetryScheduled(RetryScheduled),
+    /// Semantic timer firing.
+    TimerFired(TimerFired),
+    /// Non-terminal suspension.
+    RunSuspended(RunSuspended),
     /// Successful run terminal.
     RunCompleted(RunCompleted),
     /// Failed run terminal.
     RunFailed(RunFailed),
+    /// Cancelled run terminal.
+    RunCancelled(RunCancelled),
 }
 
 impl RecordBody {
@@ -494,7 +512,11 @@ impl RecordBody {
             Self::StageOutcomeRecorded(_)
             | Self::ContextPrepared(_)
             | Self::ToolBatchOpened(_)
-            | Self::ToolBatchClosed(_) => 0,
+            | Self::ToolBatchClosed(_)
+            | Self::CancellationRequested(_)
+            | Self::CancellationReconciled(_)
+            | Self::RetryScheduled(_)
+            | Self::TimerFired(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -520,8 +542,15 @@ impl RecordBody {
             Self::ToolBatchOpened(_) => "tool_batch_opened",
             Self::ToolCallSettled(_) => "tool_call_settled",
             Self::ToolBatchClosed(_) => "tool_batch_closed",
+            Self::CancellationRequested(_) => "cancellation_requested",
+            Self::CancellationReconciled(_) => "cancellation_reconciled",
+            Self::LimitReached(_) => "limit_reached",
+            Self::RetryScheduled(_) => "retry_scheduled",
+            Self::TimerFired(_) => "timer_fired",
+            Self::RunSuspended(_) => "run_suspended",
             Self::RunCompleted(_) => "run_completed",
             Self::RunFailed(_) => "run_failed",
+            Self::RunCancelled(_) => "run_cancelled",
         }
     }
 }

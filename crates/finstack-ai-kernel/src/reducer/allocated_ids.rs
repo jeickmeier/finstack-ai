@@ -14,6 +14,7 @@ pub(super) struct IdRequirements {
     messages: usize,
     tool_batches: usize,
     tool_calls: usize,
+    cancellations: usize,
 }
 
 impl IdRequirements {
@@ -34,7 +35,13 @@ impl IdRequirements {
             messages,
             tool_batches: 0,
             tool_calls: 0,
+            cancellations: 0,
         }
+    }
+
+    pub(super) const fn with_cancellations(mut self, cancellations: usize) -> Self {
+        self.cancellations = cancellations;
+        self
     }
 
     pub(super) const fn with_tools(mut self, tool_batches: usize, tool_calls: usize) -> Self {
@@ -73,7 +80,7 @@ pub(super) fn validate_allocated_ids(
         (
             "cancellation_request_ids",
             ids.cancellation_request_ids().len(),
-            0,
+            required.cancellations,
         ),
     ];
     for (kind, actual, needed) in queues {

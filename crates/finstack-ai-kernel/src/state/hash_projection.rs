@@ -6,16 +6,16 @@ use serde::Serialize;
 
 use crate::digest::Digest;
 use crate::effects::{ComponentInvocation, EffectRelation, EffectRequested, PipelinePosition};
-use crate::entries::{ContextPrepared, RunCompleted, RunFailed};
+use crate::entries::{ContextPrepared, RunCancelled, RunCompleted, RunFailed, RunSuspended};
 use crate::ids::{
     BudgetScopeId, EffectId, LaneId, LimitKey, MessageId, ModelRequestId, RunId, SessionId,
     ToolBatchId, ToolCallId, ToolId, TurnId,
 };
-use crate::limits::{CostLimit, RunLimits};
+use crate::limits::{CostLimit, LimitReached, LimitUsage, RunLimits};
 use crate::projection::{
     ContentProjection, EffectDeferredProjection, ErrorProjection, MessageProjection,
 };
-use crate::refs::PrincipalRef;
+use crate::refs::{CostAmount, PrincipalRef};
 use crate::run::{
     RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
@@ -27,9 +27,10 @@ use crate::tools::{
 };
 
 use super::{
-    CompletionIdentityHashEntryV1, CurrentTurn, KernelState, ModelSettlementHashEntryV1,
-    PendingModelEffect, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
-    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
+    CancellationState, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
+    ModelSettlementHashEntryV1, PendingModelEffect, RetryState, RunPhase,
+    StageSettlementHashEntryV1, TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2,
+    ToolSettlementHashEntryV2,
 };
 
 #[derive(Serialize)]
@@ -148,6 +149,200 @@ impl<'a> KernelStateHashV2<'a> {
                 .as_ref()
                 .map(ToolBatchClosedProjection::from),
             terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct KernelStateHashV3<'a> {
+    pub state_version: u16,
+    pub last_applied_sequence: u64,
+    pub session_id: Option<SessionId>,
+    pub lane_id: Option<LaneId>,
+    pub accepted: Option<RunAcceptedProjection<'a>>,
+    pub phase: Option<RunPhase>,
+    pub cycle: u64,
+    pub current_turn: Option<CurrentTurnProjection<'a>>,
+    pub messages: Vec<MessageProjection<'a>>,
+    pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
+    pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
+    pub stage_settlements: Vec<StageSettlementHashEntryV1>,
+    pub model_settlements: Vec<ModelSettlementHashEntryV1>,
+    pub completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    pub active_tool_batch: Option<ActiveToolBatchProjection<'a>>,
+    pub tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    pub tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    pub last_tool_batch: Option<ToolBatchClosedProjection<'a>>,
+    pub accepted_at: Option<Timestamp>,
+    pub limit_usage: LimitUsageProjection<'a>,
+    pub cancellation: Option<CancellationStateProjection<'a>>,
+    pub retry: RetryStateProjection<'a>,
+    pub last_limit: Option<&'a LimitReached>,
+    pub suspension: Option<RunSuspendedProjection<'a>>,
+    pub terminal: Option<TerminalStateProjection<'a>>,
+}
+
+impl<'a> KernelStateHashV3<'a> {
+    pub(super) fn from_state(
+        state: &'a KernelState,
+        stage_settlements: Vec<StageSettlementHashEntryV1>,
+        model_settlements: Vec<ModelSettlementHashEntryV1>,
+        completion_identities: Vec<CompletionIdentityHashEntryV1>,
+        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    ) -> Self {
+        Self {
+            state_version: state.state_version,
+            last_applied_sequence: state.last_applied_sequence,
+            session_id: state.session_id,
+            lane_id: state.lane_id,
+            accepted: state.accepted.as_ref().map(RunAcceptedProjection::from),
+            phase: state.phase,
+            cycle: state.cycle,
+            current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
+            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            pending_model_effect: state
+                .pending_model_effect
+                .as_ref()
+                .map(PendingModelEffectProjection::from),
+            terminal_candidate: state
+                .terminal_candidate
+                .as_ref()
+                .map(TerminalCandidateProjection::from),
+            stage_settlements,
+            model_settlements,
+            completion_identities,
+            active_tool_batch: state
+                .active_tool_batch
+                .as_ref()
+                .map(ActiveToolBatchProjection::from),
+            tool_calls,
+            tool_settlements,
+            last_tool_batch: state
+                .last_tool_batch
+                .as_ref()
+                .map(ToolBatchClosedProjection::from),
+            accepted_at: state.accepted_at,
+            limit_usage: LimitUsageProjection::from(&state.limit_usage),
+            cancellation: state
+                .cancellation
+                .as_ref()
+                .map(CancellationStateProjection::from),
+            retry: RetryStateProjection::from(&state.retry),
+            last_limit: state.last_limit.as_ref(),
+            suspension: state.suspension.as_ref().map(RunSuspendedProjection::from),
+            terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct LimitUsageProjection<'a> {
+    model_requests: u64,
+    turns: u64,
+    tool_calls: u64,
+    max_parallel_tools: u32,
+    input_tokens: u64,
+    output_tokens: u64,
+    context_bytes: u64,
+    output_bytes: u64,
+    retries: u32,
+    wall_time: Duration,
+    cost: Option<&'a CostAmount>,
+    extension_counters: Vec<LimitCounterProjection<'a>>,
+}
+
+#[derive(Serialize)]
+struct LimitCounterProjection<'a> {
+    key: &'a LimitKey,
+    value: u64,
+}
+
+impl<'a> From<&'a LimitUsage> for LimitUsageProjection<'a> {
+    fn from(value: &'a LimitUsage) -> Self {
+        Self {
+            model_requests: value.model_requests,
+            turns: value.turns,
+            tool_calls: value.tool_calls,
+            max_parallel_tools: value.max_parallel_tools,
+            input_tokens: value.input_tokens,
+            output_tokens: value.output_tokens,
+            context_bytes: value.context_bytes,
+            output_bytes: value.output_bytes,
+            retries: value.retries,
+            wall_time: value.wall_time,
+            cost: value.cost.as_ref(),
+            extension_counters: value
+                .extension_counters
+                .iter()
+                .map(|(key, value)| LimitCounterProjection { key, value: *value })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct CancellationStateProjection<'a> {
+    request: CancellationRequestProjection<'a>,
+    prior_phase: RunPhase,
+    completed_effects: &'a [EffectId],
+    cancelled_effects: &'a [EffectId],
+    uncertain_effects: &'a [EffectId],
+    outstanding_effects: &'a [EffectId],
+}
+
+#[derive(Serialize)]
+struct CancellationRequestProjection<'a> {
+    request_id: crate::CancellationRequestId,
+    initiator: &'a crate::CancellationInitiator,
+    reason: Option<&'a str>,
+}
+
+impl<'a> From<&'a CancellationState> for CancellationStateProjection<'a> {
+    fn from(value: &'a CancellationState) -> Self {
+        Self {
+            request: CancellationRequestProjection {
+                request_id: value.request.request_id,
+                initiator: &value.request.initiator,
+                reason: value.request.reason.as_deref(),
+            },
+            prior_phase: value.prior_phase,
+            completed_effects: &value.completed_effects,
+            cancelled_effects: &value.cancelled_effects,
+            uncertain_effects: &value.uncertain_effects,
+            outstanding_effects: &value.outstanding_effects,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct RetryStateProjection<'a> {
+    attempts: u32,
+    pending: Option<&'a crate::RetryScheduled>,
+    timer_firings: Vec<&'a crate::TimerFired>,
+}
+
+impl<'a> From<&'a RetryState> for RetryStateProjection<'a> {
+    fn from(value: &'a RetryState) -> Self {
+        Self {
+            attempts: value.attempts,
+            pending: value.pending.as_ref(),
+            timer_firings: value.timer_firings.values().collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct RunSuspendedProjection<'a> {
+    reason_code: &'a crate::ErrorCode,
+    cancellation_request_id: Option<crate::CancellationRequestId>,
+}
+
+impl<'a> From<&'a RunSuspended> for RunSuspendedProjection<'a> {
+    fn from(value: &'a RunSuspended) -> Self {
+        Self {
+            reason_code: &value.reason_code,
+            cancellation_request_id: value.cancellation_request_id,
         }
     }
 }
@@ -706,6 +901,7 @@ impl<'a> From<&'a TerminalCandidate> for TerminalCandidateProjection<'a> {
 pub(super) enum TerminalStateProjection<'a> {
     Completed(&'a RunCompleted),
     Failed(Box<RunFailedProjection<'a>>),
+    Cancelled(&'a RunCancelled),
 }
 
 impl<'a> From<&'a TerminalState> for TerminalStateProjection<'a> {
@@ -715,6 +911,7 @@ impl<'a> From<&'a TerminalState> for TerminalStateProjection<'a> {
             TerminalState::Failed(failed) => {
                 Self::Failed(Box::new(RunFailedProjection::from(failed)))
             }
+            TerminalState::Cancelled(cancelled) => Self::Cancelled(cancelled),
         }
     }
 }

@@ -1670,6 +1670,7 @@ fn assert_tool_golden(file: &str, harness: &Harness) {
     let terminal = state.terminal.as_ref().map(|terminal| match terminal {
         TerminalState::Completed(_) => "completed",
         TerminalState::Failed(_) => "failed",
+        TerminalState::Cancelled(_) => "cancelled",
     });
     let mut replayed = Kernel::default();
     let mut transient = 0_u64;
