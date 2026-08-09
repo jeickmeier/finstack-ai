@@ -6,6 +6,7 @@ interaction envelopes, shared refs/limits/Usage, and public-rust-api fixtures.
 Branch: `pr-008-contract-amendment`
 GitHub PR: [#5](https://github.com/jeickmeier/finstack-ai/pull/5)
 Implementation tip: `7b5ededc2054b0b7dde8373efbe0ec95ba02b71b`
+Hosted CI tip: `1f6a87060f9ea81a65ccdad703cfa3c7c9cdd533`
 
 ## Acceptance mapping
 
@@ -27,6 +28,7 @@ Implementation tip: `7b5ededc2054b0b7dde8373efbe0ec95ba02b71b`
 | TM-15 / TM-16 / §18 review | `security-review.txt` |
 | Dependency inventory | `dependency-inventory.txt` |
 | cargo-deny | `supply-chain.txt` |
+| Hosted CI | `hosted-ci.txt` |
 
 ## Commands
 

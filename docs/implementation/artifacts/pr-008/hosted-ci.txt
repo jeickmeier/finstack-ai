@@ -1,0 +1,9 @@
+PR-008 hosted CI evidence
+Date (UTC): 2026-08-09T00:08:10Z
+Branch: pr-008-contract-amendment
+Head SHA: 1f6a87060f9ea81a65ccdad703cfa3c7c9cdd533
+PR: https://github.com/jeickmeier/finstack-ai/pull/5
+ci run: https://github.com/jeickmeier/finstack-ai/actions/runs/31285097812 (success)
+security run: https://github.com/jeickmeier/finstack-ai/actions/runs/31285097802 (success)
+nightly run: https://github.com/jeickmeier/finstack-ai/actions/runs/31285097805 (success)
+Result: all 16 PR-attached checks Passed, including windows-2025 rust and release-smoke
