@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-refactor",
+  "evals": [
+    {
+      "id": 1,
+      "name": "behavior-preserving-helper-extract",
+      "prompt": "Refactor the repeated attribution metric-key construction without changing public behavior or binding-visible names.",
+      "expected_output": "A behavior-preserving refactor plan or implementation summary that names invariants, sync surfaces, and targeted verification.",
+      "files": []
+    }
+  ]
+}

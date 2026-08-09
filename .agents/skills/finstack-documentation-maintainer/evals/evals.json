@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-documentation-maintainer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "api-docs-and-stale-example",
+      "prompt": "Clean up the docs for a valuation API: add missing public API docs, remove AI/process language, and verify the Python example still matches the current bindings.",
+      "expected_output": "A documentation report that separates API coverage from stale-reference cleanup, lists source/binding/stub references checked, and reports focused verification.",
+      "files": []
+    }
+  ]
+}
