@@ -25,7 +25,8 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tool installs and 
 
 Useful tasks after bootstrap:
 
-- `mise run format` / `clippy` / `test` / `docs` — Rust merge gates
+- `mise run format` — write-mode Rust and Python formatter
+- `mise run clippy` / `test` / `docs` — Rust merge gates
 - `mise run check-minimal` — kernel-only and no-default-features graphs
 - `mise run architecture` — dependency/feature boundary enforcement
 - `mise run schema-governance` — ADR inventory, contract registry, and schema/fixture coupling
@@ -33,7 +34,7 @@ Useful tasks after bootstrap:
 - `mise run release-smoke` — private CI release binary packaging
 - `mise run build-python` — Python binding package under `bindings/finstack-ai-python`
 - `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (no percentage gate)
-- `mise run ci` — local aggregate of the checks above
+- `mise run ci` — local aggregate of the tasks above
 
 The installable Python package lives under `bindings/finstack-ai-python`, not the repository root. Prefer `mise run build-python`, or from the root: `uv build --package finstack-ai`.
 
