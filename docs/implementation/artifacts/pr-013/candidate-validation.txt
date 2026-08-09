@@ -1,0 +1,62 @@
+PR-013 immutable candidate validation
+Date: 2026-08-09
+Branch: codex/pr-013-kernel-hardening
+Implementation revision: aba26764a448f6b2691bfac62a0f36f865f61ed6
+Result: PASS for local implementation scope
+
+Focused validation at the immutable implementation revision
+
+1. mise run test-kernel
+   PASS: 87 kernel unit tests, 81 reducer/integration tests including the
+   fixed-seed property/reference-machine suite, semantic-reference drift test,
+   rustdoc tests, runtime tests, and the 106-fixture public Rust API corpus.
+
+2. mise run conformance
+   PASS: candidate-v1 public API, reducer, golden trace, prefix replay, strict
+   decoding, version rejection, and corrupt-replay coverage.
+
+3. mise run fuzz-smoke
+   PASS: record_replay_json, kernel_transition_json, run_event_json, and
+   message_json each completed 256 runs with seed 1, a 5-second input timeout,
+   1 MiB maximum input, and 2 GiB RSS limit. No crash artifact was produced.
+
+4. mise run check-wasm
+   PASS: kernel library, unit tests, model_only_reducer property tests, and
+   semantic_reference test compiled for wasm32-unknown-unknown; the WASM
+   binding crate also compiled.
+
+5. mise run architecture
+   PASS: 22 checker tests and the repository scan reported no findings.
+
+6. mise run schema-governance
+   PASS.
+
+7. mise run check-nightly
+   PASS: root and nested fuzz workspaces compiled with nightly-2026-08-01.
+
+Aggregate validation at the immutable implementation revision
+
+8. mise run ci
+   PASS: formatting, Clippy, workspace tests, rustdoc, minimal builds,
+   architecture, wasm32 compilation, schema governance, conformance, benchmark
+   compilation, workflow lint, production and fuzz supply-chain checks, secret
+   scan, release smoke, and Python source/wheel builds.
+   cargo-deny emitted non-failing duplicate-syn and unmatched-license warnings;
+   both manifest scans passed.
+
+Compatibility review
+
+- git diff --exit-code main -- fixtures/compatibility/golden-trace/v1
+  PASS: no candidate-v1 golden output changed.
+- golden-trace-SHA256SUMS contains the manually reviewed sorted catalog for all
+  25 Phase 1 golden outputs from local main 9c04c58.
+- The compiler-exhaustive semantic-reference test covers every current phase,
+  input, record body, event body, effect input, action, numbered invariant, and
+  fixture inventory entry without adding a production registry.
+
+Pending hosted evidence
+
+- Dedicated Ubuntu fuzz-smoke job on the implementation commit.
+- Hosted Linux/macOS/Windows aggregate CI on the implementation commit.
+- Manually dispatched long-fuzz campaign with retained corpora/crash artifacts.
+- Separate G1 decision by me@jeickmeier.com after the hosted evidence exists.

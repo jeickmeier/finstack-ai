@@ -21,13 +21,13 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-08 (PR-004 standalone records).
+Index last reconciled: 2026-08-09 (PR-013 immutable local candidate evidence).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-002 enforcement) |
-| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-010 tool-batch reducer; G1 remains) |
-| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-010 deterministic tool effects; G1 remains) |
+| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 kernel boundary evidence; hosted G1 remains) |
+| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 exhaustive continuation evidence; hosted G1 remains) |
+| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 property/fuzz evidence; hosted G1 remains) |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
 | ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
 | ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
@@ -49,10 +49,10 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Standalone | Not started | Missing |
 | ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Accepted | Standalone | Not started | Missing |
 | ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Standalone | In progress | Partial |
-| ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | In progress | Partial (PR-009 before_finalize continuation) |
+| ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 deferral identity; runtime lifecycle remains) |
+| ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Standalone | In progress | Partial (PR-013 attenuation evidence; dispatch/lifecycle remains) |
+| ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 DTO evidence; routing/lifecycle remains) |
+| ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 final-boundary evidence; PR-018/PR-048 remain) |
 | ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Implemented | Verified |
 | ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | Not started | Missing |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Not started | Missing |
@@ -157,14 +157,24 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-09 | ADR-028 | Evidence | me@jeickmeier.com | Missing | Partial | PR-009 `before_finalize` continuation at `5843dce6d77498a75acdc15d816586cb26098456`; full Verified awaits PR-018 / PR-048 | PR-009-E-merge-conformance-03a5d78b496c; PR-009-E-merge-kernel-f294c67a385b | me@jeickmeier.com |
 | 2026-08-09 | ADR-002 | Evidence | me@jeickmeier.com | Partial | Partial | PR-010 tool-batch continuation at `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5`; full Verified awaits G1 | PR-010-E-merge-kernel-d8f6a2c9017b; PR-010-E-merge-conformance-71e4c3a8b205; PR-010-E-security-9ab3d6e1f470 | me@jeickmeier.com |
 | 2026-08-09 | ADR-003 | Evidence | me@jeickmeier.com | Partial | Partial | PR-010 deterministic plans, commit-before-effect, and settlement at `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5`; full Verified awaits later mapped work / G1 | PR-010-E-merge-kernel-d8f6a2c9017b; PR-010-E-security-9ab3d6e1f470; PR-010-E-ci-f2c84d1a6b39 | me@jeickmeier.com |
+| 2026-08-09 | ADR-001 | Evidence | me@jeickmeier.com | Partial | Partial | PR-013 I/O-free kernel boundary, production dependency closure, native/WASM compilation, and semantic reference at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; Verified awaits hosted evidence and G1 | PR-013-E-architecture-2d7b5e1c8a94; PR-013-E-wasm-6a4f8d2c9e15; PR-013-E-golden-7f2c19a4d8e6 | me@jeickmeier.com |
+| 2026-08-09 | ADR-002 | Evidence | me@jeickmeier.com | Partial | Partial | PR-013 exhaustive phase/input, property/reference-machine, replay, retry/timer/cancellation, and terminal evidence at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; Verified awaits hosted evidence and G1 | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-fuzz-smoke-5e9a2c7d1f63 | me@jeickmeier.com |
+| 2026-08-09 | ADR-003 | Evidence | me@jeickmeier.com | Partial | Partial | PR-013 deterministic decide/apply, commit-before-action, duplicate settlement, deferral, replay, and fuzz evidence at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; Verified awaits hosted evidence and G1 | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-fuzz-smoke-5e9a2c7d1f63; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-025 | Implementation | me@jeickmeier.com | Not started | In progress | PR-013 deferred-effect identity and completion hardening at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; runtime lifecycle remains | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-025 | Evidence | me@jeickmeier.com | Missing | Partial | Original effect, input, output contract, retry safety, completion identity, and atomic conflict behavior covered; PR-014/PR-042–PR-044/PR-048 remain | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-026 | Implementation | me@jeickmeier.com | Not started | In progress | PR-013 lineage attenuation and serialized replay hardening at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; dispatch/lifecycle remains | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-026 | Evidence | me@jeickmeier.com | Missing | Partial | Depth, principal, tenant, deadline, budget, ceiling, and propagation attenuation covered; PR-046–PR-048 remain | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-027 | Implementation | me@jeickmeier.com | Not started | In progress | PR-013 typed interaction DTO, sibling, bounds, serialization, and derivation hardening at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; routing/lifecycle remains | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27 | me@jeickmeier.com |
+| 2026-08-09 | ADR-027 | Evidence | me@jeickmeier.com | Missing | Partial | Principal/authorization pairing and strict malformed fixtures covered without fabricating AwaitingInteraction routing; PR-018/PR-044/PR-048 remain | PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-028 | Evidence | me@jeickmeier.com | Partial | Partial | PR-013 proves before_finalize is the final behavior-changing kernel transition and terminals are immutable at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; PR-018/PR-048 remain | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
 
 ## Current record and evidence links
 
 | ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
 | --- | --- | --- | --- | --- | --- |
-| ADR-001 | [ADR-001-microkernel-boundary.md](adrs/ADR-001-microkernel-boundary.md) | me@jeickmeier.com | Partial (PR-002 enforcement): PR-002-E-architecture-6ed3268e6ff5; PR-002-E-dep-direction-321ce9b2b4b4 at `ee9754fe2d0f015181dcefa97e715392aadd28ed` | PR-004 standalone ADR; PR-002 architecture enforcement | 2026-08-08 |
-| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | Partial (PR-010 tool-batch reducer): PR-010-E-merge-kernel-d8f6a2c9017b; PR-010-E-merge-conformance-71e4c3a8b205; PR-010-E-security-9ab3d6e1f470 at `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` | PR-004 standalone ADR; PR-010 Done; G1 remains | 2026-08-09 |
-| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | Partial (PR-010 deterministic tool effects): PR-010-E-merge-kernel-d8f6a2c9017b; PR-010-E-security-9ab3d6e1f470; PR-010-E-ci-f2c84d1a6b39 at `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` | PR-004 standalone ADR; PR-010 Done; later mapped work / G1 remain | 2026-08-09 |
+| ADR-001 | [ADR-001-microkernel-boundary.md](adrs/ADR-001-microkernel-boundary.md) | me@jeickmeier.com | Partial (PR-013 boundary): PR-013-E-architecture-2d7b5e1c8a94; PR-013-E-wasm-6a4f8d2c9e15; PR-013-E-golden-7f2c19a4d8e6 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
+| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | Partial (PR-013 exhaustive continuation): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-fuzz-smoke-5e9a2c7d1f63 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
+| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | Partial (PR-013 deterministic effect evidence): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-fuzz-smoke-5e9a2c7d1f63; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
 | ADR-004 | [ADR-004-commit-before-effect.md](adrs/ADR-004-commit-before-effect.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-005 | [ADR-005-six-ports.md](adrs/ADR-005-six-ports.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-006 | [ADR-006-direct-native-path.md](adrs/ADR-006-direct-native-path.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
@@ -186,10 +196,10 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-022 | [ADR-022-json-schema-2020-12.md](adrs/ADR-022-json-schema-2020-12.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-023 | [ADR-023-reference-provider.md](adrs/ADR-023-reference-provider.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-024 | [ADR-024-governance-and-license.md](adrs/ADR-024-governance-and-license.md) | me@jeickmeier.com | Standalone record plus PR-001 license/governance files at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`; evidence IDs PR-001-E-ownership-review-b14626f70259, PR-001-E-security-md-f70391db8ac2 | PR-004 standalone ADR; PR-001 license/governance files | 2026-08-08 |
-| ADR-025 | [ADR-025-generic-deferred-effects.md](adrs/ADR-025-generic-deferred-effects.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-026 | [ADR-026-run-lineage.md](adrs/ADR-026-run-lineage.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-027 | [ADR-027-typed-interactions.md](adrs/ADR-027-typed-interactions.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | Partial (PR-009 before_finalize continuation): PR-009-E-merge-conformance-03a5d78b496c; PR-009-E-merge-kernel-f294c67a385b at `5843dce6d77498a75acdc15d816586cb26098456` | PR-004 standalone ADR; PR-009 Done; PR-018 / PR-048 remain | 2026-08-09 |
+| ADR-025 | [ADR-025-generic-deferred-effects.md](adrs/ADR-025-generic-deferred-effects.md) | me@jeickmeier.com | Partial (PR-013 deferral identity): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-014/PR-042–PR-044/PR-048 remain | 2026-08-09 |
+| ADR-026 | [ADR-026-run-lineage.md](adrs/ADR-026-run-lineage.md) | me@jeickmeier.com | Partial (PR-013 attenuation): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-046–PR-048 remain | 2026-08-09 |
+| ADR-027 | [ADR-027-typed-interactions.md](adrs/ADR-027-typed-interactions.md) | me@jeickmeier.com | Partial (PR-013 DTO semantics): PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-018/PR-044/PR-048 remain | 2026-08-09 |
+| ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | Partial (PR-013 final boundary): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-018/PR-048 remain | 2026-08-09 |
 | ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | Verified: PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-hosted-ci-9a1ccbb88ae5 at merge `56d7777956df145213b03d2b0b5c1922db42b346` | PR-004 standalone ADR; PR-006 [#4](https://github.com/jeickmeier/finstack-ai/pull/4) | 2026-08-08 |
 | ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-031 | [ADR-031-worker-based-wasm.md](adrs/ADR-031-worker-based-wasm.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
