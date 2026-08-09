@@ -1,0 +1,45 @@
+PR-011 candidate and local integration validation
+Date: 2026-08-09
+Commit: 01380ead5c5ca7b9e7d28d681d84719c9bf0279e
+Branch integrated: codex/pr-011-kernel-termination -> main (fast-forward)
+Result: PASS
+
+Focused validation
+
+1. cargo test -p finstack-ai-kernel --locked
+   PASS: 87 unit tests, 72 reducer/integration tests, and 6 doctests; 165 total.
+   Termination coverage includes every configured limit below/exact/above,
+   exact cost string boundaries, cost/counter overflow, all reachable
+   nonterminal cancellation phases, retry replay/budget, root-child policy,
+   deferred model/tool effects, source-ordered tool closure, chunked
+   reconciliation, terminal races, uncertainty, and replay.
+
+2. cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+   PASS.
+
+3. mise run conformance
+   PASS: strict public-Rust-API fixtures, reducer fixtures, prefix replay, and
+   golden traces including the five PR-011 termination summaries.
+
+4. mise run check-wasm
+   PASS: finstack-ai-kernel and finstack-ai-wasm for wasm32-unknown-unknown.
+
+Aggregate validation
+
+5. mise run ci
+   PASS at the immutable commit above (exit 0).
+   The aggregate included formatting, clippy, workspace tests, docs,
+   architecture, minimal-feature and WASM checks, schema governance,
+   conformance, benchmark compilation, workflow lint, supply-chain policy,
+   secret scan and canary, release smoke, and Python source/wheel builds.
+   cargo-deny reported the existing informational duplicate-syn warning; the
+   supply-chain task passed. Gitleaks scanned 75 commits and found no leaks.
+
+Golden termination summaries
+
+- fixtures/compatibility/golden-trace/v1/termination/valid--pr011-limit.json
+- fixtures/compatibility/golden-trace/v1/termination/valid--pr011-retry.json
+- fixtures/compatibility/golden-trace/v1/termination/valid--pr011-model-cancel.json
+- fixtures/compatibility/golden-trace/v1/termination/valid--pr011-tool-cancel.json
+- fixtures/compatibility/golden-trace/v1/termination/valid--pr011-uncertain.json
+

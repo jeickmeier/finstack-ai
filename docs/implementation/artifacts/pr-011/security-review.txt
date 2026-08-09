@@ -1,0 +1,59 @@
+PR-011 security and threat-model review
+Date: 2026-08-09
+Reviewed commit: 01380ead5c5ca7b9e7d28d681d84719c9bf0279e
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-011 pure-kernel scope
+
+Scope reviewed
+
+- Limit, deadline, retry, cancellation, reconciliation, terminal-race,
+  deferred-effect, tool-batch, and lineage propagation transitions.
+- Records/events, strict decoding, replay fingerprints, and conditional
+  kernel-state v3 validation/hash projection.
+- Threat Model TM-02, TM-14, TM-15 and SEC-INV-002, SEC-INV-004,
+  SEC-INV-007, SEC-INV-008, SEC-INV-009, SEC-INV-010, SEC-INV-011.
+
+Control disposition
+
+PASS - SEC-INV-007 / resource bounds
+Every PR-011 counter has an explicit maximum and below/exact/above tests.
+All aggregation uses checked arithmetic. Cost and extension-counter overflow
+fail terminally without wrap, LimitReached fabrication, or fabricated usage.
+Configured parallelism is rejected at kernel plan admission.
+
+PASS - TM-14 / cancellation and deadline races
+Cancellation intent and authorization are validated before cancellation can
+change state; committed-order precedence is explicit. Outstanding effects are
+reconciled incrementally, duplicate/conflicting observations are indexed,
+uncertainty suspends, and cancelled closures cannot assert tool success or
+tool-produced output. Tool closures finalize in assistant source order.
+
+PASS - TM-15 / child attenuation and propagation
+Propagation uses the persisted RunPropagationPolicy and normalized child
+authorization decision. Cascade is deterministic. DetachOnlyIfPreauthorized
+detaches only when the accepted decision reference carries explicit detach
+authorization; otherwise cancellation propagates. No transient application
+state is treated as authority.
+
+PASS - SEC-INV-002, 004, 008, 009, 010, 011
+The reducer remains synchronous and I/O-free; it emits effects only after the
+records that authorize them. Equal retries/cancellations/reconciliations are
+idempotent, conflicts fail closed, identifiers and lineage are checked,
+terminal states are immutable, impossible state is rejected, and durable
+records retain policy/reason/decision references without secret material.
+
+PASS - architecture and supply-chain review
+No primary port, dependency, runtime privilege, secret surface, host callback,
+network path, filesystem path, executor, or dynamic-loading capability was
+added. Aggregate architecture, supply-chain, secret-scan, and WASM checks pass.
+
+Residual later-PR obligations
+
+- Runtime cancellation signalling, dispatch/settlement rechecks, durable
+  recovery, and fault injection remain PR-015, PR-045, and PR-048 scope.
+- Actual authenticated child dispatch and cross-run fan-out remain runtime/SDK
+  scope; PR-011 proves only the normalized per-child decision.
+- Interaction-router authorization and late-resolution tests remain PR-044 and
+  PR-048 scope because PR-011 adds no router or active interaction executor.
+These are declared exclusions, not exceptions to PR-011 acceptance.
+
