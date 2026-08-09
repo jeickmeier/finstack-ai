@@ -9,7 +9,7 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, tests, docs, minimal features, architecture/WASM, schema governance, conformance compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility only; fuzz remains documentation-reserved (no green placeholder job) |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
@@ -35,6 +35,11 @@ architecture, supply-chain, secret, or release-smoke evidence on code changes.
 - Contributor/CI tools are pinned in root [`mise.toml`](../../mise.toml).
 - Update pins by changing `mise.toml` and the workflow SHA comments together;
   then run `mise run lint-workflows` and `mise run doctor`.
+- The Rust matrix uses the pinned `Swatinem/rust-cache` action to reuse dependency
+  build artifacts across runs. Its automatic key separates jobs and rustc
+  host/toolchain identities and includes the Cargo graph and compiler
+  environment; steps within one job continue to share the workspace `target/`
+  directory directly.
 
 ## Release artifacts (PR-003-A03)
 
@@ -107,6 +112,11 @@ Canonical tasks:
 - `mise run benchmark-smoke` — compile + short Criterion run with metadata
 - `mise run benchmark` — full non-blocking Criterion run with metadata under `target/benchmark/`
 - `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (uploaded by the Ubuntu `coverage` job; no percentage gate; WASM is a scaffold until real wasm tests exist)
+
+The required Rust matrix runs conformance once through `mise run test`
+(`cargo test --workspace`). The focused `mise run conformance` task remains
+available for local development without rerunning the same package in the
+aggregate CI sequence.
 
 Metadata schema: `schemas/benchmark-report/v1/metadata.schema.json`.  
 Artifacts include compiler, target, commit, feature set, and machine metadata

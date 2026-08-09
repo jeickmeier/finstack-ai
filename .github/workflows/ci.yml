@@ -104,6 +104,9 @@ jobs:
           install: true
           cache: true
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
       - name: Doctor
         run: mise run doctor
 
@@ -133,9 +136,6 @@ jobs:
           mise run lint-ci
           mise run format-ci
           mise run test-ci
-
-      - name: Conformance harness
-        run: mise run conformance
 
       - name: Benchmark helpers and compile
         run: |

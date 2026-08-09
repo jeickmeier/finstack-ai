@@ -135,8 +135,7 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/archit
 description = "Enforce architecture, dependency, and feature boundaries"
 run = """
 uv run --no-project --with pytest==9.1.1 pytest tools/architecture/tests -q && \
-uv run --no-project python tools/architecture/check.py && \
-mise run check-wasm
+uv run --no-project python tools/architecture/check.py
 """
 
 [tasks.lint-ci]
@@ -286,7 +285,6 @@ mise run lint-schema-governance
 mise run format-schema-governance
 mise run test-schema-governance
 mise run schema-governance
-mise run conformance
 mise run lint-benchmark
 mise run format-benchmark
 mise run test-benchmark
