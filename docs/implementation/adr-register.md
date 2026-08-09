@@ -21,13 +21,13 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-09 (PR-013 immutable local candidate evidence).
+Index last reconciled: 2026-08-09 (PR-013 merged; Phase 1 and G1 closed).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 kernel boundary evidence; hosted G1 remains) |
-| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 exhaustive continuation evidence; hosted G1 remains) |
-| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-013 property/fuzz evidence; hosted G1 remains) |
+| ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 merge and G1 boundary evidence) |
+| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 exhaustive continuation evidence and G1) |
+| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 hosted property/fuzz evidence and G1) |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
 | ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
 | ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
@@ -167,14 +167,20 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-09 | ADR-027 | Implementation | me@jeickmeier.com | Not started | In progress | PR-013 typed interaction DTO, sibling, bounds, serialization, and derivation hardening at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; routing/lifecycle remains | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27 | me@jeickmeier.com |
 | 2026-08-09 | ADR-027 | Evidence | me@jeickmeier.com | Missing | Partial | Principal/authorization pairing and strict malformed fixtures covered without fabricating AwaitingInteraction routing; PR-018/PR-044/PR-048 remain | PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
 | 2026-08-09 | ADR-028 | Evidence | me@jeickmeier.com | Partial | Partial | PR-013 proves before_finalize is the final behavior-changing kernel transition and terminals are immutable at `aba26764a448f6b2691bfac62a0f36f865f61ed6`; PR-018/PR-048 remain | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 | me@jeickmeier.com |
+| 2026-08-09 | ADR-001 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-013 merged as `fa6222f20e4a4616f600e867be94afe12967dcb9`; Phase 1 I/O-free kernel boundary delivery is complete | PR-013-E-integration-fa6222f20e4a; PH1-E-exit-kernel-fa6222f20e4a | me@jeickmeier.com |
+| 2026-08-09 | ADR-001 | Evidence | me@jeickmeier.com | Partial | Verified | Hosted native/WASM, architecture, dependency, semantic-reference, and G1 evidence passed | PR-013-E-hosted-ci-31339759492; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e | me@jeickmeier.com |
+| 2026-08-09 | ADR-002 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-013 merged as `fa6222f20e4a4616f600e867be94afe12967dcb9`; Phase 1 model/tool continuation delivery is complete | PR-013-E-integration-fa6222f20e4a; PH1-E-exit-kernel-fa6222f20e4a | me@jeickmeier.com |
+| 2026-08-09 | ADR-002 | Evidence | me@jeickmeier.com | Partial | Verified | Exhaustive transition, reference-machine, replay, timer/retry/cancellation, hosted fuzz, and G1 evidence passed | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-long-fuzz-31339772213; G1-D-kernel-semantics-4f52c8a91d6e | me@jeickmeier.com |
+| 2026-08-09 | ADR-003 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-013 merged as `fa6222f20e4a4616f600e867be94afe12967dcb9`; Phase 1 deterministic effect semantics delivery is complete | PR-013-E-integration-fa6222f20e4a; PH1-E-exit-kernel-fa6222f20e4a | me@jeickmeier.com |
+| 2026-08-09 | ADR-003 | Evidence | me@jeickmeier.com | Partial | Verified | Commit-before-action, duplicate/deferral identity, replay, hosted fuzz, security review, and G1 evidence passed | PR-013-E-long-fuzz-31339772213; PR-013-E-security-7d2a5f9c1e84; G1-D-kernel-semantics-4f52c8a91d6e | me@jeickmeier.com |
 
 ## Current record and evidence links
 
 | ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
 | --- | --- | --- | --- | --- | --- |
-| ADR-001 | [ADR-001-microkernel-boundary.md](adrs/ADR-001-microkernel-boundary.md) | me@jeickmeier.com | Partial (PR-013 boundary): PR-013-E-architecture-2d7b5e1c8a94; PR-013-E-wasm-6a4f8d2c9e15; PR-013-E-golden-7f2c19a4d8e6 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
-| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | Partial (PR-013 exhaustive continuation): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-fuzz-smoke-5e9a2c7d1f63 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
-| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | Partial (PR-013 deterministic effect evidence): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-fuzz-smoke-5e9a2c7d1f63; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-013 local candidate; hosted G1 remains | 2026-08-09 |
+| ADR-001 | [ADR-001-microkernel-boundary.md](adrs/ADR-001-microkernel-boundary.md) | me@jeickmeier.com | Verified: PR-013-E-architecture-2d7b5e1c8a94; PR-013-E-wasm-6a4f8d2c9e15; PR-013-E-hosted-ci-31339759492; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` | PR-004 standalone ADR; PR-013 [#6](https://github.com/jeickmeier/finstack-ai/pull/6); G1 Passed | 2026-08-09 |
+| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | Verified: PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-long-fuzz-31339772213; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` | PR-004 standalone ADR; PR-013 [#6](https://github.com/jeickmeier/finstack-ai/pull/6); G1 Passed | 2026-08-09 |
+| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | Verified: PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-long-fuzz-31339772213; PR-013-E-security-7d2a5f9c1e84; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` | PR-004 standalone ADR; PR-013 [#6](https://github.com/jeickmeier/finstack-ai/pull/6); G1 Passed | 2026-08-09 |
 | ADR-004 | [ADR-004-commit-before-effect.md](adrs/ADR-004-commit-before-effect.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-005 | [ADR-005-six-ports.md](adrs/ADR-005-six-ports.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-006 | [ADR-006-direct-native-path.md](adrs/ADR-006-direct-native-path.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
