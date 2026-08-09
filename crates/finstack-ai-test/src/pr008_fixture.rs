@@ -191,6 +191,12 @@ fn run_run_event(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError
     let session_id = parse_uuid_field(&input, "session_id", SessionId::parse)?;
     let lane_id = parse_uuid_field(&input, "lane_id", LaneId::parse)?;
     let run_id = parse_uuid_field(&input, "run_id", RunId::parse)?;
+    let model_request_id = input
+        .get("model_request_id")
+        .and_then(Value::as_str)
+        .map(finstack_ai_kernel::ModelRequestId::parse)
+        .transpose()
+        .map_err(|error| fail(error.to_string()))?;
     let text = input.get("text").and_then(Value::as_str).unwrap_or("hello");
     let delta = ModelTextDelta::try_new(text).map_err(|error| fail(error.to_string()))?;
     let ts = Timestamp::from_unix_ms(0).map_err(|error| fail(error.to_string()))?;
@@ -203,7 +209,7 @@ fn run_run_event(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError
             lane_id,
             run_id,
             None,
-            None,
+            model_request_id,
             None,
             None,
             None,

@@ -1,0 +1,28 @@
+PR-008 pre-merge code review
+Date: 2026-08-08
+Reviewer: Cursor agent review requested by me@jeickmeier.com
+Reviewed branch head: e3fdf05b59a6bc357fcb853292f20fd5d4fb7b21
+Result: Fail — remediation required before merge
+
+Confirmed findings:
+- Non-root RunAccepted construction could omit parent context; principal and
+  limit/deadline/budget attenuation admitted widening.
+- Internally tagged RecordBody/RunEventBody collided with nested kind fields
+  and could not round-trip effect RawJson payloads.
+- InteractionCancelled deserialization bypassed principal/authorization
+  pairing; tagged Role/Queue assignee hints could not serialize.
+- RunEvent constructors accepted unknown versions and mismatched effect
+  correlations and lacked a source-record ordinal constructor.
+- New semantic arrays/maps decoded into unbounded Vec/BTreeMap values before
+  applying ceilings.
+- AppendRequest admitted mixed-session records and unpaired interaction
+  request/effect records.
+- PR-008-A06–A08 evidence did not cover principal/budget attenuation,
+  deterministic record order, and exact/one-over run-depth boundaries.
+
+Remediation:
+- PR-008 acceptance dispositions reopened as Failed against this review.
+- Fixes and focused regression tests are in progress in the working tree.
+- Do not mark A01–A08 Passed again until the fixes are committed and all
+  affected local/hosted validation and threat-model review evidence is rebound
+  to the immutable remediation tip.

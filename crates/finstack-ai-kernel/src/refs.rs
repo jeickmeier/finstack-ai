@@ -7,7 +7,8 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::content::{BlobRef, LABEL_MAX_BYTES};
+use crate::bounds::{BoundedMap, BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::content::{BlobRef, BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::digest::Digest;
 use crate::ids::{
     AppendBatchId, ArtifactId, CancellationRequestId, ComponentId, EffectId, EventId,
@@ -91,7 +92,7 @@ impl MiddlewareRef {
         stage: Option<impl AsRef<str>>,
     ) -> Result<Self, RefsError> {
         let stage = match stage {
-            Some(value) => Some(validated_label(value.as_ref(), "stage")?),
+            Some(value) => Some(validated_text(value.as_ref(), "stage")?),
             None => None,
         };
         Ok(Self { component, stage })
@@ -120,10 +121,11 @@ impl<'de> Deserialize<'de> for MiddlewareRef {
         struct Wire {
             component: ComponentRef,
             #[serde(default)]
-            stage: Option<String>,
+            stage: Option<BoundedString<TEXT_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.component, wire.stage).map_err(de::Error::custom)
+        Self::try_new(wire.component, wire.stage.map(BoundedString::into_inner))
+            .map_err(de::Error::custom)
     }
 }
 
@@ -184,19 +186,23 @@ impl<'de> Deserialize<'de> for PrincipalRef {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            issuer: String,
-            subject: String,
+            issuer: BoundedString<LABEL_MAX_BYTES>,
+            subject: BoundedString<LABEL_MAX_BYTES>,
             #[serde(default)]
-            tenant_scope: Option<String>,
+            tenant_scope: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.issuer, wire.subject, wire.tenant_scope).map_err(de::Error::custom)
+        Self::try_new(
+            wire.issuer.into_inner(),
+            wire.subject.into_inner(),
+            wire.tenant_scope.map(BoundedString::into_inner),
+        )
+        .map_err(de::Error::custom)
     }
 }
 
 /// Non-authoritative assignee hint for interactions.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AssigneeHint {
     /// Concrete principal.
     Principal(PrincipalRef),
@@ -204,6 +210,55 @@ pub enum AssigneeHint {
     Role(Arc<str>),
     /// Queue name.
     Queue(Arc<str>),
+}
+
+impl Serialize for AssigneeHint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Wire<'a> {
+            Principal(&'a PrincipalRef),
+            Role(&'a str),
+            Queue(&'a str),
+        }
+
+        let wire = match self {
+            Self::Principal(principal) => Wire::Principal(principal),
+            Self::Role(role) => {
+                validate_label_ref::<S::Error>(role, "role")?;
+                Wire::Role(role)
+            }
+            Self::Queue(queue) => {
+                validate_label_ref::<S::Error>(queue, "queue")?;
+                Wire::Queue(queue)
+            }
+        };
+        wire.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AssigneeHint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Wire {
+            Principal(PrincipalRef),
+            Role(BoundedString<LABEL_MAX_BYTES>),
+            Queue(BoundedString<LABEL_MAX_BYTES>),
+        }
+
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Principal(principal) => Self::Principal(principal),
+            Wire::Role(role) => Self::Role(Arc::from(role.into_inner())),
+            Wire::Queue(queue) => Self::Queue(Arc::from(queue.into_inner())),
+        })
+    }
 }
 
 /// Durable authorization evidence identifiers.
@@ -250,11 +305,15 @@ impl<'de> Deserialize<'de> for AuthorizationEvidence {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            policy_version: String,
-            decision_id: String,
+            policy_version: BoundedString<LABEL_MAX_BYTES>,
+            decision_id: BoundedString<LABEL_MAX_BYTES>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.policy_version, wire.decision_id).map_err(de::Error::custom)
+        Self::try_new(
+            wire.policy_version.into_inner(),
+            wire.decision_id.into_inner(),
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -312,12 +371,16 @@ impl<'de> Deserialize<'de> for ExternalHandleRef {
         #[serde(deny_unknown_fields)]
         struct Wire {
             provider: ComponentId,
-            handle: String,
+            handle: BoundedString<LABEL_MAX_BYTES>,
             reconciliation_metadata: RawJson,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.provider, wire.handle, wire.reconciliation_metadata)
-            .map_err(de::Error::custom)
+        Self::try_new(
+            wire.provider,
+            wire.handle.into_inner(),
+            wire.reconciliation_metadata,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -402,7 +465,7 @@ impl<'de> Deserialize<'de> for ArtifactRef {
         #[serde(deny_unknown_fields)]
         struct Wire {
             id: ArtifactId,
-            kind: String,
+            kind: BoundedString<LABEL_MAX_BYTES>,
             blob: BlobRef,
             content_digest: Digest,
             scope_digest: Digest,
@@ -411,7 +474,7 @@ impl<'de> Deserialize<'de> for ArtifactRef {
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
             wire.id,
-            wire.kind,
+            wire.kind.into_inner(),
             wire.blob,
             wire.content_digest,
             wire.scope_digest,
@@ -507,14 +570,19 @@ impl<'de> Deserialize<'de> for Diagnostic {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            code: String,
-            message: String,
+            code: BoundedString<LABEL_MAX_BYTES>,
+            message: BoundedString<TEXT_MAX_BYTES>,
             severity: DiagnosticSeverity,
             metadata: Metadata,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.code, wire.message, wire.severity, wire.metadata)
-            .map_err(de::Error::custom)
+        Self::try_new(
+            wire.code.into_inner(),
+            wire.message.into_inner(),
+            wire.severity,
+            wire.metadata,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -589,39 +657,45 @@ impl<'de> Deserialize<'de> for CostAmount {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            unit: String,
+            unit: BoundedString<LABEL_MAX_BYTES>,
             #[serde(deserialize_with = "deserialize_micros")]
             micros: u64,
-            pricing_policy_version: String,
+            pricing_policy_version: BoundedString<LABEL_MAX_BYTES>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.unit, wire.micros, wire.pricing_policy_version)
-            .map_err(de::Error::custom)
+        Self::try_new(
+            wire.unit.into_inner(),
+            wire.micros,
+            wire.pricing_policy_version.into_inner(),
+        )
+        .map_err(de::Error::custom)
     }
 }
 
 /// Normalized token/cost usage for effect completion and budget charge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Usage {
     /// Optional input token count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<u64>,
+    input_tokens: Option<u64>,
     /// Optional output token count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<u64>,
+    output_tokens: Option<u64>,
     /// Optional total token count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_tokens: Option<u64>,
+    total_tokens: Option<u64>,
     /// Optional recorded cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<CostAmount>,
+    cost: Option<CostAmount>,
     /// Namespaced extension counters.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extension_counters: BTreeMap<LimitKey, u64>,
+    extension_counters: BTreeMap<LimitKey, u64>,
 }
 
 impl Usage {
+    /// V1 maximum registered extension counters per resolved agent.
+    pub const MAX_EXTENSION_COUNTERS: usize = 32;
+
     /// Empty usage.
     #[must_use]
     pub fn empty() -> Self {
@@ -632,6 +706,80 @@ impl Usage {
             cost: None,
             extension_counters: BTreeMap::new(),
         }
+    }
+
+    /// Construct validated normalized usage.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefsError::TooManyEntries`] when extension counters exceed the v1 ceiling.
+    pub fn try_new(
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        total_tokens: Option<u64>,
+        cost: Option<CostAmount>,
+        extension_counters: BTreeMap<LimitKey, u64>,
+    ) -> Result<Self, RefsError> {
+        if extension_counters.len() > Self::MAX_EXTENSION_COUNTERS {
+            return Err(RefsError::TooManyEntries {
+                field: "usage.extension_counters",
+                len: extension_counters.len(),
+                max: Self::MAX_EXTENSION_COUNTERS,
+            });
+        }
+        Ok(Self {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cost,
+            extension_counters,
+        })
+    }
+
+    /// Validate collection ceilings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefsError::TooManyEntries`] when extension counters exceed the v1 ceiling.
+    pub fn validate(&self) -> Result<(), RefsError> {
+        if self.extension_counters.len() > Self::MAX_EXTENSION_COUNTERS {
+            return Err(RefsError::TooManyEntries {
+                field: "usage.extension_counters",
+                len: self.extension_counters.len(),
+                max: Self::MAX_EXTENSION_COUNTERS,
+            });
+        }
+        Ok(())
+    }
+
+    /// Input token count.
+    #[must_use]
+    pub fn input_tokens(&self) -> Option<u64> {
+        self.input_tokens
+    }
+
+    /// Output token count.
+    #[must_use]
+    pub fn output_tokens(&self) -> Option<u64> {
+        self.output_tokens
+    }
+
+    /// Total token count.
+    #[must_use]
+    pub fn total_tokens(&self) -> Option<u64> {
+        self.total_tokens
+    }
+
+    /// Recorded cost.
+    #[must_use]
+    pub fn cost(&self) -> Option<&CostAmount> {
+        self.cost.as_ref()
+    }
+
+    /// Extension counters.
+    #[must_use]
+    pub fn extension_counters(&self) -> &BTreeMap<LimitKey, u64> {
+        &self.extension_counters
     }
 
     /// Canonical JSON bytes for digesting usage under effect domains.
@@ -657,43 +805,249 @@ impl Usage {
     }
 }
 
+impl<'de> Deserialize<'de> for Usage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            #[serde(default)]
+            input_tokens: Option<u64>,
+            #[serde(default)]
+            output_tokens: Option<u64>,
+            #[serde(default)]
+            total_tokens: Option<u64>,
+            #[serde(default)]
+            cost: Option<CostAmount>,
+            #[serde(default)]
+            extension_counters: BoundedMap<LimitKey, u64, { Usage::MAX_EXTENSION_COUNTERS }>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.input_tokens,
+            wire.output_tokens,
+            wire.total_tokens,
+            wire.cost,
+            wire.extension_counters.into_inner(),
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
 /// Runtime-owned preallocated `UUIDv7` bags for a transition.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[allow(clippy::struct_field_names)] // Frozen contract fields intentionally end in `_ids`.
 pub struct AllocatedIds {
     /// Record ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub record_ids: Vec<RecordId>,
+    record_ids: Vec<RecordId>,
     /// Event ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub event_ids: Vec<EventId>,
+    event_ids: Vec<EventId>,
     /// Effect ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub effect_ids: Vec<EffectId>,
+    effect_ids: Vec<EffectId>,
     /// Interaction ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub interaction_ids: Vec<InteractionId>,
+    interaction_ids: Vec<InteractionId>,
     /// Message ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub message_ids: Vec<MessageId>,
+    message_ids: Vec<MessageId>,
     /// Turn ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub turn_ids: Vec<TurnId>,
+    turn_ids: Vec<TurnId>,
     /// Model request ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub model_request_ids: Vec<ModelRequestId>,
+    model_request_ids: Vec<ModelRequestId>,
     /// Tool batch ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_batch_ids: Vec<ToolBatchId>,
+    tool_batch_ids: Vec<ToolBatchId>,
     /// Tool call ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_call_ids: Vec<ToolCallId>,
+    tool_call_ids: Vec<ToolCallId>,
     /// Append batch ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub append_batch_ids: Vec<AppendBatchId>,
+    append_batch_ids: Vec<AppendBatchId>,
     /// Cancellation request ids.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub cancellation_request_ids: Vec<CancellationRequestId>,
+    cancellation_request_ids: Vec<CancellationRequestId>,
+}
+
+impl AllocatedIds {
+    /// Construct bounded runtime-owned ID bags.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefsError::TooManyItems`] when any bag exceeds the v1 array ceiling.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        record_ids: Vec<RecordId>,
+        event_ids: Vec<EventId>,
+        effect_ids: Vec<EffectId>,
+        interaction_ids: Vec<InteractionId>,
+        message_ids: Vec<MessageId>,
+        turn_ids: Vec<TurnId>,
+        model_request_ids: Vec<ModelRequestId>,
+        tool_batch_ids: Vec<ToolBatchId>,
+        tool_call_ids: Vec<ToolCallId>,
+        append_batch_ids: Vec<AppendBatchId>,
+        cancellation_request_ids: Vec<CancellationRequestId>,
+    ) -> Result<Self, RefsError> {
+        for (field, len) in [
+            ("record_ids", record_ids.len()),
+            ("event_ids", event_ids.len()),
+            ("effect_ids", effect_ids.len()),
+            ("interaction_ids", interaction_ids.len()),
+            ("message_ids", message_ids.len()),
+            ("turn_ids", turn_ids.len()),
+            ("model_request_ids", model_request_ids.len()),
+            ("tool_batch_ids", tool_batch_ids.len()),
+            ("tool_call_ids", tool_call_ids.len()),
+            ("append_batch_ids", append_batch_ids.len()),
+            ("cancellation_request_ids", cancellation_request_ids.len()),
+        ] {
+            if len > SEMANTIC_ARRAY_MAX_ITEMS {
+                return Err(RefsError::TooManyItems {
+                    field,
+                    len,
+                    max: SEMANTIC_ARRAY_MAX_ITEMS,
+                });
+            }
+        }
+        Ok(Self {
+            record_ids,
+            event_ids,
+            effect_ids,
+            interaction_ids,
+            message_ids,
+            turn_ids,
+            model_request_ids,
+            tool_batch_ids,
+            tool_call_ids,
+            append_batch_ids,
+            cancellation_request_ids,
+        })
+    }
+
+    /// Record ids.
+    #[must_use]
+    pub fn record_ids(&self) -> &[RecordId] {
+        &self.record_ids
+    }
+
+    /// Event ids.
+    #[must_use]
+    pub fn event_ids(&self) -> &[EventId] {
+        &self.event_ids
+    }
+
+    /// Effect ids.
+    #[must_use]
+    pub fn effect_ids(&self) -> &[EffectId] {
+        &self.effect_ids
+    }
+
+    /// Interaction ids.
+    #[must_use]
+    pub fn interaction_ids(&self) -> &[InteractionId] {
+        &self.interaction_ids
+    }
+
+    /// Message ids.
+    #[must_use]
+    pub fn message_ids(&self) -> &[MessageId] {
+        &self.message_ids
+    }
+
+    /// Turn ids.
+    #[must_use]
+    pub fn turn_ids(&self) -> &[TurnId] {
+        &self.turn_ids
+    }
+
+    /// Model request ids.
+    #[must_use]
+    pub fn model_request_ids(&self) -> &[ModelRequestId] {
+        &self.model_request_ids
+    }
+
+    /// Tool batch ids.
+    #[must_use]
+    pub fn tool_batch_ids(&self) -> &[ToolBatchId] {
+        &self.tool_batch_ids
+    }
+
+    /// Tool call ids.
+    #[must_use]
+    pub fn tool_call_ids(&self) -> &[ToolCallId] {
+        &self.tool_call_ids
+    }
+
+    /// Append batch ids.
+    #[must_use]
+    pub fn append_batch_ids(&self) -> &[AppendBatchId] {
+        &self.append_batch_ids
+    }
+
+    /// Cancellation request ids.
+    #[must_use]
+    pub fn cancellation_request_ids(&self) -> &[CancellationRequestId] {
+        &self.cancellation_request_ids
+    }
+}
+
+impl<'de> Deserialize<'de> for AllocatedIds {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(clippy::struct_field_names)] // Mirrors the frozen `AllocatedIds` contract.
+        struct Wire {
+            #[serde(default)]
+            record_ids: BoundedVec<RecordId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            event_ids: BoundedVec<EventId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            effect_ids: BoundedVec<EffectId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            interaction_ids: BoundedVec<InteractionId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            message_ids: BoundedVec<MessageId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            turn_ids: BoundedVec<TurnId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            model_request_ids: BoundedVec<ModelRequestId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            tool_batch_ids: BoundedVec<ToolBatchId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            tool_call_ids: BoundedVec<ToolCallId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            append_batch_ids: BoundedVec<AppendBatchId, SEMANTIC_ARRAY_MAX_ITEMS>,
+            #[serde(default)]
+            cancellation_request_ids: BoundedVec<CancellationRequestId, SEMANTIC_ARRAY_MAX_ITEMS>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.record_ids.into_inner(),
+            wire.event_ids.into_inner(),
+            wire.effect_ids.into_inner(),
+            wire.interaction_ids.into_inner(),
+            wire.message_ids.into_inner(),
+            wire.turn_ids.into_inner(),
+            wire.model_request_ids.into_inner(),
+            wire.tool_batch_ids.into_inner(),
+            wire.tool_call_ids.into_inner(),
+            wire.append_batch_ids.into_inner(),
+            wire.cancellation_request_ids.into_inner(),
+        )
+        .map_err(de::Error::custom)
+    }
 }
 
 /// Shared reference validation errors.
@@ -711,6 +1065,26 @@ pub enum RefsError {
         /// Detail.
         detail: String,
     },
+    /// Semantic map exceeded its v1 entry ceiling.
+    #[error("{field} has {len} entries; max {max}")]
+    TooManyEntries {
+        /// Field name.
+        field: &'static str,
+        /// Observed entry count.
+        len: usize,
+        /// Maximum entry count.
+        max: usize,
+    },
+    /// Semantic array exceeded its v1 item ceiling.
+    #[error("{field} has {len} items; max {max}")]
+    TooManyItems {
+        /// Field name.
+        field: &'static str,
+        /// Observed item count.
+        len: usize,
+        /// Maximum item count.
+        max: usize,
+    },
 }
 
 impl RefsError {
@@ -720,6 +1094,8 @@ impl RefsError {
         match self {
             Self::InvalidLabel { .. } => "invalid_label",
             Self::Serialize { .. } => "serialize_failed",
+            Self::TooManyEntries { .. } => "too_many_entries",
+            Self::TooManyItems { .. } => "too_many_items",
         }
     }
 }
@@ -729,6 +1105,23 @@ pub(crate) fn validated_label(value: &str, field: &'static str) -> Result<Arc<st
         return Err(RefsError::InvalidLabel { field });
     }
     Ok(Arc::<str>::from(value))
+}
+
+pub(crate) fn validated_text(value: &str, field: &'static str) -> Result<Arc<str>, RefsError> {
+    if value.is_empty() || value.len() > TEXT_MAX_BYTES || value.as_bytes().contains(&0) {
+        return Err(RefsError::InvalidLabel { field });
+    }
+    Ok(Arc::<str>::from(value))
+}
+
+fn validate_label_ref<E>(value: &str, field: &'static str) -> Result<(), E>
+where
+    E: serde::ser::Error,
+{
+    if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+        return Err(E::custom(RefsError::InvalidLabel { field }));
+    }
+    Ok(())
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -790,5 +1183,51 @@ mod tests {
             }),
         );
         assert_eq!(component.version().unwrap().major, 1);
+    }
+
+    #[test]
+    fn role_and_queue_assignee_hints_round_trip() {
+        for hint in [
+            AssigneeHint::Role(Arc::<str>::from("reviewer")),
+            AssigneeHint::Queue(Arc::<str>::from("ops")),
+        ] {
+            let json = serde_json::to_string(&hint).expect("serialize hint");
+            let round: AssigneeHint = serde_json::from_str(&json).expect("deserialize hint");
+            assert_eq!(round, hint);
+        }
+    }
+
+    #[test]
+    fn allocated_id_arrays_and_usage_maps_enforce_semantic_ceilings() {
+        let record_id = RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("record");
+        let ids = AllocatedIds {
+            record_ids: vec![record_id; crate::content::CONTENT_MAX_ITEMS + 1],
+            ..AllocatedIds::default()
+        };
+        let json = serde_json::to_string(&ids).expect("serialize ids");
+        assert!(
+            serde_json::from_str::<AllocatedIds>(&json).is_err(),
+            "oversized allocated-id array must fail"
+        );
+
+        let usage = Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            cost: None,
+            extension_counters: (0..33)
+                .map(|index| {
+                    (
+                        LimitKey::parse(format!("app.counter-{index}")).expect("key"),
+                        1,
+                    )
+                })
+                .collect(),
+        };
+        let json = serde_json::to_string(&usage).expect("serialize usage");
+        assert!(
+            serde_json::from_str::<Usage>(&json).is_err(),
+            "more than 32 extension counters must fail"
+        );
     }
 }

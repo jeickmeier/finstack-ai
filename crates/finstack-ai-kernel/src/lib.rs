@@ -35,6 +35,7 @@
 
 #![warn(missing_docs)]
 
+mod bounds;
 mod content;
 mod digest;
 mod effects;
@@ -49,6 +50,7 @@ mod refs;
 mod run;
 mod time;
 
+pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,

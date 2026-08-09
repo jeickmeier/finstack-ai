@@ -6,9 +6,10 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::content::{BoundedString, LABEL_MAX_BYTES};
 use crate::digest::Digest;
 use crate::ids::{BudgetScopeId, EffectId, RunId};
-use crate::limits::RunLimits;
+use crate::limits::{LimitsError, RunLimits};
 use crate::refs::{PrincipalRef, RefsError, validated_label};
 use crate::time::Timestamp;
 
@@ -154,7 +155,7 @@ impl<'de> Deserialize<'de> for RunRelation {
             #[serde(default)]
             budget_scope_id: Option<BudgetScopeId>,
             #[serde(default)]
-            external_work_ref: Option<String>,
+            external_work_ref: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
@@ -164,7 +165,7 @@ impl<'de> Deserialize<'de> for RunRelation {
             wire.kind,
             wire.depth,
             wire.budget_scope_id,
-            wire.external_work_ref,
+            wire.external_work_ref.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)
     }
@@ -198,8 +199,22 @@ impl RunSecurityContext {
         authorization_decision_id: impl AsRef<str>,
         delegated_from: Option<PrincipalRef>,
     ) -> Result<Self, RunError> {
+        let tenant_scope = validated_label(tenant_scope.as_ref(), "tenant_scope")?;
+        if principal
+            .tenant_scope()
+            .is_some_and(|principal_tenant| principal_tenant != tenant_scope.as_ref())
+            || delegated_from.as_ref().is_some_and(|delegated| {
+                delegated
+                    .tenant_scope()
+                    .is_some_and(|delegated_tenant| delegated_tenant != tenant_scope.as_ref())
+            })
+        {
+            return Err(RunError::InvalidSecurityContext {
+                reason: "principal tenant scope does not match run tenant scope",
+            });
+        }
         Ok(Self {
-            tenant_scope: validated_label(tenant_scope.as_ref(), "tenant_scope")?,
+            tenant_scope,
             principal,
             authentication_method: validated_label(
                 authentication_method.as_ref(),
@@ -230,6 +245,30 @@ impl RunSecurityContext {
         &self.principal
     }
 
+    /// Authentication method captured at ingress.
+    #[must_use]
+    pub fn authentication_method(&self) -> &str {
+        &self.authentication_method
+    }
+
+    /// Authentication assurance level.
+    #[must_use]
+    pub fn assurance_level(&self) -> &str {
+        &self.assurance_level
+    }
+
+    /// Authorization-policy version.
+    #[must_use]
+    pub fn authorization_policy_version(&self) -> &str {
+        &self.authorization_policy_version
+    }
+
+    /// Authorization decision id.
+    #[must_use]
+    pub fn authorization_decision_id(&self) -> &str {
+        &self.authorization_decision_id
+    }
+
     /// Borrow delegated-from principal.
     #[must_use]
     pub fn delegated_from(&self) -> Option<&PrincipalRef> {
@@ -238,21 +277,21 @@ impl RunSecurityContext {
 
     /// True when `child` preserves tenant and attenuates principal/delegation.
     #[must_use]
-    pub fn allows_child_attenuation(&self, child: &Self) -> bool {
+    pub fn allows_child_attenuation(&self, child: &Self, policy: PrincipalPropagation) -> bool {
         if child.tenant_scope() != self.tenant_scope() {
             return false;
         }
-        match (&self.delegated_from, &child.delegated_from) {
-            (None, None) => child.principal() == self.principal(),
-            (None, Some(parent)) => {
-                parent == self.principal()
-                    && (child.principal() == self.principal() || child.principal() != parent)
+        match policy {
+            PrincipalPropagation::Inherit => {
+                child.principal() == self.principal()
+                    && child.delegated_from() == self.delegated_from()
             }
-            (Some(_), None) => false,
-            (Some(parent_from), Some(child_from)) => {
-                child_from == parent_from
-                    || child.principal() == self.principal()
-                    || child_from == self.principal()
+            PrincipalPropagation::AttenuatedDelegation => {
+                if child.principal() == self.principal() {
+                    child.delegated_from() == self.delegated_from()
+                } else {
+                    child.delegated_from() == Some(self.principal())
+                }
             }
         }
     }
@@ -266,23 +305,23 @@ impl<'de> Deserialize<'de> for RunSecurityContext {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            tenant_scope: String,
+            tenant_scope: BoundedString<LABEL_MAX_BYTES>,
             principal: PrincipalRef,
-            authentication_method: String,
-            assurance_level: String,
-            authorization_policy_version: String,
-            authorization_decision_id: String,
+            authentication_method: BoundedString<LABEL_MAX_BYTES>,
+            assurance_level: BoundedString<LABEL_MAX_BYTES>,
+            authorization_policy_version: BoundedString<LABEL_MAX_BYTES>,
+            authorization_decision_id: BoundedString<LABEL_MAX_BYTES>,
             #[serde(default)]
             delegated_from: Option<PrincipalRef>,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
-            wire.tenant_scope,
+            wire.tenant_scope.into_inner(),
             wire.principal,
-            wire.authentication_method,
-            wire.assurance_level,
-            wire.authorization_policy_version,
-            wire.authorization_decision_id,
+            wire.authentication_method.into_inner(),
+            wire.assurance_level.into_inner(),
+            wire.authorization_policy_version.into_inner(),
+            wire.authorization_decision_id.into_inner(),
             wire.delegated_from,
         )
         .map_err(de::Error::custom)
@@ -352,7 +391,20 @@ pub struct RunAccepted {
     limits: RunLimits,
     propagation: RunPropagationPolicy,
     resolved_agent_lock_digest: Digest,
+    #[serde(skip)]
+    lineage_validated: LineageValidation,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+struct LineageValidation(bool);
+
+impl PartialEq for LineageValidation {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for LineageValidation {}
 
 impl RunAccepted {
     /// Construct a validated `RunAccepted` body.
@@ -372,13 +424,22 @@ impl RunAccepted {
         resolved_agent_lock_digest: Digest,
         parent: Option<&RunAccepted>,
     ) -> Result<Self, RunError> {
+        limits.validate()?;
         if relation.kind() == RunRelationKind::Root {
+            if parent.is_some() {
+                return Err(RunError::InvalidRelation {
+                    reason: "root run must not provide parent context",
+                });
+            }
             if relation.root_run_id() != run_id {
                 return Err(RunError::InvalidRelation {
                     reason: "root relation root_run_id must equal run_id",
                 });
             }
-        } else if let Some(parent) = parent {
+        } else {
+            let parent = parent.ok_or(RunError::InvalidRelation {
+                reason: "non-root run requires parent context",
+            })?;
             validate_child_against_parent(
                 &relation,
                 &security,
@@ -395,6 +456,7 @@ impl RunAccepted {
             limits,
             propagation,
             resolved_agent_lock_digest,
+            lineage_validated: LineageValidation(true),
         })
     }
 
@@ -439,6 +501,33 @@ impl RunAccepted {
     pub fn resolved_agent_lock_digest(&self) -> Digest {
         self.resolved_agent_lock_digest
     }
+
+    /// Validate a structurally decoded non-root run against its parent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RunError`] when lineage, principal, deadline, limits, or budget
+    /// propagation is not attenuated.
+    pub fn validate_against_parent(mut self, parent: &Self) -> Result<Self, RunError> {
+        if self.relation.kind() == RunRelationKind::Root {
+            return Err(RunError::InvalidRelation {
+                reason: "root run does not require parent validation",
+            });
+        }
+        validate_child_against_parent(
+            &self.relation,
+            &self.security,
+            self.effective_deadline,
+            &self.limits,
+            parent,
+        )?;
+        self.lineage_validated = LineageValidation(true);
+        Ok(self)
+    }
+
+    pub(crate) fn lineage_is_validated(&self) -> bool {
+        self.lineage_validated.0
+    }
 }
 
 impl<'de> Deserialize<'de> for RunAccepted {
@@ -475,6 +564,7 @@ impl<'de> Deserialize<'de> for RunAccepted {
             wire.relation.depth(),
         )
         .map_err(de::Error::custom)?;
+        let lineage_validated = wire.relation.kind() == RunRelationKind::Root;
         Ok(Self {
             run_id: wire.run_id,
             relation: wire.relation,
@@ -483,6 +573,7 @@ impl<'de> Deserialize<'de> for RunAccepted {
             limits: wire.limits,
             propagation: wire.propagation,
             resolved_agent_lock_digest: wire.resolved_agent_lock_digest,
+            lineage_validated: LineageValidation(lineage_validated),
         })
     }
 }
@@ -502,9 +593,18 @@ pub enum RunError {
         /// Reason.
         reason: &'static str,
     },
+    /// Security context fields are internally inconsistent.
+    #[error("invalid run security context: {reason}")]
+    InvalidSecurityContext {
+        /// Reason.
+        reason: &'static str,
+    },
     /// Shared label/ref error.
     #[error(transparent)]
     Refs(#[from] RefsError),
+    /// Run limits failed semantic validation.
+    #[error(transparent)]
+    Limits(#[from] LimitsError),
 }
 
 impl RunError {
@@ -514,7 +614,9 @@ impl RunError {
         match self {
             Self::InvalidRelation { .. } => "invalid_run_relation",
             Self::NotAttenuated { .. } => "run_not_attenuated",
+            Self::InvalidSecurityContext { .. } => "invalid_run_security_context",
             Self::Refs(inner) => inner.code(),
+            Self::Limits(inner) => inner.code(),
         }
     }
 }
@@ -573,23 +675,61 @@ fn validate_child_against_parent(
             reason: "depth must be parent.depth + 1",
         });
     }
-    if !parent.security().allows_child_attenuation(security) {
+    if !parent
+        .security()
+        .allows_child_attenuation(security, parent.propagation().principal)
+    {
         return Err(RunError::NotAttenuated {
             reason: "security context not attenuated",
         });
+    }
+    match parent.propagation().principal {
+        PrincipalPropagation::Inherit => {}
+        PrincipalPropagation::AttenuatedDelegation => {
+            if security.principal() != parent.security().principal()
+                && relation.kind() != RunRelationKind::DelegatedAgent
+            {
+                return Err(RunError::NotAttenuated {
+                    reason: "delegated principal requires delegated-agent relation",
+                });
+            }
+        }
     }
     if !parent.limits().allows_child_attenuation(limits) {
         return Err(RunError::NotAttenuated {
             reason: "limits not attenuated",
         });
     }
-    if let (Some(parent_deadline), Some(child_deadline)) =
-        (parent.effective_deadline(), effective_deadline)
-        && child_deadline > parent_deadline
-    {
-        return Err(RunError::NotAttenuated {
-            reason: "deadline exceeds parent",
-        });
+    match (parent.effective_deadline(), effective_deadline) {
+        (Some(_), None) => {
+            return Err(RunError::NotAttenuated {
+                reason: "child removed parent deadline",
+            });
+        }
+        (Some(parent_deadline), Some(child_deadline)) if child_deadline > parent_deadline => {
+            return Err(RunError::NotAttenuated {
+                reason: "deadline exceeds parent",
+            });
+        }
+        _ => {}
+    }
+    match parent.propagation().budget {
+        BudgetPropagation::SharedScope => {
+            if relation.budget_scope_id() != parent.relation().budget_scope_id() {
+                return Err(RunError::NotAttenuated {
+                    reason: "shared budget scope changed",
+                });
+            }
+        }
+        BudgetPropagation::ReservedChildAllocation => {
+            if relation.budget_scope_id().is_none()
+                || relation.budget_scope_id() == parent.relation().budget_scope_id()
+            {
+                return Err(RunError::NotAttenuated {
+                    reason: "reserved child allocation requires a distinct budget scope",
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -658,6 +798,13 @@ mod tests {
         )
         .expect("child");
         assert_eq!(child.relation().depth(), 1);
+        let json = serde_json::to_string(&child).expect("serialize child");
+        let decoded: RunAccepted = serde_json::from_str(&json).expect("decode child");
+        assert!(!decoded.lineage_is_validated());
+        let revalidated = decoded
+            .validate_against_parent(&root)
+            .expect("revalidate child");
+        assert!(revalidated.lineage_is_validated());
 
         assert!(
             RunRelation::try_new(
@@ -697,5 +844,109 @@ mod tests {
         )
         .expect_err("widened deadline");
         assert_eq!(err.code(), "run_not_attenuated");
+    }
+
+    #[test]
+    fn non_root_run_requires_parent_context() {
+        let root_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("root");
+        let child_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("child");
+        let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("effect");
+        let relation = RunRelation::try_new(
+            root_run,
+            Some(root_run),
+            Some(effect),
+            RunRelationKind::ChildAgent,
+            1,
+            None,
+            None::<&str>,
+        )
+        .expect("relation");
+        let err = RunAccepted::try_new(
+            child_run,
+            relation,
+            sample_security(),
+            None,
+            RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(br"{}"),
+            None,
+        )
+        .expect_err("parent context required");
+        assert_eq!(err.code(), "invalid_run_relation");
+    }
+
+    #[test]
+    fn inherited_principal_cannot_change_via_delegated_from_marker() {
+        let parent_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("parent");
+        let child_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("child");
+        let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("effect");
+        let parent = RunAccepted::try_new(
+            parent_run,
+            RunRelation::root(parent_run).expect("root"),
+            sample_security(),
+            None,
+            RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(br"{}"),
+            None,
+        )
+        .expect("parent");
+        let child_security = RunSecurityContext::try_new(
+            "tenant-a",
+            PrincipalRef::try_new("iss", "other", Some("tenant-a")).expect("child principal"),
+            "oidc",
+            "high",
+            "policy-1",
+            "decision-2",
+            Some(parent.security().principal().clone()),
+        )
+        .expect("child security");
+        let relation = RunRelation::try_new(
+            parent_run,
+            Some(parent_run),
+            Some(effect),
+            RunRelationKind::ChildAgent,
+            1,
+            None,
+            None::<&str>,
+        )
+        .expect("relation");
+        let err = RunAccepted::try_new(
+            child_run,
+            relation,
+            child_security,
+            None,
+            RunLimits::empty(),
+            parent.propagation(),
+            Digest::raw_json(br"{}"),
+            Some(&parent),
+        )
+        .expect_err("inherit cannot change principal");
+        assert_eq!(err.code(), "run_not_attenuated");
+    }
+
+    #[test]
+    fn security_context_rejects_mismatched_principal_tenant() {
+        let err = RunSecurityContext::try_new(
+            "tenant-a",
+            PrincipalRef::try_new("iss", "sub", Some("tenant-b")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-1",
+            "decision-1",
+            None,
+        )
+        .expect_err("tenant mismatch");
+        assert_eq!(err.code(), "invalid_run_security_context");
     }
 }

@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "subject": "run-accepted",
+  "operation": "parse",
+  "input": {
+    "run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+    "relation": {
+      "root_run_id": "01234567-89ab-7cde-89ab-0123456789a0",
+      "parent_run_id": "01234567-89ab-7cde-89ab-0123456789a9",
+      "parent_effect_id": "01234567-89ab-7cde-89ab-0123456789aa",
+      "kind": "child_agent",
+      "depth": 17
+    },
+    "security": {
+      "tenant_scope": "tenant-a",
+      "principal": {
+        "issuer": "https://issuer.example",
+        "subject": "user-1",
+        "tenant_scope": "tenant-a"
+      },
+      "authentication_method": "oidc",
+      "assurance_level": "high",
+      "authorization_policy_version": "policy-1",
+      "authorization_decision_id": "decision-1"
+    },
+    "limits": {},
+    "propagation": {
+      "cancellation": "cascade",
+      "deadline": "minimum_of_parent_and_child",
+      "budget": "shared_scope",
+      "principal": "inherit"
+    },
+    "resolved_agent_lock_digest": "b06faf8816f77394756e7beaba4c8295cf2e7b9ad10e016a1523456b9be183c1"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_run_relation"
+  }
+}

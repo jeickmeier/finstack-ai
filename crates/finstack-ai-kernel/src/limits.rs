@@ -7,6 +7,8 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::bounds::BoundedMap;
+use crate::content::{BoundedString, LABEL_MAX_BYTES};
 use crate::ids::LimitKey;
 use crate::refs::{RefsError, validated_label};
 use crate::time::Duration;
@@ -123,17 +125,17 @@ impl<'de> Deserialize<'de> for CostLimit {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            unit: String,
+            unit: BoundedString<LABEL_MAX_BYTES>,
             #[serde(deserialize_with = "deserialize_micros")]
             micros: u64,
-            pricing_policy_version: String,
+            pricing_policy_version: BoundedString<LABEL_MAX_BYTES>,
             unknown_usage: UnknownUsagePolicy,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
-            wire.unit,
+            wire.unit.into_inner(),
             wire.micros,
-            wire.pricing_policy_version,
+            wire.pricing_policy_version.into_inner(),
             wire.unknown_usage,
         )
         .map_err(de::Error::custom)
@@ -141,8 +143,7 @@ impl<'de> Deserialize<'de> for CostLimit {
 }
 
 /// Value-only run limits stored on `RunAccepted` (enforcement is PR-011).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunLimits {
     /// Max model requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,6 +184,9 @@ pub struct RunLimits {
 }
 
 impl RunLimits {
+    /// V1 maximum registered extension counters per resolved agent.
+    pub const MAX_EXTENSION_COUNTERS: usize = 32;
+
     /// Empty limits (no ceilings).
     #[must_use]
     pub fn empty() -> Self {
@@ -222,6 +226,76 @@ impl RunLimits {
             && cost_le(self.max_cost.as_ref(), child.max_cost.as_ref())
             && counters_attenuated(&self.extension_counters, &child.extension_counters)
     }
+
+    /// Validate collection ceilings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LimitsError::TooManyEntries`] when extension counters exceed the v1 ceiling.
+    pub fn validate(&self) -> Result<(), LimitsError> {
+        if self.extension_counters.len() > Self::MAX_EXTENSION_COUNTERS {
+            return Err(LimitsError::TooManyEntries {
+                field: "run_limits.extension_counters",
+                len: self.extension_counters.len(),
+                max: Self::MAX_EXTENSION_COUNTERS,
+            });
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for RunLimits {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            #[serde(default)]
+            max_model_requests: Option<u64>,
+            #[serde(default)]
+            max_turns: Option<u64>,
+            #[serde(default)]
+            max_tool_calls: Option<u64>,
+            #[serde(default)]
+            max_parallel_tools: Option<u32>,
+            #[serde(default)]
+            max_input_tokens: Option<u64>,
+            #[serde(default)]
+            max_output_tokens: Option<u64>,
+            #[serde(default)]
+            max_context_bytes: Option<u64>,
+            #[serde(default)]
+            max_output_bytes: Option<u64>,
+            #[serde(default)]
+            max_retries: Option<u32>,
+            #[serde(default)]
+            max_wall_time: Option<Duration>,
+            #[serde(default)]
+            max_cost: Option<CostLimit>,
+            #[serde(default)]
+            extension_counters: BoundedMap<LimitKey, u64, { RunLimits::MAX_EXTENSION_COUNTERS }>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let limits = Self {
+            max_model_requests: wire.max_model_requests,
+            max_turns: wire.max_turns,
+            max_tool_calls: wire.max_tool_calls,
+            max_parallel_tools: wire.max_parallel_tools,
+            max_input_tokens: wire.max_input_tokens,
+            max_output_tokens: wire.max_output_tokens,
+            max_context_bytes: wire.max_context_bytes,
+            max_output_bytes: wire.max_output_bytes,
+            max_retries: wire.max_retries,
+            max_wall_time: wire.max_wall_time,
+            max_cost: wire.max_cost,
+            extension_counters: wire.extension_counters.into_inner(),
+        };
+        limits.validate().map_err(de::Error::custom)?;
+        Ok(limits)
+    }
 }
 
 /// Limits validation errors.
@@ -230,6 +304,16 @@ pub enum LimitsError {
     /// Label failed validation.
     #[error(transparent)]
     InvalidLabel(#[from] RefsError),
+    /// Semantic map exceeded its v1 entry ceiling.
+    #[error("{field} has {len} entries; max {max}")]
+    TooManyEntries {
+        /// Field name.
+        field: &'static str,
+        /// Observed entry count.
+        len: usize,
+        /// Maximum entry count.
+        max: usize,
+    },
 }
 
 impl LimitsError {
@@ -238,6 +322,7 @@ impl LimitsError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::InvalidLabel(inner) => inner.code(),
+            Self::TooManyEntries { .. } => "too_many_entries",
         }
     }
 }
@@ -245,33 +330,50 @@ impl LimitsError {
 fn opt_le<T: PartialOrd>(parent: Option<T>, child: Option<T>) -> bool {
     match (parent, child) {
         (Some(p), Some(c)) => c <= p,
-        (None, _) | (Some(_), None) => true,
+        (None, _) => true,
+        (Some(_), None) => false,
     }
 }
 
 fn opt_duration_le(parent: Option<Duration>, child: Option<Duration>) -> bool {
     match (parent, child) {
         (Some(p), Some(c)) => c.as_millis() <= p.as_millis(),
-        (None, _) | (Some(_), None) => true,
+        (None, _) => true,
+        (Some(_), None) => false,
     }
 }
 
 fn cost_le(parent: Option<&CostLimit>, child: Option<&CostLimit>) -> bool {
     match (parent, child) {
-        (Some(p), Some(c)) => c.unit() == p.unit() && c.micros() <= p.micros(),
-        (None, _) | (Some(_), None) => true,
+        (Some(p), Some(c)) => {
+            c.unit() == p.unit()
+                && c.pricing_policy_version() == p.pricing_policy_version()
+                && c.micros() <= p.micros()
+                && unknown_usage_at_least_as_strict(p.unknown_usage(), c.unknown_usage())
+        }
+        (None, _) => true,
+        (Some(_), None) => false,
     }
 }
 
 fn counters_attenuated(parent: &BTreeMap<LimitKey, u64>, child: &BTreeMap<LimitKey, u64>) -> bool {
-    if parent.is_empty() {
-        return true;
-    }
-    child.iter().all(|(key, value)| {
-        parent
+    parent.iter().all(|(key, parent_value)| {
+        child
             .get(key)
-            .is_some_and(|parent_value| value <= parent_value)
+            .is_some_and(|child_value| child_value <= parent_value)
     })
+}
+
+fn unknown_usage_at_least_as_strict(parent: UnknownUsagePolicy, child: UnknownUsagePolicy) -> bool {
+    unknown_usage_rank(child) <= unknown_usage_rank(parent)
+}
+
+const fn unknown_usage_rank(policy: UnknownUsagePolicy) -> u8 {
+    match policy {
+        UnknownUsagePolicy::FailClosed => 0,
+        UnknownUsagePolicy::SuspendForDecision => 1,
+        UnknownUsagePolicy::AllowWithinReservedMaximum => 2,
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -326,5 +428,75 @@ mod tests {
         };
         assert!(parent.allows_child_attenuation(&ok));
         assert!(!parent.allows_child_attenuation(&bad));
+    }
+
+    #[test]
+    fn child_cannot_remove_parent_ceilings_or_weaken_cost_policy() {
+        let parent = RunLimits {
+            max_turns: Some(10),
+            max_wall_time: Some(Duration::from_millis(1_000)),
+            max_cost: Some(
+                CostLimit::try_new("USD", 1000, "p1", UnknownUsagePolicy::FailClosed)
+                    .expect("cost"),
+            ),
+            extension_counters: BTreeMap::from([(LimitKey::parse("app.calls").expect("key"), 10)]),
+            ..RunLimits::empty()
+        };
+        assert!(!parent.allows_child_attenuation(&RunLimits::empty()));
+
+        let weaker_cost = RunLimits {
+            max_turns: Some(10),
+            max_wall_time: Some(Duration::from_millis(1_000)),
+            max_cost: Some(
+                CostLimit::try_new(
+                    "USD",
+                    1000,
+                    "p1",
+                    UnknownUsagePolicy::AllowWithinReservedMaximum,
+                )
+                .expect("cost"),
+            ),
+            extension_counters: parent.extension_counters.clone(),
+            ..RunLimits::empty()
+        };
+        assert!(!parent.allows_child_attenuation(&weaker_cost));
+    }
+
+    #[test]
+    fn child_must_preserve_parent_extension_ceilings_but_may_add_stricter_ones() {
+        let calls = LimitKey::parse("app.calls").expect("key");
+        let parent = RunLimits {
+            extension_counters: BTreeMap::from([(calls.clone(), 10)]),
+            ..RunLimits::empty()
+        };
+        let missing = RunLimits::empty();
+        assert!(!parent.allows_child_attenuation(&missing));
+
+        let child = RunLimits {
+            extension_counters: BTreeMap::from([
+                (calls, 5),
+                (LimitKey::parse("app.extra").expect("key"), 1),
+            ]),
+            ..RunLimits::empty()
+        };
+        assert!(parent.allows_child_attenuation(&child));
+    }
+
+    #[test]
+    fn run_limits_reject_more_than_32_extension_counters() {
+        let limits = RunLimits {
+            extension_counters: (0..33)
+                .map(|index| {
+                    (
+                        LimitKey::parse(format!("app.counter-{index}")).expect("key"),
+                        1,
+                    )
+                })
+                .collect(),
+            ..RunLimits::empty()
+        };
+        let json = serde_json::to_string(&limits).expect("serialize");
+        let error = serde_json::from_str::<RunLimits>(&json).expect_err("over limit");
+        assert!(error.to_string().contains("map entry count"));
     }
 }

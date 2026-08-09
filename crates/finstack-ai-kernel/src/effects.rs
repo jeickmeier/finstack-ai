@@ -6,14 +6,18 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::content::{ContentBlock, ContentError, ToolCallBlock, validate_content_items};
+use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::content::{
+    BoundedString, ContentBlock, ContentError, ContentItems, LABEL_MAX_BYTES, ToolCallBlock,
+    validate_content_items,
+};
 use crate::digest::Digest;
 use crate::error::ErrorDescriptor;
 use crate::ids::{BudgetReservationId, ComponentId, EffectId, EffectOutputKey, InteractionId};
 use crate::raw_json::{Metadata, RawJson};
 use crate::refs::{
     ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, ExternalHandleRef,
-    PrincipalRef, RefsError, Usage, Version, validated_label,
+    PrincipalRef, RefsError, Usage, Version, validated_label, validated_text,
 };
 use crate::time::Timestamp;
 
@@ -96,9 +100,27 @@ impl PipelinePosition {
     ) -> Result<Self, EffectError> {
         Ok(Self {
             chain_digest,
-            stage: validated_label(stage.as_ref(), "stage")?,
+            stage: validated_text(stage.as_ref(), "stage")?,
             index,
         })
+    }
+
+    /// Middleware-chain digest.
+    #[must_use]
+    pub fn chain_digest(&self) -> Digest {
+        self.chain_digest
+    }
+
+    /// Stage name.
+    #[must_use]
+    pub fn stage(&self) -> &str {
+        &self.stage
+    }
+
+    /// Zero-based stage index.
+    #[must_use]
+    pub fn index(&self) -> u32 {
+        self.index
     }
 }
 
@@ -111,11 +133,12 @@ impl<'de> Deserialize<'de> for PipelinePosition {
         #[serde(deny_unknown_fields)]
         struct Wire {
             chain_digest: Digest,
-            stage: String,
+            stage: BoundedString<{ crate::content::TEXT_MAX_BYTES }>,
             index: u32,
         }
         let wire = Wire::deserialize(deserializer)?;
-        Self::try_new(wire.chain_digest, wire.stage, wire.index).map_err(de::Error::custom)
+        Self::try_new(wire.chain_digest, wire.stage.into_inner(), wire.index)
+            .map_err(de::Error::custom)
     }
 }
 
@@ -145,7 +168,7 @@ pub enum EffectPurpose {
 /// Serialized with externally tagged `snake_case` variants so `RawJson` members
 /// deserialize through the ordinary human-readable path (internally tagged
 /// enums buffer content and break `RawJson`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectInput {
     /// Model request JSON.
@@ -182,6 +205,56 @@ pub enum EffectInput {
         /// Due timestamp.
         due_at: Timestamp,
     },
+}
+
+impl<'de> Deserialize<'de> for EffectInput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "snake_case")]
+        enum Wire {
+            Model {
+                request: RawJson,
+            },
+            Tool {
+                call: ToolCallBlock,
+            },
+            Context {
+                request: RawJson,
+            },
+            Middleware {
+                stage: BoundedString<{ crate::content::TEXT_MAX_BYTES }>,
+                input: RawJson,
+            },
+            Interaction {
+                interaction_id: InteractionId,
+                request_digest: Digest,
+            },
+            Timer {
+                due_at: Timestamp,
+            },
+        }
+
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Model { request } => Self::Model { request },
+            Wire::Tool { call } => Self::Tool { call },
+            Wire::Context { request } => Self::Context { request },
+            Wire::Middleware { stage, input } => Self::Middleware {
+                stage: Arc::from(stage.into_inner()),
+                input,
+            },
+            Wire::Interaction {
+                interaction_id,
+                request_digest,
+            } => Self::Interaction {
+                interaction_id,
+                request_digest,
+            },
+            Wire::Timer { due_at } => Self::Timer { due_at },
+        })
+    }
 }
 
 impl EffectInput {
@@ -306,6 +379,9 @@ impl EffectRequested {
         if input.kind() != kind {
             return Err(EffectError::KindMismatch);
         }
+        if let EffectInput::Middleware { stage, .. } = &input {
+            validated_text(stage, "stage")?;
+        }
         let input_digest = input.digest()?;
         Ok(Self {
             effect_id,
@@ -333,6 +409,24 @@ impl EffectRequested {
         self.kind
     }
 
+    /// Parent-effect relation.
+    #[must_use]
+    pub fn relation(&self) -> Option<&EffectRelation> {
+        self.relation.as_ref()
+    }
+
+    /// Resolved component invocation metadata.
+    #[must_use]
+    pub fn component(&self) -> Option<&ComponentInvocation> {
+        self.component.as_ref()
+    }
+
+    /// Middleware pipeline position.
+    #[must_use]
+    pub fn pipeline(&self) -> Option<&PipelinePosition> {
+        self.pipeline.as_ref()
+    }
+
     /// Output contract.
     #[must_use]
     pub fn output_contract(&self) -> &EffectOutputContract {
@@ -355,6 +449,12 @@ impl EffectRequested {
     #[must_use]
     pub fn retry_safety(&self) -> RetrySafety {
         self.retry_safety
+    }
+
+    /// Optional effect deadline.
+    #[must_use]
+    pub fn deadline(&self) -> Option<Timestamp> {
+        self.deadline
     }
 }
 
@@ -421,6 +521,17 @@ pub struct EffectDeferred {
     pub output_contract: EffectOutputContract,
 }
 
+impl EffectDeferred {
+    /// Validate identity and output-contract continuity against the originating request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError::SettlementMismatch`] on any mismatch.
+    pub fn validate_against(&self, requested: &EffectRequested) -> Result<(), EffectError> {
+        validate_settlement(requested, self.effect_id, &self.output_contract)
+    }
+}
+
 /// How to reconcile a deferred effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -471,8 +582,18 @@ impl EffectCompleted {
         completion_id: Option<impl AsRef<str>>,
         reservation_id: Option<BudgetReservationId>,
     ) -> Result<Self, EffectError> {
+        if artifacts.len() > SEMANTIC_ARRAY_MAX_ITEMS {
+            return Err(EffectError::TooManyItems {
+                field: "artifacts",
+                len: artifacts.len(),
+                max: SEMANTIC_ARRAY_MAX_ITEMS,
+            });
+        }
         let usage_digest = match &usage {
-            Some(value) => Some(Digest::effect_output(&value.canonical_bytes()?)),
+            Some(value) => {
+                value.validate()?;
+                Some(Digest::effect_output(&value.canonical_bytes()?))
+            }
             None => None,
         };
         let completion_id = match completion_id {
@@ -510,6 +631,57 @@ impl EffectCompleted {
     pub fn output_digest(&self) -> Digest {
         self.output_digest
     }
+
+    /// Normalized output.
+    #[must_use]
+    pub fn output(&self) -> &RawJson {
+        &self.output
+    }
+
+    /// Optional normalized usage.
+    #[must_use]
+    pub fn usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
+    }
+
+    /// Optional usage digest.
+    #[must_use]
+    pub fn usage_digest(&self) -> Option<Digest> {
+        self.usage_digest
+    }
+
+    /// Staged replay-required artifacts.
+    #[must_use]
+    pub fn artifacts(&self) -> &[ArtifactRef] {
+        &self.artifacts
+    }
+
+    /// Provider/tool identifiers.
+    #[must_use]
+    pub fn provider_ids(&self) -> &crate::message::ProviderIds {
+        &self.provider_ids
+    }
+
+    /// External completion id.
+    #[must_use]
+    pub fn completion_id(&self) -> Option<&str> {
+        self.completion_id.as_deref()
+    }
+
+    /// Budget reservation id charged by this completion.
+    #[must_use]
+    pub fn reservation_id(&self) -> Option<BudgetReservationId> {
+        self.reservation_id
+    }
+
+    /// Validate identity and output-contract continuity against the originating request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError::SettlementMismatch`] on any mismatch.
+    pub fn validate_against(&self, requested: &EffectRequested) -> Result<(), EffectError> {
+        validate_settlement(requested, self.effect_id, &self.output_contract)
+    }
 }
 
 impl<'de> Deserialize<'de> for EffectCompleted {
@@ -529,10 +701,10 @@ impl<'de> Deserialize<'de> for EffectCompleted {
             #[serde(default)]
             usage_digest: Option<Digest>,
             #[serde(default)]
-            artifacts: Vec<ArtifactRef>,
+            artifacts: BoundedVec<ArtifactRef, SEMANTIC_ARRAY_MAX_ITEMS>,
             provider_ids: crate::message::ProviderIds,
             #[serde(default)]
-            completion_id: Option<String>,
+            completion_id: Option<BoundedString<LABEL_MAX_BYTES>>,
             #[serde(default)]
             reservation_id: Option<BudgetReservationId>,
         }
@@ -542,9 +714,9 @@ impl<'de> Deserialize<'de> for EffectCompleted {
             wire.output_contract,
             wire.output,
             wire.usage,
-            wire.artifacts,
+            wire.artifacts.into_inner(),
             wire.provider_ids,
-            wire.completion_id,
+            wire.completion_id.map(BoundedString::into_inner),
             wire.reservation_id,
         )
         .map_err(de::Error::custom)?;
@@ -585,7 +757,10 @@ impl EffectFailed {
         completion_id: Option<impl AsRef<str>>,
     ) -> Result<Self, EffectError> {
         let usage_digest = match &usage {
-            Some(value) => Some(Digest::effect_output(&value.canonical_bytes()?)),
+            Some(value) => {
+                value.validate()?;
+                Some(Digest::effect_output(&value.canonical_bytes()?))
+            }
             None => None,
         };
         let completion_id = match completion_id {
@@ -607,6 +782,45 @@ impl EffectFailed {
     pub fn effect_id(&self) -> EffectId {
         self.effect_id
     }
+
+    /// Output contract copied from the originating request.
+    #[must_use]
+    pub fn output_contract(&self) -> &EffectOutputContract {
+        &self.output_contract
+    }
+
+    /// Failure descriptor.
+    #[must_use]
+    pub fn error(&self) -> &ErrorDescriptor {
+        &self.error
+    }
+
+    /// Optional normalized usage.
+    #[must_use]
+    pub fn usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
+    }
+
+    /// Optional usage digest.
+    #[must_use]
+    pub fn usage_digest(&self) -> Option<Digest> {
+        self.usage_digest
+    }
+
+    /// External completion id.
+    #[must_use]
+    pub fn completion_id(&self) -> Option<&str> {
+        self.completion_id.as_deref()
+    }
+
+    /// Validate identity and output-contract continuity against the originating request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError::SettlementMismatch`] on any mismatch.
+    pub fn validate_against(&self, requested: &EffectRequested) -> Result<(), EffectError> {
+        validate_settlement(requested, self.effect_id, &self.output_contract)
+    }
 }
 
 impl<'de> Deserialize<'de> for EffectFailed {
@@ -625,7 +839,7 @@ impl<'de> Deserialize<'de> for EffectFailed {
             #[serde(default)]
             usage_digest: Option<Digest>,
             #[serde(default)]
-            completion_id: Option<String>,
+            completion_id: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
         let constructed = Self::try_new(
@@ -633,7 +847,7 @@ impl<'de> Deserialize<'de> for EffectFailed {
             wire.output_contract,
             wire.error,
             wire.usage,
-            wire.completion_id,
+            wire.completion_id.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)?;
         if constructed.usage_digest != wire.usage_digest {
@@ -687,6 +901,33 @@ impl EffectCancelled {
     pub fn effect_id(&self) -> EffectId {
         self.effect_id
     }
+
+    /// Output contract copied from the originating request.
+    #[must_use]
+    pub fn output_contract(&self) -> &EffectOutputContract {
+        &self.output_contract
+    }
+
+    /// Optional cancellation reason.
+    #[must_use]
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
+
+    /// External completion id.
+    #[must_use]
+    pub fn completion_id(&self) -> Option<&str> {
+        self.completion_id.as_deref()
+    }
+
+    /// Validate identity and output-contract continuity against the originating request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EffectError::SettlementMismatch`] on any mismatch.
+    pub fn validate_against(&self, requested: &EffectRequested) -> Result<(), EffectError> {
+        validate_settlement(requested, self.effect_id, &self.output_contract)
+    }
 }
 
 impl<'de> Deserialize<'de> for EffectCancelled {
@@ -700,23 +941,23 @@ impl<'de> Deserialize<'de> for EffectCancelled {
             effect_id: EffectId,
             output_contract: EffectOutputContract,
             #[serde(default)]
-            reason: Option<String>,
+            reason: Option<BoundedString<LABEL_MAX_BYTES>>,
             #[serde(default)]
-            completion_id: Option<String>,
+            completion_id: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
             wire.effect_id,
             wire.output_contract,
-            wire.reason,
-            wire.completion_id,
+            wire.reason.map(BoundedString::into_inner),
+            wire.completion_id.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)
     }
 }
 
 /// Interaction kind (approval is a profile, not a separate record family).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InteractionKind {
     /// Approval profile.
@@ -736,6 +977,39 @@ pub enum InteractionKind {
         /// Custom name.
         name: Arc<str>,
     },
+}
+
+impl<'de> Deserialize<'de> for InteractionKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+        enum Wire {
+            Approval,
+            Choice,
+            Form,
+            FreeText,
+            Review,
+            Correction,
+            Custom {
+                name: BoundedString<LABEL_MAX_BYTES>,
+            },
+        }
+
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Approval => Self::Approval,
+            Wire::Choice => Self::Choice,
+            Wire::Form => Self::Form,
+            Wire::FreeText => Self::FreeText,
+            Wire::Review => Self::Review,
+            Wire::Correction => Self::Correction,
+            Wire::Custom { name } => Self::Custom {
+                name: Arc::from(name.into_inner()),
+            },
+        })
+    }
 }
 
 /// Interaction request payload (`InteractionRequested` record body).
@@ -781,6 +1055,9 @@ impl InteractionRequest {
         metadata: Metadata,
     ) -> Result<Self, EffectError> {
         validate_content_items(&prompt)?;
+        if let InteractionKind::Custom { name } = &kind {
+            validated_label(name, "interaction_kind")?;
+        }
         let prompt_json =
             serde_json::to_string(&prompt).map_err(|error| EffectError::Serialize {
                 detail: error.to_string(),
@@ -813,6 +1090,12 @@ impl InteractionRequest {
         })
     }
 
+    /// Request contract version.
+    #[must_use]
+    pub fn request_version(&self) -> u16 {
+        self.request_version
+    }
+
     /// Interaction id.
     #[must_use]
     pub fn interaction_id(&self) -> InteractionId {
@@ -831,10 +1114,64 @@ impl InteractionRequest {
         &self.kind
     }
 
+    /// Prompt content.
+    #[must_use]
+    pub fn prompt(&self) -> &[ContentBlock] {
+        &self.prompt
+    }
+
     /// Prompt digest.
     #[must_use]
     pub fn prompt_digest(&self) -> Digest {
         self.prompt_digest
+    }
+
+    /// Response schema.
+    #[must_use]
+    pub fn response_schema(&self) -> &RawJson {
+        &self.response_schema
+    }
+
+    /// Response-schema digest.
+    #[must_use]
+    pub fn response_schema_digest(&self) -> Digest {
+        self.response_schema_digest
+    }
+
+    /// Policy component.
+    #[must_use]
+    pub fn policy_component(&self) -> &ComponentRef {
+        &self.policy_component
+    }
+
+    /// Policy version.
+    #[must_use]
+    pub fn policy_version(&self) -> Version {
+        self.policy_version
+    }
+
+    /// Non-authoritative assignee hint.
+    #[must_use]
+    pub fn assignee_hint(&self) -> Option<&AssigneeHint> {
+        self.assignee_hint.as_ref()
+    }
+
+    /// Expiration time.
+    #[must_use]
+    pub fn expires_at(&self) -> Option<Timestamp> {
+        self.expires_at
+    }
+
+    /// Whether the interaction may be delegated.
+    #[must_use]
+    pub fn delegatable(&self) -> bool {
+        self.delegatable
+    }
+
+    /// Non-authoritative metadata.
+    #[must_use]
+    pub fn metadata(&self) -> &Metadata {
+        &self.metadata
     }
 
     /// Request digest for pairing with `EffectInput::Interaction`.
@@ -871,7 +1208,7 @@ impl<'de> Deserialize<'de> for InteractionRequest {
             interaction_id: InteractionId,
             effect_id: EffectId,
             kind: InteractionKind,
-            prompt: Vec<ContentBlock>,
+            prompt: ContentItems,
             prompt_digest: Digest,
             response_schema: RawJson,
             response_schema_digest: Digest,
@@ -890,7 +1227,7 @@ impl<'de> Deserialize<'de> for InteractionRequest {
             wire.interaction_id,
             wire.effect_id,
             wire.kind,
-            wire.prompt,
+            wire.prompt.into_inner(),
             wire.response_schema,
             wire.policy_component,
             wire.policy_version,
@@ -953,6 +1290,36 @@ impl InteractionResolution {
     pub fn interaction_id(&self) -> InteractionId {
         self.interaction_id
     }
+
+    /// Idempotent resolution id.
+    #[must_use]
+    pub fn resolution_id(&self) -> &str {
+        &self.resolution_id
+    }
+
+    /// Resolving principal.
+    #[must_use]
+    pub fn principal(&self) -> &PrincipalRef {
+        &self.principal
+    }
+
+    /// Authorization evidence for the resolution.
+    #[must_use]
+    pub fn authorization(&self) -> &AuthorizationEvidence {
+        &self.authorization
+    }
+
+    /// Schema-validated response.
+    #[must_use]
+    pub fn response(&self) -> &RawJson {
+        &self.response
+    }
+
+    /// Optional resolver comment.
+    #[must_use]
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_deref()
+    }
 }
 
 impl<'de> Deserialize<'de> for InteractionResolution {
@@ -964,21 +1331,21 @@ impl<'de> Deserialize<'de> for InteractionResolution {
         #[serde(deny_unknown_fields)]
         struct Wire {
             interaction_id: InteractionId,
-            resolution_id: String,
+            resolution_id: BoundedString<LABEL_MAX_BYTES>,
             principal: PrincipalRef,
             authorization: AuthorizationEvidence,
             response: RawJson,
             #[serde(default)]
-            comment: Option<String>,
+            comment: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
         let wire = Wire::deserialize(deserializer)?;
         Self::try_new(
             wire.interaction_id,
-            wire.resolution_id,
+            wire.resolution_id.into_inner(),
             wire.principal,
             wire.authorization,
             wire.response,
-            wire.comment,
+            wire.comment.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)
     }
@@ -995,20 +1362,19 @@ pub struct InteractionExpired {
 }
 
 /// Interaction cancelled.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InteractionCancelled {
     /// Interaction id.
-    pub interaction_id: InteractionId,
+    interaction_id: InteractionId,
     /// Optional principal for principal-initiated cancellation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub principal: Option<PrincipalRef>,
+    principal: Option<PrincipalRef>,
     /// Optional authorization paired with principal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authorization: Option<AuthorizationEvidence>,
+    authorization: Option<AuthorizationEvidence>,
     /// Optional reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<Arc<str>>,
+    reason: Option<Arc<str>>,
 }
 
 impl InteractionCancelled {
@@ -1038,6 +1404,69 @@ impl InteractionCancelled {
             },
         })
     }
+
+    /// Interaction id.
+    #[must_use]
+    pub fn interaction_id(&self) -> InteractionId {
+        self.interaction_id
+    }
+
+    /// Principal for a principal-initiated cancellation.
+    #[must_use]
+    pub fn principal(&self) -> Option<&PrincipalRef> {
+        self.principal.as_ref()
+    }
+
+    /// Authorization evidence paired with [`Self::principal`].
+    #[must_use]
+    pub fn authorization(&self) -> Option<&AuthorizationEvidence> {
+        self.authorization.as_ref()
+    }
+
+    /// Optional cancellation reason.
+    #[must_use]
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
+}
+
+impl<'de> Deserialize<'de> for InteractionCancelled {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            interaction_id: InteractionId,
+            #[serde(default)]
+            principal: Option<PrincipalRef>,
+            #[serde(default)]
+            authorization: Option<AuthorizationEvidence>,
+            #[serde(default)]
+            reason: Option<BoundedString<LABEL_MAX_BYTES>>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::try_new(
+            wire.interaction_id,
+            wire.principal,
+            wire.authorization,
+            wire.reason.map(BoundedString::into_inner),
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+fn validate_settlement(
+    requested: &EffectRequested,
+    effect_id: EffectId,
+    output_contract: &EffectOutputContract,
+) -> Result<(), EffectError> {
+    if effect_id != requested.effect_id() || output_contract != requested.output_contract() {
+        return Err(EffectError::SettlementMismatch);
+    }
+    Ok(())
 }
 
 /// Effect/interaction errors.
@@ -1049,6 +1478,19 @@ pub enum EffectError {
     /// Principal/authorization pairing invalid.
     #[error("interaction cancellation requires both principal and authorization or neither")]
     InvalidCancellationPair,
+    /// Semantic array exceeded its v1 item ceiling.
+    #[error("{field} has {len} items; max {max}")]
+    TooManyItems {
+        /// Field name.
+        field: &'static str,
+        /// Observed item count.
+        len: usize,
+        /// Maximum item count.
+        max: usize,
+    },
+    /// Settlement identity or output contract differed from the originating request.
+    #[error("effect settlement identity/output contract mismatch")]
+    SettlementMismatch,
     /// Label error.
     #[error(transparent)]
     Refs(#[from] RefsError),
@@ -1070,6 +1512,8 @@ impl EffectError {
         match self {
             Self::KindMismatch => "effect_kind_mismatch",
             Self::InvalidCancellationPair => "invalid_cancellation_pair",
+            Self::TooManyItems { .. } => "too_many_items",
+            Self::SettlementMismatch => "effect_settlement_mismatch",
             Self::Refs(inner) => inner.code(),
             Self::Content(_) => "invalid_content",
             Self::Serialize { .. } => "serialize_failed",
@@ -1080,6 +1524,8 @@ impl EffectError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content::BlobRef;
+    use crate::ids::ArtifactId;
     use crate::raw_json::RawJson;
 
     #[test]
@@ -1124,6 +1570,10 @@ mod tests {
             requested.input_digest(),
             requested.input().digest().expect("digest")
         );
+        assert!(requested.relation().is_none());
+        assert!(requested.component().is_none());
+        assert!(requested.pipeline().is_none());
+        assert!(requested.deadline().is_none());
         assert!(
             EffectRequested::try_new(
                 effect_id,
@@ -1139,6 +1589,121 @@ mod tests {
                 None,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn interaction_cancellation_deserialization_enforces_authorization_pair() {
+        let input = r#"{
+            "interaction_id":"01234567-89ab-7cde-89ab-0123456789ab",
+            "principal":{
+                "issuer":"https://issuer.example",
+                "subject":"user-1",
+                "tenant_scope":"tenant-a"
+            }
+        }"#;
+        let error = serde_json::from_str::<InteractionCancelled>(input)
+            .expect_err("one-sided authorization must fail");
+        assert!(error.to_string().contains("requires both principal"));
+    }
+
+    #[test]
+    fn effect_completion_rejects_oversized_artifact_array() {
+        let artifact = ArtifactRef::try_new(
+            ArtifactId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("artifact"),
+            "model-output",
+            BlobRef::try_new("blob-1", "application/json", 2, None, None::<&str>).expect("blob"),
+            Digest::raw_json(br"{}"),
+            Digest::raw_json(br"scope"),
+            Metadata::empty(),
+        )
+        .expect("artifact");
+        let error = EffectCompleted::try_new(
+            EffectId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("effect"),
+            EffectOutputContract {
+                kind: EffectOutputKind::ModelResponse,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(br"schema"),
+            },
+            RawJson::parse("{}").expect("output"),
+            None,
+            vec![artifact; crate::content::CONTENT_MAX_ITEMS + 1],
+            crate::message::ProviderIds::empty(),
+            None::<&str>,
+            None,
+        )
+        .expect_err("oversized artifacts");
+        assert_eq!(error.code(), "too_many_items");
+    }
+
+    #[test]
+    fn effect_settlements_must_preserve_originating_output_contract() {
+        let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("effect");
+        let requested = EffectRequested::try_new(
+            effect_id,
+            EffectKind::Model,
+            None,
+            None,
+            None,
+            EffectOutputContract {
+                kind: EffectOutputKind::ModelResponse,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(br"model-response"),
+            },
+            EffectInput::Model {
+                request: RawJson::parse("{}").expect("input"),
+            },
+            RetrySafety::SafeToRetry,
+            None,
+        )
+        .expect("request");
+        let wrong_contract = EffectOutputContract {
+            kind: EffectOutputKind::ToolResult,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br"tool-result"),
+        };
+        let completed = EffectCompleted::try_new(
+            effect_id,
+            wrong_contract.clone(),
+            RawJson::parse("{}").expect("output"),
+            None,
+            vec![],
+            crate::message::ProviderIds::empty(),
+            None::<&str>,
+            None,
+        )
+        .expect("completion");
+        assert_eq!(completed.output().as_str(), "{}");
+        assert!(completed.usage().is_none());
+        assert!(completed.artifacts().is_empty());
+        assert!(completed.completion_id().is_none());
+        assert_eq!(
+            completed
+                .validate_against(&requested)
+                .expect_err("contract mismatch")
+                .code(),
+            "effect_settlement_mismatch"
+        );
+
+        let deferred = EffectDeferred {
+            effect_id,
+            handle: ExternalHandleRef::try_new(
+                ComponentId::parse("finstack.provider.example").expect("component"),
+                "handle-1",
+                RawJson::parse("{}").expect("metadata"),
+            )
+            .expect("handle"),
+            reconciliation: ReconciliationPolicy::CallbackOnly,
+            next_poll_at: None,
+            expires_at: None,
+            output_contract: wrong_contract,
+        };
+        assert_eq!(
+            deferred
+                .validate_against(&requested)
+                .expect_err("contract mismatch")
+                .code(),
+            "effect_settlement_mismatch"
         );
     }
 }

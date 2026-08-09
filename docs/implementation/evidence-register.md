@@ -120,14 +120,14 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-007-A02 | PR-007 | PLAN-0.12 / same | Passed | me@jeickmeier.com | PR-007-E-test-kernel-57ac9861bcfb; PR-007-E-conformance-8b7b9c728785; PR-007-E-merge-ci-acf14a6a28ca | — | me@jeickmeier.com | 2026-08-08 |
 | PR-007-A03 | PR-007 | PLAN-0.12 / same | Passed | me@jeickmeier.com | PR-007-E-conformance-8b7b9c728785; PR-007-E-security-1146ce970799; PR-007-E-merge-ci-acf14a6a28ca | — | me@jeickmeier.com | 2026-08-08 |
 | PR-007-A04 | PR-007 | PLAN-0.12 / same | Passed | me@jeickmeier.com | PR-007-E-docs-51eca2ecc0a3; PR-007-E-schema-final-4c7efdcf83d8; PR-007-E-conformance-8b7b9c728785; PR-007-E-merge-ci-acf14a6a28ca | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A01 | PR-008 | PLAN-0.13 / [PR-008](../planning/04-finstack-ai-implementation-plan.md#pr-008---define-runtime-events-journal-records-and-effect-envelopes) | Passed | me@jeickmeier.com | PR-008-E-test-kernel-a210698d7433; PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A02 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-test-kernel-a210698d7433; PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A03 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-conformance-4a089d39991c; PR-008-E-docs-040ae6c9b784; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A04 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-test-kernel-a210698d7433; PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A05 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A06 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-conformance-4a089d39991c; PR-008-E-security-ee2bc5d1331d; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A07 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-test-kernel-a210698d7433; PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
-| PR-008-A08 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-schema-b7ad023ab0fe; PR-008-E-conformance-4a089d39991c; PR-008-E-ci-3c2b7922d2e0 | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A01 | PR-008 | PLAN-0.13 / [PR-008](../planning/04-finstack-ai-implementation-plan.md#pr-008---define-runtime-events-journal-records-and-effect-envelopes) | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A02 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A03 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A04 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A05 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A06 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A07 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
+| PR-008-A08 | PR-008 | PLAN-0.13 / same | Failed | me@jeickmeier.com | PR-008-E-code-review-f82034377d5e | — | me@jeickmeier.com | 2026-08-08 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
@@ -143,7 +143,7 @@ PR-006 acceptance is closed and the logical PR is `Done` at merge `56d7777956df1
 
 PR-007 acceptance is closed and the logical PR is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). Immutable implementation evidence is bound to `4a0a77f668adcfa2679dc161779c4456d721c0c2`; `mise run ci` and `mise run check-wasm` were re-verified after integration. ADR-036 remains `In progress` / `Partial` because later mapped artifact-store PRs are still open. Artifacts live under [`artifacts/pr-007/`](artifacts/pr-007/).
 
-PR-008 local acceptance (A01–A08) is closed against implementation tip `7b5ededc2054b0b7dde8373efbe0ec95ba02b71b` on [#5](https://github.com/jeickmeier/finstack-ai/pull/5). Hosted `ci`/`security`/`nightly` are green on head `1f6a87060f9ea81a65ccdad703cfa3c7c9cdd533` (ci run 31285097812). Canonical-CBOR payload-digest/envelope-checksum evidence remains deferred to PR-039 per PLAN-0.13. The logical PR remains `In progress` until merge. Artifacts live under [`artifacts/pr-008/`](artifacts/pr-008/).
+PR-008 acceptance A01–A08 was reopened as `Failed` by pre-merge review at head `e3fdf05b59a6bc357fcb853292f20fd5d4fb7b21` (`PR-008-E-code-review-f82034377d5e`). Earlier local and hosted evidence remains retained but no longer closes acceptance. Remediation is in progress and must be rebound to an immutable tip before any criterion returns to `Passed`. Canonical-CBOR payload-digest/envelope-checksum evidence remains deferred to PR-039 per PLAN-0.13. Artifacts live under [`artifacts/pr-008/`](artifacts/pr-008/).
 
 ## Evidence records
 
@@ -234,6 +234,7 @@ PR-008 local acceptance (A01–A08) is closed against implementation tip `7b5ede
 | PR-008-E-secret-scan-c1897dbf9d15 | 2026-08-08 | PR-008 | Local command | `mise run secret-scan` (SEC-INV-005; TM-04) | Darwin arm64; gitleaks | `7b5ededc2054b0b7dde8373efbe0ec95ba02b71b` | Pass | [`artifacts/pr-008/secret-scan.txt`](artifacts/pr-008/secret-scan.txt) sha256 `73f6a685e5f5110dd60668ca3855646c9c4489c79d0386bd588bce643f50abbb` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 | PR-008-E-ci-3c2b7922d2e0 | 2026-08-08 | PR-008 | Local command | `mise run ci` (format/clippy/test/docs/architecture/schema-governance/conformance/supply-chain/secret-scan/release-smoke/build-python) | Darwin arm64; rustc/cargo 1.97.1; python 3.14 | `7b5ededc2054b0b7dde8373efbe0ec95ba02b71b` | Pass | [`artifacts/pr-008/ci.txt`](artifacts/pr-008/ci.txt) sha256 `70bf2b93db4a76dc9b0c6be2c7eb3762ddfbafbf4c57769377c7e40ea960aeba` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 | PR-008-E-hosted-ci-f3f2d3f0a860 | 2026-08-08 | PR-008 | Hosted CI | GitHub Actions PR runs for `ci.yml` (incl. windows-2025 rust/release-smoke), `security.yml`, and `nightly.yml` | ubuntu-24.04 / macos-15 / windows-2025; GitHub-hosted | `1f6a87060f9ea81a65ccdad703cfa3c7c9cdd533` | Pass | [`artifacts/pr-008/hosted-ci.txt`](artifacts/pr-008/hosted-ci.txt) sha256 `962edce9d0451554d2578609fcae35eb0b10ce8cf2f3aa8ad47e7959c40f4c8b`; runs 31285097812 / 31285097802 / 31285097805 | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
+| PR-008-E-code-review-f82034377d5e | 2026-08-08 | PR-008 | Manual review | Pre-merge correctness/security/compatibility review of PR-008 branch changes | Files at reviewed head | `e3fdf05b59a6bc357fcb853292f20fd5d4fb7b21` | Fail | [`artifacts/pr-008/code-review.txt`](artifacts/pr-008/code-review.txt) sha256 `f6e639d919b4baca28d71720174e5bbcba62e13f27ba2c301ae69706ab2e6a5d` | me@jeickmeier.com | me@jeickmeier.com | 2026-08-08 | — |
 
 An evidence record is valid only when another contributor can identify what ran or was reviewed, against which immutable revision, in which relevant environment, with what result, and where the durable output is stored. A bare statement such as “tests pass,” an unlinked local result, or evidence from a superseded commit cannot close acceptance.
 
