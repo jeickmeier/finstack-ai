@@ -1072,6 +1072,10 @@ fn run_event_body_from_record(
         | RecordBody::CancellationReconciled(_)
         | RecordBody::RetryScheduled(_)
         | RecordBody::TimerFired(_)
+        | RecordBody::OutputConfigured(_)
+        | RecordBody::CapabilitiesActivated(_)
+        | RecordBody::FinalResultRecorded(_)
+        | RecordBody::OutputValidationFailed(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1344,7 +1348,11 @@ pub fn derived_event_kind(
         | RecordBody::CancellationRequested(_)
         | RecordBody::CancellationReconciled(_)
         | RecordBody::RetryScheduled(_)
-        | RecordBody::TimerFired(_) => {
+        | RecordBody::TimerFired(_)
+        | RecordBody::OutputConfigured(_)
+        | RecordBody::CapabilitiesActivated(_)
+        | RecordBody::FinalResultRecorded(_)
+        | RecordBody::OutputValidationFailed(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

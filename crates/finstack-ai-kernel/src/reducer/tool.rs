@@ -1078,7 +1078,9 @@ fn assistant_calls(message: &Message) -> Vec<&ToolCallBlock> {
         .content()
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) => Some(call),
+            ContentBlock::ToolCall(call) if !crate::is_internal_tool_name(call.tool_name()) => {
+                Some(call)
+            }
             _ => None,
         })
         .collect()

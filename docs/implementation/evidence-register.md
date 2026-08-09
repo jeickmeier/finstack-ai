@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.16 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.17 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -35,7 +35,8 @@ The current ordinal namespace is bound to this exact plan artifact:
 | PLAN-0.13 | 0.13 | `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | 2026-08-08 | 66 | 345 | 62 | Pack v0.15 PR-008 contract freeze | Superseded |
 | PLAN-0.14 | 0.14 | `48a3eb39c4a28c47c7aabf994613f784820517b6271a2e3881cfcb064973674e` | 2026-08-08 | 66 | 345 | 62 | Pack v0.16 PR-009 reducer contract freeze, including replay, capacity, and scope refinements | Superseded |
 | PLAN-0.15 | 0.15 | `1618c86f82b9e569a429531ff44a7b70c6079a1bcf18e19ba343f615888ac970` | 2026-08-09 | 66 | 345 | 62 | Pack v0.17 PR-010 tool-call and tool-batch reducer contract freeze | Superseded |
-| PLAN-0.16 | 0.16 | `1b7b313fc459f68e5f45529c9595fbd1ee3a52334223d8facbfd70f6db146fe9` | 2026-08-09 | 66 | 345 | 62 | Pack v0.18 PR-011 limit, retry, cancellation, lineage, and state-v3 contract freeze | Current |
+| PLAN-0.16 | 0.16 | `1b7b313fc459f68e5f45529c9595fbd1ee3a52334223d8facbfd70f6db146fe9` | 2026-08-09 | 66 | 345 | 62 | Pack v0.18 PR-011 limit, retry, cancellation, lineage, and state-v3 contract freeze | Superseded |
+| PLAN-0.17 | 0.17 | `e40d5bf6a6dd3beb501981369078e110b3aea342b92b86dcd32a65275cdea079` | 2026-08-09 | 66 | 345 | 62 | Pack v0.19 PR-012 structured-output, internal-control, capability-plan, and state-v4 contract freeze | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -64,6 +65,7 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-08 | PLAN-0.13 | PLAN-0.14 / `48a3eb39c4a28c47c7aabf994613f784820517b6271a2e3881cfcb064973674e` | PR-009 principal changes / A01–A05 | PR-009 principal changes, replay-verifiable fingerprints, hard state capacity, and completed/failed-only concrete vocabularies clarified (acceptance IDs, order, and inventory unchanged) | Pack v0.16 PR-009 reducer contract freeze/refinement | Pack v0.16 amendment |
 | 2026-08-09 | PLAN-0.14 | PLAN-0.15 / `1618c86f82b9e569a429531ff44a7b70c6079a1bcf18e19ba343f615888ac970` | PR-010 principal changes / A01–A04; PR-011 A02 | PR-010 tool reducer contract frozen and cancellation closure evidence clarified as PR-011-owned (acceptance IDs, order, and inventory unchanged) | Pack v0.17 PR-010 contract freeze | Pack v0.17 amendment |
 | 2026-08-09 | PLAN-0.15 | PLAN-0.16 / `1b7b313fc459f68e5f45529c9595fbd1ee3a52334223d8facbfd70f6db146fe9` | PR-011 principal changes / A01–A06 | PR-011 limit observation, semantic retry, cancellation reconciliation, lineage proof, and conditional state-v3 contract frozen (acceptance IDs, order, and inventory unchanged) | Pack v0.18 PR-011 contract freeze | Pack v0.18 amendment |
+| 2026-08-09 | PLAN-0.16 | PLAN-0.17 / `e40d5bf6a6dd3beb501981369078e110b3aea342b92b86dcd32a65275cdea079` | PR-012 principal changes / A01–A05 | PR-012 structured-output validation, internal-control namespace, capability activation, end-strategy, and conditional state-v4 contract frozen (acceptance IDs, order, and inventory unchanged) | Pack v0.19 PR-012 contract freeze | Pack v0.19 amendment |
 
 ## Acceptance dispositions
 
@@ -149,6 +151,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-011-A04 | PR-011 | PLAN-0.16 / same | Passed | me@jeickmeier.com | PR-011-E-kernel-c8a314829b86; PR-011-E-conformance-4aae0a67b162 | — | me@jeickmeier.com | 2026-08-09 |
 | PR-011-A05 | PR-011 | PLAN-0.16 / same | Passed | me@jeickmeier.com | PR-011-E-kernel-c8a314829b86; PR-011-E-conformance-4aae0a67b162; PR-011-E-security-c338d5a3a19c | — | me@jeickmeier.com | 2026-08-09 |
 | PR-011-A06 | PR-011 | PLAN-0.16 / same | Passed | me@jeickmeier.com | PR-011-E-kernel-c8a314829b86; PR-011-E-conformance-4aae0a67b162; PR-011-E-security-c338d5a3a19c | — | me@jeickmeier.com | 2026-08-09 |
+| PR-012-A01 | PR-012 | PLAN-0.17 / [PR-012](../planning/04-finstack-ai-implementation-plan.md#pr-012---add-structured-output-and-internal-control-tools) | Pending | me@jeickmeier.com | structured-output trace evidence pending immutable revision | — | — | — |
+| PR-012-A02 | PR-012 | PLAN-0.17 / same | Pending | me@jeickmeier.com | internal namespace and application-tool isolation evidence pending immutable revision | — | — | — |
+| PR-012-A03 | PR-012 | PLAN-0.17 / same | Pending | me@jeickmeier.com | dependency and architecture evidence pending immutable revision | — | — | — |
+| PR-012-A04 | PR-012 | PLAN-0.17 / same | Pending | me@jeickmeier.com | validator-independent retry trace evidence pending immutable revision | — | — | — |
+| PR-012-A05 | PR-012 | PLAN-0.17 / same | Pending | me@jeickmeier.com | zero-configuration compatibility evidence pending immutable revision | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

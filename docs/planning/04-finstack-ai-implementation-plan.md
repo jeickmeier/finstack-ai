@@ -13,11 +13,11 @@ date: "2026-08-09"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.16 |
+| Version | 0.17 |
 | Status | Implementation baseline |
 | Date | 2026-08-09 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.16; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.17; Security and Threat Model v0.6 |
 
 # Executive implementation decision
 
@@ -741,6 +741,10 @@ A separate ADR is required before merging a change that:
 
 - Keep schema validation execution outside the kernel while making its result semantics deterministic.
 
+- Materialize `ConfigureOutput`, `OutputValidated`, and `CapabilitiesActivated`; four zero-event records; and conditional `kernel-state` v4 exactly as TDD section 22.7 specifies.
+
+- Treat only `finstack.internal.submit_final_output` as executable PR-012 structured-result control syntax. Reserve `finstack.internal.load_capability` and reject model activation until its later catalog/runtime owner.
+
 **Acceptance evidence.**
 
 - Structured-output traces cover success, validation retry, exhausted retries, and competing output/tool calls.
@@ -757,7 +761,7 @@ A separate ADR is required before merging a change that:
 
 **Traceability.** FR-KRN-011, FR-KRN-012, FR-CAP foundations; TDD sections 10 and 17.
 
-**Explicitly excluded.** No compact model-activated catalog UX or concrete validator; `Always`/`Application` mechanics and the reserved `Model` path are sufficient here.
+**Explicitly excluded.** No compact model-activated catalog UX, concrete validator, runtime plan builder, capability catalog/provider, binding/SDK convenience layer, or internal-tool effect execution. `Always`/`Application` durable mechanics and a rejected/reserved `Model` path are sufficient here.
 
 ### PR-013 - Harden the kernel and pass the semantic gate
 

@@ -6,7 +6,9 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::capabilities::CapabilitiesActivated;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind,
     EffectOutputKind, EffectRequested, InteractionCancelled, InteractionExpired,
@@ -24,6 +26,7 @@ use crate::run::{
 };
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolBatchOutcome, ToolCallSettled};
+use crate::validation::OutputValidationFailed;
 
 /// V1 atomic append batch record-count ceiling (TDD §6.5).
 pub const APPEND_BATCH_MAX_RECORDS: usize = 256;
@@ -442,7 +445,7 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
     }
 }
 
-/// Record bodies owned through PR-011.
+/// Record bodies owned through PR-012.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {
@@ -496,6 +499,14 @@ pub enum RecordBody {
     RunFailed(RunFailed),
     /// Cancelled run terminal.
     RunCancelled(RunCancelled),
+    /// Frozen run-level output configuration.
+    OutputConfigured(OutputConfiguration),
+    /// Complete immutable resolved capability plan activation.
+    CapabilitiesActivated(CapabilitiesActivated),
+    /// Validator-independent valid final structured result.
+    FinalResultRecorded(FinalResultRecorded),
+    /// Validator-independent invalid structured result and retry feedback.
+    OutputValidationFailed(OutputValidationFailed),
 }
 
 impl RecordBody {
@@ -516,7 +527,11 @@ impl RecordBody {
             | Self::CancellationRequested(_)
             | Self::CancellationReconciled(_)
             | Self::RetryScheduled(_)
-            | Self::TimerFired(_) => 0,
+            | Self::TimerFired(_)
+            | Self::OutputConfigured(_)
+            | Self::CapabilitiesActivated(_)
+            | Self::FinalResultRecorded(_)
+            | Self::OutputValidationFailed(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -551,6 +566,10 @@ impl RecordBody {
             Self::RunCompleted(_) => "run_completed",
             Self::RunFailed(_) => "run_failed",
             Self::RunCancelled(_) => "run_cancelled",
+            Self::OutputConfigured(_) => "output_configured",
+            Self::CapabilitiesActivated(_) => "capabilities_activated",
+            Self::FinalResultRecorded(_) => "final_result_recorded",
+            Self::OutputValidationFailed(_) => "output_validation_failed",
         }
     }
 }
@@ -766,6 +785,7 @@ fn validate_body_for_creation(body: &RecordBody) -> Result<(), RecordError> {
             ToolBatchOutcome::ContinueModel | ToolBatchOutcome::Finalize => None,
         },
         RecordBody::RunFailed(failed) => Some(&failed.error),
+        RecordBody::OutputValidationFailed(failed) => Some(&failed.error),
         _ => None,
     };
     if let Some(error) = error {

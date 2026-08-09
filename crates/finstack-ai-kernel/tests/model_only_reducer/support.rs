@@ -909,6 +909,8 @@ mod apply_and_json;
 mod matrix;
 #[path = "settlements.rs"]
 mod settlements;
+#[path = "structured_output.rs"]
+mod structured_output;
 #[path = "successful.rs"]
 mod successful;
 #[path = "termination.rs"]

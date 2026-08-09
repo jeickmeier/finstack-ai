@@ -98,7 +98,9 @@
 
 #![warn(missing_docs)]
 
+mod agent;
 mod bounds;
+mod capabilities;
 mod content;
 mod digest;
 mod effects;
@@ -117,8 +119,15 @@ mod run;
 mod state;
 mod time;
 mod tools;
+mod validation;
 
+pub use agent::{
+    FinalResultRecorded, INTERNAL_TOOL_NAMESPACE, JsonSchemaDraft, LOAD_CAPABILITY_TOOL,
+    OutputConfiguration, OutputEndStrategy, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef,
+    StructuredResultSource, is_internal_tool_name,
+};
 pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
+pub use capabilities::{ActiveCapability, CapabilitiesActivated, CapabilityActivationSource};
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,
@@ -211,3 +220,4 @@ pub use tools::{
     ToolCallPlan, ToolCallSettled, ToolExecutionMode, ToolFailurePolicy, ToolSettlementFingerprint,
     ToolSettlementKind, ValidatedToolCall,
 };
+pub use validation::{OutputValidated, OutputValidationFailed, ValidationIssue, ValidationOutcome};

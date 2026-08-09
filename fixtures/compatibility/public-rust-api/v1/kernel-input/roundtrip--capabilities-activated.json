@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "capabilities_activated": {
+      "resolved_plan_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "active": [
+        {
+          "capability_id": "finstack.capability.alpha",
+          "source": "always"
+        },
+        {
+          "capability_id": "finstack.capability.beta",
+          "source": "application"
+        }
+      ]
+    }
+  },
+  "expect": { "ok": true }
+}

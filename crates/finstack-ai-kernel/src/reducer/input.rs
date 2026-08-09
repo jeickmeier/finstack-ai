@@ -23,8 +23,9 @@ use crate::refs::{ArtifactRef, Usage};
 use crate::run::{CancellationInitiator, RunAccepted};
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchContinuation, ToolCallPlan};
+use crate::{CapabilitiesActivated, OutputConfiguration, OutputValidated};
 
-/// Complete concrete command vocabulary owned through PR-011.
+/// Complete concrete command vocabulary owned through PR-012.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum KernelInput {
@@ -44,6 +45,12 @@ pub enum KernelInput {
     CancellationReconciled(CancellationReconciledInput),
     /// Fire the exact pending semantic timer.
     TimerFired(TimerFiredInput),
+    /// Freeze the run-level final-output contract before execution begins.
+    ConfigureOutput(OutputConfiguration),
+    /// Activate a complete immutable capability plan at a safe checkpoint.
+    CapabilitiesActivated(CapabilitiesActivated),
+    /// Commit a normalized external structured-output validation result.
+    OutputValidated(OutputValidated),
 }
 
 /// Normalized cancellation request; the request ID is allocated by `TransitionEnv`.

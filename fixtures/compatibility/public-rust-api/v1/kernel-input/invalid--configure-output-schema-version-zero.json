@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "configure_output": {
+      "output": {
+        "json_schema": {
+          "schema": {
+            "draft": "draft202012",
+            "schema_version": 0,
+            "schema_digest": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        }
+      },
+      "end_strategy": "early"
+    }
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_input_payload"
+  }
+}

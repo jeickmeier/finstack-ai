@@ -1,0 +1,65 @@
+PR-012 security and threat-model candidate review
+Date: 2026-08-09
+Reviewed candidate: uncommitted codex/pr-012-structured-output working tree
+Reviewer: me@jeickmeier.com
+Result: PASS for the current pure-kernel candidate; immutable binding pending
+
+Scope reviewed
+
+- Structured-result configuration, source binding, normalized validation,
+  retry/exhaustion, result/tool competition, internal namespace reservation,
+  capability-plan activation, replay, and conditional state v4.
+- Threat Model TM-01, TM-02, TM-16 and SEC-INV-001, SEC-INV-002,
+  SEC-INV-004, SEC-INV-007, SEC-INV-009, SEC-INV-010, SEC-INV-011.
+
+Control disposition
+
+PASS - SEC-INV-001 / TM-01 authority separation
+Structured content and framework control syntax do not grant application-tool
+authority. Only the exact reserved final-output call is accepted, and it is
+never dispatched. Model-driven capability activation and load-capability are
+reserved and rejected. Application capability activation remains an explicit
+BeforeRun command with an optimistic prior-plan digest.
+
+PASS - SEC-INV-002 / TM-02 commit-before-effect and tool integrity
+Internal calls are excluded from application planning, effects, usage, and
+tool indexes. Early and invalid candidates record skipped application call IDs
+without fabricating EffectRequested, ToolCallSettled, or tool-result messages.
+Exhaustive mode plans only the exact application calls in source order. Existing
+tool effect intent still commits before dispatch.
+
+PASS - SEC-INV-004 / replay conflicts
+Equal configuration, validation, and complete capability-plan transitions are
+idempotent. Changed schema/source/candidate/outcome, stale plan digests, duplicate
+capability IDs, reserved sources, and late or conflicting terminal mutations fail
+closed. Replay reconstructs the exact stable validation error at the transition.
+
+PASS - SEC-INV-007 / TM-16 bounded decoding
+Schema versions must be positive. Raw JSON retains its existing source,
+canonical-size, and depth limits. Validation issue arrays, feedback, issue text,
+keywords, skipped call arrays, and active capability arrays are bounded on wire
+decode and programmatic decide/replay paths. The kernel imports no JSON Schema or
+Pydantic validator and performs no recursive schema fetch.
+
+PASS - SEC-INV-009, SEC-INV-010, SEC-INV-011
+Structured outcomes cannot mutate terminal runs. Four explicit zero-event records
+retain configuration, activation, exact candidate/source/digest, normalized
+issues, safe feedback, and skipped identities. State v4 has strict field presence,
+an explicit recursive hash projection, one-way versioning, result/error/configuration
+consistency checks, and rejects tampered result digests and impossible outcomes.
+Existing v1-v3 histories retain their versions and hashes unless a PR-012 record
+is actually applied.
+
+PASS - architecture and dependency review
+No port, runtime executor, host privilege, network/filesystem path, validator
+dependency, or dynamic-loading capability was added. Architecture, minimal-build,
+WASM, supply-chain, secret-scan, and aggregate CI checks pass for the candidate.
+
+Residual later-PR obligations
+
+- Concrete validator selection/execution and provider-specific structured-output
+  translation remain runtime/SDK or binding work.
+- The capability catalog/provider and model-driven activation path remain deferred;
+  PR-012 intentionally rejects that path.
+- Broader fuzz/property hardening remains PR-013. These are declared exclusions,
+  not exceptions to the current PR-012 controls.
