@@ -79,7 +79,7 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel and public-rust-api fixture tests (PR-006/PR-007)"
+description = "Run focused kernel/runtime and public-Rust-API tests through PR-009"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
@@ -88,7 +88,7 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.conformance]
-description = "Run golden-trace and conformance harness tests (PR-005/PR-006)"
+description = "Run conformance through the real PR-009 reducer adapter"
 run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]
@@ -178,10 +178,14 @@ run = """
 set -euo pipefail
 rustup component add llvm-tools-preview
 mkdir -p target/coverage/rust
+rm -rf target/coverage/rust/html
 LLVM_COV="$(mise where github:taiki-e/cargo-llvm-cov)/cargo-llvm-cov"
+COVERAGE_IGNORE_REGEX='(^|[/\\])(tests|fixtures)([/\\]|$)|(^|[/\\])crates[/\\]finstack-ai-test([/\\]|$)'
 "${LLVM_COV}" llvm-cov --workspace --locked \
+  --ignore-filename-regex "${COVERAGE_IGNORE_REGEX}" \
   --lcov --output-path target/coverage/rust/lcov.info
 "${LLVM_COV}" llvm-cov report \
+  --ignore-filename-regex "${COVERAGE_IGNORE_REGEX}" \
   --html --output-dir target/coverage/rust
 """
 
