@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "subject": "interaction-cancelled",
+  "operation": "parse",
+  "input": {
+    "interaction_id": "01234567-89ab-7cde-89ab-0123456789ab",
+    "principal": {
+      "issuer": "https://issuer.example",
+      "subject": "user-1",
+      "tenant_scope": "tenant-a"
+    }
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_cancellation_pair"
+  }
+}

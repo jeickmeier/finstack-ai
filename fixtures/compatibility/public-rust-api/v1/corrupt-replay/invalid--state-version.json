@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "corrupt-replay",
+  "operation": "apply_mutation",
+  "input": {
+    "trace": "golden-trace/v1/trace/valid--pr009-model-completed.json",
+    "mutation": "state_version"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_input_payload"
+  }
+}

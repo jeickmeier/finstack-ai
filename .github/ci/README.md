@@ -9,9 +9,9 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), candidate-v1 fuzz smoke, docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
-| [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility only; fuzz remains documentation-reserved (no green placeholder job) |
+| [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns run on Sunday/manual only, with 30-day corpus/crash artifact retention |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
 
 ## Toolchain channels (PR-003-A02)
@@ -21,7 +21,7 @@ All executable checks are canonical mise tasks. Workflows must call
 | stable | mise Rust `1.97.1` | every PR (`ci.yml` label `stable`) | `me@jeickmeier.com` |
 | MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (`ci.yml` label `msrv`; intentionally coincides with stable) | `me@jeickmeier.com` |
 | nightly | `nightly-2026-08-01` | every PR + weekly (`nightly.yml`) | `me@jeickmeier.com` |
-| fuzz | reserved; no targets yet | docs-only until parser/fuzz targets land; intended weekly cadence then; `evidence_eligible = false` | `me@jeickmeier.com` |
+| fuzz | `cargo-fuzz 0.13.2`, `nightly-2026-08-01` | bounded smoke every PR; long campaign Sunday/manual | `me@jeickmeier.com` |
 
 ## Path filters
 
@@ -97,7 +97,7 @@ These reservations are documentation-only. Do not add green placeholder jobs.
 | --- | --- | --- | --- | --- |
 | Python wheels | CPython 3.11–3.14 and 3.14t; manylinux x86_64/aarch64, macOS arm64, Windows x64 | every PR for smoke subset; scheduled full matrix | PR-027 | `me@jeickmeier.com` |
 | Headless browser smoke | browser WASM conformance placeholders | every PR once browser package exists | PR-033–PR-036 | `me@jeickmeier.com` |
-| Parser fuzz smoke | no targets yet; no workflow job until targets exist | weekly via `nightly.yml` once targets exist | PR introducing each parser | `me@jeickmeier.com` |
+| Parser fuzz beyond candidate-v1 | protocol framing, CBOR, provider streams, and binding/browser inputs remain unimplemented | activate with the owning later-phase parser | owning parser PR | `me@jeickmeier.com` |
 | Security-boundary suites | adversarial authorization/permission suites | every PR for owning surface | owning runtime/binding/plugin PRs | `me@jeickmeier.com` |
 | Benchmark regression | activated as scheduled/manual artifact collection; not merge-blocking; no threshold enforcement | Mondays 06:17 UTC + `workflow_dispatch` via `benchmark.yml`; PR CI only compiles benches (`tools/benchmark/run.py compile`) | PR-005 | `me@jeickmeier.com` |
 

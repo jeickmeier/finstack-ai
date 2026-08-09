@@ -907,8 +907,12 @@ fn input_payload(input: &KernelInput, variant: &str) -> Value {
 mod apply_and_json;
 #[path = "matrix.rs"]
 mod matrix;
+#[path = "properties.rs"]
+mod properties;
 #[path = "settlements.rs"]
 mod settlements;
+#[path = "structured_output.rs"]
+mod structured_output;
 #[path = "successful.rs"]
 mod successful;
 #[path = "termination.rs"]

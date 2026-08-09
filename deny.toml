@@ -29,6 +29,8 @@ allow = [
     "Unicode-3.0",
     "MIT-0",
     "Zlib",
+    # LLVM libFuzzer runtime linked only by the isolated cargo-fuzz workspace.
+    "NCSA",
 ]
 # Additional common OSI licenses may be added when a dependency first needs them.
 # Keep the allowlist tight; unmatched allowances become cargo-deny warnings.

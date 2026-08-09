@@ -1,0 +1,54 @@
+PR-012 immutable validation
+Date: 2026-08-09
+Branch: local main (fast-forward of codex/pr-012-structured-output)
+Revision: dc58a11fbc871e70326d04fd9840297b5179023f
+Result: PASS
+
+Focused validation
+
+1. cargo test -p finstack-ai-kernel --locked --test model_only_reducer structured_output
+   PASS: 5 PR-012 reducer tests.
+   Coverage: valid JSON finalization; retry then exhaustion; Early and Exhaustive
+   output/tool competition; reserved internal names; complete capability activation,
+   replay, idempotency, ordering, duplicate IDs, and reserved Model activation.
+
+2. mise run test-kernel
+   PASS: 87 kernel unit tests, 77 reducer/integration tests, 5 passing
+   rustdoc examples plus 1 compile-fail rustdoc, runtime tests, and the 83-fixture
+   public Rust API corpus.
+
+3. mise run conformance
+   PASS: public API compatibility, reducer fixtures, prefix replay, existing
+   golden traces, and five PR-012 structured-output summaries.
+
+4. cargo clippy --workspace --all-targets --locked -- -D warnings
+   PASS.
+
+Aggregate validation
+
+5. mise run ci
+   PASS at the exact immutable revision after correcting the new negative
+   fixture's expected error-code field before commit.
+   The final run included formatting, Clippy, workspace tests, rustdoc,
+   architecture, minimal features, wasm32 checks, schema governance,
+   conformance, benchmark compilation, workflow lint, supply-chain policy,
+   secret scan and canary, release smoke, and Python source/wheel builds.
+   cargo-deny reported the pre-existing informational duplicate-syn warning;
+   the supply-chain task passed.
+
+Validation history
+
+- The first aggregate attempt was environment-blocked because sandboxed uv and
+  RustSec caches were read-only; the permitted rerun reached source validation.
+- A later aggregate run exposed the missing expected error code in the newly
+  added negative schema-version fixture. The fixture was corrected, the focused
+  public API corpus and conformance suite passed, and the final aggregate run at
+  dc58a11fbc871e70326d04fd9840297b5179023f passed.
+
+Compatibility fixtures
+
+- fixtures/compatibility/golden-trace/v1/structured-output/valid--pr012-success.json
+- fixtures/compatibility/golden-trace/v1/structured-output/valid--pr012-validation-retry.json
+- fixtures/compatibility/golden-trace/v1/structured-output/valid--pr012-early.json
+- fixtures/compatibility/golden-trace/v1/structured-output/valid--pr012-exhaustive.json
+- fixtures/compatibility/golden-trace/v1/structured-output/valid--pr012-capabilities.json

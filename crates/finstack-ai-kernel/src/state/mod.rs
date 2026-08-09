@@ -9,7 +9,9 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
+use crate::capabilities::ActiveCapability;
 use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES};
 use crate::digest::Digest;
 use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
@@ -28,6 +30,7 @@ use crate::tools::{
     ActiveToolBatch, ActiveToolCallStatus, ToolBatchClosed, ToolCallIdentity, ToolCallPlan,
     ToolSettlementFingerprint, ToolSettlementKind,
 };
+use crate::validation::OutputValidationFailed;
 
 use hash_projection::{KernelStateHashV1, KernelStateHashV2};
 
@@ -367,6 +370,16 @@ pub struct KernelState {
     pub tool_settlements: BTreeMap<EffectId, ToolSettlementFingerprint>,
     /// Most recently closed batch awaiting after-tool settlement.
     pub last_tool_batch: Option<ToolBatchClosed>,
+    /// Frozen run-level output contract, when explicitly configured.
+    pub output_configuration: Option<OutputConfiguration>,
+    /// Complete sorted active capability set.
+    pub active_capabilities: Arc<[ActiveCapability]>,
+    /// Digest of the current immutable resolved run plan.
+    pub resolved_plan_digest: Option<Digest>,
+    /// Most recent valid structured final result.
+    pub final_result: Option<FinalResultRecorded>,
+    /// Most recent invalid structured result and retry feedback.
+    pub validation_failure: Option<OutputValidationFailed>,
     /// Replay-derived cumulative limit usage.
     pub limit_usage: LimitUsage,
     /// Active or completed cancellation control state.
@@ -411,6 +424,11 @@ impl Default for KernelState {
             tool_calls: BTreeMap::new(),
             tool_settlements: BTreeMap::new(),
             last_tool_batch: None,
+            output_configuration: None,
+            active_capabilities: Arc::from([]),
+            resolved_plan_digest: None,
+            final_result: None,
+            validation_failure: None,
             limit_usage: LimitUsage::default(),
             cancellation: None,
             retry: RetryState::default(),
@@ -473,9 +491,15 @@ impl KernelState {
             || self.last_limit.is_some()
             || self.suspension.is_some()
             || matches!(self.terminal, Some(TerminalState::Cancelled(_)));
-        if !matches!(self.state_version, 1..=3)
+        let has_structured_state = self.output_configuration.is_some()
+            || !self.active_capabilities.is_empty()
+            || self.resolved_plan_digest.is_some()
+            || self.final_result.is_some()
+            || self.validation_failure.is_some();
+        if !matches!(self.state_version, 1..=4)
             || (self.state_version == 1 && has_tool_state)
             || (self.state_version < 3 && has_control_state)
+            || (self.state_version < 4 && has_structured_state)
         {
             return Err(KernelError::InvalidInputPayload {
                 field: "state_version",
@@ -485,7 +509,7 @@ impl KernelState {
         if self.state_version >= 2 && has_tool_state {
             self.validate_tool_state()?;
         }
-        if self.state_version == 3 {
+        if self.state_version >= 3 {
             if self.accepted.is_some() != self.accepted_at.is_some() {
                 return Err(KernelError::InvalidInputPayload {
                     field: "accepted_at",
@@ -597,6 +621,127 @@ impl KernelState {
                 return Err(KernelError::InvalidInputPayload {
                     field: "terminal",
                     reason_code: "inconsistent_phase",
+                });
+            }
+        }
+        if self.state_version == 4 {
+            if self
+                .output_configuration
+                .as_ref()
+                .is_some_and(|configuration| configuration.validate().is_err())
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "output_configuration",
+                    reason_code: "invalid",
+                });
+            }
+            if self.active_capabilities.len() > SEMANTIC_ARRAY_MAX_ITEMS
+                || self
+                    .active_capabilities
+                    .windows(2)
+                    .any(|pair| pair[0].capability_id >= pair[1].capability_id)
+                || self
+                    .active_capabilities
+                    .iter()
+                    .any(|item| item.source == crate::CapabilityActivationSource::Model)
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "active_capabilities",
+                    reason_code: "invalid_capability_set",
+                });
+            }
+            if self.final_result.is_some() && self.validation_failure.is_some() {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "structured_output",
+                    reason_code: "conflicting_outcomes",
+                });
+            }
+            if self
+                .final_result
+                .as_ref()
+                .is_some_and(|result| result.validate().is_err())
+                || self
+                    .validation_failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.validate().is_err())
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "structured_output",
+                    reason_code: "invalid",
+                });
+            }
+            if let Some(result) = self.final_result.as_ref() {
+                let configuration_matches = matches!(
+                    self.output_configuration.as_ref(),
+                    Some(OutputConfiguration {
+                        output: crate::OutputSpec::JsonSchema { schema },
+                        end_strategy,
+                    }) if schema == &result.schema && end_strategy == &result.end_strategy
+                );
+                let candidate_matches = matches!(
+                    self.terminal_candidate.as_ref(),
+                    Some(TerminalCandidate::Completed {
+                        cycle,
+                        turn_id,
+                        model_request_id,
+                        effect_id,
+                        message_id,
+                        result_digest,
+                    }) if cycle == &result.cycle
+                        && turn_id == &result.turn_id
+                        && model_request_id == &result.model_request_id
+                        && effect_id == &result.effect_id
+                        && message_id == &result.message_id
+                        && result_digest == &result.value_digest
+                );
+                if !configuration_matches || !candidate_matches {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "final_result",
+                        reason_code: "configuration_mismatch",
+                    });
+                }
+            }
+            if let Some(failure) = self.validation_failure.as_ref() {
+                let schema_matches = matches!(
+                    self.output_configuration.as_ref(),
+                    Some(OutputConfiguration {
+                        output: crate::OutputSpec::JsonSchema { schema },
+                        ..
+                    }) if schema == &failure.schema
+                );
+                let candidate_matches = matches!(
+                    self.terminal_candidate.as_ref(),
+                    Some(TerminalCandidate::Failed {
+                        cycle,
+                        turn_id: Some(turn_id),
+                        model_request_id: Some(model_request_id),
+                        effect_id: Some(effect_id),
+                        error,
+                    }) if cycle == &failure.cycle
+                        && turn_id == &failure.turn_id
+                        && model_request_id == &failure.model_request_id
+                        && effect_id == &failure.effect_id
+                        && error == &failure.error
+                );
+                if !schema_matches || !candidate_matches {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "validation_failure",
+                        reason_code: "configuration_mismatch",
+                    });
+                }
+            }
+            if (self.final_result.is_some() || self.validation_failure.is_some())
+                && !matches!(
+                    self.output_configuration,
+                    Some(OutputConfiguration {
+                        output: crate::OutputSpec::JsonSchema { .. },
+                        ..
+                    })
+                )
+            {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "structured_output",
+                    reason_code: "missing_configuration",
                 });
             }
         }
@@ -912,8 +1057,17 @@ impl KernelState {
                 tool_call_hash_entries(&self.tool_calls),
                 tool_settlement_hash_entries(&self.tool_settlements),
             ))
-        } else {
+        } else if self.state_version == 3 {
             serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV3::from_state(
+                self,
+                stage_hash_entries(&self.stage_settlements),
+                model_hash_entries(&self.model_settlements),
+                completion_hash_entries(&self.completion_identities),
+                tool_call_hash_entries(&self.tool_calls),
+                tool_settlement_hash_entries(&self.tool_settlements),
+            ))
+        } else {
+            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV4::from_state(
                 self,
                 stage_hash_entries(&self.stage_settlements),
                 model_hash_entries(&self.model_settlements),
@@ -1023,6 +1177,48 @@ struct KernelStateWireV3<'a> {
     terminal: Option<&'a TerminalState>,
 }
 
+#[derive(Serialize)]
+struct KernelStateWireV4<'a> {
+    state_version: u16,
+    last_applied_sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane_id: Option<LaneId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted: Option<&'a RunAccepted>,
+    accepted_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<RunPhase>,
+    cycle: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_turn: Option<&'a CurrentTurn>,
+    messages: &'a [Message],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_model_effect: Option<&'a PendingModelEffect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_candidate: Option<&'a TerminalCandidate>,
+    stage_settlements: Vec<StageSettlementHashEntryV1>,
+    model_settlements: Vec<ModelSettlementHashEntryV1>,
+    completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    active_tool_batch: Option<&'a ActiveToolBatch>,
+    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    last_tool_batch: Option<&'a ToolBatchClosed>,
+    limit_usage: &'a LimitUsage,
+    cancellation: Option<&'a CancellationState>,
+    retry: &'a RetryState,
+    last_limit: Option<&'a LimitReached>,
+    suspension: Option<&'a RunSuspended>,
+    output_configuration: Option<&'a OutputConfiguration>,
+    active_capabilities: &'a [ActiveCapability],
+    resolved_plan_digest: Option<Digest>,
+    final_result: Option<&'a FinalResultRecorded>,
+    validation_failure: Option<&'a OutputValidationFailed>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<&'a TerminalState>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KernelStateWireOwned {
@@ -1069,6 +1265,16 @@ struct KernelStateWireOwned {
     #[serde(default)]
     suspension: NullableField<RunSuspended>,
     #[serde(default)]
+    output_configuration: NullableField<OutputConfiguration>,
+    #[serde(default)]
+    active_capabilities: RequiredField<BoundedVec<ActiveCapability, SEMANTIC_ARRAY_MAX_ITEMS>>,
+    #[serde(default)]
+    resolved_plan_digest: NullableField<Digest>,
+    #[serde(default)]
+    final_result: NullableField<FinalResultRecorded>,
+    #[serde(default)]
+    validation_failure: NullableField<OutputValidationFailed>,
+    #[serde(default)]
     terminal: Option<TerminalState>,
 }
 
@@ -1111,6 +1317,10 @@ where
 }
 
 impl Serialize for KernelState {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "each state version has an explicit fixed wire projection to prevent field drift"
+    )]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1157,7 +1367,7 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
-        } else {
+        } else if self.state_version == 3 {
             KernelStateWireV3 {
                 state_version: self.state_version,
                 last_applied_sequence: self.last_applied_sequence,
@@ -1186,6 +1396,40 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
+        } else {
+            KernelStateWireV4 {
+                state_version: self.state_version,
+                last_applied_sequence: self.last_applied_sequence,
+                session_id: self.session_id,
+                lane_id: self.lane_id,
+                accepted: self.accepted.as_ref(),
+                accepted_at: self.accepted_at,
+                phase: self.phase,
+                cycle: self.cycle,
+                current_turn: self.current_turn.as_ref(),
+                messages: &self.messages,
+                pending_model_effect: self.pending_model_effect.as_ref(),
+                terminal_candidate: self.terminal_candidate.as_ref(),
+                stage_settlements: stage_hash_entries(&self.stage_settlements),
+                model_settlements: model_hash_entries(&self.model_settlements),
+                completion_identities: completion_hash_entries(&self.completion_identities),
+                active_tool_batch: self.active_tool_batch.as_ref(),
+                tool_calls: tool_call_hash_entries(&self.tool_calls),
+                tool_settlements: tool_settlement_hash_entries(&self.tool_settlements),
+                last_tool_batch: self.last_tool_batch.as_ref(),
+                limit_usage: &self.limit_usage,
+                cancellation: self.cancellation.as_ref(),
+                retry: &self.retry,
+                last_limit: self.last_limit.as_ref(),
+                suspension: self.suspension.as_ref(),
+                output_configuration: self.output_configuration.as_ref(),
+                active_capabilities: &self.active_capabilities,
+                resolved_plan_digest: self.resolved_plan_digest,
+                final_result: self.final_result.as_ref(),
+                validation_failure: self.validation_failure.as_ref(),
+                terminal: self.terminal.as_ref(),
+            }
+            .serialize(serializer)
         }
     }
 }
@@ -1200,7 +1444,7 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1..=3) {
+        if !matches!(wire.state_version, 1..=4) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
         let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
@@ -1220,7 +1464,7 @@ impl<'de> Deserialize<'de> for KernelState {
             && matches!(&wire.tool_calls, RequiredField::Present(_))
             && matches!(&wire.tool_settlements, RequiredField::Present(_))
             && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if matches!(wire.state_version, 2 | 3) && !all_tool_fields_present {
+        if matches!(wire.state_version, 2..=4) && !all_tool_fields_present {
             return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
         }
         let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
@@ -1234,9 +1478,31 @@ impl<'de> Deserialize<'de> for KernelState {
                 "v1/v2 kernel state contains control fields",
             ));
         }
-        if wire.state_version == 3 && !all_control_fields_present {
+        if wire.state_version >= 3 && !all_control_fields_present {
             return Err(de::Error::custom(
-                "v3 kernel state is missing control fields",
+                "v3/v4 kernel state is missing control fields",
+            ));
+        }
+        let structured_fields_present =
+            matches!(&wire.output_configuration, NullableField::Present(_))
+                || matches!(&wire.active_capabilities, RequiredField::Present(_))
+                || matches!(&wire.resolved_plan_digest, NullableField::Present(_))
+                || matches!(&wire.final_result, NullableField::Present(_))
+                || matches!(&wire.validation_failure, NullableField::Present(_));
+        let all_structured_fields_present =
+            matches!(&wire.output_configuration, NullableField::Present(_))
+                && matches!(&wire.active_capabilities, RequiredField::Present(_))
+                && matches!(&wire.resolved_plan_digest, NullableField::Present(_))
+                && matches!(&wire.final_result, NullableField::Present(_))
+                && matches!(&wire.validation_failure, NullableField::Present(_));
+        if wire.state_version < 4 && structured_fields_present {
+            return Err(de::Error::custom(
+                "v1/v2/v3 kernel state contains structured-output fields",
+            ));
+        }
+        if wire.state_version == 4 && !all_structured_fields_present {
+            return Err(de::Error::custom(
+                "v4 kernel state is missing structured-output fields",
             ));
         }
         let mut stage_settlements = BTreeMap::new();
@@ -1372,6 +1638,26 @@ impl<'de> Deserialize<'de> for KernelState {
                 NullableField::Present(value) => value,
             },
             suspension: match wire.suspension {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            output_configuration: match wire.output_configuration {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            active_capabilities: match wire.active_capabilities {
+                RequiredField::Missing => Arc::from([]),
+                RequiredField::Present(value) => Arc::from(value.into_inner()),
+            },
+            resolved_plan_digest: match wire.resolved_plan_digest {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            final_result: match wire.final_result {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            validation_failure: match wire.validation_failure {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
             },

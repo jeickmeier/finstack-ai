@@ -13,11 +13,11 @@ date: "2026-08-09"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.16 |
+| Version | 0.17 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.16; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.17; Security and Threat Model v0.6 |
 
 # 1. Technical objective
 
@@ -2056,7 +2056,12 @@ Delivery ownership for `RecordBody` variants is staged by logical PR. **PR-008 o
 - `LimitReached`, `RetryScheduled`, `TimerFired`
 - `RunSuspended`, `RunCancelled`
 
-All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-011 limits/cancellation/budget, PR-012 capabilities, and PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
+**PR-012 additionally owns and materializes**:
+
+- `OutputConfigured`, `FinalResultRecorded`, `OutputValidationFailed`
+- `CapabilitiesActivated`
+
+All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
 
 The PR-009 payloads are:
 
@@ -3580,6 +3585,107 @@ pub suspension: Option<RunSuspended>,
 V3 always includes the v2 tool fields even when empty. `CancellationState` retains the winning request, prior phase, cumulative sorted completed/cancelled/uncertain effect IDs, and outstanding effect IDs. `RetryState` retains the committed retry count and optional pending `RetryScheduled`. `LimitUsage` retains every cumulative dimension and the sorted extension map; `max_parallel_tools` records the maximum admitted group size, not transient task count.
 
 V1/v2 reject v3 fields. V3 rejects a missing field, duplicate map key, unsupported version, impossible phase/control combination, unregistered extension key, decreasing counter, or capacity violation. Upgrade is one-way; no silent down-conversion exists. Adding candidate v3 is a classified pre-1.0 contract evolution, not a change to compatibility policy, so no new ADR is required. An older reader must reject PR-011 records/state; rollback after persistence requires a pre-PR-011 journal or a reader that understands v3.
+
+## 22.7 PR-012 structured-output and capability contract
+
+PR-012 materializes validator-independent structured results and pre-run capability-plan activation without adding a port, middleware stage, kernel dependency, or runtime catalog. The zero-configuration path remains plain text and preserves every PR-009–PR-011 wire shape and state hash.
+
+### 22.7.1 Exact commands and public types
+
+PR-012 adds these externally tagged `snake_case`, deny-unknown `KernelInput` variants:
+
+```rust
+pub enum KernelInput {
+    // PR-009 through PR-011 variants unchanged
+    ConfigureOutput(OutputConfiguration),
+    CapabilitiesActivated(CapabilitiesActivated),
+    OutputValidated(OutputValidated),
+}
+
+pub struct OutputConfiguration {
+    pub output: OutputSpec,
+    pub end_strategy: OutputEndStrategy,
+}
+
+pub enum OutputSpec {
+    PlainText,
+    JsonSchema { schema: SchemaRef },
+}
+
+pub struct SchemaRef {
+    pub draft: JsonSchemaDraft, // Draft202012 only
+    pub schema_version: u16,    // non-zero
+    pub schema_digest: Digest,
+}
+
+pub enum OutputEndStrategy { Early, Exhaustive }
+
+pub struct OutputValidated {
+    pub message_id: MessageId,
+    pub schema: SchemaRef,
+    pub candidate: RawJson,
+    pub source: StructuredResultSource,
+    pub outcome: ValidationOutcome,
+}
+
+pub enum StructuredResultSource {
+    JsonBlock { content_index: u32 },
+    InternalTool { tool_call_id: ToolCallId },
+}
+
+pub enum ValidationOutcome {
+    Valid,
+    Invalid { issues: Arc<[ValidationIssue]>, feedback: Arc<str> },
+}
+
+pub struct CapabilitiesActivated {
+    pub prior_plan_digest: Option<Digest>,
+    pub resolved_plan_digest: Digest,
+    pub active: Arc<[ActiveCapability]>,
+}
+
+pub struct ActiveCapability {
+    pub capability_id: CapabilityId,
+    pub source: CapabilityActivationSource, // Always | Application | Model
+}
+```
+
+`ConfigureOutput` is accepted at `BeforeRun` exactly once. An equal repeat is an empty idempotent decision; a different repeat conflicts. `OutputSpec::PlainText` is the default when no command is supplied. `JsonSchema` requires draft 2020-12, a positive application schema version, and the digest of the canonical schema document. The kernel never imports or executes a schema validator.
+
+`OutputValidated` is accepted only at `AfterModel` for the exact current completed assistant message and exact configured schema. `candidate` must byte-for-byte equal either the selected `JsonBlock.value` or the arguments of `finstack.internal.submit_final_output`; the source identity and candidate digest are durable. `Valid` records the exact canonical result. `Invalid` requires at least one bounded normalized issue, retains bounded safe feedback, and installs a validation-category failed terminal candidate. The error is retryable while the configured semantic retry ceiling permits another attempt and otherwise uses `structured_output_retries_exhausted`, `retryable = false`. `RetryClassification::Validation` is accepted only for this validation-failure candidate; firing its committed timer clears the prior candidate/feedback and begins a fresh model cycle.
+
+Framework-owned tool names are reserved under `finstack.internal.`. PR-012 defines `finstack.internal.submit_final_output` and reserves `finstack.internal.load_capability`; other internal names and model-driven capability loading are rejected. Internal control calls consume ordinary source `ToolCallId` allocation and association checks but are excluded from application `ToolBatchPrepared` coverage, effect dispatch, tool usage, and application tool identity indexes. This refines the PR-010 phrase “every `ToolCallBlock`” to “every application `ToolCallBlock`” once PR-012 is present; all non-internal PR-010 behavior is unchanged.
+
+`CapabilitiesActivated` is accepted only at `BeforeRun`. It carries the complete strictly sorted active set and an optimistic `prior_plan_digest`. PR-012 accepts `Always` and `Application`; `Model` is reserved and rejected until the catalog/runtime owner lands. Apply replaces the immutable active set only when the prior digest matches. Equal complete set/digest input is idempotent; stale prior digests conflict.
+
+### 22.7.2 End strategies, records, and replay
+
+After valid structured validation, `Early` deterministically records every same-response application tool call as skipped and routes `AfterModel -> BeforeFinalize`. `Exhaustive` routes to `BeforeToolBatch` when application calls exist, plans only those application calls in source order, then finalizes the already-recorded structured candidate after the batch. An invalid candidate skips every same-response application call and routes to `BeforeFinalize` for validation retry or terminal failure. No skipped call produces `EffectRequested`, `ExecuteEffect`, `ToolCallSettled`, or a fabricated tool result.
+
+PR-012 adds four zero-public-event records:
+
+```rust
+OutputConfigured(OutputConfiguration),
+CapabilitiesActivated(CapabilitiesActivated),
+FinalResultRecorded(FinalResultRecorded),
+OutputValidationFailed(OutputValidationFailed),
+```
+
+`FinalResultRecorded` binds cycle, turn, model request, effect, message, schema, exact value, value digest, source, end strategy, and skipped application call IDs. `RunCompleted.result_digest` becomes the structured value digest. `OutputValidationFailed` binds the same execution identity, schema, candidate digest, source, normalized issues, safe feedback, stable error, and every skipped application call ID. These records derive no new public event and therefore do not renumber existing ordinals.
+
+### 22.7.3 Conditional kernel-state v4
+
+Applying the first PR-012 record upgrades transactionally to `state_version = 4`. V4 is SHA-256 under domain `kernel-state`, schema version 4, over a dedicated recursive-explicit-null JCS projection. It contains every v3 field and adds these exact fields immediately before `terminal`:
+
+```rust
+pub output_configuration: Option<OutputConfiguration>,
+pub active_capabilities: Arc<[ActiveCapability]>,
+pub resolved_plan_digest: Option<Digest>,
+pub final_result: Option<FinalResultRecorded>,
+pub validation_failure: Option<OutputValidationFailed>,
+```
+
+V4 always includes the v2 tool fields and v3 control fields, even when empty/null. V1–v3 reject v4 fields; v4 rejects missing fields, unsorted/duplicate/reserved model capability entries, simultaneous valid and invalid structured outcomes, an outcome without a JSON Schema configuration, or any prior invariant failure. Existing histories never upgrade merely because a v4 reader loads them: tool-free, tool-bearing, and PR-011 histories retain their exact v1, v2, and v3 bytes/hashes respectively.
 
 # 23. Recovery algorithm
 

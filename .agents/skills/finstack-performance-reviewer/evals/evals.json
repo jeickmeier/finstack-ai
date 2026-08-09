@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-performance-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "parallel-attribution-regression",
+      "prompt": "Review the parallel attribution changes for performance regression risk. Focus on allocation patterns, deterministic reductions, and what benchmarks should prove the change.",
+      "expected_output": "A performance review with benchmark regression recommendations, targeted finstack commands, and no micro-optimization without measurement.",
+      "files": []
+    }
+  ]
+}

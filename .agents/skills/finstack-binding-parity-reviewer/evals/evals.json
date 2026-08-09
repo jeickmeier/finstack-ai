@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-binding-parity-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "valuation-attribution-binding-drift",
+      "prompt": "Review the valuation attribution API changes across Rust, finstack-quant-py, and finstack-quant-wasm. I want to know if the Python stubs, WASM names, parity contract, and tests all match the canonical Rust API.",
+      "expected_output": "A binding parity review that lists every mirrored surface checked, flags missing stubs/exports/parity entries, and recommends targeted python-build/parity/WASM verification.",
+      "files": []
+    }
+  ]
+}

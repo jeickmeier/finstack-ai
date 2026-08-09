@@ -111,6 +111,19 @@ class KernelForbiddenTests:
             check_kernel_forbidden(ctx, meta)
             assert ctx.failing(), f"expected failure for {name}"
 
+    def test_ignores_test_only_dependency_closure(self) -> None:
+        kernel = _pkg("finstack-ai-kernel", "kernel-id", str(REPO_ROOT / "crates/finstack-ai-kernel/Cargo.toml"))
+        proptest = _pkg("proptest", "proptest-id", "/virtual/proptest/Cargo.toml")
+        wasm_bindgen = _pkg("wasm-bindgen", "wasm-bindgen-id", "/virtual/wasm-bindgen/Cargo.toml")
+        meta = _metadata(
+            [kernel, proptest, wasm_bindgen],
+            {"kernel-id": ["proptest-id"], "proptest-id": ["wasm-bindgen-id"], "wasm-bindgen-id": []},
+            ["kernel-id"],
+        )
+        meta["resolve"]["nodes"][0]["deps"] = [{"pkg": "proptest-id", "dep_kinds": [{"kind": "dev", "target": None}]}]
+        check_kernel_forbidden(self.ctx, meta)
+        assert self.ctx.failing() == []
+
 
 class EdgeTests:
     def test_rejects_runtime_to_protocol(self) -> None:

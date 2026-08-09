@@ -395,6 +395,17 @@ def resolve_node_deps(
 ) -> list[str]:
     for node in metadata.get("resolve", {}).get("nodes", []):
         if node["id"] == package_id:
+            # Cargo's `dependencies` list flattens normal, build, and dev edges.
+            # Architecture constraints describe the production consumer graph;
+            # test-only dependencies are checked by their own compile/supply-chain
+            # gates and must not create false production-closure violations.
+            detailed = node.get("deps")
+            if detailed is not None:
+                return [
+                    dep["pkg"]
+                    for dep in detailed
+                    if not dep.get("dep_kinds") or any(kind.get("kind") != "dev" for kind in dep["dep_kinds"])
+                ]
             return list(node.get("dependencies", []))
     return []
 

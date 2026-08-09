@@ -1,0 +1,1 @@
+{"format_version":1,"phase":"before_run","cycle":0,"state_version":4,"records":["run_accepted","capabilities_activated"],"final_result_digest":null,"validation_error":null,"skipped_tool_call_ids":[],"active_capabilities":["finstack.capability.alpha","finstack.capability.beta"],"active_tool_batch":false,"retry_attempts":0,"terminal":null,"replay_hash_equal":true}

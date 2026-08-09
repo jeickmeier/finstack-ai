@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-senior-code-review",
+  "evals": [
+    {
+      "id": 1,
+      "name": "fallback-review",
+      "prompt": "Do a broad code review of this non-quant helper module for correctness, over-engineering, and production readiness. No specialist skill seems to apply.",
+      "expected_output": "A verdict-led senior review that focuses on correctness and simplicity while deferring quant, performance, architecture, and binding issues to specialist skills when applicable.",
+      "files": []
+    }
+  ]
+}

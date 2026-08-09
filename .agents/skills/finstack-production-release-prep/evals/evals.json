@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-production-release-prep",
+  "evals": [
+    {
+      "id": 1,
+      "name": "release-readiness",
+      "prompt": "Prepare this finstack branch for release: check versioning, docs, binding parity, performance regressions, dependency audits, release notes, and final quality gates.",
+      "expected_output": "A release readiness report with semver rationale, docs status, binding parity status, performance/golden-test status, quality gates, and remaining items.",
+      "files": []
+    }
+  ]
+}

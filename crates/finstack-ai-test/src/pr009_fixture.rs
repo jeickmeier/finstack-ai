@@ -1,8 +1,8 @@
-//! Public-API compatibility fixtures for PR-009 through PR-011 reducer contracts.
+//! Public-API compatibility fixtures for PR-009 through PR-012 reducer contracts.
 
 use finstack_ai_kernel::{
-    APPEND_BATCH_MAX_RECORDS, CommittedBatch, KernelInput, KernelState, RECORD_KIND_VERSION,
-    RecordEnvelope, RunEvent, RunPhase,
+    APPEND_BATCH_MAX_RECORDS, CommittedBatch, Kernel, KernelInput, KernelState,
+    RECORD_KIND_VERSION, RecordEnvelope, RunEvent, RunPhase,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -19,9 +19,274 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "kernel-input" => run_kernel_input(fixture),
         "committed-batch" => run_committed_batch(fixture),
         "kernel-state" => run_kernel_state(fixture),
-        "pr009-record" | "pr010-record" | "pr011-record" => run_record(fixture),
+        "corrupt-replay" => run_corrupt_replay(fixture),
+        "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" => run_record(fixture),
         other => Err(fail(format!("unsupported PR-009 subject {other}"))),
     }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the fixture subject exercises the full decode, replay, atomicity, and hash contract"
+)]
+fn run_corrupt_replay(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
+    if fixture.operation != "apply_mutation" {
+        return Err(fail(format!(
+            "unsupported corrupt-replay operation {}",
+            fixture.operation
+        )));
+    }
+    let input = require_input(fixture)?;
+    let relative = input
+        .get("trace")
+        .and_then(Value::as_str)
+        .ok_or_else(|| fail("corrupt-replay trace required"))?;
+    let mutation = input
+        .get("mutation")
+        .and_then(Value::as_str)
+        .ok_or_else(|| fail("corrupt-replay mutation required"))?;
+    let path = try_compatibility_fixture(relative).map_err(|error| fail(error.to_string()))?;
+    let mut trace = load_golden_trace(path).map_err(|error| fail(error.to_string()))?;
+    if mutation == "trace_format_version" {
+        trace.format_version = 2;
+        let Err(error) = execute_reducer_trace(&trace) else {
+            return Err(fail("unsupported trace version unexpectedly executed"));
+        };
+        if !error.to_string().contains("format_version") {
+            return Err(fail("trace version returned an unstable error"));
+        }
+        return assert_error_code(&fixture.expect, "unsupported_format_version");
+    }
+    if mutation == "scripted_format_version" {
+        trace.scripted_outcomes.format_version = 2;
+        let Err(error) = execute_reducer_trace(&trace) else {
+            return Err(fail("unsupported scripted version unexpectedly executed"));
+        };
+        if !error.to_string().contains("format_version") {
+            return Err(fail("scripted version returned an unstable error"));
+        }
+        return assert_error_code(&fixture.expect, "unsupported_format_version");
+    }
+    let execution = execute_reducer_trace(&trace).map_err(|error| fail(error.to_string()))?;
+    if mutation == "state_version" {
+        let mut encoded_state = serde_json::to_value(&execution.kernel_state)
+            .map_err(|error| fail(format!("encode kernel state: {error}")))?;
+        encoded_state["state_version"] = Value::from(99);
+        let Err(error) = from_json::<KernelState>(&encoded_state) else {
+            return Err(fail("unsupported state version unexpectedly decoded"));
+        };
+        if !error.to_string().contains("state_version") {
+            return Err(fail("state version returned an unstable error"));
+        }
+        return assert_error_code(&fixture.expect, "invalid_input_payload");
+    }
+    let mut batches = execution.committed_batches;
+    let target = corrupt_replay_target(mutation, &batches)?;
+
+    let mut encoded = serde_json::to_value(&batches[target])
+        .map_err(|error| fail(format!("encode committed batch: {error}")))?;
+    mutate_committed_batch_json(mutation, &mut encoded)?;
+
+    let decoded = from_json::<CommittedBatch>(&encoded);
+    if matches!(
+        mutation,
+        "unsupported_format_version" | "unsupported_kind_version" | "derived_event_count"
+    ) {
+        let Err(error) = decoded else {
+            return Err(fail("corrupt record unexpectedly decoded"));
+        };
+        let code = if error.to_string().contains("format_version") {
+            "unsupported_format_version"
+        } else if error.to_string().contains("kind_version") {
+            "unsupported_kind_version"
+        } else if error.to_string().contains("derived_event_ids") {
+            "derived_event_count"
+        } else {
+            "invalid_input_payload"
+        };
+        return assert_error_code(&fixture.expect, code);
+    }
+    batches[target] = decoded?;
+
+    let mut kernel = Kernel::default();
+    for batch in &batches[..target] {
+        kernel
+            .apply(batch, 0)
+            .map_err(|error| fail(format!("valid replay prefix failed: {}", error.code())))?;
+    }
+    let state_before = kernel.state().clone();
+    let hash_before = state_before
+        .state_hash()
+        .map_err(|error| fail(format!("state hash before corruption: {}", error.code())))?;
+    let Err(error) = kernel.apply(&batches[target], 0) else {
+        return Err(fail("corrupt replay batch unexpectedly applied"));
+    };
+    if kernel.state() != &state_before {
+        return Err(fail("rejected corrupt replay changed kernel state"));
+    }
+    let hash_after = kernel.state().state_hash().map_err(|hash_error| {
+        fail(format!(
+            "state hash after corruption: {}",
+            hash_error.code()
+        ))
+    })?;
+    if hash_after != hash_before {
+        return Err(fail("rejected corrupt replay changed state hash"));
+    }
+    assert_error_code(&fixture.expect, error.code())
+}
+
+fn corrupt_replay_target(
+    mutation: &str,
+    batches: &[CommittedBatch],
+) -> Result<usize, PublicApiFixtureError> {
+    match mutation {
+        "sequence_gap"
+        | "range_overlap"
+        | "derived_event_count"
+        | "unsupported_format_version"
+        | "unsupported_kind_version" => Ok(0),
+        "identity_substitution"
+        | "lane_identity_substitution"
+        | "run_identity_substitution"
+        | "settlement_tamper" => Ok(1),
+        "sibling_reordering" | "record_truncation" => batches
+            .iter()
+            .position(|batch| batch.records.len() > 1)
+            .ok_or_else(|| fail("golden trace has no sibling batch")),
+        "derived_event_ordinal" => batches
+            .iter()
+            .position(|batch| {
+                batch
+                    .records
+                    .iter()
+                    .map(|record| record.derived_event_ids().len())
+                    .sum::<usize>()
+                    > 1
+            })
+            .ok_or_else(|| fail("golden trace has no multi-event batch")),
+        "effect_identity_substitution" => batches
+            .iter()
+            .position(|batch| {
+                batch.records.iter().any(|record| {
+                    matches!(
+                        record.body(),
+                        finstack_ai_kernel::RecordBody::EffectRequested(_)
+                    )
+                })
+            })
+            .ok_or_else(|| fail("golden trace has no effect request batch")),
+        other => Err(fail(format!("unsupported corrupt-replay mutation {other}"))),
+    }
+}
+
+fn mutate_committed_batch_json(
+    mutation: &str,
+    encoded: &mut Value,
+) -> Result<(), PublicApiFixtureError> {
+    match mutation {
+        "sequence_gap" => {
+            let sequence = encoded["records"][0]["sequence"]
+                .as_u64()
+                .ok_or_else(|| fail("record sequence missing"))?;
+            encoded["records"][0]["sequence"] = Value::from(sequence + 1);
+        }
+        "range_overlap" => encoded["first_sequence"] = Value::from(0),
+        "identity_substitution" => {
+            encoded["records"][0]["session_id"] =
+                Value::String("00000000-0000-7000-8000-00000000dead".to_owned());
+        }
+        "lane_identity_substitution" => {
+            encoded["records"][0]["lane_id"] =
+                Value::String("00000000-0000-7000-8000-00000000dead".to_owned());
+        }
+        "run_identity_substitution" => {
+            encoded["records"][0]["run_id"] =
+                Value::String("00000000-0000-7000-8000-00000000dead".to_owned());
+        }
+        "effect_identity_substitution" => {
+            let records = encoded["records"]
+                .as_array_mut()
+                .ok_or_else(|| fail("committed records missing"))?;
+            let request = records
+                .iter_mut()
+                .find_map(|record| record["body"].get_mut("effect_requested"))
+                .ok_or_else(|| fail("effect request body missing"))?;
+            request["effect_id"] = Value::String("00000000-0000-7000-8000-00000000dead".to_owned());
+        }
+        "sibling_reordering" => {
+            let first_sequence = encoded["first_sequence"]
+                .as_u64()
+                .ok_or_else(|| fail("batch first_sequence missing"))?;
+            let records = encoded["records"]
+                .as_array_mut()
+                .ok_or_else(|| fail("committed records missing"))?;
+            records.swap(0, 1);
+            for (offset, record) in records.iter_mut().enumerate() {
+                record["sequence"] = Value::from(
+                    first_sequence
+                        + u64::try_from(offset).map_err(|error| fail(error.to_string()))?,
+                );
+            }
+        }
+        "record_truncation" => {
+            let first_sequence = encoded["first_sequence"]
+                .as_u64()
+                .ok_or_else(|| fail("batch first_sequence missing"))?;
+            encoded["records"]
+                .as_array_mut()
+                .ok_or_else(|| fail("committed records missing"))?
+                .pop();
+            encoded["last_sequence"] = Value::from(first_sequence);
+        }
+        "derived_event_count" => {
+            encoded["records"][0]["derived_event_ids"]
+                .as_array_mut()
+                .ok_or_else(|| fail("derived event ids missing"))?
+                .pop();
+        }
+        "derived_event_ordinal" => mutate_derived_event_ordinal(encoded)?,
+        "settlement_tamper" => {
+            encoded["records"][0]["body"]["stage_outcome_recorded"]["settlement_digest"] =
+                Value::String(
+                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_owned(),
+                );
+        }
+        "unsupported_format_version" => {
+            encoded["records"][0]["format_version"] = Value::from(2);
+        }
+        "unsupported_kind_version" => {
+            encoded["records"][0]["kind_version"] = Value::from(2);
+        }
+        _ => unreachable!("mutation validated before application"),
+    }
+    Ok(())
+}
+
+fn mutate_derived_event_ordinal(encoded: &mut Value) -> Result<(), PublicApiFixtureError> {
+    let records = encoded["records"]
+        .as_array_mut()
+        .ok_or_else(|| fail("committed records missing"))?;
+    let first = records
+        .iter()
+        .flat_map(|record| record["derived_event_ids"].as_array().into_iter().flatten())
+        .next()
+        .cloned()
+        .ok_or_else(|| fail("first derived event id missing"))?;
+    let mut ordinal = 0_usize;
+    for record in records {
+        let Some(event_ids) = record["derived_event_ids"].as_array_mut() else {
+            continue;
+        };
+        for event_id in event_ids {
+            if ordinal == 1 {
+                *event_id = first;
+                return Ok(());
+            }
+            ordinal += 1;
+        }
+    }
+    Err(fail("second derived event id missing"))
 }
 
 fn run_phase(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {

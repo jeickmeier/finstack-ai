@@ -1,0 +1,12 @@
+{
+  "skill_name": "finstack-consistency-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "name": "binding-accessor-consistency",
+      "prompt": "Check whether the new valuation attribution accessors are named consistently across Rust, Python, and WASM.",
+      "expected_output": "A consistency review that compares at least three instances, identifies the dominant convention, and recommends one standard.",
+      "files": []
+    }
+  ]
+}

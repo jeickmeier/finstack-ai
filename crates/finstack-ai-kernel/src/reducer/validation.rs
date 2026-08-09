@@ -32,10 +32,28 @@ pub(super) fn validate_assistant_semantics(
         return Err(KernelError::AssistantMessageMismatch);
     }
     let mut seen = std::collections::BTreeSet::new();
+    let mut final_output_calls = 0_usize;
     for call in assistant_tool_calls(message) {
         if !seen.insert(*call.tool_call_id()) || state.tool_calls.contains_key(call.tool_call_id())
         {
             return Err(KernelError::DuplicateToolCall);
+        }
+        if crate::is_internal_tool_name(call.tool_name()) {
+            if call.tool_name() != crate::SUBMIT_FINAL_OUTPUT_TOOL
+                || !matches!(
+                    state.output_configuration,
+                    Some(crate::OutputConfiguration {
+                        output: crate::OutputSpec::JsonSchema { .. },
+                        ..
+                    })
+                )
+            {
+                return Err(KernelError::AssistantMessageMismatch);
+            }
+            final_output_calls += 1;
+            if final_output_calls > 1 {
+                return Err(KernelError::AssistantMessageMismatch);
+            }
         }
     }
     Ok(())
