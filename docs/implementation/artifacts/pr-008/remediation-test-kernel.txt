@@ -1,0 +1,114 @@
+[test-kernel] $ cargo test -p finstack-ai-kernel --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_kernel-e6369ef635825757)
+
+running 62 tests
+test content::tests::content_item_size_hint_rejects_before_reading_elements ... ok
+test bounds::tests::oversized_sequence_hint_is_rejected_before_elements_are_read ... ok
+test bounds::tests::oversized_map_hint_is_rejected_before_entries_are_read ... ok
+test error::tests::error_code_requires_lowercase_snake_case ... ok
+test content::tests::bounded_string_checks_escaped_length_before_decoding ... ok
+test content::tests::tool_result_rejects_nested_tool_blocks ... ok
+test digest::tests::domain_separation_changes_digest ... ok
+test content::tests::blob_ref_rejects_inline_semantics_and_invalid_labels ... ok
+test events::tests::event_constructors_reject_unknown_versions ... ok
+test events::tests::durable_and_transient_constructors_are_class_safe ... ok
+test content::tests::content_block_round_trip_and_unknown_kind ... ok
+test content::tests::text_exact_and_one_over_ceiling ... ok
+test events::tests::effect_events_require_matching_effect_correlation ... ok
+test content::tests::content_block_accepts_owned_and_reader_json_inputs ... ok
+test effects::tests::effect_request_digests_input ... ok
+test events::tests::durable_event_from_record_reuses_persisted_ordinal_id ... ok
+test ids::tests::ids_serialize_lowercase_and_reject_invalid ... ok
+test effects::tests::effect_settlements_must_preserve_originating_output_contract ... ok
+test error::tests::error_descriptor_json_round_trip_preserves_stable_fields ... ok
+test ids::tests::keys_validate_namespace_rules ... ok
+test content::tests::large_declared_length_serializes_as_small_reference ... ok
+test content::tests::nested_tool_kind_is_rejected_before_its_payload_is_decoded ... ok
+test limits::tests::child_cannot_remove_parent_ceilings_or_weaken_cost_policy ... ok
+test limits::tests::child_limits_must_attenuate ... ok
+test content::tests::content_blocks_reject_unknown_and_inapplicable_members ... ok
+test limits::tests::child_must_preserve_parent_extension_ceilings_but_may_add_stricter_ones ... ok
+test effects::tests::effect_input_external_tag_round_trips_raw_json ... ok
+test effects::tests::interaction_cancellation_deserialization_enforces_authorization_pair ... ok
+test events::tests::durable_effect_event_round_trips_human_json_with_raw_input ... ok
+test effects::tests::effect_completion_rejects_oversized_artifact_array ... ok
+test message::tests::assistant_tool_call_allowed ... ok
+test message::tests::invalid_tool_associations_are_rejected ... ok
+test message::tests::model_ref_context_length_stays_in_portable_json_range ... ok
+test message::tests::messages_and_model_refs_reject_unknown_members ... ok
+test message::tests::message_round_trip_preserves_timestamp_and_file_ref ... ok
+test limits::tests::run_limits_reject_more_than_32_extension_counters ... ok
+test message::tests::model_ref_optionals_independent ... ok
+test message::tests::role_block_matrix_rejects_tool_result_on_user ... ok
+test raw_json::tests::parse_canonicalizes_and_shares_bytes_on_clone ... ok
+test raw_json::tests::rejects_duplicates_trailing_data_and_depth ... ok
+test raw_json::tests::metadata_preserves_unknown_members_and_limits ... ok
+test records::tests::append_request_preserves_injected_record_order ... ok
+test records::tests::append_request_rejects_records_from_another_session ... ok
+test records::tests::draft_requires_one_derived_event ... ok
+test records::tests::effect_record_body_round_trips_human_json_with_raw_input ... ok
+test records::tests::run_accepted_record_requires_matching_run_id ... ok
+test refs::tests::principal_and_usage_roundtrip ... ok
+test refs::tests::role_and_queue_assignee_hints_round_trip ... ok
+test run::tests::inherited_principal_cannot_change_via_delegated_from_marker ... ok
+test records::tests::record_envelope_deserialization_validates_versions_and_event_count ... ok
+test run::tests::non_root_run_requires_parent_context ... ok
+test run::tests::security_context_rejects_mismatched_principal_tenant ... ok
+test time::tests::duration_js_safe_boundary ... ok
+test time::tests::json_uses_rfc3339_text ... ok
+test run::tests::root_and_child_lineage ... ok
+test records::tests::append_request_rejects_unpaired_interaction_request ... ok
+test time::tests::rejects_leap_seconds_and_out_of_range ... ok
+test time::tests::timestamp_round_trips_rfc3339_and_unix_ms ... ok
+test raw_json::tests::serde_human_path_rejects_duplicates_and_checks_source_span ... ok
+test refs::tests::allocated_id_arrays_and_usage_maps_enforce_semantic_ceilings ... ok
+test content::tests::nested_raw_json_preserves_strict_source_validation ... ok
+test raw_json::tests::enforces_exact_and_one_over_source_ceiling ... ok
+
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests finstack_ai_kernel
+
+running 4 tests
+test crates/finstack-ai-kernel/src/message.rs - message::Message (line 294) ... ok
+test crates/finstack-ai-kernel/src/message.rs - message::ModelRef (line 71) ... ok
+test crates/finstack-ai-kernel/src/content.rs - content::BlobRef (line 268) ... ok
+test crates/finstack-ai-kernel/src/lib.rs - (line 11) ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test crates/finstack-ai-kernel/src/ids.rs - ids::Id (line 56) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+all doctests ran in 0.95s; merged doctests compilation took 0.63s
+   Compiling finstack-ai-runtime v0.0.1 (/Users/jeickmeier/Projects/finstack-ai/crates/finstack-ai-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running unittests src/lib.rs (target/debug/deps/finstack_ai_runtime-a74c97642773805d)
+
+running 4 tests
+test id_generation::tests::uuidv7_propagates_random_source_failure ... ok
+test id_generation::tests::deterministic_uuidv7_from_injected_sources ... ok
+test id_generation::tests::uuidv7_rejects_pre_epoch_and_out_of_range_timestamps ... ok
+test error::tests::debug_redacts_local_source_chain ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests finstack_ai_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/public_rust_api.rs (target/debug/deps/public_rust_api-e7d0a5de1306608f)
+
+running 2 tests
+test deterministic_uuidv7_fakes_are_repeatable ... ok
+test public_rust_api_corpus_passes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+

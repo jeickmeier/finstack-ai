@@ -1,0 +1,6 @@
+PR-008 remediation validation environment
+Date (UTC): 2026-08-09T00:55:14Z
+Branch: pr-008-contract-amendment
+Implementation commit: cd1fa367b528225e5bba1484ecc377cc109d666c
+rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo: cargo 1.97.1 (c980f4866 2026-06-30)
