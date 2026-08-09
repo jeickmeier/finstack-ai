@@ -1,32 +1,8 @@
-Candidate status: local, uncommitted, non-evidence
-Captured at (UTC): 2026-08-09T05:30:35Z
-OS: macOS
-OS version: 26.5.2
-OS build: 25F84
-Architecture: arm64
-
-rustc --version --verbose
-rustc 1.97.1 (8bab26f4f 2026-07-14)
-binary: rustc
-commit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
-commit-date: 2026-07-14
-host: aarch64-apple-darwin
-release: 1.97.1
-LLVM version: 22.1.6
-
-cargo --version --verbose
-cargo 1.97.1 (c980f4866 2026-06-30)
-release: 1.97.1
-commit-hash: c980f4866141969fab6254a680546a277789d6f0
-commit-date: 2026-06-30
-host: aarch64-apple-darwin
-libgit2: 1.9.2 (sys:0.20.4 vendored)
-libcurl: 8.7.1 (sys:0.4.88+curl-8.20.0 system ssl:(SecureTransport) LibreSSL/3.3.6)
-ssl: OpenSSL 3.6.2 7 Apr 2026
-os: Mac OS 26.5.2 [64-bit]
-
-mise --version
-2026.8.3 macos-arm64 (2026-08-07)
-
-Git HEAD: fa4735801781011ae340db9d850ecbe0aded128b
-Worktree: dirty (contains uncommitted PR-009 candidate changes)
+timestamp_utc=2026-08-09T14:02:00Z
+cwd=/Users/jeickmeier/Projects/finstack-ai
+branch=main
+head=5843dce6d77498a75acdc15d816586cb26098456
+dirty=no (after integration commit; close-docs commit follows)
+uname=Darwin arm64
+rustc=rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo=cargo 1.97.1 (c980f4866 2026-06-30)

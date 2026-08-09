@@ -1,0 +1,10 @@
+PR-009 post-integration kernel verification
+Date: 2026-08-09
+Commit: 5843dce6d77498a75acdc15d816586cb26098456
+Command: cargo test -p finstack-ai-kernel --locked
+Environment: Darwin arm64; rustc/cargo 1.97.1
+
+Result: PASS (exit 0)
+- 84 kernel unit tests
+- 38 focused model-only reducer tests
+- 6 kernel doctests (5 pass + 1 compile-fail)

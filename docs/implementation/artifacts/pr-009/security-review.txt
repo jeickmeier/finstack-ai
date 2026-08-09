@@ -1,15 +1,34 @@
-A dedicated local security review has completed over the uncommitted change set:
+PR-009 Threat Model §18 / TM-15 / TM-16 / SEC-INV disposition
+Date: 2026-08-09
+Reviewer: me@jeickmeier.com
+Integrated on main: 5843dce6d77498a75acdc15d816586cb26098456
+Result: Pass
 
-- Scope: uncommitted PR-009 planning, kernel, records/events, conformance, fixtures, and benchmark changes.
-- Result: no medium, high, or critical security findings.
-- Verified controls: fail-closed phase/correlation checks, settlement idempotency/conflict handling, terminal immutability, commit-before-effect ordering, strict/bounded decoding, compact public events, and original effect identity through deferral.
-- Residual later-runtime obligations: authenticated tenant-scoped external completion ingress, store enforcement, and observer sensitivity handling.
+Scope:
+- Model-only kernel reducer (decide/apply), KernelState, fingerprints,
+  capacity preflight, PR-009 record/event derivation, strict/bounded
+  ErrorDescriptor decoding, fixture path containment, and conformance harness.
+- No new primary port, store, provider, observer, or authenticated ingress.
 
-Subsequent integrity hardening of canonical and typed path-aware fingerprints, capacity preflight validation, stage-settlement digest verification, focused tests, and expected hashes was covered by task-scoped code review and the fresh local validation captured in this directory. A final whole-change review remains outside these candidate artifacts.
+Verified controls:
+- SEC-INV-002 commit-before-effect: ExecuteEffect only with sibling EffectRequested.
+- SEC-INV-004 settlement idempotency/conflict: fingerprint classify + fail-closed conflicts.
+- SEC-INV-007 bounded decode/capacity: ErrorCode/ErrorDescriptor ceilings; state caps.
+- SEC-INV-009 terminal immutability: decide reject_terminal; apply TerminalStateImmutable.
+- SEC-INV-010 fail-closed invalid transitions: stable KernelError; transactional apply.
+- TM-15 child-run lineage: non-root RunAccepted requires validated lineage on create;
+  persisted child replay retains lineage_validated for store-trusted envelopes.
+- TM-16 DoS/oversized payloads: label/text ceilings; map/array/batch caps.
+- Event sensitivity/correlation: Confidential model effects; Internal compact finals;
+  authoritative model correlations from apply.
 
-This review is local working-tree review only. It is not immutable evidence, final whole-change review, or reviewer approval and must not be assigned an evidence ID.
+Findings: none at medium or above.
 
-Supersession note (2026-08-09): this review predates the subsequent whole-change
-review findings and remediation. It is retained as historical candidate context
-but no longer supports a current-tree "no findings" claim. The remediated tree
-requires a fresh dedicated whole-change security review before evidence binding.
+Residual later-runtime obligations (not PR-009 defects):
+- Authenticated tenant-scoped external completion ingress
+- Journal/store write authorization
+- Observer redaction for Confidential model events
+- Canonical-CBOR payload/envelope digest verification (PR-039)
+
+This review supersedes the superseded candidate security-review note that
+predated whole-change remediation.

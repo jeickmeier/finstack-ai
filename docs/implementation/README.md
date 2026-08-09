@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.16 on 2026-08-08 (PR-009 reducer contract amendment active on the authorized `main` checkout; no GitHub issue or actual PR):
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.16; PR-009 closed on local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` on 2026-08-09 (no GitHub issue or actual PR):
 
-- 37 decisions are accepted and indexed; ADR-002, ADR-003, and ADR-028 are `In progress` with evidence still `Missing`; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
-- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-008 are `Done` (PR-008 merged via [#5](https://github.com/jeickmeier/finstack-ai/pull/5) at `4b68a9397a8e07a581f34dfc34f0bfb96873c00d` with A01–A08 Passed); PR-009 is `In review` on the authorized dirty `main` checkout with 0/5 acceptance; PR-010–PR-066 are `Todo`.
+- 37 decisions are accepted and indexed; ADR-002, ADR-003, and ADR-028 remain `In progress` with PR-009 evidence `Partial` (later mapped PRs still open); ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
+- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-009 are `Done` (PR-009 at `5843dce6d77498a75acdc15d816586cb26098456` with A01–A05 Passed); PR-010–PR-066 are `Todo`.
 - Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
-- PR-001–PR-008 acceptance criteria are closed. PR-009 A01–A05, immutable implementation evidence, hosted review, merge, and completion are pending; its fresh local validation and security review are retained only as non-evidence candidate artifacts under [`artifacts/pr-009/`](artifacts/pr-009/). PR-008 evidence is bound under [`artifacts/pr-008/`](artifacts/pr-008/). No exceptions or blockers are open.
+- PR-001–PR-009 acceptance criteria are closed. PR-009 evidence is bound under [`artifacts/pr-009/`](artifacts/pr-009/). PR-008 evidence is bound under [`artifacts/pr-008/`](artifacts/pr-008/). No exceptions or blockers are open.
 
 Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
 
