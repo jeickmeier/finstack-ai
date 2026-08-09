@@ -185,6 +185,9 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
         "blob_ref" | "content_block" | "message" => {
             crate::message_fixture::run_message_subject(fixture)
         }
+        "run-accepted" | "effect-requested" | "record-draft" | "append-request" | "run-event" => {
+            crate::pr008_fixture::run_pr008_subject(fixture)
+        }
         other => Err(PublicApiFixtureError::Failed(format!(
             "unknown subject {other}"
         ))),

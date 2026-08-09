@@ -1,0 +1,56 @@
+{
+  "format_version": 1,
+  "subject": "append-request",
+  "operation": "construct_count",
+  "input": {
+    "count": 257,
+    "batch_id": "01234567-89ab-7cde-89ab-0123456789b1",
+    "session_id": "01234567-89ab-7cde-89ab-0123456789a2",
+    "template": {
+      "format_version": 1,
+      "kind_version": 1,
+      "record_id": "01234567-89ab-7cde-89ab-0123456789a1",
+      "session_id": "01234567-89ab-7cde-89ab-0123456789a2",
+      "lane_id": "01234567-89ab-7cde-89ab-0123456789a3",
+      "run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+      "timestamp": "1970-01-01T00:00:00.000Z",
+      "derived_event_ids": [
+        "01234567-89ab-7cde-89ab-0123456789a4"
+      ],
+      "body": {
+        "run_accepted": {
+          "run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+          "relation": {
+            "root_run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+            "kind": "root",
+            "depth": 0
+          },
+          "security": {
+            "tenant_scope": "tenant-a",
+            "principal": {
+              "issuer": "https://issuer.example",
+              "subject": "user-1",
+              "tenant_scope": "tenant-a"
+            },
+            "authentication_method": "oidc",
+            "assurance_level": "high",
+            "authorization_policy_version": "policy-1",
+            "authorization_decision_id": "decision-1"
+          },
+          "limits": {},
+          "propagation": {
+            "cancellation": "cascade",
+            "deadline": "minimum_of_parent_and_child",
+            "budget": "shared_scope",
+            "principal": "inherit"
+          },
+          "resolved_agent_lock_digest": "b06faf8816f77394756e7beaba4c8295cf2e7b9ad10e016a1523456b9be183c1"
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "batch_too_large"
+  }
+}

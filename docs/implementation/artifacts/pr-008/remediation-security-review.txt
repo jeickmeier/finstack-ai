@@ -1,0 +1,49 @@
+PR-008 review-remediation security disposition
+Date: 2026-08-08
+Reviewer: me@jeickmeier.com
+Implementation commit: cd1fa367b528225e5bba1484ecc377cc109d666c
+Result: Pass
+
+TM-15 child-run attenuation:
+- Non-root construction requires parent context.
+- Structurally decoded child runs remain unvalidated until explicitly checked
+  against the accepted parent; record/event construction rejects unvalidated
+  child lineage.
+- Principal inheritance/delegation, tenant scope, deadlines, effective limits,
+  cost policy, extension counters, budget scope, relation depth, and declared
+  propagation fail closed on widening.
+- Compatibility fixtures cover inherited-principal and budget-limit widening,
+  exact depth 16, and one-over depth 17.
+
+TM-16 bounded semantic decoding:
+- Shared bounded sequence/map visitors reject oversized size hints before
+  reading entries and reject a trailing item beyond the ceiling.
+- Record/event/effect/interaction DTO deserializers use bounded strings,
+  arrays, and extension maps and reject unknown fields.
+- Append batches remain capped at 256 records and validate record sessions.
+
+Replay and lifecycle integrity:
+- RecordBody and RunEventBody use unambiguous external tags and round-trip
+  owned effect payloads containing strict RawJson.
+- Durable events derive replay-stable IDs from RecordEnvelope ordinals and
+  validate versions and required correlations.
+- Interaction request/settlement records require atomic sibling effects.
+- Effect settlements expose validation against the originating effect identity
+  and exact output contract.
+
+SEC-INV-001 / SEC-INV-005 / SEC-INV-007:
+- No authority is derived from metadata or assignee hints.
+- No secret-bearing data or credentials were added.
+- All newly activated collections and strings are bounded at construction or
+  before deserializer allocation.
+
+Validation:
+- `mise run test-kernel`: Pass (62 kernel tests plus doctests/runtime fixtures).
+- `mise run conformance`: Pass (54 public-rust-api fixtures).
+- `mise run schema-governance`: Pass.
+- `mise run ci`: Pass, including strict Clippy, docs, architecture, WASM,
+  supply-chain, secret scanning, release smoke, and Python build.
+
+No Threat Model text or ADR change is required: the remediation implements the
+existing TM-15/TM-16 controls and retains pack-v0.15 digest ownership (PR-039
+still owns canonical-CBOR record payload/envelope checksums).

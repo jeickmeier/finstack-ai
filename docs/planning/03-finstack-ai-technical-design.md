@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.12 |
+| Version | 0.13 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.7; Implementation Plan v0.12; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.8; Implementation Plan v0.13; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -383,6 +383,24 @@ pub struct TransitionEnv {
 
 Test fixtures provide exact timestamps and IDs, making decisions reproducible.
 
+```rust
+pub struct AllocatedIds {
+    pub record_ids: Vec<RecordId>,
+    pub event_ids: Vec<EventId>,
+    pub effect_ids: Vec<EffectId>,
+    pub interaction_ids: Vec<InteractionId>,
+    pub message_ids: Vec<MessageId>,
+    pub turn_ids: Vec<TurnId>,
+    pub model_request_ids: Vec<ModelRequestId>,
+    pub tool_batch_ids: Vec<ToolBatchId>,
+    pub tool_call_ids: Vec<ToolCallId>,
+    pub append_batch_ids: Vec<AppendBatchId>,
+    pub cancellation_request_ids: Vec<CancellationRequestId>,
+}
+```
+
+`AllocatedIds` is a runtime-owned bag of preallocated UUIDv7 values consumed in documented order by `decide`. Empty vectors are valid when a transition allocates no IDs of that kind. Fixtures supply exact vectors; the kernel never generates UUIDv7 values.
+
 ## 5.4 Time and duration
 
 ```rust
@@ -448,7 +466,7 @@ The v1 digest algorithm is SHA-256, serialized as lowercase 64-character hexadec
 
 The domain name is fixed per use (`raw-json`, `record-payload`, `effect-input`, `effect-output`, `blob-content`, `snapshot-state`, `middleware-chain`, `agent-spec`, or another versioned registry entry). JSON uses the strict RFC 8785 bytes above; durable DTOs use the frozen canonical CBOR profile; blob content uses the exact raw bytes. A digest comparison never mixes domains or schema versions. Cross-language known-answer fixtures include key-order/whitespace-equivalent JSON, duplicate-key rejection, numeric edge cases, Unicode, empty/large blobs, and every durable record family.
 
-`finstack-ai-kernel::digest` owns `Digest`, the domain registry, SHA-256 wrapper, and strict canonical-JSON normalization used by semantic DTOs. Runtime and SDK call that module; protocol applies the same type to its canonical-CBOR bytes; leaf adapters do not implement competing hash/JCS rules. PR-003/PR-006 pin/audit the hash dependency and known-answer corpus.
+`finstack-ai-kernel::digest` owns `Digest`, the domain registry constants, SHA-256 wrapper, and strict canonical-JSON normalization used by semantic DTOs. Runtime and SDK call that module; protocol applies the same type to its canonical-CBOR bytes; leaf adapters do not implement competing hash/JCS rules. PR-006 pins the hash dependency and JSON known-answer corpus. PR-008 freezes the durable digest domain names and schema versions used by record/effect surfaces. PR-039 owns canonical-CBOR encoding of durable record bodies/envelopes, calculation and verification of `record-payload` / envelope checksum digests over those bytes, binary size/depth fixtures, and malicious declared-length enforcement.
 
 ## 6.5 V1 semantic payload bounds
 
@@ -581,7 +599,63 @@ pub struct AuthorizationEvidence {
     pub policy_version: Arc<str>,
     pub decision_id: Arc<str>,
 }
+
+pub struct Version {
+    pub major: u16,
+    pub minor: u16,
+    pub patch: u16,
+}
+
+pub struct ComponentRef {
+    pub id: ComponentId,
+    pub version: Option<Version>,
+}
+
+pub struct MiddlewareRef {
+    pub component: ComponentRef,
+    pub stage: Option<Arc<str>>,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum Sensitivity {
+    Public,
+    Internal,
+    Confidential,
+    Secret,
+    Credential,
+}
+
+pub struct Diagnostic {
+    pub code: Arc<str>,
+    pub message: Arc<str>,
+    pub severity: DiagnosticSeverity,
+    pub metadata: Metadata,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSeverity {
+    Debug,
+    Info,
+    Warning,
+    Error,
+}
+
+pub struct Usage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cost: Option<CostAmount>,
+    pub extension_counters: BTreeMap<LimitKey, u64>,
+}
+
+pub struct CostAmount {
+    pub unit: Arc<str>,
+    pub micros: u64,
+    pub pricing_policy_version: Arc<str>,
+}
 ```
+
+`Version` is a non-negative semantic triple; string SemVer labels are not used on durable fields. `ComponentRef.id` is required; `version` is optional selected-configuration metadata and does not replace resolved-agent lock digests. `MiddlewareRef.stage` names a pipeline stage when present and is bounded by the individual text ceiling in section 6.5. `Sensitivity` classifications match section 31.4. `Diagnostic` values are decision-local and never become `RunEvent` bodies or journal records. `Usage` is the normalized token/cost counter surface for effect completion and budget charge; `CostAmount.micros` follows the same non-negative integer-millionths rules as `CostLimit` in section 22.1 (JSON/JSONL encode as a canonical decimal string). Empty `extension_counters` maps are valid; keys are namespaced `LimitKey` values.
 
 ## 7.3 Message roles
 
@@ -633,7 +707,7 @@ pub struct Message {
 }
 ```
 
-`ModelRef.provider` and `ModelRef.model` are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `thinking_level`, `context_length`, and `fast` are independently optional selected-configuration fields: a model reference may omit all three, carry thinking only, fast only, context length only, or any combination (including thinking and fast together). When present, `context_length` is a positive token budget in the portable exact-JSON integer range (`1..=2^53-1`); larger values are rejected rather than serialized imprecisely for JavaScript consumers. Absent optional fields are omitted from JSON (`skip_serializing_if`). `Message.content` is bounded by the section 6.5 array-item ceiling (4,096). `created_at` is supplied by the runtime environment; the kernel never reads a clock. `Usage` is not a message field in PR-007; token/cost usage types remain owned by budget and effect-completion surfaces (PR-008/PR-011) and are deferred until those consumers freeze them.
+`ModelRef.provider` and `ModelRef.model` are non-empty, at most 256 UTF-8 bytes, and must not contain NUL. `thinking_level`, `context_length`, and `fast` are independently optional selected-configuration fields: a model reference may omit all three, carry thinking only, fast only, context length only, or any combination (including thinking and fast together). When present, `context_length` is a positive token budget in the portable exact-JSON integer range (`1..=2^53-1`); larger values are rejected rather than serialized imprecisely for JavaScript consumers. Absent optional fields are omitted from JSON (`skip_serializing_if`). `Message.content` is bounded by the section 6.5 array-item ceiling (4,096). `created_at` is supplied by the runtime environment; the kernel never reads a clock. `Usage` is not a message field; token/cost usage types are defined in section 7.2 and consumed by effect-completion and budget surfaces (PR-008/PR-011).
 
 Constructors and deserializers validate the role/block matrix and reject invalid combinations with stable validation error codes. Tool-association validation in the message model is pure and structural:
 
@@ -1210,13 +1284,29 @@ pub struct ChildRunPrepared {
 
 `RunAccepted` always stores relation, security, effective deadline/limits, propagation policy, and resolved-agent lock evidence; root runs use `RunRelationKind::Root`. The kernel validates relation shape, depth, deadline/budget monotonicity, and declared propagation but does not invoke child agents or aggregate budgets. A child inherits the tenant scope, cannot exceed the parent deadline or reserved budget, and either retains the parent principal or uses an explicitly authorized delegated principal whose scopes/roles are attenuated and whose decision ID is persisted. Tenant changes require a separately authenticated boundary. `AgentCatalog`, `AgentInvoker`, and runtime/application policy own invocation services.
 
+The v1 maximum `RunRelation.depth` is **16** (`0` for a root). Depth greater than 16 is rejected before commit. Child depth must equal `parent.depth + 1` when a parent relation is present; root relations require `parent_run_id` and `parent_effect_id` both absent; non-root relations require both present and a `root_run_id` that remains stable across the lineage.
+
 `AwaitingExternal` and `AwaitingInteraction` are generic suspension phases. Feature-specific background model, tool, approval, or workflow states are not added to the kernel.
 
 # 12. Journal record design
 
-## 12.1 Envelope
+Public vocabulary for durable truth uses `RecordDraft`, `RecordEnvelope`, and `RecordBody`. Ambiguous Implementation Plan shorthand names `JournalRecord`, `EffectRequest`, and `EffectResult` are non-normative aliases and must not appear in public APIs: map `JournalRecord` → `RecordEnvelope` / `RecordDraft` as appropriate, `EffectRequest` → `EffectRequested`, and `EffectResult` → `EffectCompleted` / `EffectFailed` / `EffectCancelled`.
+
+## 12.1 Envelope and draft
 
 ```rust
+pub struct RecordDraft {
+    pub format_version: u16,
+    pub kind_version: u16,
+    pub record_id: RecordId,
+    pub session_id: SessionId,
+    pub lane_id: LaneId,
+    pub run_id: Option<RunId>,
+    pub timestamp: Timestamp,
+    pub derived_event_ids: Arc<[EventId]>,
+    pub body: RecordBody,
+}
+
 pub struct RecordEnvelope {
     pub format_version: u16,
     pub kind_version: u16,
@@ -1235,9 +1325,11 @@ pub struct RecordEnvelope {
 }
 ```
 
+`RecordDraft` is the kernel/runtime semantic proposal before store assignment. It carries no sequence, store commit time, payload digest, or checksum. `RecordEnvelope` is the committed durable shape after the store assigns `sequence` (and optional diagnostic `committed_at`) and the protocol codec fills digest/checksum fields. The protocol's canonical-CBOR encoding of a `RecordEnvelope` is the wire/persistence form owned by PR-039; there is no separate public DTO named `CanonicalRecordEnvelope`.
+
 The runtime supplies the semantic `timestamp` and UUIDv7 IDs (including the fixed ordered IDs for durable-derived events) through `TransitionEnv` before decision/commit, and retries preserve them exactly. The store assigns only `sequence` and may add a separate diagnostic `committed_at`; it never rewrites semantic time. `format_version` versions the envelope while `kind_version` versions the selected record body.
 
-`payload_digest` covers canonical body bytes. `checksum` covers the canonical envelope fields required for replay—format/kind versions, identifiers, assigned sequence, semantic timestamp, payload digest/body, prior checksum, and derived event IDs—and excludes diagnostic `committed_at`. `previous_checksum` links the session sequence; session metadata and snapshots retain the corresponding head checksum. Loads verify sequence continuity, payload/envelope digests, and the chain before applying records.
+`payload_digest` covers canonical-CBOR body bytes under the `record-payload` digest domain. `checksum` covers the canonical envelope fields required for replay—format/kind versions, identifiers, assigned sequence, semantic timestamp, payload digest/body, prior checksum, and derived event IDs—and excludes diagnostic `committed_at`. `previous_checksum` links the session sequence; session metadata and snapshots retain the corresponding head checksum. Loads verify sequence continuity, payload/envelope digests, and the chain before applying records. PR-008 freezes draft/envelope field shapes, versions, ordering, derived-event ID rules, and logical semantic ceilings; PR-039 calculates and verifies digests/checksums and enforces canonical-CBOR byte limits.
 
 ## 12.2 Record body
 
@@ -1281,6 +1373,14 @@ pub enum RecordBody {
     SnapshotWritten(SnapshotWritten),
 }
 ```
+
+Delivery ownership for `RecordBody` variants is staged by logical PR. **PR-008 owns and must materialize** only:
+
+- `RunAccepted`
+- `EffectRequested`, `EffectDeferred`, `EffectCompleted`, `EffectFailed`, `EffectCancelled`
+- `InteractionRequested`, `InteractionResolved`, `InteractionExpired`, `InteractionCancelled`
+
+All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-009 reducer records, PR-011 limits/cancellation/budget, PR-012 capabilities, PR-014/PR-039 store/session/lane/snapshot surfaces). A PR-008 implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
 
 Control-path payloads are explicit and versioned rather than inferred from runtime state:
 
@@ -1406,11 +1506,73 @@ pub enum EffectKind {
     Interaction,
     Timer,
 }
+
+pub enum EffectInput {
+    Model {
+        request: RawJson,
+    },
+    Tool {
+        call: ToolCallBlock,
+    },
+    Context {
+        request: RawJson,
+    },
+    Middleware {
+        stage: Arc<str>,
+        input: RawJson,
+    },
+    Interaction {
+        interaction_id: InteractionId,
+        request_digest: Digest,
+    },
+    Timer {
+        due_at: Timestamp,
+    },
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum RetrySafety {
+    SafeToRetry,
+    IdempotentWithKey,
+    AtMostOnce,
+    Unknown,
+}
 ```
+
+`EffectInput` must match `EffectRequested.kind`; mismatched combinations are rejected. `EffectInput::Interaction.request_digest` digests the paired `InteractionRequest` body under the `effect-input` domain after RFC 8785 / canonical-CBOR normalization rules for that payload family; the interaction request itself is committed as a sibling `InteractionRequested` record. `input_digest` on `EffectRequested` digests the selected `EffectInput` variant under domain `effect-input`. `RetrySafety` describes external-execution retry policy for the effect; it is distinct from `InvocationRecovery`, which describes whether a component configuration may be recomputed.
 
 Completion records include the normalized output, usage, provider/tool IDs, and retry metadata. Large output needed for replay is staged through `ArtifactStore` and referenced by a digest-bearing `ArtifactRef` before commit; a plain external `BlobRef` is insufficient for authoritative behavior-changing data.
 
 ```rust
+pub struct EffectCompleted {
+    pub effect_id: EffectId,
+    pub output_contract: EffectOutputContract,
+    pub output: RawJson,
+    pub output_digest: Digest,
+    pub usage: Option<Usage>,
+    pub usage_digest: Option<Digest>,
+    pub artifacts: Arc<[ArtifactRef]>,
+    pub provider_ids: ProviderIds,
+    pub completion_id: Option<Arc<str>>,
+    pub reservation_id: Option<BudgetReservationId>,
+}
+
+pub struct EffectFailed {
+    pub effect_id: EffectId,
+    pub output_contract: EffectOutputContract,
+    pub error: ErrorDescriptor,
+    pub usage: Option<Usage>,
+    pub usage_digest: Option<Digest>,
+    pub completion_id: Option<Arc<str>>,
+}
+
+pub struct EffectCancelled {
+    pub effect_id: EffectId,
+    pub output_contract: EffectOutputContract,
+    pub reason: Option<Arc<str>>,
+    pub completion_id: Option<Arc<str>>,
+}
+
 pub struct EffectDeferred {
     pub effect_id: EffectId,
     pub handle: ExternalHandleRef,
@@ -1419,7 +1581,11 @@ pub struct EffectDeferred {
     pub expires_at: Option<Timestamp>,
     pub output_contract: EffectOutputContract,
 }
+```
 
+`EffectCompleted.output_contract`, `EffectFailed.output_contract`, and `EffectCancelled.output_contract` must equal the non-optional contract from the originating `EffectRequested` (copied unchanged through any `EffectDeferred`). `output_digest` uses the `effect-output` digest domain. When `usage` is present, `usage_digest` is required and digests the normalized `Usage` value; when `usage` is absent, `usage_digest` must be absent. `artifacts` is empty when no staged artifacts are referenced. Optional `completion_id` supports external idempotency; conflicting reuse with a different normalized outcome fails closed.
+
+```rust
 pub struct EffectOutputContract {
     pub kind: EffectOutputKind,
     pub schema_version: u16,
@@ -2196,11 +2362,116 @@ pub struct RunEvent {
 
 ## 20.2 Durable versus transient
 
-Durable-derived events include accepted, message finalized, tool settled, interaction requested/resolved (including the approval profile), limit reached, and terminal results.
+`RunEvent` has exactly two semantic classes: **durable-derived** and **transient**. Public constructors are class-safe and cannot confuse the two. Diagnostics (`Diagnostic` on `Decision`, observer/ops logs, JSONL projections) are a separate non-semantic channel and are never `RunEvent` kinds. Binding-local notifications (language-runtime callbacks, UI widgets, host-only spans) remain binding implementation details outside journal and runtime-event schemas.
 
-For each durable record kind, a versioned table defines zero or more derived event ordinals. Their UUIDv7 `event_id` values are allocated in the record draft and persisted in `derived_event_ids`, so replay and every binding reproduce the same IDs. Transient event IDs are allocated at emission and are not replay-stable.
+```rust
+#[serde(rename_all = "snake_case")]
+pub enum RunEventClass {
+    DurableDerived,
+    Transient,
+}
 
-Transient events include model text delta, reasoning delta, tool progress, queue depth warning, and provider heartbeat.
+#[serde(rename_all = "snake_case")]
+pub enum RunEventKind {
+    // Durable-derived
+    RunAccepted,
+    EffectRequested,
+    EffectDeferred,
+    EffectCompleted,
+    EffectFailed,
+    EffectCancelled,
+    InteractionRequested,
+    InteractionResolved,
+    InteractionExpired,
+    InteractionCancelled,
+    MessageFinalized,
+    ToolSettled,
+    LimitReached,
+    RunSuspended,
+    RunCompleted,
+    RunFailed,
+    RunCancelled,
+    // Transient
+    ModelTextDelta,
+    ReasoningDelta,
+    ToolProgress,
+    QueueDepthWarning,
+    ProviderHeartbeat,
+}
+
+pub enum RunEventBody {
+    // PR-008-owned durable bodies (full payloads)
+    RunAccepted(RunAccepted),
+    EffectRequested(EffectRequested),
+    EffectDeferred(EffectDeferred),
+    EffectCompleted(EffectCompleted),
+    EffectFailed(EffectFailed),
+    EffectCancelled(EffectCancelled),
+    InteractionRequested(InteractionRequest),
+    InteractionResolved(InteractionResolution),
+    InteractionExpired(InteractionExpired),
+    InteractionCancelled(InteractionCancelled),
+    // Reserved durable bodies — owning PRs freeze full record/event payloads;
+    // kind tags and correlation rules are fixed here so class/version surfaces stay stable.
+    MessageFinalized { message_id: MessageId },
+    ToolSettled { tool_call_id: ToolCallId },
+    LimitReached { dimension: LimitDimension },
+    RunSuspended { reason_code: Option<Arc<str>> },
+    RunCompleted { result_digest: Digest },
+    RunFailed { error: ErrorDescriptor },
+    RunCancelled { request_id: Option<CancellationRequestId> },
+    // Transient bodies
+    ModelTextDelta(ModelTextDelta),
+    ReasoningDelta(ReasoningDelta),
+    ToolProgress(ToolProgress),
+    QueueDepthWarning(QueueDepthWarning),
+    ProviderHeartbeat(ProviderHeartbeat),
+}
+
+pub struct ModelTextDelta {
+    pub text: Arc<str>,
+}
+
+pub struct ReasoningDelta {
+    pub text: Arc<str>,
+}
+
+pub struct ToolProgress {
+    pub message: Arc<str>,
+    pub percent: Option<u8>,
+}
+
+pub struct QueueDepthWarning {
+    pub depth: u32,
+    pub limit: u32,
+}
+
+pub struct ProviderHeartbeat {
+    pub provider: Arc<str>,
+    pub detail: Option<Arc<str>>,
+}
+```
+
+`RunEvent.kind` and `RunEvent.body` must agree. Durable-derived events require `durable_sequence = Some(source_record_sequence)` and a replay-stable `event_id` taken from the source record's `derived_event_ids`. Transient events require `durable_sequence = None`; their `event_id` values are allocated at emission and are explicitly non-replay-stable. `transient_sequence` is always set and advances for every emitted event on the run stream. Correlation fields (`model_request_id`, `tool_batch_id`, `effect_id`, `tool_call_id`, `turn_id`) are set when applicable to the kind and otherwise `None`. `sensitivity` is mandatory on every event.
+
+For each durable record kind, a versioned ordinal table defines zero or more derived events. Ordinals are dense from zero in table order; `derived_event_ids.len()` must equal the table length for that record kind/version. Replay and every binding reuse those IDs.
+
+### 20.2.1 Derived-event ordinal table (kind_version = 1)
+
+| Record body | Ordinal → `RunEventKind` |
+|---|---|
+| `RunAccepted` | 0 → `RunAccepted` |
+| `EffectRequested` | 0 → `EffectRequested` |
+| `EffectDeferred` | 0 → `EffectDeferred` |
+| `EffectCompleted` | 0 → `EffectCompleted` |
+| `EffectFailed` | 0 → `EffectFailed` |
+| `EffectCancelled` | 0 → `EffectCancelled` |
+| `InteractionRequested` | 0 → `InteractionRequested` |
+| `InteractionResolved` | 0 → `InteractionResolved` |
+| `InteractionExpired` | 0 → `InteractionExpired` |
+| `InteractionCancelled` | 0 → `InteractionCancelled` |
+
+PR-008 freezes and implements constructors/fixtures for the ordinal rows above plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). Later PRs append ordinal rows for their owned record kinds (`MessageFinalized`, `ToolSettled`, `LimitReached`, terminal run records, and others) without renumbering existing rows for a given `kind_version`.
 
 ## 20.3 Event hub
 
@@ -2987,7 +3258,7 @@ These immutable contexts are the only source of runtime identity, authorization,
 
 ## 31.4 Sensitive data
 
-`Sensitivity` classifications include public, internal, confidential, secret, and credential. Event subscriptions and observers declare the maximum permitted level and redaction mode.
+`Sensitivity` classifications are the section 7.2 enum (`Public`, `Internal`, `Confidential`, `Secret`, `Credential`). Event subscriptions and observers declare the maximum permitted level and redaction mode.
 
 ## 31.5 Plugin manifests
 

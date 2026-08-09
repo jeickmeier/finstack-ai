@@ -13,10 +13,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.7 |
+| Version | 0.8 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.12; Implementation Plan v0.12; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.13; Implementation Plan v0.13; Security and Threat Model v0.4 |
 
 # Executive architecture decision
 
@@ -1115,11 +1115,11 @@ sequence / transient order
 
 ## 19.2 Separation of events and records
 
-- Records are durable truth.
-- Events are public observations derived from records and transient progress.
-- Observer-specific spans/metrics are projections.
+- Records are durable truth (`RecordDraft` / `RecordEnvelope` / `RecordBody`).
+- `RunEvent` observations have exactly two semantic classes: durable-derived (from committed records) and transient progress.
+- Diagnostics, observer-specific spans/metrics, and binding-local notifications are projections or host details; they are not `RunEvent` kinds and must not become the persistence schema.
 
-This prevents telemetry schemas from becoming the persistence schema.
+This prevents telemetry schemas from becoming the persistence schema. Canonical-CBOR encoding, payload digests, and envelope checksums for durable records remain the protocol/store delivery owned by ADR-015 / PR-039; Phase 1 freezes semantic shapes and digest domain constants only.
 
 ## 19.3 Instrumentation extension
 
