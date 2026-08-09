@@ -31,7 +31,9 @@ use crate::entries::{
 use crate::error::ErrorCode;
 use crate::error::{ErrorCategory, ErrorDescriptor};
 use crate::limits::{LimitDimension, LimitReached, LimitUsage, LimitValue};
-use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
+use crate::records::{
+    APPEND_BATCH_MAX_RECORDS, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft,
+};
 use crate::refs::{Diagnostic, DiagnosticSeverity};
 use crate::state::{KernelState, RunPhase, TerminalCandidate, TransitionEnv};
 use crate::{
@@ -44,6 +46,13 @@ pub(super) fn decide(
     env: &TransitionEnv,
     input: KernelInput,
 ) -> Result<Decision, KernelError> {
+    if let KernelInput::CancelRequested(cancel) = &input
+        && state.cancellation.is_none()
+        && state.terminal.is_none()
+        && let Some(accepted) = state.accepted.as_ref()
+    {
+        validate_cancel_authorization(accepted, env, cancel)?;
+    }
     if let Some(decision) = decide_limit(state, env, &input)? {
         return Ok(decision);
     }
@@ -70,11 +79,14 @@ fn decide_limit(
     env: &TransitionEnv,
     input: &KernelInput,
 ) -> Result<Option<Decision>, KernelError> {
-    if matches!(
-        input,
-        KernelInput::AcceptRun(_) | KernelInput::CancelRequested(_)
-    ) || state.accepted.is_none()
+    if matches!(input, KernelInput::AcceptRun(_))
+        || state.accepted.is_none()
         || state.cancellation.is_some()
+        || state.terminal.is_some()
+        || matches!(
+            state.phase,
+            Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
+        )
     {
         return Ok(None);
     }
@@ -969,37 +981,7 @@ fn decide_cancel(
             phase: state.phase,
             input: "cancel_requested",
         })?;
-    let authorized = match &input.initiator {
-        CancellationInitiator::Principal {
-            principal,
-            authorization,
-        } => {
-            principal == accepted.security().principal()
-                && authorization.policy_version()
-                    == accepted.security().authorization_policy_version()
-                && authorization.decision_id() == accepted.security().authorization_decision_id()
-        }
-        CancellationInitiator::ParentRun { parent_run_id } => {
-            accepted.relation().parent_run_id() == Some(*parent_run_id)
-                && match accepted.propagation().cancellation {
-                    crate::CancellationPropagation::Cascade => true,
-                    crate::CancellationPropagation::DetachOnlyIfPreauthorized => !accepted
-                        .security()
-                        .authorization_decision_id()
-                        .starts_with("detach:"),
-                }
-        }
-        CancellationInitiator::Deadline => accepted
-            .effective_deadline()
-            .is_some_and(|deadline| env.now >= deadline),
-        CancellationInitiator::RuntimeShutdown => true,
-    };
-    if !authorized {
-        return Err(KernelError::InvalidInputPayload {
-            field: "initiator",
-            reason_code: "unauthorized",
-        });
-    }
+    validate_cancel_authorization(accepted, env, input)?;
     validate_allocated_ids(
         &env.ids,
         IdRequirements::new(1, 0, 0, 0, 0, 0).with_cancellations(1),
@@ -1032,6 +1014,45 @@ fn decide_cancel(
         actions,
         diagnostics: Vec::new(),
     })
+}
+
+fn validate_cancel_authorization(
+    accepted: &crate::RunAccepted,
+    env: &TransitionEnv,
+    input: &CancelRequested,
+) -> Result<(), KernelError> {
+    let authorized = match &input.initiator {
+        CancellationInitiator::Principal {
+            principal,
+            authorization,
+        } => {
+            principal == accepted.security().principal()
+                && authorization.policy_version()
+                    == accepted.security().authorization_policy_version()
+                && authorization.decision_id() == accepted.security().authorization_decision_id()
+        }
+        CancellationInitiator::ParentRun { parent_run_id } => {
+            accepted.relation().parent_run_id() == Some(*parent_run_id)
+                && match accepted.propagation().cancellation {
+                    crate::CancellationPropagation::Cascade => true,
+                    crate::CancellationPropagation::DetachOnlyIfPreauthorized => !accepted
+                        .security()
+                        .authorization_decision_id()
+                        .starts_with("detach:"),
+                }
+        }
+        CancellationInitiator::Deadline => accepted
+            .effective_deadline()
+            .is_some_and(|deadline| env.now >= deadline),
+        CancellationInitiator::RuntimeShutdown => true,
+    };
+    if !authorized {
+        return Err(KernelError::InvalidInputPayload {
+            field: "initiator",
+            reason_code: "unauthorized",
+        });
+    }
+    Ok(())
 }
 
 #[expect(
@@ -1103,12 +1124,20 @@ fn decide_reconciliation(
         .iter()
         .filter(|effect_id| !classified.contains(effect_id))
         .count();
-    let mut bodies = Vec::new();
-    for effect_id in input
+    let newly_completed = input
+        .completed_effects
+        .iter()
+        .filter(|effect_id| !cancellation.completed_effects.contains(effect_id))
+        .copied()
+        .collect::<Vec<_>>();
+    let newly_cancelled = input
         .cancelled_effects
         .iter()
         .filter(|effect_id| !cancellation.cancelled_effects.contains(effect_id))
-    {
+        .copied()
+        .collect::<Vec<_>>();
+    let mut bodies = Vec::new();
+    for effect_id in &newly_cancelled {
         if let Some(pending) = state
             .pending_model_effect
             .as_ref()
@@ -1125,7 +1154,16 @@ fn decide_reconciliation(
             ));
         }
     }
+    let mut tool_followups =
+        super::tool::cancellation_followups(state, env, &newly_completed, &newly_cancelled)?;
+    let first_non_cancelled = tool_followups
+        .bodies
+        .iter()
+        .position(|body| !matches!(body, RecordBody::EffectCancelled(_)))
+        .unwrap_or(tool_followups.bodies.len());
+    bodies.extend(tool_followups.bodies.drain(..first_non_cancelled));
     bodies.push(RecordBody::CancellationReconciled(reconciled));
+    bodies.append(&mut tool_followups.bodies);
     if !uncertain.is_empty() {
         bodies.push(RecordBody::RunSuspended(RunSuspended {
             reason_code: ErrorCode::new("cancellation_uncertain")
@@ -1139,20 +1177,31 @@ fn decide_reconciliation(
                 .map_err(|_| KernelError::InvariantViolation)?,
         }));
     }
-    let event_count = bodies
-        .iter()
-        .filter(|body| {
-            matches!(
-                body,
-                RecordBody::EffectCancelled(_)
-                    | RecordBody::RunSuspended(_)
-                    | RecordBody::RunCancelled(_)
+    let event_count = bodies.iter().try_fold(0_usize, |count, body| {
+        count
+            .checked_add(
+                body.derived_event_count(RECORD_KIND_VERSION)
+                    .map_err(|_| KernelError::InvariantViolation)?,
             )
-        })
-        .count();
+            .ok_or(KernelError::InvariantViolation)
+    })?;
+    if bodies.len() > APPEND_BATCH_MAX_RECORDS {
+        return Err(KernelError::InvalidInputPayload {
+            field: "records",
+            reason_code: "too_many_items",
+        });
+    }
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            messages: tool_followups.messages,
+            tool_settlements: &tool_followups.settlements,
+            ..StateGrowth::default()
+        },
+    )?;
     validate_allocated_ids(
         &env.ids,
-        IdRequirements::new(bodies.len(), event_count, 0, 0, 0, 0),
+        IdRequirements::new(bodies.len(), event_count, 0, 0, 0, tool_followups.messages),
     )?;
     let records = draft_for_state(state, env, bodies)?;
     Ok(Decision {

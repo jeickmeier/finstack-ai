@@ -663,6 +663,9 @@ impl KernelState {
                         | RunPhase::BeforeFinalize
                         | RunPhase::Completed
                         | RunPhase::Failed
+                        | RunPhase::Cancelling
+                        | RunPhase::Suspended
+                        | RunPhase::Cancelled
                 )
             );
             let assigned_count = self
@@ -693,7 +696,12 @@ impl KernelState {
     fn validate_active_tool_batch(&self, batch: &ActiveToolBatch) -> Result<(), ()> {
         if !matches!(
             self.phase,
-            Some(RunPhase::AwaitingTools | RunPhase::AwaitingExternal)
+            Some(
+                RunPhase::AwaitingTools
+                    | RunPhase::AwaitingExternal
+                    | RunPhase::Cancelling
+                    | RunPhase::Suspended
+            )
         ) || self.pending_model_effect.is_some()
             || batch.opened.cycle != self.cycle
             || batch.calls.is_empty()
@@ -718,7 +726,11 @@ impl KernelState {
                 }
             )
         });
-        if (self.phase == Some(RunPhase::AwaitingExternal)) != expected_external {
+        if matches!(
+            self.phase,
+            Some(RunPhase::AwaitingTools | RunPhase::AwaitingExternal)
+        ) && (self.phase == Some(RunPhase::AwaitingExternal)) != expected_external
+        {
             return Err(());
         }
 
@@ -802,7 +814,9 @@ impl KernelState {
                 (
                     ToolCallPlan::Execute(_),
                     ActiveToolCallStatus::Buffered { .. } | ActiveToolCallStatus::Settled { .. },
-                ) if call.assigned.group_index > batch.current_group => {
+                ) if call.assigned.group_index > batch.current_group
+                    && !matches!(self.phase, Some(RunPhase::Cancelling | RunPhase::Suspended)) =>
+                {
                     return Err(());
                 }
                 (

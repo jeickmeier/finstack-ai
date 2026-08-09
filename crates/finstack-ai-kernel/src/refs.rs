@@ -1186,6 +1186,23 @@ mod tests {
     }
 
     #[test]
+    fn cost_micros_boundary_values_round_trip_as_canonical_decimal_strings() {
+        for micros in [0, (1_u64 << 53) - 1, 1_u64 << 53, u64::MAX] {
+            let amount = CostAmount::try_new("USD", micros, "price-v1").expect("cost");
+            let encoded = serde_json::to_string(&amount).expect("serialize cost");
+            assert!(encoded.contains(&format!(r#""micros":"{micros}""#)));
+            let decoded: CostAmount = serde_json::from_str(&encoded).expect("deserialize cost");
+            assert_eq!(decoded, amount);
+        }
+        for invalid in [
+            r#"{"unit":"USD","micros":0,"pricing_policy_version":"price-v1"}"#,
+            r#"{"unit":"USD","micros":"00","pricing_policy_version":"price-v1"}"#,
+        ] {
+            assert!(serde_json::from_str::<CostAmount>(invalid).is_err());
+        }
+    }
+
+    #[test]
     fn role_and_queue_assignee_hints_round_trip() {
         for hint in [
             AssigneeHint::Role(Arc::<str>::from("reviewer")),

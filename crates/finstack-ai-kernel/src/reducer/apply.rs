@@ -132,6 +132,7 @@ fn event_correlations_for(state: &KernelState, body: &RecordBody) -> EventCorrel
         RecordBody::EffectDeferred(value) => Some(value.effect_id),
         RecordBody::EffectCompleted(value) => Some(value.effect_id()),
         RecordBody::EffectFailed(value) => Some(value.effect_id()),
+        RecordBody::EffectCancelled(value) => Some(value.effect_id()),
         RecordBody::ToolCallSettled(value) => Some(value.effect_id),
         _ => None,
     };
@@ -411,16 +412,25 @@ fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool
     }) {
         return false;
     }
-    matches!(
+    if !matches!(
         records[reconciled_index].body(),
         RecordBody::CancellationReconciled(value)
             if value.request_id == cancellation.request.request_id
-    ) && records.get(reconciled_index + 1).is_none_or(|record| {
-        matches!(
-            record.body(),
+    ) {
+        return false;
+    }
+    let tail = &records[reconciled_index + 1..];
+    let mut closed = false;
+    for (index, record) in tail.iter().enumerate() {
+        match record.body() {
+            RecordBody::ToolCallSettled(_) if !closed => {}
+            RecordBody::ToolBatchClosed(_) if !closed => closed = true,
             RecordBody::RunSuspended(_) | RecordBody::RunCancelled(_)
-        )
-    }) && records.len() <= reconciled_index + 2
+                if index + 1 == tail.len() => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
@@ -1057,6 +1067,46 @@ fn apply_record(
                 .copied()
                 .collect::<Vec<_>>()
                 .into();
+            if let Some(pending) = &state.pending_model_effect
+                && reconciled
+                    .completed_effects
+                    .contains(&pending.requested.effect_id())
+            {
+                state.pending_model_effect = None;
+            }
+            if let Some(batch) = state.active_tool_batch.as_mut() {
+                super::tool::buffer_reconciled_tool_closures(batch, &reconciled.completed_effects)?;
+            }
+            let cancellation_fingerprints = state
+                .active_tool_batch
+                .as_ref()
+                .map(|batch| {
+                    batch
+                        .calls
+                        .iter()
+                        .filter_map(|call| match &call.status {
+                            ActiveToolCallStatus::Buffered {
+                                settlement_digest,
+                                synthetic: true,
+                                error: Some(error),
+                                ..
+                            } if error.code.as_str() == "cancelled" => {
+                                Some((call.assigned.effect_id, *settlement_digest))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for (effect_id, digest) in cancellation_fingerprints {
+                insert_tool_identity(
+                    state,
+                    effect_id,
+                    ToolSettlementKind::Synthetic,
+                    digest,
+                    None,
+                )?;
+            }
             state.state_version = 3;
         }
         RecordBody::RetryScheduled(retry) => {
@@ -1108,14 +1158,56 @@ fn apply_record(
             state.state_version = 3;
         }
         RecordBody::EffectCancelled(cancelled) => {
-            let pending = state
-                .pending_model_effect
-                .as_ref()
-                .ok_or(KernelError::InvalidRecordOrder)?;
-            cancelled
-                .validate_against(&pending.requested)
-                .map_err(|_| KernelError::InvalidRecordOrder)?;
-            state.pending_model_effect = None;
+            if let Some(pending) = state.pending_model_effect.as_ref()
+                && pending.requested.effect_id() == cancelled.effect_id()
+            {
+                cancelled
+                    .validate_against(&pending.requested)
+                    .map_err(|_| KernelError::InvalidRecordOrder)?;
+                state.pending_model_effect = None;
+            } else {
+                let batch = state
+                    .active_tool_batch
+                    .as_mut()
+                    .ok_or(KernelError::InvalidRecordOrder)?;
+                let requested = batch
+                    .calls
+                    .iter()
+                    .find_map(|call| match &call.status {
+                        ActiveToolCallStatus::Requested { requested, .. }
+                            if requested.effect_id() == cancelled.effect_id() =>
+                        {
+                            Some(requested)
+                        }
+                        _ => None,
+                    })
+                    .ok_or(KernelError::InvalidRecordOrder)?;
+                cancelled
+                    .validate_against(requested)
+                    .map_err(|_| KernelError::InvalidRecordOrder)?;
+                if !super::tool::buffer_cancelled_effect(batch, cancelled.effect_id())? {
+                    return Err(KernelError::InvalidRecordOrder);
+                }
+                let digest = batch
+                    .calls
+                    .iter()
+                    .find_map(|call| match &call.status {
+                        ActiveToolCallStatus::Buffered {
+                            settlement_digest, ..
+                        } if call.assigned.effect_id == cancelled.effect_id() => {
+                            Some(*settlement_digest)
+                        }
+                        _ => None,
+                    })
+                    .ok_or(KernelError::InvalidRecordOrder)?;
+                insert_tool_identity(
+                    state,
+                    cancelled.effect_id(),
+                    ToolSettlementKind::Synthetic,
+                    digest,
+                    None,
+                )?;
+            }
             state.state_version = 3;
         }
         RecordBody::InteractionRequested(_)

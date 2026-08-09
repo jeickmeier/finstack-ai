@@ -727,6 +727,69 @@ fn every_reachable_phase_rejects_nonmatching_input_families() {
 }
 
 #[test]
+fn cancellation_is_accepted_idempotently_from_every_reachable_nonterminal_phase() {
+    let mut before_run = Harness::default();
+    accept(&mut before_run);
+    let mut preparing = Harness::default();
+    accept(&mut preparing);
+    settle_before_run(&mut preparing);
+    let mut before_model = Harness::default();
+    accept(&mut before_model);
+    settle_before_run(&mut before_model);
+    prepare_context(&mut before_model, 0, false);
+    let awaiting_model = drive_to_awaiting_model();
+    let after_model = drive_to_after_model();
+    let before_tool_batch = drive_to_before_tool_batch_matrix();
+    let awaiting_tools = drive_to_awaiting_tools_matrix();
+    let after_tool_batch = drive_to_after_tool_batch_matrix();
+    let before_finalize = drive_to_before_finalize();
+    let mut awaiting_external = drive_to_awaiting_model();
+    awaiting_external.apply_input(
+        transition_env(1_400, &[7], &[3], &[], &[], &[], &[]),
+        deferred_input(
+            TURN_ONE,
+            MODEL_REQUEST_ONE,
+            EFFECT_ONE,
+            "cancel-phase-external",
+        ),
+    );
+
+    let mut harnesses = Vec::with_capacity(10);
+    harnesses.push(before_run);
+    harnesses.push(preparing);
+    harnesses.push(before_model);
+    harnesses.push(awaiting_model);
+    harnesses.push(after_model);
+    harnesses.push(before_tool_batch);
+    harnesses.push(awaiting_tools);
+    harnesses.push(after_tool_batch);
+    harnesses.push(before_finalize);
+    harnesses.push(awaiting_external);
+    for (index, harness) in harnesses.iter().enumerate() {
+        let cancel = KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("phase-matrix")),
+        });
+        let decision = harness
+            .kernel
+            .decide(
+                &cancellation_env(
+                    10_000 + i64::try_from(index).expect("index"),
+                    &[8_000 + u64::try_from(index).expect("index")],
+                    &[],
+                    &[8_500 + u64::try_from(index).expect("index")],
+                ),
+                cancel,
+            )
+            .expect("cancellation must be accepted from reachable phase");
+        assert!(matches!(
+            decision.records.as_slice(),
+            [record] if matches!(record.body(), RecordBody::CancellationRequested(_))
+        ));
+    }
+}
+
+#[test]
 fn tool_stage_failures_are_valid_only_at_their_frozen_boundaries() {
     let mut before = drive_to_before_tool_batch_matrix();
     let before_decision = before.apply_input(

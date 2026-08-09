@@ -1348,8 +1348,19 @@ fn generated_parallel_completion_permutations_are_source_ordered_and_replayable(
 }
 
 pub(super) fn model_with_calls(calls: &[ToolCallBlock]) -> Harness {
+    model_with_calls_and_limits(calls, RunLimits::empty())
+}
+
+pub(super) fn model_with_calls_and_limits(calls: &[ToolCallBlock], limits: RunLimits) -> Harness {
     let mut harness = Harness::default();
-    accept(&mut harness);
+    harness.apply_input(
+        transition_env(1_000, &[1], &[1], &[], &[], &[], &[]),
+        KernelInput::AcceptRun(AcceptRun {
+            session_id: id::<finstack_ai_kernel::SessionTag>(SESSION),
+            lane_id: id::<finstack_ai_kernel::LaneTag>(LANE),
+            accepted: root_acceptance_with(limits, None),
+        }),
+    );
     settle_before_run(&mut harness);
     prepare_context(&mut harness, 0, false);
     request_model(&mut harness, 0, false);
@@ -1448,7 +1459,7 @@ pub(super) fn execute(
     })
 }
 
-fn tool_contract() -> EffectOutputContract {
+pub(super) fn tool_contract() -> EffectOutputContract {
     EffectOutputContract {
         kind: EffectOutputKind::ToolResult,
         schema_version: 1,

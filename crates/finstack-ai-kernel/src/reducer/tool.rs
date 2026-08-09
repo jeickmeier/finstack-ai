@@ -19,7 +19,8 @@ use super::input::{
 use super::validation::{validate_completion_identity, validate_error_descriptor};
 use crate::content::{ContentBlock, JsonBlock, ToolCallBlock, ToolResultBlock};
 use crate::effects::{
-    EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind, EffectRequested,
+    EffectCancelled, EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
+    EffectRequested,
 };
 use crate::entries::{StageDisposition, StageOutcomeRecorded};
 use crate::message::{Message, MessageRole, ProviderIds};
@@ -28,7 +29,7 @@ use crate::records::APPEND_BATCH_MAX_RECORDS;
 use crate::records::RecordBody;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 use crate::tools::{
-    ActiveToolBatch, ActiveToolCallStatus, AssignedToolCall, ToolBatchClosed,
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, ToolBatchClosed,
     ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
     ToolFailurePolicy,
 };
@@ -523,6 +524,174 @@ struct ToolFollowups {
     messages: usize,
 }
 
+pub(super) struct CancellationToolFollowups {
+    pub bodies: Vec<RecordBody>,
+    pub settlements: Vec<crate::EffectId>,
+    pub messages: usize,
+}
+
+pub(super) fn buffer_cancelled_effect(
+    batch: &mut ActiveToolBatch,
+    effect_id: crate::EffectId,
+) -> Result<bool, KernelError> {
+    let error = cancelled_error()?;
+    let batch_id = batch.opened.tool_batch_id;
+    let Some(call) = Arc::make_mut(&mut batch.calls)
+        .iter_mut()
+        .find(|call| call.assigned.effect_id == effect_id)
+    else {
+        return Ok(false);
+    };
+    if !matches!(call.status, ActiveToolCallStatus::Requested { .. }) {
+        return Ok(false);
+    }
+    buffer_cancellation_result(call, batch_id, &error)?;
+    Ok(true)
+}
+
+pub(super) fn buffer_reconciled_tool_closures(
+    batch: &mut ActiveToolBatch,
+    completed_effects: &[crate::EffectId],
+) -> Result<(), KernelError> {
+    let error = cancelled_error()?;
+    let batch_id = batch.opened.tool_batch_id;
+    for call in Arc::make_mut(&mut batch.calls) {
+        let completed = completed_effects
+            .binary_search(&call.assigned.effect_id)
+            .is_ok();
+        if matches!(call.status, ActiveToolCallStatus::Undispatched)
+            || (completed && matches!(call.status, ActiveToolCallStatus::Requested { .. }))
+        {
+            buffer_cancellation_result(call, batch_id, &error)?;
+        }
+    }
+    Ok(())
+}
+
+fn buffer_cancellation_result(
+    call: &mut ActiveToolCall,
+    tool_batch_id: crate::ToolBatchId,
+    error: &crate::ErrorDescriptor,
+) -> Result<(), KernelError> {
+    let result = synthetic_result(call.assigned.plan.call(), error)?;
+    let digest = synthetic_tool_digest(
+        tool_batch_id,
+        *call.assigned.plan.call().tool_call_id(),
+        call.assigned.effect_id,
+        &result,
+        error,
+    )?;
+    call.status = ActiveToolCallStatus::Buffered {
+        result,
+        settlement_digest: digest,
+        synthetic: true,
+        error: Some(error.clone()),
+    };
+    Ok(())
+}
+
+/// Build cancellation records against a prospective tool batch.
+///
+/// Requested calls classified as cancelled receive `EffectCancelled`; calls
+/// classified as completed are conservatively closed with the same
+/// framework-authored cancelled result because reconciliation carries no tool
+/// output. Undispatched calls receive the identical closure. Buffered real
+/// results remain real. Canonical result records are emitted only for the
+/// contiguous source prefix, so bounded reconciliation chunks are replay-safe.
+pub(super) fn cancellation_followups(
+    state: &KernelState,
+    env: &TransitionEnv,
+    newly_completed: &[crate::EffectId],
+    newly_cancelled: &[crate::EffectId],
+) -> Result<CancellationToolFollowups, KernelError> {
+    let Some(mut batch) = state.active_tool_batch.clone() else {
+        return Ok(CancellationToolFollowups {
+            bodies: Vec::new(),
+            settlements: Vec::new(),
+            messages: 0,
+        });
+    };
+    let error = cancelled_error()?;
+    let batch_id = batch.opened.tool_batch_id;
+    let mut bodies = Vec::new();
+    for call in Arc::make_mut(&mut batch.calls) {
+        let effect_id = call.assigned.effect_id;
+        let classified_cancelled = newly_cancelled.binary_search(&effect_id).is_ok();
+        let classified_completed = newly_completed.binary_search(&effect_id).is_ok();
+        let should_close = classified_cancelled
+            || classified_completed
+            || matches!(call.status, ActiveToolCallStatus::Undispatched);
+        if !should_close {
+            continue;
+        }
+        if classified_cancelled
+            && let ActiveToolCallStatus::Requested { requested, .. } = &call.status
+        {
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    effect_id,
+                    requested.output_contract().clone(),
+                    Some("cancelled"),
+                    Option::<&str>::None,
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
+        if matches!(
+            call.status,
+            ActiveToolCallStatus::Requested { .. } | ActiveToolCallStatus::Undispatched
+        ) {
+            buffer_cancellation_result(call, batch_id, &error)?;
+        }
+    }
+
+    let mut result_ids = batch.result_message_ids.to_vec();
+    let start =
+        usize::try_from(batch.next_source_index).map_err(|_| KernelError::InvariantViolation)?;
+    let mut message_count = 0_usize;
+    let mut settlements = Vec::new();
+    for index in start..batch.calls.len() {
+        let ActiveToolCallStatus::Buffered {
+            result,
+            settlement_digest,
+            synthetic,
+            error,
+        } = batch.calls[index].status.clone()
+        else {
+            break;
+        };
+        let message_id = required(env.ids.message_ids(), message_count, "message_ids")?;
+        bodies.push(RecordBody::ToolCallSettled(tool_settled_record(
+            &batch.opened,
+            &batch.calls[index].assigned,
+            message_id,
+            env,
+            BufferedToolResult {
+                result,
+                settlement_digest,
+                synthetic,
+                error,
+            },
+        )?));
+        result_ids.push(message_id);
+        settlements.push(batch.calls[index].assigned.effect_id);
+        message_count += 1;
+    }
+    if result_ids.len() == batch.calls.len() {
+        bodies.push(RecordBody::ToolBatchClosed(close_record(
+            &batch.opened,
+            result_ids,
+            outcome_for_continuation(batch.opened.continuation),
+        )?));
+    }
+    ensure_record_batch_bound(bodies.len())?;
+    Ok(CancellationToolFollowups {
+        bodies,
+        settlements,
+        messages: message_count,
+    })
+}
+
 fn followup_records(
     batch: &mut ActiveToolBatch,
     env: &TransitionEnv,
@@ -951,6 +1120,16 @@ fn aborted_error() -> Result<crate::ErrorDescriptor, KernelError> {
         "tool_batch_aborted",
         "tool call was not dispatched because the batch failed",
         crate::ErrorCategory::Tool,
+        false,
+    )
+    .map_err(|_| KernelError::InvariantViolation)
+}
+
+pub(super) fn cancelled_error() -> Result<crate::ErrorDescriptor, KernelError> {
+    crate::ErrorDescriptor::new(
+        "cancelled",
+        "tool call was cancelled before run termination",
+        crate::ErrorCategory::Cancellation,
         false,
     )
     .map_err(|_| KernelError::InvariantViolation)
