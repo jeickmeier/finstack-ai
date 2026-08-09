@@ -1,7 +1,8 @@
 //! Golden-trace load, validate, normalize, and compare helpers.
 //!
 //! Normalization is fixture-only deterministic JSON key ordering. It does not
-//! claim ADR-016 JCS semantics and does not compute Phase 1 state hashes.
+//! claim semantic JCS behavior; reducer-backed adapters obtain state hashes from
+//! the kernel's public state-hash API.
 
 use std::fs;
 use std::path::Path;
@@ -22,6 +23,8 @@ pub enum TraceError {
     Parse(String),
     /// JSON Schema validation failure.
     Schema(String),
+    /// Deterministic adapter execution failure.
+    Adapter(String),
     /// Byte-for-byte comparison mismatch after normalization.
     Mismatch {
         /// Expected normalized JSON bytes.
@@ -34,7 +37,10 @@ pub enum TraceError {
 impl std::fmt::Display for TraceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(message) | Self::Parse(message) | Self::Schema(message) => {
+            Self::Io(message)
+            | Self::Parse(message)
+            | Self::Schema(message)
+            | Self::Adapter(message) => {
                 write!(f, "{message}")
             }
             Self::Mismatch { expected, actual } => write!(
@@ -154,7 +160,7 @@ pub struct ExpectedTrace {
     pub final_state: Value,
     /// Opaque expected final result.
     pub final_result: Value,
-    /// Opaque expected state hash string (not computed by this harness).
+    /// Expected state hash string.
     pub state_hash: String,
 }
 

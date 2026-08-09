@@ -12,6 +12,10 @@ use crate::effects::{
     EffectOutputKind, EffectRequested, InteractionCancelled, InteractionExpired,
     InteractionRequest, InteractionResolution,
 };
+use crate::entries::{
+    ContextPrepared, EntryAppended, RunCompleted, RunFailed, StageOutcomeRecorded,
+};
+use crate::error::ErrorDescriptorError;
 use crate::ids::{AppendBatchId, EventId, LaneId, RecordId, RunId, SessionId};
 use crate::run::{RunAccepted, RunError, RunRelationKind};
 use crate::time::Timestamp;
@@ -408,6 +412,12 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
         )
         .map_err(de::Error::custom)?;
         validate_record_run_id(wire.run_id, &wire.body).map_err(de::Error::custom)?;
+        let body = match wire.body {
+            RecordBody::RunAccepted(accepted) => {
+                RecordBody::RunAccepted(accepted.mark_persisted_lineage_validated())
+            }
+            body => body,
+        };
         Ok(Self {
             format_version: wire.format_version,
             kind_version: wire.kind_version,
@@ -422,12 +432,12 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
             previous_checksum: wire.previous_checksum,
             checksum: wire.checksum,
             derived_event_ids: derived_event_ids.into(),
-            body: wire.body,
+            body,
         })
     }
 }
 
-/// PR-008-owned record bodies only.
+/// Record bodies owned through PR-009.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {
@@ -451,6 +461,16 @@ pub enum RecordBody {
     InteractionExpired(InteractionExpired),
     /// Interaction cancelled.
     InteractionCancelled(InteractionCancelled),
+    /// Aggregate stage outcome.
+    StageOutcomeRecorded(StageOutcomeRecorded),
+    /// Prepared model context.
+    ContextPrepared(ContextPrepared),
+    /// Final assistant message append.
+    EntryAppended(EntryAppended),
+    /// Successful run terminal.
+    RunCompleted(RunCompleted),
+    /// Failed run terminal.
+    RunFailed(RunFailed),
 }
 
 impl RecordBody {
@@ -463,7 +483,10 @@ impl RecordBody {
         if kind_version != RECORD_KIND_VERSION {
             return Err(RecordError::UnsupportedKindVersion { kind_version });
         }
-        Ok(1)
+        Ok(match self {
+            Self::StageOutcomeRecorded(_) | Self::ContextPrepared(_) => 0,
+            _ => 1,
+        })
     }
 
     /// Stable body kind name.
@@ -480,6 +503,11 @@ impl RecordBody {
             Self::InteractionResolved(_) => "interaction_resolved",
             Self::InteractionExpired(_) => "interaction_expired",
             Self::InteractionCancelled(_) => "interaction_cancelled",
+            Self::StageOutcomeRecorded(_) => "stage_outcome_recorded",
+            Self::ContextPrepared(_) => "context_prepared",
+            Self::EntryAppended(_) => "entry_appended",
+            Self::RunCompleted(_) => "run_completed",
+            Self::RunFailed(_) => "run_failed",
         }
     }
 }
@@ -683,6 +711,20 @@ fn validate_body_for_creation(body: &RecordBody) -> Result<(), RecordError> {
     {
         return Err(RecordError::UnvalidatedRunLineage);
     }
+    let error = match body {
+        RecordBody::StageOutcomeRecorded(outcome) => match &outcome.disposition {
+            crate::StageDisposition::Failed { error } => Some(error),
+            _ => None,
+        },
+        RecordBody::EffectFailed(failed) => Some(failed.error()),
+        RecordBody::RunFailed(failed) => Some(&failed.error),
+        _ => None,
+    };
+    if let Some(error) = error {
+        error
+            .validate()
+            .map_err(RecordError::InvalidErrorDescriptor)?;
+    }
     Ok(())
 }
 
@@ -738,6 +780,9 @@ pub enum RecordError {
     /// Record run id did not match the run-scoped body.
     #[error("record run_id does not match RunAccepted body")]
     RecordRunMismatch,
+    /// Durable failure descriptor violates semantic limits.
+    #[error(transparent)]
+    InvalidErrorDescriptor(ErrorDescriptorError),
     /// Child run lineage or attenuation validation failed.
     #[error(transparent)]
     Run(#[from] RunError),
@@ -756,6 +801,7 @@ impl RecordError {
             Self::InvalidInteractionPair => "invalid_interaction_pair",
             Self::UnvalidatedRunLineage => "unvalidated_run_lineage",
             Self::RecordRunMismatch => "record_run_mismatch",
+            Self::InvalidErrorDescriptor(_) => "invalid_error_descriptor",
             Self::Run(inner) => inner.code(),
         }
     }
@@ -807,6 +853,44 @@ mod tests {
         .expect("accepted")
     }
 
+    fn sample_child_run_accepted(parent: &RunAccepted) -> RunAccepted {
+        let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("run");
+        RunAccepted::try_new(
+            run,
+            RunRelation::try_new(
+                parent.run_id(),
+                Some(parent.run_id()),
+                Some(EffectId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("effect")),
+                RunRelationKind::ChildAgent,
+                1,
+                None,
+                None::<&str>,
+            )
+            .expect("relation"),
+            RunSecurityContext::try_new(
+                "tenant",
+                PrincipalRef::try_new("iss", "sub", Some("tenant")).expect("principal"),
+                "oidc",
+                "high",
+                "policy",
+                "decision",
+                None,
+            )
+            .expect("security"),
+            None,
+            RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(br"{}"),
+            Some(parent),
+        )
+        .expect("child accepted")
+    }
+
     fn sample_effect_requested() -> EffectRequested {
         EffectRequested::try_new(
             EffectId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("effect"),
@@ -826,6 +910,77 @@ mod tests {
             None,
         )
         .expect("effect")
+    }
+
+    #[test]
+    fn record_creation_rejects_programmatically_invalid_failure_descriptor() {
+        let mut error = crate::ErrorDescriptor::new(
+            "stage_failed",
+            "failed",
+            crate::ErrorCategory::Middleware,
+            false,
+        )
+        .expect("descriptor");
+        error.message = Arc::from("x".repeat(crate::TEXT_MAX_BYTES + 1));
+        let result = RecordDraft::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("record"),
+            SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session"),
+            LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("lane"),
+            Some(RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("run")),
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            vec![],
+            RecordBody::StageOutcomeRecorded(crate::StageOutcomeRecorded {
+                cursor: crate::StageCursor {
+                    cycle: 0,
+                    stage: crate::Stage::BeforeRun,
+                },
+                disposition: crate::StageDisposition::Failed { error },
+                settlement_digest: Digest::raw_json(b"settlement"),
+            }),
+        )
+        .expect_err("invalid descriptor");
+        assert_eq!(result.code(), "invalid_error_descriptor");
+    }
+
+    #[test]
+    fn serialized_child_run_record_replays_as_validated_lineage() {
+        let parent = sample_run_accepted();
+        let child = sample_child_run_accepted(&parent);
+        let record = RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            RecordId::parse("01234567-89ab-7cde-89ab-0123456789a1").expect("record"),
+            SessionId::parse("01234567-89ab-7cde-89ab-0123456789a2").expect("session"),
+            LaneId::parse("01234567-89ab-7cde-89ab-0123456789a3").expect("lane"),
+            Some(child.run_id()),
+            1,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            Digest::raw_json(b"payload"),
+            None,
+            Digest::raw_json(b"checksum"),
+            vec![EventId::parse("01234567-89ab-7cde-89ab-0123456789a4").expect("event")],
+            RecordBody::RunAccepted(child),
+        )
+        .expect("record");
+        let encoded = serde_json::to_vec(&record).expect("serialize record");
+        let decoded: RecordEnvelope = serde_json::from_slice(&encoded).expect("decode record");
+        let RecordBody::RunAccepted(decoded_child) = decoded.body() else {
+            panic!("run accepted body");
+        };
+        assert!(decoded_child.lineage_is_validated());
+
+        let batch = crate::CommittedBatch::try_new(
+            AppendBatchId::parse("01234567-89ab-7cde-89ab-0123456789a5").expect("batch"),
+            1,
+            1,
+            vec![decoded],
+        )
+        .expect("batch");
+        let mut kernel = crate::Kernel::default();
+        kernel.apply(&batch, 0).expect("replay child acceptance");
     }
 
     #[test]

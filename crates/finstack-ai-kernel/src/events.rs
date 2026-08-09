@@ -9,8 +9,9 @@ use thiserror::Error;
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::digest::Digest;
 use crate::effects::{
-    EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,
-    InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
+    EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectOutputKind,
+    EffectRequested, InteractionCancelled, InteractionExpired, InteractionRequest,
+    InteractionResolution,
 };
 use crate::error::ErrorDescriptor;
 use crate::ids::{
@@ -503,6 +504,10 @@ pub struct RunEvent {
 impl RunEvent {
     /// Construct a durable-derived event.
     ///
+    /// Correlation values supplied here are event data, not proof of source
+    /// authenticity. Runtime code derives authoritative model-effect events
+    /// through [`crate::Kernel::apply`].
+    ///
     /// # Errors
     ///
     /// Returns [`EventError::ClassMismatch`] when the body is transient or
@@ -535,6 +540,7 @@ impl RunEvent {
             });
         }
         validate_event_correlations(run_id, model_request_id, effect_id, tool_call_id, &body)?;
+        validate_event_policy(turn_id, model_request_id, effect_id, sensitivity, &body)?;
         Ok(Self {
             schema_version,
             kind_version,
@@ -557,6 +563,10 @@ impl RunEvent {
     }
 
     /// Construct a transient event.
+    ///
+    /// Runtime producers must source model correlations from the outstanding
+    /// [`crate::PendingModelEffect`]; this value constructor does not authenticate
+    /// caller-supplied identifiers.
     ///
     /// # Errors
     ///
@@ -588,6 +598,7 @@ impl RunEvent {
             });
         }
         validate_event_correlations(run_id, model_request_id, effect_id, tool_call_id, &body)?;
+        validate_event_policy(turn_id, model_request_id, effect_id, sensitivity, &body)?;
         Ok(Self {
             schema_version,
             kind_version,
@@ -613,6 +624,10 @@ impl RunEvent {
     ///
     /// This reuses the replay-stable event id persisted on the record.
     ///
+    /// Model effect records require authoritative state correlations and are
+    /// therefore derived only by [`crate::Kernel::apply`]. Other record bodies
+    /// carry all required correlations in the record.
+    ///
     /// # Errors
     ///
     /// Returns [`EventError`] when the record is not run-scoped, the ordinal is
@@ -621,7 +636,22 @@ impl RunEvent {
         record: &RecordEnvelope,
         ordinal: usize,
         transient_sequence: u64,
-        sensitivity: Sensitivity,
+    ) -> Result<Self, EventError> {
+        Self::try_from_record_with_model_correlations(
+            record,
+            ordinal,
+            transient_sequence,
+            None,
+            None,
+        )
+    }
+
+    pub(crate) fn try_from_record_with_model_correlations(
+        record: &RecordEnvelope,
+        ordinal: usize,
+        transient_sequence: u64,
+        model_turn_id: Option<TurnId>,
+        pending_model_request_id: Option<ModelRequestId>,
     ) -> Result<Self, EventError> {
         let expected_kind = derived_event_kind(record.body(), record.kind_version(), ordinal)?;
         let event_id = record
@@ -629,7 +659,7 @@ impl RunEvent {
             .get(ordinal)
             .copied()
             .ok_or(EventError::UnsupportedOrdinal { ordinal })?;
-        let body = run_event_body_from_record(record.body());
+        let body = run_event_body_from_record(record.body())?;
         if body.kind() != expected_kind {
             return Err(EventError::CorrelationMismatch {
                 reason: "derived event ordinal/body mismatch",
@@ -638,7 +668,20 @@ impl RunEvent {
         let run_id = record.run_id().ok_or(EventError::CorrelationMismatch {
             reason: "PR-008 durable event source must be run-scoped",
         })?;
-        let effect_id = effect_id_for_body(&body);
+        let (turn_id, model_request_id, effect_id) = record_correlations(
+            record.body(),
+            model_turn_id,
+            pending_model_request_id,
+            effect_id_for_body(&body),
+        );
+        if is_model_effect_record(record.body())
+            && (turn_id.is_none() || model_request_id.is_none())
+        {
+            return Err(EventError::CorrelationMismatch {
+                reason: "model effect event requires authoritative model correlations",
+            });
+        }
+        let sensitivity = derived_event_sensitivity(record.body());
         Self::try_durable(
             RUN_EVENT_SCHEMA_VERSION,
             record.kind_version(),
@@ -646,8 +689,8 @@ impl RunEvent {
             record.session_id(),
             record.lane_id(),
             run_id,
-            None,
-            None,
+            turn_id,
+            model_request_id,
             None,
             effect_id,
             None,
@@ -768,6 +811,58 @@ impl RunEvent {
     }
 }
 
+fn validate_event_policy(
+    turn_id: Option<TurnId>,
+    model_request_id: Option<ModelRequestId>,
+    effect_id: Option<EffectId>,
+    sensitivity: Sensitivity,
+    body: &RunEventBody,
+) -> Result<(), EventError> {
+    match body {
+        RunEventBody::MessageFinalized { .. } | RunEventBody::RunCompleted { .. }
+            if turn_id.is_none()
+                || model_request_id.is_none()
+                || effect_id.is_none()
+                || sensitivity != Sensitivity::Internal =>
+        {
+            return Err(EventError::CorrelationMismatch {
+                reason: "compact model event requires turn_id, model_request_id, effect_id, and internal sensitivity",
+            });
+        }
+        RunEventBody::RunFailed { .. } if sensitivity != Sensitivity::Internal => {
+            return Err(EventError::CorrelationMismatch {
+                reason: "run failed event requires internal sensitivity",
+            });
+        }
+        _ => {}
+    }
+    let model_event = match body {
+        RunEventBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Model,
+        RunEventBody::EffectDeferred(deferred) => {
+            deferred.output_contract.kind == EffectOutputKind::ModelResponse
+        }
+        RunEventBody::EffectCompleted(completed) => {
+            completed.output_contract().kind == EffectOutputKind::ModelResponse
+        }
+        RunEventBody::EffectFailed(failed) => {
+            failed.output_contract().kind == EffectOutputKind::ModelResponse
+        }
+        RunEventBody::ModelTextDelta(_) | RunEventBody::ReasoningDelta(_) => true,
+        _ => false,
+    };
+    if model_event
+        && (turn_id.is_none()
+            || model_request_id.is_none()
+            || effect_id.is_none()
+            || sensitivity != Sensitivity::Confidential)
+    {
+        return Err(EventError::CorrelationMismatch {
+            reason: "model event requires turn_id, model_request_id, effect_id, and confidential sensitivity",
+        });
+    }
+    Ok(())
+}
+
 fn validate_event_versions(schema_version: u16, kind_version: u16) -> Result<(), EventError> {
     if schema_version != RUN_EVENT_SCHEMA_VERSION {
         return Err(EventError::UnsupportedSchemaVersion { schema_version });
@@ -842,8 +937,8 @@ fn effect_id_for_body(body: &RunEventBody) -> Option<EffectId> {
     }
 }
 
-fn run_event_body_from_record(body: &RecordBody) -> RunEventBody {
-    match body {
+fn run_event_body_from_record(body: &RecordBody) -> Result<RunEventBody, EventError> {
+    let event = match body {
         RecordBody::RunAccepted(value) => RunEventBody::RunAccepted(value.clone()),
         RecordBody::EffectRequested(value) => RunEventBody::EffectRequested(value.clone()),
         RecordBody::EffectDeferred(value) => RunEventBody::EffectDeferred(value.clone()),
@@ -858,6 +953,69 @@ fn run_event_body_from_record(body: &RecordBody) -> RunEventBody {
         RecordBody::InteractionCancelled(value) => {
             RunEventBody::InteractionCancelled(value.clone())
         }
+        RecordBody::EntryAppended(value) => RunEventBody::MessageFinalized {
+            message_id: *value.message.id(),
+        },
+        RecordBody::RunCompleted(value) => RunEventBody::RunCompleted {
+            result_digest: value.result_digest,
+        },
+        RecordBody::RunFailed(value) => RunEventBody::RunFailed {
+            error: value.error.clone(),
+        },
+        RecordBody::StageOutcomeRecorded(_) | RecordBody::ContextPrepared(_) => {
+            return Err(EventError::UnsupportedOrdinal { ordinal: 0 });
+        }
+    };
+    Ok(event)
+}
+
+fn record_correlations(
+    body: &RecordBody,
+    model_turn_id: Option<TurnId>,
+    pending_model_request_id: Option<ModelRequestId>,
+    body_effect_id: Option<EffectId>,
+) -> (Option<TurnId>, Option<ModelRequestId>, Option<EffectId>) {
+    match body {
+        RecordBody::EntryAppended(value) => (
+            Some(value.turn_id),
+            Some(value.model_request_id),
+            Some(value.effect_id),
+        ),
+        RecordBody::RunCompleted(value) => (
+            Some(value.turn_id),
+            Some(value.model_request_id),
+            Some(value.effect_id),
+        ),
+        RecordBody::RunFailed(value) => (value.turn_id, value.model_request_id, value.effect_id),
+        RecordBody::EffectRequested(_)
+        | RecordBody::EffectDeferred(_)
+        | RecordBody::EffectCompleted(_)
+        | RecordBody::EffectFailed(_) => (model_turn_id, pending_model_request_id, body_effect_id),
+        _ => (None, None, body_effect_id),
+    }
+}
+
+fn derived_event_sensitivity(body: &RecordBody) -> Sensitivity {
+    if is_model_effect_record(body) {
+        Sensitivity::Confidential
+    } else {
+        Sensitivity::Internal
+    }
+}
+
+fn is_model_effect_record(body: &RecordBody) -> bool {
+    match body {
+        RecordBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Model,
+        RecordBody::EffectDeferred(deferred) => {
+            deferred.output_contract.kind == EffectOutputKind::ModelResponse
+        }
+        RecordBody::EffectCompleted(completed) => {
+            completed.output_contract().kind == EffectOutputKind::ModelResponse
+        }
+        RecordBody::EffectFailed(failed) => {
+            failed.output_contract().kind == EffectOutputKind::ModelResponse
+        }
+        _ => false,
     }
 }
 
@@ -969,7 +1127,7 @@ pub fn derived_event_kind(
     if ordinal != 0 {
         return Err(EventError::UnsupportedOrdinal { ordinal });
     }
-    Ok(match body {
+    let kind = match body {
         RecordBody::RunAccepted(_) => RunEventKind::RunAccepted,
         RecordBody::EffectRequested(_) => RunEventKind::EffectRequested,
         RecordBody::EffectDeferred(_) => RunEventKind::EffectDeferred,
@@ -980,7 +1138,14 @@ pub fn derived_event_kind(
         RecordBody::InteractionResolved(_) => RunEventKind::InteractionResolved,
         RecordBody::InteractionExpired(_) => RunEventKind::InteractionExpired,
         RecordBody::InteractionCancelled(_) => RunEventKind::InteractionCancelled,
-    })
+        RecordBody::EntryAppended(_) => RunEventKind::MessageFinalized,
+        RecordBody::RunCompleted(_) => RunEventKind::RunCompleted,
+        RecordBody::RunFailed(_) => RunEventKind::RunFailed,
+        RecordBody::StageOutcomeRecorded(_) | RecordBody::ContextPrepared(_) => {
+            return Err(EventError::UnsupportedOrdinal { ordinal });
+        }
+    };
+    Ok(kind)
 }
 
 /// Event construction errors.
@@ -1066,6 +1231,10 @@ mod tests {
         let session = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("s");
         let lane = LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("l");
         let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("r");
+        let turn = TurnId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("turn");
+        let model_request =
+            ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("request");
+        let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("effect");
         let delta = ModelTextDelta::try_new("hi").expect("delta");
         assert!(
             RunEvent::try_durable(
@@ -1088,6 +1257,24 @@ mod tests {
             )
             .is_err()
         );
+        RunEvent::try_transient(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            Some(turn),
+            Some(model_request),
+            None,
+            Some(effect),
+            None,
+            0,
+            Timestamp::from_unix_ms(0).expect("ts"),
+            Sensitivity::Internal,
+            RunEventBody::ModelTextDelta(delta.clone()),
+        )
+        .expect_err("model deltas require confidential sensitivity");
         let transient = RunEvent::try_transient(
             RUN_EVENT_SCHEMA_VERSION,
             RUN_EVENT_KIND_VERSION,
@@ -1095,17 +1282,14 @@ mod tests {
             session,
             lane,
             run,
+            Some(turn),
+            Some(model_request),
             None,
-            Some(
-                ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789af")
-                    .expect("model request"),
-            ),
-            None,
-            None,
+            Some(effect),
             None,
             0,
             Timestamp::from_unix_ms(0).expect("ts"),
-            Sensitivity::Internal,
+            Sensitivity::Confidential,
             RunEventBody::ModelTextDelta(delta),
         )
         .expect("transient");
@@ -1114,7 +1298,7 @@ mod tests {
         assert_eq!(transient.schema_version(), RUN_EVENT_SCHEMA_VERSION);
         assert_eq!(transient.session_id(), session);
         assert!(transient.model_request_id().is_some());
-        assert_eq!(transient.sensitivity(), Sensitivity::Internal);
+        assert_eq!(transient.sensitivity(), Sensitivity::Confidential);
 
         let error = RunEvent::try_transient(
             RUN_EVENT_SCHEMA_VERSION,
@@ -1158,7 +1342,10 @@ mod tests {
             None,
         )
         .expect("request");
-        let event = RunEvent::try_durable(
+        let turn_id = TurnId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("turn");
+        let model_request_id =
+            ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789b2").expect("request");
+        RunEvent::try_durable(
             RUN_EVENT_SCHEMA_VERSION,
             RUN_EVENT_KIND_VERSION,
             EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("event"),
@@ -1174,6 +1361,25 @@ mod tests {
             0,
             Timestamp::from_unix_ms(0).expect("timestamp"),
             Sensitivity::Internal,
+            RunEventBody::EffectRequested(requested.clone()),
+        )
+        .expect_err("model effect events require correlations and confidential sensitivity");
+        let event = RunEvent::try_durable(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("event"),
+            SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session"),
+            LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("lane"),
+            RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("run"),
+            Some(turn_id),
+            Some(model_request_id),
+            None,
+            Some(effect_id),
+            None,
+            1,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Confidential,
             RunEventBody::EffectRequested(requested),
         )
         .expect("event");
@@ -1287,10 +1493,133 @@ mod tests {
             RecordBody::EffectRequested(requested),
         )
         .expect("record");
-        let event =
-            RunEvent::try_from_record(&record, 0, 3, Sensitivity::Internal).expect("derived event");
+        let missing = RunEvent::try_from_record(&record, 0, 3);
+        assert!(matches!(
+            missing,
+            Err(EventError::CorrelationMismatch { reason })
+                if reason.contains("authoritative model correlations")
+        ));
+    }
+
+    #[test]
+    fn non_model_effect_record_derives_without_model_correlations() {
+        let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("effect");
+        let requested = EffectRequested::try_new(
+            effect_id,
+            EffectKind::Context,
+            None,
+            None,
+            None,
+            EffectOutputContract {
+                kind: EffectOutputKind::ContextContribution,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"schema"),
+            },
+            EffectInput::Context {
+                request: RawJson::parse("{}").expect("request"),
+            },
+            RetrySafety::SafeToRetry,
+            None,
+        )
+        .expect("request");
+        let event_id = EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("event");
+        let record = RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            RecordId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("record"),
+            SessionId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("session"),
+            LaneId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("lane"),
+            Some(RunId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("run")),
+            7,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            Digest::raw_json(b"payload"),
+            None,
+            Digest::raw_json(b"checksum"),
+            vec![event_id],
+            RecordBody::EffectRequested(requested),
+        )
+        .expect("record");
+
+        let event = RunEvent::try_from_record(&record, 0, 3).expect("derived context event");
         assert_eq!(event.event_id(), event_id);
-        assert_eq!(event.durable_sequence(), Some(7));
-        assert_eq!(event.kind(), RunEventKind::EffectRequested);
+        assert_eq!(event.effect_id(), Some(effect_id));
+        assert_eq!(event.turn_id(), None);
+        assert_eq!(event.model_request_id(), None);
+        assert_eq!(event.sensitivity(), Sensitivity::Internal);
+    }
+
+    #[test]
+    fn finalized_message_requires_model_correlations_and_internal_sensitivity() {
+        let event_id = EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("event");
+        let session = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session");
+        let lane = LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("lane");
+        let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("run");
+        let message = MessageId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("message");
+        let turn = TurnId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("turn");
+        let request =
+            ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("request");
+        let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789b2").expect("effect");
+        let body = || RunEventBody::MessageFinalized {
+            message_id: message,
+        };
+
+        RunEvent::try_durable(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Internal,
+            body(),
+        )
+        .expect_err("message finalized requires model correlations");
+        RunEvent::try_durable(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            Some(turn),
+            Some(request),
+            None,
+            Some(effect),
+            None,
+            1,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Confidential,
+            body(),
+        )
+        .expect_err("message finalized must be internal");
+        RunEvent::try_durable(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            Some(turn),
+            Some(request),
+            None,
+            Some(effect),
+            None,
+            1,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Internal,
+            body(),
+        )
+        .expect("valid message finalized");
     }
 }

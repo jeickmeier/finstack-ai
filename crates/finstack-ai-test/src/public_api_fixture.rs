@@ -1,4 +1,4 @@
-//! Compatibility fixture runner for `public-rust-api` (PR-006/PR-007).
+//! Compatibility fixture runner for `public-rust-api` (PR-006–PR-009).
 //!
 //! Boundary recipes are materialized and measured before assertions so exact and
 //! one-over ceilings are evidence, not declarations. Python/JavaScript/CBOR
@@ -187,6 +187,9 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
         }
         "run-accepted" | "effect-requested" | "record-draft" | "append-request" | "run-event" => {
             crate::pr008_fixture::run_pr008_subject(fixture)
+        }
+        "run-phase" | "kernel-input" | "committed-batch" | "kernel-state" | "pr009-record" => {
+            crate::pr009_fixture::run_pr009_subject(fixture)
         }
         other => Err(PublicApiFixtureError::Failed(format!(
             "unknown subject {other}"

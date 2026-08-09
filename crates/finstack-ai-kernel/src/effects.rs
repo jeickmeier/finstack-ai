@@ -12,7 +12,7 @@ use crate::content::{
     validate_content_items,
 };
 use crate::digest::Digest;
-use crate::error::ErrorDescriptor;
+use crate::error::{ErrorDescriptor, ErrorDescriptorError};
 use crate::ids::{BudgetReservationId, ComponentId, EffectId, EffectOutputKey, InteractionId};
 use crate::raw_json::{Metadata, RawJson};
 use crate::refs::{
@@ -756,6 +756,9 @@ impl EffectFailed {
         usage: Option<Usage>,
         completion_id: Option<impl AsRef<str>>,
     ) -> Result<Self, EffectError> {
+        error
+            .validate()
+            .map_err(EffectError::InvalidErrorDescriptor)?;
         let usage_digest = match &usage {
             Some(value) => {
                 value.validate()?;
@@ -1491,6 +1494,9 @@ pub enum EffectError {
     /// Settlement identity or output contract differed from the originating request.
     #[error("effect settlement identity/output contract mismatch")]
     SettlementMismatch,
+    /// Failure descriptor violates durable semantic limits.
+    #[error(transparent)]
+    InvalidErrorDescriptor(ErrorDescriptorError),
     /// Label error.
     #[error(transparent)]
     Refs(#[from] RefsError),
@@ -1514,6 +1520,7 @@ impl EffectError {
             Self::InvalidCancellationPair => "invalid_cancellation_pair",
             Self::TooManyItems { .. } => "too_many_items",
             Self::SettlementMismatch => "effect_settlement_mismatch",
+            Self::InvalidErrorDescriptor(_) => "invalid_error_descriptor",
             Self::Refs(inner) => inner.code(),
             Self::Content(_) => "invalid_content",
             Self::Serialize { .. } => "serialize_failed",
@@ -1634,6 +1641,31 @@ mod tests {
         )
         .expect_err("oversized artifacts");
         assert_eq!(error.code(), "too_many_items");
+    }
+
+    #[test]
+    fn failed_effect_rejects_programmatically_invalid_descriptor() {
+        let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("effect");
+        let mut error = ErrorDescriptor::new(
+            "provider_failed",
+            "failed",
+            crate::error::ErrorCategory::Model,
+            false,
+        )
+        .expect("descriptor");
+        error.message = Arc::from("x".repeat(crate::content::TEXT_MAX_BYTES + 1));
+        let result = EffectFailed::try_new(
+            effect_id,
+            EffectOutputContract {
+                kind: EffectOutputKind::ModelResponse,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"schema"),
+            },
+            error,
+            None,
+            None::<&str>,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

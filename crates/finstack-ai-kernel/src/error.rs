@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::ids::{
     AppendBatchId, ArtifactId, BudgetReservationId, BudgetScopeId, CancellationRequestId, EffectId,
     EventId, InteractionId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId,
@@ -26,7 +27,8 @@ impl ErrorCode {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorCodeError`] when the code is empty or not lowercase `snake_case`.
+    /// Returns [`ErrorCodeError`] when the code is empty, exceeds the label
+    /// ceiling, or is not lowercase `snake_case`.
     pub fn new(code: impl AsRef<str>) -> Result<Self, ErrorCodeError> {
         let code = code.as_ref();
         validate_error_code(code)?;
@@ -63,8 +65,34 @@ impl<'de> Deserialize<'de> for ErrorCode {
     where
         D: serde::Deserializer<'de>,
     {
-        let text = String::deserialize(deserializer)?;
-        Self::new(text).map_err(serde::de::Error::custom)
+        struct ErrorCodeVisitor;
+
+        impl serde::de::Visitor<'_> for ErrorCodeVisitor {
+            type Value = ErrorCode;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(
+                    formatter,
+                    "a lowercase snake_case error code no longer than {LABEL_MAX_BYTES} bytes"
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                ErrorCode::new(value).map_err(E::custom)
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                ErrorCode::new(value).map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_str(ErrorCodeVisitor)
     }
 }
 
@@ -80,6 +108,9 @@ fn validate_error_code(code: &str) -> Result<(), ErrorCodeError> {
     let invalid = || ErrorCodeError {
         code: code.to_owned(),
     };
+    if code.len() > LABEL_MAX_BYTES {
+        return Err(invalid());
+    }
     let mut chars = code.chars();
     let Some(first) = chars.next() else {
         return Err(invalid());
@@ -172,6 +203,7 @@ impl fmt::Display for ErrorCategory {
 
 /// Optional typed identifier context attached to an error descriptor.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ErrorIdentifiers {
     /// Session id when relevant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,7 +263,7 @@ pub struct ErrorIdentifiers {
 /// This is the only durable / cross-language error form. Local Rust source chains
 /// belong on runtime [`crate`]-external wrappers and must be stripped before any
 /// kernel, record, digest, binding, or remote boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ErrorDescriptor {
     /// Stable code.
     pub code: ErrorCode,
@@ -254,22 +286,84 @@ impl ErrorDescriptor {
     ///
     /// # Errors
     ///
-    /// Returns [`ErrorCodeError`] when `code` is not lowercase `snake_case`.
+    /// Returns [`ErrorDescriptorError`] when `code` is invalid or `message`
+    /// violates the semantic text ceiling.
     pub fn new(
         code: impl AsRef<str>,
         message: impl AsRef<str>,
         category: ErrorCategory,
         retryable: bool,
-    ) -> Result<Self, ErrorCodeError> {
-        Ok(Self {
-            code: ErrorCode::new(code)?,
+    ) -> Result<Self, ErrorDescriptorError> {
+        let descriptor = Self {
+            code: ErrorCode::new(code).map_err(ErrorDescriptorError::Code)?,
             message: Arc::<str>::from(message.as_ref()),
             category,
             retryable,
             identifiers: ErrorIdentifiers::default(),
             safe_details: Metadata::empty(),
-        })
+        };
+        descriptor.validate()?;
+        Ok(descriptor)
     }
+
+    /// Validate programmatically assembled descriptor text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorDescriptorError::InvalidMessage`] when the message is
+    /// empty, contains NUL, or exceeds the semantic text ceiling.
+    pub fn validate(&self) -> Result<(), ErrorDescriptorError> {
+        if self.message.is_empty()
+            || self.message.len() > TEXT_MAX_BYTES
+            || self.message.as_bytes().contains(&0)
+        {
+            return Err(ErrorDescriptorError::InvalidMessage);
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for ErrorDescriptor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            code: ErrorCode,
+            message: BoundedString<TEXT_MAX_BYTES>,
+            category: ErrorCategory,
+            retryable: bool,
+            #[serde(default)]
+            identifiers: ErrorIdentifiers,
+            #[serde(default)]
+            safe_details: Metadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let descriptor = Self {
+            code: wire.code,
+            message: Arc::from(wire.message.into_inner()),
+            category: wire.category,
+            retryable: wire.retryable,
+            identifiers: wire.identifiers,
+            safe_details: wire.safe_details,
+        };
+        descriptor.validate().map_err(serde::de::Error::custom)?;
+        Ok(descriptor)
+    }
+}
+
+/// Invalid durable error descriptor.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ErrorDescriptorError {
+    /// Stable error code is invalid.
+    #[error(transparent)]
+    Code(#[from] ErrorCodeError),
+    /// Safe message violates the semantic text contract.
+    #[error("invalid error message")]
+    InvalidMessage,
 }
 
 impl fmt::Display for ErrorDescriptor {
@@ -328,5 +422,56 @@ mod tests {
         assert!(ErrorCode::new("double__underscore").is_err());
         assert!(ErrorCode::new("").is_err());
         assert!(serde_json::from_str::<ErrorCode>("\"Not_Snake\"").is_err());
+    }
+
+    #[test]
+    fn error_code_enforces_label_ceiling_before_decode() {
+        let exact = "x".repeat(crate::LABEL_MAX_BYTES);
+        assert!(ErrorCode::new(&exact).is_ok());
+        let one_over = "x".repeat(crate::LABEL_MAX_BYTES + 1);
+        assert!(ErrorCode::new(&one_over).is_err());
+        let encoded = serde_json::to_string(&one_over).expect("encoded error code");
+        assert!(serde_json::from_str::<ErrorCode>(&encoded).is_err());
+        let escaped = format!("\"{}\"", "\\u0078".repeat(crate::LABEL_MAX_BYTES + 1));
+        assert!(serde_json::from_str::<ErrorCode>(&escaped).is_err());
+    }
+
+    #[test]
+    fn error_descriptor_rejects_unknown_nested_fields() {
+        let descriptor = serde_json::json!({
+            "code": "provider_failed",
+            "message": "failed",
+            "category": "model",
+            "retryable": false,
+            "identifiers": {
+                "run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+                "unknown_identifier": true
+            },
+            "safe_details": {}
+        });
+        assert!(serde_json::from_value::<ErrorDescriptor>(descriptor).is_err());
+
+        let descriptor = serde_json::json!({
+            "code": "provider_failed",
+            "message": "failed",
+            "category": "model",
+            "retryable": false,
+            "identifiers": {},
+            "safe_details": {},
+            "unknown_descriptor": true
+        });
+        assert!(serde_json::from_value::<ErrorDescriptor>(descriptor).is_err());
+    }
+
+    #[test]
+    fn error_descriptor_message_enforces_text_ceiling() {
+        let exact = "x".repeat(crate::content::TEXT_MAX_BYTES);
+        assert!(
+            ErrorDescriptor::new("provider_failed", exact, ErrorCategory::Model, false).is_ok()
+        );
+        let one_over = "x".repeat(crate::content::TEXT_MAX_BYTES + 1);
+        assert!(
+            ErrorDescriptor::new("provider_failed", one_over, ErrorCategory::Model, false).is_err()
+        );
     }
 }

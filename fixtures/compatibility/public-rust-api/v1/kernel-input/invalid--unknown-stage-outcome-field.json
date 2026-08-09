@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "stage_settled": {
+      "cursor": {
+        "cycle": 0,
+        "stage": "before_finalize"
+      },
+      "outcome": {
+        "continue_model": {
+          "reason": "continue",
+          "unknown": true
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "unknown_field"
+  }
+}

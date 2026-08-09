@@ -17,9 +17,9 @@ date: "2026-08-08"
 | Status | Validated supporting design; incorporated into the authoritative baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, framework architects, implementation teams, extension authors, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.8; Technical Design v0.13; Implementation Plan v0.13; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.9; Technical Design v0.14; Implementation Plan v0.14; Security and Threat Model v0.4 |
 
-This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; Engineering Standards v0.5, Product Requirements v0.7, Architecture Specification v0.8, Technical Design v0.13, accepted ADRs, Security and Threat Model v0.4, and Implementation Plan v0.13 are authoritative for the incorporated requirements, controls, and delivery sequence.
+This document records the validation rationale and future composition guidance. It is supporting material under the documentation authority rules in `docs/README.md`; Engineering Standards v0.5, Product Requirements v0.7, Architecture Specification v0.9, Technical Design v0.14, accepted ADRs, Security and Threat Model v0.4, and Implementation Plan v0.14 are authoritative for the incorporated requirements, controls, and delivery sequence.
 
 # Executive design verdict
 

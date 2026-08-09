@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.13 |
+| Version | 0.14 |
 | Status | Implementation baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.8; Technical Design v0.13; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.9; Technical Design v0.14; Security and Threat Model v0.4 |
 
 # Executive implementation decision
 
@@ -619,13 +619,17 @@ A separate ADR is required before merging a change that:
 
 - Implement the exact TDD `RunPhase` enum and transition table: accepted, before-run, preparing-context, before-model, awaiting-model, after-model, before-tool-batch, awaiting-tools, after-tool-batch, before-finalize, awaiting-interaction, awaiting-external, sleeping, cancelling, suspended, completed, failed, and cancelled.
 
-- Add command-level inputs and the exact TDD `Decision` output: record drafts, post-commit actions/effects, and diagnostics. Durable public events are derived only by `apply` after commit; transient progress is sequenced by the runtime.
+- Materialize only the PR-009-owned command inputs frozen in TDD section 11: run acceptance, aggregate stage settlement, direct model settlement, and external completion of a deferred model effect. Retain the exact `TransitionEnv`, `Decision`, and `CommittedBatch` shapes; reserve later input families for their owning PRs.
 
-- Add `apply` functions that mutate state only from committed records.
+- Add the frozen `KernelState`, stable `KernelError`, and `PostCommitAction::ExecuteEffect` contract. `decide` consumes preallocated IDs in documented order, emits no effect action without a preceding sibling request record, and never mutates authoritative state.
 
-- Support text streaming as transient events and final assistant message commitment as durable state.
+- Add transactional `apply` functions that validate committed-batch ranges, contiguous record sequences, identity/order/sibling rules, exact duplicate versus conflicting settlements, and terminal immutability before mutating state only from committed records. Return the existing `RunEvent` type, not a second `KernelEvent` vocabulary.
 
-- Support generic effect deferral/resumption and require `before_finalize` settlement before terminal commit.
+- Support text streaming as transient events and final assistant message commitment as durable state. One runtime-owned sequence spans transient progress and commit-derived events; the runtime supplies the next unused sequence to each kernel `apply`.
+
+- Materialize only the PR-009-owned `StageOutcomeRecorded`, `ContextPrepared`, `EntryAppended`, `RunCompleted`, and `RunFailed` payloads and ordinal/correlation rules. Freeze the `kernel-state` v1 JCS projection/domain used by replay evidence.
+
+- Support generic model-effect deferral/resumption under the original `EffectId`; classify equal repeats idempotently and conflicts fail closed. Require aggregate `before_finalize` acceptance, fresh model continuation, or failure settlement before any terminal commit.
 
 **Acceptance evidence.**
 
@@ -643,7 +647,7 @@ A separate ADR is required before merging a change that:
 
 **Traceability.** FR-KRN-002 through FR-KRN-004; TDD section 11.
 
-**Explicitly excluded.** No tools, middleware, context providers, or retries.
+**Explicitly excluded.** No tools; actual middleware or context-provider invocation; retries; cancellation or limit enforcement; runtime/store commit loops; canonical-CBOR encoding; Python/WASM bindings; or G1 closure.
 
 ### PR-010 - Add tool-call and tool-batch semantics to the reducer
 

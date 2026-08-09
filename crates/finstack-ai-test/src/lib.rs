@@ -4,7 +4,7 @@
 //! conformance runner, and Criterion benchmark helpers. PR-006 adds deterministic
 //! clock/random fakes and the `public-rust-api` fixture runner. PR-007 extends that
 //! runner with content-block, blob-ref, and message subjects. PR-008 adds
-//! run/effect/record/event subjects.
+//! run/effect/record/event subjects. PR-009 adds a real reducer-backed adapter.
 
 #![warn(missing_docs)]
 
@@ -13,7 +13,9 @@ mod fakes;
 mod message_fixture;
 mod paths;
 mod pr008_fixture;
+mod pr009_fixture;
 mod public_api_fixture;
+mod reducer_fixture;
 mod scripted_model;
 mod trace_fixture;
 
@@ -26,6 +28,10 @@ pub use paths::{compatibility_fixture, repo_root, schema_path};
 pub use public_api_fixture::{
     Expect, PublicApiFixture, PublicApiFixtureError, Recipe, discover_public_api_fixtures,
     load_public_api_fixture, run_all_public_api_fixtures, run_public_api_fixture,
+};
+pub use reducer_fixture::{
+    ReducerExecution, ReducerRustAdapter, ReducerTerminalProjection, execute_reducer_trace,
+    project_reducer_terminal,
 };
 pub use scripted_model::{ScriptedInput, ScriptedStep, ScriptedStepKind};
 pub use trace_fixture::{

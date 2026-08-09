@@ -96,4 +96,7 @@ def test_build_metadata_includes_required_identity_fields() -> None:
         )
     for key in ("rustc", "target", "commit", "features", "platform", "host_triple"):
         assert key in metadata
+    assert metadata["workload"] == "conformance-noop-and-pr009-reducer-groups"
+    assert "no-op" in metadata["notes"]
+    assert "PR-009 reducer" in metadata["notes"]
     bench.validate_metadata(metadata)

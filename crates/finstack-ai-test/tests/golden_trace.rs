@@ -66,6 +66,39 @@ fn oversized_payload_declarations_are_rejected() {
 }
 
 #[test]
+fn pr009_scripted_step_contract_rejects_missing_fields_and_kind_misuse() {
+    for relative in [
+        "golden-trace/v1/scripted-input/invalid--model-chunk-missing-id.json",
+        "golden-trace/v1/scripted-input/invalid--model-chunk-missing-text.json",
+        "golden-trace/v1/scripted-input/invalid--model-chunk-empty-text.json",
+        "golden-trace/v1/scripted-input/invalid--model-completed-missing-id.json",
+        "golden-trace/v1/scripted-input/invalid--model-completed-text.json",
+        "golden-trace/v1/scripted-input/invalid--external-completed-missing-text.json",
+    ] {
+        let text = std::fs::read_to_string(compatibility_fixture(relative))
+            .expect("read invalid PR-009 scripted fixture");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("parse invalid fixture");
+        let error = validate_against_schema("golden-trace", 1, "scripted-input", &value)
+            .expect_err("invalid PR-009 scripted step must fail");
+        assert!(matches!(error, TraceError::Schema(_)), "{relative}");
+    }
+}
+
+#[test]
+fn pr009_external_completion_allows_present_empty_text() {
+    let path =
+        compatibility_fixture("golden-trace/v1/trace/valid--pr009-external-completed-empty.json");
+    let trace = load_golden_trace(path).expect("empty external completion text is schema-valid");
+    let external = trace
+        .scripted_outcomes
+        .steps
+        .iter()
+        .find(|step| step.kind == finstack_ai_test::ScriptedStepKind::ExternalCompleted)
+        .expect("external completion step");
+    assert_eq!(external.text.as_deref(), Some(""));
+}
+
+#[test]
 fn normalization_is_order_independent_for_object_keys() {
     let left = json!({"z": 1, "a": [ {"b": 2, "a": 3} ]});
     let right = json!({"a": [ {"a": 3, "b": 2} ], "z": 1});

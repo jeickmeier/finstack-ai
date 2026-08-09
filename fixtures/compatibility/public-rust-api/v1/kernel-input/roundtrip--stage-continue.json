@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "stage_settled": {
+      "cursor": {
+        "cycle": 0,
+        "stage": "before_run"
+      },
+      "outcome": "continue"
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

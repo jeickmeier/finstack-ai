@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "kernel-state",
+  "operation": "reducer_completed_hash",
+  "input": {
+    "trace": "golden-trace/v1/trace/valid--pr009-model-completed.json"
+  },
+  "expect": {
+    "ok": true,
+    "state_hash": "58a34b469371d122d76c71740cf6aa2c5b246788239e965e09e750a6386a493c"
+  }
+}

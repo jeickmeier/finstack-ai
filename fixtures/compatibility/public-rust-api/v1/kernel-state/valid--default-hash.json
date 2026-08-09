@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "subject": "kernel-state",
+  "operation": "default_hash",
+  "input": {},
+  "expect": {
+    "ok": true,
+    "state_hash": "2bb5c2fabe0b6669de360dfa118eabac52821dd3378b09d762e8fc08ab32f0c8"
+  }
+}

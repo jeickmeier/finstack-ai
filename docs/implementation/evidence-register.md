@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.13 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.14 inventory remains 345 logical-PR criteria and 62 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -32,7 +32,8 @@ The current ordinal namespace is bound to this exact plan artifact:
 | PLAN-0.10 | 0.10 | `fea2ea8b02a710a0edc655909dc9f6f1a2aae6e1996f657b26c9e3424bfd2916` | 2026-08-08 | 66 | 345 | 62 | Pack v0.12 centralized license layout | Superseded |
 | PLAN-0.11 | 0.11 | `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.13 PR-007 message contract freeze | Superseded |
 | PLAN-0.12 | 0.12 | `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | 2026-08-08 | 66 | 345 | 62 | Pack v0.14 ModelRef optional fields | Superseded |
-| PLAN-0.13 | 0.13 | `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | 2026-08-08 | 66 | 345 | 62 | Pack v0.15 PR-008 contract freeze | Current |
+| PLAN-0.13 | 0.13 | `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | 2026-08-08 | 66 | 345 | 62 | Pack v0.15 PR-008 contract freeze | Superseded |
+| PLAN-0.14 | 0.14 | `48a3eb39c4a28c47c7aabf994613f784820517b6271a2e3881cfcb064973674e` | 2026-08-08 | 66 | 345 | 62 | Pack v0.16 PR-009 reducer contract freeze, including replay, capacity, and scope refinements | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -58,6 +59,7 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-08 | PLAN-0.10 | PLAN-0.11 / `6bcbdb7926487a957014623126054acd85831efc5824fbb1bc048a37d74216b6` | PR-007 principal changes / A01 | PR-007 principal changes / A01 (revised; acceptance IDs unchanged) | Pack v0.13 PR-007 message contract freeze | Pack v0.13 amendment |
 | 2026-08-08 | PLAN-0.11 | PLAN-0.12 / `afd2927ade5fbdc6f040ab78f7358e39e1dcda160bb9cf95391b0381a8ef19a6` | PR-007 principal changes (`ModelRef`) | PR-007 principal changes (`ModelRef` optionals; acceptance IDs unchanged) | Pack v0.14 ModelRef optional fields | Pack v0.14 amendment |
 | 2026-08-08 | PLAN-0.12 | PLAN-0.13 / `4e813549b478c7586a22f65ddcadb87fa3a25b2e910fd22ef44b08b16fbfe43f` | PR-008 principal changes / A01 / A03 | PR-008 principal changes / A01 / A03 (revised; acceptance IDs unchanged; payload-digest evidence moved to PR-039) | Pack v0.15 PR-008 contract freeze | Pack v0.15 amendment |
+| 2026-08-08 | PLAN-0.13 | PLAN-0.14 / `48a3eb39c4a28c47c7aabf994613f784820517b6271a2e3881cfcb064973674e` | PR-009 principal changes / A01–A05 | PR-009 principal changes, replay-verifiable fingerprints, hard state capacity, and completed/failed-only concrete vocabularies clarified (acceptance IDs, order, and inventory unchanged) | Pack v0.16 PR-009 reducer contract freeze/refinement | Pack v0.16 amendment |
 
 ## Acceptance dispositions
 
@@ -128,6 +130,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-008-A06 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-remediation-test-a8ae4dbcdf37; PR-008-E-remediation-security-c7141f3b3c7f; PR-008-E-final-hosted-ci-e1b5e2591cc4; PR-008-E-merge-ci-eb68551e3bac | — | me@jeickmeier.com | 2026-08-08 |
 | PR-008-A07 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-remediation-test-a8ae4dbcdf37; PR-008-E-remediation-conformance-24e99a1432e8; PR-008-E-final-hosted-ci-e1b5e2591cc4; PR-008-E-merge-ci-eb68551e3bac | — | me@jeickmeier.com | 2026-08-08 |
 | PR-008-A08 | PR-008 | PLAN-0.13 / same | Passed | me@jeickmeier.com | PR-008-E-remediation-schema-209e13c5594d; PR-008-E-remediation-conformance-24e99a1432e8; PR-008-E-remediation-security-c7141f3b3c7f; PR-008-E-final-hosted-ci-e1b5e2591cc4; PR-008-E-merge-ci-eb68551e3bac | — | me@jeickmeier.com | 2026-08-08 |
+| PR-009-A01 | PR-009 | PLAN-0.14 / [PR-009](../planning/04-finstack-ai-implementation-plan.md#pr-009---implement-the-model-only-run-reducer) | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-009-A02 | PR-009 | PLAN-0.14 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-009-A03 | PR-009 | PLAN-0.14 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-009-A04 | PR-009 | PLAN-0.14 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-009-A05 | PR-009 | PLAN-0.14 / same | Pending | me@jeickmeier.com | — | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
@@ -144,6 +151,8 @@ PR-006 acceptance is closed and the logical PR is `Done` at merge `56d7777956df1
 PR-007 acceptance is closed and the logical PR is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). Immutable implementation evidence is bound to `4a0a77f668adcfa2679dc161779c4456d721c0c2`; `mise run ci` and `mise run check-wasm` were re-verified after integration. ADR-036 remains `In progress` / `Partial` because later mapped artifact-store PRs are still open. Artifacts live under [`artifacts/pr-007/`](artifacts/pr-007/).
 
 PR-008 acceptance A01–A08 was reopened as `Failed` by pre-merge review at head `e3fdf05b59a6bc357fcb853292f20fd5d4fb7b21` (`PR-008-E-code-review-f82034377d5e`), reclosed locally after remediation at implementation commit `cd1fa367b528225e5bba1484ecc377cc109d666c`, and reconfirmed by final hosted checks at PR head `44d86b0c8371f6ee4e9ad14014e9fc35ea807c3a` plus post-merge local CI at merge commit `4b68a9397a8e07a581f34dfc34f0bfb96873c00d`. PR-008 is `Done` via merged [#5](https://github.com/jeickmeier/finstack-ai/pull/5). Canonical-CBOR payload-digest/envelope-checksum evidence remains deferred to PR-039 per PLAN-0.13. Artifacts live under [`artifacts/pr-008/`](artifacts/pr-008/).
+
+PR-009 A01–A05 remain `Pending` at 0/5. Local uncommitted initial-candidate artifacts and a fresh post-review remediation validation summary live under [`artifacts/pr-009/`](artifacts/pr-009/), but they are not immutable evidence, do not close acceptance, and carry no reviewer approval. The initial security review is superseded as a current-tree claim; dedicated security re-review remains pending.
 
 ## Evidence records
 

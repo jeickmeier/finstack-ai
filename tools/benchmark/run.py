@@ -20,7 +20,7 @@ from pathlib import Path
 TOOL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOL_DIR.parents[1]
 PACKAGE = "finstack-ai-test"
-WORKLOAD = "conformance-noop-load-normalize-compare"
+WORKLOAD = "conformance-noop-and-pr009-reducer-groups"
 ARTIFACT_ROOT = REPO_ROOT / "target" / "benchmark"
 METADATA_SCHEMA = (
     REPO_ROOT / "schemas" / "benchmark-report" / "v1" / "metadata.schema.json"
@@ -150,8 +150,9 @@ def build_metadata(
         },
         "generated_at_unix_ms": int(time.time() * 1000),
         "notes": (
-            "Non-blocking harness evidence. Framework-only conformance path; "
-            "no external model latency."
+            "Non-blocking aggregate Criterion evidence: no-op fixture "
+            "load/normalize/compare and real PR-009 reducer execution groups. "
+            "Framework-only paths; no external model latency."
         ),
     }
 

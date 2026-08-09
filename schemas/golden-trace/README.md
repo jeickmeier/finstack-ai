@@ -11,6 +11,10 @@ schemas/golden-trace/v1/scripted-input.schema.json
 schemas/golden-trace/v1/trace.schema.json
 ```
 
-Payload declaration ceilings mirror Technical Design §6.5. The Phase 0
-harness validates fixtures and compares opaque expected values; it does not
-implement Phase 1 semantic hashing or ADR-016 JCS.
+Payload declaration ceilings mirror Technical Design §6.5. Format v1 retains
+the original scripted fields and adds strict model-only completion, deferral,
+external-completion (required `text`, including empty text), and
+`before_finalize` continuation steps for PR-009.
+The native reducer adapter obtains semantic state hashes from
+`KernelState::state_hash`; fixture normalization itself remains sorted-key JSON
+comparison and does not implement semantic JCS.

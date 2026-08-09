@@ -1,0 +1,15 @@
+A dedicated local security review has completed over the uncommitted change set:
+
+- Scope: uncommitted PR-009 planning, kernel, records/events, conformance, fixtures, and benchmark changes.
+- Result: no medium, high, or critical security findings.
+- Verified controls: fail-closed phase/correlation checks, settlement idempotency/conflict handling, terminal immutability, commit-before-effect ordering, strict/bounded decoding, compact public events, and original effect identity through deferral.
+- Residual later-runtime obligations: authenticated tenant-scoped external completion ingress, store enforcement, and observer sensitivity handling.
+
+Subsequent integrity hardening of canonical and typed path-aware fingerprints, capacity preflight validation, stage-settlement digest verification, focused tests, and expected hashes was covered by task-scoped code review and the fresh local validation captured in this directory. A final whole-change review remains outside these candidate artifacts.
+
+This review is local working-tree review only. It is not immutable evidence, final whole-change review, or reviewer approval and must not be assigned an evidence ID.
+
+Supersession note (2026-08-09): this review predates the subsequent whole-change
+review findings and remediation. It is retained as historical candidate context
+but no longer supports a current-tree "no findings" claim. The remediated tree
+requires a fresh dedicated whole-change security review before evidence binding.

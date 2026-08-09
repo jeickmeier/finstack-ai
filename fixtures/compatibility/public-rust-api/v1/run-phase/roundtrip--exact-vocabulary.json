@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "subject": "run-phase",
+  "operation": "exact_vocabulary",
+  "input": [
+    "accepted",
+    "before_run",
+    "preparing_context",
+    "before_model",
+    "awaiting_model",
+    "after_model",
+    "before_tool_batch",
+    "awaiting_tools",
+    "after_tool_batch",
+    "before_finalize",
+    "awaiting_interaction",
+    "awaiting_external",
+    "sleeping",
+    "cancelling",
+    "suspended",
+    "completed",
+    "failed",
+    "cancelled"
+  ],
+  "expect": {
+    "ok": true
+  }
+}

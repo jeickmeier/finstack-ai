@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "steps": [
+    {
+      "kind": "model_completed",
+      "id": "completion-1",
+      "text": "model_completed must use accumulated chunks"
+    }
+  ]
+}

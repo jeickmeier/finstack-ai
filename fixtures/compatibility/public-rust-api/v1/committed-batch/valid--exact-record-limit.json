@@ -1,0 +1,37 @@
+{
+  "format_version": 1,
+  "subject": "committed-batch",
+  "operation": "construct_count",
+  "input": {
+    "count": 256,
+    "batch_id": "01234567-89ab-7cde-89ab-0123456789a0",
+    "first_sequence": 1,
+    "last_sequence": 256,
+    "template": {
+      "format_version": 1,
+      "kind_version": 1,
+      "record_id": "01234567-89ab-7cde-89ab-0123456789a1",
+      "session_id": "01234567-89ab-7cde-89ab-0123456789a2",
+      "lane_id": "01234567-89ab-7cde-89ab-0123456789a3",
+      "run_id": "01234567-89ab-7cde-89ab-0123456789a4",
+      "sequence": 1,
+      "timestamp": "1970-01-01T00:00:00.000Z",
+      "payload_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "derived_event_ids": [],
+      "body": {
+        "stage_outcome_recorded": {
+          "cursor": {
+            "cycle": 0,
+            "stage": "before_run"
+          },
+          "disposition": "continued",
+          "settlement_digest": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

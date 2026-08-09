@@ -1,0 +1,5 @@
+$ mise run schema-governance
+[schema-governance] $ uv run --no-project python tools/schema_governance/check.…
+schema-governance: ok
+
+exit_status=0

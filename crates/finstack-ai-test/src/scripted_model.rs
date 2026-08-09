@@ -13,6 +13,14 @@ use crate::trace_fixture::PayloadDeclaration;
 pub enum ScriptedStepKind {
     /// One model text chunk.
     ModelChunk,
+    /// Complete the current model request from accumulated text chunks.
+    ModelCompleted,
+    /// Defer the current model request under a non-secret external handle.
+    ModelDeferred,
+    /// Complete the deferred model request with final external text.
+    ExternalCompleted,
+    /// Continue from `before_finalize` into a fresh model cycle.
+    BeforeFinalizeContinue,
     /// One tool invocation request.
     ToolCall,
     /// One tool result.
@@ -27,6 +35,7 @@ pub enum ScriptedStepKind {
 
 /// One deterministic scripted outcome.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScriptedStep {
     /// Step kind.
     pub kind: ScriptedStepKind,
@@ -61,6 +70,7 @@ pub struct ScriptedStep {
 
 /// Scripted input sequence consumed by golden traces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScriptedInput {
     /// Format major version. Always `1` for this schema.
     pub format_version: u32,

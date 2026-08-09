@@ -17,7 +17,7 @@ date: "2026-08-08"
 | Status | Pre-implementation security baseline |
 | Date | 2026-08-08 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.7; Architecture Specification v0.8; Technical Design v0.13; Implementation Plan v0.13; Engineering Standards v0.5 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.9; Technical Design v0.14; Implementation Plan v0.14; Engineering Standards v0.5 |
 
 # 1. Purpose and authority
 

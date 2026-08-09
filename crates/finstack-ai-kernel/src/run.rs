@@ -528,6 +528,11 @@ impl RunAccepted {
     pub(crate) fn lineage_is_validated(&self) -> bool {
         self.lineage_validated.0
     }
+
+    pub(crate) fn mark_persisted_lineage_validated(mut self) -> Self {
+        self.lineage_validated = LineageValidation(true);
+        self
+    }
 }
 
 impl<'de> Deserialize<'de> for RunAccepted {

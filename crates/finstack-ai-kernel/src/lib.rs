@@ -32,6 +32,69 @@
 //! .expect("message");
 //! assert_eq!(message.role(), MessageRole::User);
 //! ```
+//!
+//! # Model-only decide, commit, and apply
+//!
+//! ```
+//! # use finstack_ai_kernel::*;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # let run_id = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab")?;
+//! # let accepted = RunAccepted::try_new(
+//! #     run_id, RunRelation::root(run_id)?,
+//! #     RunSecurityContext::try_new(
+//! #         "tenant", PrincipalRef::try_new("issuer", "subject", Some("tenant"))?,
+//! #         "oidc", "high", "policy-v1", "decision-v1", None,
+//! #     )?,
+//! #     None, RunLimits::empty(),
+//! #     RunPropagationPolicy {
+//! #         cancellation: CancellationPropagation::Cascade,
+//! #         deadline: DeadlinePropagation::MinimumOfParentAndChild,
+//! #         budget: BudgetPropagation::SharedScope,
+//! #         principal: PrincipalPropagation::Inherit,
+//! #     },
+//! #     Digest::raw_json(br#"{"agent":"example"}"#), None,
+//! # )?;
+//! # let record_id = RecordId::parse("01234567-89ab-7cde-89ab-0123456789ac")?;
+//! # let event_id = EventId::parse("01234567-89ab-7cde-89ab-0123456789ad")?;
+//! # let now = Timestamp::from_unix_ms(1_000)?;
+//! let mut kernel = Kernel::default();
+//! let env = TransitionEnv {
+//!     now,
+//!     ids: AllocatedIds::try_new(
+//!         vec![record_id], vec![event_id], vec![], vec![], vec![], vec![],
+//!         vec![], vec![], vec![], vec![], vec![],
+//!     )?,
+//! };
+//! let decision = kernel.decide(
+//!     &env,
+//!     KernelInput::AcceptRun(AcceptRun {
+//!         session_id: SessionId::parse("01234567-89ab-7cde-89ab-0123456789ae")?,
+//!         lane_id: LaneId::parse("01234567-89ab-7cde-89ab-0123456789af")?,
+//!         accepted,
+//!     }),
+//! )?;
+//!
+//! // The store atomically assigns the sequence and returns a committed envelope.
+//! let draft = &decision.records[0];
+//! let envelope = RecordEnvelope::try_new(
+//!     draft.format_version(), draft.kind_version(), draft.record_id(),
+//!     draft.session_id(), draft.lane_id(), draft.run_id(),
+//!     decision.expected_sequence, draft.timestamp(), Some(now),
+//!     Digest::raw_json(b"payload"), None, Digest::raw_json(b"checksum"),
+//!     draft.derived_event_ids().to_vec(), draft.body().clone(),
+//! )?;
+//! let batch = CommittedBatch::try_new(
+//!     AppendBatchId::parse("01234567-89ab-7cde-89ab-0123456789b0")?,
+//!     decision.expected_sequence,
+//!     decision.expected_sequence,
+//!     vec![envelope],
+//! )?;
+//! let events = kernel.apply(&batch, 0)?;
+//! assert_eq!(events.len(), 1);
+//! assert_eq!(kernel.state().phase, Some(RunPhase::BeforeRun));
+//! # Ok(())
+//! # }
+//! ```
 
 #![warn(missing_docs)]
 
@@ -39,15 +102,19 @@ mod bounds;
 mod content;
 mod digest;
 mod effects;
+mod entries;
 mod error;
 mod events;
 mod ids;
 mod limits;
 mod message;
+mod projection;
 mod raw_json;
 mod records;
+mod reducer;
 mod refs;
 mod run;
+mod state;
 mod time;
 
 pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
@@ -70,7 +137,14 @@ pub use effects::{
     InteractionRequest, InteractionResolution, InvocationRecovery, PipelinePosition,
     ReconciliationPolicy, RetrySafety,
 };
-pub use error::{ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorIdentifiers};
+pub use entries::{
+    ContextPrepared, ContextPreparedError, EntryAppended, RunCompleted, RunFailed, Stage,
+    StageCursor, StageDisposition, StageOutcomeRecorded,
+};
+pub use error::{
+    ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorDescriptorError,
+    ErrorIdentifiers,
+};
 pub use events::{
     EventError, ModelTextDelta, ProviderHeartbeat, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, ReasoningDelta, RunEvent, RunEventBody, RunEventClass, RunEventKind,
@@ -100,6 +174,11 @@ pub use records::{
     APPEND_BATCH_MAX_RECORDS, AppendRequest, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
     RecordBody, RecordDraft, RecordEnvelope, RecordError,
 };
+pub use reducer::{
+    AcceptRun, CommittedBatch, Decision, ExternalEffectCompletedInput, ExternalEffectCompletion,
+    ExternalEffectOutcome, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
+    PostCommitAction, ReducerStageOutcome, StageSettled,
+};
 pub use refs::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
     Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef, RefsError,
@@ -109,6 +188,12 @@ pub use run::{
     BudgetPropagation, CancellationPropagation, DeadlinePropagation, MAX_RUN_RELATION_DEPTH,
     PrincipalPropagation, RunAccepted, RunError, RunPropagationPolicy, RunRelation,
     RunRelationKind, RunSecurityContext,
+};
+pub use state::{
+    CompletionIdentity, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
+    ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
+    PendingModelEffect, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
+    TransitionEnv,
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,

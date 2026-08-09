@@ -26,8 +26,8 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Partial (PR-002 enforcement) |
-| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Not started | Missing |
-| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Not started | Missing |
+| ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Missing |
+| ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | In progress | Missing |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
 | ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
 | ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
@@ -52,7 +52,7 @@ Index last reconciled: 2026-08-08 (PR-004 standalone records).
 | ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | Not started | Missing |
+| ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | In progress | Missing |
 | ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Implemented | Verified |
 | ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | Not started | Missing |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Not started | Missing |
@@ -149,14 +149,17 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-029 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-006 merged [#4](https://github.com/jeickmeier/finstack-ai/pull/4) @ `56d7777956df145213b03d2b0b5c1922db42b346` | PR-006-E-hosted-ci-9a1ccbb88ae5; PR-006-E-test-kernel-bc373cf935e4 | me@jeickmeier.com |
 | 2026-08-08 | ADR-036 | Implementation | me@jeickmeier.com | Not started | In progress | PR-007 BlobRef / no seventh-port boundary at `4a0a77f668adcfa2679dc161779c4456d721c0c2` | PR-007-E-security-1146ce970799 | — |
 | 2026-08-08 | ADR-036 | Evidence | me@jeickmeier.com | Missing | Partial | PR-007 local TM-20 / BlobRef fixtures; full Verified awaits merge + remaining mapped PRs | PR-007-E-security-1146ce970799; PR-007-E-conformance-8b7b9c728785 | me@jeickmeier.com |
+| 2026-08-08 | ADR-002 | Implementation | me@jeickmeier.com | Not started | In progress | PR-009 reducer contract/implementation tracking on authorized `main` checkout | — | — |
+| 2026-08-08 | ADR-003 | Implementation | me@jeickmeier.com | Not started | In progress | PR-009 reducer contract/implementation tracking on authorized `main` checkout | — | — |
+| 2026-08-08 | ADR-028 | Implementation | me@jeickmeier.com | Not started | In progress | PR-009 `before_finalize` contract/implementation tracking on authorized `main` checkout | — | — |
 
 ## Current record and evidence links
 
 | ADR | Standalone record | Assigned to | Current evidence | Change reference | Updated |
 | --- | --- | --- | --- | --- | --- |
 | ADR-001 | [ADR-001-microkernel-boundary.md](adrs/ADR-001-microkernel-boundary.md) | me@jeickmeier.com | Partial (PR-002 enforcement): PR-002-E-architecture-6ed3268e6ff5; PR-002-E-dep-direction-321ce9b2b4b4 at `ee9754fe2d0f015181dcefa97e715392aadd28ed` | PR-004 standalone ADR; PR-002 architecture enforcement | 2026-08-08 |
-| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | — | PR-004 standalone ADR; PR-009 implementation in progress | 2026-08-08 |
+| ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | — | PR-004 standalone ADR; PR-009 implementation in progress | 2026-08-08 |
 | ADR-004 | [ADR-004-commit-before-effect.md](adrs/ADR-004-commit-before-effect.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-005 | [ADR-005-six-ports.md](adrs/ADR-005-six-ports.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-006 | [ADR-006-direct-native-path.md](adrs/ADR-006-direct-native-path.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
@@ -181,7 +184,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-025 | [ADR-025-generic-deferred-effects.md](adrs/ADR-025-generic-deferred-effects.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-026 | [ADR-026-run-lineage.md](adrs/ADR-026-run-lineage.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-027 | [ADR-027-typed-interactions.md](adrs/ADR-027-typed-interactions.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | — | PR-004 standalone ADR; PR-009 implementation in progress | 2026-08-08 |
 | ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | Verified: PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-hosted-ci-9a1ccbb88ae5 at merge `56d7777956df145213b03d2b0b5c1922db42b346` | PR-004 standalone ADR; PR-006 [#4](https://github.com/jeickmeier/finstack-ai/pull/4) | 2026-08-08 |
 | ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-031 | [ADR-031-worker-based-wasm.md](adrs/ADR-031-worker-based-wasm.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |

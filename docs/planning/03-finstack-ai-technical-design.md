@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.13 |
+| Version | 0.14 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.8; Implementation Plan v0.13; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.9; Implementation Plan v0.14; Security and Threat Model v0.4 |
 
 # 1. Technical objective
 
@@ -464,9 +464,9 @@ The v1 digest algorithm is SHA-256, serialized as lowercase 64-character hexadec
 "finstack-ai" NUL domain-name NUL schema-version-u32-be NUL canonical-bytes
 ```
 
-The domain name is fixed per use (`raw-json`, `record-payload`, `effect-input`, `effect-output`, `blob-content`, `snapshot-state`, `middleware-chain`, `agent-spec`, or another versioned registry entry). JSON uses the strict RFC 8785 bytes above; durable DTOs use the frozen canonical CBOR profile; blob content uses the exact raw bytes. A digest comparison never mixes domains or schema versions. Cross-language known-answer fixtures include key-order/whitespace-equivalent JSON, duplicate-key rejection, numeric edge cases, Unicode, empty/large blobs, and every durable record family.
+The domain name is fixed per use (`raw-json`, `record-payload`, `effect-input`, `effect-output`, `blob-content`, `snapshot-state`, `middleware-chain`, `agent-spec`, `model-context`, `stage-settlement`, `model-settlement`, `kernel-state`, or another versioned registry entry). JSON uses the strict RFC 8785 bytes above; durable DTOs use the frozen canonical CBOR profile; blob content uses the exact raw bytes. A digest comparison never mixes domains or schema versions. Cross-language known-answer fixtures include key-order/whitespace-equivalent JSON, duplicate-key rejection, numeric edge cases, Unicode, empty/large blobs, and every durable record family.
 
-`finstack-ai-kernel::digest` owns `Digest`, the domain registry constants, SHA-256 wrapper, and strict canonical-JSON normalization used by semantic DTOs. Runtime and SDK call that module; protocol applies the same type to its canonical-CBOR bytes; leaf adapters do not implement competing hash/JCS rules. PR-006 pins the hash dependency and JSON known-answer corpus. PR-008 freezes the durable digest domain names and schema versions used by record/effect surfaces. PR-039 owns canonical-CBOR encoding of durable record bodies/envelopes, calculation and verification of `record-payload` / envelope checksum digests over those bytes, binary size/depth fixtures, and malicious declared-length enforcement.
+`finstack-ai-kernel::digest` owns `Digest`, the domain registry constants, SHA-256 wrapper, and strict canonical-JSON normalization used by semantic DTOs. Runtime and SDK call that module; protocol applies the same type to its canonical-CBOR bytes; leaf adapters do not implement competing hash/JCS rules. PR-006 pins the hash dependency and JSON known-answer corpus. PR-008 freezes the durable digest domain names and schema versions used by record/effect surfaces. PR-009 freezes `model-context`, `stage-settlement`, `model-settlement`, and `kernel-state` at schema version 1 over the JCS projections specified in section 11. PR-039 owns canonical-CBOR encoding of durable record bodies/envelopes, calculation and verification of `record-payload` / envelope checksum digests over those bytes, binary size/depth fixtures, and malicious declared-length enforcement.
 
 ## 6.5 V1 semantic payload bounds
 
@@ -1114,17 +1114,82 @@ pub enum KernelInput {
     AcceptRun(AcceptRun),
     StageSettled(StageSettled),
     ModelSettled(ModelSettled),
-    ToolBatchSettled(ToolBatchSettled),
-    InteractionSettled(InteractionResolution),
-    ExternalEffectCompleted(ExternalEffectCompletion),
-    TimerFired(TimerFired),
-    CancelRequested(CancellationRequest),
-    EffectReconciled(EffectReconciled),
-    ResumeRequested(ResumeRequested),
+    ExternalEffectCompleted(ExternalEffectCompletedInput),
+}
+
+pub struct AcceptRun {
+    pub session_id: SessionId,
+    pub lane_id: LaneId,
+    pub accepted: RunAccepted,
+}
+
+pub struct StageSettled {
+    pub cursor: StageCursor,
+    pub outcome: ReducerStageOutcome,
+}
+
+pub enum ReducerStageOutcome {
+    Continue,
+    ContextPrepared {
+        messages: Arc<[Message]>,
+    },
+    ModelRequestPrepared {
+        request: RawJson,
+        component: Option<ComponentInvocation>,
+        output_contract: EffectOutputContract,
+        retry_safety: RetrySafety,
+        deadline: Option<Timestamp>,
+    },
+    FinalizeAccepted,
+    ContinueModel {
+        reason: Option<Arc<str>>,
+    },
+    Fail(ErrorDescriptor),
+}
+
+pub struct ModelSettled {
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub outcome: ModelSettlement,
+}
+
+pub enum ModelSettlement {
+    Completed {
+        completion: EffectCompleted,
+        assistant_message: Message,
+    },
+    Deferred(EffectDeferred),
+    Failed(EffectFailed),
+}
+
+pub enum ModelSettlementKind {
+    Completed,
+    Failed,
+}
+
+pub struct ExternalEffectCompletedInput {
+    pub completion: ExternalEffectCompletion,
+    pub assistant_message: Option<Message>,
 }
 ```
 
-Fine-grained model and tool progress events are handled by the runtime event sequencer and are not kernel inputs.
+The code block above is the complete concrete PR-009 Rust enum. The later input **inventory** reserves the names `ToolBatchSettled` (PR-010), `CancelRequested` and `TimerFired` (PR-011), capability activation (PR-012), and interaction/reconciliation/resume inputs for their mapped later PRs. Those names are not PR-009 `KernelInput` variants, have no PR-009 payload or constructor, and are added only when their owning PR freezes and implements them.
+
+The PR-009 stage/outcome matrix is exact:
+
+| Current phase | `StageSettled.cursor.stage` | Allowed `ReducerStageOutcome` |
+|---|---|---|
+| `BeforeRun` | `BeforeRun` | `Continue`, `Fail` |
+| `PreparingContext` | `PrepareContext` | `ContextPrepared`, `Fail` |
+| `BeforeModel` | `BeforeModel` | `ModelRequestPrepared`, `Fail` |
+| `AfterModel` | `AfterModel` | `Continue`, `Fail` |
+| `BeforeFinalize` | `BeforeFinalize` | `FinalizeAccepted`, `ContinueModel`, `Fail` |
+
+For a new settlement, `StageSettled.cursor` must equal the state's exact expected `(cycle, stage)` before the outcome matrix is evaluated; otherwise `stage_cursor_mismatch` is returned. The cursor is part of the `stage-settlement` fingerprint and the durable `StageOutcomeRecorded`, so a delayed prior-cycle input can only classify as an equal post-commit duplicate or a conflict and can never settle the current cycle. Every other stage/outcome pair returns `invalid_phase_input`. PR-009 does not invoke middleware or context providers: these inputs are already-normalized aggregate settlements used to prove reducer semantics. PR-018 later drives the same boundaries from real middleware effects without adding a stage or changing reducer ownership. `ContinueModel` is the generic `before_finalize` continuation: it increments the checked cycle counter and re-enters `PreparingContext`; it is not a retry and does not reuse a prior `TurnId`, `ModelRequestId`, or `EffectId`. PR-011 applies configured turn/model-request limits.
+
+`ModelSettled` applies only to the outstanding direct model effect in `AwaitingModel`. `ExternalEffectCompleted` applies only to the same effect after an equal `EffectDeferred` moved it to `AwaitingExternal`; it preserves the original `EffectId` and output contract. A completed external outcome requires `assistant_message = Some`, while a failed outcome requires `None`. PR-009's concrete `ExternalEffectOutcome` contains only `Completed` and `Failed`; cancellation remains PR-011 scope. An encoded `cancelled` or any other unknown/future outcome variant fails strict decoding as `invalid_input_payload` until its owning PR adds the variant and semantics. A completed settlement must use `EffectOutputKind::ModelResponse`; its assistant message is role `Assistant`, contains no tool-call block, and has provider IDs equal to the completion. Fine-grained model and tool progress events are handled by the runtime event sequencer and are not kernel inputs.
+
+All PR-009 command and record wire forms reject unknown fields, use the shared externally tagged `snake_case` enum representation, and enforce the section 6.5 limits before allocation. Optional fields default only where shown and are omitted on human-readable serialization; no unknown state-bearing member is ignored.
 
 ## 11.2 Canonical run phases
 
@@ -1153,6 +1218,8 @@ pub enum RunPhase {
 
 The normal path is `Accepted -> BeforeRun -> PreparingContext -> BeforeModel -> AwaitingModel -> AfterModel`, followed by either the tool cycle `BeforeToolBatch -> AwaitingTools -> AfterToolBatch -> BeforeModel` or `BeforeFinalize -> Completed`. Any effect-bearing phase may enter `AwaitingExternal`; middleware/tool policy may enter `AwaitingInteraction`; timers enter `Sleeping`; explicit operator/application suspension enters `Suspended`; cancellation enters `Cancelling` before `Cancelled`. `Completed`, `Failed`, and `Cancelled` are terminal. Every other transition is enumerated in reducer tests; unknown phase/input pairs return `invalid_phase_input`.
 
+PR-009 reaches only `Accepted`, `BeforeRun`, `PreparingContext`, `BeforeModel`, `AwaitingModel`, `AfterModel`, `BeforeFinalize`, `AwaitingExternal`, `Completed`, and `Failed`. `Accepted` is the deterministic intermediate result of applying `RunAccepted`; successful completion of that committed batch closes to `BeforeRun` before `apply` returns. The remaining variants are frozen for their owning later PRs and cannot be synthesized by PR-009.
+
 ## 11.3 Decision API
 
 ```rust
@@ -1170,11 +1237,12 @@ impl Kernel {
     pub fn apply(
         &mut self,
         committed: &CommittedBatch,
-    ) -> Result<Arc<[KernelEvent]>, KernelError>;
+        first_transient_sequence: u64,
+    ) -> Result<Arc<[RunEvent]>, KernelError>;
 }
 ```
 
-`decide` does not mutate authoritative state.
+`KernelEvent` in the older signature was an inconsistent alias and is removed. `RunEvent` is the sole runtime event vocabulary from section 20. `decide` does not mutate authoritative state. The runtime-owned event sequencer supplies `first_transient_sequence` as the next unused run-stream sequence. `apply` assigns contiguous values to its derived events in record/ordinal order and rejects overflow as `invalid_input_payload`; transient model progress emitted between commits consumes values from the same sequencer. The event sequence is live delivery metadata, not authoritative kernel state, and remains excluded from `KernelState::state_hash()`.
 
 ```rust
 pub struct Decision {
@@ -1186,6 +1254,412 @@ pub struct Decision {
 ```
 
 `PostCommitAction` may execute only after the associated records are committed and applied.
+
+### 11.3.1 Authoritative state
+
+```rust
+pub struct KernelState {
+    pub state_version: u16,
+    pub last_applied_sequence: u64,
+    pub session_id: Option<SessionId>,
+    pub lane_id: Option<LaneId>,
+    pub accepted: Option<RunAccepted>,
+    pub phase: Option<RunPhase>,
+    pub cycle: u64,
+    pub current_turn: Option<CurrentTurn>,
+    pub messages: Arc<[Message]>,
+    pub pending_model_effect: Option<PendingModelEffect>,
+    pub terminal_candidate: Option<TerminalCandidate>,
+    pub stage_settlements: BTreeMap<StageCursor, Digest>,
+    pub model_settlements: BTreeMap<EffectId, ModelSettlementFingerprint>,
+    pub completion_identities: BTreeMap<Arc<str>, CompletionIdentity>,
+    pub terminal: Option<TerminalState>,
+}
+
+pub struct StageCursor {
+    pub cycle: u64,
+    pub stage: Stage,
+}
+
+pub struct CurrentTurn {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub context: ContextPrepared,
+    pub model_request_id: Option<ModelRequestId>,
+    pub effect_id: Option<EffectId>,
+    pub final_message_id: Option<MessageId>,
+}
+
+pub struct PendingModelEffect {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub requested: EffectRequested,
+    pub deferred: Option<EffectDeferred>,
+}
+
+pub enum TerminalCandidate {
+    Completed {
+        cycle: u64,
+        turn_id: TurnId,
+        model_request_id: ModelRequestId,
+        effect_id: EffectId,
+        message_id: MessageId,
+        result_digest: Digest,
+    },
+    Failed {
+        cycle: u64,
+        turn_id: Option<TurnId>,
+        model_request_id: Option<ModelRequestId>,
+        effect_id: Option<EffectId>,
+        error: ErrorDescriptor,
+    },
+}
+
+pub struct ModelSettlementFingerprint {
+    pub kind: ModelSettlementKind,
+    pub digest: Digest,
+}
+
+pub struct CompletionIdentity {
+    pub effect_id: EffectId,
+    pub settlement_digest: Digest,
+}
+
+pub enum TerminalState {
+    Completed(RunCompleted),
+    Failed(RunFailed),
+}
+```
+
+`KernelState::default()` is unaccepted with `state_version = 1`, `last_applied_sequence = 0`, and all optional/collection fields empty. A restore at a nonzero session sequence constructs the same state by applying the complete relevant committed prefix; PR-041 snapshots remain derived caches. `session_id`, `lane_id`, and `RunAccepted.run_id` become immutable when `RunAccepted` applies.
+
+The code block is the complete concrete PR-009 terminal-state vocabulary. PR-009 materializes only `Completed` and `Failed`; PR-011 owns adding `Cancelled(RunCancelled)` to this state enum together with cancellation input, transition, record-application, and compatibility semantics. The later `RunPhase::Cancelled` inventory value is not a PR-009 `TerminalState` payload.
+
+PR-009 applies the existing section 6.5 semantic ceilings as hard authoritative-state capacities: `messages` has at most 4,096 items; each of `stage_settlements`, `model_settlements`, and `completion_identities` has at most 256 entries. A replacement/equal duplicate at an existing key does not grow a collection. Before a non-duplicate `decide` or committed-batch `apply` would make any field exceed its ceiling, it returns `state_capacity_exceeded` with field exactly `messages`, `stage_settlements`, `model_settlements`, or `completion_identities` and leaves state unchanged. Capacity is never reported as `invariant_violation`, and collections are never truncated, evicted, or allowed to grow without bound.
+
+`stage_settlements` is keyed by `(cycle, stage)`, terminal `model_settlements` by `EffectId`, and `completion_identities` by any non-empty settlement `completion_id`; all are derived from committed records and retained so duplicate/conflict classification survives replay. The pending effect retains an optional full `EffectDeferred` value separately because deferral followed by final completion under the same `EffectId` is the intended transition, not a conflict. An equal normalized settlement after its phase advanced returns an empty decision plus a `duplicate_settlement` diagnostic. Completion identity has precedence over the per-effect index: an indexed non-empty `completion_id` with equal `(effect_id, settlement_digest)` is an exact duplicate, while a changed effect or digest returns `conflicting_completion_id` without consulting or returning the per-effect conflict. `conflicting_settlement` is used only for unequal indexed stage, effect, or deferral content not already classified by completion identity. An unknown or non-outstanding effect returns `effect_not_pending`.
+
+### 11.3.2 Settlement fingerprints
+
+#### 11.3.2.1 Stage-settlement fingerprint
+
+`stage-settlement` schema 1 hashes the section 6.4 domain prefix plus RFC 8785 JCS bytes of exactly one externally tagged `snake_case` variant below:
+
+```rust
+pub enum StageSettlementFingerprintV1 {
+    Continue {
+        cursor: StageCursor,
+    },
+    ContextPrepared {
+        cursor: StageCursor,
+        messages: Arc<[Message]>,
+    },
+    ModelRequestPrepared {
+        cursor: StageCursor,
+        request: RawJson,
+        component: Option<ComponentInvocation>,
+        output_contract: EffectOutputContract,
+        retry_safety: RetrySafety,
+        deadline: Option<Timestamp>,
+    },
+    FinalizeAccepted {
+        cursor: StageCursor,
+    },
+    ContinueModel {
+        cursor: StageCursor,
+    },
+    Fail {
+        cursor: StageCursor,
+        error: ErrorDescriptor,
+    },
+}
+```
+
+The exact top-level JSON shapes are `{"continue":{...}}`, `{"context_prepared":{...}}`, `{"model_request_prepared":{...}}`, `{"finalize_accepted":{...}}`, `{"continue_model":{...}}`, or `{"fail":{...}}`. Member names and values are exactly those shown. `ContinueModel.reason` is diagnostic, non-semantic input: it is absent from the projection and `StageOutcomeRecorded`, is not replayed, and does not affect equality. Two otherwise equal `ContinueModel` inputs with different reasons therefore produce the same fingerprint and classify as equal. The digest does **not** cover the complete human-readable `StageSettled` input.
+
+Fingerprint construction and replay reconstruction are exact:
+
+| Valid command outcome | Committed record source used by `apply` / replay |
+|---|---|
+| `Continue` | matching `StageOutcomeRecorded { cursor, disposition: Continued, ... }` |
+| `ContextPrepared { messages }` | matching stage record plus required `ContextPrepared`; use its complete `messages`, and validate disposition `turn_id`/`context_digest` against the sibling |
+| `ModelRequestPrepared { request, component, output_contract, retry_safety, deadline }` | matching stage record plus required model `EffectRequested`; use `EffectInput::Model.request`, `component`, `output_contract`, `retry_safety`, and `deadline`, and validate disposition turn/request/effect IDs against state and sibling |
+| `FinalizeAccepted` | matching stage record plus its required candidate-matching terminal sibling |
+| `ContinueModel { reason: _ }` | matching stage record `ContinueModel { next_cycle }`; validate `next_cycle = checked(cursor.cycle + 1)` but do not project it or any reason |
+| `Fail(error)` | matching stage record `Failed { error }` and, for `BeforeFinalize`, its required matching `RunFailed` sibling |
+
+`apply` validates the complete sibling/order/correlation rules, reconstructs this DTO from committed semantic fields, recomputes the digest, and compares it with `StageOutcomeRecorded.settlement_digest` before inserting `stage_settlements` or changing phase. A missing/malformed sibling is `invalid_record_order`; correlation or semantic mismatch uses its dedicated error; a recorded digest unequal to the reconstructed projection is `settlement_digest_mismatch`. Full replay follows the same reconstruction and must produce the same index. No reducer-assigned turn, request, effect, record, or event ID enters this fingerprint.
+
+#### 11.3.2.2 Model-settlement fingerprint
+
+`model-settlement` schema 1 hashes the section 6.4 domain prefix plus RFC 8785 JCS bytes of exactly one externally tagged `snake_case` variant below. The variant is the input family and source discriminator; direct and external settlements with otherwise equal values intentionally hash differently.
+
+```rust
+pub enum ModelSettlementFingerprintV1 {
+    DirectCompleted(DirectModelCompletedFingerprintV1),
+    DirectFailed(DirectModelFailedFingerprintV1),
+    DirectDeferred(DirectModelDeferredFingerprintV1),
+    ExternalCompleted(ExternalModelCompletedFingerprintV1),
+    ExternalFailed(ExternalModelFailedFingerprintV1),
+}
+
+pub struct DirectModelCompletedFingerprintV1 {
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub completion: EffectCompleted,
+    pub assistant_message: Message,
+}
+
+pub struct DirectModelFailedFingerprintV1 {
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub failure: EffectFailed,
+}
+
+pub struct DirectModelDeferredFingerprintV1 {
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub deferred: EffectDeferred,
+}
+
+pub struct ExternalModelCompletedFingerprintV1 {
+    pub effect_id: EffectId,
+    pub completion_id: Arc<str>,
+    pub output: RawJson,
+    pub usage: Option<Usage>,
+    pub artifacts: Arc<[ArtifactRef]>,
+    pub assistant_message: Message,
+}
+
+pub struct ExternalModelFailedFingerprintV1 {
+    pub effect_id: EffectId,
+    pub completion_id: Arc<str>,
+    pub error: ErrorDescriptor,
+}
+```
+
+The exact top-level JSON shapes are `{"direct_completed":{...}}`, `{"direct_failed":{...}}`, `{"direct_deferred":{...}}`, `{"external_completed":{...}}`, or `{"external_failed":{...}}`. Struct member names are exactly those shown; every member is present; options are explicit JSON `null`; arrays preserve semantic order and are present when empty; IDs/digests/timestamps and nested DTOs use their frozen public JSON field sets. A `RawJson` member is embedded as its parsed semantic JSON value, not as source bytes or a JSON string, before the enclosing object is canonicalized. The completed variants include the full assistant `Message`, including ID, creation time, content, metadata, model, and provider IDs.
+
+For both stage- and model-settlement schema 1, explicit null is recursive. Implementations must construct dedicated fingerprint projection DTOs for every nested struct that has optional fields and serialize every such field as JSON `null` when absent. They must not serialize the ordinary human-readable DTO directly, because that form may omit absent optionals. The semantic type names in the Rust-like definitions identify the exact nested field sets; they do not authorize reuse of omission-bearing Serde settings.
+
+Fingerprint construction from a valid command is exact:
+
+| Kernel input | Fingerprint variant and fields |
+|---|---|
+| `ModelSettled { turn_id, model_request_id, outcome: Completed { completion, assistant_message } }` | `DirectCompleted` with every supplied field unchanged after `RawJson` normalization |
+| `ModelSettled { turn_id, model_request_id, outcome: Failed(failure) }` | `DirectFailed` with the complete supplied `EffectFailed` |
+| `ModelSettled { turn_id, model_request_id, outcome: Deferred(deferred) }` | `DirectDeferred` with the complete supplied `EffectDeferred` |
+| `ExternalEffectCompletedInput { completion: { effect_id, completion_id, outcome: Completed { output, usage, artifacts } }, assistant_message: Some(message) }` | `ExternalCompleted` with all six shown fields |
+| `ExternalEffectCompletedInput { completion: { effect_id, completion_id, outcome: Failed { error } }, assistant_message: None }` | `ExternalFailed` with all three shown fields |
+
+For an external completion, fields absent from the command are excluded rather than synthesized into the fingerprint. `output_contract` is excluded and must match `pending_model_effect.requested.output_contract`; `output_digest` is excluded and must be recomputed from `output`; `usage_digest` is excluded and must be recomputed from `usage`; `EffectCompleted.provider_ids` is excluded because it must equal the included `assistant_message.provider_ids`; and `reservation_id` is excluded and must be `None` in PR-009. The outer turn/model-request/cycle correlations are also excluded because external input carries only `effect_id`; they are validated through the outstanding pending effect. For external failure, the committed `EffectFailed` must additionally have `usage = None` and `usage_digest = None`. Any failure of these equalities is `model_settlement_mismatch`, while malformed sibling shape/order remains `invalid_record_order`.
+
+`apply` and replay reconstruct the same variant before clearing `pending_model_effect`:
+
+| Pre-record state and committed siblings | Reconstructed fingerprint |
+|---|---|
+| `AwaitingModel`, no deferred value; `EffectCompleted` immediately followed by matching `EntryAppended` | `DirectCompleted` from pending turn/request correlation, the complete `EffectCompleted`, and `EntryAppended.message` |
+| `AwaitingModel`, no deferred value; matching `EffectFailed` | `DirectFailed` from pending turn/request correlation and the complete `EffectFailed` |
+| `AwaitingModel`, no deferred value; matching `EffectDeferred` | `DirectDeferred` from pending turn/request correlation and the complete `EffectDeferred`; the full value remains pending for later duplicate checks |
+| `AwaitingExternal`, deferred value present; `EffectCompleted` immediately followed by matching `EntryAppended` | after the external-field validations above, `ExternalCompleted` from record `effect_id`, required `completion_id`, `output`, `usage`, `artifacts`, and `EntryAppended.message` |
+| `AwaitingExternal`, deferred value present; matching `EffectFailed` | after the external-field validations above, `ExternalFailed` from record `effect_id`, required `completion_id`, and `error` |
+
+Replay recreates the same pre-record state from the preceding `EffectRequested` and optional `EffectDeferred`, so source discrimination does not require another durable field. Non-empty usage and artifacts come directly from `EffectCompleted`; the assistant message comes from its required `EntryAppended` sibling. The reconstructed digest is inserted into `model_settlements` and, when present, `completion_identities`; inability to reconstruct the exact command projection or a digest mismatch is `settlement_digest_mismatch`. `ModelSettlementFingerprint { kind, digest }` remains sufficient because `digest` commits to source and every projected field. Deferred duplicate classification recomputes `DirectDeferred` from the retained full pending value, so no additional state field is required.
+
+### 11.3.3 Post-commit actions and allocated IDs
+
+```rust
+pub enum PostCommitAction {
+    ExecuteEffect { effect_id: EffectId },
+}
+```
+
+An `ExecuteEffect` action must have exactly one preceding sibling `EffectRequested` draft with the same ID in the decision. Actions preserve request-record order. A runtime may execute an action only after the complete decision batch commits and `apply` succeeds; an empty or failed append executes none.
+
+`decide` treats every `AllocatedIds` vector as an ordered queue and never generates or derives a UUID. It consumes:
+
+1. `record_ids` in `Decision.records` order;
+2. `event_ids` in record order and then the section 20 ordinal order;
+3. `effect_ids` in new `EffectRequested` order;
+4. `turn_ids` when a successful `PrepareContext` settlement starts a cycle;
+5. `model_request_ids` when a successful `BeforeModel` settlement requests a model;
+6. `message_ids` when a successful model settlement finalizes the assistant message.
+
+PR-009 consumes no interaction, tool-batch, tool-call, cancellation-request, or append-batch ID. `append_batch_ids` remains runtime-owned when constructing `AppendRequest`. For a state-changing decision, every kernel-owned queue must contain exactly the IDs required by that transition: shortage returns `allocated_ids_exhausted`, and unused IDs in a kernel-owned queue return `unused_allocated_ids`. Assistant presence, role, tool-call prohibition, provider IDs, and `created_at == TransitionEnv.now` are semantic checks performed before any allocated-ID queue validation. Equality between the supplied assistant `message.id` and the consumed `MessageId` is checked only after all required queues pass shortage/extra validation.
+
+`decide` uses this validation order:
+
+1. decode and structurally validate the normalized input;
+2. compute its settlement identity/fingerprint without reading or consuming `AllocatedIds`;
+3. when the input carries a non-empty `completion_id`, consult `completion_identities` first: an existing equal `(effect_id, settlement_digest)` returns the empty duplicate decision, and an existing unequal tuple returns `conflicting_completion_id` immediately;
+4. only when step 3 finds no indexed completion identity, consult the applicable stage, per-effect, or pending-deferral index: equal content returns the empty duplicate decision and unequal content returns `conflicting_settlement`;
+5. for either duplicate return, set `expected_sequence = last_applied_sequence + 1` and do not validate or consume any queue in `env.ids`;
+6. reject terminal state, stale cursor, wrong phase, wrong outstanding correlation, or invalid semantic payload in the stable order listed in section 11.3.5; assistant presence/role/tool/provider/time checks occur here;
+7. preflight prospective state growth in fixed field order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, returning `state_capacity_exceeded` for the first field that would cross its hard ceiling;
+8. calculate required IDs and validate every kernel-owned queue for shortages, then extras, in the queue order above; a missing message ID is `allocated_ids_exhausted` even if the supplied message ID could not match;
+9. after successful queue validation, require every supplied ID-bearing payload to equal its consumed ID, including assistant `message.id`; mismatch is `assistant_message_mismatch` for that message and `record_identity_mismatch` for other payloads;
+10. build the decision.
+
+A pre-commit reevaluation sees no committed settlement index, repeats steps 6–10 against the unchanged state, and therefore requires the same `TransitionEnv` and reproduces the same non-empty records and actions byte-for-byte. A post-commit redelivery takes step 3 or 4; the reused environment may still contain the IDs from the original attempt, but the empty decision neither consumes nor rejects them. This exact-duplicate exception is the only path on which a non-empty kernel-owned queue does not produce `unused_allocated_ids`.
+
+### 11.3.4 Apply validation and phase derivation
+
+`apply` validates the entire batch on a temporary state and swaps it into the kernel only if all records succeed. The batch must be non-empty; `first_sequence` must equal `last_applied_sequence + 1`; `last_sequence` must equal `first_sequence + records.len() - 1`; and every envelope sequence must be contiguous and equal its position. Batch range mismatch is `committed_batch_range_mismatch`; a gap, duplicate, rollback, or overflow is `non_contiguous_record_sequence`. Every record must match the accepted session/lane/run identity (with `RunAccepted` establishing it), and all intra-batch sibling/order constraints below must hold.
+
+Apply precedence is structural batch/range/sequence validation, then record identity/sibling/order and reconstructed fingerprint/digest validation, then one checked preflight of the whole batch's net-new state entries in fixed order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, then temporary-state application and atomic swap. A batch that would cross a hard capacity returns `state_capacity_exceeded` before the first semantic mutation; a malformed/tampered batch retains its earlier dedicated validation error rather than being masked by capacity.
+
+The PR-009 record-to-state table is normative:
+
+| Committed record | Required prior phase / sibling rule | Applied state |
+|---|---|---|
+| `RunAccepted` | unaccepted state; only record in its decision | identity fixed; `Accepted`, then deterministic batch-boundary closure to `BeforeRun` |
+| `StageOutcomeRecorded(BeforeRun, Continued)` | `BeforeRun` | `PreparingContext` |
+| `StageOutcomeRecorded(PrepareContext, ContextPrepared)` | `PreparingContext`; immediately followed by matching `ContextPrepared` | cursor recorded; phase advances when sibling applies |
+| `ContextPrepared` | matching prepare-context outcome | current turn/context set; `BeforeModel` |
+| `StageOutcomeRecorded(BeforeModel, ModelRequested)` | `BeforeModel`; immediately followed by matching model `EffectRequested` | correlation fixed; phase advances when sibling applies |
+| `EffectRequested(Model)` | matching before-model outcome | pending effect set; `AwaitingModel` |
+| `EffectDeferred` | `AwaitingModel`; matches pending request | pending effect retained with handle; `AwaitingExternal` |
+| `EffectCompleted(Model)` | `AwaitingModel` or `AwaitingExternal`; immediately followed by matching `EntryAppended` | effect settlement and any completion identity indexed; phase advances when sibling applies |
+| `EntryAppended` | matching completed effect in the same batch | message appended, candidate set; `AfterModel` |
+| `EffectFailed(Model)` | `AwaitingModel` or `AwaitingExternal`; matches pending request | effect settlement and any completion identity indexed; failure candidate set; `BeforeFinalize` |
+| `StageOutcomeRecorded(AfterModel, Continued)` | `AfterModel` | preserve completion candidate; `BeforeFinalize` |
+| non-final `StageOutcomeRecorded(..., Failed)` | matching nonterminal stage | failure candidate set; `BeforeFinalize` |
+| `StageOutcomeRecorded(BeforeFinalize, FinalizeAccepted)` | `BeforeFinalize`; immediately followed by terminal record matching the candidate | phase advances when sibling applies |
+| `StageOutcomeRecorded(BeforeFinalize, ContinueModel)` | `BeforeFinalize`; completion candidate only | clear candidate/current request, checked `cycle += 1`; `PreparingContext` |
+| `StageOutcomeRecorded(BeforeFinalize, Failed)` | `BeforeFinalize`; immediately followed by matching `RunFailed` | phase advances when sibling applies |
+| `RunCompleted` | matching finalize-accepted completion candidate | terminal and immutable; `Completed` |
+| `RunFailed` | matching finalize-accepted failure candidate or before-finalize failure | terminal and immutable; `Failed` |
+
+The corresponding PR-009 decision/batch shapes are exact:
+
+| Valid input | Ordered record bodies | Actions | Phase after apply |
+|---|---|---|---|
+| `AcceptRun` | `RunAccepted` | none | `BeforeRun` |
+| `StageSettled((cycle, BeforeRun), Continue)` | `StageOutcomeRecorded` | none | `PreparingContext` |
+| `StageSettled((cycle, PrepareContext), ContextPrepared)` | `StageOutcomeRecorded`, `ContextPrepared` | none | `BeforeModel` |
+| `StageSettled((cycle, BeforeModel), ModelRequestPrepared)` | `StageOutcomeRecorded`, `EffectRequested(Model)` | matching `ExecuteEffect` | `AwaitingModel` |
+| `ModelSettled(Completed)` | `EffectCompleted`, `EntryAppended` | none | `AfterModel` |
+| `ModelSettled(Deferred)` | `EffectDeferred` | none | `AwaitingExternal` |
+| `ModelSettled(Failed)` | `EffectFailed` | none | `BeforeFinalize` |
+| `ExternalEffectCompleted` | same durable completed/failed record shape, with distinct external fingerprint variant | none | `AfterModel` / `BeforeFinalize` |
+| `StageSettled((cycle, AfterModel), Continue)` | `StageOutcomeRecorded` | none | `BeforeFinalize` |
+| non-final `StageSettled((cycle, ...), Fail)` | `StageOutcomeRecorded` | none | `BeforeFinalize` |
+| `StageSettled((cycle, BeforeFinalize), FinalizeAccepted)` | `StageOutcomeRecorded`, matching `RunCompleted` or `RunFailed` | none | `Completed` / `Failed` |
+| `StageSettled((cycle, BeforeFinalize), ContinueModel)` | `StageOutcomeRecorded` | none | `PreparingContext` |
+| `StageSettled((cycle, BeforeFinalize), Fail)` | `StageOutcomeRecorded`, `RunFailed` | none | `Failed` |
+| exact indexed duplicate settlement | none | none | unchanged |
+
+`StageOutcomeRecorded`, `ContextPrepared`, and `EntryAppended` cannot appear without their required sibling records. Record order is semantic and fixed as shown. `RunCompleted` or `RunFailed` is never proposed or applied until `BeforeFinalize` settles. Once terminal, `apply` rejects every later record and `decide` rejects every state-changing input with `terminal_state_immutable`; only an exact already-indexed settlement duplicate may return the empty idempotent decision.
+
+### 11.3.5 Stable reducer errors
+
+```rust
+pub enum KernelError {
+    InvalidInputPayload { field: &'static str, reason_code: &'static str },
+    InvalidRunAcceptance,
+    InvalidPhaseInput { phase: Option<RunPhase>, input: &'static str },
+    StageCursorMismatch { expected: StageCursor, actual: StageCursor },
+    ModelRequestContractMismatch,
+    ModelSettlementMismatch,
+    AssistantMessagePresenceMismatch,
+    AssistantMessageMismatch,
+    SettlementDigestMismatch,
+    ContextDigestMismatch,
+    ConflictingCompletionId,
+    CycleOverflow,
+    StateCapacityExceeded { field: &'static str },
+    AllocatedIdsExhausted { kind: &'static str },
+    UnusedAllocatedIds { kind: &'static str },
+    CommittedBatchRangeMismatch,
+    NonContiguousRecordSequence,
+    RecordIdentityMismatch,
+    InvalidRecordOrder,
+    EffectNotPending { effect_id: EffectId },
+    ConflictingSettlement,
+    TerminalStateImmutable,
+    StateHashFailed,
+    InvariantViolation,
+}
+```
+
+The stable codes are the `snake_case` variant names: `invalid_input_payload`, `invalid_run_acceptance`, `invalid_phase_input`, `stage_cursor_mismatch`, `model_request_contract_mismatch`, `model_settlement_mismatch`, `assistant_message_presence_mismatch`, `assistant_message_mismatch`, `settlement_digest_mismatch`, `context_digest_mismatch`, `conflicting_completion_id`, `cycle_overflow`, `state_capacity_exceeded`, `allocated_ids_exhausted`, `unused_allocated_ids`, `committed_batch_range_mismatch`, `non_contiguous_record_sequence`, `record_identity_mismatch`, `invalid_record_order`, `effect_not_pending`, `conflicting_settlement`, `terminal_state_immutable`, `state_hash_failed`, and `invariant_violation`.
+
+Mandatory validation maps exactly as follows; implementations must not substitute `invariant_violation` for a rejected public payload or settlement:
+
+| Failure | Stable `KernelError` code |
+|---|---|
+| strict decode, unknown field, malformed ID/digest/timestamp, empty required string, section 6.5 bound, or invalid enum discriminant | `invalid_input_payload` |
+| inconsistent `AcceptRun` identities or invalid accepted payload | `invalid_run_acceptance` |
+| no transition for the current phase/input or disallowed stage outcome | `invalid_phase_input` |
+| a new `StageSettled.cursor` differs from the exact current `(cycle, stage)` | `stage_cursor_mismatch` |
+| model request output kind is not `ModelResponse`, request bytes are invalid, or retry/deadline/component fields violate the request contract | `model_request_contract_mismatch` |
+| turn/request/effect correlation, effect kind, output contract, provider IDs, deferral handle, or completed/failed settlement metadata differs from the pending model request | `model_settlement_mismatch` |
+| successful external completion lacks `assistant_message`, or failed outcome supplies one | `assistant_message_presence_mismatch` |
+| assistant role, tool-call prohibition, provider IDs, or `created_at` differs from the required finalized message; checked before allocated-ID queues | `assistant_message_mismatch` |
+| after successful queue validation, assistant `message.id` differs from the consumed `MessageId` | `assistant_message_mismatch` |
+| a committed stage/effect sibling set cannot reproduce its dedicated settlement projection digest or differs from the recorded/indexed digest | `settlement_digest_mismatch` |
+| `ContextPrepared.context_digest` does not match canonical prepared messages/context | `context_digest_mismatch` |
+| an already-indexed non-empty `completion_id` identifies a different effect or terminal settlement digest; this lookup precedes and short-circuits per-effect conflict lookup | `conflicting_completion_id` |
+| checked cycle increment overflows | `cycle_overflow` |
+| a non-duplicate decision or valid committed batch would grow one named authoritative collection beyond 4,096 messages or 256 entries | `state_capacity_exceeded` |
+| required allocated ID absent / extra ID present on a state-changing path | `allocated_ids_exhausted` / `unused_allocated_ids` |
+| committed envelope session/lane/run, record/event ID, sequence-independent correlation, or required transition timestamp differs | `record_identity_mismatch` |
+| required sibling is absent, duplicated, mismatched, or out of order | `invalid_record_order` |
+| settlement names an unknown or no-longer-pending effect and is not indexed | `effect_not_pending` |
+| indexed stage/effect/deferral identity has unequal normalized content and no indexed completion identity already classified the input | `conflicting_settlement` |
+
+Batch-range and sequence failures retain their dedicated codes. `terminal_state_immutable`, state-hash serialization failure, and an unreachable reducer-state contradiction map only to `terminal_state_immutable`, `state_hash_failed`, and `invariant_violation`, respectively. Errors returned by `decide` or `apply` do not mutate state and do not fabricate durable failure records. A normalized `Fail(ErrorDescriptor)` is semantic input, not `KernelError`; it follows the `before_finalize` path and becomes `RunFailed` only after commit.
+
+PR-009 boundary tests must cover one-below-to-limit success, at-limit non-growing duplicate success, at-limit growth failure for each of the four fields, deterministic first-field precedence when one transition would exceed multiple fields, and whole-batch apply overflow with no partial mutation. Private pure-preflight tests may assemble capacity-only states for ceilings that cannot be reached through PR-009's model-only transition graph: the 256-entry stage index is exhausted before the 4,096-message or 256-entry model/completion indexes can be reached. Full decide/apply/replay parity is required for every prefix reachable in the current scope; each later PR that adds transitions capable of independently reaching another ceiling must add the corresponding full-replay boundary proof. Tests must not add a public arbitrary-state restoration constructor merely to synthesize unreachable boundaries. Separate ordering tests must prove semantic assistant failure precedes queue errors, a valid assistant with a missing message ID returns `allocated_ids_exhausted`, and consumed-message-ID mismatch is checked only after queues pass.
+
+### 11.3.6 Canonical state hash
+
+`KernelState::state_hash()` is SHA-256 under domain `kernel-state`, schema version 1, using the section 6.4 prefix encoding. The hash input is RFC 8785 JCS of this exact deny-unknown DTO; the internal maps are never serialized directly:
+
+```rust
+pub struct KernelStateHashV1 {
+    pub state_version: u16,
+    pub last_applied_sequence: u64,
+    pub session_id: Option<SessionId>,
+    pub lane_id: Option<LaneId>,
+    pub accepted: Option<RunAccepted>,
+    pub phase: Option<RunPhase>,
+    pub cycle: u64,
+    pub current_turn: Option<CurrentTurn>,
+    pub messages: Arc<[Message]>,
+    pub pending_model_effect: Option<PendingModelEffect>,
+    pub terminal_candidate: Option<TerminalCandidate>,
+    pub stage_settlements: Arc<[StageSettlementHashEntryV1]>,
+    pub model_settlements: Arc<[ModelSettlementHashEntryV1]>,
+    pub completion_identities: Arc<[CompletionIdentityHashEntryV1]>,
+    pub terminal: Option<TerminalState>,
+}
+
+pub struct StageSettlementHashEntryV1 {
+    pub cycle: u64,
+    pub stage: Stage,
+    pub settlement_digest: Digest,
+}
+
+pub struct ModelSettlementHashEntryV1 {
+    pub effect_id: EffectId,
+    pub kind: ModelSettlementKind,
+    pub settlement_digest: Digest,
+}
+
+pub struct CompletionIdentityHashEntryV1 {
+    pub completion_id: Arc<str>,
+    pub effect_id: EffectId,
+    pub settlement_digest: Digest,
+}
+```
+
+The JSON object has exactly the `KernelStateHashV1` fields above in the shown names. Every field is present: optional values are JSON `null`; collection fields are JSON arrays, including when empty; integers are JSON base-10 numbers; IDs and timestamps use their canonical public string forms; digests are lowercase hexadecimal strings; structs are objects with all fields present; and enums use the shared externally tagged `snake_case` representation. Nested `CurrentTurn`, `PendingModelEffect`, `TerminalCandidate`, `TerminalState`, `RunAccepted`, `Message`, and record payloads use dedicated state-hash projection DTOs with the exact field sets frozen by their definitions and recursive explicit nulls. Implementations must not serialize ordinary human-readable DTOs directly where their Serde form omits absent optionals. The schema-1 `TerminalState` projection accepts only `completed` and `failed`.
+
+Before JCS, `stage_settlements` is projected to entries ordered by ascending numeric `cycle`, then bytewise-ascending canonical `stage` snake-case string; `model_settlements` is ordered by bytewise-ascending canonical lowercase `effect_id`; and `completion_identities` is ordered by bytewise-ascending UTF-8 `completion_id`. Duplicate keys are invalid rather than last-write-wins. This array representation is the only state-hash representation of those maps and avoids non-string JSON keys.
+
+The projection excludes `committed_at`, envelope payload/checksum fields, append-batch IDs, diagnostics, post-commit actions, transient events/sequences, observer state, and runtime caches. `ContextPrepared.context_digest`, settlement fingerprints, completion identities, and terminal result digests remain in the projection alongside the semantic values they validate. Equal valid record prefixes therefore produce equal state hashes independent of model stream chunking, store commit timestamps, or process restart.
 
 ## 11.4 Why no generic graph engine
 
@@ -1380,7 +1854,84 @@ Delivery ownership for `RecordBody` variants is staged by logical PR. **PR-008 o
 - `EffectRequested`, `EffectDeferred`, `EffectCompleted`, `EffectFailed`, `EffectCancelled`
 - `InteractionRequested`, `InteractionResolved`, `InteractionExpired`, `InteractionCancelled`
 
-All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-009 reducer records, PR-011 limits/cancellation/budget, PR-012 capabilities, PR-014/PR-039 store/session/lane/snapshot surfaces). A PR-008 implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
+**PR-009 additionally owns and materializes**:
+
+- `StageOutcomeRecorded`
+- `ContextPrepared`
+- `EntryAppended`
+- `RunCompleted`
+- `RunFailed`
+
+All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-010 tool-batch records, PR-011 limits/cancellation/budget, PR-012 capabilities, and PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
+
+The PR-009 payloads are:
+
+```rust
+pub struct StageOutcomeRecorded {
+    pub cursor: StageCursor,
+    pub disposition: StageDisposition,
+    pub settlement_digest: Digest,
+}
+
+pub enum StageDisposition {
+    Continued,
+    ContextPrepared {
+        turn_id: TurnId,
+        context_digest: Digest,
+    },
+    ModelRequested {
+        turn_id: TurnId,
+        model_request_id: ModelRequestId,
+        effect_id: EffectId,
+    },
+    FinalizeAccepted,
+    ContinueModel {
+        next_cycle: u64,
+    },
+    Failed {
+        error: ErrorDescriptor,
+    },
+}
+
+pub struct ContextPrepared {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub messages: Arc<[Message]>,
+    pub context_digest: Digest,
+}
+
+pub struct EntryAppended {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub effect_id: EffectId,
+    pub parent_message_id: Option<MessageId>,
+    pub message: Message,
+}
+
+pub struct RunCompleted {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub model_request_id: ModelRequestId,
+    pub effect_id: EffectId,
+    pub result_message_id: MessageId,
+    pub result_digest: Digest,
+}
+
+pub struct RunFailed {
+    pub cycle: u64,
+    pub turn_id: Option<TurnId>,
+    pub model_request_id: Option<ModelRequestId>,
+    pub effect_id: Option<EffectId>,
+    pub error: ErrorDescriptor,
+}
+```
+
+`StageOutcomeRecorded.settlement_digest` is the `stage-settlement` schema-1 digest of the dedicated semantic projection in section 11.3.2.1, not of the complete human-readable `StageSettled` input. Required sibling records supply replay fields; reducer-assigned IDs and `ContinueModel.reason` are excluded. Its disposition carries assigned correlations needed for replay validation. `ContextPrepared.context_digest` is the `model-context` v1 digest of the JCS message array and must match `messages`. `EntryAppended.message` must be an assistant message without tool-call blocks in PR-009; `created_at` must equal `TransitionEnv.now`, and its ID must equal the consumed message ID after allocated-ID queues validate. `parent_message_id` is the prior durable message in the model-only linear projection, or `None`. Session/lane conversation-tree `EntryId` and lane-leaf mechanics remain PR-014 scope and are not guessed into this payload.
+
+For successful settlement, `RunCompleted.result_digest` is the matching final `EffectCompleted.output_digest`; `result_message_id` identifies the durable assistant message derived from that normalized output. `RunFailed.error` is the normalized candidate failure accepted by `before_finalize`. Optional correlations are all present for a model failure and may be absent only when an earlier aggregate stage failed before a model request existed.
+
+The exact family-discriminated `model-settlement` schema-1 DTOs, external-field exclusions, and command-to-record reconstruction rules are normative in section 11.3.2. In particular, direct and external sources never normalize to one interchangeable shape: source is committed by the fingerprint variant, and non-empty usage, artifacts, and the complete assistant message are reconstructed from `EffectCompleted` plus its required `EntryAppended` sibling.
 
 Control-path payloads are explicit and versioned rather than inferred from runtime state:
 
@@ -1623,9 +2174,10 @@ pub enum ExternalEffectOutcome {
         artifacts: Arc<[ArtifactRef]>,
     },
     Failed { error: ErrorDescriptor },
-    Cancelled { reason: Option<Arc<str>> },
 }
 ```
+
+The code block above is the complete concrete PR-009 external outcome enum. `Cancelled` is not a reserved placeholder variant: PR-011 owns adding it and its transition semantics. Until then, strict external-command decoding maps a `cancelled` or any unknown/future discriminant to `invalid_input_payload`; there is no separate typed semantic error for an unmaterialized variant.
 
 External completion and interaction commands carry an explicit durable locator:
 
@@ -1774,7 +2326,7 @@ store.append(expected_sequence, records)
     +-- failure  --> fault lane/session; execute no post-commit action
     |
     v
-kernel.apply(committed_batch)
+kernel.apply(committed_batch, next_transient_sequence)
     |
     v
 publish durable-derived events
@@ -2411,14 +2963,14 @@ pub enum RunEventBody {
     InteractionResolved(InteractionResolution),
     InteractionExpired(InteractionExpired),
     InteractionCancelled(InteractionCancelled),
-    // Reserved durable bodies — owning PRs freeze full record/event payloads;
-    // kind tags and correlation rules are fixed here so class/version surfaces stay stable.
+    // PR-009-owned compact public bodies
     MessageFinalized { message_id: MessageId },
+    RunCompleted { result_digest: Digest },
+    RunFailed { error: ErrorDescriptor },
+    // Reserved durable bodies — owning PRs freeze full record/event payloads.
     ToolSettled { tool_call_id: ToolCallId },
     LimitReached { dimension: LimitDimension },
     RunSuspended { reason_code: Option<Arc<str>> },
-    RunCompleted { result_digest: Digest },
-    RunFailed { error: ErrorDescriptor },
     RunCancelled { request_id: Option<CancellationRequestId> },
     // Transient bodies
     ModelTextDelta(ModelTextDelta),
@@ -2454,6 +3006,8 @@ pub struct ProviderHeartbeat {
 
 `RunEvent.kind` and `RunEvent.body` must agree. Durable-derived events require `durable_sequence = Some(source_record_sequence)` and a replay-stable `event_id` taken from the source record's `derived_event_ids`. Transient events require `durable_sequence = None`; their `event_id` values are allocated at emission and are explicitly non-replay-stable. `transient_sequence` is always set and advances for every emitted event on the run stream. Correlation fields (`model_request_id`, `tool_batch_id`, `effect_id`, `tool_call_id`, `turn_id`) are set when applicable to the kind and otherwise `None`. `sensitivity` is mandatory on every event.
 
+Value constructors and deserializers enforce event class, applicable-correlation presence, and sensitivity policy; they do not authenticate caller-supplied identifiers. Authoritative durable model events come only from `Kernel::apply` over committed records and replay-derived pending state. Authoritative transient model events come from the runtime sequencer using the outstanding `PendingModelEffect`. Transport, observer, or binding consumers treat separately decoded events as untrusted until their authenticated source/provenance is established.
+
 For each durable record kind, a versioned ordinal table defines zero or more derived events. Ordinals are dense from zero in table order; `derived_event_ids.len()` must equal the table length for that record kind/version. Replay and every binding reuse those IDs.
 
 ### 20.2.1 Derived-event ordinal table (kind_version = 1)
@@ -2470,8 +3024,15 @@ For each durable record kind, a versioned ordinal table defines zero or more der
 | `InteractionResolved` | 0 → `InteractionResolved` |
 | `InteractionExpired` | 0 → `InteractionExpired` |
 | `InteractionCancelled` | 0 → `InteractionCancelled` |
+| `StageOutcomeRecorded` | none |
+| `ContextPrepared` | none |
+| `EntryAppended` | 0 → `MessageFinalized` |
+| `RunCompleted` | 0 → `RunCompleted` |
+| `RunFailed` | 0 → `RunFailed` |
 
-PR-008 freezes and implements constructors/fixtures for the ordinal rows above plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). Later PRs append ordinal rows for their owned record kinds (`MessageFinalized`, `ToolSettled`, `LimitReached`, terminal run records, and others) without renumbering existing rows for a given `kind_version`.
+PR-008 freezes and implements constructors/fixtures for its rows plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). PR-009 adds the five rows above. `StageOutcomeRecorded` and `ContextPrepared` are semantic bookkeeping with no public event; therefore their drafts carry empty `derived_event_ids`. Later PRs append rows for their owned record kinds (`ToolSettled`, `LimitReached`, `RunCancelled`, and others) without renumbering existing rows for a given `kind_version`.
+
+For PR-009, `MessageFinalized` takes `turn_id`, `model_request_id`, and `effect_id` from `EntryAppended`; `RunCompleted` and `RunFailed` take their optional/applicable correlations from the terminal payload. Model `EffectRequested`, `EffectDeferred`, `EffectCompleted`, and `EffectFailed` events take the same correlations from the outstanding `PendingModelEffect` established by the matching before-model outcome. Those full model-effect event bodies are `Sensitivity::Confidential`; the compact `MessageFinalized`, `RunCompleted`, and safe-descriptor-only `RunFailed` bodies are `Sensitivity::Internal`. No PR-009 event publishes assistant message content. A later change to these projections or classifications requires compatibility fixtures and threat-model review.
 
 ## 20.3 Event hub
 

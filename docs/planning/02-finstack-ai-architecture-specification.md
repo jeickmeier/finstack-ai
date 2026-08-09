@@ -13,10 +13,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.8 |
+| Version | 0.9 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.13; Implementation Plan v0.13; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.14; Implementation Plan v0.14; Security and Threat Model v0.4 |
 
 # Executive architecture decision
 
@@ -598,6 +598,10 @@ The runtime never executes a recoverable effect solely because the in-memory ker
 
 This avoids mutating authoritative state before the store confirms the transition.
 
+The Phase 1 reducer accepts only normalized semantic boundaries. PR-009 materializes run acceptance, aggregate stage settlement, direct model settlement, and completion of a previously deferred model effect. Tool batches, cancellation/limits, real middleware/context invocation, interactions, timers, and general recovery commands remain with their named later PRs. A decision may contain an `ExecuteEffect` action only when the same decision contains the preceding `EffectRequested` intent; the action remains inert until that complete batch commits and applies.
+
+Committed records, never commands or actions, derive the authoritative phase. Apply validates a contiguous committed sequence and the complete sibling/order contract transactionally before changing state. Replay-derived indexes retain exact stage cursors, effect-settlement fingerprints, and non-empty external completion IDs with their effect and settlement digest. Stage fingerprints are reconstructed from `StageOutcomeRecorded` plus required siblings; non-semantic continuation reason text is excluded, while digest tampering fails closed. Model-settlement fingerprints discriminate direct completed/failed/deferred input from external completed/failed input and are reconstructed before pending state is cleared from the complete committed sibling set, including usage, artifacts, and finalized assistant message where applicable. Equal repeated settlements are idempotent; reuse of a stage cursor or effect identity with different normalized content, or of a completion ID for a different effect/digest, fails closed. The model stream's transient chunking never enters this state derivation.
+
 ## 8.3 Transient streaming
 
 Provider text/reasoning deltas are transient by default. They are:
@@ -662,6 +666,8 @@ The initial data model includes lane IDs and immutable parent links. Public conc
 
 A run owns its current phase, explicit root/parent/effect relation, limit counters, active/deferred effects, unresolved interactions, pending tool calls, usage, and terminal result. A turn owns one model response and its complete tool batch.
 
+For PR-009, one run state also retains the current cycle/turn correlation, prepared-context digest, pending model request/deferral, candidate terminal result, and replay-derived settlement fingerprints. Its concrete terminal payload vocabulary is completed/failed only. Message state is hard-capped at 4,096 items and each settlement/completion index at 256 entries; prospective overflow fails without mutation rather than evicting replay evidence. The canonical `kernel-state` v1 hash uses dedicated recursive explicit-null projection DTOs, covers that bounded semantic state, and excludes store commit timestamps, envelope checksums, actions, diagnostics, transient events, observers, and caches.
+
 Run relation metadata is immutable after acceptance. It provides root and parent correlation, relation kind, depth, optional budget scope, and external-work reference. It does not make child-run scheduling a kernel responsibility; `AgentInvoker` and application/runtime services own invocation and fan-out policy.
 
 Every `RunAccepted` also persists an audit-safe initiating principal/tenant reference, authentication method/assurance, authorization policy version and decision ID, effective deadline/limits, propagation policy, and resolved-agent lock digest. Child contexts may only attenuate principal scopes, deadlines, and budget; tenant changes require a new authenticated boundary.
@@ -709,6 +715,8 @@ A deferred effect always retains the original `EffectId` and a non-secret extern
 
 Identical duplicates are idempotent. For a known authorized locator, a conflicting duplicate or invalid late command appends a durable rejection/audit record that does not change run state. Authentication failures, scope mismatches, malformed callback tokens, and unknown locators go only to the required security-audit sink to prevent journal probing or existence disclosure; failure of required audit recording fails the command closed.
 
+PR-009 proves the kernel half of this rule for deferred model effects: a direct `EffectDeferred` preserves the outstanding request and moves the run to `AwaitingExternal`; an accepted external completion must match that request's effect/output contract and emits the same durable completed/failed record families as direct completion while retaining a distinct source-discriminated settlement fingerprint. Ingress authentication, locator routing, durable rejection/audit records, cancellation/deadline checks, and the runtime/store loop remain later-PR responsibilities and are not claimed by the reducer-only slice.
+
 Accepted command identity/digest settlements remain derivable from journal records and snapshots. Outstanding targets cannot be pruned; terminal settlement tombstones are retained for at least the callback-token/idempotency horizon. After that declared horizon, callback tokens are expired and late commands are rejected/audited without a claim of indefinite duplicate recognition.
 
 ## 10.4 Exactly-once statement
@@ -738,6 +746,8 @@ before_finalize
 For a concise public API, `prepare_context` and `before_model` are separate because context retrieval and final request shaping have different budgets and durability implications.
 
 `before_finalize` receives a candidate terminal result before any terminal record is committed. It may accept completion, request bounded continuation/retry/interaction, suspend, or fail. Post-terminal notifications are immutable observer events; there is no behavior-changing `after_run` stage.
+
+PR-009 implements only aggregate acceptance, model continuation, and failure settlements at this boundary. Acceptance commits the candidate terminal record; continuation starts a fresh checked cycle at context preparation with new turn/model/effect identities; failure commits `RunFailed`. Retry, interaction, suspension, and actual middleware-chain execution remain assigned to later PRs. No path bypasses this settlement, including failures raised before a model request exists.
 
 ## 11.2 Ordering
 
@@ -1070,6 +1080,8 @@ Security decisions such as typed interaction approvals, policy denials, permissi
 
 Invalid state transitions, corrupt record sequences, identifier mismatches, and invariant failures are terminal for the affected run or session and produce explicit error codes.
 
+The reducer distinguishes rejected commands from semantic run failure. Stable `KernelError` codes include `invalid_phase_input`, allocated-ID shortage/extras, state-capacity exhaustion, settlement-digest mismatch, committed-batch range or sequence mismatch, record identity/order mismatch, unknown pending effects, conflicting settlements, terminal-state mutation, state-hash failure, and invariant violation. Returning one does not mutate state or fabricate `RunFailed`; a normalized failure becomes durable only through the settled `before_finalize` path.
+
 ## 18.2 External effect failures
 
 Model/tool/context/store/middleware failures are normalized into categories:
@@ -1120,6 +1132,8 @@ sequence / transient order
 - Diagnostics, observer-specific spans/metrics, and binding-local notifications are projections or host details; they are not `RunEvent` kinds and must not become the persistence schema.
 
 This prevents telemetry schemas from becoming the persistence schema. Canonical-CBOR encoding, payload digests, and envelope checksums for durable records remain the protocol/store delivery owned by ADR-015 / PR-039; Phase 1 freezes semantic shapes and digest domain constants only.
+
+Kernel `apply` returns `RunEvent` values; `KernelEvent` is not a second public type. PR-009 stage/context bookkeeping derives no public event, while committed assistant entries and terminal records derive replay-stable `MessageFinalized`, `RunCompleted`, or `RunFailed` events using persisted ordinal IDs and turn/model/effect correlations.
 
 ## 19.3 Instrumentation extension
 

@@ -118,7 +118,7 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://finstack.ai/schemas/golden-trace/v1/scripted-input.schema.json",
       "title": "ScriptedInput",
-      "description": "Deterministic scripted model/tool/timer outcomes for golden traces (PR-005; TDD \u00a732).",
+      "description": "Deterministic scripted outcomes for golden traces, including PR-009 model-only reducer progress and settlement (TDD \u00a732).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -143,6 +143,10 @@
                 "type": "string",
                 "enum": [
                   "model_chunk",
+                  "model_completed",
+                  "model_deferred",
+                  "external_completed",
+                  "before_finalize_continue",
                   "tool_call",
                   "tool_result",
                   "cancellation",
@@ -234,7 +238,123 @@
                   }
                 }
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "model_chunk"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4194304
+                    },
+                    "tool_name": false,
+                    "arguments": false,
+                    "result": false,
+                    "error_code": false,
+                    "message": false,
+                    "duration_ms": false
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "model_completed",
+                        "model_deferred"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "text": false,
+                    "tool_name": false,
+                    "arguments": false,
+                    "result": false,
+                    "error_code": false,
+                    "message": false,
+                    "duration_ms": false
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "external_completed"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "id",
+                    "text"
+                  ],
+                  "properties": {
+                    "tool_name": false,
+                    "arguments": false,
+                    "result": false,
+                    "error_code": false,
+                    "message": false,
+                    "duration_ms": false
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "before_finalize_continue"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "id": false,
+                    "text": false,
+                    "tool_name": false,
+                    "arguments": false,
+                    "result": false,
+                    "error_code": false,
+                    "duration_ms": false
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -527,7 +647,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128,
-          "description": "Opaque expected state hash string for fixture comparison; not computed by Phase 0 harness."
+          "description": "Expected semantic state hash; reducer-backed fixtures obtain it from KernelState::state_hash."
         }
       }
     }

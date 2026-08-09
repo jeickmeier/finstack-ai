@@ -1,0 +1,9 @@
+{
+  "format_version": 1,
+  "steps": [
+    {
+      "kind": "external_completed",
+      "id": "external-completion-1"
+    }
+  ]
+}
