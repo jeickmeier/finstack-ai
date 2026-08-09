@@ -1,0 +1,46 @@
+PR-010 Threat Model section 18 / TM-02 review
+Date: 2026-08-09
+Reviewer: me@jeickmeier.com
+Integrated on main: ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5
+Result: Pass
+
+Review trigger:
+- PR-010 changes effect settlement, replay, and terminal-candidate routing semantics.
+- No new port, middleware stage, trust class, deployment topology, parser family,
+  network listener, privileged host capability, or dependency was introduced.
+- No ADR trigger was crossed: the six ports, existing stages, commit-before-effect,
+  deterministic synchronous kernel, and at-least-once effect guarantee are preserved.
+
+TM-02 controls verified:
+- Assistant tool-call IDs are unique and must match preallocated IDs in source order.
+- Tool name and arguments are frozen by the complete validated batch plan.
+- Successful output must use the ToolResult contract and decode to the exact call ID.
+- Batch/effect identities and the complete plan are committed before ExecuteEffect.
+- Unknown tools and permitted framework failures use framework-authored error results.
+- Direct/external equal duplicates are idempotent; conflicts fail closed.
+- Arrival-order effect settlements buffer results while tool messages/events finalize
+  only for the newly contiguous source prefix.
+- Tool-call and settlement maps, message history, and record batches are bounded and
+  capacity-preflighted transactionally.
+- Fail-run drains dispatched calls, closes only undispatched calls, and never fabricates
+  a result for an active unresolved effect.
+- Replay validates exact settlement-prefix, next-group dispatch, and closure shapes.
+
+Security invariants verified:
+- SEC-INV-001: model content cannot authorize execution; ToolBatchPrepared must supply
+  a matching validated plan before dispatch.
+- SEC-INV-002: every ExecuteEffect action has a preceding committed EffectRequested.
+- SEC-INV-004: duplicate/conflicting settlements and completion IDs are classified
+  deterministically and fail closed when unequal.
+- SEC-INV-007: plans, indexes, messages, and record batches retain hard ceilings.
+- SEC-INV-009: terminal state remains immutable.
+- SEC-INV-010: malformed plans, records, associations, and state v2 fail explicitly.
+
+Findings: none at medium or above.
+
+Residual later-PR obligations, not PR-010 defects:
+- PR-011 owns cancellation inputs, EffectCancelled, deadlines, retries, and cancellation
+  closure evidence.
+- PR-015/PR-018 own configured tool-call/concurrency limits, policy integration, and
+  runtime dispatch authorization.
+- Authenticated tenant-scoped external completion ingress remains runtime scope.

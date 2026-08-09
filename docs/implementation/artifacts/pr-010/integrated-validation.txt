@@ -1,0 +1,59 @@
+PR-010 immutable and integrated validation
+Date: 2026-08-09
+Implementation/integration commit: ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5
+Branch: main
+Integration method: fast-forward from codex/pr-010-tool-reducer
+Result: Pass
+
+Immutable candidate:
+PASS  mise run ci
+      Executed on codex/pr-010-tool-reducer at ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5.
+
+Post-integration focused verification:
+PASS  mise run test-kernel
+      86 kernel unit tests
+      52 focused reducer tests
+      5 passing kernel doctests plus 1 compile-fail doctest
+      4 runtime tests
+      4 public-Rust-API tests
+
+PASS  mise run conformance
+      29 unit/integration/doc tests
+      public compatibility corpus includes PR-010 subjects
+
+PASS  mise run check-wasm
+      kernel and facade/WASM checks for wasm32-unknown-unknown
+
+PASS  mise run architecture
+      21 tests; no architecture findings
+
+PASS  mise run schema-governance
+      schema-governance: ok
+
+Retained post-integration failure:
+FAIL  mise run ci
+      All local code/test/docs/architecture/schema/WASM/security-scan stages passed.
+      RustSec advisory fetch timed out reaching GitHub, and the Python build could
+      not resolve PyPI DNS. No source or fixture failure was reported.
+
+Remediation and final post-integration verification:
+PASS  mise run supply-chain
+      advisories, bans, licenses, and sources ok; duplicate syn versions are a warning
+
+PASS  mise run build-python
+      source distribution and wheel built successfully
+
+PASS  mise run ci
+      format, clippy, workspace tests, docs, minimal checks, architecture, WASM,
+      Python tooling, schema governance, benchmark compile, workflow lint,
+      supply-chain, secret scan/canaries, release smoke, and Python build passed
+
+Compatibility and deterministic coverage:
+- eight PR-010 tool-batch golden traces
+- 74 strict public-Rust-API compatibility fixtures in the active corpus
+- all six completion permutations for a three-call parallel group
+- replay of every committed prefix with decide/apply state equivalence
+- unchanged PR-009 kernel-state v1 known-answer hashes
+- deterministic conditional kernel-state v2 hashes
+
+No hosted CI, GitHub pull request, phase-exit decision, or G1 decision is claimed.
