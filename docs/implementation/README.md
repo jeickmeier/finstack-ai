@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Initial state
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.16; PR-009 closed on local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` on 2026-08-09 (no GitHub issue or actual PR):
+The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.17; PR-009 closed on local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` on 2026-08-09 (no GitHub issue or actual PR), and PR-010 is `In progress` on `codex/pr-010-tool-reducer`:
 
 - 37 decisions are accepted and indexed; ADR-002, ADR-003, and ADR-028 remain `In progress` with PR-009 evidence `Partial` (later mapped PRs still open); ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
-- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-009 are `Done` (PR-009 at `5843dce6d77498a75acdc15d816586cb26098456` with A01–A05 Passed); PR-010–PR-066 are `Todo`.
+- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-009 are `Done` (PR-009 at `5843dce6d77498a75acdc15d816586cb26098456` with A01–A05 Passed); PR-010 is `In progress`; PR-011–PR-066 are `Todo`.
 - Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
-- PR-001–PR-009 acceptance criteria are closed. PR-009 evidence is bound under [`artifacts/pr-009/`](artifacts/pr-009/). PR-008 evidence is bound under [`artifacts/pr-008/`](artifacts/pr-008/). No exceptions or blockers are open.
+- PR-001–PR-009 acceptance criteria are closed. PR-010 A01–A04 remain `Pending` until immutable implementation evidence and integrated verification exist. PR-009 evidence is bound under [`artifacts/pr-009/`](artifacts/pr-009/). PR-008 evidence is bound under [`artifacts/pr-008/`](artifacts/pr-008/). No exceptions or blockers are open.
 
 Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
 

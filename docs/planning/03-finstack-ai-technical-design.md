@@ -2,7 +2,7 @@
 title: "finstack-ai Technical Design Document"
 subtitle: "Implementation-level design for the Rust agent microkernel, runtime, bindings, and extension SDK"
 author: "finstack-ai project"
-date: "2026-08-08"
+date: "2026-08-09"
 ---
 
 # finstack-ai Technical Design Document
@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.14 |
+| Version | 0.15 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.9; Implementation Plan v0.14; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.15; Security and Threat Model v0.5 |
 
 # 1. Technical objective
 
@@ -1173,7 +1173,84 @@ pub struct ExternalEffectCompletedInput {
 }
 ```
 
-The code block above is the complete concrete PR-009 Rust enum. The later input **inventory** reserves the names `ToolBatchSettled` (PR-010), `CancelRequested` and `TimerFired` (PR-011), capability activation (PR-012), and interaction/reconciliation/resume inputs for their mapped later PRs. Those names are not PR-009 `KernelInput` variants, have no PR-009 payload or constructor, and are added only when their owning PR freezes and implements them.
+The code block above is the complete concrete PR-009 Rust enum. PR-010 extends it with the tool contract below. The later input **inventory** continues to reserve `CancelRequested` and `TimerFired` (PR-011), capability activation (PR-012), and interaction/reconciliation/resume inputs for their mapped later PRs.
+
+### 11.1.1 PR-010 tool command and policy contract
+
+PR-010 adds these exact externally tagged, `snake_case`, deny-unknown wire shapes:
+
+```rust
+pub enum KernelInput {
+    // PR-009 variants unchanged
+    ToolBatchSettled(ToolBatchSettled),
+}
+
+pub enum ReducerStageOutcome {
+    // PR-009 variants unchanged
+    ToolBatchPrepared {
+        calls: Arc<[ToolCallPlan]>,
+        continuation: ToolBatchContinuation,
+    },
+}
+
+pub struct ToolBatchSettled {
+    pub tool_batch_id: ToolBatchId,
+    pub outcome: ToolSettlement,
+}
+
+pub enum ToolSettlement {
+    Completed(EffectCompleted),
+    Deferred(EffectDeferred),
+    Failed(EffectFailed),
+}
+
+pub enum ToolExecutionMode {
+    Parallel,
+    Sequential,
+    Barrier,
+}
+
+pub enum ToolFailurePolicy {
+    ReturnToModel,
+    FailRun,
+}
+
+pub enum ToolBatchContinuation {
+    ContinueModel,
+    Finalize,
+}
+
+pub struct ValidatedToolCall {
+    pub call: ToolCallBlock,
+    pub tool_id: ToolId,
+    pub component: Option<ComponentInvocation>,
+    pub output_contract: EffectOutputContract,
+    pub retry_safety: RetrySafety,
+    pub deadline: Option<Timestamp>,
+    pub execution: ToolExecutionMode,
+    pub failure_policy: ToolFailurePolicy,
+}
+
+pub struct SyntheticToolClosure {
+    pub call: ToolCallBlock,
+    pub execution: ToolExecutionMode,
+    pub failure_policy: ToolFailurePolicy,
+    pub error: ErrorDescriptor,
+}
+
+pub enum ToolCallPlan {
+    Execute(ValidatedToolCall),
+    SyntheticClosure(SyntheticToolClosure),
+}
+```
+
+`ToolBatchPrepared` is valid only for the exact current `(cycle, BeforeToolBatch)` cursor. Its `calls` array must cover every `ToolCallBlock` in the originating assistant message exactly once and in source order, preserving call ID, tool name, and canonical arguments. Duplicate source IDs return `duplicate_tool_call`; missing, extra, reordered, or mutated plans return `tool_batch_plan_mismatch`. An executable call must use `EffectOutputKind::ToolResult`. A synthetic closure must have a valid framework `ErrorDescriptor`; unknown tools use code `unknown_tool`, category `Tool`, `retryable = false`, and no execution action.
+
+Consecutive `Parallel` calls share a zero-based execution group. Every `Sequential` or `Barrier` call is an exclusive group. Synthetic calls retain their declared mode for deterministic grouping but never produce `EffectRequested` or `ExecuteEffect`. The reducer dispatches only executable calls in the current eligible group. The runtime may execute those actions concurrently; it may not dispatch a later group before every executable call in the current group has reached a terminal settlement. `Barrier` is intentionally an exclusive scheduling boundary in PR-010; broader resource or middleware semantics are not implied.
+
+`ToolBatchSettled` carries exactly one direct settlement. `ExternalEffectCompleted` remains the external settlement command: `assistant_message` must be `None` for every tool outcome. A successful direct or external completion must match the original request and use `EffectOutputKind::ToolResult`; its `EffectCompleted.output` must strictly decode as one `ToolResultBlock` whose `tool_call_id` equals the planned call. Unknown fields or variants fail strict decoding. A framework `EffectFailed` becomes a framework-authored `is_error = true` result under `ReturnToModel`; under `FailRun` it records the same safe closure for the failed call, stops later dispatch, drains already-dispatched calls, closes only undispatched calls with `tool_batch_aborted`, and installs a failed terminal candidate. A deferred call preserves the original `EffectId`, enters `AwaitingExternal`, emits no result, and cannot be synthetically closed while unresolved.
+
+`ToolBatchContinuation::ContinueModel` increments the cycle after batch closure and re-enters `PreparingContext`. `Finalize` enters `BeforeFinalize` with the successful assistant candidate that opened the batch. Tool-result messages remain canonical history but never replace that candidate as the `RunCompleted` result.
 
 The PR-009 stage/outcome matrix is exact:
 
@@ -1183,11 +1260,13 @@ The PR-009 stage/outcome matrix is exact:
 | `PreparingContext` | `PrepareContext` | `ContextPrepared`, `Fail` |
 | `BeforeModel` | `BeforeModel` | `ModelRequestPrepared`, `Fail` |
 | `AfterModel` | `AfterModel` | `Continue`, `Fail` |
+| `BeforeToolBatch` | `BeforeToolBatch` | `ToolBatchPrepared`, `Fail` |
+| `AfterToolBatch` | `AfterToolBatch` | `Continue`, `Fail` |
 | `BeforeFinalize` | `BeforeFinalize` | `FinalizeAccepted`, `ContinueModel`, `Fail` |
 
 For a new settlement, `StageSettled.cursor` must equal the state's exact expected `(cycle, stage)` before the outcome matrix is evaluated; otherwise `stage_cursor_mismatch` is returned. The cursor is part of the `stage-settlement` fingerprint and the durable `StageOutcomeRecorded`, so a delayed prior-cycle input can only classify as an equal post-commit duplicate or a conflict and can never settle the current cycle. Every other stage/outcome pair returns `invalid_phase_input`. PR-009 does not invoke middleware or context providers: these inputs are already-normalized aggregate settlements used to prove reducer semantics. PR-018 later drives the same boundaries from real middleware effects without adding a stage or changing reducer ownership. `ContinueModel` is the generic `before_finalize` continuation: it increments the checked cycle counter and re-enters `PreparingContext`; it is not a retry and does not reuse a prior `TurnId`, `ModelRequestId`, or `EffectId`. PR-011 applies configured turn/model-request limits.
 
-`ModelSettled` applies only to the outstanding direct model effect in `AwaitingModel`. `ExternalEffectCompleted` applies only to the same effect after an equal `EffectDeferred` moved it to `AwaitingExternal`; it preserves the original `EffectId` and output contract. A completed external outcome requires `assistant_message = Some`, while a failed outcome requires `None`. PR-009's concrete `ExternalEffectOutcome` contains only `Completed` and `Failed`; cancellation remains PR-011 scope. An encoded `cancelled` or any other unknown/future outcome variant fails strict decoding as `invalid_input_payload` until its owning PR adds the variant and semantics. A completed settlement must use `EffectOutputKind::ModelResponse`; its assistant message is role `Assistant`, contains no tool-call block, and has provider IDs equal to the completion. Fine-grained model and tool progress events are handled by the runtime event sequencer and are not kernel inputs.
+`ModelSettled` applies only to the outstanding direct model effect in `AwaitingModel`. `ExternalEffectCompleted` applies only to the same effect after an equal `EffectDeferred` moved it to `AwaitingExternal`; PR-010 also permits that command for the exact deferred tool call in the active batch. It preserves the original `EffectId` and output contract. A completed external model outcome requires `assistant_message = Some`; every tool outcome and a failed model outcome require `None`. The concrete `ExternalEffectOutcome` still contains only `Completed` and `Failed`; cancellation remains PR-011 scope. An encoded `cancelled` or any other unknown/future outcome variant fails strict decoding as `invalid_input_payload` until its owning PR adds the variant and semantics. A completed model settlement must use `EffectOutputKind::ModelResponse`; its assistant message is role `Assistant`, has provider IDs equal to the completion, and may contain unique tool-call blocks in PR-010. Those call IDs must equal the preallocated `tool_call_ids` queue in source order. Fine-grained model and tool progress events are handled by the runtime event sequencer and are not kernel inputs.
 
 All PR-009 command and record wire forms reject unknown fields, use the shared externally tagged `snake_case` enum representation, and enforce the section 6.5 limits before allocation. Optional fields default only where shown and are omitted on human-readable serialization; no unknown state-bearing member is ignored.
 
@@ -1216,9 +1295,9 @@ pub enum RunPhase {
 }
 ```
 
-The normal path is `Accepted -> BeforeRun -> PreparingContext -> BeforeModel -> AwaitingModel -> AfterModel`, followed by either the tool cycle `BeforeToolBatch -> AwaitingTools -> AfterToolBatch -> BeforeModel` or `BeforeFinalize -> Completed`. Any effect-bearing phase may enter `AwaitingExternal`; middleware/tool policy may enter `AwaitingInteraction`; timers enter `Sleeping`; explicit operator/application suspension enters `Suspended`; cancellation enters `Cancelling` before `Cancelled`. `Completed`, `Failed`, and `Cancelled` are terminal. Every other transition is enumerated in reducer tests; unknown phase/input pairs return `invalid_phase_input`.
+The normal path is `Accepted -> BeforeRun -> PreparingContext -> BeforeModel -> AwaitingModel -> AfterModel`, followed by either the tool cycle `BeforeToolBatch -> AwaitingTools -> AfterToolBatch`, which then continues through `PreparingContext` for another model cycle or enters `BeforeFinalize`, or the direct path `BeforeFinalize -> Completed`. Any effect-bearing phase may enter `AwaitingExternal`; middleware/tool policy may enter `AwaitingInteraction`; timers enter `Sleeping`; explicit operator/application suspension enters `Suspended`; cancellation enters `Cancelling` before `Cancelled`. `Completed`, `Failed`, and `Cancelled` are terminal. Every other transition is enumerated in reducer tests; unknown phase/input pairs return `invalid_phase_input`.
 
-PR-009 reaches only `Accepted`, `BeforeRun`, `PreparingContext`, `BeforeModel`, `AwaitingModel`, `AfterModel`, `BeforeFinalize`, `AwaitingExternal`, `Completed`, and `Failed`. `Accepted` is the deterministic intermediate result of applying `RunAccepted`; successful completion of that committed batch closes to `BeforeRun` before `apply` returns. The remaining variants are frozen for their owning later PRs and cannot be synthesized by PR-009.
+PR-010 additionally reaches `BeforeToolBatch`, `AwaitingTools`, and `AfterToolBatch`, and uses `AwaitingExternal` for one or more deferred tool effects. `Accepted` is the deterministic intermediate result of applying `RunAccepted`; successful completion of that committed batch closes to `BeforeRun` before `apply` returns. Interaction, sleeping, cancellation, suspension, and cancelled terminal phases remain frozen for their owning later PRs.
 
 ## 11.3 Decision API
 
@@ -1336,7 +1415,7 @@ pub enum TerminalState {
 
 The code block is the complete concrete PR-009 terminal-state vocabulary. PR-009 materializes only `Completed` and `Failed`; PR-011 owns adding `Cancelled(RunCancelled)` to this state enum together with cancellation input, transition, record-application, and compatibility semantics. The later `RunPhase::Cancelled` inventory value is not a PR-009 `TerminalState` payload.
 
-PR-009 applies the existing section 6.5 semantic ceilings as hard authoritative-state capacities: `messages` has at most 4,096 items; each of `stage_settlements`, `model_settlements`, and `completion_identities` has at most 256 entries. A replacement/equal duplicate at an existing key does not grow a collection. Before a non-duplicate `decide` or committed-batch `apply` would make any field exceed its ceiling, it returns `state_capacity_exceeded` with field exactly `messages`, `stage_settlements`, `model_settlements`, or `completion_identities` and leaves state unchanged. Capacity is never reported as `invariant_violation`, and collections are never truncated, evicted, or allowed to grow without bound.
+PR-009 applies the existing section 6.5 semantic ceilings as hard authoritative-state capacities: `messages` has at most 4,096 items; each of `stage_settlements`, `model_settlements`, and `completion_identities` has at most 256 entries. PR-010 applies the same 256-entry ceiling independently to `tool_calls` and `tool_settlements`. A replacement/equal duplicate at an existing key does not grow a collection. Before a non-duplicate `decide` or committed-batch `apply` would make any field exceed its ceiling, it returns `state_capacity_exceeded` with the exact field name and leaves state unchanged. Capacity is never reported as `invariant_violation`, and collections are never truncated, evicted, or allowed to grow without bound.
 
 `stage_settlements` is keyed by `(cycle, stage)`, terminal `model_settlements` by `EffectId`, and `completion_identities` by any non-empty settlement `completion_id`; all are derived from committed records and retained so duplicate/conflict classification survives replay. The pending effect retains an optional full `EffectDeferred` value separately because deferral followed by final completion under the same `EffectId` is the intended transition, not a conflict. An equal normalized settlement after its phase advanced returns an empty decision plus a `duplicate_settlement` diagnostic. Completion identity has precedence over the per-effect index: an indexed non-empty `completion_id` with equal `(effect_id, settlement_digest)` is an exact duplicate, while a changed effect or digest returns `conflicting_completion_id` without consulting or returning the per-effect conflict. `conflicting_settlement` is used only for unequal indexed stage, effect, or deferral content not already classified by completion identity. An unknown or non-outstanding effect returns `effect_not_pending`.
 
@@ -1363,6 +1442,11 @@ pub enum StageSettlementFingerprintV1 {
         retry_safety: RetrySafety,
         deadline: Option<Timestamp>,
     },
+    ToolBatchPrepared {
+        cursor: StageCursor,
+        calls: Arc<[ToolCallPlan]>,
+        continuation: ToolBatchContinuation,
+    },
     FinalizeAccepted {
         cursor: StageCursor,
     },
@@ -1376,7 +1460,7 @@ pub enum StageSettlementFingerprintV1 {
 }
 ```
 
-The exact top-level JSON shapes are `{"continue":{...}}`, `{"context_prepared":{...}}`, `{"model_request_prepared":{...}}`, `{"finalize_accepted":{...}}`, `{"continue_model":{...}}`, or `{"fail":{...}}`. Member names and values are exactly those shown. `ContinueModel.reason` is diagnostic, non-semantic input: it is absent from the projection and `StageOutcomeRecorded`, is not replayed, and does not affect equality. Two otherwise equal `ContinueModel` inputs with different reasons therefore produce the same fingerprint and classify as equal. The digest does **not** cover the complete human-readable `StageSettled` input.
+The exact top-level JSON shapes are `{"continue":{...}}`, `{"context_prepared":{...}}`, `{"model_request_prepared":{...}}`, `{"tool_batch_prepared":{...}}`, `{"finalize_accepted":{...}}`, `{"continue_model":{...}}`, or `{"fail":{...}}`. Member names and values are exactly those shown. Every optional nested member, including tool component/deadline and error identifiers, is projected explicitly as a value or JSON `null`. `ContinueModel.reason` is diagnostic, non-semantic input: it is absent from the projection and `StageOutcomeRecorded`, is not replayed, and does not affect equality. Two otherwise equal `ContinueModel` inputs with different reasons therefore produce the same fingerprint and classify as equal. The digest does **not** cover the complete human-readable `StageSettled` input.
 
 Fingerprint construction and replay reconstruction are exact:
 
@@ -1385,6 +1469,7 @@ Fingerprint construction and replay reconstruction are exact:
 | `Continue` | matching `StageOutcomeRecorded { cursor, disposition: Continued, ... }` |
 | `ContextPrepared { messages }` | matching stage record plus required `ContextPrepared`; use its complete `messages`, and validate disposition `turn_id`/`context_digest` against the sibling |
 | `ModelRequestPrepared { request, component, output_contract, retry_safety, deadline }` | matching stage record plus required model `EffectRequested`; use `EffectInput::Model.request`, `component`, `output_contract`, `retry_safety`, and `deadline`, and validate disposition turn/request/effect IDs against state and sibling |
+| `ToolBatchPrepared { calls, continuation }` | matching stage record plus required `ToolBatchOpened`; use each source-ordered `AssignedToolCall.plan` plus `continuation`, excluding reducer-assigned batch, effect, source-index, and group-index values from this stage fingerprint |
 | `FinalizeAccepted` | matching stage record plus its required candidate-matching terminal sibling |
 | `ContinueModel { reason: _ }` | matching stage record `ContinueModel { next_cycle }`; validate `next_cycle = checked(cursor.cycle + 1)` but do not project it or any reason |
 | `Fail(error)` | matching stage record `Failed { error }` and, for `BeforeFinalize`, its required matching `RunFailed` sibling |
@@ -1467,6 +1552,47 @@ For an external completion, fields absent from the command are excluded rather t
 
 Replay recreates the same pre-record state from the preceding `EffectRequested` and optional `EffectDeferred`, so source discrimination does not require another durable field. Non-empty usage and artifacts come directly from `EffectCompleted`; the assistant message comes from its required `EntryAppended` sibling. The reconstructed digest is inserted into `model_settlements` and, when present, `completion_identities`; inability to reconstruct the exact command projection or a digest mismatch is `settlement_digest_mismatch`. `ModelSettlementFingerprint { kind, digest }` remains sufficient because `digest` commits to source and every projected field. Deferred duplicate classification recomputes `DirectDeferred` from the retained full pending value, so no additional state field is required.
 
+#### 11.3.2.3 PR-010 tool fingerprints
+
+PR-010 adds three schema-1 domains. All use the section 6.4 prefix plus JCS of dedicated recursive-explicit-null DTOs; ordinary omission-bearing human-readable DTO serialization is forbidden.
+
+`tool-batch-plan` hashes `ToolBatchPlanFingerprintV1 { cycle, turn_id, tool_batch_id, source_message_id, calls, continuation }`, where `calls` is the complete `AssignedToolCall` array including reducer-assigned effect IDs, source/group indexes, and the complete executable or synthetic plan. The digest excludes only `plan_digest` itself.
+
+`tool-settlement` hashes exactly one source-discriminated variant:
+
+```rust
+pub enum ToolSettlementFingerprintV1 {
+    DirectCompleted { tool_batch_id: ToolBatchId, completion: EffectCompleted },
+    DirectFailed { tool_batch_id: ToolBatchId, failure: EffectFailed },
+    DirectDeferred { tool_batch_id: ToolBatchId, deferred: EffectDeferred },
+    ExternalCompleted {
+        tool_batch_id: ToolBatchId,
+        effect_id: EffectId,
+        completion_id: Arc<str>,
+        output: RawJson,
+        usage: Option<Usage>,
+        artifacts: Arc<[ArtifactRef]>,
+    },
+    ExternalFailed {
+        tool_batch_id: ToolBatchId,
+        effect_id: EffectId,
+        completion_id: Arc<str>,
+        error: ErrorDescriptor,
+    },
+    Synthetic {
+        tool_batch_id: ToolBatchId,
+        tool_call_id: ToolCallId,
+        effect_id: EffectId,
+        result: ToolResultBlock,
+        error: ErrorDescriptor,
+    },
+}
+```
+
+Direct and external settlements with otherwise equal values intentionally differ. External projection/exclusion rules match the model external fingerprint: request output contract and recomputed digests are validated rather than projected, reservation is absent, and a tool completion has no assistant message or provider IDs. A synthetic digest commits to the exact model-visible result and safe framework error.
+
+`tool-batch-close` hashes `ToolBatchCloseFingerprintV1 { cycle, turn_id, tool_batch_id, source_message_id, result_message_ids, outcome }` and excludes only `close_digest`. Apply reconstructs all three domains from the committed record and required siblings/state before mutation; any mismatch is `settlement_digest_mismatch`.
+
 ### 11.3.3 Post-commit actions and allocated IDs
 
 ```rust
@@ -1486,7 +1612,9 @@ An `ExecuteEffect` action must have exactly one preceding sibling `EffectRequest
 5. `model_request_ids` when a successful `BeforeModel` settlement requests a model;
 6. `message_ids` when a successful model settlement finalizes the assistant message.
 
-PR-009 consumes no interaction, tool-batch, tool-call, cancellation-request, or append-batch ID. `append_batch_ids` remains runtime-owned when constructing `AppendRequest`. For a state-changing decision, every kernel-owned queue must contain exactly the IDs required by that transition: shortage returns `allocated_ids_exhausted`, and unused IDs in a kernel-owned queue return `unused_allocated_ids`. Assistant presence, role, tool-call prohibition, provider IDs, and `created_at == TransitionEnv.now` are semantic checks performed before any allocated-ID queue validation. Equality between the supplied assistant `message.id` and the consumed `MessageId` is checked only after all required queues pass shortage/extra validation.
+PR-010 consumes the assistant message's preallocated `tool_call_ids` during successful model settlement in source order. `ToolBatchPrepared` consumes one `tool_batch_id` and one `effect_id` per source call, including synthetic calls, then later group dispatch reuses those persisted effect IDs without consuming new ones. Every finalized tool result consumes one `message_id`. PR-010 still consumes no interaction, cancellation-request, or append-batch ID. `append_batch_ids` remains runtime-owned when constructing `AppendRequest`. For a state-changing decision, every kernel-owned queue must contain exactly the IDs required by that transition: shortage returns `allocated_ids_exhausted`, and unused IDs in a kernel-owned queue return `unused_allocated_ids`. Assistant/tool-result semantic checks occur before allocated-ID validation; equality with consumed message/call IDs is checked only after every required queue passes shortage/extra validation.
+
+The 256-record append-batch ceiling is also preflighted before allocated-ID validation. A prepared plan is rejected as `invalid_input_payload { field = "records", reason_code = "too_many_items" }` if its opening decision, the adversarial-order terminal settlement of any execution group (including contiguous result finalization plus next-group dispatch or closure), or any `FailRun` drain/abort closure could exceed 256 records. No accepted plan can later become uncommittable solely because parallel completions arrived in a different order.
 
 `decide` uses this validation order:
 
@@ -1496,7 +1624,7 @@ PR-009 consumes no interaction, tool-batch, tool-call, cancellation-request, or 
 4. only when step 3 finds no indexed completion identity, consult the applicable stage, per-effect, or pending-deferral index: equal content returns the empty duplicate decision and unequal content returns `conflicting_settlement`;
 5. for either duplicate return, set `expected_sequence = last_applied_sequence + 1` and do not validate or consume any queue in `env.ids`;
 6. reject terminal state, stale cursor, wrong phase, wrong outstanding correlation, or invalid semantic payload in the stable order listed in section 11.3.5; assistant presence/role/tool/provider/time checks occur here;
-7. preflight prospective state growth in fixed field order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, returning `state_capacity_exceeded` for the first field that would cross its hard ceiling;
+7. preflight prospective state growth in fixed field order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, `tool_calls`, `tool_settlements`, returning `state_capacity_exceeded` for the first field that would cross its hard ceiling;
 8. calculate required IDs and validate every kernel-owned queue for shortages, then extras, in the queue order above; a missing message ID is `allocated_ids_exhausted` even if the supplied message ID could not match;
 9. after successful queue validation, require every supplied ID-bearing payload to equal its consumed ID, including assistant `message.id`; mismatch is `assistant_message_mismatch` for that message and `record_identity_mismatch` for other payloads;
 10. build the decision.
@@ -1507,7 +1635,7 @@ A pre-commit reevaluation sees no committed settlement index, repeats steps 6–
 
 `apply` validates the entire batch on a temporary state and swaps it into the kernel only if all records succeed. The batch must be non-empty; `first_sequence` must equal `last_applied_sequence + 1`; `last_sequence` must equal `first_sequence + records.len() - 1`; and every envelope sequence must be contiguous and equal its position. Batch range mismatch is `committed_batch_range_mismatch`; a gap, duplicate, rollback, or overflow is `non_contiguous_record_sequence`. Every record must match the accepted session/lane/run identity (with `RunAccepted` establishing it), and all intra-batch sibling/order constraints below must hold.
 
-Apply precedence is structural batch/range/sequence validation, then record identity/sibling/order and reconstructed fingerprint/digest validation, then one checked preflight of the whole batch's net-new state entries in fixed order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, then temporary-state application and atomic swap. A batch that would cross a hard capacity returns `state_capacity_exceeded` before the first semantic mutation; a malformed/tampered batch retains its earlier dedicated validation error rather than being masked by capacity.
+Apply precedence is structural batch/range/sequence validation, then record identity/sibling/order and reconstructed fingerprint/digest validation, then temporary-state invariant validation and one checked preflight of the whole batch's net-new state entries in fixed order `messages`, `stage_settlements`, `model_settlements`, `completion_identities`, `tool_calls`, `tool_settlements`, then atomic swap. A batch that would cross a hard capacity returns `state_capacity_exceeded` without mutating authoritative state; a malformed/tampered batch retains its earlier dedicated validation error rather than being masked by capacity.
 
 The PR-009 record-to-state table is normative:
 
@@ -1523,7 +1651,7 @@ The PR-009 record-to-state table is normative:
 | `EffectCompleted(Model)` | `AwaitingModel` or `AwaitingExternal`; immediately followed by matching `EntryAppended` | effect settlement and any completion identity indexed; phase advances when sibling applies |
 | `EntryAppended` | matching completed effect in the same batch | message appended, candidate set; `AfterModel` |
 | `EffectFailed(Model)` | `AwaitingModel` or `AwaitingExternal`; matches pending request | effect settlement and any completion identity indexed; failure candidate set; `BeforeFinalize` |
-| `StageOutcomeRecorded(AfterModel, Continued)` | `AfterModel` | preserve completion candidate; `BeforeFinalize` |
+| `StageOutcomeRecorded(AfterModel, Continued)` | `AfterModel` | preserve completion candidate; `BeforeToolBatch` when the assistant message contains calls, otherwise `BeforeFinalize` |
 | non-final `StageOutcomeRecorded(..., Failed)` | matching nonterminal stage | failure candidate set; `BeforeFinalize` |
 | `StageOutcomeRecorded(BeforeFinalize, FinalizeAccepted)` | `BeforeFinalize`; immediately followed by terminal record matching the candidate | phase advances when sibling applies |
 | `StageOutcomeRecorded(BeforeFinalize, ContinueModel)` | `BeforeFinalize`; completion candidate only | clear candidate/current request, checked `cycle += 1`; `PreparingContext` |
@@ -1543,12 +1671,23 @@ The corresponding PR-009 decision/batch shapes are exact:
 | `ModelSettled(Deferred)` | `EffectDeferred` | none | `AwaitingExternal` |
 | `ModelSettled(Failed)` | `EffectFailed` | none | `BeforeFinalize` |
 | `ExternalEffectCompleted` | same durable completed/failed record shape, with distinct external fingerprint variant | none | `AfterModel` / `BeforeFinalize` |
-| `StageSettled((cycle, AfterModel), Continue)` | `StageOutcomeRecorded` | none | `BeforeFinalize` |
+| `StageSettled((cycle, AfterModel), Continue)` | `StageOutcomeRecorded` | none | `BeforeToolBatch` when the assistant message contains calls, otherwise `BeforeFinalize` |
 | non-final `StageSettled((cycle, ...), Fail)` | `StageOutcomeRecorded` | none | `BeforeFinalize` |
 | `StageSettled((cycle, BeforeFinalize), FinalizeAccepted)` | `StageOutcomeRecorded`, matching `RunCompleted` or `RunFailed` | none | `Completed` / `Failed` |
 | `StageSettled((cycle, BeforeFinalize), ContinueModel)` | `StageOutcomeRecorded` | none | `PreparingContext` |
 | `StageSettled((cycle, BeforeFinalize), Fail)` | `StageOutcomeRecorded`, `RunFailed` | none | `Failed` |
 | exact indexed duplicate settlement | none | none | unchanged |
+
+PR-010 adds these exact decision shapes. `ToolCallSettled*` means the newly contiguous source prefix only; `EffectRequested(next group)*` is present only when that prefix makes the next executable group eligible.
+
+| Valid input | Ordered record bodies | Actions | Phase after apply |
+|---|---|---|---|
+| `StageSettled((cycle, BeforeToolBatch), ToolBatchPrepared)` | `StageOutcomeRecorded`, `ToolBatchOpened`, `EffectRequested(first executable group)*`, leading synthetic `ToolCallSettled*`, optional `ToolBatchClosed` for an all-synthetic plan | one matching `ExecuteEffect` per first-group request | `AwaitingTools`, or `AfterToolBatch` for an all-synthetic plan |
+| `ToolBatchSettled(Deferred)` | `EffectDeferred` | none | `AwaitingExternal` |
+| `ToolBatchSettled(Completed/Failed)` | matching `EffectCompleted`/`EffectFailed`, `ToolCallSettled*`, `EffectRequested(next group)*` or optional terminal `ToolBatchClosed` | one matching `ExecuteEffect` per next-group request | `AwaitingTools`, `AwaitingExternal`, or `AfterToolBatch` |
+| tool `ExternalEffectCompleted` | matching external `EffectCompleted`/`EffectFailed`, then the same ordered follow-up shape | one matching `ExecuteEffect` per newly eligible next-group request | `AwaitingTools`, `AwaitingExternal`, or `AfterToolBatch` |
+| `StageSettled((cycle, AfterToolBatch), Continue)` | `StageOutcomeRecorded` | none | `PreparingContext` with checked `cycle += 1` for `ContinueModel`; `BeforeFinalize` for `Finalize` or `Failed` |
+| exact indexed tool settlement/deferral duplicate | none | none | unchanged |
 
 `StageOutcomeRecorded`, `ContextPrepared`, and `EntryAppended` cannot appear without their required sibling records. Record order is semantic and fixed as shown. `RunCompleted` or `RunFailed` is never proposed or applied until `BeforeFinalize` settles. Once terminal, `apply` rejects every later record and `decide` rejects every state-changing input with `terminal_state_immutable`; only an exact already-indexed settlement duplicate may return the empty idempotent decision.
 
@@ -1562,6 +1701,11 @@ pub enum KernelError {
     StageCursorMismatch { expected: StageCursor, actual: StageCursor },
     ModelRequestContractMismatch,
     ModelSettlementMismatch,
+    DuplicateToolCall,
+    ToolBatchPlanMismatch,
+    ToolEffectContractMismatch,
+    ToolSettlementMismatch,
+    ToolResultMismatch,
     AssistantMessagePresenceMismatch,
     AssistantMessageMismatch,
     SettlementDigestMismatch,
@@ -1583,7 +1727,7 @@ pub enum KernelError {
 }
 ```
 
-The stable codes are the `snake_case` variant names: `invalid_input_payload`, `invalid_run_acceptance`, `invalid_phase_input`, `stage_cursor_mismatch`, `model_request_contract_mismatch`, `model_settlement_mismatch`, `assistant_message_presence_mismatch`, `assistant_message_mismatch`, `settlement_digest_mismatch`, `context_digest_mismatch`, `conflicting_completion_id`, `cycle_overflow`, `state_capacity_exceeded`, `allocated_ids_exhausted`, `unused_allocated_ids`, `committed_batch_range_mismatch`, `non_contiguous_record_sequence`, `record_identity_mismatch`, `invalid_record_order`, `effect_not_pending`, `conflicting_settlement`, `terminal_state_immutable`, `state_hash_failed`, and `invariant_violation`.
+The stable codes are the `snake_case` variant names: `invalid_input_payload`, `invalid_run_acceptance`, `invalid_phase_input`, `stage_cursor_mismatch`, `model_request_contract_mismatch`, `model_settlement_mismatch`, `duplicate_tool_call`, `tool_batch_plan_mismatch`, `tool_effect_contract_mismatch`, `tool_settlement_mismatch`, `tool_result_mismatch`, `assistant_message_presence_mismatch`, `assistant_message_mismatch`, `settlement_digest_mismatch`, `context_digest_mismatch`, `conflicting_completion_id`, `cycle_overflow`, `state_capacity_exceeded`, `allocated_ids_exhausted`, `unused_allocated_ids`, `committed_batch_range_mismatch`, `non_contiguous_record_sequence`, `record_identity_mismatch`, `invalid_record_order`, `effect_not_pending`, `conflicting_settlement`, `terminal_state_immutable`, `state_hash_failed`, and `invariant_violation`.
 
 Mandatory validation maps exactly as follows; implementations must not substitute `invariant_violation` for a rejected public payload or settlement:
 
@@ -1595,6 +1739,11 @@ Mandatory validation maps exactly as follows; implementations must not substitut
 | a new `StageSettled.cursor` differs from the exact current `(cycle, stage)` | `stage_cursor_mismatch` |
 | model request output kind is not `ModelResponse`, request bytes are invalid, or retry/deadline/component fields violate the request contract | `model_request_contract_mismatch` |
 | turn/request/effect correlation, effect kind, output contract, provider IDs, deferral handle, or completed/failed settlement metadata differs from the pending model request | `model_settlement_mismatch` |
+| an assistant tool call repeats a source ID within the message or reuses a persistent call ID | `duplicate_tool_call` |
+| the prepared plan is missing, extra, reordered, or mutates a source call | `tool_batch_plan_mismatch` |
+| an executable tool plan or settlement uses the wrong effect kind/output contract | `tool_effect_contract_mismatch` |
+| batch/call/effect/phase/deferral or completion metadata does not match the active tool call | `tool_settlement_mismatch` |
+| a successful tool output does not decode exactly to the matching `ToolResultBlock` | `tool_result_mismatch` |
 | successful external completion lacks `assistant_message`, or failed outcome supplies one | `assistant_message_presence_mismatch` |
 | assistant role, tool-call prohibition, provider IDs, or `created_at` differs from the required finalized message; checked before allocated-ID queues | `assistant_message_mismatch` |
 | after successful queue validation, assistant `message.id` differs from the consumed `MessageId` | `assistant_message_mismatch` |
@@ -1660,6 +1809,37 @@ The JSON object has exactly the `KernelStateHashV1` fields above in the shown na
 Before JCS, `stage_settlements` is projected to entries ordered by ascending numeric `cycle`, then bytewise-ascending canonical `stage` snake-case string; `model_settlements` is ordered by bytewise-ascending canonical lowercase `effect_id`; and `completion_identities` is ordered by bytewise-ascending UTF-8 `completion_id`. Duplicate keys are invalid rather than last-write-wins. This array representation is the only state-hash representation of those maps and avoids non-string JSON keys.
 
 The projection excludes `committed_at`, envelope payload/checksum fields, append-batch IDs, diagnostics, post-commit actions, transient events/sequences, observer state, and runtime caches. `ContextPrepared.context_digest`, settlement fingerprints, completion identities, and terminal result digests remain in the projection alongside the semantic values they validate. Equal valid record prefixes therefore produce equal state hashes independent of model stream chunking, store commit timestamps, or process restart.
+
+#### 11.3.6.1 Conditional kernel-state v2
+
+Every tool-free state remains `state_version = 1`, serializes through `KernelStateHashV1`, and uses the exact existing `kernel-state` schema-1 prefix and hash. Applying the first `EntryAppended` whose assistant message contains a `ToolCallBlock` transactionally upgrades that run to `state_version = 2`; it never rewrites an earlier v1 record or hash.
+
+V2 is SHA-256 under domain `kernel-state`, schema version 2, over a dedicated recursive-explicit-null JCS projection. It contains every v1 field unchanged plus these exact fields after `completion_identities` and before `terminal`:
+
+```rust
+pub active_tool_batch: Option<ActiveToolBatch>,
+pub tool_calls: Arc<[ToolCallIdentityHashEntryV2]>,
+pub tool_settlements: Arc<[ToolSettlementHashEntryV2]>,
+pub last_tool_batch: Option<ToolBatchClosed>,
+
+pub struct ToolCallIdentityHashEntryV2 {
+    pub tool_call_id: ToolCallId,
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub source_message_id: MessageId,
+    pub tool_batch_id: Option<ToolBatchId>,
+    pub effect_id: Option<EffectId>,
+    pub call: ToolCallBlock,
+}
+
+pub struct ToolSettlementHashEntryV2 {
+    pub effect_id: EffectId,
+    pub kind: ToolSettlementKind,
+    pub settlement_digest: Digest,
+}
+```
+
+`ActiveToolBatch` is the exact public state DTO defined by the PR-010 record/state contract below. `tool_calls` sorts by canonical lowercase `tool_call_id`; `tool_settlements` sorts by canonical lowercase `effect_id`. `active_tool_batch.calls` remains assistant source ordered, buffered results retain arrival-derived settlement data, and `result_message_ids` remains finalization ordered. V2 decoding requires `state_version = 2` and all four fields; v1 rejects them as unknown. V2 rejects a missing field, duplicate map key, unsupported state version, impossible cursor/group/status combination, or capacity violation rather than guessing migration state.
 
 ## 11.4 Why no generic graph engine
 
@@ -1829,6 +2009,7 @@ pub enum RecordBody {
     EffectCancelled(EffectCancelled),
     EntryAppended(EntryAppended),
     ToolBatchOpened(ToolBatchOpened),
+    ToolCallSettled(ToolCallSettled),
     ToolBatchClosed(ToolBatchClosed),
     InteractionRequested(InteractionRequest),
     InteractionResolved(InteractionResolution),
@@ -1862,7 +2043,13 @@ Delivery ownership for `RecordBody` variants is staged by logical PR. **PR-008 o
 - `RunCompleted`
 - `RunFailed`
 
-All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-010 tool-batch records, PR-011 limits/cancellation/budget, PR-012 capabilities, and PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
+**PR-010 additionally owns and materializes**:
+
+- `ToolBatchOpened`
+- `ToolCallSettled`
+- `ToolBatchClosed`
+
+All other variants remain reserved in the enum inventory and are owned by later PRs (for example PR-011 limits/cancellation/budget, PR-012 capabilities, and PR-014/PR-039 store/session/lane/snapshot surfaces). An implementation must reject construction of non-owned variants rather than inventing placeholder payloads.
 
 The PR-009 payloads are:
 
@@ -1930,6 +2117,90 @@ pub struct RunFailed {
 `StageOutcomeRecorded.settlement_digest` is the `stage-settlement` schema-1 digest of the dedicated semantic projection in section 11.3.2.1, not of the complete human-readable `StageSettled` input. Required sibling records supply replay fields; reducer-assigned IDs and `ContinueModel.reason` are excluded. Its disposition carries assigned correlations needed for replay validation. `ContextPrepared.context_digest` is the `model-context` v1 digest of the JCS message array and must match `messages`. `EntryAppended.message` must be an assistant message without tool-call blocks in PR-009; `created_at` must equal `TransitionEnv.now`, and its ID must equal the consumed message ID after allocated-ID queues validate. `parent_message_id` is the prior durable message in the model-only linear projection, or `None`. Session/lane conversation-tree `EntryId` and lane-leaf mechanics remain PR-014 scope and are not guessed into this payload.
 
 For successful settlement, `RunCompleted.result_digest` is the matching final `EffectCompleted.output_digest`; `result_message_id` identifies the durable assistant message derived from that normalized output. `RunFailed.error` is the normalized candidate failure accepted by `before_finalize`. Optional correlations are all present for a model failure and may be absent only when an earlier aggregate stage failed before a model request existed.
+
+The exact PR-010 record and replay-state payloads are:
+
+```rust
+pub struct AssignedToolCall {
+    pub source_index: u32,
+    pub group_index: u32,
+    pub effect_id: EffectId,
+    pub plan: ToolCallPlan,
+}
+
+pub struct ToolBatchOpened {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub tool_batch_id: ToolBatchId,
+    pub source_message_id: MessageId,
+    pub calls: Arc<[AssignedToolCall]>,
+    pub continuation: ToolBatchContinuation,
+    pub plan_digest: Digest,
+}
+
+pub struct ToolCallSettled {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub tool_batch_id: ToolBatchId,
+    pub tool_call_id: ToolCallId,
+    pub effect_id: EffectId,
+    pub message: Message,
+    pub settlement_digest: Digest,
+    pub synthetic: bool,
+    pub error: Option<ErrorDescriptor>,
+}
+
+pub enum ToolBatchOutcome {
+    ContinueModel,
+    Finalize,
+    Failed { error: ErrorDescriptor },
+}
+
+pub struct ToolBatchClosed {
+    pub cycle: u64,
+    pub turn_id: TurnId,
+    pub tool_batch_id: ToolBatchId,
+    pub source_message_id: MessageId,
+    pub result_message_ids: Arc<[MessageId]>,
+    pub outcome: ToolBatchOutcome,
+    pub close_digest: Digest,
+}
+
+pub struct ActiveToolBatch {
+    pub opened: ToolBatchOpened,
+    pub calls: Arc<[ActiveToolCall]>,
+    pub current_group: u32,
+    pub next_source_index: u32,
+    pub result_message_ids: Arc<[MessageId]>,
+    pub fatal_error: Option<ErrorDescriptor>,
+}
+
+pub struct ActiveToolCall {
+    pub assigned: AssignedToolCall,
+    pub status: ActiveToolCallStatus,
+}
+
+pub enum ActiveToolCallStatus {
+    Undispatched,
+    Requested { requested: EffectRequested, deferred: Option<EffectDeferred> },
+    Buffered {
+        result: ToolResultBlock,
+        settlement_digest: Digest,
+        synthetic: bool,
+        error: Option<ErrorDescriptor>,
+    },
+    Settled {
+        result_message_id: MessageId,
+        settlement_digest: Digest,
+    },
+}
+```
+
+`ToolBatchOpened.calls` is the complete source-ordered plan with one stable `EffectId` per source call, including synthetic and not-yet-dispatched calls. `source_index` is contiguous from zero. `group_index` is the deterministic partition described in section 11.1.1. `plan_digest` is recomputed from the complete open payload projection before apply mutates state.
+
+`ToolCallSettled.message` is role `Tool`, has exactly one `ToolResultBlock`, no model, empty provider IDs and metadata, and `created_at` equal to its record timestamp. Its result call ID equals the record/planned call ID. `synthetic = false` requires `error = None` and preserves a tool-produced decoded result; `synthetic = true` requires `is_error = true` and `error = Some`. The record finalizes exactly the current `next_source_index`; out-of-order effect records buffer results but cannot produce this record early.
+
+`ToolBatchClosed` is valid only after every source call is `Settled`; its result IDs exactly equal the source-ordered settled messages. `ContinueModel`/`Finalize` must equal the opened continuation. `Failed` requires the batch fatal error. `ToolBatchOpened` and `ToolBatchClosed` derive no public event. `ToolCallSettled` derives ordinal 0 `MessageFinalized` and ordinal 1 `ToolSettled`, both with turn/batch/call/effect correlations and `Internal` sensitivity.
 
 The exact family-discriminated `model-settlement` schema-1 DTOs, external-field exclusions, and command-to-record reconstruction rules are normative in section 11.3.2. In particular, direct and external sources never normalize to one interchangeable shape: source is committed by the fingerprint variant, and non-empty usage, artifacts, and the complete assistant message are reconstructed from `EffectCompleted` plus its required `EntryAppended` sibling.
 
@@ -2472,15 +2743,9 @@ pub struct ToolBatch {
     pub turn_id: TurnId,
     pub calls: Arc<[ValidatedToolCall]>,
 }
-
-pub struct ToolBatchOpened {
-    pub tool_batch_id: ToolBatchId,
-    pub turn_id: TurnId,
-    pub source_order_call_ids: Arc<[ToolCallId]>,
-}
 ```
 
-`ToolBatchId` is persisted by `ToolBatchOpened`/`ToolBatchClosed` and carried by every call event. Each call has its own `ToolCallId` and `EffectId`; retries keep them frozen.
+`ToolBatch` is the runtime-facing executable view. The authoritative `ToolBatchOpened`, `ToolCallSettled`, and `ToolBatchClosed` record shapes are frozen in section 12.2 and are not abbreviated here. `ToolBatchId` is persisted by open/close records and carried by every call event. Each call has its own `ToolCallId` and `EffectId`; deferral, reconciliation, and any later retry keep them frozen.
 
 ## 15.1 Trait
 
@@ -3027,12 +3292,17 @@ For each durable record kind, a versioned ordinal table defines zero or more der
 | `StageOutcomeRecorded` | none |
 | `ContextPrepared` | none |
 | `EntryAppended` | 0 → `MessageFinalized` |
+| `ToolBatchOpened` | none |
+| `ToolCallSettled` | 0 → `MessageFinalized`; 1 → `ToolSettled` |
+| `ToolBatchClosed` | none |
 | `RunCompleted` | 0 → `RunCompleted` |
 | `RunFailed` | 0 → `RunFailed` |
 
-PR-008 freezes and implements constructors/fixtures for its rows plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). PR-009 adds the five rows above. `StageOutcomeRecorded` and `ContextPrepared` are semantic bookkeeping with no public event; therefore their drafts carry empty `derived_event_ids`. Later PRs append rows for their owned record kinds (`ToolSettled`, `LimitReached`, `RunCancelled`, and others) without renumbering existing rows for a given `kind_version`.
+PR-008 freezes and implements constructors/fixtures for its rows plus the transient kinds needed to prove class separation (`ModelTextDelta`, `ReasoningDelta`, `ToolProgress`, `QueueDepthWarning`, `ProviderHeartbeat`). PR-009 adds its five rows; PR-010 adds the three tool-record rows. `StageOutcomeRecorded`, `ContextPrepared`, `ToolBatchOpened`, and `ToolBatchClosed` are semantic bookkeeping with no public event and therefore carry empty `derived_event_ids`. Later PRs append rows for their owned record kinds (`LimitReached`, `RunCancelled`, and others) without renumbering existing rows for a given `kind_version`.
 
 For PR-009, `MessageFinalized` takes `turn_id`, `model_request_id`, and `effect_id` from `EntryAppended`; `RunCompleted` and `RunFailed` take their optional/applicable correlations from the terminal payload. Model `EffectRequested`, `EffectDeferred`, `EffectCompleted`, and `EffectFailed` events take the same correlations from the outstanding `PendingModelEffect` established by the matching before-model outcome. Those full model-effect event bodies are `Sensitivity::Confidential`; the compact `MessageFinalized`, `RunCompleted`, and safe-descriptor-only `RunFailed` bodies are `Sensitivity::Internal`. No PR-009 event publishes assistant message content. A later change to these projections or classifications requires compatibility fixtures and threat-model review.
+
+For PR-010, tool `EffectRequested`, `EffectDeferred`, `EffectCompleted`, and `EffectFailed` events take turn/batch/call/effect correlations from the active assigned call and are `Sensitivity::Confidential`. Both events derived from `ToolCallSettled` carry the same correlations and are `Sensitivity::Internal`; `MessageFinalized` contains only its message ID and `ToolSettled` only its call ID. Neither event publishes tool-result content.
 
 ## 20.3 Event hub
 
@@ -3050,7 +3320,7 @@ Completion events cannot be silently dropped. A subscriber that cannot keep up i
 
 ## 21.1 Batch construction
 
-The final model response yields ordered calls. Each call is resolved to a tool and annotated with execution mode and policy metadata.
+The final model response yields ordered calls with preallocated unique IDs. `BeforeToolBatch` receives one exact source-ordered `ToolCallPlan` per call. Known tools become validated executable plans; unknown tools become `unknown_tool` synthetic closures. The reducer allocates/persists the batch and every call effect identity before any action, then verifies the schema-1 plan digest during replay.
 
 ## 21.2 Execution groups
 
@@ -3059,6 +3329,10 @@ Rules:
 1. Consecutive parallel calls may execute together.
 2. A sequential call executes alone and waits for prior work.
 3. A barrier waits for all previous calls and blocks subsequent calls until complete.
+
+Only the current group receives `EffectRequested` records/actions. Every direct or external completion is committed immediately in runtime arrival order. Normalized results are buffered in authoritative state; `ToolCallSettled`, tool messages, and their two events are emitted only for the newly contiguous source prefix. A later group is requested only after the current group is terminal. Deferral preserves the call's original identity and blocks closure until its external completion arrives.
+
+Unknown tools and permitted framework failures produce deterministic framework-authored `is_error` results. A `FailRun` call failure prevents later dispatch, drains its already-dispatched group, closes only undispatched calls with `tool_batch_aborted`, and then records a failed batch outcome. PR-010 never emits `EffectCancelled` and never fabricates closure for an active unresolved effect; PR-011 adds those cancellation transitions.
 4. Middleware or approval may split a batch further.
 5. The runtime enforces global and per-tool concurrency limits.
 

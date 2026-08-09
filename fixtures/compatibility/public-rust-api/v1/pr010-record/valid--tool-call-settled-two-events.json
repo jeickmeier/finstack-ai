@@ -1,0 +1,61 @@
+{
+  "format_version": 1,
+  "subject": "pr010-record",
+  "operation": "parse_and_derive",
+  "input": {
+    "format_version": 1,
+    "kind_version": 1,
+    "record_id": "01234567-89ab-7cde-89ab-012345678921",
+    "session_id": "01234567-89ab-7cde-89ab-012345678922",
+    "lane_id": "01234567-89ab-7cde-89ab-012345678923",
+    "run_id": "01234567-89ab-7cde-89ab-012345678924",
+    "sequence": 11,
+    "timestamp": "1970-01-01T00:00:01.100Z",
+    "payload_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+    "derived_event_ids": [
+      "01234567-89ab-7cde-89ab-012345678925",
+      "01234567-89ab-7cde-89ab-012345678926"
+    ],
+    "body": {
+      "tool_call_settled": {
+        "cycle": 0,
+        "turn_id": "01234567-89ab-7cde-89ab-012345678927",
+        "tool_batch_id": "01234567-89ab-7cde-89ab-012345678928",
+        "tool_call_id": "01234567-89ab-7cde-89ab-012345678929",
+        "effect_id": "01234567-89ab-7cde-89ab-012345678930",
+        "message": {
+          "id": "01234567-89ab-7cde-89ab-012345678931",
+          "role": "tool",
+          "content": [
+            {
+              "kind": "tool_result",
+              "tool_call_id": "01234567-89ab-7cde-89ab-012345678929",
+              "content": [{"kind": "text", "text": "unknown tool"}],
+              "is_error": true
+            }
+          ],
+          "created_at": "1970-01-01T00:00:01.100Z",
+          "provider_ids": {},
+          "metadata": {}
+        },
+        "settlement_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+        "synthetic": true,
+        "error": {
+          "code": "unknown_tool",
+          "message": "unknown tool",
+          "category": "tool",
+          "retryable": false,
+          "identifiers": {},
+          "safe_details": {}
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": true,
+    "body_kind": "tool_call_settled",
+    "derived_event_count": 2,
+    "event_kinds": ["message_finalized", "tool_settled"]
+  }
+}

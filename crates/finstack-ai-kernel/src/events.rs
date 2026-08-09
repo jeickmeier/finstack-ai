@@ -63,17 +63,17 @@ pub enum RunEventKind {
     InteractionExpired,
     /// Interaction cancelled.
     InteractionCancelled,
-    /// Message finalized (reserved payload).
+    /// Message finalized.
     MessageFinalized,
-    /// Tool settled (reserved payload).
+    /// Tool settled.
     ToolSettled,
     /// Limit reached (reserved payload).
     LimitReached,
     /// Run suspended (reserved payload).
     RunSuspended,
-    /// Run completed (reserved payload).
+    /// Run completed.
     RunCompleted,
-    /// Run failed (reserved payload).
+    /// Run failed.
     RunFailed,
     /// Run cancelled (reserved payload).
     RunCancelled,
@@ -316,12 +316,12 @@ pub enum RunEventBody {
     InteractionExpired(InteractionExpired),
     /// Interaction cancelled.
     InteractionCancelled(InteractionCancelled),
-    /// Reserved message finalized.
+    /// Message finalized.
     MessageFinalized {
         /// Message id.
         message_id: MessageId,
     },
-    /// Reserved tool settled.
+    /// Tool settled.
     ToolSettled {
         /// Tool call id.
         tool_call_id: ToolCallId,
@@ -337,12 +337,12 @@ pub enum RunEventBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason_code: Option<Arc<str>>,
     },
-    /// Reserved run completed.
+    /// Run completed.
     RunCompleted {
         /// Result digest.
         result_digest: Digest,
     },
-    /// Reserved run failed.
+    /// Run failed.
     RunFailed {
         /// Error.
         error: ErrorDescriptor,
@@ -501,6 +501,23 @@ pub struct RunEvent {
     body: RunEventBody,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct EventCorrelations {
+    pub model_turn: Option<TurnId>,
+    pub model_request: Option<ModelRequestId>,
+    pub tool_turn: Option<TurnId>,
+    pub tool_batch: Option<ToolBatchId>,
+    pub tool_call: Option<ToolCallId>,
+}
+
+struct ResolvedEventCorrelations {
+    turn: Option<TurnId>,
+    model_request: Option<ModelRequestId>,
+    tool_batch: Option<ToolBatchId>,
+    effect: Option<EffectId>,
+    tool_call: Option<ToolCallId>,
+}
+
 impl RunEvent {
     /// Construct a durable-derived event.
     ///
@@ -540,7 +557,15 @@ impl RunEvent {
             });
         }
         validate_event_correlations(run_id, model_request_id, effect_id, tool_call_id, &body)?;
-        validate_event_policy(turn_id, model_request_id, effect_id, sensitivity, &body)?;
+        validate_event_policy(
+            turn_id,
+            model_request_id,
+            tool_batch_id,
+            effect_id,
+            tool_call_id,
+            sensitivity,
+            &body,
+        )?;
         Ok(Self {
             schema_version,
             kind_version,
@@ -598,7 +623,15 @@ impl RunEvent {
             });
         }
         validate_event_correlations(run_id, model_request_id, effect_id, tool_call_id, &body)?;
-        validate_event_policy(turn_id, model_request_id, effect_id, sensitivity, &body)?;
+        validate_event_policy(
+            turn_id,
+            model_request_id,
+            tool_batch_id,
+            effect_id,
+            tool_call_id,
+            sensitivity,
+            &body,
+        )?;
         Ok(Self {
             schema_version,
             kind_version,
@@ -624,9 +657,9 @@ impl RunEvent {
     ///
     /// This reuses the replay-stable event id persisted on the record.
     ///
-    /// Model effect records require authoritative state correlations and are
-    /// therefore derived only by [`crate::Kernel::apply`]. Other record bodies
-    /// carry all required correlations in the record.
+    /// Model and tool effect records require authoritative state correlations
+    /// and are therefore derived only by [`crate::Kernel::apply`]. Other record
+    /// bodies carry all required correlations in the record.
     ///
     /// # Errors
     ///
@@ -637,21 +670,19 @@ impl RunEvent {
         ordinal: usize,
         transient_sequence: u64,
     ) -> Result<Self, EventError> {
-        Self::try_from_record_with_model_correlations(
+        Self::try_from_record_with_correlations(
             record,
             ordinal,
             transient_sequence,
-            None,
-            None,
+            EventCorrelations::default(),
         )
     }
 
-    pub(crate) fn try_from_record_with_model_correlations(
+    pub(crate) fn try_from_record_with_correlations(
         record: &RecordEnvelope,
         ordinal: usize,
         transient_sequence: u64,
-        model_turn_id: Option<TurnId>,
-        pending_model_request_id: Option<ModelRequestId>,
+        correlations: EventCorrelations,
     ) -> Result<Self, EventError> {
         let expected_kind = derived_event_kind(record.body(), record.kind_version(), ordinal)?;
         let event_id = record
@@ -659,7 +690,7 @@ impl RunEvent {
             .get(ordinal)
             .copied()
             .ok_or(EventError::UnsupportedOrdinal { ordinal })?;
-        let body = run_event_body_from_record(record.body())?;
+        let body = run_event_body_from_record(record.body(), ordinal)?;
         if body.kind() != expected_kind {
             return Err(EventError::CorrelationMismatch {
                 reason: "derived event ordinal/body mismatch",
@@ -668,17 +699,21 @@ impl RunEvent {
         let run_id = record.run_id().ok_or(EventError::CorrelationMismatch {
             reason: "PR-008 durable event source must be run-scoped",
         })?;
-        let (turn_id, model_request_id, effect_id) = record_correlations(
-            record.body(),
-            model_turn_id,
-            pending_model_request_id,
-            effect_id_for_body(&body),
-        );
+        let resolved = record_correlations(record.body(), correlations, effect_id_for_body(&body));
         if is_model_effect_record(record.body())
-            && (turn_id.is_none() || model_request_id.is_none())
+            && (resolved.turn.is_none() || resolved.model_request.is_none())
         {
             return Err(EventError::CorrelationMismatch {
                 reason: "model effect event requires authoritative model correlations",
+            });
+        }
+        if is_tool_effect_record(record.body())
+            && (resolved.turn.is_none()
+                || resolved.tool_batch.is_none()
+                || resolved.tool_call.is_none())
+        {
+            return Err(EventError::CorrelationMismatch {
+                reason: "tool effect event requires authoritative tool correlations",
             });
         }
         let sensitivity = derived_event_sensitivity(record.body());
@@ -689,11 +724,11 @@ impl RunEvent {
             record.session_id(),
             record.lane_id(),
             run_id,
-            turn_id,
-            model_request_id,
-            None,
-            effect_id,
-            None,
+            resolved.turn,
+            resolved.model_request,
+            resolved.tool_batch,
+            resolved.effect,
+            resolved.tool_call,
             record.sequence(),
             transient_sequence,
             record.timestamp(),
@@ -814,19 +849,43 @@ impl RunEvent {
 fn validate_event_policy(
     turn_id: Option<TurnId>,
     model_request_id: Option<ModelRequestId>,
+    tool_batch_id: Option<ToolBatchId>,
     effect_id: Option<EffectId>,
+    tool_call_id: Option<ToolCallId>,
     sensitivity: Sensitivity,
     body: &RunEventBody,
 ) -> Result<(), EventError> {
     match body {
-        RunEventBody::MessageFinalized { .. } | RunEventBody::RunCompleted { .. }
+        RunEventBody::MessageFinalized { .. }
+            if turn_id.is_none()
+                || effect_id.is_none()
+                || (model_request_id.is_none()
+                    && (tool_batch_id.is_none() || tool_call_id.is_none()))
+                || sensitivity != Sensitivity::Internal =>
+        {
+            return Err(EventError::CorrelationMismatch {
+                reason: "message event requires model or tool correlations and internal sensitivity",
+            });
+        }
+        RunEventBody::ToolSettled { .. }
+            if turn_id.is_none()
+                || tool_batch_id.is_none()
+                || effect_id.is_none()
+                || tool_call_id.is_none()
+                || sensitivity != Sensitivity::Internal =>
+        {
+            return Err(EventError::CorrelationMismatch {
+                reason: "tool-settled event requires turn, batch, effect, call, and internal sensitivity",
+            });
+        }
+        RunEventBody::RunCompleted { .. }
             if turn_id.is_none()
                 || model_request_id.is_none()
                 || effect_id.is_none()
                 || sensitivity != Sensitivity::Internal =>
         {
             return Err(EventError::CorrelationMismatch {
-                reason: "compact model event requires turn_id, model_request_id, effect_id, and internal sensitivity",
+                reason: "run-completed event requires model correlations and internal sensitivity",
             });
         }
         RunEventBody::RunFailed { .. } if sensitivity != Sensitivity::Internal => {
@@ -858,6 +917,31 @@ fn validate_event_policy(
     {
         return Err(EventError::CorrelationMismatch {
             reason: "model event requires turn_id, model_request_id, effect_id, and confidential sensitivity",
+        });
+    }
+    let tool_event = match body {
+        RunEventBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Tool,
+        RunEventBody::EffectDeferred(deferred) => {
+            deferred.output_contract.kind == EffectOutputKind::ToolResult
+        }
+        RunEventBody::EffectCompleted(completed) => {
+            completed.output_contract().kind == EffectOutputKind::ToolResult
+        }
+        RunEventBody::EffectFailed(failed) => {
+            failed.output_contract().kind == EffectOutputKind::ToolResult
+        }
+        RunEventBody::ToolProgress(_) => true,
+        _ => false,
+    };
+    if tool_event
+        && (turn_id.is_none()
+            || tool_batch_id.is_none()
+            || effect_id.is_none()
+            || tool_call_id.is_none()
+            || sensitivity != Sensitivity::Confidential)
+    {
+        return Err(EventError::CorrelationMismatch {
+            reason: "tool event requires turn_id, tool_batch_id, effect_id, tool_call_id, and confidential sensitivity",
         });
     }
     Ok(())
@@ -937,7 +1021,10 @@ fn effect_id_for_body(body: &RunEventBody) -> Option<EffectId> {
     }
 }
 
-fn run_event_body_from_record(body: &RecordBody) -> Result<RunEventBody, EventError> {
+fn run_event_body_from_record(
+    body: &RecordBody,
+    ordinal: usize,
+) -> Result<RunEventBody, EventError> {
     let event = match body {
         RecordBody::RunAccepted(value) => RunEventBody::RunAccepted(value.clone()),
         RecordBody::EffectRequested(value) => RunEventBody::EffectRequested(value.clone()),
@@ -956,14 +1043,24 @@ fn run_event_body_from_record(body: &RecordBody) -> Result<RunEventBody, EventEr
         RecordBody::EntryAppended(value) => RunEventBody::MessageFinalized {
             message_id: *value.message.id(),
         },
+        RecordBody::ToolCallSettled(value) if ordinal == 0 => RunEventBody::MessageFinalized {
+            message_id: *value.message.id(),
+        },
+        RecordBody::ToolCallSettled(value) if ordinal == 1 => RunEventBody::ToolSettled {
+            tool_call_id: value.tool_call_id,
+        },
         RecordBody::RunCompleted(value) => RunEventBody::RunCompleted {
             result_digest: value.result_digest,
         },
         RecordBody::RunFailed(value) => RunEventBody::RunFailed {
             error: value.error.clone(),
         },
-        RecordBody::StageOutcomeRecorded(_) | RecordBody::ContextPrepared(_) => {
-            return Err(EventError::UnsupportedOrdinal { ordinal: 0 });
+        RecordBody::StageOutcomeRecorded(_)
+        | RecordBody::ContextPrepared(_)
+        | RecordBody::ToolBatchOpened(_)
+        | RecordBody::ToolBatchClosed(_)
+        | RecordBody::ToolCallSettled(_) => {
+            return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };
     Ok(event)
@@ -971,35 +1068,93 @@ fn run_event_body_from_record(body: &RecordBody) -> Result<RunEventBody, EventEr
 
 fn record_correlations(
     body: &RecordBody,
-    model_turn_id: Option<TurnId>,
-    pending_model_request_id: Option<ModelRequestId>,
+    correlations: EventCorrelations,
     body_effect_id: Option<EffectId>,
-) -> (Option<TurnId>, Option<ModelRequestId>, Option<EffectId>) {
+) -> ResolvedEventCorrelations {
     match body {
-        RecordBody::EntryAppended(value) => (
-            Some(value.turn_id),
-            Some(value.model_request_id),
-            Some(value.effect_id),
-        ),
-        RecordBody::RunCompleted(value) => (
-            Some(value.turn_id),
-            Some(value.model_request_id),
-            Some(value.effect_id),
-        ),
-        RecordBody::RunFailed(value) => (value.turn_id, value.model_request_id, value.effect_id),
+        RecordBody::EntryAppended(value) => ResolvedEventCorrelations {
+            turn: Some(value.turn_id),
+            model_request: Some(value.model_request_id),
+            tool_batch: None,
+            effect: Some(value.effect_id),
+            tool_call: None,
+        },
+        RecordBody::ToolCallSettled(value) => ResolvedEventCorrelations {
+            turn: Some(value.turn_id),
+            model_request: None,
+            tool_batch: Some(value.tool_batch_id),
+            effect: Some(value.effect_id),
+            tool_call: Some(value.tool_call_id),
+        },
+        RecordBody::RunCompleted(value) => ResolvedEventCorrelations {
+            turn: Some(value.turn_id),
+            model_request: Some(value.model_request_id),
+            tool_batch: None,
+            effect: Some(value.effect_id),
+            tool_call: None,
+        },
+        RecordBody::RunFailed(value) => ResolvedEventCorrelations {
+            turn: value.turn_id,
+            model_request: value.model_request_id,
+            tool_batch: None,
+            effect: value.effect_id,
+            tool_call: None,
+        },
         RecordBody::EffectRequested(_)
         | RecordBody::EffectDeferred(_)
         | RecordBody::EffectCompleted(_)
-        | RecordBody::EffectFailed(_) => (model_turn_id, pending_model_request_id, body_effect_id),
-        _ => (None, None, body_effect_id),
+        | RecordBody::EffectFailed(_)
+            if is_tool_effect_record(body) =>
+        {
+            ResolvedEventCorrelations {
+                turn: correlations.tool_turn,
+                model_request: None,
+                tool_batch: correlations.tool_batch,
+                effect: body_effect_id,
+                tool_call: correlations.tool_call,
+            }
+        }
+        RecordBody::EffectRequested(_)
+        | RecordBody::EffectDeferred(_)
+        | RecordBody::EffectCompleted(_)
+        | RecordBody::EffectFailed(_) => ResolvedEventCorrelations {
+            turn: correlations.model_turn,
+            model_request: correlations.model_request,
+            tool_batch: None,
+            effect: body_effect_id,
+            tool_call: None,
+        },
+        _ => ResolvedEventCorrelations {
+            turn: None,
+            model_request: None,
+            tool_batch: None,
+            effect: body_effect_id,
+            tool_call: None,
+        },
     }
 }
 
 fn derived_event_sensitivity(body: &RecordBody) -> Sensitivity {
-    if is_model_effect_record(body) {
+    if is_model_effect_record(body) || is_tool_effect_record(body) {
         Sensitivity::Confidential
     } else {
         Sensitivity::Internal
+    }
+}
+
+fn is_tool_effect_record(body: &RecordBody) -> bool {
+    match body {
+        RecordBody::EffectRequested(requested) => requested.kind() == crate::EffectKind::Tool,
+        RecordBody::EffectDeferred(deferred) => {
+            deferred.output_contract.kind == EffectOutputKind::ToolResult
+        }
+        RecordBody::EffectCompleted(completed) => {
+            completed.output_contract().kind == EffectOutputKind::ToolResult
+        }
+        RecordBody::EffectFailed(failed) => {
+            failed.output_contract().kind == EffectOutputKind::ToolResult
+        }
+        _ => false,
     }
 }
 
@@ -1124,6 +1279,13 @@ pub fn derived_event_kind(
     if kind_version != RECORD_KIND_VERSION {
         return Err(EventError::UnsupportedKindVersion { kind_version });
     }
+    if let RecordBody::ToolCallSettled(_) = body {
+        return match ordinal {
+            0 => Ok(RunEventKind::MessageFinalized),
+            1 => Ok(RunEventKind::ToolSettled),
+            _ => Err(EventError::UnsupportedOrdinal { ordinal }),
+        };
+    }
     if ordinal != 0 {
         return Err(EventError::UnsupportedOrdinal { ordinal });
     }
@@ -1139,9 +1301,13 @@ pub fn derived_event_kind(
         RecordBody::InteractionExpired(_) => RunEventKind::InteractionExpired,
         RecordBody::InteractionCancelled(_) => RunEventKind::InteractionCancelled,
         RecordBody::EntryAppended(_) => RunEventKind::MessageFinalized,
+        RecordBody::ToolCallSettled(_) => unreachable!("handled above"),
         RecordBody::RunCompleted(_) => RunEventKind::RunCompleted,
         RecordBody::RunFailed(_) => RunEventKind::RunFailed,
-        RecordBody::StageOutcomeRecorded(_) | RecordBody::ContextPrepared(_) => {
+        RecordBody::StageOutcomeRecorded(_)
+        | RecordBody::ContextPrepared(_)
+        | RecordBody::ToolBatchOpened(_)
+        | RecordBody::ToolBatchClosed(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

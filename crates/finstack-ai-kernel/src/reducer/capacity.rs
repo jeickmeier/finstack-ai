@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 
 use crate::StageCursor;
 use crate::bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
-use crate::ids::EffectId;
+use crate::content::ContentBlock;
+use crate::ids::{EffectId, ToolCallId};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::KernelState;
 
@@ -16,6 +17,8 @@ pub(super) struct StateGrowth<'a> {
     pub stage: Option<StageCursor>,
     pub model: Option<EffectId>,
     pub completion: Option<&'a str>,
+    pub tool_calls: &'a [ToolCallId],
+    pub tool_settlements: &'a [EffectId],
 }
 
 pub(super) fn preflight_decision(
@@ -57,6 +60,32 @@ pub(super) fn preflight_decision(
                 .is_some_and(|key| !state.completion_identities.contains_key(key)),
         ),
         SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    let tool_call_growth = growth
+        .tool_calls
+        .iter()
+        .filter(|key| !state.tool_calls.contains_key(key))
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .len();
+    check(
+        "tool_calls",
+        state.tool_calls.len(),
+        tool_call_growth,
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    let tool_settlement_growth = growth
+        .tool_settlements
+        .iter()
+        .filter(|key| !state.tool_settlements.contains_key(key))
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .len();
+    check(
+        "tool_settlements",
+        state.tool_settlements.len(),
+        tool_settlement_growth,
+        SEMANTIC_MAP_MAX_ENTRIES,
     )
 }
 
@@ -68,6 +97,8 @@ pub(super) fn preflight_batch(
     let mut stage_keys = BTreeSet::new();
     let mut model_keys = BTreeSet::new();
     let mut completion_keys = BTreeSet::new();
+    let mut tool_call_keys = BTreeSet::new();
+    let mut tool_settlement_keys = BTreeSet::new();
     for record in records {
         match record.body() {
             RecordBody::StageOutcomeRecorded(outcome) => {
@@ -75,9 +106,28 @@ pub(super) fn preflight_batch(
                     stage_keys.insert(outcome.cursor);
                 }
             }
-            RecordBody::EntryAppended(_) => messages += 1,
+            RecordBody::EntryAppended(entry) => {
+                messages += 1;
+                for block in entry.message.content() {
+                    if let ContentBlock::ToolCall(call) = block
+                        && !state.tool_calls.contains_key(call.tool_call_id())
+                    {
+                        tool_call_keys.insert(*call.tool_call_id());
+                    }
+                }
+            }
+            RecordBody::ToolCallSettled(settled) => {
+                messages += 1;
+                if !state.tool_settlements.contains_key(&settled.effect_id) {
+                    tool_settlement_keys.insert(settled.effect_id);
+                }
+            }
             RecordBody::EffectCompleted(value) => {
-                if !state.model_settlements.contains_key(&value.effect_id()) {
+                if value.output_contract().kind == crate::EffectOutputKind::ToolResult {
+                    if !state.tool_settlements.contains_key(&value.effect_id()) {
+                        tool_settlement_keys.insert(value.effect_id());
+                    }
+                } else if !state.model_settlements.contains_key(&value.effect_id()) {
                     model_keys.insert(value.effect_id());
                 }
                 if let Some(id) = value.completion_id()
@@ -87,7 +137,11 @@ pub(super) fn preflight_batch(
                 }
             }
             RecordBody::EffectFailed(value) => {
-                if !state.model_settlements.contains_key(&value.effect_id()) {
+                if value.output_contract().kind == crate::EffectOutputKind::ToolResult {
+                    if !state.tool_settlements.contains_key(&value.effect_id()) {
+                        tool_settlement_keys.insert(value.effect_id());
+                    }
+                } else if !state.model_settlements.contains_key(&value.effect_id()) {
                     model_keys.insert(value.effect_id());
                 }
                 if let Some(id) = value.completion_id()
@@ -122,6 +176,18 @@ pub(super) fn preflight_batch(
         state.completion_identities.len(),
         completion_keys.len(),
         SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "tool_calls",
+        state.tool_calls.len(),
+        tool_call_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "tool_settlements",
+        state.tool_settlements.len(),
+        tool_settlement_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
     )
 }
 
@@ -148,11 +214,13 @@ mod tests {
     use crate::effects::{EffectCompleted, EffectOutputContract, EffectOutputKind};
     use crate::entries::EntryAppended;
     use crate::ids::{
-        EffectId, EventId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId, TurnId,
+        EffectId, EventId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId,
+        ToolCallId, TurnId,
     };
     use crate::message::{Message, MessageRole, ProviderIds};
     use crate::raw_json::{Metadata, RawJson};
     use crate::state::{CompletionIdentity, ModelSettlementFingerprint, ModelSettlementKind};
+    use crate::tools::{ToolCallIdentity, ToolSettlementFingerprint, ToolSettlementKind};
     use crate::{
         ContentBlock, Digest, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, Stage, TextBlock,
         Timestamp,
@@ -185,6 +253,7 @@ mod tests {
                     stage: Some(full_stage_key()),
                     model: Some(full_model_key()),
                     completion: Some("completion-0"),
+                    ..StateGrowth::default()
                 },
             ),
             Ok(()),
@@ -209,6 +278,7 @@ mod tests {
                     stage: Some(full_stage_key()),
                     model: Some(full_model_key()),
                     completion: Some("completion-0"),
+                    ..StateGrowth::default()
                 },
             ),
             Ok(()),
@@ -224,6 +294,7 @@ mod tests {
                     stage: Some(full_stage_key()),
                     model: Some(full_model_key()),
                     completion: Some("completion-0"),
+                    ..StateGrowth::default()
                 },
             ),
             Ok(()),
@@ -241,6 +312,7 @@ mod tests {
                     stage: Some(full_stage_key()),
                     model: Some(full_model_key()),
                     completion: Some("completion-0"),
+                    ..StateGrowth::default()
                 },
             ),
             Ok(()),
@@ -261,6 +333,7 @@ mod tests {
                 }),
                 model: Some(full_model_key()),
                 completion: Some("completion-0"),
+                ..StateGrowth::default()
             },
         )
         .expect_err("stage map growth past its limit");
@@ -277,6 +350,7 @@ mod tests {
                 stage: Some(full_stage_key()),
                 model: Some(effect_id(10_001)),
                 completion: Some("completion-0"),
+                ..StateGrowth::default()
             },
         )
         .expect_err("model map growth past its limit");
@@ -293,6 +367,7 @@ mod tests {
                 stage: Some(full_stage_key()),
                 model: Some(full_model_key()),
                 completion: Some("completion-new"),
+                ..StateGrowth::default()
             },
         )
         .expect_err("completion map growth past its limit");
@@ -312,6 +387,67 @@ mod tests {
         assert_eq!(
             error,
             KernelError::StateCapacityExceeded { field: "messages" }
+        );
+    }
+
+    #[test]
+    fn tool_map_preflight_allows_exact_limit_and_rejects_one_over_in_fixed_order() {
+        let state = full_capacity_state();
+        let duplicate_call = tool_call_id(0);
+        let duplicate_settlement = effect_id(600);
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    tool_calls: &[duplicate_call],
+                    tool_settlements: &[duplicate_settlement],
+                    ..StateGrowth::default()
+                },
+            ),
+            Ok(())
+        );
+
+        let mut one_below = state.clone();
+        one_below.tool_calls.remove(&duplicate_call);
+        one_below.tool_settlements.remove(&duplicate_settlement);
+        assert_eq!(
+            preflight_decision(
+                &one_below,
+                StateGrowth {
+                    tool_calls: &[duplicate_call],
+                    tool_settlements: &[duplicate_settlement],
+                    ..StateGrowth::default()
+                },
+            ),
+            Ok(())
+        );
+
+        let new_call = tool_call_id(10_000);
+        let new_settlement = effect_id(10_001);
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    tool_calls: &[new_call],
+                    tool_settlements: &[new_settlement],
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "tool_calls"
+            })
+        );
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    tool_settlements: &[new_settlement],
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "tool_settlements"
+            })
         );
     }
 
@@ -355,6 +491,25 @@ mod tests {
                     )
                 })
                 .collect(),
+            tool_calls: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                .map(|ordinal| {
+                    let ordinal = u64::try_from(ordinal).expect("ordinal fits u64");
+                    let identity = tool_call_identity(ordinal);
+                    (*identity.call.tool_call_id(), identity)
+                })
+                .collect(),
+            tool_settlements: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                .map(|ordinal| {
+                    let ordinal = u64::try_from(ordinal + 600).expect("ordinal fits u64");
+                    (
+                        effect_id(ordinal),
+                        ToolSettlementFingerprint {
+                            kind: ToolSettlementKind::Completed,
+                            digest: Digest::raw_json(format!("tool-{ordinal}").as_bytes()),
+                        },
+                    )
+                })
+                .collect(),
             ..KernelState::default()
         }
     }
@@ -376,6 +531,7 @@ mod tests {
             stage: Some(full_stage_key()),
             model: Some(full_model_key()),
             completion: Some("completion-0"),
+            ..StateGrowth::default()
         }
     }
 
@@ -388,6 +544,7 @@ mod tests {
             }),
             model: Some(effect_id(10_001)),
             completion: Some("completion-new"),
+            ..StateGrowth::default()
         }
     }
 
@@ -489,5 +646,31 @@ mod tests {
         bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
         EffectId::from_bytes(bytes)
+    }
+
+    fn tool_call_id(ordinal: u64) -> ToolCallId {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        ToolCallId::from_bytes(bytes)
+    }
+
+    fn tool_call_identity(ordinal: u64) -> ToolCallIdentity {
+        let call = crate::ToolCallBlock::try_new(
+            tool_call_id(ordinal),
+            "fixture_tool",
+            RawJson::parse(format!(r#"{{"ordinal":{ordinal}}}"#)).expect("arguments"),
+        )
+        .expect("tool call");
+        ToolCallIdentity {
+            cycle: 0,
+            turn_id: TurnId::parse("01234567-89ab-7cde-89ab-0123456789a2").expect("turn"),
+            source_message_id: MessageId::parse("01234567-89ab-7cde-89ab-0123456789a4")
+                .expect("message"),
+            tool_batch_id: None,
+            effect_id: None,
+            call,
+        }
     }
 }

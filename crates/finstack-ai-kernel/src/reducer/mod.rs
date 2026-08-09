@@ -7,6 +7,7 @@ mod decide;
 mod decision;
 mod fingerprint;
 mod input;
+mod tool;
 mod validation;
 
 use std::sync::Arc;
@@ -17,6 +18,7 @@ pub use decision::{CommittedBatch, Decision, KernelError, PostCommitAction};
 pub use input::{
     AcceptRun, ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
     KernelInput, ModelSettled, ModelSettlement, ReducerStageOutcome, StageSettled,
+    ToolBatchSettled, ToolSettlement,
 };
 
 use crate::entries::RunFailed;

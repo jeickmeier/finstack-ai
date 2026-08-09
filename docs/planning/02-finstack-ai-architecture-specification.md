@@ -2,7 +2,7 @@
 title: "finstack-ai Architecture Specification"
 subtitle: "Agent microkernel, extension boundaries, bindings, durability, and deployment model"
 author: "finstack-ai project"
-date: "2026-08-08"
+date: "2026-08-09"
 ---
 
 # finstack-ai Architecture Specification
@@ -13,10 +13,10 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.9 |
+| Version | 0.10 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.14; Implementation Plan v0.14; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.15; Implementation Plan v0.15; Security and Threat Model v0.5 |
 
 # Executive architecture decision
 
@@ -598,9 +598,11 @@ The runtime never executes a recoverable effect solely because the in-memory ker
 
 This avoids mutating authoritative state before the store confirms the transition.
 
-The Phase 1 reducer accepts only normalized semantic boundaries. PR-009 materializes run acceptance, aggregate stage settlement, direct model settlement, and completion of a previously deferred model effect. Tool batches, cancellation/limits, real middleware/context invocation, interactions, timers, and general recovery commands remain with their named later PRs. A decision may contain an `ExecuteEffect` action only when the same decision contains the preceding `EffectRequested` intent; the action remains inert until that complete batch commits and applies.
+The Phase 1 reducer accepts only normalized semantic boundaries. PR-009 materializes run acceptance, aggregate stage settlement, direct model settlement, and completion of a previously deferred model effect. PR-010 additionally materializes assistant tool calls, normalized batch planning, one-call direct settlements, and external completion of deferred tool effects. Cancellation/limits, real middleware/context invocation, interactions, timers, and general recovery commands remain with their named later PRs. A decision may contain an `ExecuteEffect` action only when its `EffectRequested` intent is committed in that decision or the same batch-open record already allocated and persisted the reused effect identity; the action remains inert until that complete batch commits and applies.
 
-Committed records, never commands or actions, derive the authoritative phase. Apply validates a contiguous committed sequence and the complete sibling/order contract transactionally before changing state. Replay-derived indexes retain exact stage cursors, effect-settlement fingerprints, and non-empty external completion IDs with their effect and settlement digest. Stage fingerprints are reconstructed from `StageOutcomeRecorded` plus required siblings; non-semantic continuation reason text is excluded, while digest tampering fails closed. Model-settlement fingerprints discriminate direct completed/failed/deferred input from external completed/failed input and are reconstructed before pending state is cleared from the complete committed sibling set, including usage, artifacts, and finalized assistant message where applicable. Equal repeated settlements are idempotent; reuse of a stage cursor or effect identity with different normalized content, or of a completion ID for a different effect/digest, fails closed. The model stream's transient chunking never enters this state derivation.
+Committed records, never commands or actions, derive the authoritative phase. Apply validates a contiguous committed sequence and the complete sibling/order contract transactionally before changing state. Replay-derived indexes retain exact stage cursors, model/tool settlement fingerprints, persistent tool-call identities, and non-empty external completion IDs with their effect and settlement digest. Stage fingerprints are reconstructed from `StageOutcomeRecorded` plus required siblings; non-semantic continuation reason text is excluded, while digest tampering fails closed. Model- and tool-settlement fingerprints preserve direct versus external source identity; tool plans and closures have separate digest domains. Equal repeated settlements are idempotent; reuse of a stage cursor, call/effect identity, or completion ID with unequal normalized content fails closed. The model/tool stream's transient chunking never enters this state derivation.
+
+PR-010 partitions calls in assistant source order: consecutive `Parallel` calls share a group, while every `Sequential` or `Barrier` call is an exclusive group. Only the current group is dispatched. Effect completions commit in arrival order, but result messages and `MessageFinalized`/`ToolSettled` events are emitted only when the contiguous source prefix is available. A deferral keeps the original `EffectId`, suspends in `AwaitingExternal`, and cannot be replaced by a fabricated closure. Unknown tools and permitted framework failures use explicit framework-authored error closures; they never claim tool-produced output.
 
 ## 8.3 Transient streaming
 
@@ -667,6 +669,8 @@ The initial data model includes lane IDs and immutable parent links. Public conc
 A run owns its current phase, explicit root/parent/effect relation, limit counters, active/deferred effects, unresolved interactions, pending tool calls, usage, and terminal result. A turn owns one model response and its complete tool batch.
 
 For PR-009, one run state also retains the current cycle/turn correlation, prepared-context digest, pending model request/deferral, candidate terminal result, and replay-derived settlement fingerprints. Its concrete terminal payload vocabulary is completed/failed only. Message state is hard-capped at 4,096 items and each settlement/completion index at 256 entries; prospective overflow fails without mutation rather than evicting replay evidence. The canonical `kernel-state` v1 hash uses dedicated recursive explicit-null projection DTOs, covers that bounded semantic state, and excludes store commit timestamps, envelope checksums, actions, diagnostics, transient events, observers, and caches.
+
+PR-010 preserves those exact v1 bytes and hashes for tool-free prefixes. Applying the first assistant message containing a tool call upgrades only that run to strict `kernel-state` v2. V2 adds the active batch, assigned plans/groups, persistent call identities, tool-settlement fingerprints, buffered source results, the next source-finalization cursor, result-message identities, and last batch close outcome. The original assistant message remains the successful terminal candidate; tool-result messages extend canonical history. `Finalize` after a batch therefore reaches `before_finalize` with that originating candidate, while `ContinueModel` increments the cycle and prepares context containing the canonical assistant/tool history.
 
 Run relation metadata is immutable after acceptance. It provides root and parent correlation, relation kind, depth, optional budget scope, and external-work reference. It does not make child-run scheduling a kernel responsibility; `AgentInvoker` and application/runtime services own invocation and fan-out policy.
 

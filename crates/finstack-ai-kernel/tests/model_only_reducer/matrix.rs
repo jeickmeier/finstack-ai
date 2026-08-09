@@ -1,4 +1,12 @@
+use super::tool_batches::{
+    BATCH, CALL_A, TOOL_EFFECT_A, call, execute, model_with_calls, settle_after_model_for_tools,
+    tool_completed, tool_env,
+};
 use super::*;
+use finstack_ai_kernel::{
+    ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolExecutionMode, ToolFailurePolicy,
+    ToolSettlement,
+};
 
 #[derive(Clone, Copy, Debug)]
 enum AllowedCase {
@@ -456,6 +464,9 @@ fn disallowed_stage_outcomes_and_cursor_mismatches_use_frozen_codes() {
     settle_before_run(&mut before_model);
     prepare_context(&mut before_model, 0, false);
     let after_model = drive_to_after_model();
+    let before_tool_batch = drive_to_before_tool_batch_matrix();
+    let awaiting_tools = drive_to_awaiting_tools_matrix();
+    let after_tool_batch = drive_to_after_tool_batch_matrix();
     let before_finalize = drive_to_before_finalize();
 
     let cases = [
@@ -480,11 +491,25 @@ fn disallowed_stage_outcomes_and_cursor_mismatches_use_frozen_codes() {
             vec!["continue", "fail"],
         ),
         (
+            &before_tool_batch.kernel,
+            Stage::BeforeToolBatch,
+            vec!["tool_batch_prepared", "fail"],
+        ),
+        (
+            &after_tool_batch.kernel,
+            Stage::AfterToolBatch,
+            vec!["continue", "fail"],
+        ),
+        (
             &before_finalize.kernel,
             Stage::BeforeFinalize,
             vec!["finalize_accepted", "continue_model", "fail"],
         ),
     ];
+    assert_eq!(
+        awaiting_tools.kernel.state().phase,
+        Some(RunPhase::AwaitingTools)
+    );
     let stages = [
         Stage::BeforeRun,
         Stage::PrepareContext,
@@ -545,6 +570,17 @@ fn outcome_cases() -> Vec<(&'static str, ReducerStageOutcome)> {
                 deadline: None,
             },
         ),
+        (
+            "tool_batch_prepared",
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([execute(
+                    &call(CALL_A, "alpha"),
+                    ToolExecutionMode::Sequential,
+                    ToolFailurePolicy::ReturnToModel,
+                )]),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
         ("finalize_accepted", ReducerStageOutcome::FinalizeAccepted),
         (
             "continue_model",
@@ -563,9 +599,14 @@ enum InputFamily {
     Stage,
     Model,
     External,
+    Tool,
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the phase/input matrix intentionally lists every reachable reducer phase"
+)]
 fn every_reachable_phase_rejects_nonmatching_input_families() {
     let unaccepted = Harness::default();
     assert_wrong_inputs(
@@ -622,6 +663,30 @@ fn every_reachable_phase_rejects_nonmatching_input_families() {
         6_000,
         "invalid_phase_input",
     );
+    let before_tool_batch = drive_to_before_tool_batch_matrix();
+    assert_wrong_inputs(
+        &before_tool_batch.kernel,
+        InputFamily::Stage,
+        Stage::BeforeToolBatch,
+        6_100,
+        "invalid_phase_input",
+    );
+    let awaiting_tools = drive_to_awaiting_tools_matrix();
+    assert_wrong_inputs(
+        &awaiting_tools.kernel,
+        InputFamily::Tool,
+        Stage::BeforeToolBatch,
+        6_200,
+        "invalid_phase_input",
+    );
+    let after_tool_batch = drive_to_after_tool_batch_matrix();
+    assert_wrong_inputs(
+        &after_tool_batch.kernel,
+        InputFamily::Stage,
+        Stage::AfterToolBatch,
+        6_300,
+        "invalid_phase_input",
+    );
     let before_finalize = drive_to_before_finalize();
     assert_wrong_inputs(
         &before_finalize.kernel,
@@ -659,6 +724,47 @@ fn every_reachable_phase_rejects_nonmatching_input_families() {
             );
         }
     }
+}
+
+#[test]
+fn tool_stage_failures_are_valid_only_at_their_frozen_boundaries() {
+    let mut before = drive_to_before_tool_batch_matrix();
+    let before_decision = before.apply_input(
+        transition_env(6_600, &[6_600], &[], &[], &[], &[], &[]),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::Fail(fixture_error("before_tool_batch_failed")),
+        ),
+    );
+    assert_eq!(
+        decision_body_names(&before_decision),
+        ["stage_outcome_recorded"]
+    );
+    assert_eq!(before.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert!(matches!(
+        before.kernel.state().terminal_candidate.as_ref(),
+        Some(TerminalCandidate::Failed { .. })
+    ));
+
+    let mut after = drive_to_after_tool_batch_matrix();
+    let after_decision = after.apply_input(
+        transition_env(6_700, &[6_700], &[], &[], &[], &[], &[]),
+        stage_input(
+            0,
+            Stage::AfterToolBatch,
+            ReducerStageOutcome::Fail(fixture_error("after_tool_batch_failed")),
+        ),
+    );
+    assert_eq!(
+        decision_body_names(&after_decision),
+        ["stage_outcome_recorded"]
+    );
+    assert_eq!(after.kernel.state().phase, Some(RunPhase::BeforeFinalize));
+    assert!(matches!(
+        after.kernel.state().terminal_candidate.as_ref(),
+        Some(TerminalCandidate::Failed { .. })
+    ));
 }
 
 #[test]
@@ -747,7 +853,15 @@ fn assert_wrong_inputs(
 ) {
     for (family, input) in family_inputs(stage, identity_seed) {
         if family != allowed {
-            assert_error_code(kernel.decide(&empty_env(9_400), input), expected_error);
+            let expected = if family == InputFamily::Tool
+                && kernel.state().phase == Some(RunPhase::AwaitingExternal)
+                && kernel.state().active_tool_batch.is_none()
+            {
+                "tool_settlement_mismatch"
+            } else {
+                expected_error
+            };
+            assert_error_code(kernel.decide(&empty_env(9_400), input), expected);
         }
     }
 }
@@ -781,7 +895,74 @@ fn family_inputs(stage: Stage, identity_seed: u64) -> Vec<(InputFamily, KernelIn
                 "hello",
             ),
         ),
+        (
+            InputFamily::Tool,
+            KernelInput::ToolBatchSettled(ToolBatchSettled {
+                tool_batch_id: id::<ToolBatchTag>(identity_seed + 7),
+                outcome: ToolSettlement::Completed(tool_completed(
+                    identity_seed + 8,
+                    &call(identity_seed + 9, "phase-tool"),
+                )),
+            }),
+        ),
     ]
+}
+
+fn drive_to_before_tool_batch_matrix() -> Harness {
+    let calls = [call(CALL_A, "alpha")];
+    let mut harness = model_with_calls(&calls);
+    settle_after_model_for_tools(&mut harness);
+    harness
+}
+
+fn drive_to_awaiting_tools_matrix() -> Harness {
+    let calls = [call(CALL_A, "alpha")];
+    let mut harness = drive_to_before_tool_batch_matrix();
+    harness.apply_input(
+        tool_env(
+            6_400,
+            &[6_400, 6_401, 6_402],
+            &[6_400],
+            &[TOOL_EFFECT_A],
+            &[],
+            &[BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([execute(
+                    &calls[0],
+                    ToolExecutionMode::Sequential,
+                    ToolFailurePolicy::ReturnToModel,
+                )]),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    harness
+}
+
+fn drive_to_after_tool_batch_matrix() -> Harness {
+    let calls = [call(CALL_A, "alpha")];
+    let mut harness = drive_to_awaiting_tools_matrix();
+    harness.apply_input(
+        tool_env(
+            6_500,
+            &[6_410, 6_411, 6_412],
+            &[6_410, 6_411, 6_412],
+            &[],
+            &[6_420],
+            &[],
+            &[],
+        ),
+        KernelInput::ToolBatchSettled(ToolBatchSettled {
+            tool_batch_id: id::<ToolBatchTag>(BATCH),
+            outcome: ToolSettlement::Completed(tool_completed(TOOL_EFFECT_A, &calls[0])),
+        }),
+    );
+    harness
 }
 
 fn failed_terminal() -> Harness {

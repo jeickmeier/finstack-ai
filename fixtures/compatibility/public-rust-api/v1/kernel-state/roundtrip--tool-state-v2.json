@@ -1,0 +1,63 @@
+{
+  "format_version": 1,
+  "subject": "kernel-state",
+  "operation": "roundtrip",
+  "input": {
+    "state_version": 2,
+    "last_applied_sequence": 4,
+    "phase": "before_tool_batch",
+    "cycle": 0,
+    "messages": [
+      {
+        "id": "01234567-89ab-7cde-89ab-0123456789ab",
+        "role": "assistant",
+        "content": [
+          {
+            "kind": "tool_call",
+            "tool_call_id": "01234567-89ab-7cde-89ab-0123456789cd",
+            "tool_name": "lookup",
+            "arguments": {
+              "q": "x"
+            }
+          }
+        ],
+        "created_at": "1970-01-01T00:00:00.000Z",
+        "model": {
+          "provider": "openai",
+          "model": "gpt-test"
+        },
+        "provider_ids": {
+          "request_id": "req-1"
+        },
+        "metadata": {}
+      }
+    ],
+    "stage_settlements": [],
+    "model_settlements": [],
+    "completion_identities": [],
+    "active_tool_batch": null,
+    "tool_calls": [
+      {
+        "tool_call_id": "01234567-89ab-7cde-89ab-0123456789cd",
+        "cycle": 0,
+        "turn_id": "01234567-89ab-7cde-89ab-0123456789ce",
+        "source_message_id": "01234567-89ab-7cde-89ab-0123456789ab",
+        "tool_batch_id": null,
+        "effect_id": null,
+        "call": {
+          "tool_call_id": "01234567-89ab-7cde-89ab-0123456789cd",
+          "tool_name": "lookup",
+          "arguments": {
+            "q": "x"
+          }
+        }
+      }
+    ],
+    "tool_settlements": [],
+    "last_tool_batch": null
+  },
+  "expect": {
+    "ok": true,
+    "state_version": 2
+  }
+}

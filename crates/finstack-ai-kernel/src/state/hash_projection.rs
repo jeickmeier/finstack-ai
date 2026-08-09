@@ -8,19 +8,28 @@ use crate::digest::Digest;
 use crate::effects::{ComponentInvocation, EffectRelation, EffectRequested, PipelinePosition};
 use crate::entries::{ContextPrepared, RunCompleted, RunFailed};
 use crate::ids::{
-    BudgetScopeId, EffectId, LaneId, LimitKey, MessageId, ModelRequestId, RunId, SessionId, TurnId,
+    BudgetScopeId, EffectId, LaneId, LimitKey, MessageId, ModelRequestId, RunId, SessionId,
+    ToolBatchId, ToolCallId, ToolId, TurnId,
 };
 use crate::limits::{CostLimit, RunLimits};
-use crate::projection::{EffectDeferredProjection, ErrorProjection, MessageProjection};
+use crate::projection::{
+    ContentProjection, EffectDeferredProjection, ErrorProjection, MessageProjection,
+};
 use crate::refs::PrincipalRef;
 use crate::run::{
     RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
 use crate::time::{Duration, Timestamp};
+use crate::tools::{
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
+    ToolBatchClosed, ToolBatchContinuation, ToolBatchOutcome, ToolCallPlan, ToolExecutionMode,
+    ToolFailurePolicy, ValidatedToolCall,
+};
 
 use super::{
     CompletionIdentityHashEntryV1, CurrentTurn, KernelState, ModelSettlementHashEntryV1,
     PendingModelEffect, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
+    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
 };
 
 #[derive(Serialize)]
@@ -71,6 +80,347 @@ impl<'a> KernelStateHashV1<'a> {
             model_settlements,
             completion_identities,
             terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct KernelStateHashV2<'a> {
+    pub state_version: u16,
+    pub last_applied_sequence: u64,
+    pub session_id: Option<SessionId>,
+    pub lane_id: Option<LaneId>,
+    pub accepted: Option<RunAcceptedProjection<'a>>,
+    pub phase: Option<RunPhase>,
+    pub cycle: u64,
+    pub current_turn: Option<CurrentTurnProjection<'a>>,
+    pub messages: Vec<MessageProjection<'a>>,
+    pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
+    pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
+    pub stage_settlements: Vec<StageSettlementHashEntryV1>,
+    pub model_settlements: Vec<ModelSettlementHashEntryV1>,
+    pub completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    pub active_tool_batch: Option<ActiveToolBatchProjection<'a>>,
+    pub tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    pub tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    pub last_tool_batch: Option<ToolBatchClosedProjection<'a>>,
+    pub terminal: Option<TerminalStateProjection<'a>>,
+}
+
+impl<'a> KernelStateHashV2<'a> {
+    pub(super) fn from_state(
+        state: &'a KernelState,
+        stage_settlements: Vec<StageSettlementHashEntryV1>,
+        model_settlements: Vec<ModelSettlementHashEntryV1>,
+        completion_identities: Vec<CompletionIdentityHashEntryV1>,
+        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    ) -> Self {
+        Self {
+            state_version: state.state_version,
+            last_applied_sequence: state.last_applied_sequence,
+            session_id: state.session_id,
+            lane_id: state.lane_id,
+            accepted: state.accepted.as_ref().map(RunAcceptedProjection::from),
+            phase: state.phase,
+            cycle: state.cycle,
+            current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
+            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            pending_model_effect: state
+                .pending_model_effect
+                .as_ref()
+                .map(PendingModelEffectProjection::from),
+            terminal_candidate: state
+                .terminal_candidate
+                .as_ref()
+                .map(TerminalCandidateProjection::from),
+            stage_settlements,
+            model_settlements,
+            completion_identities,
+            active_tool_batch: state
+                .active_tool_batch
+                .as_ref()
+                .map(ActiveToolBatchProjection::from),
+            tool_calls,
+            tool_settlements,
+            last_tool_batch: state
+                .last_tool_batch
+                .as_ref()
+                .map(ToolBatchClosedProjection::from),
+            terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct ActiveToolBatchProjection<'a> {
+    opened: ToolBatchOpenedProjection<'a>,
+    calls: Vec<ActiveToolCallProjection<'a>>,
+    current_group: u32,
+    next_source_index: u32,
+    result_message_ids: &'a [MessageId],
+    fatal_error: Option<ErrorProjection<'a>>,
+}
+
+impl<'a> From<&'a ActiveToolBatch> for ActiveToolBatchProjection<'a> {
+    fn from(value: &'a ActiveToolBatch) -> Self {
+        Self {
+            opened: ToolBatchOpenedProjection::from(&value.opened),
+            calls: value
+                .calls
+                .iter()
+                .map(ActiveToolCallProjection::from)
+                .collect(),
+            current_group: value.current_group,
+            next_source_index: value.next_source_index,
+            result_message_ids: &value.result_message_ids,
+            fatal_error: value.fatal_error.as_ref().map(ErrorProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ToolBatchOpenedProjection<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: MessageId,
+    calls: Vec<AssignedToolCallProjection<'a>>,
+    continuation: ToolBatchContinuation,
+    plan_digest: Digest,
+}
+
+impl<'a> From<&'a crate::ToolBatchOpened> for ToolBatchOpenedProjection<'a> {
+    fn from(value: &'a crate::ToolBatchOpened) -> Self {
+        Self {
+            cycle: value.cycle,
+            turn_id: value.turn_id,
+            tool_batch_id: value.tool_batch_id,
+            source_message_id: value.source_message_id,
+            calls: value
+                .calls
+                .iter()
+                .map(AssignedToolCallProjection::from)
+                .collect(),
+            continuation: value.continuation,
+            plan_digest: value.plan_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct AssignedToolCallProjection<'a> {
+    source_index: u32,
+    group_index: u32,
+    effect_id: EffectId,
+    plan: ToolCallPlanProjection<'a>,
+}
+
+impl<'a> From<&'a AssignedToolCall> for AssignedToolCallProjection<'a> {
+    fn from(value: &'a AssignedToolCall) -> Self {
+        Self {
+            source_index: value.source_index,
+            group_index: value.group_index,
+            effect_id: value.effect_id,
+            plan: ToolCallPlanProjection::from(&value.plan),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolCallPlanProjection<'a> {
+    Execute(ValidatedToolCallProjection<'a>),
+    SyntheticClosure(Box<SyntheticToolClosureProjection<'a>>),
+}
+
+impl<'a> From<&'a ToolCallPlan> for ToolCallPlanProjection<'a> {
+    fn from(value: &'a ToolCallPlan) -> Self {
+        match value {
+            ToolCallPlan::Execute(call) => Self::Execute(ValidatedToolCallProjection::from(call)),
+            ToolCallPlan::SyntheticClosure(closure) => {
+                Self::SyntheticClosure(Box::new(SyntheticToolClosureProjection::from(closure)))
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ValidatedToolCallProjection<'a> {
+    call: &'a crate::ToolCallBlock,
+    tool_id: ToolId,
+    component: Option<&'a ComponentInvocation>,
+    output_contract: &'a crate::EffectOutputContract,
+    retry_safety: crate::RetrySafety,
+    deadline: Option<Timestamp>,
+    execution: ToolExecutionMode,
+    failure_policy: ToolFailurePolicy,
+}
+
+impl<'a> From<&'a ValidatedToolCall> for ValidatedToolCallProjection<'a> {
+    fn from(value: &'a ValidatedToolCall) -> Self {
+        Self {
+            call: &value.call,
+            tool_id: value.tool_id.clone(),
+            component: value.component.as_ref(),
+            output_contract: &value.output_contract,
+            retry_safety: value.retry_safety,
+            deadline: value.deadline,
+            execution: value.execution,
+            failure_policy: value.failure_policy,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct SyntheticToolClosureProjection<'a> {
+    call: &'a crate::ToolCallBlock,
+    execution: ToolExecutionMode,
+    failure_policy: ToolFailurePolicy,
+    error: ErrorProjection<'a>,
+}
+
+impl<'a> From<&'a SyntheticToolClosure> for SyntheticToolClosureProjection<'a> {
+    fn from(value: &'a SyntheticToolClosure) -> Self {
+        Self {
+            call: &value.call,
+            execution: value.execution,
+            failure_policy: value.failure_policy,
+            error: ErrorProjection::from(&value.error),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ActiveToolCallProjection<'a> {
+    assigned: AssignedToolCallProjection<'a>,
+    status: ActiveToolCallStatusProjection<'a>,
+}
+
+impl<'a> From<&'a ActiveToolCall> for ActiveToolCallProjection<'a> {
+    fn from(value: &'a ActiveToolCall) -> Self {
+        Self {
+            assigned: AssignedToolCallProjection::from(&value.assigned),
+            status: ActiveToolCallStatusProjection::from(&value.status),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ActiveToolCallStatusProjection<'a> {
+    Undispatched,
+    Requested {
+        requested: EffectRequestedProjection<'a>,
+        deferred: Option<EffectDeferredProjection<'a>>,
+    },
+    Buffered {
+        result: ToolResultProjection<'a>,
+        settlement_digest: Digest,
+        synthetic: bool,
+        error: Option<Box<ErrorProjection<'a>>>,
+    },
+    Settled {
+        result_message_id: MessageId,
+        settlement_digest: Digest,
+    },
+}
+
+impl<'a> From<&'a ActiveToolCallStatus> for ActiveToolCallStatusProjection<'a> {
+    fn from(value: &'a ActiveToolCallStatus) -> Self {
+        match value {
+            ActiveToolCallStatus::Undispatched => Self::Undispatched,
+            ActiveToolCallStatus::Requested {
+                requested,
+                deferred,
+            } => Self::Requested {
+                requested: EffectRequestedProjection::from(requested),
+                deferred: deferred.as_ref().map(EffectDeferredProjection::from),
+            },
+            ActiveToolCallStatus::Buffered {
+                result,
+                settlement_digest,
+                synthetic,
+                error,
+            } => Self::Buffered {
+                result: ToolResultProjection::from(result),
+                settlement_digest: *settlement_digest,
+                synthetic: *synthetic,
+                error: error.as_ref().map(ErrorProjection::from).map(Box::new),
+            },
+            ActiveToolCallStatus::Settled {
+                result_message_id,
+                settlement_digest,
+            } => Self::Settled {
+                result_message_id: *result_message_id,
+                settlement_digest: *settlement_digest,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ToolResultProjection<'a> {
+    tool_call_id: ToolCallId,
+    content: Vec<ContentProjection<'a>>,
+    is_error: bool,
+}
+
+impl<'a> From<&'a crate::ToolResultBlock> for ToolResultProjection<'a> {
+    fn from(value: &'a crate::ToolResultBlock) -> Self {
+        Self {
+            tool_call_id: *value.tool_call_id(),
+            content: value
+                .content()
+                .iter()
+                .map(ContentProjection::from)
+                .collect(),
+            is_error: value.is_error(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct ToolBatchClosedProjection<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: MessageId,
+    result_message_ids: &'a [MessageId],
+    outcome: ToolBatchOutcomeProjection<'a>,
+    close_digest: Digest,
+}
+
+impl<'a> From<&'a ToolBatchClosed> for ToolBatchClosedProjection<'a> {
+    fn from(value: &'a ToolBatchClosed) -> Self {
+        Self {
+            cycle: value.cycle,
+            turn_id: value.turn_id,
+            tool_batch_id: value.tool_batch_id,
+            source_message_id: value.source_message_id,
+            result_message_ids: &value.result_message_ids,
+            outcome: ToolBatchOutcomeProjection::from(&value.outcome),
+            close_digest: value.close_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolBatchOutcomeProjection<'a> {
+    ContinueModel,
+    Finalize,
+    Failed { error: Box<ErrorProjection<'a>> },
+}
+
+impl<'a> From<&'a ToolBatchOutcome> for ToolBatchOutcomeProjection<'a> {
+    fn from(value: &'a ToolBatchOutcome) -> Self {
+        match value {
+            ToolBatchOutcome::ContinueModel => Self::ContinueModel,
+            ToolBatchOutcome::Finalize => Self::Finalize,
+            ToolBatchOutcome::Failed { error } => Self::Failed {
+                error: Box::new(ErrorProjection::from(error)),
+            },
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::Digest;
 use crate::content::ContentBlock;
 use crate::effects::EffectCompleted;
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, MessageId};
+use crate::ids::{EffectId, MessageId, ToolCallId};
 use crate::message::{Message, MessageRole};
 use crate::state::{KernelState, TransitionEnv};
 
@@ -20,17 +20,46 @@ pub(super) fn validate_error_descriptor(error: &ErrorDescriptor) -> Result<(), K
 }
 
 pub(super) fn validate_assistant_semantics(
+    state: &KernelState,
     env: &TransitionEnv,
     message: &Message,
     completion: &EffectCompleted,
 ) -> Result<(), KernelError> {
     if message.created_at() != env.now
         || message.role() != MessageRole::Assistant
-        || message
-            .content()
-            .iter()
-            .any(|block| matches!(block, ContentBlock::ToolCall(_)))
         || message.provider_ids() != completion.provider_ids()
+    {
+        return Err(KernelError::AssistantMessageMismatch);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for call in assistant_tool_calls(message) {
+        if !seen.insert(*call.tool_call_id()) || state.tool_calls.contains_key(call.tool_call_id())
+        {
+            return Err(KernelError::DuplicateToolCall);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn assistant_tool_calls(message: &Message) -> Vec<&crate::ToolCallBlock> {
+    message
+        .content()
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall(call) => Some(call),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(super) fn validate_assistant_tool_call_ids(
+    allocated: &[ToolCallId],
+    message: &Message,
+) -> Result<(), KernelError> {
+    if assistant_tool_calls(message)
+        .iter()
+        .map(|call| *call.tool_call_id())
+        .ne(allocated.iter().copied())
     {
         return Err(KernelError::AssistantMessageMismatch);
     }

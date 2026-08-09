@@ -1,11 +1,11 @@
-//! Source-discriminated PR-009 model-settlement fingerprints.
+//! Source-discriminated reducer settlement fingerprints through PR-010.
 
 use serde::Serialize;
 
 use super::decision::KernelError;
 use super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ModelSettled, ModelSettlement,
-    ReducerStageOutcome, StageSettled,
+    ReducerStageOutcome, StageSettled, ToolSettlement,
 };
 use crate::digest::Digest;
 use crate::effects::{
@@ -13,15 +13,18 @@ use crate::effects::{
     EffectRequested, RetrySafety,
 };
 use crate::entries::{ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded};
-use crate::ids::{EffectId, ModelRequestId, TurnId};
+use crate::ids::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
 use crate::message::Message;
 use crate::projection::{
-    ArtifactProjection, EffectCompletedProjection, EffectDeferredProjection,
+    ArtifactProjection, ContentProjection, EffectCompletedProjection, EffectDeferredProjection,
     EffectFailedProjection, ErrorProjection, MessageProjection, UsageProjection,
 };
 use crate::raw_json::RawJson;
 use crate::state::PendingModelEffect;
 use crate::time::Timestamp;
+use crate::tools::{
+    AssignedToolCall, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallPlan,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,6 +37,11 @@ enum StageSettlementFingerprintV1<'a> {
         messages: Vec<MessageProjection<'a>>,
     },
     ModelRequestPrepared(Box<ModelRequestPreparedFingerprintV1<'a>>),
+    ToolBatchPrepared {
+        cursor: StageCursor,
+        calls: Vec<ToolCallPlanFingerprintV1<'a>>,
+        continuation: ToolBatchContinuation,
+    },
     FinalizeAccepted {
         cursor: StageCursor,
     },
@@ -108,6 +116,168 @@ struct ExternalModelFailedFingerprintV1<'a> {
     error: ErrorProjection<'a>,
 }
 
+#[derive(Serialize)]
+struct ToolBatchPlanFingerprintV1<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: crate::MessageId,
+    calls: Vec<AssignedToolCallFingerprintV1<'a>>,
+    continuation: ToolBatchContinuation,
+}
+
+#[derive(Serialize)]
+struct AssignedToolCallFingerprintV1<'a> {
+    source_index: u32,
+    group_index: u32,
+    effect_id: EffectId,
+    plan: ToolCallPlanFingerprintV1<'a>,
+}
+
+impl<'a> From<&'a AssignedToolCall> for AssignedToolCallFingerprintV1<'a> {
+    fn from(value: &'a AssignedToolCall) -> Self {
+        Self {
+            source_index: value.source_index,
+            group_index: value.group_index,
+            effect_id: value.effect_id,
+            plan: ToolCallPlanFingerprintV1::from(&value.plan),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolCallPlanFingerprintV1<'a> {
+    Execute {
+        call: &'a crate::ToolCallBlock,
+        tool_id: &'a crate::ToolId,
+        component: Option<&'a ComponentInvocation>,
+        output_contract: &'a EffectOutputContract,
+        retry_safety: RetrySafety,
+        deadline: Option<Timestamp>,
+        execution: crate::ToolExecutionMode,
+        failure_policy: crate::ToolFailurePolicy,
+    },
+    SyntheticClosure {
+        call: &'a crate::ToolCallBlock,
+        execution: crate::ToolExecutionMode,
+        failure_policy: crate::ToolFailurePolicy,
+        error: Box<ErrorProjection<'a>>,
+    },
+}
+
+impl<'a> From<&'a ToolCallPlan> for ToolCallPlanFingerprintV1<'a> {
+    fn from(value: &'a ToolCallPlan) -> Self {
+        match value {
+            ToolCallPlan::Execute(call) => Self::Execute {
+                call: &call.call,
+                tool_id: &call.tool_id,
+                component: call.component.as_ref(),
+                output_contract: &call.output_contract,
+                retry_safety: call.retry_safety,
+                deadline: call.deadline,
+                execution: call.execution,
+                failure_policy: call.failure_policy,
+            },
+            ToolCallPlan::SyntheticClosure(closure) => Self::SyntheticClosure {
+                call: &closure.call,
+                execution: closure.execution,
+                failure_policy: closure.failure_policy,
+                error: Box::new(ErrorProjection::from(&closure.error)),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolSettlementFingerprintV1<'a> {
+    DirectCompleted {
+        tool_batch_id: ToolBatchId,
+        completion: EffectCompletedProjection<'a>,
+    },
+    DirectFailed {
+        tool_batch_id: ToolBatchId,
+        failure: EffectFailedProjection<'a>,
+    },
+    DirectDeferred {
+        tool_batch_id: ToolBatchId,
+        deferred: EffectDeferredProjection<'a>,
+    },
+    ExternalCompleted {
+        tool_batch_id: ToolBatchId,
+        effect_id: EffectId,
+        completion_id: &'a str,
+        output: &'a RawJson,
+        usage: Option<UsageProjection<'a>>,
+        artifacts: Vec<ArtifactProjection<'a>>,
+    },
+    ExternalFailed {
+        tool_batch_id: ToolBatchId,
+        effect_id: EffectId,
+        completion_id: &'a str,
+        error: ErrorProjection<'a>,
+    },
+    Synthetic {
+        tool_batch_id: ToolBatchId,
+        tool_call_id: ToolCallId,
+        effect_id: EffectId,
+        result: ToolResultFingerprintV1<'a>,
+        error: ErrorProjection<'a>,
+    },
+}
+
+#[derive(Serialize)]
+struct ToolResultFingerprintV1<'a> {
+    tool_call_id: ToolCallId,
+    content: Vec<ContentProjection<'a>>,
+    is_error: bool,
+}
+
+impl<'a> From<&'a crate::ToolResultBlock> for ToolResultFingerprintV1<'a> {
+    fn from(value: &'a crate::ToolResultBlock) -> Self {
+        Self {
+            tool_call_id: *value.tool_call_id(),
+            content: value
+                .content()
+                .iter()
+                .map(ContentProjection::from)
+                .collect(),
+            is_error: value.is_error(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ToolBatchCloseFingerprintV1<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: crate::MessageId,
+    result_message_ids: &'a [crate::MessageId],
+    outcome: ToolBatchOutcomeFingerprintV1<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolBatchOutcomeFingerprintV1<'a> {
+    ContinueModel,
+    Finalize,
+    Failed { error: Box<ErrorProjection<'a>> },
+}
+
+impl<'a> From<&'a ToolBatchOutcome> for ToolBatchOutcomeFingerprintV1<'a> {
+    fn from(value: &'a ToolBatchOutcome) -> Self {
+        match value {
+            ToolBatchOutcome::ContinueModel => Self::ContinueModel,
+            ToolBatchOutcome::Finalize => Self::Finalize,
+            ToolBatchOutcome::Failed { error } => Self::Failed {
+                error: Box::new(ErrorProjection::from(error)),
+            },
+        }
+    }
+}
+
 pub(super) fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
     let fingerprint = match &input.outcome {
         ReducerStageOutcome::Continue => StageSettlementFingerprintV1::Continue {
@@ -135,6 +305,14 @@ pub(super) fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> 
                 deadline: *deadline,
             },
         )),
+        ReducerStageOutcome::ToolBatchPrepared {
+            calls,
+            continuation,
+        } => StageSettlementFingerprintV1::ToolBatchPrepared {
+            cursor: input.cursor,
+            calls: calls.iter().map(ToolCallPlanFingerprintV1::from).collect(),
+            continuation: *continuation,
+        },
         ReducerStageOutcome::FinalizeAccepted => StageSettlementFingerprintV1::FinalizeAccepted {
             cursor: input.cursor,
         },
@@ -177,6 +355,22 @@ pub(super) fn stage_record_digest(
                 return Err(KernelError::InvalidRecordOrder);
             };
             model_request_stage_fingerprint(outcome.cursor, requested)?
+        }
+        StageDisposition::ToolBatchPrepared { .. } => {
+            let Some(crate::RecordBody::ToolBatchOpened(opened)) =
+                sibling.map(crate::RecordEnvelope::body)
+            else {
+                return Err(KernelError::InvalidRecordOrder);
+            };
+            StageSettlementFingerprintV1::ToolBatchPrepared {
+                cursor: outcome.cursor,
+                calls: opened
+                    .calls
+                    .iter()
+                    .map(|assigned| ToolCallPlanFingerprintV1::from(&assigned.plan))
+                    .collect(),
+                continuation: opened.continuation,
+            }
         }
         StageDisposition::FinalizeAccepted => StageSettlementFingerprintV1::FinalizeAccepted {
             cursor: outcome.cursor,
@@ -351,6 +545,183 @@ fn digest(fingerprint: &ModelSettlementFingerprintV1<'_>) -> Result<Digest, Kern
     super::canonical_digest("model-settlement", fingerprint)
 }
 
+pub(super) fn tool_batch_plan_digest(
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: crate::MessageId,
+    calls: &[AssignedToolCall],
+    continuation: ToolBatchContinuation,
+) -> Result<Digest, KernelError> {
+    super::canonical_digest(
+        "tool-batch-plan",
+        &ToolBatchPlanFingerprintV1 {
+            cycle,
+            turn_id,
+            tool_batch_id,
+            source_message_id,
+            calls: calls
+                .iter()
+                .map(AssignedToolCallFingerprintV1::from)
+                .collect(),
+            continuation,
+        },
+    )
+}
+
+pub(super) fn opened_tool_batch_plan_digest(
+    opened: &ToolBatchOpened,
+) -> Result<Digest, KernelError> {
+    tool_batch_plan_digest(
+        opened.cycle,
+        opened.turn_id,
+        opened.tool_batch_id,
+        opened.source_message_id,
+        &opened.calls,
+        opened.continuation,
+    )
+}
+
+pub(super) fn direct_tool_digest(
+    tool_batch_id: ToolBatchId,
+    outcome: &ToolSettlement,
+) -> Result<Digest, KernelError> {
+    let fingerprint = match outcome {
+        ToolSettlement::Completed(completion) => ToolSettlementFingerprintV1::DirectCompleted {
+            tool_batch_id,
+            completion: EffectCompletedProjection::from(completion),
+        },
+        ToolSettlement::Deferred(deferred) => ToolSettlementFingerprintV1::DirectDeferred {
+            tool_batch_id,
+            deferred: EffectDeferredProjection::from(deferred),
+        },
+        ToolSettlement::Failed(failure) => ToolSettlementFingerprintV1::DirectFailed {
+            tool_batch_id,
+            failure: EffectFailedProjection::from(failure),
+        },
+    };
+    super::canonical_digest("tool-settlement", &fingerprint)
+}
+
+pub(super) fn external_tool_digest(
+    tool_batch_id: ToolBatchId,
+    input: &ExternalEffectCompletedInput,
+) -> Result<Digest, KernelError> {
+    let fingerprint = match &input.completion.outcome {
+        ExternalEffectOutcome::Completed {
+            output,
+            usage,
+            artifacts,
+        } => ToolSettlementFingerprintV1::ExternalCompleted {
+            tool_batch_id,
+            effect_id: input.completion.effect_id,
+            completion_id: &input.completion.completion_id,
+            output,
+            usage: usage.as_ref().map(UsageProjection::from),
+            artifacts: artifacts.iter().map(ArtifactProjection::from).collect(),
+        },
+        ExternalEffectOutcome::Failed { error } => ToolSettlementFingerprintV1::ExternalFailed {
+            tool_batch_id,
+            effect_id: input.completion.effect_id,
+            completion_id: &input.completion.completion_id,
+            error: ErrorProjection::from(error),
+        },
+    };
+    super::canonical_digest("tool-settlement", &fingerprint)
+}
+
+pub(super) fn synthetic_tool_digest(
+    tool_batch_id: ToolBatchId,
+    tool_call_id: ToolCallId,
+    effect_id: EffectId,
+    result: &crate::ToolResultBlock,
+    error: &crate::ErrorDescriptor,
+) -> Result<Digest, KernelError> {
+    super::canonical_digest(
+        "tool-settlement",
+        &ToolSettlementFingerprintV1::Synthetic {
+            tool_batch_id,
+            tool_call_id,
+            effect_id,
+            result: ToolResultFingerprintV1::from(result),
+            error: ErrorProjection::from(error),
+        },
+    )
+}
+
+pub(super) fn completed_tool_record_digest(
+    tool_batch_id: ToolBatchId,
+    external: bool,
+    completed: &EffectCompleted,
+) -> Result<Digest, KernelError> {
+    let fingerprint = if external {
+        ToolSettlementFingerprintV1::ExternalCompleted {
+            tool_batch_id,
+            effect_id: completed.effect_id(),
+            completion_id: completed
+                .completion_id()
+                .ok_or(KernelError::ToolSettlementMismatch)?,
+            output: completed.output(),
+            usage: completed.usage().map(UsageProjection::from),
+            artifacts: completed
+                .artifacts()
+                .iter()
+                .map(ArtifactProjection::from)
+                .collect(),
+        }
+    } else {
+        ToolSettlementFingerprintV1::DirectCompleted {
+            tool_batch_id,
+            completion: EffectCompletedProjection::from(completed),
+        }
+    };
+    super::canonical_digest("tool-settlement", &fingerprint)
+}
+
+pub(super) fn failed_tool_record_digest(
+    tool_batch_id: ToolBatchId,
+    external: bool,
+    failed: &EffectFailed,
+) -> Result<Digest, KernelError> {
+    let fingerprint = if external {
+        ToolSettlementFingerprintV1::ExternalFailed {
+            tool_batch_id,
+            effect_id: failed.effect_id(),
+            completion_id: failed
+                .completion_id()
+                .ok_or(KernelError::ToolSettlementMismatch)?,
+            error: ErrorProjection::from(failed.error()),
+        }
+    } else {
+        ToolSettlementFingerprintV1::DirectFailed {
+            tool_batch_id,
+            failure: EffectFailedProjection::from(failed),
+        }
+    };
+    super::canonical_digest("tool-settlement", &fingerprint)
+}
+
+pub(super) fn tool_batch_close_digest(
+    cycle: u64,
+    turn_id: TurnId,
+    tool_batch_id: ToolBatchId,
+    source_message_id: crate::MessageId,
+    result_message_ids: &[crate::MessageId],
+    outcome: &ToolBatchOutcome,
+) -> Result<Digest, KernelError> {
+    super::canonical_digest(
+        "tool-batch-close",
+        &ToolBatchCloseFingerprintV1 {
+            cycle,
+            turn_id,
+            tool_batch_id,
+            source_message_id,
+            result_message_ids,
+            outcome: ToolBatchOutcomeFingerprintV1::from(outcome),
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +799,107 @@ mod tests {
                 "0f6d26e1e4c7aabe6ed3679e2812abcd6e037db35945858cc0581a9758f5508d",
             ]
         );
+    }
+
+    #[test]
+    fn tool_fingerprint_domains_and_source_variants_are_stable_and_distinct() {
+        let batch = ToolBatchId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("tool batch");
+        let direct_completed =
+            direct_tool_digest(batch, &ToolSettlement::Completed(completed_effect()))
+                .expect("direct completed");
+        assert_eq!(
+            direct_completed,
+            direct_tool_digest(batch, &ToolSettlement::Completed(completed_effect()))
+                .expect("repeated direct completed")
+        );
+        let direct_failed = direct_tool_digest(
+            batch,
+            &ToolSettlement::Failed(failed_effect(Some("direct-failure"))),
+        )
+        .expect("direct failed");
+        let direct_deferred =
+            direct_tool_digest(batch, &ToolSettlement::Deferred(deferred_effect()))
+                .expect("direct deferred");
+        let external_completed_input = ExternalEffectCompletedInput {
+            completion: super::super::input::ExternalEffectCompletion {
+                effect_id: effect_id(),
+                completion_id: Arc::from("direct-completion"),
+                outcome: ExternalEffectOutcome::Completed {
+                    output: RawJson::parse(r#"{"text":"hello"}"#).expect("output"),
+                    usage: None,
+                    artifacts: Arc::from([]),
+                },
+            },
+            assistant_message: None,
+        };
+        let external_completed =
+            external_tool_digest(batch, &external_completed_input).expect("external completed");
+        let external_failed = external_tool_digest(
+            batch,
+            &ExternalEffectCompletedInput {
+                completion: super::super::input::ExternalEffectCompletion {
+                    effect_id: effect_id(),
+                    completion_id: Arc::from("direct-failure"),
+                    outcome: ExternalEffectOutcome::Failed {
+                        error: failure_error(),
+                    },
+                },
+                assistant_message: None,
+            },
+        )
+        .expect("external failed");
+        let tool_call_id =
+            ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("tool call");
+        let synthetic_error =
+            ErrorDescriptor::new("unknown_tool", "unknown tool", ErrorCategory::Tool, false)
+                .expect("synthetic error");
+        let synthetic_result = crate::ToolResultBlock::try_new(
+            tool_call_id,
+            vec![ContentBlock::Text(
+                TextBlock::try_new("unknown tool").expect("result text"),
+            )],
+            true,
+        )
+        .expect("synthetic result");
+        let synthetic = synthetic_tool_digest(
+            batch,
+            tool_call_id,
+            effect_id(),
+            &synthetic_result,
+            &synthetic_error,
+        )
+        .expect("synthetic");
+        let plan = tool_batch_plan_digest(
+            7,
+            turn_id(),
+            batch,
+            *assistant_message().id(),
+            &[],
+            ToolBatchContinuation::Finalize,
+        )
+        .expect("plan");
+        let close = tool_batch_close_digest(
+            7,
+            turn_id(),
+            batch,
+            *assistant_message().id(),
+            &[],
+            &ToolBatchOutcome::Finalize,
+        )
+        .expect("close");
+        let distinct = [
+            direct_completed,
+            direct_failed,
+            direct_deferred,
+            external_completed,
+            external_failed,
+            synthetic,
+            plan,
+            close,
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(distinct.len(), 8);
     }
 
     const OPAQUE_OUTPUT_ABSENT: &str =

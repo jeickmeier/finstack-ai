@@ -12,8 +12,8 @@ use super::input::{
     ModelSettlement, ReducerStageOutcome, StageSettled,
 };
 use super::validation::{
-    validate_assistant_message_id, validate_assistant_semantics, validate_completion_identity,
-    validate_error_descriptor,
+    assistant_tool_calls, validate_assistant_message_id, validate_assistant_semantics,
+    validate_assistant_tool_call_ids, validate_completion_identity, validate_error_descriptor,
 };
 use crate::bounds::SEMANTIC_ARRAY_MAX_ITEMS;
 use crate::content::{LABEL_MAX_BYTES, TEXT_MAX_BYTES};
@@ -39,6 +39,9 @@ pub(super) fn decide(
         KernelInput::StageSettled(input) => decide_stage(state, env, &input),
         KernelInput::ModelSettled(input) => decide_model(state, env, &input),
         KernelInput::ExternalEffectCompleted(input) => decide_external(state, env, input),
+        KernelInput::ToolBatchSettled(input) => {
+            super::tool::decide_tool_settled(state, env, &input)
+        }
     }
 }
 
@@ -107,6 +110,10 @@ fn decide_stage(
         });
     }
 
+    if matches!(input.outcome, ReducerStageOutcome::ToolBatchPrepared { .. }) {
+        return super::tool::decide_batch_prepared(state, env, input, settlement_digest);
+    }
+
     let requirements = stage_id_requirements(state, input)?;
     capacity::preflight_decision(
         state,
@@ -133,7 +140,10 @@ fn stage_id_requirements(
     let cursor = input.cursor;
     match &input.outcome {
         ReducerStageOutcome::Continue
-            if matches!(cursor.stage, Stage::BeforeRun | Stage::AfterModel) =>
+            if matches!(
+                cursor.stage,
+                Stage::BeforeRun | Stage::AfterModel | Stage::AfterToolBatch
+            ) =>
         {
             Ok(IdRequirements::new(1, 0, 0, 0, 0, 0))
         }
@@ -171,7 +181,12 @@ fn stage_id_requirements(
         ReducerStageOutcome::Fail(_)
             if matches!(
                 cursor.stage,
-                Stage::BeforeRun | Stage::PrepareContext | Stage::BeforeModel | Stage::AfterModel
+                Stage::BeforeRun
+                    | Stage::PrepareContext
+                    | Stage::BeforeModel
+                    | Stage::AfterModel
+                    | Stage::BeforeToolBatch
+                    | Stage::AfterToolBatch
             ) =>
         {
             Ok(IdRequirements::new(1, 0, 0, 0, 0, 0))
@@ -218,7 +233,10 @@ fn stage_bodies(
     let cursor = input.cursor;
     match &input.outcome {
         ReducerStageOutcome::Continue
-            if matches!(cursor.stage, Stage::BeforeRun | Stage::AfterModel) =>
+            if matches!(
+                cursor.stage,
+                Stage::BeforeRun | Stage::AfterModel | Stage::AfterToolBatch
+            ) =>
         {
             Ok((
                 vec![stage_record(
@@ -256,7 +274,7 @@ fn stage_bodies(
             continued_model_bodies(state, cursor, settlement_digest)
         }
         ReducerStageOutcome::Fail(error) => {
-            failed_stage_bodies(state, cursor, settlement_digest, error)
+            Ok(failed_stage_bodies(state, cursor, settlement_digest, error))
         }
         _ => Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
@@ -392,9 +410,14 @@ fn failed_stage_bodies(
     cursor: StageCursor,
     settlement_digest: Digest,
     error: &crate::ErrorDescriptor,
-) -> Result<(Vec<RecordBody>, Option<PostCommitAction>), KernelError> {
+) -> (Vec<RecordBody>, Option<PostCommitAction>) {
     match cursor.stage {
-        Stage::BeforeRun | Stage::PrepareContext | Stage::BeforeModel | Stage::AfterModel => Ok((
+        Stage::BeforeRun
+        | Stage::PrepareContext
+        | Stage::BeforeModel
+        | Stage::AfterModel
+        | Stage::BeforeToolBatch
+        | Stage::AfterToolBatch => (
             vec![stage_record(
                 cursor,
                 StageDisposition::Failed {
@@ -403,8 +426,8 @@ fn failed_stage_bodies(
                 settlement_digest,
             )],
             None,
-        )),
-        Stage::BeforeFinalize => Ok((
+        ),
+        Stage::BeforeFinalize => (
             vec![
                 stage_record(
                     cursor,
@@ -416,11 +439,7 @@ fn failed_stage_bodies(
                 RecordBody::RunFailed(failure_from_state(state, error.clone())),
             ],
             None,
-        )),
-        Stage::BeforeToolBatch | Stage::AfterToolBatch => Err(KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "stage_settled",
-        }),
+        ),
     }
 }
 
@@ -470,6 +489,9 @@ fn decide_external(
     input: ExternalEffectCompletedInput,
 ) -> Result<Decision, KernelError> {
     validate_external_completion_input(&input)?;
+    if super::tool::is_known_tool_effect(state, input.completion.effect_id) {
+        return super::tool::decide_external_tool(state, env, input);
+    }
     let settlement_digest = external_digest(&input)?;
     if let Some(decision) = classify_model_duplicate(
         state,
@@ -685,20 +707,27 @@ fn model_settlement_bodies(
                 effect_id,
                 settlement_digest,
             )?;
-            validate_assistant_semantics(env, assistant_message, completion)?;
+            validate_assistant_semantics(state, env, assistant_message, completion)?;
+            let tool_call_ids = assistant_tool_calls(assistant_message)
+                .iter()
+                .map(|call| *call.tool_call_id())
+                .collect::<Vec<_>>();
             capacity::preflight_decision(
                 state,
                 StateGrowth {
                     messages: 1,
                     model: Some(effect_id),
                     completion: completion.completion_id(),
+                    tool_calls: &tool_call_ids,
                     ..StateGrowth::default()
                 },
             )?;
-            let requirements = IdRequirements::new(2, 2, 0, 0, 0, 1);
+            let requirements =
+                IdRequirements::new(2, 2, 0, 0, 0, 1).with_tools(0, tool_call_ids.len());
             validate_allocated_ids(&env.ids, requirements)?;
             let message_id = required(env.ids.message_ids(), 0, "message_ids")?;
             validate_assistant_message_id(message_id, assistant_message)?;
+            validate_assistant_tool_call_ids(env.ids.tool_call_ids(), assistant_message)?;
             let parent_message_id = state.messages.last().map(|message| *message.id());
             Ok((
                 requirements,
@@ -750,7 +779,7 @@ fn model_settlement_bodies(
     }
 }
 
-fn draft_for_state(
+pub(super) fn draft_for_state(
     state: &KernelState,
     env: &TransitionEnv,
     bodies: Vec<RecordBody>,
@@ -848,6 +877,8 @@ fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
         RunPhase::PreparingContext => Stage::PrepareContext,
         RunPhase::BeforeModel => Stage::BeforeModel,
         RunPhase::AfterModel => Stage::AfterModel,
+        RunPhase::BeforeToolBatch => Stage::BeforeToolBatch,
+        RunPhase::AfterToolBatch => Stage::AfterToolBatch,
         RunPhase::BeforeFinalize => Stage::BeforeFinalize,
         _ => return None,
     };
@@ -873,7 +904,7 @@ fn settlement_completion_id(outcome: &ModelSettlement) -> Option<&str> {
     }
 }
 
-fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> {
+pub(super) fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> {
     let diagnostic = Diagnostic::try_new(
         "duplicate_settlement",
         "equal committed settlement was ignored",
@@ -884,7 +915,7 @@ fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> {
     Ok(Decision::duplicate(next_sequence(state)?, diagnostic))
 }
 
-fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
+pub(super) fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
     if matches!(
         state.phase,
         Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
@@ -895,14 +926,18 @@ fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
     Ok(())
 }
 
-fn next_sequence(state: &KernelState) -> Result<u64, KernelError> {
+pub(super) fn next_sequence(state: &KernelState) -> Result<u64, KernelError> {
     state
         .last_applied_sequence
         .checked_add(1)
         .ok_or(KernelError::InvariantViolation)
 }
 
-fn required<T: Copy>(values: &[T], index: usize, kind: &'static str) -> Result<T, KernelError> {
+pub(super) fn required<T: Copy>(
+    values: &[T],
+    index: usize,
+    kind: &'static str,
+) -> Result<T, KernelError> {
     values
         .get(index)
         .copied()

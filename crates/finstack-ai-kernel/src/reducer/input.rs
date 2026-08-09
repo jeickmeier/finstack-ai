@@ -1,4 +1,4 @@
-//! Normalized PR-009 reducer inputs.
+//! Normalized reducer inputs owned through PR-010.
 
 use std::sync::Arc;
 
@@ -13,14 +13,15 @@ use crate::effects::{
     RetrySafety,
 };
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, LaneId, ModelRequestId, SessionId, TurnId};
+use crate::ids::{EffectId, LaneId, ModelRequestId, SessionId, ToolBatchId, TurnId};
 use crate::message::Message;
 use crate::raw_json::RawJson;
 use crate::refs::{ArtifactRef, Usage};
 use crate::run::RunAccepted;
 use crate::time::Timestamp;
+use crate::tools::{ToolBatchContinuation, ToolCallPlan};
 
-/// Complete concrete PR-009 command vocabulary.
+/// Complete concrete command vocabulary owned through PR-010.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum KernelInput {
@@ -32,6 +33,8 @@ pub enum KernelInput {
     ModelSettled(ModelSettled),
     /// Complete the outstanding deferred model effect.
     ExternalEffectCompleted(ExternalEffectCompletedInput),
+    /// Settle one direct call in the active tool batch.
+    ToolBatchSettled(ToolBatchSettled),
 }
 
 /// Normalized run-acceptance command.
@@ -56,7 +59,7 @@ pub struct StageSettled {
     pub outcome: ReducerStageOutcome,
 }
 
-/// Aggregate outcomes accepted by PR-009 stages.
+/// Aggregate outcomes accepted by stages through PR-010.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReducerStageOutcome {
@@ -81,6 +84,13 @@ pub enum ReducerStageOutcome {
         /// Optional semantic deadline.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         deadline: Option<Timestamp>,
+    },
+    /// Prepared source-ordered tool batch plan.
+    ToolBatchPrepared {
+        /// Exactly one plan per assistant source call.
+        calls: Arc<[ToolCallPlan]>,
+        /// Continuation after complete batch closure.
+        continuation: ToolBatchContinuation,
     },
     /// Accept the current terminal candidate.
     FinalizeAccepted,
@@ -119,6 +129,13 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
 
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
+        struct ToolBatchPreparedWire {
+            calls: BoundedVec<ToolCallPlan, SEMANTIC_ARRAY_MAX_ITEMS>,
+            continuation: ToolBatchContinuation,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct ContinueModelWire {
             #[serde(default)]
             reason: Option<BoundedString<TEXT_MAX_BYTES>>,
@@ -130,6 +147,7 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
             Continue,
             ContextPrepared(ContextPreparedWire),
             ModelRequestPrepared(ModelRequestPreparedWire),
+            ToolBatchPrepared(ToolBatchPreparedWire),
             FinalizeAccepted,
             ContinueModel(ContinueModelWire),
             Fail(ErrorDescriptor),
@@ -147,6 +165,10 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
                 retry_safety: value.retry_safety,
                 deadline: value.deadline,
             },
+            Wire::ToolBatchPrepared(value) => Self::ToolBatchPrepared {
+                calls: Arc::from(value.calls.into_inner()),
+                continuation: value.continuation,
+            },
             Wire::FinalizeAccepted => Self::FinalizeAccepted,
             Wire::ContinueModel(value) => Self::ContinueModel {
                 reason: value.reason.map(|reason| Arc::from(reason.into_inner())),
@@ -154,6 +176,32 @@ impl<'de> Deserialize<'de> for ReducerStageOutcome {
             Wire::Fail(error) => Self::Fail(error),
         })
     }
+}
+
+/// Direct settlement of one call in an active tool batch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolBatchSettled {
+    /// Active batch identity.
+    pub tool_batch_id: ToolBatchId,
+    /// One direct tool outcome.
+    pub outcome: ToolSettlement,
+}
+
+/// Direct tool-effect outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the frozen public settlement variants store effect payloads by value"
+)]
+pub enum ToolSettlement {
+    /// Successful tool completion.
+    Completed(EffectCompleted),
+    /// Deferred external work under the original effect identity.
+    Deferred(EffectDeferred),
+    /// Failed tool completion.
+    Failed(EffectFailed),
 }
 
 /// Direct model-effect settlement command.

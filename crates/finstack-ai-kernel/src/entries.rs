@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::digest::Digest;
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, MessageId, ModelRequestId, TurnId};
+use crate::ids::{EffectId, MessageId, ModelRequestId, ToolBatchId, TurnId};
 use crate::message::Message;
 
 /// One of the seven normalized middleware boundaries.
@@ -66,6 +66,13 @@ pub enum StageDisposition {
         model_request_id: ModelRequestId,
         /// Fresh effect identity.
         effect_id: EffectId,
+    },
+    /// A complete tool batch was prepared.
+    ToolBatchPrepared {
+        /// Stable batch identity.
+        tool_batch_id: ToolBatchId,
+        /// `tool-batch-plan` schema-1 digest.
+        plan_digest: Digest,
     },
     /// The current terminal candidate was accepted.
     FinalizeAccepted,

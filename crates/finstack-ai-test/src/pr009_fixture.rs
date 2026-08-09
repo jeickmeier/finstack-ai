@@ -1,4 +1,4 @@
-//! Public-API compatibility fixtures for PR-009 reducer contracts.
+//! Public-API compatibility fixtures for PR-009 and PR-010 reducer contracts.
 
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, CommittedBatch, KernelInput, KernelState, RECORD_KIND_VERSION,
@@ -19,7 +19,7 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "kernel-input" => run_kernel_input(fixture),
         "committed-batch" => run_committed_batch(fixture),
         "kernel-state" => run_kernel_state(fixture),
-        "pr009-record" => run_record(fixture),
+        "pr009-record" | "pr010-record" => run_record(fixture),
         other => Err(fail(format!("unsupported PR-009 subject {other}"))),
     }
 }
@@ -184,6 +184,42 @@ fn run_committed_batch(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtur
 }
 
 fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
+    if fixture.operation == "roundtrip" {
+        let input = require_input(fixture)?;
+        let decoded = from_json::<KernelState>(&input);
+        return match decoded {
+            Ok(state) => {
+                if !fixture.expect.ok {
+                    return Err(fail("expected KernelState roundtrip failure"));
+                }
+                let encoded =
+                    serde_json::to_value(&state).map_err(|error| fail(error.to_string()))?;
+                let reparsed = from_json::<KernelState>(&encoded)?;
+                if reparsed != state {
+                    return Err(fail("KernelState roundtrip changed semantic state"));
+                }
+                let expected_version = fixture
+                    .expect
+                    .extras
+                    .get("state_version")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| fail("kernel-state expect.state_version required"))?;
+                if u64::from(state.state_version) != expected_version {
+                    return Err(fail(format!(
+                        "kernel-state version mismatch: expected {expected_version}, got {}",
+                        state.state_version
+                    )));
+                }
+                state
+                    .state_hash()
+                    .map_err(|error| fail(format!("{}: {error}", error.code())))?;
+                Ok(())
+            }
+            Err(error) => {
+                assert_error_code(&fixture.expect, classify_serde_error(&error.to_string()))
+            }
+        };
+    }
     let state = match fixture.operation.as_str() {
         "default_hash" => KernelState::default(),
         "reducer_completed_hash" => {
@@ -265,19 +301,41 @@ fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     if expected_count == 0 {
         return Ok(());
     }
-    let event = RunEvent::try_from_record(&record, 0, record.sequence())
-        .map_err(|error| fail(format!("{}: {error}", error.code())))?;
-    let actual_kind =
-        serde_json::to_value(event.kind()).map_err(|error| fail(error.to_string()))?;
-    let expected_kind = fixture
+    if let Some(expected_kinds) = fixture
         .expect
         .extras
-        .get("event_kind")
-        .ok_or_else(|| fail("pr009-record expect.event_kind required"))?;
-    if &actual_kind != expected_kind {
-        return Err(fail(format!(
-            "derived event kind mismatch: {actual_kind} != {expected_kind}"
-        )));
+        .get("event_kinds")
+        .and_then(Value::as_array)
+    {
+        if expected_kinds.len() != expected_count {
+            return Err(fail("record event_kinds count mismatch"));
+        }
+        for (ordinal, expected_kind) in expected_kinds.iter().enumerate() {
+            let event = RunEvent::try_from_record(&record, ordinal, record.sequence())
+                .map_err(|error| fail(format!("{}: {error}", error.code())))?;
+            let actual_kind =
+                serde_json::to_value(event.kind()).map_err(|error| fail(error.to_string()))?;
+            if &actual_kind != expected_kind {
+                return Err(fail(format!(
+                    "derived event kind mismatch at ordinal {ordinal}: {actual_kind} != {expected_kind}"
+                )));
+            }
+        }
+    } else {
+        let event = RunEvent::try_from_record(&record, 0, record.sequence())
+            .map_err(|error| fail(format!("{}: {error}", error.code())))?;
+        let actual_kind =
+            serde_json::to_value(event.kind()).map_err(|error| fail(error.to_string()))?;
+        let expected_kind = fixture
+            .expect
+            .extras
+            .get("event_kind")
+            .ok_or_else(|| fail("record expect.event_kind or event_kinds required"))?;
+        if &actual_kind != expected_kind {
+            return Err(fail(format!(
+                "derived event kind mismatch: {actual_kind} != {expected_kind}"
+            )));
+        }
     }
     Ok(())
 }

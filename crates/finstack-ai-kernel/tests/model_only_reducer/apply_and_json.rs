@@ -1,6 +1,8 @@
 use finstack_ai_kernel::{ArtifactRef, ArtifactTag, BlobRef, KernelState};
 
+use super::tool_batches::{CALL_A, call, execute};
 use super::*;
+use finstack_ai_kernel::{ToolBatchContinuation, ToolExecutionMode, ToolFailurePolicy};
 
 #[test]
 fn decide_is_pure_and_execute_effect_has_exact_preceding_request() {
@@ -862,6 +864,14 @@ fn assert_stage_outcome_json() {
             output_contract: output_contract(),
             retry_safety: RetrySafety::SafeToRetry,
             deadline: None,
+        },
+        ReducerStageOutcome::ToolBatchPrepared {
+            calls: Arc::from([execute(
+                &call(CALL_A, "alpha"),
+                ToolExecutionMode::Sequential,
+                ToolFailurePolicy::ReturnToModel,
+            )]),
+            continuation: ToolBatchContinuation::Finalize,
         },
         ReducerStageOutcome::FinalizeAccepted,
         ReducerStageOutcome::ContinueModel {

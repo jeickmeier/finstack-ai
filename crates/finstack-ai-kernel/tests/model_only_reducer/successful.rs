@@ -419,6 +419,14 @@ fn stage_fingerprint(cursor: StageCursor, outcome: &ReducerStageOutcome) -> Valu
             "retry_safety": retry_safety,
             "deadline": deadline,
         }}),
+        ReducerStageOutcome::ToolBatchPrepared {
+            calls,
+            continuation,
+        } => json!({"tool_batch_prepared": {
+            "cursor": cursor,
+            "calls": calls,
+            "continuation": continuation,
+        }}),
         ReducerStageOutcome::FinalizeAccepted => {
             json!({"finalize_accepted": {"cursor": cursor}})
         }

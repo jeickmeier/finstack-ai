@@ -2,7 +2,7 @@
 title: "finstack-ai Security and Threat Model"
 subtitle: "Assets, trust boundaries, threats, controls, and verification obligations"
 author: "finstack-ai project"
-date: "2026-08-08"
+date: "2026-08-09"
 ---
 
 # finstack-ai Security and Threat Model
@@ -13,11 +13,11 @@ date: "2026-08-08"
 |---|---|
 | Product | finstack-ai |
 | Document | Security and Threat Model |
-| Version | 0.4 |
+| Version | 0.5 |
 | Status | Pre-implementation security baseline |
-| Date | 2026-08-08 |
+| Date | 2026-08-09 |
 | Primary audience | Maintainers, security reviewers, runtime/binding/plugin implementers, deployers, and extension authors |
-| Related documents | Product Requirements Document v0.7; Architecture Specification v0.9; Technical Design v0.14; Implementation Plan v0.14; Engineering Standards v0.5 |
+| Related documents | Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.15; Implementation Plan v0.15; Engineering Standards v0.5 |
 
 # 1. Purpose and authority
 
@@ -162,7 +162,7 @@ A malicious host application, OS administrator, or fully trusted native extensio
 | ID | Threat | Required controls | Primary verification and delivery |
 |---|---|---|---|
 | TM-01 | Prompt injection or poisoned retrieval causes unauthorized action. | Treat content as data; provenance; explicit tool/resource policy; schema validation; optional interaction/verification before sensitive effects. | Adversarial context/tool-policy fixtures; PR-016, PR-018, PR-056. |
-| TM-02 | Model fabricates, mutates, or floods tool calls. | Validate names/schemas; enforce call, size, cost, and concurrency limits; reject unknown tools; preserve source ordering; policy before dispatch. | Tool scheduler and malformed-call tests; PR-010, PR-015, PR-018. |
+| TM-02 | Model fabricates, mutates, duplicates, re-associates, or floods tool calls/results. | Require unique preallocated source call IDs; freeze name/arguments through the validated plan; exact output-contract and result-call association; persist batch/effect identities before dispatch; deterministic unknown-tool/error closure; source-order history/events; bounded call/settlement indexes; policy before dispatch. PR-011/PR-015 add cancellation and configured call/concurrency limits. | PR-010 plan/result mutation, duplicate/conflict, reverse-completion, capacity, replay, and unknown-tool fixtures; PR-011 cancellation closure; PR-015/PR-018 schema, limit, and policy tests. |
 | TM-03 | Filesystem or shell tool escapes intended scope. | Handle-relative no-follow/capability-style filesystem access; symlink/rename race tests; allow/deny command policy; minimal environment; bounded output/time; optional external sandbox. | Traversal, symlink, environment, injection, timeout, and flood tests; PR-025, PR-056. |
 | TM-04 | Secrets leak through prompts, errors, journals, events, artifacts, or telemetry. | Secret references; explicit reveal boundaries; structured redaction and metadata-only observer/diagnostic/export views; secure references in authoritative records; deny secret fields in bundles; safe error display. | Canary-secret and redaction tests; PR-003, PR-014, PR-022, PR-024, PR-034, PR-039, PR-057, PR-060. |
 | TM-05 | Browser bundle exposes provider credentials or sensitive persistent data. | Same-origin proxy pattern; no embedded provider key; documented CSP/CORS/storage policy; explicit IndexedDB sensitivity and deletion behavior. | Static bundle/example scanning and browser security fixtures; PR-034, PR-037, PR-038. |

@@ -116,6 +116,7 @@ mod refs;
 mod run;
 mod state;
 mod time;
+mod tools;
 
 pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 pub use content::{
@@ -177,7 +178,7 @@ pub use records::{
 pub use reducer::{
     AcceptRun, CommittedBatch, Decision, ExternalEffectCompletedInput, ExternalEffectCompletion,
     ExternalEffectOutcome, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
-    PostCommitAction, ReducerStageOutcome, StageSettled,
+    PostCommitAction, ReducerStageOutcome, StageSettled, ToolBatchSettled, ToolSettlement,
 };
 pub use refs::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
@@ -193,8 +194,14 @@ pub use state::{
     CompletionIdentity, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
     ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
     PendingModelEffect, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
-    TransitionEnv,
+    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,
+};
+pub use tools::{
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
+    ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallIdentity,
+    ToolCallPlan, ToolCallSettled, ToolExecutionMode, ToolFailurePolicy, ToolSettlementFingerprint,
+    ToolSettlementKind, ValidatedToolCall,
 };

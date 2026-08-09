@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "subject": "pr010-record",
+  "operation": "parse_and_derive",
+  "input": {
+    "format_version": 1,
+    "kind_version": 1,
+    "record_id": "01234567-89ab-7cde-89ab-012345678911",
+    "session_id": "01234567-89ab-7cde-89ab-012345678912",
+    "lane_id": "01234567-89ab-7cde-89ab-012345678913",
+    "run_id": "01234567-89ab-7cde-89ab-012345678914",
+    "sequence": 10,
+    "timestamp": "1970-01-01T00:00:01.000Z",
+    "payload_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+    "derived_event_ids": [],
+    "body": {
+      "tool_batch_opened": {
+        "cycle": 0,
+        "turn_id": "01234567-89ab-7cde-89ab-012345678915",
+        "tool_batch_id": "01234567-89ab-7cde-89ab-012345678916",
+        "source_message_id": "01234567-89ab-7cde-89ab-012345678917",
+        "calls": [
+          {
+            "source_index": 0,
+            "group_index": 0,
+            "effect_id": "01234567-89ab-7cde-89ab-012345678918",
+            "plan": {
+              "synthetic_closure": {
+                "call": {
+                  "tool_call_id": "01234567-89ab-7cde-89ab-012345678919",
+                  "tool_name": "missing_tool",
+                  "arguments": {"query": "x"}
+                },
+                "execution": "sequential",
+                "failure_policy": "return_to_model",
+                "error": {
+                  "code": "unknown_tool",
+                  "message": "unknown tool: missing_tool",
+                  "category": "tool",
+                  "retryable": false,
+                  "identifiers": {},
+                  "safe_details": {}
+                }
+              }
+            }
+          }
+        ],
+        "continuation": "finalize",
+        "plan_digest": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  },
+  "expect": {
+    "ok": true,
+    "body_kind": "tool_batch_opened",
+    "derived_event_count": 0
+  }
+}

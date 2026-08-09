@@ -2,7 +2,7 @@
 title: "finstack-ai Implementation Plan"
 subtitle: "Build phases, pull request sequence, delivery gates, and release roadmap"
 author: "finstack-ai project"
-date: "2026-08-08"
+date: "2026-08-09"
 ---
 
 # finstack-ai Implementation Plan
@@ -13,11 +13,11 @@ date: "2026-08-08"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.14 |
+| Version | 0.15 |
 | Status | Implementation baseline |
-| Date | 2026-08-08 |
+| Date | 2026-08-09 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.9; Technical Design v0.14; Security and Threat Model v0.4 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.15; Security and Threat Model v0.5 |
 
 # Executive implementation decision
 
@@ -655,21 +655,23 @@ A separate ADR is required before merging a change that:
 
 **Principal changes.**
 
-- Add assistant tool-call messages, validated tool-call state, tool-batch creation, and tool-result application.
+- Add `KernelInput::ToolBatchSettled`, the `ToolBatchPrepared` stage outcome, validated executable/synthetic call plans, explicit execution/failure/continuation policy enums, and strict direct/external/synthetic schema-1 fingerprints.
 
-- Define sequential barriers, parallel groups, source-order finalization, duplicate call handling, and unknown tool behavior.
+- Accept assistant messages containing unique preallocated call IDs; allocate one batch ID and stable effect ID per source call; persist the complete plan and deterministic consecutive-parallel/exclusive-sequential-or-barrier groups before dispatch.
 
-- Ensure every accepted tool call receives exactly one durable result or synthetic closure result.
+- Commit tool effect settlements in arrival order while buffering normalized results; append `ToolCallSettled` records, tool-role messages, and `MessageFinalized`/`ToolSettled` events only for the newly contiguous source prefix.
 
-- Add continuation rules for returning tool results to the model and for the explicit policy outcome where a settled batch terminates the run instead of continuing.
+- Decode successful `ToolResult` output to an exactly associated `ToolResultBlock`; make unknown tools and allowed framework failures deterministic model-visible error closures; preserve the originating assistant candidate for explicit finalize-after-batch.
 
-- Allow tool effects to defer under the same `EffectDeferred`/external-completion path used by models; unresolved calls remain suspended rather than receiving fabricated completion.
+- Reuse `EffectDeferred`/external completion without changing `EffectId`; on fail-run, drain dispatched work, close only undispatched calls with `tool_batch_aborted`, then install a failed candidate. PR-011 owns cancellation inputs and `EffectCancelled`; PR-010 cannot fabricate an active unresolved result.
+
+- Preserve exact PR-009 `kernel-state` v1 hashes for tool-free runs and conditionally upgrade tool-bearing runs to strict state v2 with bounded call/settlement indexes and buffered batch state.
 
 **Acceptance evidence.**
 
 - Parallel tools may complete in any runtime order but durable history finalizes in assistant source order.
 
-- Cancellation and failure never leave an unmatched tool call in restored history.
+- Every PR-010-owned success/failure history is restorable without unmatched tool calls; cancellation closure and `EffectCancelled` evidence is explicitly PR-011 acceptance scope.
 
 - Duplicate completion for an effect is detected and handled idempotently.
 
@@ -677,9 +679,9 @@ A separate ADR is required before merging a change that:
 
 **Dependencies.** PR-009.
 
-**Traceability.** FR-KRN-002, FR-RT-003 semantics, FR-TLS; TDD sections 15 and 21.
+**Traceability.** FR-KRN-002, FR-RT-003 semantics, FR-TLS; TDD sections 11, 12, 15, 20, and 21; TM-02.
 
-**Explicitly excluded.** No actual concurrent executor.
+**Explicitly excluded.** No toolset implementation, schema compiler, actual concurrent executor, middleware invocation, limits, retries, cancellation state, store loop, bindings, or new dependency.
 
 ### PR-011 - Add limits, cancellation, deadlines, and retry state
 

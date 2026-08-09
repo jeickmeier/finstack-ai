@@ -19,6 +19,7 @@ use crate::error::ErrorDescriptorError;
 use crate::ids::{AppendBatchId, EventId, LaneId, RecordId, RunId, SessionId};
 use crate::run::{RunAccepted, RunError, RunRelationKind};
 use crate::time::Timestamp;
+use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolBatchOutcome, ToolCallSettled};
 
 /// V1 atomic append batch record-count ceiling (TDD §6.5).
 pub const APPEND_BATCH_MAX_RECORDS: usize = 256;
@@ -437,7 +438,7 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
     }
 }
 
-/// Record bodies owned through PR-009.
+/// Record bodies owned through PR-010.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {
@@ -467,6 +468,12 @@ pub enum RecordBody {
     ContextPrepared(ContextPrepared),
     /// Final assistant message append.
     EntryAppended(EntryAppended),
+    /// Complete source-ordered tool-batch plan.
+    ToolBatchOpened(ToolBatchOpened),
+    /// Source-order tool result finalization.
+    ToolCallSettled(ToolCallSettled),
+    /// Complete tool-batch closure.
+    ToolBatchClosed(ToolBatchClosed),
     /// Successful run terminal.
     RunCompleted(RunCompleted),
     /// Failed run terminal.
@@ -484,7 +491,11 @@ impl RecordBody {
             return Err(RecordError::UnsupportedKindVersion { kind_version });
         }
         Ok(match self {
-            Self::StageOutcomeRecorded(_) | Self::ContextPrepared(_) => 0,
+            Self::StageOutcomeRecorded(_)
+            | Self::ContextPrepared(_)
+            | Self::ToolBatchOpened(_)
+            | Self::ToolBatchClosed(_) => 0,
+            Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
     }
@@ -506,6 +517,9 @@ impl RecordBody {
             Self::StageOutcomeRecorded(_) => "stage_outcome_recorded",
             Self::ContextPrepared(_) => "context_prepared",
             Self::EntryAppended(_) => "entry_appended",
+            Self::ToolBatchOpened(_) => "tool_batch_opened",
+            Self::ToolCallSettled(_) => "tool_call_settled",
+            Self::ToolBatchClosed(_) => "tool_batch_closed",
             Self::RunCompleted(_) => "run_completed",
             Self::RunFailed(_) => "run_failed",
         }
@@ -717,6 +731,11 @@ fn validate_body_for_creation(body: &RecordBody) -> Result<(), RecordError> {
             _ => None,
         },
         RecordBody::EffectFailed(failed) => Some(failed.error()),
+        RecordBody::ToolCallSettled(settled) => settled.error.as_ref(),
+        RecordBody::ToolBatchClosed(closed) => match &closed.outcome {
+            ToolBatchOutcome::Failed { error } => Some(error),
+            ToolBatchOutcome::ContinueModel | ToolBatchOutcome::Finalize => None,
+        },
         RecordBody::RunFailed(failed) => Some(&failed.error),
         _ => None,
     };

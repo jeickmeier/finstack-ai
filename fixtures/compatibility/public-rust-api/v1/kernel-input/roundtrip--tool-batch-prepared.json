@@ -1,0 +1,42 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "stage_settled": {
+      "cursor": {
+        "cycle": 0,
+        "stage": "before_tool_batch"
+      },
+      "outcome": {
+        "tool_batch_prepared": {
+          "calls": [
+            {
+              "synthetic_closure": {
+                "call": {
+                  "tool_call_id": "01234567-89ab-7cde-89ab-012345678901",
+                  "tool_name": "missing_tool",
+                  "arguments": {"query": "x"}
+                },
+                "execution": "sequential",
+                "failure_policy": "return_to_model",
+                "error": {
+                  "code": "unknown_tool",
+                  "message": "unknown tool: missing_tool",
+                  "category": "tool",
+                  "retryable": false,
+                  "identifiers": {},
+                  "safe_details": {}
+                }
+              }
+            }
+          ],
+          "continuation": "finalize"
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

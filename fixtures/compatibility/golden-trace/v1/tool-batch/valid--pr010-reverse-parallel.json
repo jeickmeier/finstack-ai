@@ -1,0 +1,1 @@
+{"format_version":1,"phase":"awaiting_tools","cycle":0,"state_version":2,"records_after_open":["tool_batch_opened","effect_requested","effect_requested","effect_completed"],"tool_message_call_ids":[],"tool_event_call_ids":[],"active_batch":true,"last_batch_outcome":null,"terminal_candidate":"completed","terminal":null,"replay_hash_equal":true}

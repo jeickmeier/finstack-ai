@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "subject": "kernel-state",
+  "operation": "roundtrip",
+  "input": {
+    "state_version": 2,
+    "last_applied_sequence": 0,
+    "cycle": 0,
+    "messages": [],
+    "stage_settlements": [],
+    "model_settlements": [],
+    "completion_identities": [],
+    "active_tool_batch": null,
+    "tool_calls": [],
+    "last_tool_batch": null
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_input_payload"
+  }
+}

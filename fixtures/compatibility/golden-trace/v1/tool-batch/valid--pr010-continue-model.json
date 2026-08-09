@@ -1,0 +1,1 @@
+{"format_version":1,"phase":"preparing_context","cycle":1,"state_version":2,"records_after_open":["tool_batch_opened","tool_call_settled","tool_batch_closed","stage_outcome_recorded"],"tool_message_call_ids":[301],"tool_event_call_ids":[301],"active_batch":false,"last_batch_outcome":null,"terminal_candidate":null,"terminal":null,"replay_hash_equal":true}

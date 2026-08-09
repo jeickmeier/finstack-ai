@@ -10,17 +10,21 @@ use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
-use crate::content::{BoundedString, LABEL_MAX_BYTES};
+use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES};
 use crate::digest::Digest;
-use crate::effects::{EffectDeferred, EffectRequested};
+use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
 use crate::entries::{ContextPrepared, RunCompleted, RunFailed, Stage, StageCursor};
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, LaneId, MessageId, ModelRequestId, SessionId, TurnId};
+use crate::ids::{EffectId, LaneId, MessageId, ModelRequestId, SessionId, ToolCallId, TurnId};
 use crate::message::Message;
 use crate::reducer::KernelError;
 use crate::run::RunAccepted;
+use crate::tools::{
+    ActiveToolBatch, ActiveToolCallStatus, ToolBatchClosed, ToolCallIdentity, ToolCallPlan,
+    ToolSettlementFingerprint, ToolSettlementKind,
+};
 
-use hash_projection::KernelStateHashV1;
+use hash_projection::{KernelStateHashV1, KernelStateHashV2};
 
 pub use env::TransitionEnv;
 
@@ -224,6 +228,40 @@ pub struct CompletionIdentityHashEntryV1 {
     pub settlement_digest: Digest,
 }
 
+/// Sorted state-hash projection entry for one persistent tool call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolCallIdentityHashEntryV2 {
+    /// Persistent call identity.
+    pub tool_call_id: ToolCallId,
+    /// Model cycle that produced the call.
+    pub cycle: u64,
+    /// Originating turn.
+    pub turn_id: TurnId,
+    /// Assistant source message.
+    pub source_message_id: MessageId,
+    /// Assigned batch identity after planning.
+    #[serde(default)]
+    pub tool_batch_id: Option<crate::ToolBatchId>,
+    /// Assigned effect identity after planning.
+    #[serde(default)]
+    pub effect_id: Option<EffectId>,
+    /// Exact source call.
+    pub call: crate::ToolCallBlock,
+}
+
+/// Sorted state-hash projection entry for one tool settlement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSettlementHashEntryV2 {
+    /// Settled effect identity.
+    pub effect_id: EffectId,
+    /// Settlement kind.
+    pub kind: ToolSettlementKind,
+    /// Settlement digest.
+    pub settlement_digest: Digest,
+}
+
 impl<'de> Deserialize<'de> for CompletionIdentityHashEntryV1 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -280,6 +318,14 @@ pub struct KernelState {
     pub model_settlements: BTreeMap<EffectId, ModelSettlementFingerprint>,
     /// Replay-derived external completion identity index.
     pub completion_identities: BTreeMap<Arc<str>, CompletionIdentity>,
+    /// Active source-ordered tool batch.
+    pub active_tool_batch: Option<ActiveToolBatch>,
+    /// Persistent source call identities.
+    pub tool_calls: BTreeMap<ToolCallId, ToolCallIdentity>,
+    /// Replay-derived terminal tool settlement index.
+    pub tool_settlements: BTreeMap<EffectId, ToolSettlementFingerprint>,
+    /// Most recently closed batch awaiting after-tool settlement.
+    pub last_tool_batch: Option<ToolBatchClosed>,
     /// Applied terminal payload.
     pub terminal: Option<TerminalState>,
 }
@@ -301,6 +347,10 @@ impl Default for KernelState {
             stage_settlements: BTreeMap::new(),
             model_settlements: BTreeMap::new(),
             completion_identities: BTreeMap::new(),
+            active_tool_batch: None,
+            tool_calls: BTreeMap::new(),
+            tool_settlements: BTreeMap::new(),
+            last_tool_batch: None,
             terminal: None,
         }
     }
@@ -324,6 +374,8 @@ impl KernelState {
             ("stage_settlements", self.stage_settlements.len()),
             ("model_settlements", self.model_settlements.len()),
             ("completion_identities", self.completion_identities.len()),
+            ("tool_calls", self.tool_calls.len()),
+            ("tool_settlements", self.tool_settlements.len()),
         ] {
             if length > SEMANTIC_MAP_MAX_ENTRIES {
                 return Err(KernelError::InvalidInputPayload {
@@ -342,6 +394,290 @@ impl KernelState {
                 reason_code: "invalid_label",
             });
         }
+        let has_tool_state = self.active_tool_batch.is_some()
+            || !self.tool_calls.is_empty()
+            || !self.tool_settlements.is_empty()
+            || self.last_tool_batch.is_some();
+        if !matches!(self.state_version, 1 | 2) || (self.state_version == 1 && has_tool_state) {
+            return Err(KernelError::InvalidInputPayload {
+                field: "state_version",
+                reason_code: "unsupported_or_inconsistent",
+            });
+        }
+        if self.state_version == 2 {
+            self.validate_tool_state()?;
+        }
+        Ok(())
+    }
+
+    fn validate_tool_state(&self) -> Result<(), KernelError> {
+        let invalid = || KernelError::InvalidInputPayload {
+            field: "tool_state",
+            reason_code: "inconsistent",
+        };
+        if self.tool_calls.is_empty()
+            || (self.active_tool_batch.is_some() && self.last_tool_batch.is_some())
+        {
+            return Err(invalid());
+        }
+
+        let mut effect_ids = std::collections::BTreeSet::new();
+        for (tool_call_id, identity) in &self.tool_calls {
+            if identity.call.tool_call_id() != tool_call_id
+                || identity.tool_batch_id.is_some() != identity.effect_id.is_some()
+            {
+                return Err(invalid());
+            }
+            let source_matches = self.messages.iter().any(|message| {
+                *message.id() == identity.source_message_id
+                    && message.role() == crate::MessageRole::Assistant
+                    && message.content().iter().any(|block| {
+                        matches!(block, ContentBlock::ToolCall(call) if call == &identity.call)
+                    })
+            });
+            if !source_matches {
+                return Err(invalid());
+            }
+            if let Some(effect_id) = identity.effect_id
+                && !effect_ids.insert(effect_id)
+            {
+                return Err(invalid());
+            }
+        }
+        if self
+            .tool_settlements
+            .keys()
+            .any(|effect_id| !effect_ids.contains(effect_id))
+        {
+            return Err(invalid());
+        }
+
+        if let Some(batch) = &self.active_tool_batch {
+            self.validate_active_tool_batch(batch)
+                .map_err(|()| invalid())?;
+        } else if matches!(self.phase, Some(RunPhase::AwaitingTools))
+            || (self.phase == Some(RunPhase::AwaitingExternal)
+                && self.pending_model_effect.is_none())
+        {
+            return Err(invalid());
+        }
+
+        if let Some(closed) = &self.last_tool_batch {
+            let allowed_phase = matches!(
+                self.phase,
+                Some(
+                    RunPhase::AfterToolBatch
+                        | RunPhase::BeforeFinalize
+                        | RunPhase::Completed
+                        | RunPhase::Failed
+                )
+            );
+            let assigned_count = self
+                .tool_calls
+                .values()
+                .filter(|identity| identity.tool_batch_id == Some(closed.tool_batch_id))
+                .count();
+            if !allowed_phase
+                || closed.cycle > self.cycle
+                || assigned_count == 0
+                || assigned_count != closed.result_message_ids.len()
+                || closed.result_message_ids.iter().any(|message_id| {
+                    !self.messages.iter().any(|message| {
+                        message.id() == message_id && message.role() == crate::MessageRole::Tool
+                    })
+                })
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the active-batch state machine is validated as one source-ordered invariant"
+    )]
+    fn validate_active_tool_batch(&self, batch: &ActiveToolBatch) -> Result<(), ()> {
+        if !matches!(
+            self.phase,
+            Some(RunPhase::AwaitingTools | RunPhase::AwaitingExternal)
+        ) || self.pending_model_effect.is_some()
+            || batch.opened.cycle != self.cycle
+            || batch.calls.is_empty()
+            || batch.calls.len() != batch.opened.calls.len()
+            || usize::try_from(batch.next_source_index).map_err(|_| ())? > batch.calls.len()
+            || batch.result_message_ids.len()
+                != usize::try_from(batch.next_source_index).map_err(|_| ())?
+            || self
+                .current_turn
+                .as_ref()
+                .is_none_or(|turn| turn.turn_id != batch.opened.turn_id)
+        {
+            return Err(());
+        }
+
+        let expected_external = batch.calls.iter().any(|call| {
+            matches!(
+                call.status,
+                ActiveToolCallStatus::Requested {
+                    deferred: Some(_),
+                    ..
+                }
+            )
+        });
+        if (self.phase == Some(RunPhase::AwaitingExternal)) != expected_external {
+            return Err(());
+        }
+
+        let finalized = usize::try_from(batch.next_source_index).map_err(|_| ())?;
+        let mut has_current_request = false;
+        for (index, (call, opened_call)) in batch
+            .calls
+            .iter()
+            .zip(batch.opened.calls.iter())
+            .enumerate()
+        {
+            if &call.assigned != opened_call
+                || call.assigned.source_index != u32::try_from(index).map_err(|_| ())?
+            {
+                return Err(());
+            }
+            let expected_group = if index == 0 {
+                0
+            } else {
+                let prior = &batch.opened.calls[index - 1];
+                if prior.plan.execution() == crate::ToolExecutionMode::Parallel
+                    && call.assigned.plan.execution() == crate::ToolExecutionMode::Parallel
+                {
+                    prior.group_index
+                } else {
+                    prior.group_index.checked_add(1).ok_or(())?
+                }
+            };
+            if call.assigned.group_index != expected_group {
+                return Err(());
+            }
+            let identity = self
+                .tool_calls
+                .get(call.assigned.plan.call().tool_call_id())
+                .ok_or(())?;
+            if identity.call != *call.assigned.plan.call()
+                || identity.tool_batch_id != Some(batch.opened.tool_batch_id)
+                || identity.effect_id != Some(call.assigned.effect_id)
+            {
+                return Err(());
+            }
+
+            match (&call.assigned.plan, &call.status) {
+                (
+                    ToolCallPlan::SyntheticClosure(_),
+                    ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. },
+                ) => {
+                    return Err(());
+                }
+                (
+                    ToolCallPlan::Execute(plan),
+                    ActiveToolCallStatus::Requested {
+                        requested,
+                        deferred,
+                    },
+                ) => {
+                    if call.assigned.group_index != batch.current_group
+                        || requested.effect_id() != call.assigned.effect_id
+                        || requested.kind() != EffectKind::Tool
+                        || requested.relation().is_some()
+                        || requested.component() != plan.component.as_ref()
+                        || requested.pipeline().is_some()
+                        || requested.output_contract() != &plan.output_contract
+                        || requested.output_contract().kind != EffectOutputKind::ToolResult
+                        || !matches!(requested.input(), EffectInput::Tool { call } if call == &plan.call)
+                        || requested.retry_safety() != plan.retry_safety
+                        || requested.deadline() != plan.deadline
+                        || deferred
+                            .as_ref()
+                            .is_some_and(|value| value.validate_against(requested).is_err())
+                    {
+                        return Err(());
+                    }
+                    has_current_request = true;
+                }
+                (ToolCallPlan::Execute(_), ActiveToolCallStatus::Undispatched)
+                    if call.assigned.group_index <= batch.current_group =>
+                {
+                    return Err(());
+                }
+                (
+                    ToolCallPlan::Execute(_),
+                    ActiveToolCallStatus::Buffered { .. } | ActiveToolCallStatus::Settled { .. },
+                ) if call.assigned.group_index > batch.current_group => {
+                    return Err(());
+                }
+                (
+                    _,
+                    ActiveToolCallStatus::Buffered {
+                        result,
+                        settlement_digest,
+                        synthetic,
+                        error,
+                    },
+                ) => {
+                    if result.tool_call_id() != call.assigned.plan.call().tool_call_id()
+                        || *synthetic != error.is_some()
+                        || (*synthetic && !result.is_error())
+                    {
+                        return Err(());
+                    }
+                    if matches!(call.assigned.plan, ToolCallPlan::Execute(_))
+                        && self
+                            .tool_settlements
+                            .get(&call.assigned.effect_id)
+                            .is_none_or(|entry| entry.digest != *settlement_digest)
+                    {
+                        return Err(());
+                    }
+                }
+                (
+                    _,
+                    ActiveToolCallStatus::Settled {
+                        result_message_id,
+                        settlement_digest,
+                    },
+                ) => {
+                    if self
+                        .tool_settlements
+                        .get(&call.assigned.effect_id)
+                        .is_none_or(|entry| entry.digest != *settlement_digest)
+                    {
+                        return Err(());
+                    }
+                    if index >= finalized
+                        || batch.result_message_ids.get(index) != Some(result_message_id)
+                    {
+                        return Err(());
+                    }
+                }
+                _ => {}
+            }
+            if index < finalized && !matches!(call.status, ActiveToolCallStatus::Settled { .. }) {
+                return Err(());
+            }
+            if index >= finalized && matches!(call.status, ActiveToolCallStatus::Settled { .. }) {
+                return Err(());
+            }
+        }
+        let has_fail_run_settlement = batch.calls.iter().any(|call| {
+            call.assigned.plan.failure_policy() == crate::ToolFailurePolicy::FailRun
+                && self
+                    .tool_settlements
+                    .get(&call.assigned.effect_id)
+                    .is_some_and(|entry| entry.kind == ToolSettlementKind::Failed)
+        });
+        if batch.fatal_error.is_some() != has_fail_run_settlement {
+            return Err(());
+        }
+        if !has_current_request {
+            return Err(());
+        }
         Ok(())
     }
 
@@ -353,21 +689,31 @@ impl KernelState {
     /// be represented or canonicalized as JSON.
     pub fn state_hash(&self) -> Result<Digest, KernelError> {
         self.validate().map_err(|_| KernelError::StateHashFailed)?;
-        let projection = KernelStateHashV1::from_state(
-            self,
-            stage_hash_entries(&self.stage_settlements),
-            model_hash_entries(&self.model_settlements),
-            completion_hash_entries(&self.completion_identities),
-        );
-        let canonical = serde_json_canonicalizer::to_vec(&projection)
-            .map_err(|_| KernelError::StateHashFailed)?;
-        Digest::domain_separated("kernel-state", 1, &canonical)
+        let canonical = if self.state_version == 1 {
+            serde_json_canonicalizer::to_vec(&KernelStateHashV1::from_state(
+                self,
+                stage_hash_entries(&self.stage_settlements),
+                model_hash_entries(&self.model_settlements),
+                completion_hash_entries(&self.completion_identities),
+            ))
+        } else {
+            serde_json_canonicalizer::to_vec(&KernelStateHashV2::from_state(
+                self,
+                stage_hash_entries(&self.stage_settlements),
+                model_hash_entries(&self.model_settlements),
+                completion_hash_entries(&self.completion_identities),
+                tool_call_hash_entries(&self.tool_calls),
+                tool_settlement_hash_entries(&self.tool_settlements),
+            ))
+        }
+        .map_err(|_| KernelError::StateHashFailed)?;
+        Digest::domain_separated("kernel-state", u32::from(self.state_version), &canonical)
             .map_err(|_| KernelError::StateHashFailed)
     }
 }
 
 #[derive(Serialize)]
-struct KernelStateWire<'a> {
+struct KernelStateWireV1<'a> {
     state_version: u16,
     last_applied_sequence: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,6 +735,37 @@ struct KernelStateWire<'a> {
     stage_settlements: Vec<StageSettlementHashEntryV1>,
     model_settlements: Vec<ModelSettlementHashEntryV1>,
     completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<&'a TerminalState>,
+}
+
+#[derive(Serialize)]
+struct KernelStateWireV2<'a> {
+    state_version: u16,
+    last_applied_sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane_id: Option<LaneId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted: Option<&'a RunAccepted>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<RunPhase>,
+    cycle: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_turn: Option<&'a CurrentTurn>,
+    messages: &'a [Message],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_model_effect: Option<&'a PendingModelEffect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_candidate: Option<&'a TerminalCandidate>,
+    stage_settlements: Vec<StageSettlementHashEntryV1>,
+    model_settlements: Vec<ModelSettlementHashEntryV1>,
+    completion_identities: Vec<CompletionIdentityHashEntryV1>,
+    active_tool_batch: Option<&'a ActiveToolBatch>,
+    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    last_tool_batch: Option<&'a ToolBatchClosed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     terminal: Option<&'a TerminalState>,
 }
@@ -418,7 +795,54 @@ struct KernelStateWireOwned {
     model_settlements: BoundedVec<ModelSettlementHashEntryV1, SEMANTIC_MAP_MAX_ENTRIES>,
     completion_identities: BoundedVec<CompletionIdentityHashEntryV1, SEMANTIC_MAP_MAX_ENTRIES>,
     #[serde(default)]
+    active_tool_batch: NullableField<ActiveToolBatch>,
+    #[serde(default)]
+    tool_calls: RequiredField<BoundedVec<ToolCallIdentityHashEntryV2, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    tool_settlements:
+        RequiredField<BoundedVec<ToolSettlementHashEntryV2, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    last_tool_batch: NullableField<ToolBatchClosed>,
+    #[serde(default)]
     terminal: Option<TerminalState>,
+}
+
+#[derive(Default)]
+enum RequiredField<T> {
+    #[default]
+    Missing,
+    Present(T),
+}
+
+impl<'de, T> Deserialize<'de> for RequiredField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(Self::Present)
+    }
+}
+
+#[derive(Default)]
+enum NullableField<T> {
+    #[default]
+    Missing,
+    Present(Option<T>),
+}
+
+impl<'de, T> Deserialize<'de> for NullableField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Self::Present)
+    }
 }
 
 impl Serialize for KernelState {
@@ -426,35 +850,78 @@ impl Serialize for KernelState {
     where
         S: Serializer,
     {
-        KernelStateWire {
-            state_version: self.state_version,
-            last_applied_sequence: self.last_applied_sequence,
-            session_id: self.session_id,
-            lane_id: self.lane_id,
-            accepted: self.accepted.as_ref(),
-            phase: self.phase,
-            cycle: self.cycle,
-            current_turn: self.current_turn.as_ref(),
-            messages: &self.messages,
-            pending_model_effect: self.pending_model_effect.as_ref(),
-            terminal_candidate: self.terminal_candidate.as_ref(),
-            stage_settlements: stage_hash_entries(&self.stage_settlements),
-            model_settlements: model_hash_entries(&self.model_settlements),
-            completion_identities: completion_hash_entries(&self.completion_identities),
-            terminal: self.terminal.as_ref(),
+        if self.state_version == 1 {
+            KernelStateWireV1 {
+                state_version: self.state_version,
+                last_applied_sequence: self.last_applied_sequence,
+                session_id: self.session_id,
+                lane_id: self.lane_id,
+                accepted: self.accepted.as_ref(),
+                phase: self.phase,
+                cycle: self.cycle,
+                current_turn: self.current_turn.as_ref(),
+                messages: &self.messages,
+                pending_model_effect: self.pending_model_effect.as_ref(),
+                terminal_candidate: self.terminal_candidate.as_ref(),
+                stage_settlements: stage_hash_entries(&self.stage_settlements),
+                model_settlements: model_hash_entries(&self.model_settlements),
+                completion_identities: completion_hash_entries(&self.completion_identities),
+                terminal: self.terminal.as_ref(),
+            }
+            .serialize(serializer)
+        } else {
+            KernelStateWireV2 {
+                state_version: self.state_version,
+                last_applied_sequence: self.last_applied_sequence,
+                session_id: self.session_id,
+                lane_id: self.lane_id,
+                accepted: self.accepted.as_ref(),
+                phase: self.phase,
+                cycle: self.cycle,
+                current_turn: self.current_turn.as_ref(),
+                messages: &self.messages,
+                pending_model_effect: self.pending_model_effect.as_ref(),
+                terminal_candidate: self.terminal_candidate.as_ref(),
+                stage_settlements: stage_hash_entries(&self.stage_settlements),
+                model_settlements: model_hash_entries(&self.model_settlements),
+                completion_identities: completion_hash_entries(&self.completion_identities),
+                active_tool_batch: self.active_tool_batch.as_ref(),
+                tool_calls: tool_call_hash_entries(&self.tool_calls),
+                tool_settlements: tool_settlement_hash_entries(&self.tool_settlements),
+                last_tool_batch: self.last_tool_batch.as_ref(),
+                terminal: self.terminal.as_ref(),
+            }
+            .serialize(serializer)
         }
-        .serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for KernelState {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "version dispatch and duplicate-map rejection must remain one atomic decode path"
+    )]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if wire.state_version != 1 {
+        if !matches!(wire.state_version, 1 | 2) {
             return Err(de::Error::custom("unsupported kernel state_version"));
+        }
+        let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
+            || matches!(&wire.tool_calls, RequiredField::Present(_))
+            || matches!(&wire.tool_settlements, RequiredField::Present(_))
+            || matches!(&wire.last_tool_batch, NullableField::Present(_));
+        if wire.state_version == 1 && tool_fields_present {
+            return Err(de::Error::custom("v1 kernel state contains tool fields"));
+        }
+        let all_tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
+            && matches!(&wire.tool_calls, RequiredField::Present(_))
+            && matches!(&wire.tool_settlements, RequiredField::Present(_))
+            && matches!(&wire.last_tool_batch, NullableField::Present(_));
+        if wire.state_version == 2 && !all_tool_fields_present {
+            return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
         }
         let mut stage_settlements = BTreeMap::new();
         for entry in wire.stage_settlements.into_inner() {
@@ -501,7 +968,49 @@ impl<'de> Deserialize<'de> for KernelState {
                 return Err(de::Error::custom("duplicate completion identity"));
             }
         }
-        Ok(Self {
+        let mut tool_calls = BTreeMap::new();
+        let tool_call_entries = match wire.tool_calls {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in tool_call_entries {
+            if tool_calls
+                .insert(
+                    entry.tool_call_id,
+                    ToolCallIdentity {
+                        cycle: entry.cycle,
+                        turn_id: entry.turn_id,
+                        source_message_id: entry.source_message_id,
+                        tool_batch_id: entry.tool_batch_id,
+                        effect_id: entry.effect_id,
+                        call: entry.call,
+                    },
+                )
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate tool call identity"));
+            }
+        }
+        let mut tool_settlements = BTreeMap::new();
+        let tool_settlement_entries = match wire.tool_settlements {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in tool_settlement_entries {
+            if tool_settlements
+                .insert(
+                    entry.effect_id,
+                    ToolSettlementFingerprint {
+                        kind: entry.kind,
+                        digest: entry.settlement_digest,
+                    },
+                )
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate tool settlement identity"));
+            }
+        }
+        let state = Self {
             state_version: wire.state_version,
             last_applied_sequence: wire.last_applied_sequence,
             session_id: wire.session_id,
@@ -516,8 +1025,20 @@ impl<'de> Deserialize<'de> for KernelState {
             stage_settlements,
             model_settlements,
             completion_identities,
+            active_tool_batch: match wire.active_tool_batch {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            tool_calls,
+            tool_settlements,
+            last_tool_batch: match wire.last_tool_batch {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
             terminal: wire.terminal,
-        })
+        };
+        state.validate().map_err(de::Error::custom)?;
+        Ok(state)
     }
 }
 
@@ -560,6 +1081,36 @@ fn completion_hash_entries(
             completion_id: Arc::clone(completion_id),
             effect_id: identity.effect_id,
             settlement_digest: identity.settlement_digest,
+        })
+        .collect()
+}
+
+fn tool_call_hash_entries(
+    entries: &BTreeMap<ToolCallId, ToolCallIdentity>,
+) -> Vec<ToolCallIdentityHashEntryV2> {
+    entries
+        .iter()
+        .map(|(tool_call_id, identity)| ToolCallIdentityHashEntryV2 {
+            tool_call_id: *tool_call_id,
+            cycle: identity.cycle,
+            turn_id: identity.turn_id,
+            source_message_id: identity.source_message_id,
+            tool_batch_id: identity.tool_batch_id,
+            effect_id: identity.effect_id,
+            call: identity.call.clone(),
+        })
+        .collect()
+}
+
+fn tool_settlement_hash_entries(
+    entries: &BTreeMap<EffectId, ToolSettlementFingerprint>,
+) -> Vec<ToolSettlementHashEntryV2> {
+    entries
+        .iter()
+        .map(|(effect_id, settlement)| ToolSettlementHashEntryV2 {
+            effect_id: *effect_id,
+            kind: settlement.kind,
+            settlement_digest: settlement.digest,
         })
         .collect()
 }

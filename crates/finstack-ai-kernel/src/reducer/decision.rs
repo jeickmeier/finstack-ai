@@ -149,6 +149,21 @@ pub enum KernelError {
     /// Model settlement does not match the outstanding request.
     #[error("model settlement mismatch")]
     ModelSettlementMismatch,
+    /// Assistant source tool-call identity was duplicated or reused.
+    #[error("duplicate tool call")]
+    DuplicateToolCall,
+    /// Prepared tool plan does not exactly cover the assistant source calls.
+    #[error("tool batch plan mismatch")]
+    ToolBatchPlanMismatch,
+    /// Tool effect kind or output contract is invalid.
+    #[error("tool effect contract mismatch")]
+    ToolEffectContractMismatch,
+    /// Tool settlement does not match the active planned call.
+    #[error("tool settlement mismatch")]
+    ToolSettlementMismatch,
+    /// Tool output is not an exactly associated result block.
+    #[error("tool result mismatch")]
+    ToolResultMismatch,
     /// External outcome and assistant-message presence disagree.
     #[error("assistant message presence mismatch")]
     AssistantMessagePresenceMismatch,
@@ -228,6 +243,11 @@ impl KernelError {
             Self::StageCursorMismatch { .. } => "stage_cursor_mismatch",
             Self::ModelRequestContractMismatch => "model_request_contract_mismatch",
             Self::ModelSettlementMismatch => "model_settlement_mismatch",
+            Self::DuplicateToolCall => "duplicate_tool_call",
+            Self::ToolBatchPlanMismatch => "tool_batch_plan_mismatch",
+            Self::ToolEffectContractMismatch => "tool_effect_contract_mismatch",
+            Self::ToolSettlementMismatch => "tool_settlement_mismatch",
+            Self::ToolResultMismatch => "tool_result_mismatch",
             Self::AssistantMessagePresenceMismatch => "assistant_message_presence_mismatch",
             Self::AssistantMessageMismatch => "assistant_message_mismatch",
             Self::SettlementDigestMismatch => "settlement_digest_mismatch",
