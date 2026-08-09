@@ -1,8 +1,8 @@
-PR-012 candidate validation
+PR-012 immutable validation
 Date: 2026-08-09
-Branch: codex/pr-012-structured-output
-Revision: uncommitted working tree; immutable binding pending
-Result: PASS for the current candidate
+Branch: local main (fast-forward of codex/pr-012-structured-output)
+Revision: dc58a11fbc871e70326d04fd9840297b5179023f
+Result: PASS
 
 Focused validation
 
@@ -27,7 +27,8 @@ Focused validation
 Aggregate validation
 
 5. mise run ci
-   PASS after correcting the new negative fixture's expected error-code field.
+   PASS at the exact immutable revision after correcting the new negative
+   fixture's expected error-code field before commit.
    The final run included formatting, Clippy, workspace tests, rustdoc,
    architecture, minimal features, wasm32 checks, schema governance,
    conformance, benchmark compilation, workflow lint, supply-chain policy,
@@ -41,8 +42,8 @@ Validation history
   RustSec caches were read-only; the permitted rerun reached source validation.
 - A later aggregate run exposed the missing expected error code in the newly
   added negative schema-version fixture. The fixture was corrected, the focused
-  public API corpus and conformance suite passed, and the final aggregate run
-  passed.
+  public API corpus and conformance suite passed, and the final aggregate run at
+  dc58a11fbc871e70326d04fd9840297b5179023f passed.
 
 Compatibility fixtures
 

@@ -1,8 +1,8 @@
-PR-012 security and threat-model candidate review
+PR-012 security and threat-model review
 Date: 2026-08-09
-Reviewed candidate: uncommitted codex/pr-012-structured-output working tree
+Reviewed commit: dc58a11fbc871e70326d04fd9840297b5179023f on local main
 Reviewer: me@jeickmeier.com
-Result: PASS for the current pure-kernel candidate; immutable binding pending
+Result: PASS for the implemented pure-kernel scope
 
 Scope reviewed
 
@@ -53,7 +53,8 @@ is actually applied.
 PASS - architecture and dependency review
 No port, runtime executor, host privilege, network/filesystem path, validator
 dependency, or dynamic-loading capability was added. Architecture, minimal-build,
-WASM, supply-chain, secret-scan, and aggregate CI checks pass for the candidate.
+WASM, supply-chain, secret-scan, and aggregate CI checks pass at the immutable
+integration commit.
 
 Residual later-PR obligations
 
