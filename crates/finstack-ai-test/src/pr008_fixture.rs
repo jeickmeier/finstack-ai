@@ -2,7 +2,7 @@
 
 use finstack_ai_kernel::{
     APPEND_BATCH_MAX_RECORDS, AppendRequest, EffectInput, EffectKind, EffectOutputContract,
-    EffectRequested, EventId, LaneId, ModelTextDelta, RUN_EVENT_KIND_VERSION,
+    EffectRequested, EventId, InteractionCancelled, LaneId, ModelTextDelta, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, RecordDraft, RetrySafety, RunAccepted, RunEvent, RunEventBody, RunId,
     Sensitivity, SessionId, Timestamp,
 };
@@ -18,6 +18,7 @@ pub(crate) fn run_pr008_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "record-draft" => run_record_draft(fixture),
         "append-request" => run_append_request(fixture),
         "run-event" => run_run_event(fixture),
+        "interaction-cancelled" => run_interaction_cancelled(fixture),
         other => Err(fail(format!("unsupported pr008 subject {other}"))),
     }
 }
@@ -187,6 +188,9 @@ fn run_append_request(fixture: &PublicApiFixture) -> Result<(), PublicApiFixture
 
 fn run_run_event(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
     let input = require_input_value(fixture)?;
+    if fixture.operation == "parse" {
+        return run_run_event_parse(fixture, &input);
+    }
     let event_id = parse_uuid_field(&input, "event_id", EventId::parse)?;
     let session_id = parse_uuid_field(&input, "session_id", SessionId::parse)?;
     let lane_id = parse_uuid_field(&input, "lane_id", LaneId::parse)?;
@@ -278,6 +282,53 @@ fn run_run_event(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError
     }
 }
 
+fn run_run_event_parse(
+    fixture: &PublicApiFixture,
+    input: &Value,
+) -> Result<(), PublicApiFixtureError> {
+    match from_json_value::<RunEvent>(input) {
+        Ok(value) => {
+            if !fixture.expect.ok {
+                return Err(fail("expected run_event failure"));
+            }
+            let encoded = serde_json::to_value(&value).map_err(|error| fail(error.to_string()))?;
+            let decoded: RunEvent = from_json_value(&encoded)?;
+            if decoded != value {
+                return Err(fail("run_event round-trip mismatch"));
+            }
+            Ok(())
+        }
+        Err(error) => assert_error_code(&fixture.expect, classify_event_error(&error.to_string())),
+    }
+}
+
+fn run_interaction_cancelled(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {
+    let input = require_input_value(fixture)?;
+    match fixture.operation.as_str() {
+        "parse" => match from_json_value::<InteractionCancelled>(&input) {
+            Ok(value) => {
+                if !fixture.expect.ok {
+                    return Err(fail("expected interaction_cancelled failure"));
+                }
+                let encoded =
+                    serde_json::to_value(&value).map_err(|error| fail(error.to_string()))?;
+                let decoded: InteractionCancelled = from_json_value(&encoded)?;
+                if decoded != value {
+                    return Err(fail("interaction_cancelled round-trip mismatch"));
+                }
+                Ok(())
+            }
+            Err(error) => assert_error_code(
+                &fixture.expect,
+                classify_interaction_error(&error.to_string()),
+            ),
+        },
+        other => Err(fail(format!(
+            "unsupported interaction_cancelled operation {other}"
+        ))),
+    }
+}
+
 fn parse_effect_id(input: &Value) -> Result<finstack_ai_kernel::EffectId, PublicApiFixtureError> {
     let text = input
         .get("effect_id")
@@ -357,6 +408,32 @@ fn classify_record_error(message: &str) -> &'static str {
         "batch_too_large"
     } else {
         "invalid_label"
+    }
+}
+
+fn classify_event_error(message: &str) -> &'static str {
+    if message.contains("unsupported event schema_version") {
+        "unsupported_schema_version"
+    } else if message.contains("unsupported event kind_version") {
+        "unsupported_kind_version"
+    } else if message.contains("kind/body mismatch") {
+        "event_kind_mismatch"
+    } else if message.contains("unknown field") {
+        "unknown_field"
+    } else if message.contains("unknown variant") {
+        "unknown_variant"
+    } else {
+        "invalid_json"
+    }
+}
+
+fn classify_interaction_error(message: &str) -> &'static str {
+    if message.contains("requires both principal") {
+        "invalid_cancellation_pair"
+    } else if message.contains("unknown field") {
+        "unknown_field"
+    } else {
+        "invalid_json"
     }
 }
 
