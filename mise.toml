@@ -66,9 +66,14 @@ cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked && \
 cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
 """
 
+# TypeScript formatting deferred until a TypeScript package and formatter config exist.
 [tasks.format]
-description = "Check Rust formatting"
-run = "cargo fmt --all -- --check"
+description = "Format Rust and Python sources"
+run = """
+set -euo pipefail
+cargo fmt --all
+uv run --no-project --with ruff==0.12.11 ruff format .
+"""
 
 [tasks.clippy]
 description = "Lint the Cargo workspace with warnings denied"
