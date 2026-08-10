@@ -1,0 +1,1 @@
+{"id":"01234567-89ab-7cde-89ab-0123456789ab","role":"assistant","content":[{"kind":"text","text":"hello"}],"created_at":"1970-01-01T00:00:00.000Z","model":{"provider":"openai","model":"gpt-test"},"provider_ids":{},"metadata":{}}

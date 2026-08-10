@@ -23,16 +23,16 @@ The registers may record status, assignments, links, evidence, and approved exce
 
 If implementation reveals a required design change, mark the affected work `Blocked`, open the required ADR or versioned planning amendment, and link that change from the register. Editing a register alone cannot authorize the change.
 
-## Initial state
+## Current baseline
 
-The registers were initialized from documentation pack v0.8 and reconciled through documentation pack v0.17; PR-010 closed on local `main` integration `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` on 2026-08-09 (no GitHub issue or actual PR):
+The registers were initialized from documentation pack v0.8 and are reconciled through PR-013 merge `fa6222f20e4a4616f600e867be94afe12967dcb9` and G1 closure on 2026-08-09:
 
-- 37 decisions are accepted and indexed; ADR-002 and ADR-003 remain `In progress` with PR-010 evidence `Partial` (G1 and later mapped work remain), while ADR-028 remains `In progress` with PR-009 evidence `Partial`; ADR-007 remains `Partial` (shared conformance harness present; binding parity deferred); ADR-024 license/governance files remain `Partial`; ADR-036 is `In progress` / `Partial` under PR-007.
-- Phase 0 is `Done` at merge `c1108d207389a947d16e9b0dd7a76026108c01eb`; PR-001–PR-010 are `Done` (PR-010 at `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` with A01–A04 Passed); PR-011–PR-066 are `Todo`.
-- Gate G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1–G8 remain `Not ready`.
-- PR-001–PR-010 acceptance criteria are closed. PR-010 evidence is bound under [`artifacts/pr-010/`](artifacts/pr-010/). PR-009 evidence is bound under [`artifacts/pr-009/`](artifacts/pr-009/). No exceptions or blockers are open.
+- 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-025 through ADR-028 remain `In progress` / `Partial` because their planned runtime, routing, durability, and lifecycle work remains. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
+- Phase 0 and Phase 1 are `Done`; PR-001–PR-013 are `Done`; PR-014–PR-066 are `Todo`.
+- G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2–G8 remain `Not ready`.
+- PR-001–PR-013 acceptance criteria are closed. PR-013 local, hosted, long-fuzz, security, integration, phase-exit, and gate evidence is bound under [`artifacts/pr-013/`](artifacts/pr-013/). No exceptions or blockers are open.
 
-Phase 0 / G0 closure is recorded only after the named gate decision against the immutable merged commit; green CI alone does not pass G0.
+Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 
 ## Update discipline
 

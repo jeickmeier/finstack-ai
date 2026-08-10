@@ -2,8 +2,8 @@
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, weekly schedule, workflow_dispatch.
 # MSRV/stable remain the merge baseline (mise Rust 1.97.1). Nightly is advisory
-# compatibility only. Parser fuzz targets are reserved in .github/ci/README.md
-# and must not appear as green jobs until real targets exist.
+# compatibility only. Candidate-v1 parser/replay fuzz campaigns run on the
+# Sunday schedule and manual dispatch, never as a placeholder PR job.
 
 name: nightly
 
@@ -43,3 +43,39 @@ jobs:
 
       - name: Nightly compatibility check
         run: mise run check-nightly
+
+  long-fuzz:
+    name: long-fuzz (candidate-v1 kernel)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Cache fuzz build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "fuzz -> target"
+
+      - name: Ten-minute campaigns per target
+        run: mise run fuzz
+
+      - name: Upload fuzz corpora and crash artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-v1-fuzz-${{ github.run_id }}
+          path: |
+            fuzz/corpus/**
+            fuzz/artifacts/**
+          if-no-files-found: error
+          retention-days: 30
