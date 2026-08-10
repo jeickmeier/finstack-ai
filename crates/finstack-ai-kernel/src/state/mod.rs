@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::capabilities::ActiveCapability;
-use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES};
+use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::digest::Digest;
 use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
 use crate::entries::{
@@ -351,7 +351,12 @@ pub struct KernelState {
     /// Current turn.
     pub current_turn: Option<CurrentTurn>,
     /// Durable final assistant messages in model-only order.
-    pub messages: Arc<[Message]>,
+    ///
+    /// `Arc<Vec<_>>` rather than `Arc<[_]>` so appending can reuse the buffer
+    /// via [`Arc::make_mut`]. The transactional state clone shares the `Arc`,
+    /// so the first append in a batch pays one copy and the rest are amortized
+    /// O(1); an `Arc<[_]>` forces a full copy on every single append.
+    pub messages: Arc<Vec<Message>>,
     /// Outstanding model effect.
     pub pending_model_effect: Option<PendingModelEffect>,
     /// Candidate gated by `before_finalize`.
@@ -395,8 +400,20 @@ pub struct KernelState {
 }
 
 impl PartialEq for KernelState {
+    /// Compares the canonical state projection rather than two `serde_json`
+    /// DOM trees.
+    ///
+    /// A failed projection compares unequal: the previous `.ok() == .ok()`
+    /// form reported two *unserializable* states as equal, which is exactly
+    /// backwards for a fail-closed boundary.
     fn eq(&self, other: &Self) -> bool {
-        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+        match (
+            serde_json_canonicalizer::to_vec(self),
+            serde_json_canonicalizer::to_vec(other),
+        ) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
     }
 }
 
@@ -414,7 +431,7 @@ impl Default for KernelState {
             phase: None,
             cycle: 0,
             current_turn: None,
-            messages: Arc::from([]),
+            messages: Arc::new(Vec::new()),
             pending_model_effect: None,
             terminal_candidate: None,
             stage_settlements: BTreeMap::new(),
@@ -759,6 +776,26 @@ impl KernelState {
             return Err(invalid());
         }
 
+        // One pass over messages builds the authorship index, so each tool call
+        // costs a lookup instead of a full message-and-block rescan. The nested
+        // form was O(tool_calls x messages x blocks) and ran on every apply and
+        // every deserialize, making it a decode-path denial-of-service surface.
+        let mut authored: BTreeMap<&ToolCallId, Vec<(&MessageId, &ToolCallBlock)>> =
+            BTreeMap::new();
+        for message in self.messages.iter() {
+            if message.role() != crate::MessageRole::Assistant {
+                continue;
+            }
+            for block in message.content() {
+                if let ContentBlock::ToolCall(call) = block {
+                    authored
+                        .entry(call.tool_call_id())
+                        .or_default()
+                        .push((message.id(), call));
+                }
+            }
+        }
+
         let mut effect_ids = std::collections::BTreeSet::new();
         for (tool_call_id, identity) in &self.tool_calls {
             if identity.call.tool_call_id() != tool_call_id
@@ -766,12 +803,10 @@ impl KernelState {
             {
                 return Err(invalid());
             }
-            let source_matches = self.messages.iter().any(|message| {
-                *message.id() == identity.source_message_id
-                    && message.role() == crate::MessageRole::Assistant
-                    && message.content().iter().any(|block| {
-                        matches!(block, ContentBlock::ToolCall(call) if call == &identity.call)
-                    })
+            let source_matches = authored.get(tool_call_id).is_some_and(|authorships| {
+                authorships.iter().any(|(message_id, call)| {
+                    **message_id == identity.source_message_id && *call == &identity.call
+                })
             });
             if !source_matches {
                 return Err(invalid());
@@ -818,15 +853,21 @@ impl KernelState {
                 .values()
                 .filter(|identity| identity.tool_batch_id == Some(closed.tool_batch_id))
                 .count();
+            // Hoisted out of the membership test below, which was O(results x messages).
+            let tool_message_ids = self
+                .messages
+                .iter()
+                .filter(|message| message.role() == crate::MessageRole::Tool)
+                .map(crate::Message::id)
+                .collect::<std::collections::BTreeSet<_>>();
             if !allowed_phase
                 || closed.cycle > self.cycle
                 || assigned_count == 0
                 || assigned_count != closed.result_message_ids.len()
-                || closed.result_message_ids.iter().any(|message_id| {
-                    !self.messages.iter().any(|message| {
-                        message.id() == message_id && message.role() == crate::MessageRole::Tool
-                    })
-                })
+                || closed
+                    .result_message_ids
+                    .iter()
+                    .any(|message_id| !tool_message_ids.contains(message_id))
             {
                 return Err(invalid());
             }
@@ -1041,44 +1082,61 @@ impl KernelState {
     /// be represented or canonicalized as JSON.
     pub fn state_hash(&self) -> Result<Digest, KernelError> {
         self.validate().map_err(|_| KernelError::StateHashFailed)?;
-        let canonical = if self.state_version == 1 {
-            serde_json_canonicalizer::to_vec(&KernelStateHashV1::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-            ))
+        // Streamed into the hasher rather than canonicalized into a `Vec`: the
+        // state projection is the largest single canonical payload the kernel
+        // produces, and buffering it grew a fresh allocation every call.
+        let mut writer =
+            crate::digest::DigestWriter::new("kernel-state", u32::from(self.state_version))
+                .map_err(|_| KernelError::StateHashFailed)?;
+        if self.state_version == 1 {
+            serde_json_canonicalizer::to_writer(
+                &KernelStateHashV1::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                ),
+                &mut writer,
+            )
         } else if self.state_version == 2 {
-            serde_json_canonicalizer::to_vec(&KernelStateHashV2::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &KernelStateHashV2::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         } else if self.state_version == 3 {
-            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV3::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV3::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         } else {
-            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV4::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV4::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         }
         .map_err(|_| KernelError::StateHashFailed)?;
-        Digest::domain_separated("kernel-state", u32::from(self.state_version), &canonical)
-            .map_err(|_| KernelError::StateHashFailed)
+        Ok(writer.finish().0)
     }
 }
 
@@ -1335,7 +1393,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1354,7 +1412,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1378,7 +1436,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1407,7 +1465,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),

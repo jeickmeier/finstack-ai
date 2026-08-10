@@ -96,7 +96,25 @@ impl Clock for SystemClock {
     }
 }
 
-/// OS entropy source via `getrandom`.
+/// Bytes drawn from the OS per refill.
+///
+/// A decision allocates several identifiers and each needs only 10 bytes, so
+/// an unbuffered source makes one syscall-shaped call per identifier. Batching
+/// amortizes that. The pool holds raw OS entropy — it is not a userspace
+/// PRNG, so the entropy quality is exactly `getrandom`'s.
+#[cfg(feature = "native-tokio")]
+const ENTROPY_POOL_BYTES: usize = 1024;
+
+#[cfg(feature = "native-tokio")]
+thread_local! {
+    /// Per-thread entropy pool and cursor into the unread remainder.
+    ///
+    /// The cursor starts exhausted so the first request refills from the OS.
+    static ENTROPY_POOL: core::cell::RefCell<([u8; ENTROPY_POOL_BYTES], usize)> =
+        const { core::cell::RefCell::new(([0; ENTROPY_POOL_BYTES], ENTROPY_POOL_BYTES)) };
+}
+
+/// OS entropy source via `getrandom`, buffered per thread.
 #[cfg(feature = "native-tokio")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsRandomSource;
@@ -104,7 +122,27 @@ pub struct OsRandomSource;
 #[cfg(feature = "native-tokio")]
 impl RandomSource for OsRandomSource {
     fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
-        getrandom::fill(buf).map_err(|error| IdGenerationError::Source(error.to_string()))
+        // Requests at or above the pool size go straight to the OS rather than
+        // cycling the pool repeatedly.
+        if buf.len() >= ENTROPY_POOL_BYTES {
+            return getrandom::fill(buf)
+                .map_err(|error| IdGenerationError::Source(error.to_string()));
+        }
+        ENTROPY_POOL.with(|cell| {
+            let mut pool = cell.borrow_mut();
+            let (bytes, cursor) = &mut *pool;
+            if *cursor + buf.len() > ENTROPY_POOL_BYTES {
+                getrandom::fill(bytes)
+                    .map_err(|error| IdGenerationError::Source(error.to_string()))?;
+                *cursor = 0;
+            }
+            let end = *cursor + buf.len();
+            buf.copy_from_slice(&bytes[*cursor..end]);
+            // Consumed entropy is zeroed so it can never be handed out twice.
+            bytes[*cursor..end].fill(0);
+            *cursor = end;
+            Ok(())
+        })
     }
 }
 
@@ -198,5 +236,38 @@ mod tests {
             .generate::<finstack_ai_kernel::RunTag>()
             .expect_err("range");
         assert!(matches!(err, IdGenerationError::Time(_)));
+    }
+
+    /// The buffered pool must never hand the same bytes out twice, including
+    /// across the refill boundary.
+    #[cfg(feature = "native-tokio")]
+    #[test]
+    fn buffered_os_entropy_never_repeats_across_refills() {
+        use std::collections::BTreeSet;
+
+        let source = OsRandomSource;
+        // More than one pool's worth of 10-byte draws forces several refills.
+        let draws = (ENTROPY_POOL_BYTES / 10) * 3;
+        let mut seen = BTreeSet::new();
+        for _ in 0..draws {
+            let mut buf = [0_u8; 10];
+            source.fill_bytes(&mut buf).expect("entropy");
+            assert!(seen.insert(buf), "entropy pool repeated a draw");
+        }
+        assert_eq!(seen.len(), draws);
+    }
+
+    /// Requests at or beyond the pool size bypass the pool entirely.
+    #[cfg(feature = "native-tokio")]
+    #[test]
+    fn oversized_requests_bypass_the_pool() {
+        let source = OsRandomSource;
+        let mut large = vec![0_u8; ENTROPY_POOL_BYTES * 2];
+        source.fill_bytes(&mut large).expect("entropy");
+        assert!(large.iter().any(|byte| *byte != 0), "large draw was filled");
+
+        let mut small = [0_u8; 10];
+        source.fill_bytes(&mut small).expect("entropy");
+        assert!(small.iter().any(|byte| *byte != 0), "pool still usable");
     }
 }

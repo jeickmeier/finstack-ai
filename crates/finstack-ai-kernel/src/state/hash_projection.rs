@@ -14,9 +14,7 @@ use crate::ids::{
     ToolBatchId, ToolCallId, ToolId, TurnId,
 };
 use crate::limits::{CostLimit, LimitReached, LimitUsage, RunLimits};
-use crate::projection::{
-    ContentProjection, EffectDeferredProjection, ErrorProjection, MessageProjection,
-};
+use crate::projection::{ContentProjection, EffectDeferredProjection, ErrorProjection, MessageSeq};
 use crate::refs::{CostAmount, PrincipalRef};
 use crate::run::{
     RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
@@ -46,7 +44,7 @@ pub(super) struct KernelStateHashV1<'a> {
     pub phase: Option<RunPhase>,
     pub cycle: u64,
     pub current_turn: Option<CurrentTurnProjection<'a>>,
-    pub messages: Vec<MessageProjection<'a>>,
+    pub messages: MessageSeq<'a>,
     pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
     pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
     pub stage_settlements: Vec<StageSettlementHashEntryV1>,
@@ -71,7 +69,7 @@ impl<'a> KernelStateHashV1<'a> {
             phase: state.phase,
             cycle: state.cycle,
             current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
-            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            messages: MessageSeq::new(state.messages.as_slice()),
             pending_model_effect: state
                 .pending_model_effect
                 .as_ref()
@@ -98,7 +96,7 @@ pub(super) struct KernelStateHashV2<'a> {
     pub phase: Option<RunPhase>,
     pub cycle: u64,
     pub current_turn: Option<CurrentTurnProjection<'a>>,
-    pub messages: Vec<MessageProjection<'a>>,
+    pub messages: MessageSeq<'a>,
     pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
     pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
     pub stage_settlements: Vec<StageSettlementHashEntryV1>,
@@ -129,7 +127,7 @@ impl<'a> KernelStateHashV2<'a> {
             phase: state.phase,
             cycle: state.cycle,
             current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
-            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            messages: MessageSeq::new(state.messages.as_slice()),
             pending_model_effect: state
                 .pending_model_effect
                 .as_ref()
@@ -166,7 +164,7 @@ pub(super) struct KernelStateHashV3<'a> {
     pub phase: Option<RunPhase>,
     pub cycle: u64,
     pub current_turn: Option<CurrentTurnProjection<'a>>,
-    pub messages: Vec<MessageProjection<'a>>,
+    pub messages: MessageSeq<'a>,
     pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
     pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
     pub stage_settlements: Vec<StageSettlementHashEntryV1>,
@@ -203,7 +201,7 @@ impl<'a> KernelStateHashV3<'a> {
             phase: state.phase,
             cycle: state.cycle,
             current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
-            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            messages: MessageSeq::new(state.messages.as_slice()),
             pending_model_effect: state
                 .pending_model_effect
                 .as_ref()
@@ -249,7 +247,7 @@ pub(super) struct KernelStateHashV4<'a> {
     pub phase: Option<RunPhase>,
     pub cycle: u64,
     pub current_turn: Option<CurrentTurnProjection<'a>>,
-    pub messages: Vec<MessageProjection<'a>>,
+    pub messages: MessageSeq<'a>,
     pub pending_model_effect: Option<PendingModelEffectProjection<'a>>,
     pub terminal_candidate: Option<TerminalCandidateProjection<'a>>,
     pub stage_settlements: Vec<StageSettlementHashEntryV1>,
@@ -291,7 +289,7 @@ impl<'a> KernelStateHashV4<'a> {
             phase: state.phase,
             cycle: state.cycle,
             current_turn: state.current_turn.as_ref().map(CurrentTurnProjection::from),
-            messages: state.messages.iter().map(MessageProjection::from).collect(),
+            messages: MessageSeq::new(state.messages.as_slice()),
             pending_model_effect: state
                 .pending_model_effect
                 .as_ref()
@@ -870,7 +868,7 @@ impl<'a> From<&'a CurrentTurn> for CurrentTurnProjection<'a> {
 struct ContextPreparedProjection<'a> {
     cycle: u64,
     turn_id: TurnId,
-    messages: Vec<MessageProjection<'a>>,
+    messages: MessageSeq<'a>,
     context_digest: Digest,
 }
 
@@ -879,7 +877,7 @@ impl<'a> From<&'a ContextPrepared> for ContextPreparedProjection<'a> {
         Self {
             cycle: value.cycle,
             turn_id: value.turn_id,
-            messages: value.messages.iter().map(MessageProjection::from).collect(),
+            messages: MessageSeq::new(&value.messages),
             context_digest: value.context_digest,
         }
     }

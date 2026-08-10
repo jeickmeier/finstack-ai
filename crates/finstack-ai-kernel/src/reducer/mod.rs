@@ -27,9 +27,22 @@ use crate::state::{KernelState, TransitionEnv};
 use crate::{Digest, ErrorDescriptor};
 
 fn canonical_digest<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, KernelError> {
-    let canonical =
-        serde_json_canonicalizer::to_vec(value).map_err(|_| KernelError::InvariantViolation)?;
-    Digest::domain_separated(domain, 1, &canonical).map_err(|_| KernelError::InvariantViolation)
+    Ok(canonical_digest_and_len(domain, value)?.0)
+}
+
+/// Canonical digest plus the canonical byte length, in a single pass.
+///
+/// Streams into the hasher instead of materializing the canonical bytes, so
+/// no output buffer is allocated or grown per digest.
+fn canonical_digest_and_len<T: Serialize>(
+    domain: &'static str,
+    value: &T,
+) -> Result<(Digest, usize), KernelError> {
+    let mut writer =
+        crate::digest::DigestWriter::new(domain, 1).map_err(|_| KernelError::InvariantViolation)?;
+    serde_json_canonicalizer::to_writer(value, &mut writer)
+        .map_err(|_| KernelError::InvariantViolation)?;
+    Ok(writer.finish())
 }
 
 fn failure_from_state(state: &KernelState, error: ErrorDescriptor) -> RunFailed {

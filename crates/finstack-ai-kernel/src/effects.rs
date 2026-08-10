@@ -264,19 +264,9 @@ impl EffectInput {
     ///
     /// Returns [`EffectError`] when serialization fails.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectError> {
-        let json = serde_json::to_string(self).map_err(|error| EffectError::Serialize {
+        serde_json_canonicalizer::to_vec(self).map_err(|error| EffectError::Serialize {
             detail: error.to_string(),
-        })?;
-        let value: serde_json::Value =
-            serde_json::from_str(&json).map_err(|error| EffectError::Serialize {
-                detail: error.to_string(),
-            })?;
-        let canonical = serde_json_canonicalizer::to_string(&value).map_err(|error| {
-            EffectError::Serialize {
-                detail: error.to_string(),
-            }
-        })?;
-        Ok(canonical.into_bytes())
+        })
     }
 
     /// Digest under the `effect-input` domain.
@@ -1061,19 +1051,9 @@ impl InteractionRequest {
         if let InteractionKind::Custom { name } = &kind {
             validated_label(name, "interaction_kind")?;
         }
-        let prompt_json =
-            serde_json::to_string(&prompt).map_err(|error| EffectError::Serialize {
-                detail: error.to_string(),
-            })?;
-        let prompt_value: serde_json::Value =
-            serde_json::from_str(&prompt_json).map_err(|error| EffectError::Serialize {
-                detail: error.to_string(),
-            })?;
         let prompt_canonical =
-            serde_json_canonicalizer::to_string(&prompt_value).map_err(|error| {
-                EffectError::Serialize {
-                    detail: error.to_string(),
-                }
+            serde_json_canonicalizer::to_vec(&prompt).map_err(|error| EffectError::Serialize {
+                detail: error.to_string(),
             })?;
         Ok(Self {
             request_version,
@@ -1081,7 +1061,7 @@ impl InteractionRequest {
             effect_id,
             kind,
             prompt: prompt.into(),
-            prompt_digest: Digest::effect_input(prompt_canonical.as_bytes()),
+            prompt_digest: Digest::effect_input(&prompt_canonical),
             response_schema_digest: Digest::effect_input(response_schema.as_str().as_bytes()),
             response_schema,
             policy_component,
@@ -1183,19 +1163,11 @@ impl InteractionRequest {
     ///
     /// Returns [`EffectError`] when serialization fails.
     pub fn request_digest(&self) -> Result<Digest, EffectError> {
-        let json = serde_json::to_string(self).map_err(|error| EffectError::Serialize {
-            detail: error.to_string(),
-        })?;
-        let value: serde_json::Value =
-            serde_json::from_str(&json).map_err(|error| EffectError::Serialize {
+        let canonical =
+            serde_json_canonicalizer::to_vec(self).map_err(|error| EffectError::Serialize {
                 detail: error.to_string(),
             })?;
-        let canonical = serde_json_canonicalizer::to_string(&value).map_err(|error| {
-            EffectError::Serialize {
-                detail: error.to_string(),
-            }
-        })?;
-        Ok(Digest::effect_input(canonical.as_bytes()))
+        Ok(Digest::effect_input(&canonical))
     }
 }
 

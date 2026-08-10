@@ -55,12 +55,25 @@ pub(super) fn decide(
     {
         validate_cancel_authorization(accepted, env, cancel)?;
     }
-    if let Some(decision) = decide_limit(state, env, &input)? {
+    // The prepared context is the largest payload the kernel canonicalizes and
+    // it grows with every turn, so it is canonicalized once here and reused by
+    // limit accounting and by the record it produces.
+    let context_canonical = match &input {
+        KernelInput::StageSettled(StageSettled {
+            outcome: ReducerStageOutcome::ContextPrepared { messages },
+            ..
+        }) => Some(
+            crate::entries::context_digest_and_len(messages)
+                .map_err(|_| KernelError::ContextDigestMismatch)?,
+        ),
+        _ => None,
+    };
+    if let Some(decision) = decide_limit(state, env, &input, context_canonical)? {
         return Ok(decision);
     }
     match input {
         KernelInput::AcceptRun(input) => decide_accept(state, env, &input),
-        KernelInput::StageSettled(input) => decide_stage(state, env, &input),
+        KernelInput::StageSettled(input) => decide_stage(state, env, &input, context_canonical),
         KernelInput::ModelSettled(input) => decide_model(state, env, &input),
         KernelInput::ExternalEffectCompleted(input) => decide_external(state, env, input),
         KernelInput::ToolBatchSettled(input) => {
@@ -370,6 +383,7 @@ fn decide_limit(
     state: &KernelState,
     env: &TransitionEnv,
     input: &KernelInput,
+    context_canonical: Option<(Digest, usize)>,
 ) -> Result<Option<Decision>, KernelError> {
     if matches!(input, KernelInput::AcceptRun(_))
         || state.accepted.is_none()
@@ -433,7 +447,7 @@ fn decide_limit(
     }
     match input {
         KernelInput::StageSettled(StageSettled {
-            outcome: ReducerStageOutcome::ContextPrepared { messages },
+            outcome: ReducerStageOutcome::ContextPrepared { .. },
             ..
         }) => {
             usage.turns = usage
@@ -443,9 +457,7 @@ fn decide_limit(
                     field: "turns",
                     reason_code: "overflow",
                 })?;
-            let bytes = serde_json_canonicalizer::to_vec(&messages.as_ref())
-                .map_err(|_| KernelError::InvariantViolation)?
-                .len();
+            let (_, bytes) = context_canonical.ok_or(KernelError::InvariantViolation)?;
             usage.context_bytes = usage
                 .context_bytes
                 .checked_add(u64::try_from(bytes).map_err(|_| KernelError::InvariantViolation)?)
@@ -941,6 +953,7 @@ fn decide_stage(
     state: &KernelState,
     env: &TransitionEnv,
     input: &StageSettled,
+    context_canonical: Option<(Digest, usize)>,
 ) -> Result<Decision, KernelError> {
     validate_stage_input(input)?;
     let settlement_digest = stage_digest(input)?;
@@ -976,7 +989,7 @@ fn decide_stage(
         },
     )?;
     validate_allocated_ids(&env.ids, requirements)?;
-    let (bodies, action) = stage_bodies(state, env, input, settlement_digest)?;
+    let (bodies, action) = stage_bodies(state, env, input, settlement_digest, context_canonical)?;
     let records = draft_for_state(state, env, bodies)?;
     Ok(Decision {
         expected_sequence: next_sequence(state)?,
@@ -1101,6 +1114,7 @@ fn stage_bodies(
     env: &TransitionEnv,
     input: &StageSettled,
     settlement_digest: Digest,
+    context_canonical: Option<(Digest, usize)>,
 ) -> Result<(Vec<RecordBody>, Option<PostCommitAction>), KernelError> {
     let cursor = input.cursor;
     match &input.outcome {
@@ -1122,7 +1136,13 @@ fn stage_bodies(
         ReducerStageOutcome::ContextPrepared { messages }
             if cursor.stage == Stage::PrepareContext =>
         {
-            prepared_context_bodies(env, cursor, messages, settlement_digest)
+            prepared_context_bodies(
+                env,
+                cursor,
+                messages,
+                settlement_digest,
+                context_canonical.ok_or(KernelError::InvariantViolation)?.0,
+            )
         }
         ReducerStageOutcome::ModelRequestPrepared {
             request: _,
@@ -1654,11 +1674,14 @@ fn prepared_context_bodies(
     cursor: StageCursor,
     messages: &Arc<[crate::Message]>,
     settlement_digest: Digest,
+    context_digest: Digest,
 ) -> Result<(Vec<RecordBody>, Option<PostCommitAction>), KernelError> {
     let turn_id = required(env.ids.turn_ids(), 0, "turn_ids")?;
-    let context = ContextPrepared::try_from_messages(cursor.cycle, turn_id, messages.to_vec())
-        .map_err(|_| KernelError::ContextDigestMismatch)?;
-    let context_digest = context.context_digest;
+    // The messages are already a shared slice and already canonicalized; taking
+    // a `Vec` here and collecting back into an `Arc` copied the whole context
+    // twice for no change in value.
+    let context =
+        ContextPrepared::from_shared(cursor.cycle, turn_id, Arc::clone(messages), context_digest);
     Ok((
         vec![
             stage_record(

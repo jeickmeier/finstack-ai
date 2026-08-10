@@ -119,6 +119,7 @@ mod run;
 mod state;
 mod time;
 mod tools;
+mod transcode;
 mod validation;
 
 pub use agent::{

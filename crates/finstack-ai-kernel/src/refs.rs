@@ -788,20 +788,9 @@ impl Usage {
     ///
     /// Returns [`RefsError::Serialize`] when serialization fails.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, RefsError> {
-        let json = serde_json::to_string(self).map_err(|error| RefsError::Serialize {
+        serde_json_canonicalizer::to_vec(self).map_err(|error| RefsError::Serialize {
             detail: error.to_string(),
-        })?;
-        let canonical = serde_json_canonicalizer::to_string(
-            &serde_json::from_str::<serde_json::Value>(&json).map_err(|error| {
-                RefsError::Serialize {
-                    detail: error.to_string(),
-                }
-            })?,
-        )
-        .map_err(|error| RefsError::Serialize {
-            detail: error.to_string(),
-        })?;
-        Ok(canonical.into_bytes())
+        })
     }
 }
 

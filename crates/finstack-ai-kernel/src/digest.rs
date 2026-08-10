@@ -1,7 +1,6 @@
 //! Domain-separated SHA-256 digests and JCS known-answer helpers.
 
 use core::fmt;
-use core::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
@@ -57,11 +56,8 @@ impl Digest {
     /// Lowercase 64-character hexadecimal encoding.
     #[must_use]
     pub fn to_hex(&self) -> String {
-        let mut out = String::with_capacity(64);
-        for byte in self.0 {
-            let _ = write!(out, "{byte:02x}");
-        }
-        out
+        let mut buffer = HexBuffer::new();
+        buffer.encode(&self.0).to_owned()
     }
 
     /// Parse a lowercase or uppercase 64-character hex digest.
@@ -173,13 +169,113 @@ impl Digest {
 
 impl fmt::Debug for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Digest").field(&self.to_hex()).finish()
+        let mut buffer = HexBuffer::new();
+        f.debug_tuple("Digest")
+            .field(&buffer.encode(&self.0))
+            .finish()
     }
 }
 
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_hex())
+        let mut buffer = HexBuffer::new();
+        f.write_str(buffer.encode(&self.0))
+    }
+}
+
+/// Chunk size batching canonicalizer writes into the hasher.
+///
+/// The JCS formatter emits a great many very small writes (one per token,
+/// separator, and escaped fragment). Feeding those to SHA-256 individually
+/// measured ~20% slower than hashing one contiguous buffer, because the
+/// per-update overhead dominates. Batching recovers bulk-hash throughput
+/// without ever allocating a full-size output buffer.
+const DIGEST_CHUNK_BYTES: usize = 8192;
+
+/// Incremental domain-separated hasher that also counts the bytes it consumes.
+///
+/// Canonicalizing into a `Vec` and hashing it afterwards grew a fresh
+/// full-size buffer per digest, and reallocation was among the hottest paths
+/// in the reducer. This hashes through a fixed-size chunk instead; the byte
+/// count comes along for free, which is what limit accounting needs.
+pub(crate) struct DigestWriter {
+    hasher: Sha256,
+    chunk: Vec<u8>,
+    written: usize,
+}
+
+impl DigestWriter {
+    /// Start a digest over `domain` and `schema_version`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DigestError::InvalidDomain`] when `domain` is empty or NUL-bearing.
+    pub(crate) fn new(domain: &str, schema_version: u32) -> Result<Self, DigestError> {
+        validate_domain(domain)?;
+        let mut hasher = Sha256::new();
+        hasher.update(b"finstack-ai");
+        hasher.update([0]);
+        hasher.update(domain.as_bytes());
+        hasher.update([0]);
+        hasher.update(schema_version.to_be_bytes());
+        hasher.update([0]);
+        Ok(Self {
+            hasher,
+            chunk: Vec::with_capacity(DIGEST_CHUNK_BYTES),
+            written: 0,
+        })
+    }
+
+    /// Finish the digest and report how many canonical bytes were hashed.
+    pub(crate) fn finish(mut self) -> (Digest, usize) {
+        self.hasher.update(&self.chunk);
+        (Digest(self.hasher.finalize().into()), self.written)
+    }
+}
+
+impl std::io::Write for DigestWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.chunk.len().saturating_add(buf.len()) > DIGEST_CHUNK_BYTES {
+            self.hasher.update(&self.chunk);
+            self.chunk.clear();
+        }
+        if buf.len() >= DIGEST_CHUNK_BYTES {
+            // Oversized writes bypass the chunk rather than growing it.
+            self.hasher.update(buf);
+        } else {
+            self.chunk.extend_from_slice(buf);
+        }
+        self.written = self.written.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Lowercase hex nibble table shared by digest and UUID encoding.
+pub(crate) const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+/// Stack buffer for 64-character digest hex text.
+///
+/// Encoding writes through [`HEX_DIGITS`] rather than 32 `write!` calls, which
+/// avoids a heap allocation and 32 `core::fmt` dispatches per serialized
+/// digest. Digests appear in nearly every canonical projection field.
+pub(crate) struct HexBuffer([u8; 64]);
+
+impl HexBuffer {
+    pub(crate) const fn new() -> Self {
+        Self([0; 64])
+    }
+
+    pub(crate) fn encode(&mut self, bytes: &[u8; 32]) -> &str {
+        for (index, byte) in bytes.iter().enumerate() {
+            self.0[index * 2] = HEX_DIGITS[usize::from(byte >> 4)];
+            self.0[index * 2 + 1] = HEX_DIGITS[usize::from(byte & 0x0f)];
+        }
+        // Only ASCII hex digits are ever written.
+        core::str::from_utf8(&self.0).expect("hex text is ASCII")
     }
 }
 
@@ -224,17 +320,31 @@ fn serialize_hex<S>(value: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(&Digest(*value).to_hex())
+    let mut buffer = HexBuffer::new();
+    serializer.serialize_str(buffer.encode(value))
 }
 
 fn deserialize_hex<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let text = String::deserialize(deserializer)?;
-    Digest::from_hex(&text)
-        .map(|digest| *digest.as_bytes())
-        .map_err(serde::de::Error::custom)
+    struct HexVisitor;
+
+    impl serde::de::Visitor<'_> for HexVisitor {
+        type Value = [u8; 32];
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a 64-character hexadecimal digest string")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            Digest::from_hex(value)
+                .map(|digest| *digest.as_bytes())
+                .map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_str(HexVisitor)
 }
 
 #[cfg(test)]
