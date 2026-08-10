@@ -119,6 +119,15 @@ impl CommitCoordinator {
         self.fault
     }
 
+    #[cfg(feature = "native-tokio")]
+    pub(crate) fn classify(
+        &self,
+        env: &TransitionEnv,
+        input: KernelInput,
+    ) -> Result<Decision, KernelError> {
+        self.kernel.decide(env, input)
+    }
+
     /// Submit one normalized command through the authoritative commit boundary.
     ///
     /// # Errors

@@ -356,6 +356,8 @@ version = "0.0.1"
 dependencies = [
  "finstack-ai-kernel",
  "getrandom",
+ "serde",
+ "serde_json_canonicalizer",
  "thiserror",
  "tokio",
  "uuid",

@@ -103,7 +103,7 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.test-runtime]
-description = "Run PR-014 commit-loop, task-owner, and memory-store tests"
+description = "Run PR-014 runtime, task-owner, ingress, and memory-store tests"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio --locked
