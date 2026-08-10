@@ -1076,6 +1076,7 @@ fn run_event_body_from_record(
         | RecordBody::CapabilitiesActivated(_)
         | RecordBody::FinalResultRecorded(_)
         | RecordBody::OutputValidationFailed(_)
+        | RecordBody::ExternalCommandRejected(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1352,7 +1353,8 @@ pub fn derived_event_kind(
         | RecordBody::OutputConfigured(_)
         | RecordBody::CapabilitiesActivated(_)
         | RecordBody::FinalResultRecorded(_)
-        | RecordBody::OutputValidationFailed(_) => {
+        | RecordBody::OutputValidationFailed(_)
+        | RecordBody::ExternalCommandRejected(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

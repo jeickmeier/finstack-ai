@@ -1,0 +1,41 @@
+{
+  "format_version": 1,
+  "subject": "external-effect-completion-command",
+  "operation": "parse",
+  "input": {
+    "locator": {
+      "tenant_scope": "tenant-a",
+      "session_id": "01234567-89ab-7cde-89ab-012345679201",
+      "lane_id": "01234567-89ab-7cde-89ab-012345679202",
+      "run_id": "01234567-89ab-7cde-89ab-012345679203"
+    },
+    "principal": {
+      "issuer": "https://issuer.example",
+      "subject": "user-1",
+      "tenant_scope": "tenant-a"
+    },
+    "authorization": {
+      "policy_version": "policy-v1",
+      "decision_id": "decision-1"
+    },
+    "completion": {
+      "effect_id": "01234567-89ab-7cde-89ab-012345679204",
+      "completion_id": "completion-1",
+      "outcome": {
+        "failed": {
+          "error": {
+            "code": "provider_failed",
+            "message": "provider failed",
+            "category": "model",
+            "retryable": true,
+            "identifiers": {},
+            "safe_details": {}
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

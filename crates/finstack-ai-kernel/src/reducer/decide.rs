@@ -48,6 +48,9 @@ pub(super) fn decide(
     env: &TransitionEnv,
     input: KernelInput,
 ) -> Result<Decision, KernelError> {
+    if let KernelInput::RecordExternalCommandRejected(input) = &input {
+        return decide_external_command_rejected(state, env, input);
+    }
     if let KernelInput::CancelRequested(cancel) = &input
         && state.cancellation.is_none()
         && state.terminal.is_none()
@@ -87,7 +90,65 @@ pub(super) fn decide(
             decide_capabilities_activated(state, env, input)
         }
         KernelInput::OutputValidated(input) => decide_output_validated(state, env, input),
+        KernelInput::RecordExternalCommandRejected(_) => {
+            unreachable!("external rejection returns before limit processing")
+        }
     }
+}
+
+fn decide_external_command_rejected(
+    state: &KernelState,
+    env: &TransitionEnv,
+    input: &crate::RecordExternalCommandRejected,
+) -> Result<Decision, KernelError> {
+    let accepted = state
+        .accepted
+        .as_ref()
+        .ok_or(KernelError::InvalidRunAcceptance)?;
+    let security = accepted.security();
+    if state.session_id != Some(input.locator.session_id)
+        || state.lane_id != Some(input.locator.lane_id)
+        || accepted.run_id() != input.locator.run_id
+        || security.tenant_scope() != input.locator.tenant_scope.as_ref()
+        || security.principal() != &input.rejection.principal
+        || security.authorization_policy_version() != input.rejection.authorization.policy_version()
+        || security.authorization_decision_id() != input.rejection.authorization.decision_id()
+    {
+        return Err(KernelError::InvalidRunAcceptance);
+    }
+    if let crate::ExternalCommandTarget::Effect(effect_id) = input.rejection.target
+        && !known_effect(state, effect_id)
+    {
+        return Err(KernelError::EffectNotPending { effect_id });
+    }
+    validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
+    Ok(Decision {
+        expected_sequence: next_sequence(state)?,
+        records: draft_for_state(
+            state,
+            env,
+            vec![RecordBody::ExternalCommandRejected(input.rejection.clone())],
+        )?,
+        actions: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+}
+
+fn known_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
+    state
+        .pending_model_effect
+        .as_ref()
+        .is_some_and(|pending| pending.requested.effect_id() == effect_id)
+        || state.model_settlements.contains_key(&effect_id)
+        || state.tool_settlements.contains_key(&effect_id)
+        || state
+            .tool_calls
+            .values()
+            .any(|identity| identity.effect_id == Some(effect_id))
+        || state
+            .completion_identities
+            .values()
+            .any(|identity| identity.effect_id == effect_id)
 }
 
 fn decide_configure_output(

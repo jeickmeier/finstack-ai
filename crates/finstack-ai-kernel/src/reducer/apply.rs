@@ -43,11 +43,16 @@ pub(super) fn apply(
 ) -> Result<(KernelState, Arc<[RunEvent]>), KernelError> {
     validate_batch_range(original, committed)?;
     validate_record_sequences(committed)?;
-    if original.terminal.is_some()
-        || matches!(
-            original.phase,
-            Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
-        )
+    let external_rejection_only = matches!(
+        committed.records.as_ref(),
+        [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
+    );
+    if !external_rejection_only
+        && (original.terminal.is_some()
+            || matches!(
+                original.phase,
+                Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
+            ))
     {
         return Err(KernelError::TerminalStateImmutable);
     }
@@ -275,6 +280,14 @@ fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
+    if state.accepted.is_some()
+        && matches!(
+            records,
+            [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
+        )
+    {
+        return Ok(());
+    }
     let valid = match state.phase {
         None => matches!(
             records,
@@ -927,7 +940,9 @@ fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
-    update_wall_usage(state, record.timestamp())?;
+    if !matches!(record.body(), RecordBody::ExternalCommandRejected(_)) {
+        update_wall_usage(state, record.timestamp())?;
+    }
     match record.body() {
         RecordBody::RunAccepted(accepted) => {
             state.session_id = Some(record.session_id());
@@ -1189,6 +1204,7 @@ fn apply_record(
         RecordBody::OutputValidationFailed(failure) => {
             apply_validation_failure(state, failure)?;
         }
+        RecordBody::ExternalCommandRejected(_) => {}
         RecordBody::EffectCancelled(cancelled) => {
             if let Some(pending) = state.pending_model_effect.as_ref()
                 && pending.requested.effect_id() == cancelled.effect_id()

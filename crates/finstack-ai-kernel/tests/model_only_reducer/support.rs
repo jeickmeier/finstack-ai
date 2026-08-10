@@ -905,6 +905,8 @@ fn input_payload(input: &KernelInput, variant: &str) -> Value {
 
 #[path = "apply_and_json.rs"]
 mod apply_and_json;
+#[path = "external_commands.rs"]
+mod external_commands;
 #[path = "matrix.rs"]
 mod matrix;
 #[path = "properties.rs"]

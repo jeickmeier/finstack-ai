@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "operation-locator",
+  "operation": "parse",
+  "input": {
+    "tenant_scope": "tenant-a",
+    "session_id": "01234567-89ab-7cde-89ab-012345679201",
+    "lane_id": "01234567-89ab-7cde-89ab-012345679202",
+    "run_id": "01234567-89ab-7cde-89ab-012345679203"
+  },
+  "expect": {
+    "ok": true
+  }
+}

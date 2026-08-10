@@ -1,4 +1,4 @@
-//! Public-rust-api compatibility corpus (PR-006–PR-013).
+//! Public-rust-api compatibility corpus (PR-006–PR-014).
 
 use std::collections::BTreeSet;
 
@@ -13,13 +13,13 @@ use finstack_ai_test::{
 fn public_rust_api_corpus_passes() {
     let count = run_all_public_api_fixtures().expect("public-rust-api fixtures");
     assert_eq!(
-        count, 106,
-        "expected the PR-006–PR-013 public-rust-api corpus size, found {count}"
+        count, 115,
+        "expected the PR-006–PR-014 public-rust-api corpus size, found {count}"
     );
 }
 
 #[test]
-fn public_rust_api_corpus_includes_reducer_subjects_through_pr013() {
+fn public_rust_api_corpus_includes_reducer_subjects_through_pr014() {
     let paths = discover_public_api_fixtures().expect("discover public-rust-api fixtures");
     let subjects = paths
         .iter()
@@ -34,6 +34,11 @@ fn public_rust_api_corpus_includes_reducer_subjects_through_pr013() {
         "pr010-record",
         "pr011-record",
         "pr012-record",
+        "operation-locator",
+        "external-effect-completion-command",
+        "interaction-resolution-command",
+        "external-command-rejected",
+        "pr014-record",
         "corrupt-replay",
     ] {
         assert!(

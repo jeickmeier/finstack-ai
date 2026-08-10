@@ -139,6 +139,7 @@ fn input_name(value: &KernelInput) -> &'static str {
         KernelInput::ConfigureOutput(_) => "ConfigureOutput",
         KernelInput::CapabilitiesActivated(_) => "CapabilitiesActivated",
         KernelInput::OutputValidated(_) => "OutputValidated",
+        KernelInput::RecordExternalCommandRejected(_) => "RecordExternalCommandRejected",
     }
 }
 
@@ -174,6 +175,7 @@ fn record_name(value: &RecordBody) -> &'static str {
         RecordBody::CapabilitiesActivated(_) => "CapabilitiesActivated",
         RecordBody::FinalResultRecorded(_) => "FinalResultRecorded",
         RecordBody::OutputValidationFailed(_) => "OutputValidationFailed",
+        RecordBody::ExternalCommandRejected(_) => "ExternalCommandRejected",
     }
 }
 
