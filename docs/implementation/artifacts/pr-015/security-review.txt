@@ -2,9 +2,11 @@ PR-015 security and threat-model review
 Date: 2026-08-10
 Branch: codex/pr-015-model-port
 Base revision: 08f0e6395d6514eaf06e87da7ac3b837335790be
-Reviewed implementation revision: uncommitted working-tree candidate
+Reviewed implementation revision: f3a9ffb891a7dd7d5ed0afe2971d35aa266d3c3a
+Local integration revision: 16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82
 Reviewer: me@jeickmeier.com
-Result: PASS for candidate scope; immutable revision and hosted review remain required
+Result: PASS for PR-015 scope at the immutable implementation and identical
+local integration trees
 
 Scope reviewed
 
@@ -74,6 +76,7 @@ Residual later-PR obligations
 - PR-019 owns the complete cancellation-token tree, timer service, monotonic
   deadline mechanics, and retry scheduler.
 - Real providers/routing, bindings, persistent recovery, hosted cross-platform
-  validation, security workflow evidence, independent review, and immutable
-  merge verification remain open. This review does not pass G2 or mark PR-015
-  Done.
+  validation, hosted security workflow evidence, and independent review remain
+  outside this local integration record. Local merge-tree identity and
+  post-merge CI are retained in integration-validation.txt. This review does
+  not pass G2.

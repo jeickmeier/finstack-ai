@@ -3,7 +3,11 @@ Date: 2026-08-10
 Branch: codex/pr-015-model-port
 Status: NOT RUN
 
-No issue or actual pull request exists yet. Linux/macOS/Windows, hosted
-security/supply-chain, coverage/fuzz, and immutable reviewed-head checks remain
-required before PR-015 acceptance can be closed. No hosted run ID, approval, or
-merge revision is claimed by this candidate artifact.
+No issue or actual pull request was created; PR-015 was integrated locally on
+`main` at `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` at the user's direction.
+Linux/Windows hosted matrices, hosted security/supply-chain, coverage/fuzz, and
+independent approval are therefore not claimed. Local immutable integration,
+Darwin CI, native/WASM leaf compilation, and security review are retained in
+the adjacent artifacts. If this integration is later pushed through a hosted
+pull request, append those runs as supplemental evidence instead of rewriting
+this status.

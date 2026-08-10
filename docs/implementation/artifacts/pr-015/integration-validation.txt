@@ -1,0 +1,48 @@
+PR-015 immutable local integration validation
+Date: 2026-08-10
+Base revision: 08f0e6395d6514eaf06e87da7ac3b837335790be
+Implementation revision: f3a9ffb891a7dd7d5ed0afe2971d35aa266d3c3a
+Implementation tree: 13e1a236f7a2ce63bc20a9586ba9e8c7bb54592f
+Local merge revision: 16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82
+Merge parents: 08f0e6395d6514eaf06e87da7ac3b837335790be and
+  f3a9ffb891a7dd7d5ed0afe2971d35aa266d3c3a
+Merge tree: 13e1a236f7a2ce63bc20a9586ba9e8c7bb54592f
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1; cargo 1.97.1
+Result: PASS
+
+Integration identity
+
+- The local merge has the expected base and implementation parents.
+- The implementation and merge trees are byte-identical.
+- The worktree was clean immediately after the merge.
+- No issue, actual pull request, hosted run, or remote push is claimed.
+
+Post-merge validation
+
+1. mise run test-model
+   PASS: 6 Model contract/profile/request tests, 14 model_port integration
+   tests, and default-feature-free leaf Model compilation for native and
+   wasm32-unknown-unknown.
+
+2. mise run ci
+   PASS: format; Clippy with warnings denied; workspace tests and rustdoc;
+   minimal and WASM checks; architecture and schema governance; conformance;
+   benchmark compilation; workflow lint; supply-chain and secret checks;
+   release smoke; and Python source/wheel builds.
+
+Passing supply-chain warnings were limited to unmatched license allowances and
+the existing syn 2/3 duplicate-version report. No denial, advisory, secret, or
+product failure was reported.
+
+Acceptance disposition
+
+- A01: Passed by byte-identical 1/10/100/1,000-chunk durable outcomes.
+- A02: Passed by deterministic cancellation, consumer-drop, shutdown, and
+  grace-deadline forced-abort tests with zero surviving scripted streams.
+- A03: Passed by exact malformed terminal/tool/usage/response error tests and
+  failure settlement without partial durable success.
+- A04: Passed by the public default-feature-free leaf implementation compiled
+  natively and for wasm32-unknown-unknown without kernel edits.
+
+This local integration closes PR-015 only. It does not pass G2 or satisfy later
+phase, provider, toolset, event-hub, cancellation-tree, or hosted-platform work.

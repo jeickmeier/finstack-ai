@@ -2,10 +2,10 @@ PR-015 working-tree candidate validation
 Date: 2026-08-10
 Branch: codex/pr-015-model-port
 Base revision: 08f0e6395d6514eaf06e87da7ac3b837335790be
-Implementation revision: uncommitted working tree
+Implementation revision: f3a9ffb891a7dd7d5ed0afe2971d35aa266d3c3a
 Environment: Darwin 25.5.0 arm64; rustc 1.97.1; cargo 1.97.1
-Disposition: PASS for the working-tree candidate; immutable and hosted evidence
-remain pending
+Disposition: PASS for the immutable implementation tree; local integration is
+recorded separately
 
 Focused model/runtime and compatibility validation
 
@@ -72,6 +72,9 @@ advisory failure was reported.
 
 Validation boundary
 
-This file reports a working-tree candidate only. No commit, pull request,
-hosted check, independent approval, merged revision, acceptance closure, G2
-decision, or PR-015 Done state is claimed.
+This file retains the candidate command history. Commit
+f3a9ffb891a7dd7d5ed0afe2971d35aa266d3c3a captured the exact validated tree,
+which was integrated locally on main as
+16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82. Post-merge commands and tree
+identity are retained in integration-validation.txt. No hosted check,
+independent approval, actual pull request, or G2 decision is claimed.
