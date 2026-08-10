@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-09 (PR-013 merged; Phase 1 and G1 closed).
+Index last reconciled: 2026-08-10 (PR-014 merged; PR-015 candidate in progress).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -29,8 +29,8 @@ Index last reconciled: 2026-08-09 (PR-013 merged; Phase 1 and G1 closed).
 | ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 exhaustive continuation evidence and G1) |
 | ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 hosted property/fuzz evidence and G1) |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
-| ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
-| ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | Not started | Missing |
+| ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 working-tree Model-port candidate](artifacts/pr-015/README.md); immutable review and remaining ports pending) |
+| ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 retained direct `Arc<dyn Model>` candidate](artifacts/pr-015/README.md); immutable review and later paths pending) |
 | ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Standalone | In progress | Partial (PR-005 harness Done @ `c1108d2`; Python/WASM parity deferred) |
 | ADR-008 | `declarative-capabilities` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Standalone | Not started | Missing |
@@ -54,7 +54,7 @@ Index last reconciled: 2026-08-09 (PR-013 merged; Phase 1 and G1 closed).
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 DTO evidence; routing/lifecycle remains) |
 | ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 final-boundary evidence; PR-018/PR-048 remain) |
 | ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Implemented | Verified |
-| ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | Not started | Missing |
+| ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | In progress | Partial ([PR-015 target-correct boxed Model future/stream candidate and native/WASM leaf proof](artifacts/pr-015/README.md); immutable review pending) |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-032 | `disposable-snapshots` | Durability/ecosystem lead | PR-041 | Accepted | Standalone | Not started | Missing |
 | ADR-033 | `explicit-interruption` | Core/runtime lead | PR-042 | Accepted | Standalone | Not started | Missing |

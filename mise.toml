@@ -94,7 +94,7 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel/runtime and public-Rust-API tests through PR-014"
+description = "Run focused kernel/runtime and public-Rust-API tests through PR-015"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
@@ -103,15 +103,26 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.test-runtime]
-description = "Run PR-014 runtime, task-owner, ingress, and memory-store tests"
+description = "Run PR-014/PR-015 runtime, task-owner, ingress, model, and memory-store tests"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio --locked
 cargo test -p finstack-ai-store-memory --locked
+cargo test -p finstack-ai-test --test model_port --locked
+"""
+
+[tasks.test-model]
+description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio model::tests --locked
+cargo test -p finstack-ai-test --test model_port --locked
+cargo check -p finstack-ai-model-port-leaf-fixture --no-default-features --locked
+cargo check -p finstack-ai-model-port-leaf-fixture --no-default-features --target wasm32-unknown-unknown --locked
 """
 
 [tasks.conformance]
-description = "Run PR-009 reducer traces and public compatibility through PR-011"
+description = "Run reducer traces and public compatibility through PR-015"
 run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]

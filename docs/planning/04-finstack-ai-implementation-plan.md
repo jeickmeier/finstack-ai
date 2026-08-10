@@ -2,7 +2,7 @@
 title: "finstack-ai Implementation Plan"
 subtitle: "Build phases, pull request sequence, delivery gates, and release roadmap"
 author: "finstack-ai project"
-date: "2026-08-09"
+date: "2026-08-10"
 ---
 
 # finstack-ai Implementation Plan
@@ -13,11 +13,11 @@ date: "2026-08-09"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.17 |
+| Version | 0.18 |
 | Status | Implementation baseline |
-| Date | 2026-08-09 |
+| Date | 2026-08-10 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.17; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.18; Security and Threat Model v0.6 |
 
 # Executive implementation decision
 
@@ -871,15 +871,15 @@ A separate ADR is required before merging a change that:
 
 **Principal changes.**
 
-- Add the object-safe `Model` trait, request type, model capabilities, model metadata, and normalized stream items.
+- Add the object-safe boxed `Model` trait and compatibility-controlled descriptor, capability, draft/request, call/reconcile/warmup-context, response/deferral/error, and normalized stream DTOs from TDD section 14. `ModelRequestDraft` is the committed canonical payload; runtime identity, attempt, authorization, cancellation, and optional continuation state are injected only after commit.
 
 - Define/lock `ModelContextProfile` per resolved provider/model: hard input bytes, context/output token ceilings, reserved output/provider overhead, and exact or conservative estimator identity/version with override precedence that can only tighten ceilings.
 
-- Implement a scripted model used by golden traces, retries, suspensions, malformed streams, and cancellation tests.
+- Implement the complete data-only `ToolSpec` request DTO plus a scripted model used by golden traces, retries, suspensions, malformed streams, blocking points, cancellation acknowledgement, warmup, and reuse tests. PR-016 retains schema compilation/validation, approval enforcement, `Toolset`, scheduling, and execution.
 
-- Add model resource reuse, connection warmup hooks, and per-request context without provider-specific fields in the kernel.
+- Add retained model resource reuse, an exactly-once default-no-op warmup hook, synchronous I/O-free estimator execution bound to the profile estimator identity/version/source, and per-request context without provider-specific kernel fields.
 
-- Bridge model stream items into transient events and final kernel inputs.
+- Validate bounded streams through EOF after exactly one `Completed` or `Deferred` terminal, bridge explicit normalized progress into existing confidential transient events, and assemble one final kernel settlement with runtime-owned IDs/timestamps. Opaque provider events remain driver-local.
 
 **Acceptance evidence.**
 
@@ -903,7 +903,7 @@ A separate ADR is required before merging a change that:
 
 **Principal changes.**
 
-- Add `Toolset`, `ToolSpec`, argument validation adapter, tool call context, output streaming, and idempotency metadata.
+- Add `Toolset`, argument-validation adapter, tool-call context, output streaming, idempotency metadata, and executable resolution around the PR-015-owned data-only `ToolSpec` DTO.
 
 - Implement the default Rust JSON Schema draft 2020-12 validator with `jsonschema` 0.40, compiled once per registration and usable in native/WASM builds with host-supplied offline reference resolution and no implicit network fetch.
 
@@ -1106,6 +1106,8 @@ A separate ADR is required before merging a change that:
 - Add namespacing, duplicate policy, aliases, lifecycle hooks, and resolution diagnostics.
 
 - Support ready handles and typed async construction factories; invoke selected factories once under construction cancellation/deadline, surface failures before run start, and retain only ready handles in `ResolvedAgent`.
+
+- Treat `Model::warmup` as part of selected-model ready-handle construction; do not invoke it per request or duplicate the PR-015 runtime reuse path.
 
 - Create immutable `ResolvedAgent` and `ResolvedRunPlan` structures.
 

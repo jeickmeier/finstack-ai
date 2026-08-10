@@ -18,6 +18,12 @@ pub trait Clock {
     fn now(&self) -> Result<Timestamp, IdGenerationError>;
 }
 
+impl<T: Clock + ?Sized> Clock for &T {
+    fn now(&self) -> Result<Timestamp, IdGenerationError> {
+        (**self).now()
+    }
+}
+
 /// Provides cryptographic-quality or test entropy for `UUIDv7` construction.
 pub trait RandomSource {
     /// Fill `buf` with random bytes.
@@ -26,6 +32,12 @@ pub trait RandomSource {
     ///
     /// Returns [`IdGenerationError`] when entropy is unavailable.
     fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError>;
+}
+
+impl<T: RandomSource + ?Sized> RandomSource for &T {
+    fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
+        (**self).fill_bytes(buf)
+    }
 }
 
 /// Failure allocating a `UUIDv7` identifier.

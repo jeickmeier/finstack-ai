@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through PR-013 merge `fa6222f20e4a4616f600e867be94afe12967dcb9` and G1 closure on 2026-08-09:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, PR-014 merge `399f3a7d9d987268f4d79ab90f31b93f854084f8`, and the start of PR-015 on 2026-08-10:
 
-- 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-025 through ADR-028 remain `In progress` / `Partial` because their planned runtime, routing, durability, and lifecycle work remains. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
-- Phase 0 and Phase 1 are `Done`; PR-001–PR-013 are `Done`; PR-014–PR-066 are `Todo`.
+- 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-005, ADR-006, and ADR-030 are `In progress`; their PR-015 evidence remains candidate-only until an immutable reviewed revision exists. ADR-025 through ADR-028 remain `In progress` / `Partial` because their planned runtime, routing, durability, and lifecycle work remains. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
+- Phase 0 and Phase 1 are `Done`; PR-001–PR-014 are `Done`; PR-015 is `In progress`; PR-016–PR-066 are `Todo`.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2–G8 remain `Not ready`.
-- PR-001–PR-013 acceptance criteria are closed. PR-013 local, hosted, long-fuzz, security, integration, phase-exit, and gate evidence is bound under [`artifacts/pr-013/`](artifacts/pr-013/). No exceptions or blockers are open.
+- PR-001–PR-014 acceptance criteria are closed. PR-015 A01–A04 remain pending immutable-review evidence while candidate artifacts are retained under [`artifacts/pr-015/`](artifacts/pr-015/). No exceptions or blockers are open.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "subject": "model-request-draft",
+  "operation": "parse",
+  "input": {
+    "model": "scripted-1",
+    "messages": [],
+    "tools": [],
+    "output": "plain_text",
+    "settings": {
+      "values": {}
+    },
+    "limits": {
+      "max_input_bytes": 4096,
+      "max_input_tokens": 1024,
+      "max_output_tokens": 256
+    },
+    "runtime_effect_id": "must-not-be-committed"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "strict_decode"
+  }
+}
