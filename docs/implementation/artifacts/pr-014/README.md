@@ -1,4 +1,4 @@
-# PR-014 candidate evidence
+# PR-014 evidence
 
 PR-014 implements the runtime commit loop and bounded in-memory journal on
 `codex/pr-014-runtime-commit-loop`.
@@ -20,11 +20,16 @@ TM-11/TM-12/TM-14/TM-16/TM-18 and SEC-INV disposition is in
 [`security-review.txt`](security-review.txt).
 
 Candidate acceptance evidence is complete for PR-014's local implementation
-scope. The logical PR remains `In progress`: no hosted pull request, immutable
-merge revision, or post-merge verification exists yet. Successful provider
-model-response decoding remains PR-015, successful interaction resolution
-remains PR-044, and canonical CBOR/checksum plus persistent stores remain
-PR-039 onward.
+scope. Hosted Linux/macOS/Windows, coverage, fuzz-smoke, nightly, security,
+schema-governance, workflow, and release evidence plus immutable merge-tree
+verification are recorded in [`hosted-validation.txt`](hosted-validation.txt).
+Pull request [#8](https://github.com/jeickmeier/finstack-ai/pull/8) merged as
+`399f3a7d9d987268f4d79ab90f31b93f854084f8`; its tree is identical to the
+validated head `8a9f9a6948dc6dc72a84937dda452915a666257f`. PR-014 is `Done`.
 
-[`SHA256SUMS`](SHA256SUMS) binds the candidate validation and security-review
-artifacts.
+Successful provider model-response decoding remains PR-015, successful
+interaction resolution remains PR-044, and canonical CBOR/checksum plus
+persistent stores remain PR-039 onward.
+
+[`SHA256SUMS`](SHA256SUMS) binds the candidate validation, security review, and
+hosted/merge evidence artifacts.
