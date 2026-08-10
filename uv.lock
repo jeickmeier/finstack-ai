@@ -1,0 +1,13 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[manifest]
+members = [
+    "finstack-ai",
+]
+
+[[package]]
+name = "finstack-ai"
+version = "0.0.1"
+source = { editable = "bindings/finstack-ai-python" }
