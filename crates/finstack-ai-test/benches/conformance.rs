@@ -13,7 +13,6 @@
 //! rather than hiding inside a single point measurement.
 
 use std::hint::black_box;
-use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -123,7 +122,7 @@ fn filler_message(ordinal: usize) -> Message {
 
 fn state_with_messages(count: usize) -> KernelState {
     KernelState {
-        messages: Arc::new((0..count).map(filler_message).collect()),
+        messages: (0..count).map(filler_message).collect::<Vec<_>>().into(),
         ..KernelState::default()
     }
 }
