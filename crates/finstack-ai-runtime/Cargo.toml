@@ -12,7 +12,7 @@ description = "Runtime ports and effect execution for finstack-ai"
 
 [features]
 default = []
-native-tokio = ["dep:getrandom"]
+native-tokio = ["dep:getrandom", "dep:tokio"]
 wasm-host = []
 
 [dependencies]
@@ -20,6 +20,7 @@ finstack-ai-kernel = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 getrandom = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [lints]
 workspace = true
