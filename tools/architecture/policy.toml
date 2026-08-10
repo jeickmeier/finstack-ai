@@ -38,7 +38,7 @@ binding = ["sdk"]
 provider = ["runtime"]
 toolset = ["runtime"]
 observer = ["runtime"]
-store = ["runtime", "protocol"]
+store = ["kernel", "runtime", "protocol"]
 plugin = ["runtime", "sdk", "protocol"]
 application = ["sdk", "runtime", "protocol"]
 # Fixtures and tooling may depend on core packages for checks.

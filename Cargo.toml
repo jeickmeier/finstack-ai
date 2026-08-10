@@ -8,6 +8,7 @@ members = [
     "crates/finstack-ai-test",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
+    "extensions/stores/finstack-ai-store-memory",
     "fixtures/ci/release-smoke",
 ]
 exclude = ["fuzz"]
@@ -40,6 +41,7 @@ finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.0.1", 
 finstack-ai = { path = "crates/finstack-ai", version = "0.0.1", default-features = false }
 finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.0.1" }
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.0.1" }
+finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "0.0.1" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 # Offline draft 2020-12 validation only; keep default features off to avoid

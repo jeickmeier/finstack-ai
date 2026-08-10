@@ -361,6 +361,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-store-memory"
+version = "0.0.1"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "finstack-ai-test"
 version = "0.0.1"
 dependencies = [
