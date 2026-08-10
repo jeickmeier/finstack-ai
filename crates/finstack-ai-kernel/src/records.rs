@@ -19,6 +19,7 @@ use crate::entries::{
     RunSuspended, StageOutcomeRecorded, TimerFired,
 };
 use crate::error::ErrorDescriptorError;
+use crate::external::ExternalCommandRejected;
 use crate::ids::{AppendBatchId, EventId, LaneId, RecordId, RunId, SessionId};
 use crate::limits::LimitReached;
 use crate::run::{
@@ -507,6 +508,8 @@ pub enum RecordBody {
     FinalResultRecorded(FinalResultRecorded),
     /// Validator-independent invalid structured result and retry feedback.
     OutputValidationFailed(OutputValidationFailed),
+    /// Known authorized external command rejected by semantic validation.
+    ExternalCommandRejected(ExternalCommandRejected),
 }
 
 impl RecordBody {
@@ -531,7 +534,8 @@ impl RecordBody {
             | Self::OutputConfigured(_)
             | Self::CapabilitiesActivated(_)
             | Self::FinalResultRecorded(_)
-            | Self::OutputValidationFailed(_) => 0,
+            | Self::OutputValidationFailed(_)
+            | Self::ExternalCommandRejected(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -570,6 +574,7 @@ impl RecordBody {
             Self::CapabilitiesActivated(_) => "capabilities_activated",
             Self::FinalResultRecorded(_) => "final_result_recorded",
             Self::OutputValidationFailed(_) => "output_validation_failed",
+            Self::ExternalCommandRejected(_) => "external_command_rejected",
         }
     }
 }

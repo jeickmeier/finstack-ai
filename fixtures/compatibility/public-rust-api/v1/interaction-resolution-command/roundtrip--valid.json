@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "subject": "interaction-resolution-command",
+  "operation": "parse",
+  "input": {
+    "locator": {
+      "tenant_scope": "tenant-a",
+      "session_id": "01234567-89ab-7cde-89ab-012345679201",
+      "lane_id": "01234567-89ab-7cde-89ab-012345679202",
+      "run_id": "01234567-89ab-7cde-89ab-012345679203"
+    },
+    "resolution": {
+      "interaction_id": "01234567-89ab-7cde-89ab-012345679205",
+      "resolution_id": "resolution-1",
+      "principal": {
+        "issuer": "https://issuer.example",
+        "subject": "user-1",
+        "tenant_scope": "tenant-a"
+      },
+      "authorization": {
+        "policy_version": "policy-v1",
+        "decision_id": "decision-1"
+      },
+      "response": {
+        "approved": true
+      },
+      "comment": "approved"
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

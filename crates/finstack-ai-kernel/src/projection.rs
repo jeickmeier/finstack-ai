@@ -1,8 +1,10 @@
 //! Exact typed schema-1 nested fingerprint projections.
 
+use core::marker::PhantomData;
 use std::collections::BTreeMap;
 
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 
 use crate::content::{
     BlobRef, ContentBlock, MediaRef, OpaquePayload, ToolCallBlock, ToolResultBlock,
@@ -20,6 +22,48 @@ use crate::raw_json::{Metadata, RawJson};
 use crate::refs::{ArtifactRef, CostAmount, ExternalHandleRef, Usage};
 use crate::time::Timestamp;
 
+/// Serializes a borrowed slice through a per-element projection, lazily.
+///
+/// Collecting projections into a `Vec` allocated once per collection per
+/// digest; every message in every fingerprint and state hash paid it. The
+/// emitted sequence is identical either way.
+pub(crate) struct ProjectedSeq<'a, T, P> {
+    items: &'a [T],
+    _marker: PhantomData<fn() -> P>,
+}
+
+impl<'a, T, P> ProjectedSeq<'a, T, P> {
+    pub(crate) const fn new(items: &'a [T]) -> Self {
+        Self {
+            items,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T, P> Serialize for ProjectedSeq<'a, T, P>
+where
+    P: From<&'a T> + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.items.len()))?;
+        for item in self.items {
+            sequence.serialize_element(&P::from(item))?;
+        }
+        sequence.end()
+    }
+}
+
+/// Lazily projected content-block sequence.
+pub(crate) type ContentSeq<'a> = ProjectedSeq<'a, ContentBlock, ContentProjection<'a>>;
+/// Lazily projected artifact sequence.
+pub(crate) type ArtifactSeq<'a> = ProjectedSeq<'a, ArtifactRef, ArtifactProjection<'a>>;
+/// Lazily projected message sequence.
+pub(crate) type MessageSeq<'a> = ProjectedSeq<'a, Message, MessageProjection<'a>>;
+
 #[derive(Serialize)]
 pub(crate) struct EffectCompletedProjection<'a> {
     effect_id: EffectId,
@@ -28,7 +72,7 @@ pub(crate) struct EffectCompletedProjection<'a> {
     output_digest: Digest,
     usage: Option<UsageProjection<'a>>,
     usage_digest: Option<Digest>,
-    artifacts: Vec<ArtifactProjection<'a>>,
+    artifacts: ArtifactSeq<'a>,
     provider_ids: ProviderIdsProjection<'a>,
     completion_id: Option<&'a str>,
     reservation_id: Option<BudgetReservationId>,
@@ -43,11 +87,7 @@ impl<'a> From<&'a EffectCompleted> for EffectCompletedProjection<'a> {
             output_digest: value.output_digest(),
             usage: value.usage().map(UsageProjection::from),
             usage_digest: value.usage_digest(),
-            artifacts: value
-                .artifacts()
-                .iter()
-                .map(ArtifactProjection::from)
-                .collect(),
+            artifacts: ArtifactSeq::new(value.artifacts()),
             provider_ids: ProviderIdsProjection::from(value.provider_ids()),
             completion_id: value.completion_id(),
             reservation_id: value.reservation_id(),
@@ -105,7 +145,7 @@ impl<'a> From<&'a EffectDeferred> for EffectDeferredProjection<'a> {
 pub(crate) struct MessageProjection<'a> {
     id: MessageId,
     role: MessageRole,
-    content: Vec<ContentProjection<'a>>,
+    content: ContentSeq<'a>,
     created_at: Timestamp,
     model: Option<ModelRefProjection<'a>>,
     provider_ids: ProviderIdsProjection<'a>,
@@ -117,11 +157,7 @@ impl<'a> From<&'a Message> for MessageProjection<'a> {
         Self {
             id: *value.id(),
             role: value.role(),
-            content: value
-                .content()
-                .iter()
-                .map(ContentProjection::from)
-                .collect(),
+            content: ContentSeq::new(value.content()),
             created_at: value.created_at(),
             model: value.model().map(ModelRefProjection::from),
             provider_ids: ProviderIdsProjection::from(value.provider_ids()),
@@ -196,7 +232,7 @@ pub(crate) enum ContentProjection<'a> {
     },
     ToolResult {
         tool_call_id: ToolCallId,
-        content: Vec<ContentProjection<'a>>,
+        content: ContentSeq<'a>,
         is_error: bool,
     },
     Opaque {
@@ -246,11 +282,7 @@ fn tool_call_projection(block: &ToolCallBlock) -> ContentProjection<'_> {
 fn tool_result_projection(block: &ToolResultBlock) -> ContentProjection<'_> {
     ContentProjection::ToolResult {
         tool_call_id: *block.tool_call_id(),
-        content: block
-            .content()
-            .iter()
-            .map(ContentProjection::from)
-            .collect(),
+        content: ContentSeq::new(block.content()),
         is_error: block.is_error(),
     }
 }

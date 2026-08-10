@@ -725,6 +725,9 @@ fn followup_records(
     let start =
         usize::try_from(batch.next_source_index).map_err(|_| KernelError::InvariantViolation)?;
     let mut message_index = 0_usize;
+    // Accumulated across the loop and written back once. Rebuilding the shared
+    // slice per iteration made finalizing a k-call batch O(k^2).
+    let mut result_ids = batch.result_message_ids.to_vec();
     for index in start..batch.calls.len() {
         let ActiveToolCallStatus::Buffered {
             result,
@@ -753,9 +756,7 @@ fn followup_records(
             result_message_id: message_id,
             settlement_digest,
         };
-        let mut result_ids = batch.result_message_ids.to_vec();
         result_ids.push(message_id);
-        batch.result_message_ids = result_ids.into();
         batch.next_source_index = batch
             .next_source_index
             .checked_add(1)
@@ -763,6 +764,7 @@ fn followup_records(
         finalized_effects.push(batch.calls[index].assigned.effect_id);
         message_index += 1;
     }
+    batch.result_message_ids = result_ids.into();
 
     if batch.fatal_error.is_none()
         && current_group_complete

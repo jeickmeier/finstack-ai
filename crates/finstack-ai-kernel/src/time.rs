@@ -43,8 +43,8 @@ impl Timestamp {
     /// Format as exact RFC 3339 UTC with millisecond precision.
     #[must_use]
     pub fn to_rfc3339(&self) -> String {
-        let (year, month, day, hour, minute, second, millis) = civil_from_unix_ms(self.0);
-        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+        let mut buffer = Rfc3339Buffer::new();
+        buffer.encode(self.0).to_owned()
     }
 
     /// Parse exact RFC 3339 UTC with millisecond precision.
@@ -86,15 +86,55 @@ impl Timestamp {
 
 impl fmt::Debug for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buffer = Rfc3339Buffer::new();
         f.debug_tuple("Timestamp")
-            .field(&self.to_rfc3339())
+            .field(&buffer.encode(self.0))
             .finish()
     }
 }
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_rfc3339())
+        let mut buffer = Rfc3339Buffer::new();
+        f.write_str(buffer.encode(self.0))
+    }
+}
+
+/// Stack buffer for `YYYY-MM-DDTHH:MM:SS.sssZ` text.
+///
+/// Writes the seven fixed-width fields directly instead of running seven
+/// padded-integer `core::fmt` dispatches plus a heap allocation. Every message
+/// and every record carries a timestamp.
+pub(crate) struct Rfc3339Buffer([u8; 24]);
+
+impl Rfc3339Buffer {
+    pub(crate) const fn new() -> Self {
+        Self(*b"0000-00-00T00:00:00.000Z")
+    }
+
+    pub(crate) fn encode(&mut self, unix_ms: i64) -> &str {
+        let (year, month, day, hour, minute, second, millis) = civil_from_unix_ms(unix_ms);
+        write_digits(&mut self.0[0..4], year);
+        write_digits(&mut self.0[5..7], month);
+        write_digits(&mut self.0[8..10], day);
+        write_digits(&mut self.0[11..13], hour);
+        write_digits(&mut self.0[14..16], minute);
+        write_digits(&mut self.0[17..19], second);
+        write_digits(&mut self.0[20..23], millis);
+        // Only ASCII digits and fixed separators are ever written.
+        core::str::from_utf8(&self.0).expect("RFC 3339 text is ASCII")
+    }
+}
+
+/// Write `value` right-aligned and zero-padded across the whole slice.
+///
+/// Callers pass slices sized to the field width, and `civil_from_unix_ms`
+/// bounds every field, so truncation is unreachable.
+fn write_digits(slot: &mut [u8], value: u32) {
+    let mut remaining = value;
+    for position in slot.iter_mut().rev() {
+        *position = b'0' + u8::try_from(remaining % 10).expect("digit fits u8");
+        remaining /= 10;
     }
 }
 
@@ -125,8 +165,21 @@ impl<'de> Deserialize<'de> for Timestamp {
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let text = String::deserialize(deserializer)?;
-            Self::parse_rfc3339(&text).map_err(serde::de::Error::custom)
+            struct Rfc3339Visitor;
+
+            impl serde::de::Visitor<'_> for Rfc3339Visitor {
+                type Value = Timestamp;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("an RFC 3339 UTC timestamp with millisecond precision")
+                }
+
+                fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                    Timestamp::parse_rfc3339(value).map_err(E::custom)
+                }
+            }
+
+            deserializer.deserialize_str(Rfc3339Visitor)
         } else {
             let ms = i64::deserialize(deserializer)?;
             Self::from_unix_ms(ms).map_err(serde::de::Error::custom)

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::decision::KernelError;
+use crate::RecordExternalCommandRejected;
 use crate::RetryDirective;
 use crate::StageCursor;
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
@@ -51,6 +52,8 @@ pub enum KernelInput {
     CapabilitiesActivated(CapabilitiesActivated),
     /// Commit a normalized external structured-output validation result.
     OutputValidated(OutputValidated),
+    /// Record a known authorized external command rejected by semantic validation.
+    RecordExternalCommandRejected(RecordExternalCommandRejected),
 }
 
 /// Normalized cancellation request; the request ID is allocated by `TransitionEnv`.

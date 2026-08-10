@@ -4,7 +4,6 @@
 //! Equality and digests use those canonical bytes.
 
 use core::fmt;
-use std::collections::BTreeSet;
 
 use bytes::Bytes;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -150,10 +149,10 @@ impl Serialize for RawJson {
         S: serde::Serializer,
     {
         if serializer.is_human_readable() {
-            // Human/diagnostic JSON emits the structured value.
-            let value: Value =
-                serde_json::from_slice(self.as_bytes()).map_err(serde::ser::Error::custom)?;
-            value.serialize(serializer)
+            // Human/diagnostic JSON emits the structured value. Stored bytes are
+            // already canonical, so stream them straight through instead of
+            // rebuilding a `serde_json::Value` to emit the same tokens.
+            crate::transcode::CanonicalJson(self.as_bytes()).serialize(serializer)
         } else {
             // Durable CBOR carries the canonical JCS UTF-8 bytes as a byte string.
             serializer.serialize_bytes(self.as_bytes())
@@ -514,7 +513,6 @@ impl<'de> Visitor<'de> for StrictVisitor {
             )));
         }
         let mut object = serde_json::Map::new();
-        let mut seen = BTreeSet::<String>::new();
         while let Some(key) = map.next_key::<String>()? {
             if let Some(max_key_bytes) = self.max_key_bytes
                 && key.len() > max_key_bytes
@@ -524,7 +522,9 @@ impl<'de> Visitor<'de> for StrictVisitor {
                     key.len()
                 )));
             }
-            if !seen.insert(key.clone()) {
+            // The object under construction is itself the seen-key set; a side
+            // `BTreeSet<String>` would clone every key for no extra signal.
+            if object.contains_key(&key) {
                 return Err(de::Error::custom(format!("duplicate object key: {key}")));
             }
             let value = map.next_value_seed(StrictValue {

@@ -66,4 +66,9 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial: PR-014 candidate commit
+  `ff9178f2244c8d8fd0c62cbba18b2b4dfbee2a29` authenticates, replays, validates,
+  and routes deferred external completion under the original `EffectId`
+  (PR-014-E-runtime-f7d0f0ecede0; PR-014-E-security-a8a835efcf19).
+  Provider-neutral successful model decoding, successful interaction resolution,
+  and later persistent completion paths remain mapped work.

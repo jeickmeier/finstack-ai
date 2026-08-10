@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 use core::str::FromStr;
 use std::sync::Arc;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 
 /// Opaque tag distinguishing typed UUID identifiers at compile time.
@@ -91,7 +91,8 @@ impl<T: IdTag> Id<T> {
     /// Serialize as the canonical lowercase hyphenated UUID string.
     #[must_use]
     pub fn to_canonical_string(&self) -> String {
-        format_uuid_hyphenated(&self.value)
+        let mut buffer = UuidBuffer::new();
+        buffer.encode(&self.value).to_owned()
     }
 
     /// Parse a lowercase or uppercase hyphenated UUID string.
@@ -146,15 +147,17 @@ impl<T: IdTag> Hash for Id<T> {
 
 impl<T: IdTag> fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut buffer = UuidBuffer::new();
         f.debug_tuple(T::NAME)
-            .field(&self.to_canonical_string())
+            .field(&buffer.encode(&self.value))
             .finish()
     }
 }
 
 impl<T: IdTag> fmt::Display for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_canonical_string())
+        let mut buffer = UuidBuffer::new();
+        f.write_str(buffer.encode(&self.value))
     }
 }
 
@@ -171,7 +174,8 @@ impl<T: IdTag> Serialize for Id<T> {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_canonical_string())
+        let mut buffer = UuidBuffer::new();
+        serializer.serialize_str(buffer.encode(&self.value))
     }
 }
 
@@ -180,8 +184,49 @@ impl<'de, T: IdTag> Deserialize<'de> for Id<T> {
     where
         D: Deserializer<'de>,
     {
-        let text = String::deserialize(deserializer)?;
-        Self::parse(&text).map_err(serde::de::Error::custom)
+        struct IdVisitor<T: IdTag>(PhantomData<fn() -> T>);
+
+        impl<T: IdTag> de::Visitor<'_> for IdVisitor<T> {
+            type Value = Id<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "a hyphenated {} UUID string", T::NAME)
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Id::parse(value).map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_str(IdVisitor::<T>(PhantomData))
+    }
+}
+
+/// Stack buffer for canonical hyphenated UUID text.
+///
+/// Encoding writes 36 ASCII bytes with a nibble lookup table, avoiding the
+/// heap allocation and 16 `core::fmt` dispatches a `format!` would cost. IDs
+/// are the most frequently serialized scalar in every canonical projection.
+pub(crate) struct UuidBuffer([u8; 36]);
+
+impl UuidBuffer {
+    pub(crate) const fn new() -> Self {
+        Self([b'-'; 36])
+    }
+
+    pub(crate) fn encode(&mut self, bytes: &[u8; 16]) -> &str {
+        const GROUPS: [(usize, usize, usize); 5] =
+            [(0, 0, 4), (9, 4, 2), (14, 6, 2), (19, 8, 2), (24, 10, 6)];
+        for (text_start, byte_start, count) in GROUPS {
+            for offset in 0..count {
+                let byte = bytes[byte_start + offset];
+                let position = text_start + offset * 2;
+                self.0[position] = crate::digest::HEX_DIGITS[usize::from(byte >> 4)];
+                self.0[position + 1] = crate::digest::HEX_DIGITS[usize::from(byte & 0x0f)];
+            }
+        }
+        // Only ASCII hex digits and the pre-set hyphens are ever written.
+        core::str::from_utf8(&self.0).expect("canonical UUID text is ASCII")
     }
 }
 
@@ -193,28 +238,6 @@ pub struct IdParseError {
     pub family: &'static str,
     /// Rejected input.
     pub input: String,
-}
-
-fn format_uuid_hyphenated(bytes: &[u8; 16]) -> String {
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15],
-    )
 }
 
 fn parse_uuid_hyphenated(input: &str) -> Option<[u8; 16]> {

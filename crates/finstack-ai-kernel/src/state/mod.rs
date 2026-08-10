@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::capabilities::ActiveCapability;
-use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES};
+use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::digest::Digest;
 use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
 use crate::entries::{
@@ -351,7 +351,12 @@ pub struct KernelState {
     /// Current turn.
     pub current_turn: Option<CurrentTurn>,
     /// Durable final assistant messages in model-only order.
-    pub messages: Arc<[Message]>,
+    ///
+    /// `Arc<Vec<_>>` rather than `Arc<[_]>` so appending can reuse the buffer
+    /// via [`Arc::make_mut`]. The transactional state clone shares the `Arc`,
+    /// so the first append in a batch pays one copy and the rest are amortized
+    /// O(1); an `Arc<[_]>` forces a full copy on every single append.
+    pub messages: Arc<Vec<Message>>,
     /// Outstanding model effect.
     pub pending_model_effect: Option<PendingModelEffect>,
     /// Candidate gated by `before_finalize`.
@@ -395,8 +400,20 @@ pub struct KernelState {
 }
 
 impl PartialEq for KernelState {
+    /// Compares the canonical state projection rather than two `serde_json`
+    /// DOM trees.
+    ///
+    /// A failed projection compares unequal: the previous `.ok() == .ok()`
+    /// form reported two *unserializable* states as equal, which is exactly
+    /// backwards for a fail-closed boundary.
     fn eq(&self, other: &Self) -> bool {
-        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+        match (
+            serde_json_canonicalizer::to_vec(self),
+            serde_json_canonicalizer::to_vec(other),
+        ) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
     }
 }
 
@@ -414,7 +431,7 @@ impl Default for KernelState {
             phase: None,
             cycle: 0,
             current_turn: None,
-            messages: Arc::from([]),
+            messages: Arc::new(Vec::new()),
             pending_model_effect: None,
             terminal_candidate: None,
             stage_settlements: BTreeMap::new(),
@@ -759,6 +776,26 @@ impl KernelState {
             return Err(invalid());
         }
 
+        // One pass over messages builds the authorship index, so each tool call
+        // costs a lookup instead of a full message-and-block rescan. The nested
+        // form was O(tool_calls x messages x blocks) and ran on every apply and
+        // every deserialize, making it a decode-path denial-of-service surface.
+        let mut authored: BTreeMap<&ToolCallId, Vec<(&MessageId, &ToolCallBlock)>> =
+            BTreeMap::new();
+        for message in self.messages.iter() {
+            if message.role() != crate::MessageRole::Assistant {
+                continue;
+            }
+            for block in message.content() {
+                if let ContentBlock::ToolCall(call) = block {
+                    authored
+                        .entry(call.tool_call_id())
+                        .or_default()
+                        .push((message.id(), call));
+                }
+            }
+        }
+
         let mut effect_ids = std::collections::BTreeSet::new();
         for (tool_call_id, identity) in &self.tool_calls {
             if identity.call.tool_call_id() != tool_call_id
@@ -766,12 +803,10 @@ impl KernelState {
             {
                 return Err(invalid());
             }
-            let source_matches = self.messages.iter().any(|message| {
-                *message.id() == identity.source_message_id
-                    && message.role() == crate::MessageRole::Assistant
-                    && message.content().iter().any(|block| {
-                        matches!(block, ContentBlock::ToolCall(call) if call == &identity.call)
-                    })
+            let source_matches = authored.get(tool_call_id).is_some_and(|authorships| {
+                authorships.iter().any(|(message_id, call)| {
+                    **message_id == identity.source_message_id && *call == &identity.call
+                })
             });
             if !source_matches {
                 return Err(invalid());
@@ -818,15 +853,21 @@ impl KernelState {
                 .values()
                 .filter(|identity| identity.tool_batch_id == Some(closed.tool_batch_id))
                 .count();
+            // Hoisted out of the membership test below, which was O(results x messages).
+            let tool_message_ids = self
+                .messages
+                .iter()
+                .filter(|message| message.role() == crate::MessageRole::Tool)
+                .map(crate::Message::id)
+                .collect::<std::collections::BTreeSet<_>>();
             if !allowed_phase
                 || closed.cycle > self.cycle
                 || assigned_count == 0
                 || assigned_count != closed.result_message_ids.len()
-                || closed.result_message_ids.iter().any(|message_id| {
-                    !self.messages.iter().any(|message| {
-                        message.id() == message_id && message.role() == crate::MessageRole::Tool
-                    })
-                })
+                || closed
+                    .result_message_ids
+                    .iter()
+                    .any(|message_id| !tool_message_ids.contains(message_id))
             {
                 return Err(invalid());
             }
@@ -1041,44 +1082,61 @@ impl KernelState {
     /// be represented or canonicalized as JSON.
     pub fn state_hash(&self) -> Result<Digest, KernelError> {
         self.validate().map_err(|_| KernelError::StateHashFailed)?;
-        let canonical = if self.state_version == 1 {
-            serde_json_canonicalizer::to_vec(&KernelStateHashV1::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-            ))
+        // Streamed into the hasher rather than canonicalized into a `Vec`: the
+        // state projection is the largest single canonical payload the kernel
+        // produces, and buffering it grew a fresh allocation every call.
+        let mut writer =
+            crate::digest::DigestWriter::new("kernel-state", u32::from(self.state_version))
+                .map_err(|_| KernelError::StateHashFailed)?;
+        if self.state_version == 1 {
+            serde_json_canonicalizer::to_writer(
+                &KernelStateHashV1::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                ),
+                &mut writer,
+            )
         } else if self.state_version == 2 {
-            serde_json_canonicalizer::to_vec(&KernelStateHashV2::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &KernelStateHashV2::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         } else if self.state_version == 3 {
-            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV3::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV3::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         } else {
-            serde_json_canonicalizer::to_vec(&hash_projection::KernelStateHashV4::from_state(
-                self,
-                stage_hash_entries(&self.stage_settlements),
-                model_hash_entries(&self.model_settlements),
-                completion_hash_entries(&self.completion_identities),
-                tool_call_hash_entries(&self.tool_calls),
-                tool_settlement_hash_entries(&self.tool_settlements),
-            ))
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV4::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
         }
         .map_err(|_| KernelError::StateHashFailed)?;
-        Digest::domain_separated("kernel-state", u32::from(self.state_version), &canonical)
-            .map_err(|_| KernelError::StateHashFailed)
+        Ok(writer.finish().0)
     }
 }
 
@@ -1335,7 +1393,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1354,7 +1412,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1378,7 +1436,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1407,7 +1465,7 @@ impl Serialize for KernelState {
                 phase: self.phase,
                 cycle: self.cycle,
                 current_turn: self.current_turn.as_ref(),
-                messages: &self.messages,
+                messages: self.messages.as_slice(),
                 pending_model_effect: self.pending_model_effect.as_ref(),
                 terminal_candidate: self.terminal_candidate.as_ref(),
                 stage_settlements: stage_hash_entries(&self.stage_settlements),
@@ -1750,5 +1808,183 @@ const fn stage_name(stage: Stage) -> &'static str {
         Stage::BeforeToolBatch => "before_tool_batch",
         Stage::AfterToolBatch => "after_tool_batch",
         Stage::BeforeFinalize => "before_finalize",
+    }
+}
+
+#[cfg(test)]
+mod validate_tool_state_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::ids::MessageId;
+    use crate::message::{Message, MessageRole, ProviderIds};
+    use crate::raw_json::{Metadata, RawJson};
+    use crate::tools::ToolCallIdentity;
+
+    /// Reference implementation of the authorship check: the nested scan the
+    /// indexed version replaced. Any input the two disagree on is a regression
+    /// in a fail-closed boundary, so the equivalence is asserted directly.
+    fn authored_by_nested_scan(state: &KernelState, identity: &ToolCallIdentity) -> bool {
+        state.messages.iter().any(|message| {
+            *message.id() == identity.source_message_id
+                && message.role() == MessageRole::Assistant
+                && message.content().iter().any(
+                    |block| matches!(block, ContentBlock::ToolCall(call) if call == &identity.call),
+                )
+        })
+    }
+
+    fn id<T: crate::IdTag>(ordinal: u64) -> crate::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        crate::Id::from_bytes(bytes)
+    }
+
+    fn tool_call(ordinal: u64, name: &str) -> ToolCallBlock {
+        ToolCallBlock::try_new(
+            id::<crate::ToolCallTag>(ordinal),
+            name,
+            RawJson::parse(format!(r#"{{"ordinal":{ordinal}}}"#)).expect("arguments"),
+        )
+        .expect("tool call")
+    }
+
+    fn message(message_id: MessageId, role: MessageRole, blocks: Vec<ContentBlock>) -> Message {
+        Message::try_new(
+            message_id,
+            role,
+            blocks,
+            crate::Timestamp::from_unix_ms(1_000).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message")
+    }
+
+    /// Builds a state whose single tool call is authored by its source message.
+    fn authored_state() -> (KernelState, ToolCallIdentity) {
+        let source_message_id = id::<crate::MessageTag>(1);
+        let call = tool_call(2, "lookup_price");
+        let identity = ToolCallIdentity {
+            cycle: 0,
+            turn_id: id::<crate::TurnTag>(3),
+            source_message_id,
+            tool_batch_id: None,
+            effect_id: None,
+            call: call.clone(),
+        };
+        let state = KernelState {
+            state_version: 2,
+            messages: Arc::new(vec![message(
+                source_message_id,
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall(call.clone())],
+            )]),
+            tool_calls: [(*call.tool_call_id(), identity.clone())]
+                .into_iter()
+                .collect(),
+            ..KernelState::default()
+        };
+        (state, identity)
+    }
+
+    #[test]
+    fn indexed_authorship_matches_the_nested_scan_across_mutations() {
+        let (base, identity) = authored_state();
+
+        // Authored: both forms agree it is present.
+        assert!(authored_by_nested_scan(&base, &identity));
+        assert_eq!(base.validate_tool_state(), Ok(()));
+
+        // Wrong source message id.
+        let mut wrong_source = identity.clone();
+        wrong_source.source_message_id = id::<crate::MessageTag>(99);
+        let mut state = base.clone();
+        state.tool_calls = [(*wrong_source.call.tool_call_id(), wrong_source.clone())]
+            .into_iter()
+            .collect();
+        assert!(!authored_by_nested_scan(&state, &wrong_source));
+        assert!(state.validate_tool_state().is_err());
+
+        // Author message exists but carries a different call payload.
+        let mut different_args = base.clone();
+        different_args.messages = Arc::new(vec![message(
+            identity.source_message_id,
+            MessageRole::Assistant,
+            vec![ContentBlock::ToolCall(tool_call(2, "different_tool"))],
+        )]);
+        assert!(!authored_by_nested_scan(&different_args, &identity));
+        assert!(different_args.validate_tool_state().is_err());
+
+        // A non-assistant author is unrepresentable: `Message::try_new` rejects
+        // a tool-role message carrying a tool-call block, so the role filter in
+        // both forms can only ever see assistant authorship.
+        assert!(
+            Message::try_new(
+                identity.source_message_id,
+                MessageRole::Tool,
+                vec![ContentBlock::ToolCall(identity.call.clone())],
+                crate::Timestamp::from_unix_ms(1_000).expect("timestamp"),
+                None,
+                ProviderIds::empty(),
+                Metadata::empty(),
+            )
+            .is_err()
+        );
+
+        // Same id authored by a non-source message must not satisfy the check.
+        let mut other_author = base.clone();
+        other_author.messages = Arc::new(vec![message(
+            id::<crate::MessageTag>(42),
+            MessageRole::Assistant,
+            vec![ContentBlock::ToolCall(identity.call.clone())],
+        )]);
+        assert!(!authored_by_nested_scan(&other_author, &identity));
+        assert!(other_author.validate_tool_state().is_err());
+    }
+
+    #[test]
+    fn duplicate_effect_assignments_are_still_rejected() {
+        let (mut state, identity) = authored_state();
+        let second_call = tool_call(7, "lookup_quote");
+        let effect_id = id::<crate::EffectTag>(11);
+        let batch_id = id::<crate::ToolBatchTag>(12);
+
+        let mut first = identity.clone();
+        first.effect_id = Some(effect_id);
+        first.tool_batch_id = Some(batch_id);
+        let mut second = ToolCallIdentity {
+            call: second_call.clone(),
+            ..identity.clone()
+        };
+        second.effect_id = Some(effect_id);
+        second.tool_batch_id = Some(batch_id);
+
+        state.messages = Arc::new(vec![message(
+            identity.source_message_id,
+            MessageRole::Assistant,
+            vec![
+                ContentBlock::ToolCall(identity.call.clone()),
+                ContentBlock::ToolCall(second_call.clone()),
+            ],
+        )]);
+        state.tool_calls = [
+            (*first.call.tool_call_id(), first),
+            (*second.call.tool_call_id(), second),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            state.validate_tool_state(),
+            Err(KernelError::InvalidInputPayload {
+                field: "tool_state",
+                reason_code: "inconsistent",
+            }),
+            "the same effect id assigned to two calls must stay rejected"
+        );
     }
 }

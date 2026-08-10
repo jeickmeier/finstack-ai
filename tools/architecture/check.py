@@ -353,6 +353,40 @@ def run_cargo_metadata(
     return json.loads(proc.stdout)
 
 
+def run_cargo_tree(
+    manifest_path: Path,
+    package: str,
+    *,
+    target: str,
+) -> list[tuple[int, str]]:
+    """Resolve one selected package graph without workspace feature unification."""
+    cmd = [
+        resolve_tool("cargo"),
+        "tree",
+        "--manifest-path",
+        str(manifest_path),
+        "--package",
+        package,
+        "--target",
+        target,
+        "--no-default-features",
+        "--edges",
+        "normal",
+        "--prefix",
+        "depth",
+        "--locked",
+    ]
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"cargo tree failed ({proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}")
+    resolved: list[tuple[int, str]] = []
+    for line in proc.stdout.splitlines():
+        match = re.match(r"^(\d+)([^ ]+)", line)
+        if match:
+            resolved.append((int(match.group(1)), match.group(2)))
+    return resolved
+
+
 def posix_rel(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
 
@@ -668,6 +702,7 @@ def check_wasm_graph(ctx: CheckContext) -> None:
     try:
         metadata = run_cargo_metadata(
             manifest,
+            no_default_features=True,
             filter_platform="wasm32-unknown-unknown",
             offline=False,
             locked=True,
@@ -696,7 +731,6 @@ def check_wasm_graph(ctx: CheckContext) -> None:
         )
 
     exact = set(ctx.policy.get("wasm", {}).get("forbidden_exact", {}).get("names", []))
-    id_map = package_id_map(metadata)
     node_ids = {n["id"] for n in resolve.get("nodes", [])}
     if wasm_pkg["id"] not in node_ids:
         ctx.warn(
@@ -705,17 +739,29 @@ def check_wasm_graph(ctx: CheckContext) -> None:
         )
         return
 
-    for dep_id in transitive_closure(metadata, wasm_pkg["id"]):
-        if dep_id == wasm_pkg["id"]:
-            continue
-        dep = id_map[dep_id]
-        if dep["name"] in exact:
-            path = " -> ".join(shortest_dep_path(metadata, wasm_pkg["id"], dep_id))
+    try:
+        selected_graph = run_cargo_tree(
+            manifest,
+            wasm_name,
+            target="wasm32-unknown-unknown",
+        )
+    except RuntimeError as exc:
+        ctx.add(
+            "ARCH012",
+            wasm_name,
+            f"unable to resolve selected WASM package graph: {exc}",
+            location=str(manifest),
+        )
+        return
+    stack: list[str] = []
+    for depth, name in selected_graph:
+        stack[depth:] = [name]
+        if name in exact:
             ctx.add(
                 "ARCH012",
                 wasm_name,
-                f"browser WASM graph contains forbidden package `{dep['name']}`",
-                path=path or dep["name"],
+                f"browser WASM graph contains forbidden package `{name}`",
+                path=" -> ".join(stack),
             )
 
 

@@ -1,6 +1,6 @@
 # public-rust-api fixtures
 
-Compatibility corpus for public Rust kernel value types (PR-006–PR-013).
+Compatibility corpus for public Rust kernel value types (PR-006–PR-014).
 
 Layout:
 
@@ -22,7 +22,9 @@ Kinds:
 - `message`
 - `run-accepted`, `effect-requested`, `record-draft`, `append-request`, `run-event`
 - `run-phase`, `kernel-input`, `committed-batch`, `kernel-state`
-- `pr009-record`, `pr010-record`, `pr011-record`, `pr012-record`
+- `operation-locator`, `external-effect-completion-command`
+- `interaction-resolution-command`, `external-command-rejected`
+- `pr009-record`, `pr010-record`, `pr011-record`, `pr012-record`, `pr014-record`
 - `corrupt-replay`
 
 Boundary fixtures use materialization recipes (`json_string`, `scientific_array`,

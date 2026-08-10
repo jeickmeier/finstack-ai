@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "subject": "external-command-rejected",
+  "operation": "parse",
+  "input": {
+    "command_kind": "effect_completion",
+    "command_id": "completion-1",
+    "target": {
+      "interaction": "01234567-89ab-7cde-89ab-012345679205"
+    },
+    "principal": {
+      "issuer": "https://issuer.example",
+      "subject": "user-1",
+      "tenant_scope": "tenant-a"
+    },
+    "authorization": {
+      "policy_version": "policy-v1",
+      "decision_id": "decision-1"
+    },
+    "reason_code": "conflicting_completion",
+    "submitted_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "accepted_digest": null
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "invalid_input_payload"
+  }
+}

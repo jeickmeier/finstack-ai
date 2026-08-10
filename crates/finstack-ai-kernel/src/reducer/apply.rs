@@ -5,18 +5,18 @@ use std::sync::Arc;
 
 use super::capacity;
 use super::decision::{CommittedBatch, KernelError};
+use super::failure_from_state;
 use super::fingerprint;
 use super::fingerprint::{
     completed_record_digest, completed_tool_record_digest, failed_record_digest,
     failed_tool_record_digest, opened_tool_batch_plan_digest, synthetic_tool_digest,
     tool_batch_close_digest,
 };
-use super::{canonical_digest, failure_from_state};
 use crate::content::ContentBlock;
 use crate::digest::Digest;
 use crate::effects::{EffectKind, EffectOutputKind};
 use crate::entries::{
-    ContextPrepared, EntryAppended, RunCompleted, RunFailed, Stage, StageCursor, StageDisposition,
+    EntryAppended, RunCompleted, RunFailed, Stage, StageCursor, StageDisposition,
     StageOutcomeRecorded,
 };
 use crate::events::{EventCorrelations, RunEvent};
@@ -43,11 +43,16 @@ pub(super) fn apply(
 ) -> Result<(KernelState, Arc<[RunEvent]>), KernelError> {
     validate_batch_range(original, committed)?;
     validate_record_sequences(committed)?;
-    if original.terminal.is_some()
-        || matches!(
-            original.phase,
-            Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
-        )
+    let external_rejection_only = matches!(
+        committed.records.as_ref(),
+        [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
+    );
+    if !external_rejection_only
+        && (original.terminal.is_some()
+            || matches!(
+                original.phase,
+                Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
+            ))
     {
         return Err(KernelError::TerminalStateImmutable);
     }
@@ -275,6 +280,14 @@ fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
+    if state.accepted.is_some()
+        && matches!(
+            records,
+            [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
+        )
+    {
+        return Ok(());
+    }
     let valid = match state.phase {
         None => matches!(
             records,
@@ -927,7 +940,9 @@ fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
-    update_wall_usage(state, record.timestamp())?;
+    if !matches!(record.body(), RecordBody::ExternalCommandRejected(_)) {
+        update_wall_usage(state, record.timestamp())?;
+    }
     match record.body() {
         RecordBody::RunAccepted(accepted) => {
             state.session_id = Some(record.session_id());
@@ -938,7 +953,12 @@ fn apply_record(
         }
         RecordBody::StageOutcomeRecorded(outcome) => apply_stage_outcome(state, outcome)?,
         RecordBody::ContextPrepared(context) => {
-            if !context_digest_matches(context) {
+            // Verifying the digest and measuring the context are the same
+            // canonicalization; doing them separately walked the whole
+            // conversation twice per turn.
+            let (digest, context_bytes) = crate::entries::context_digest_and_len(&context.messages)
+                .map_err(|_| KernelError::ContextDigestMismatch)?;
+            if digest != context.context_digest {
                 return Err(KernelError::ContextDigestMismatch);
             }
             state.current_turn = Some(CurrentTurn {
@@ -955,9 +975,6 @@ fn apply_record(
                 .turns
                 .checked_add(1)
                 .ok_or(KernelError::InvalidRecordOrder)?;
-            let context_bytes = serde_json_canonicalizer::to_vec(&context.messages.as_ref())
-                .map_err(|_| KernelError::InvalidRecordOrder)?
-                .len();
             state.limit_usage.context_bytes = state
                 .limit_usage
                 .context_bytes
@@ -1187,6 +1204,7 @@ fn apply_record(
         RecordBody::OutputValidationFailed(failure) => {
             apply_validation_failure(state, failure)?;
         }
+        RecordBody::ExternalCommandRejected(_) => {}
         RecordBody::EffectCancelled(cancelled) => {
             if let Some(pending) = state.pending_model_effect.as_ref()
                 && pending.requested.effect_id() == cancelled.effect_id()
@@ -1503,9 +1521,7 @@ fn apply_entry_appended(state: &mut KernelState, entry: &EntryAppended) -> Resul
     if has_tool_calls {
         state.state_version = state.state_version.max(2);
     }
-    let mut messages = state.messages.to_vec();
-    messages.push(entry.message.clone());
-    state.messages = messages.into();
+    Arc::make_mut(&mut state.messages).push(entry.message.clone());
     if let Some(turn) = state.current_turn.as_mut() {
         turn.final_message_id = Some(message_id);
     }
@@ -2069,9 +2085,7 @@ fn apply_tool_call_settled(
         .next_source_index
         .checked_add(1)
         .ok_or(KernelError::InvariantViolation)?;
-    let mut messages = state.messages.to_vec();
-    messages.push(settled.message.clone());
-    state.messages = messages.into();
+    Arc::make_mut(&mut state.messages).push(settled.message.clone());
     Ok(())
 }
 
@@ -2370,11 +2384,6 @@ fn insert_model_identity(
         );
     }
     Ok(())
-}
-
-fn context_digest_matches(context: &ContextPrepared) -> bool {
-    canonical_digest("model-context", &context.messages.as_ref())
-        .is_ok_and(|digest| digest == context.context_digest)
 }
 
 fn failure_candidate(state: &KernelState, error: crate::ErrorDescriptor) -> TerminalCandidate {

@@ -91,7 +91,7 @@ fn assert_success_state_identity_and_indexes(harness: &Harness) {
     assert_eq!(state.phase, Some(RunPhase::Completed));
     assert_eq!(state.cycle, 0);
     assert_eq!(
-        state.messages.as_ref(),
+        state.messages.as_slice(),
         [assistant_message(FINAL_MESSAGE_ONE, 1_400, "hello")]
     );
     assert!(state.pending_model_effect.is_none());
@@ -239,7 +239,7 @@ fn default_and_non_text_state_hash_vectors_use_recursive_explicit_nulls() {
     )
     .expect("non-text message");
     let state = KernelState {
-        messages: Arc::from([message]),
+        messages: Arc::new(vec![message]),
         ..KernelState::default()
     };
     let non_text_projection = json!({

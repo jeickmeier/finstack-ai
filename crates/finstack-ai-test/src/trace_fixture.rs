@@ -4,8 +4,10 @@
 //! claim semantic JCS behavior; reducer-backed adapters obtain state hashes from
 //! the kernel's public state-hash API.
 
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use jsonschema::Draft;
 use serde::{Deserialize, Serialize};
@@ -264,14 +266,7 @@ pub fn validate_against_schema(
     instance: &Value,
 ) -> Result<(), TraceError> {
     let path = schema_path(family, major, kind);
-    let text = fs::read_to_string(&path)
-        .map_err(|error| TraceError::Io(format!("{}: {error}", path.display())))?;
-    let schema: Value = serde_json::from_str(&text)
-        .map_err(|error| TraceError::Parse(format!("{}: {error}", path.display())))?;
-    let validator = jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .build(&schema)
-        .map_err(|error| TraceError::Schema(format!("{}: {error}", path.display())))?;
+    let validator = compiled_validator(&path)?;
     if let Err(error) = validator.validate(instance) {
         return Err(TraceError::Schema(format!(
             "{} failed validation: {error}",
@@ -279,6 +274,36 @@ pub fn validate_against_schema(
         )));
     }
     Ok(())
+}
+
+/// Compiled-validator cache keyed by schema path.
+///
+/// Schema compilation dominates validation cost and the conformance suite
+/// validates many instances against the same handful of schemas, so reading
+/// and compiling per call made the suite roughly linear in instance count for
+/// no benefit. Schemas are checked-in fixtures and immutable during a run.
+fn compiled_validator(path: &Path) -> Result<Arc<jsonschema::Validator>, TraceError> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<jsonschema::Validator>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(validator) = guard.get(path)
+    {
+        return Ok(Arc::clone(validator));
+    }
+    let text = fs::read_to_string(path)
+        .map_err(|error| TraceError::Io(format!("{}: {error}", path.display())))?;
+    let schema: Value = serde_json::from_str(&text)
+        .map_err(|error| TraceError::Parse(format!("{}: {error}", path.display())))?;
+    let validator = Arc::new(
+        jsonschema::options()
+            .with_draft(Draft::Draft202012)
+            .build(&schema)
+            .map_err(|error| TraceError::Schema(format!("{}: {error}", path.display())))?,
+    );
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path.to_path_buf(), Arc::clone(&validator));
+    }
+    Ok(validator)
 }
 
 /// Deterministically normalize a JSON value to sorted-key UTF-8 bytes.

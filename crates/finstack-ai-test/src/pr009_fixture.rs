@@ -1,8 +1,9 @@
-//! Public-API compatibility fixtures for PR-009 through PR-012 reducer contracts.
+//! Public-API compatibility fixtures for PR-009 through PR-014 reducer contracts.
 
 use finstack_ai_kernel::{
-    APPEND_BATCH_MAX_RECORDS, CommittedBatch, Kernel, KernelInput, KernelState,
-    RECORD_KIND_VERSION, RecordEnvelope, RunEvent, RunPhase,
+    APPEND_BATCH_MAX_RECORDS, CommittedBatch, ExternalCommandRejected,
+    ExternalEffectCompletionCommand, InteractionResolutionCommand, Kernel, KernelInput,
+    KernelState, OperationLocator, RECORD_KIND_VERSION, RecordEnvelope, RunEvent, RunPhase,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -19,9 +20,48 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         "kernel-input" => run_kernel_input(fixture),
         "committed-batch" => run_committed_batch(fixture),
         "kernel-state" => run_kernel_state(fixture),
+        "operation-locator" => run_strict_parse::<OperationLocator>(fixture),
+        "external-effect-completion-command" => {
+            run_strict_parse::<ExternalEffectCompletionCommand>(fixture)
+        }
+        "interaction-resolution-command" => {
+            run_strict_parse::<InteractionResolutionCommand>(fixture)
+        }
+        "external-command-rejected" => run_strict_parse::<ExternalCommandRejected>(fixture),
         "corrupt-replay" => run_corrupt_replay(fixture),
-        "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" => run_record(fixture),
+        "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" | "pr014-record" => {
+            run_record(fixture)
+        }
         other => Err(fail(format!("unsupported PR-009 subject {other}"))),
+    }
+}
+
+fn run_strict_parse<T>(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError>
+where
+    T: DeserializeOwned + serde::Serialize,
+{
+    if fixture.operation != "parse" {
+        return Err(fail(format!(
+            "unsupported {} operation {}",
+            fixture.subject, fixture.operation
+        )));
+    }
+    let input = require_input(fixture)?;
+    match from_json::<T>(&input) {
+        Ok(value) => {
+            if !fixture.expect.ok {
+                return Err(fail(format!("expected {} parse failure", fixture.subject)));
+            }
+            let encoded = serde_json::to_value(value).map_err(|error| fail(error.to_string()))?;
+            if encoded != input {
+                return Err(fail(format!(
+                    "{} strict round-trip mismatch",
+                    fixture.subject
+                )));
+            }
+            Ok(())
+        }
+        Err(error) => assert_error_code(&fixture.expect, classify_serde_error(&error.to_string())),
     }
 }
 

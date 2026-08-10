@@ -16,8 +16,8 @@ use crate::entries::{ContextPrepared, StageCursor, StageDisposition, StageOutcom
 use crate::ids::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
 use crate::message::Message;
 use crate::projection::{
-    ArtifactProjection, ContentProjection, EffectCompletedProjection, EffectDeferredProjection,
-    EffectFailedProjection, ErrorProjection, MessageProjection, UsageProjection,
+    ArtifactSeq, ContentSeq, EffectCompletedProjection, EffectDeferredProjection,
+    EffectFailedProjection, ErrorProjection, MessageProjection, MessageSeq, UsageProjection,
 };
 use crate::raw_json::RawJson;
 use crate::state::PendingModelEffect;
@@ -34,7 +34,7 @@ enum StageSettlementFingerprintV1<'a> {
     },
     ContextPrepared {
         cursor: StageCursor,
-        messages: Vec<MessageProjection<'a>>,
+        messages: MessageSeq<'a>,
     },
     ModelRequestPrepared(Box<ModelRequestPreparedFingerprintV1<'a>>),
     ToolBatchPrepared {
@@ -111,7 +111,7 @@ struct ExternalModelCompletedFingerprintV1<'a> {
     completion_id: &'a str,
     output: &'a RawJson,
     usage: Option<UsageProjection<'a>>,
-    artifacts: Vec<ArtifactProjection<'a>>,
+    artifacts: ArtifactSeq<'a>,
     assistant_message: MessageProjection<'a>,
 }
 
@@ -216,7 +216,7 @@ enum ToolSettlementFingerprintV1<'a> {
         completion_id: &'a str,
         output: &'a RawJson,
         usage: Option<UsageProjection<'a>>,
-        artifacts: Vec<ArtifactProjection<'a>>,
+        artifacts: ArtifactSeq<'a>,
     },
     ExternalFailed {
         tool_batch_id: ToolBatchId,
@@ -236,7 +236,7 @@ enum ToolSettlementFingerprintV1<'a> {
 #[derive(Serialize)]
 struct ToolResultFingerprintV1<'a> {
     tool_call_id: ToolCallId,
-    content: Vec<ContentProjection<'a>>,
+    content: ContentSeq<'a>,
     is_error: bool,
 }
 
@@ -244,11 +244,7 @@ impl<'a> From<&'a crate::ToolResultBlock> for ToolResultFingerprintV1<'a> {
     fn from(value: &'a crate::ToolResultBlock) -> Self {
         Self {
             tool_call_id: *value.tool_call_id(),
-            content: value
-                .content()
-                .iter()
-                .map(ContentProjection::from)
-                .collect(),
+            content: ContentSeq::new(value.content()),
             is_error: value.is_error(),
         }
     }
@@ -292,7 +288,7 @@ pub(super) fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> 
         ReducerStageOutcome::ContextPrepared { messages } => {
             StageSettlementFingerprintV1::ContextPrepared {
                 cursor: input.cursor,
-                messages: messages.iter().map(MessageProjection::from).collect(),
+                messages: MessageSeq::new(messages),
             }
         }
         ReducerStageOutcome::ModelRequestPrepared {
@@ -357,7 +353,7 @@ pub(super) fn stage_record_digest(
             };
             StageSettlementFingerprintV1::ContextPrepared {
                 cursor: outcome.cursor,
-                messages: messages.iter().map(MessageProjection::from).collect(),
+                messages: MessageSeq::new(messages),
             }
         }
         StageDisposition::ModelRequested { .. } => {
@@ -500,7 +496,7 @@ pub(super) fn external_digest(input: &ExternalEffectCompletedInput) -> Result<Di
             completion_id: &input.completion.completion_id,
             output,
             usage: usage.as_ref().map(UsageProjection::from),
-            artifacts: artifacts.iter().map(ArtifactProjection::from).collect(),
+            artifacts: ArtifactSeq::new(artifacts),
             assistant_message: MessageProjection::from(assistant_message),
         }),
         (ExternalEffectOutcome::Completed { .. }, None) => {
@@ -534,11 +530,7 @@ pub(super) fn completed_record_digest(
             completion_id,
             output: completed.output(),
             usage: completed.usage().map(UsageProjection::from),
-            artifacts: completed
-                .artifacts()
-                .iter()
-                .map(ArtifactProjection::from)
-                .collect(),
+            artifacts: ArtifactSeq::new(completed.artifacts()),
             assistant_message: MessageProjection::from(assistant_message),
         })
     } else {
@@ -655,7 +647,7 @@ pub(super) fn external_tool_digest(
             completion_id: &input.completion.completion_id,
             output,
             usage: usage.as_ref().map(UsageProjection::from),
-            artifacts: artifacts.iter().map(ArtifactProjection::from).collect(),
+            artifacts: ArtifactSeq::new(artifacts),
         },
         ExternalEffectOutcome::Failed { error } => ToolSettlementFingerprintV1::ExternalFailed {
             tool_batch_id,
@@ -700,11 +692,7 @@ pub(super) fn completed_tool_record_digest(
                 .ok_or(KernelError::ToolSettlementMismatch)?,
             output: completed.output(),
             usage: completed.usage().map(UsageProjection::from),
-            artifacts: completed
-                .artifacts()
-                .iter()
-                .map(ArtifactProjection::from)
-                .collect(),
+            artifacts: ArtifactSeq::new(completed.artifacts()),
         }
     } else {
         ToolSettlementFingerprintV1::DirectCompleted {

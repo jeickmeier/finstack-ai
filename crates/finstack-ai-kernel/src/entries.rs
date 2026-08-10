@@ -334,16 +334,31 @@ impl ContextPrepared {
         turn_id: TurnId,
         messages: Vec<Message>,
     ) -> Result<Self, ContextPreparedError> {
-        if messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
-            return Err(ContextPreparedError::TooManyMessages);
-        }
-        let context_digest = context_digest_for(&messages)?;
+        let (context_digest, _) = context_digest_and_len(&messages)?;
         Ok(Self {
             cycle,
             turn_id,
             messages: messages.into(),
             context_digest,
         })
+    }
+
+    /// Build from an already-shared message slice and a precomputed digest.
+    ///
+    /// The caller has canonicalized these messages once already; recomputing
+    /// the digest here would double the per-turn context cost.
+    pub(crate) fn from_shared(
+        cycle: u64,
+        turn_id: TurnId,
+        messages: Arc<[Message]>,
+        context_digest: Digest,
+    ) -> Self {
+        Self {
+            cycle,
+            turn_id,
+            messages,
+            context_digest,
+        }
     }
 
     /// Construct a bounded prepared context and validate its canonical digest.
@@ -404,11 +419,23 @@ pub enum ContextPreparedError {
     DigestMismatch,
 }
 
-fn context_digest_for(messages: &[Message]) -> Result<Digest, ContextPreparedError> {
-    let canonical = serde_json_canonicalizer::to_vec(&messages)
+/// Canonical `model-context` digest and canonical byte length of `messages`.
+///
+/// The length is returned alongside the digest because limit accounting needs
+/// exactly the byte count this canonicalization already produced. Computing
+/// them separately canonicalized the whole conversation context twice, and the
+/// context grows with every turn.
+pub(crate) fn context_digest_and_len(
+    messages: &[Message],
+) -> Result<(Digest, usize), ContextPreparedError> {
+    if messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
+        return Err(ContextPreparedError::TooManyMessages);
+    }
+    let mut writer = crate::digest::DigestWriter::new("model-context", 1)
         .map_err(|_| ContextPreparedError::CanonicalizationFailed)?;
-    Digest::domain_separated("model-context", 1, &canonical)
-        .map_err(|_| ContextPreparedError::CanonicalizationFailed)
+    serde_json_canonicalizer::to_writer(&messages, &mut writer)
+        .map_err(|_| ContextPreparedError::CanonicalizationFailed)?;
+    Ok(writer.finish())
 }
 
 /// Durable final assistant message append.

@@ -61,13 +61,19 @@ cargo check -p finstack-ai-test --no-default-features --locked
 """
 
 [tasks.check-wasm]
-description = "Type-check kernel tests and browser WASM binding for wasm32"
+description = "Type-check kernel/runtime tests and browser WASM binding for wasm32"
 run = """
 rustup target add wasm32-unknown-unknown && \
 cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked && \
 RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
   cargo test -p finstack-ai-kernel --target wasm32-unknown-unknown --no-run --locked && \
+RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
+  cargo test -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host --no-run --locked && \
 cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+if cargo tree -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host -e normal | grep -q 'tokio '; then
+  echo 'wasm-host unexpectedly resolves Tokio'
+  exit 1
+fi
 """
 
 # TypeScript formatting deferred until a TypeScript package and formatter config exist.
@@ -88,12 +94,20 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel/runtime and public-Rust-API tests through PR-011"
+description = "Run focused kernel/runtime and public-Rust-API tests through PR-014"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
 cargo test -p finstack-ai-runtime --locked
 cargo test -p finstack-ai-test --test public_rust_api --locked
+"""
+
+[tasks.test-runtime]
+description = "Run PR-014 runtime, task-owner, ingress, and memory-store tests"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio --locked
+cargo test -p finstack-ai-store-memory --locked
 """
 
 [tasks.conformance]

@@ -107,6 +107,7 @@ mod effects;
 mod entries;
 mod error;
 mod events;
+mod external;
 mod ids;
 mod limits;
 mod message;
@@ -119,6 +120,7 @@ mod run;
 mod state;
 mod time;
 mod tools;
+mod transcode;
 mod validation;
 
 pub use agent::{
@@ -160,6 +162,11 @@ pub use events::{
     EventError, ModelTextDelta, ProviderHeartbeat, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, ReasoningDelta, RunEvent, RunEventBody, RunEventClass, RunEventKind,
     ToolProgress, derived_event_kind,
+};
+pub use external::{
+    ExternalCommandError, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
+    ExternalEffectCompletionCommand, InteractionResolutionCommand, OperationLocator,
+    RecordExternalCommandRejected,
 };
 pub use ids::{
     AgentId, AgentTag, AppendBatchId, AppendBatchTag, ArtifactId, ArtifactTag, BudgetReservationId,

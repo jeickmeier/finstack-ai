@@ -99,6 +99,13 @@ fn validate_json_string_length(input: &str, max: usize) -> Result<(), String> {
             bytes.len()
         ));
     }
+    // Escapes only ever shrink a string, so a source that already fits cannot
+    // decode past the ceiling. Skipping the scan makes the common (short, or
+    // escape-free) case one pass instead of two; `serde_json` still rejects
+    // malformed escapes when it decodes.
+    if bytes.len() - 2 <= max {
+        return Ok(());
+    }
 
     let mut decoded_len = 0_usize;
     let mut index = 1_usize;

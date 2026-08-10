@@ -1,0 +1,83 @@
+PR-014 security and threat-model review
+Date: 2026-08-09
+Reviewed commit: ff9178f2244c8d8fd0c62cbba18b2b4dfbee2a29
+Reviewer: me@jeickmeier.com
+Result: PASS for the implemented journal/effect/ingress candidate scope
+
+Scope reviewed
+
+- Authoritative decide -> append -> apply -> publish -> dispatch ordering,
+  append uncertainty/conflict recovery, replay, effect rechecks, bounded task
+  ownership, memory-store behavior, authenticated external command routing, and
+  required security auditing.
+- Threat Model TM-04, TM-10, TM-11, TM-12, TM-14, TM-16, TM-18 and
+  SEC-INV-002, SEC-INV-003, SEC-INV-004, SEC-INV-005, SEC-INV-007,
+  SEC-INV-008, SEC-INV-009, SEC-INV-010, SEC-INV-011, SEC-INV-012.
+
+Control disposition
+
+PASS - TM-10 / SEC-INV-003, SEC-INV-004, and SEC-INV-008 completion integrity
+Routers accept only fully expanded authenticated commands, load only the named
+session, replay it, and bind tenant/lane/run/effect, principal, authorization
+evidence, effect kind/version/schema digest, completion identity, and normalized
+submission digest. Equal completion identity/digest is idempotent. Conflicting,
+late, or contract-invalid commands for known authorized targets fail closed and
+append ExternalCommandRejected; unknown targets and scope/authentication
+failures receive one non-existence-revealing result after required audit.
+
+PASS - TM-11 interaction ingress boundary
+InteractionRouter implements locator replay, tenant/lane/run/principal and
+authorization validation, redacted audit, and a uniform closed response. It
+does not fabricate interaction reducer state: after validation it records
+interaction_resolution_unavailable and rejects until PR-044 owns successful
+resolution semantics.
+
+PASS - SEC-INV-002 and TM-14 commit/race ordering
+The coordinator decides without mutation, freezes one complete append request,
+verifies the store receipt, transactionally applies the committed batch, then
+rechecks terminal state, cancellation, deadline, outstanding effect identity,
+and committed request identity immediately before each dispatch. Fault-injected
+tests prove no dispatch before append/apply and replay reconstructs a committed
+prefix. Shutdown closes intake and finishes or aborts the owned boundary without
+fabricating RunCancelled.
+
+PASS - TM-12 / SEC-INV-010 journal integrity within PR-014 scope
+The store commits whole batches atomically with contiguous sequences. Existing
+batch/record identity is resolved before optimistic sequence checks; equal reuse
+is idempotent and unequal or mixed reuse is corruption. One optimistic conflict
+causes direct reload/replay/reclassification; repeated conflict or continued
+ambiguous acknowledgement faults the run. Loaded batch boundaries and head are
+verified before replay. Canonical CBOR, protected checksums, persistent backup,
+and snapshot verification remain explicitly deferred to PR-039 through PR-041.
+
+PASS - TM-04 / SEC-INV-005 and SEC-INV-011 audit redaction
+SecurityAuditEvent exposes stable bounded identity/category/reason/timestamp,
+optional authenticated principal/scope, and only locator/submission digests.
+Raw tokens, credentials, locators, and submitted content have no audit-event or
+router parameter path. The audit receipt must match the submitted event ID.
+
+PASS - TM-16 / SEC-INV-007 bounded resource ownership
+Kernel command IDs/reasons/identities and opaque snapshots are bounded. The
+memory store requires non-zero limits for sessions, batches, records, and
+snapshot bytes. Runtime commands use bounded mpsc; audit operations and shutdown
+use positive timeouts; task ownership uses one JoinSet and aborts on owner drop
+or shutdown deadline expiry. Mutexes protect ordered maps and are not held
+across await points.
+
+PASS - TM-18 / SEC-INV-012 dependency and target boundary
+Tokio is pinned at 1.49.0 and production enables only rt, sync, and time. The
+wasm-host build resolves no Tokio. Full supply-chain, secret, minimal-feature,
+WASM, architecture, and aggregate CI checks pass. No network, filesystem,
+provider, tool, server, telemetry, or persistent-store battery was added.
+
+Residual later-PR obligations
+
+- Successful completed model callbacks remain closed with
+  model_response_decoder_unavailable until PR-015 provides the provider-neutral
+  decoder.
+- Successful interaction resolution remains PR-044.
+- Actual model/tool/context/middleware execution remains PR-015 through PR-018.
+- Canonical CBOR/checksum verification and persistent stores remain PR-039
+  onward; the memory store is explicitly non-durable and transitional.
+- Hosted CI, external review, and immutable merge verification are required
+  before PR-014 can be marked Done.
