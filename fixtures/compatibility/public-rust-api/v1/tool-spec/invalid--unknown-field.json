@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "subject": "tool-spec",
+  "operation": "parse",
+  "input": {
+    "id": "finstack.tools.lookup",
+    "model_name": "lookup",
+    "title": "Lookup",
+    "description": "Look up a value.",
+    "input_schema": {
+      "type": "object"
+    },
+    "output_schema": null,
+    "execution": "sequential",
+    "side_effect": "read_only",
+    "retry_safety": "safe_to_retry",
+    "approval": {
+      "requirement": "policy",
+      "reason": null,
+      "attributes": {}
+    },
+    "max_result_bytes": 4096,
+    "metadata": {},
+    "execute_now": true
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "strict_decode"
+  }
+}

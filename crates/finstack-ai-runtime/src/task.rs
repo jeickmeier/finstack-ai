@@ -4,13 +4,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai_kernel::{KernelInput, TransitionEnv};
+use finstack_ai_kernel::{
+    AllocatedIds, AppendBatchId, AppendBatchTag, ContentBlock, EffectCompleted, EffectDeferred,
+    EffectFailed, ErrorCategory, EventId, EventTag, Id, IdTag, KernelInput, Message, MessageId,
+    MessageRole, MessageTag, Metadata, ModelRef, ModelSettled, ModelSettlement, RawJson, RecordId,
+    RecordTag, ToolCallBlock, ToolCallId, ToolCallTag, TransitionEnv,
+};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
-use crate::{CommitCoordinator, CommitCoordinatorError, CommitOutcome};
+use crate::model_runtime::{ModelDispatcher, ModelDriverResult, run_model_jobs};
+use crate::{
+    Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome, IdGenerationError,
+    LockedModelContextProfile, Model, ModelContextProfileOverride, ModelError,
+    ModelStreamAssembler, ModelStreamLimits, ModelTerminal, ModelWarmupContext, RandomSource,
+    UuidV7Generator, resolve_model_context_profile,
+};
 
 /// Observable lifecycle of one owned runtime task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +46,31 @@ pub struct RunTaskConfig {
     pub command_capacity: usize,
     /// Maximum time the owner waits before aborting owned tasks.
     pub shutdown_deadline: Duration,
+}
+
+/// Configuration for the private bounded model job/result path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelTaskConfig {
+    /// Bounded committed model-job queue capacity.
+    pub job_capacity: usize,
+    /// Bounded terminal result queue capacity.
+    pub result_capacity: usize,
+    /// Pure stream-assembler bounds.
+    pub stream_limits: ModelStreamLimits,
+    /// Optional construction warmup deadline.
+    pub warmup_deadline: Option<finstack_ai_kernel::Timestamp>,
+    /// Bounded non-secret warmup metadata.
+    pub warmup_metadata: Metadata,
+}
+
+impl ModelTaskConfig {
+    fn validate(&self) -> Result<ModelStreamAssembler, RunHandleError> {
+        if self.job_capacity == 0 || self.result_capacity == 0 {
+            return Err(RunHandleError::InvalidConfiguration);
+        }
+        ModelStreamAssembler::new(self.stream_limits)
+            .map_err(|_| RunHandleError::InvalidConfiguration)
+    }
 }
 
 impl RunTaskConfig {
@@ -167,6 +203,84 @@ impl RunTaskOwner {
         })
     }
 
+    /// Warm one retained model and spawn the bounded commit/model workers.
+    ///
+    /// The ready handle is not returned until the default-no-op or provider
+    /// warmup completes exactly once. Model jobs can only be enqueued by the
+    /// coordinator after the request and effect records are committed/applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration or warmup errors before publishing a run handle.
+    pub async fn spawn_with_model<C, R>(
+        mut coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        model: Arc<dyn Model>,
+        profile: LockedModelContextProfile,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
+        let run_config = run_config.validate()?;
+        let assembler = model_config.validate()?;
+        validate_model_binding(model.as_ref(), &profile)?;
+        model
+            .warmup(ModelWarmupContext {
+                cancellation: crate::CancellationSignal::new(),
+                deadline: model_config.warmup_deadline,
+                metadata: model_config.warmup_metadata.clone(),
+            })
+            .await
+            .map_err(|error| model_handle_error(&error))?;
+
+        let (sender, receiver) = mpsc::channel(run_config.command_capacity);
+        let (job_sender, job_receiver) = mpsc::channel(model_config.job_capacity);
+        let (result_sender, result_receiver) = mpsc::channel(model_config.result_capacity);
+        let dispatcher = Arc::new(ModelDispatcher::new(
+            Arc::clone(&model),
+            profile,
+            job_sender,
+        ));
+        let active = dispatcher.active();
+        coordinator.install_dispatcher(dispatcher);
+
+        let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
+        let shared = Arc::new(Shared {
+            sender: Mutex::new(Some(sender)),
+            shutting_down: AtomicBool::new(false),
+            status: status_sender,
+        });
+        let handle = RunHandle {
+            shared: Arc::clone(&shared),
+            status: status_receiver,
+        };
+        let mut tasks = JoinSet::new();
+        tasks.spawn(run_worker_with_model(
+            coordinator,
+            receiver,
+            result_receiver,
+            Arc::clone(&shared),
+            SettlementSources { clock, random },
+        ));
+        tasks.spawn(run_model_jobs(
+            model,
+            assembler,
+            active,
+            job_receiver,
+            result_sender,
+        ));
+        Ok(Self {
+            handle,
+            tasks,
+            shutdown_deadline: run_config.shutdown_deadline,
+            joined: false,
+        })
+    }
+
     /// Clone the run handle without transferring task ownership.
     #[must_use]
     pub fn handle(&self) -> RunHandle {
@@ -231,6 +345,18 @@ pub enum RunHandleError {
     /// Coordinator rejected or faulted the submission.
     #[error(transparent)]
     Coordinator(CommitCoordinatorError),
+    /// Model warmup or execution adapter failed before a durable settlement.
+    #[error("model adapter failed: {code}")]
+    Model {
+        /// Stable adapter code.
+        code: Arc<str>,
+    },
+    /// Runtime could not construct a valid kernel settlement.
+    #[error("model settlement construction failed: {code}")]
+    ModelSettlement {
+        /// Stable runtime code.
+        code: &'static str,
+    },
 }
 
 struct Shared {
@@ -279,6 +405,382 @@ async fn run_worker(
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
         shared.status.send_replace(RunStatus::Stopped);
+    }
+}
+
+struct SettlementSources<C, R> {
+    clock: C,
+    random: R,
+}
+
+impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
+    fn now(&self) -> Result<finstack_ai_kernel::Timestamp, RunHandleError> {
+        self.clock.now().map_err(id_source_error)
+    }
+
+    fn generate<T: IdTag>(&self) -> Result<Id<T>, RunHandleError> {
+        UuidV7Generator::new(&self.clock, &self.random)
+            .generate()
+            .map_err(id_source_error)
+    }
+}
+
+async fn run_worker_with_model<C, R>(
+    mut coordinator: CommitCoordinator,
+    mut receiver: mpsc::Receiver<RunCommand>,
+    mut results: mpsc::Receiver<ModelDriverResult>,
+    shared: Arc<Shared>,
+    sources: SettlementSources<C, R>,
+) where
+    C: Clock + Send + Sync + 'static,
+    R: RandomSource + Send + Sync + 'static,
+{
+    let mut result_path_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            result = results.recv(), if result_path_open => {
+                match result {
+                    Some(result) => {
+                        if let Err(error) = process_model_result(&mut coordinator, result, &sources).await {
+                            fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    None => result_path_open = false,
+                }
+            }
+            command = receiver.recv() => {
+                let Some(command) = command else { break; };
+                if shared.shutting_down.load(Ordering::Acquire) {
+                    let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
+                    continue;
+                }
+                let result = coordinator
+                    .submit(command.env, command.input)
+                    .await
+                    .map_err(RunHandleError::Coordinator);
+                let fault_code = result_fault_code(&result);
+                let _ = command.reply.send(result);
+                if let Some(code) = fault_code {
+                    fault_worker(&shared, &mut receiver, code);
+                    break;
+                }
+            }
+        }
+    }
+    if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
+        shared.status.send_replace(RunStatus::Stopped);
+    }
+}
+
+async fn process_model_result<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    mut driver_result: ModelDriverResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let effect_id = driver_result.seed.pending.requested.effect_id();
+    let state = coordinator.state();
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return Ok(());
+    };
+    if pending.requested.effect_id() != effect_id
+        || pending.model_request_id != driver_result.seed.pending.model_request_id
+        || pending.deferred.is_some()
+        || state.terminal.is_some()
+        || state.cancellation.is_some()
+    {
+        return Ok(());
+    }
+    let now = sources.now()?;
+    if pending
+        .requested
+        .deadline()
+        .is_some_and(|deadline| deadline <= now)
+    {
+        driver_result.result = Err(ModelError::try_new(
+            "model_deadline_exceeded",
+            ErrorCategory::Deadline,
+            false,
+            "model result arrived after the committed deadline",
+            Metadata::empty(),
+        )
+        .map_err(|error| model_handle_error(&error))?);
+    }
+
+    if let Ok(assembled) = &driver_result.result {
+        let _events = coordinator
+            .materialize_model_progress(&assembled.progress, &driver_result.provider, now)
+            .map_err(|code| RunHandleError::ModelSettlement { code })?;
+    }
+
+    let allocation = allocate_settlement(&driver_result, sources)?;
+    let settled = build_settlement(driver_result, now, &allocation)?;
+    let outcome = coordinator
+        .submit(
+            TransitionEnv {
+                now,
+                ids: allocation.ids,
+            },
+            KernelInput::ModelSettled(settled),
+        )
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+struct SettlementAllocation {
+    ids: AllocatedIds,
+    message_id: Option<MessageId>,
+    tool_call_ids: Vec<ToolCallId>,
+}
+
+fn allocate_settlement<C: Clock, R: RandomSource>(
+    result: &ModelDriverResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<SettlementAllocation, RunHandleError> {
+    let completed = matches!(
+        result.result,
+        Ok(crate::AssembledModelStream {
+            terminal: ModelTerminal::Completed(_),
+            ..
+        })
+    );
+    let tool_count = match &result.result {
+        Ok(value) => match &value.terminal {
+            ModelTerminal::Completed(response) => response.tool_calls.len(),
+            ModelTerminal::Deferred(_) => 0,
+        },
+        Err(_) => 0,
+    };
+    let record_count = if completed { 2 } else { 1 };
+    let event_count = if completed { 2 } else { 1 };
+    let records = (0..record_count)
+        .map(|_| sources.generate::<RecordTag>())
+        .collect::<Result<Vec<RecordId>, _>>()?;
+    let events = (0..event_count)
+        .map(|_| sources.generate::<EventTag>())
+        .collect::<Result<Vec<EventId>, _>>()?;
+    let message_id = completed
+        .then(|| sources.generate::<MessageTag>())
+        .transpose()?;
+    let tool_call_ids = (0..tool_count)
+        .map(|_| sources.generate::<ToolCallTag>())
+        .collect::<Result<Vec<ToolCallId>, _>>()?;
+    let append_batch_id: AppendBatchId = sources.generate::<AppendBatchTag>()?;
+    let ids = AllocatedIds::try_new(
+        records,
+        events,
+        Vec::new(),
+        Vec::new(),
+        message_id.into_iter().collect(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        tool_call_ids.clone(),
+        vec![append_batch_id],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::ModelSettlement {
+        code: "model_settlement_ids_invalid",
+    })?;
+    Ok(SettlementAllocation {
+        ids,
+        message_id,
+        tool_call_ids,
+    })
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "terminal conversion keeps response, deferral, and failure identity continuity visible"
+)]
+fn build_settlement(
+    result: ModelDriverResult,
+    now: finstack_ai_kernel::Timestamp,
+    allocation: &SettlementAllocation,
+) -> Result<ModelSettled, RunHandleError> {
+    let requested = &result.seed.pending.requested;
+    let effect_id = requested.effect_id();
+    let outcome = match result.result {
+        Ok(assembled) => match assembled.terminal {
+            ModelTerminal::Completed(response) => {
+                let output_bytes = serde_json_canonicalizer::to_vec(&response).map_err(|_| {
+                    RunHandleError::ModelSettlement {
+                        code: "model_response_serialize_failed",
+                    }
+                })?;
+                let output =
+                    RawJson::parse(output_bytes).map_err(|_| RunHandleError::ModelSettlement {
+                        code: "model_response_output_invalid",
+                    })?;
+                let completion = EffectCompleted::try_new(
+                    effect_id,
+                    requested.output_contract().clone(),
+                    output,
+                    Some(response.usage.clone()),
+                    Vec::new(),
+                    response.provider_ids.clone(),
+                    Some(response.completion_id.as_ref()),
+                    None,
+                )
+                .map_err(|_| RunHandleError::ModelSettlement {
+                    code: "model_effect_completion_invalid",
+                })?;
+                let mut content = response.assistant_content.to_vec();
+                if allocation.tool_call_ids.len() != response.tool_calls.len() {
+                    return Err(RunHandleError::ModelSettlement {
+                        code: "model_tool_call_id_cardinality",
+                    });
+                }
+                for (call, tool_call_id) in
+                    response.tool_calls.iter().zip(&allocation.tool_call_ids)
+                {
+                    content.push(ContentBlock::ToolCall(
+                        ToolCallBlock::try_new(*tool_call_id, &call.name, call.arguments.clone())
+                            .map_err(|_| RunHandleError::ModelSettlement {
+                            code: "model_tool_call_invalid",
+                        })?,
+                    ));
+                }
+                let model_ref = ModelRef::try_new(&result.provider, result.draft.model.as_str())
+                    .map_err(|_| RunHandleError::ModelSettlement {
+                        code: "model_reference_invalid",
+                    })?;
+                let message_id = allocation
+                    .message_id
+                    .ok_or(RunHandleError::ModelSettlement {
+                        code: "model_message_id_missing",
+                    })?;
+                let assistant_message = Message::try_new(
+                    message_id,
+                    MessageRole::Assistant,
+                    content,
+                    now,
+                    Some(model_ref),
+                    response.provider_ids,
+                    Metadata::empty(),
+                )
+                .map_err(|_| RunHandleError::ModelSettlement {
+                    code: "model_assistant_message_invalid",
+                })?;
+                ModelSettlement::Completed {
+                    completion,
+                    assistant_message,
+                }
+            }
+            ModelTerminal::Deferred(deferral) => ModelSettlement::Deferred(EffectDeferred {
+                effect_id,
+                handle: deferral.handle,
+                reconciliation: deferral.reconciliation,
+                next_poll_at: deferral.next_poll_at,
+                expires_at: deferral.expires_at,
+                output_contract: requested.output_contract().clone(),
+            }),
+        },
+        Err(error) => {
+            let descriptor = error
+                .to_descriptor()
+                .map_err(|error| model_handle_error(&error))?;
+            ModelSettlement::Failed(
+                EffectFailed::try_new(
+                    effect_id,
+                    requested.output_contract().clone(),
+                    descriptor,
+                    None,
+                    None::<&str>,
+                )
+                .map_err(|_| RunHandleError::ModelSettlement {
+                    code: "model_effect_failure_invalid",
+                })?,
+            )
+        }
+    };
+    Ok(ModelSettled {
+        turn_id: result.seed.pending.turn_id,
+        model_request_id: result.seed.pending.model_request_id,
+        outcome,
+    })
+}
+
+fn result_fault_code(result: &Result<CommitOutcome, RunHandleError>) -> Option<&'static str> {
+    match result {
+        Ok(outcome) => outcome.fault.map(|fault| fault.code),
+        Err(RunHandleError::Coordinator(
+            CommitCoordinatorError::BoundaryFault { code }
+            | CommitCoordinatorError::Faulted { code },
+        )) => Some(*code),
+        _ => None,
+    }
+}
+
+fn fault_worker(shared: &Shared, receiver: &mut mpsc::Receiver<RunCommand>, code: &'static str) {
+    shared.shutting_down.store(true, Ordering::Release);
+    if let Ok(mut sender) = shared.sender.lock() {
+        sender.take();
+    }
+    receiver.close();
+    shared.status.send_replace(RunStatus::Faulted { code });
+}
+
+fn model_runtime_fault(error: &RunHandleError) -> &'static str {
+    match error {
+        RunHandleError::Faulted { code }
+        | RunHandleError::ModelSettlement { code }
+        | RunHandleError::Coordinator(
+            CommitCoordinatorError::BoundaryFault { code }
+            | CommitCoordinatorError::Faulted { code },
+        ) => code,
+        _ => "model_runtime_failed",
+    }
+}
+
+fn model_handle_error(error: &ModelError) -> RunHandleError {
+    RunHandleError::Model {
+        code: Arc::from(error.code()),
+    }
+}
+
+fn validate_model_binding(
+    model: &dyn Model,
+    profile: &LockedModelContextProfile,
+) -> Result<(), RunHandleError> {
+    let descriptor = model.descriptor();
+    descriptor
+        .validate()
+        .map_err(|error| model_handle_error(&error))?;
+    if descriptor.provider != profile.profile.provider
+        || !descriptor.models.contains(&profile.profile.model)
+    {
+        return Err(RunHandleError::Model {
+            code: Arc::from(crate::MODEL_PROFILE_INVALID),
+        });
+    }
+    let provider = model.capabilities(&profile.profile.model).context_profile;
+    let effective = &profile.profile;
+    let overlay = ModelContextProfileOverride {
+        hard_input_bytes: Some(effective.hard_input_bytes),
+        context_window_tokens: Some(effective.context_window_tokens),
+        max_output_tokens: Some(effective.max_output_tokens),
+        reserved_output_tokens: Some(effective.reserved_output_tokens),
+        provider_overhead_tokens: Some(effective.provider_overhead_tokens),
+    };
+    let relocked = resolve_model_context_profile(provider, Some(&overlay), None, false)
+        .map_err(|error| model_handle_error(&error))?;
+    if relocked != *profile {
+        return Err(RunHandleError::Model {
+            code: Arc::from(crate::MODEL_PROFILE_INVALID),
+        });
+    }
+    Ok(())
+}
+
+fn id_source_error(_error: IdGenerationError) -> RunHandleError {
+    RunHandleError::ModelSettlement {
+        code: "model_settlement_id_source_failed",
     }
 }
 

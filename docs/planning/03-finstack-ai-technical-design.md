@@ -2,7 +2,7 @@
 title: "finstack-ai Technical Design Document"
 subtitle: "Implementation-level design for the Rust agent microkernel, runtime, bindings, and extension SDK"
 author: "finstack-ai project"
-date: "2026-08-09"
+date: "2026-08-10"
 ---
 
 # finstack-ai Technical Design Document
@@ -13,11 +13,11 @@ date: "2026-08-09"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.17 |
+| Version | 0.18 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.17; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.18; Security and Threat Model v0.6 |
 
 # 1. Technical objective
 
@@ -2641,9 +2641,21 @@ pub trait Model: PortObject {
     fn descriptor(&self) -> ModelDescriptor;
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities;
 
+    fn warmup(
+        &self,
+        _ctx: ModelWarmupContext,
+    ) -> PortFuture<Result<(), ModelError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        model: &ModelName,
+        canonical_request: &[u8],
+    ) -> Result<ModelTokenEstimate, ModelError>;
+
     fn request(
         &self,
-        ctx: ModelCallContext,
         request: ModelRequest,
     ) -> PortFuture<Result<ModelEventStream, ModelError>>;
 
@@ -2657,23 +2669,13 @@ pub trait Model: PortObject {
 }
 ```
 
-A no-GAT boxed future/stream API is selected initially because it maps cleanly to trait objects, Python adapters, and plugin proxies. Performance-critical first-party providers may use internal concrete types behind the trait.
+A no-GAT boxed future/stream API is selected initially because it maps cleanly to trait objects, Python adapters, and plugin proxies. `PortStream` is the target-specific alias from section 3.2: native streams are `Send`; browser-WASM streams are local. Performance-critical first-party providers may use internal concrete types behind the trait.
+
+`warmup` is object-safe and defaults to a no-op. Resolved construction invokes it exactly once before publishing a ready `Arc<dyn Model>` and retains that same ready handle for all requests. `estimate_input_tokens` is synchronous and I/O-free. Its `ModelTokenEstimate.estimator` must exactly equal the resolved profile estimator ID, version, and source; a mismatch is a fail-closed adapter error. Warmup and estimator execution must not create network clients per request.
 
 ## 14.2 Request
 
 ```rust
-pub struct ModelRequest {
-    pub request_id: ModelRequestId,
-    pub effect_id: EffectId,
-    pub model: ModelName,
-    pub messages: Arc<[Message]>,
-    pub tools: Arc<[ToolSpec]>,
-    pub output: OutputSpec,
-    pub settings: ModelSettings,
-    pub limits: ModelRequestLimits,
-    pub provider_state: Option<OpaqueState>,
-}
-
 pub struct ModelRequestDraft {
     pub model: ModelName,
     pub messages: Arc<[Message]>,
@@ -2682,9 +2684,72 @@ pub struct ModelRequestDraft {
     pub settings: ModelSettings,
     pub limits: ModelRequestLimits,
 }
+
+pub struct ModelRequest {
+    pub call: ModelCallContext,
+    pub draft: ModelRequestDraft,
+    pub continuation_state: Option<RawJson>,
+}
+
+pub struct ModelDescriptor {
+    pub provider: Arc<str>,
+    pub models: Arc<[ModelName]>,
+    pub metadata: Metadata,
+}
+
+pub struct ModelSettings {
+    pub values: RawJson,
+}
+
+pub struct ModelRequestLimits {
+    pub max_input_bytes: u64,
+    pub max_input_tokens: u64,
+    pub max_output_tokens: u64,
+}
+
+pub struct AuthorizationContext {
+    pub principal: PrincipalRef,
+    pub authentication_method: Arc<str>,
+    pub assurance_level: Arc<str>,
+    pub roles: Arc<[Arc<str>]>,
+    pub permitted_scopes: Arc<[Arc<str>]>,
+    pub safe_claims: Metadata,
+    pub policy_version: Arc<str>,
+    pub decision_id: Arc<str>,
+}
+
+pub struct RunCallContext {
+    pub locator: OperationLocator,
+    pub authorization: AuthorizationContext,
+    pub effect_id: EffectId,
+    pub attempt: u32,
+    pub deadline: Option<Timestamp>,
+    pub budget_scope_id: Option<BudgetScopeId>,
+    pub cancellation: CancellationSignal,
+}
+
+pub struct ModelCallContext {
+    pub run: RunCallContext,
+    pub request_id: ModelRequestId,
+}
+
+pub struct ModelWarmupContext {
+    pub cancellation: CancellationSignal,
+    pub deadline: Option<Timestamp>,
+    pub metadata: Metadata,
+}
+
+pub struct ReconcileContext {
+    pub run: RunCallContext,
+    pub original_input_digest: Digest,
+}
 ```
 
-`ModelRequestId` correlates one logical model turn request across records/events/bindings; `EffectId` identifies its committed external execution/idempotency lifecycle. A retry/reconciliation reuses both IDs and frozen request bytes. A later continuation after tools allocates a new pair.
+`ModelRequestDraft` is a strict compatibility-controlled data-only DTO. Its canonical JSON bytes are the exact payload committed in `EffectInput::Model.request`; it has no fields for runtime-generated identities, credentials, authorization, or cancellation state. V1 admits at most 4,096 messages and 1,024 model-visible tools before the lower provider byte/token limits apply; tool names are unique. Only after the request-prepared record and `EffectRequested` are committed and applied does the runtime combine the frozen draft with `ModelCallContext` and optional bounded continuation state to form `ModelRequest`. The context supplies the committed `ModelRequestId`, `EffectId`, attempt, authorization, deadline, budget scope, and effect-local cancellation signal.
+
+`ModelRequestId` correlates one logical model turn request across records/events/bindings; `EffectId` identifies its committed external execution/idempotency lifecycle. A retry or reconciliation reuses both IDs and the frozen draft bytes. A later continuation after tools allocates a new pair. `ModelSettings` and continuation state are bounded canonical `RawJson`; provider-specific settings and state remain namespaced data and never add kernel fields.
+
+`ModelName`, `ModelDescriptor`, `ModelSettings`, `ModelRequestLimits`, `ModelContextProfileOverride`, and every compatibility-controlled profile/stream data DTO in this section use strict decoding, bounded strings/collections, and target-independent Serde names. In-process call, warmup, cancellation, and reconciliation contexts are frozen Rust port contracts but are intentionally not serialized; WIT/remote projections use their separately governed sanitized DTOs. `ModelDescriptor` freezes provider identity, supported model names, and bounded namespaced `Metadata`. `ModelRequestLimits` freezes the effective input-byte, input-token, and output-token ceilings copied from the locked profile.
 
 ## 14.3 Stream items
 
@@ -2694,12 +2759,66 @@ pub enum ModelStreamItem {
     ReasoningDelta(ReasoningDelta),
     ToolCallDelta(ToolCallDelta),
     Usage(UsageDelta),
+    Heartbeat(Metadata),
     ProviderEvent(OpaqueProviderEvent),
     Completed(ModelResponse),
+    Deferred(ModelDeferral),
+}
+
+pub struct TextDelta {
+    pub text: Arc<str>,
+}
+
+pub struct ReasoningDelta {
+    pub text: Arc<str>,
+}
+
+pub struct ToolCallDelta {
+    pub index: u32,
+    pub name: Option<Arc<str>>,
+    pub arguments_delta: Arc<str>,
+}
+
+pub struct UsageDelta {
+    pub usage: Usage,
+}
+
+pub struct OpaqueProviderEvent {
+    pub namespace: Arc<str>,
+    pub payload: RawJson,
 }
 ```
 
-Exactly one `Completed` item is required for a successful stream. The runtime validates stream order and assembles tool calls where the provider emits partial arguments.
+`Completed` and `Deferred` are terminal alternatives. After observing one terminal item, the runtime continues polling through EOF and rejects a second terminal, any later item, or a later error. EOF before a terminal is invalid. Text, reasoning, tool-call fragments, cumulative usage snapshots, heartbeat data, and opaque provider events are bounded independently and in aggregate.
+
+`ToolCallDelta` carries a zero-based provider index, an optional name, and one UTF-8 arguments fragment. The first appearance fixes source order; later fragments may fill but never mutate the name. Completion requires a non-empty name and strict canonical JSON arguments. Framework `ToolCallId` values are intentionally absent from model DTOs and are allocated only when the runtime constructs the final kernel `Message`.
+
+`UsageDelta` is cumulative. Every present counter must be greater than or equal to its prior value, checked token totals must be internally consistent, and the final response usage must equal the final streamed snapshot when one was emitted. Text/reasoning/tool-call aggregates and final usage/provider/completion identity must match `ModelResponse`; mismatches produce no partial durable success.
+
+```rust
+pub struct ModelToolCall {
+    pub name: Arc<str>,
+    pub arguments: RawJson,
+}
+
+pub struct ModelResponse {
+    pub assistant_content: Arc<[ContentBlock]>,
+    pub tool_calls: Arc<[ModelToolCall]>,
+    pub usage: Usage,
+    pub provider_ids: ProviderIds,
+    pub completion_id: Arc<str>,
+    pub continuation_state: Option<RawJson>,
+}
+
+pub struct ModelDeferral {
+    pub handle: ExternalHandleRef,
+    pub reconciliation: ReconciliationPolicy,
+    pub next_poll_at: Option<Timestamp>,
+    pub expires_at: Option<Timestamp>,
+}
+```
+
+`assistant_content` contains normalized assistant content but never `ToolCall` or `ToolResult` blocks; model tool calls are source-ordered separately without framework IDs. The runtime combines content and allocated tool-call blocks, allocates `MessageId`, timestamps with the injected clock, and constructs `EffectCompleted` plus `ModelSettlement::Completed`. `Deferred` constructs `EffectDeferred` using the committed effect output contract. A port error constructs a failed settlement. Opaque provider events remain driver-local; explicit text, reasoning, and heartbeat items may become the existing confidential transient `RunEvent` kinds, with no new event kind.
 
 ## 14.4 Capability model
 
@@ -2717,13 +2836,46 @@ pub struct ModelCapabilities {
     pub native_capabilities: BTreeSet<CapabilityKey>,
 }
 
+pub struct InputCapabilities {
+    pub text: bool,
+    pub json: bool,
+    pub images: bool,
+    pub audio: bool,
+    pub files: bool,
+}
+
+pub enum StructuredOutputCapability {
+    Unsupported,
+    Prompted,
+    Native,
+}
+
 pub struct ModelContextProfile {
+    pub provider: Arc<str>,
     pub model: ModelName,
     pub hard_input_bytes: u64,
     pub context_window_tokens: u64,
     pub max_output_tokens: u64,
     pub reserved_output_tokens: u64,
     pub provider_overhead_tokens: u64,
+    pub estimator: TokenEstimatorRef,
+}
+
+pub struct ModelContextProfileOverride {
+    pub hard_input_bytes: Option<u64>,
+    pub context_window_tokens: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+    pub reserved_output_tokens: Option<u64>,
+    pub provider_overhead_tokens: Option<u64>,
+}
+
+pub struct LockedModelContextProfile {
+    pub profile: ModelContextProfile,
+    pub digest: Digest,
+}
+
+pub struct ModelTokenEstimate {
+    pub input_tokens: u64,
     pub estimator: TokenEstimatorRef,
 }
 
@@ -2740,13 +2892,50 @@ pub enum TokenEstimatorSource {
 }
 ```
 
-The provider/model descriptor supplies hard ceilings and its estimator identity/version. `AgentSpec` may only reduce input/output budgets or increase reserved/provider-overhead safety margins; an explicitly allowlisted run override may reduce them again, never exceed provider ceilings. Resolution computes and locks the effective profile and its digest. If no exact tokenizer exists, the provider supplies a named/versioned conservative estimator with a documented upper-bound rule; an unknown estimator cannot be treated as exact. Hard byte and token validation always runs after compaction and before the model effect commit.
+The provider/model descriptor supplies non-zero hard ceilings and its estimator identity/version/source. Resolution applies provider ceilings first, then agent and explicitly allowlisted run overrides. Ceilings tighten with `min`; reserved-output and provider-overhead safety margins tighten with `max`. Any attempted relaxation, non-allowlisted run override, checked-arithmetic overflow, or `reserved_output_tokens + provider_overhead_tokens > context_window_tokens` fails closed. Provider/model and estimator identity plus every effective field are canonicalized and bound with `Digest::raw_json`; the immutable profile/digest pair is retained for the resolved run.
+
+If no exact tokenizer exists, the provider supplies a named/versioned conservative estimator with a documented upper-bound rule; an unknown estimator cannot be treated as exact. After real compaction and immediately before the request-prepared/effect commit, the shared validator checks canonical request bytes against `hard_input_bytes`, invokes the declared estimator, verifies estimator identity, computes available input tokens with checked arithmetic, and checks input/output limits. PR-018 reuses this validator after real compaction rather than adding a second interpretation.
 
 Provider-specific capability detail lives in namespaced metadata rather than kernel enums whenever possible.
 
-## 14.5 Reference implementations
+## 14.5 Stable adapter failures
 
-`ScriptedModel` is the semantic reference and drives all deterministic conformance fixtures. The reference network provider is OpenAI-compatible with Chat Completions as the required baseline. Responses API mapping is an optional adapter extension. A versioned quirks table captures endpoint deviations, and Anthropic fixtures act as the early check that `Model` remains provider-neutral.
+`ModelError` contains a stable code, framework `ErrorCategory`, retryable flag, bounded safe message, and bounded namespaced metadata. Adapters must use these exact codes for the corresponding validation class:
+
+```rust
+pub struct ModelError {
+    code: ErrorCode,
+    category: ErrorCategory,
+    retryable: bool,
+    message: Arc<str>,
+    metadata: Metadata,
+}
+```
+
+```text
+model_request_invalid
+model_profile_invalid
+model_profile_relaxation
+model_profile_override_not_allowed
+model_estimator_mismatch
+model_context_limit_exceeded
+model_stream_missing_completion
+model_stream_duplicate_completion
+model_stream_item_after_completion
+model_stream_error_after_completion
+model_stream_limit_exceeded
+model_tool_call_delta_invalid
+model_tool_call_incomplete
+model_tool_call_arguments_invalid
+model_usage_invalid
+model_response_mismatch
+```
+
+All listed errors are non-retryable. `model_context_limit_exceeded` and `model_stream_limit_exceeded` use `ErrorCategory::Limit`; every other listed code uses `ErrorCategory::Validation`. Construction rejects a reserved code paired with another category or retryability. Provider-originated errors may be retryable only when the adapter can safely classify them without exposing secrets. No malformed stream produces an assistant message, completed effect, or other partial durable success.
+
+## 14.6 Reference implementations
+
+`ScriptedModel` is the PR-015 semantic reference and actual leaf implementation of `Model`. It drives deterministic success, fragmentation, cumulative usage, heartbeat/opaque events, error, deferral, malformed ordering, blocking, cancellation acknowledgement, warmup, and reuse fixtures while preserving the existing fixture language. The reference network provider is OpenAI-compatible with Chat Completions as the required baseline in its later owning PR. Responses API mapping is an optional adapter extension. A versioned quirks table captures endpoint deviations, and Anthropic fixtures act as the early check that `Model` remains provider-neutral.
 
 # 15. Toolset port design
 
@@ -2794,6 +2983,12 @@ pub enum ApprovalRequirement {
     NotRequired,
 }
 
+pub enum SideEffectClass {
+    ReadOnly,
+    IdempotentWrite,
+    NonIdempotentWrite,
+}
+
 pub struct ApprovalMetadata {
     pub requirement: ApprovalRequirement,
     pub reason: Option<Arc<str>>,
@@ -2817,6 +3012,8 @@ pub struct ToolSpec {
 ```
 
 `model_name` is the name exposed to the LLM and must be unique in the resolved agent. `ToolId` remains stable across aliases. `ApprovalMetadata` is a bounded policy hint, not an authorization grant: `Required` cannot be bypassed, while `Policy` and `NotRequired` remain subject to stricter host or middleware policy.
+
+PR-015 owns this complete data-only `ToolSpec`, `ApprovalRequirement`, `ApprovalMetadata`, and `SideEffectClass` model-request DTO contract because model requests cannot compile without it. PR-016 owns schema compilation and validation, `Toolset`, executable resolution, approval enforcement, scheduling, and tool execution. PR-015 must not compile schemas, authorize tools, or dispatch a tool.
 
 ## 15.3 Validation
 
@@ -4338,6 +4535,12 @@ pub struct ModelCallContext {
     pub request_id: ModelRequestId,
 }
 
+pub struct ModelWarmupContext {
+    pub cancellation: CancellationSignal,
+    pub deadline: Option<Timestamp>,
+    pub metadata: Metadata,
+}
+
 pub struct ToolCallContext {
     pub run: RunCallContext,
     pub tool_batch_id: ToolBatchId,
@@ -4360,7 +4563,7 @@ pub struct ReconcileContext {
 }
 ```
 
-These immutable contexts are the only source of runtime identity, authorization, deadline, budget, cancellation, attempt, and idempotency data at port boundaries. Native adapters receive the full authorized projection; WIT receives the sanitized subset defined in section 27; remote/process adapters bind it to authenticated locators. Reconciliation reuses the original identifiers/evidence.
+`ModelRequest.call` embeds the immutable `ModelCallContext`; other port calls receive their context as a separate argument. These immutable contexts are the only source of runtime identity, authorization, deadline, budget, cancellation, attempt, and idempotency data at port boundaries. `CancellationSignal` is an effect-local, cloneable, target-portable observation/wakeup handle and carries no authority. Native adapters receive the full authorized projection; WIT receives the sanitized subset defined in section 27; remote/process adapters bind it to authenticated locators. Reconciliation reuses the original identifiers/evidence. Warmup runs before a ready model handle accepts work and therefore receives construction cancellation/deadline plus bounded non-secret metadata, not a fabricated run identity or principal.
 
 ## 31.4 Sensitive data
 

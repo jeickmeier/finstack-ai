@@ -3,12 +3,17 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AppendRequest, CommittedBatch, Decision, Diagnostic, EffectId, Kernel, KernelError,
-    KernelInput, KernelState, PostCommitAction, RecordBody, RunEvent, Timestamp, TransitionEnv,
+    AppendRequest, CommittedBatch, Decision, Diagnostic, EffectId, EventId, Kernel, KernelError,
+    KernelInput, KernelState, Metadata, ModelTextDelta, OperationLocator, PendingModelEffect,
+    PostCommitAction, ProviderHeartbeat, ReasoningDelta, RecordBody, RunEvent, RunEventBody,
+    Sensitivity, Timestamp, TransitionEnv,
 };
 use thiserror::Error;
 
-use crate::{JournalStore, LoadRequest, LoadedSession, PortFuture, PortObject, StoreError};
+use crate::{
+    AuthorizationContext, JournalStore, LoadRequest, LoadedSession, ModelProgress, PortFuture,
+    PortObject, StoreError,
+};
 
 /// Stable run-local fault state owned by a commit coordinator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +51,12 @@ pub enum CommitCoordinatorError {
     Decision {
         /// Stable kernel error code.
         code: &'static str,
+    },
+    /// A configured effect driver rejected a request before any append.
+    #[error("model request rejected before commit: {code}")]
+    ModelRequest {
+        /// Stable adapter error code.
+        code: Arc<str>,
     },
     /// The environment did not provide exactly one append identity.
     #[error("non-empty decision requires exactly one append batch id")]
@@ -153,6 +164,13 @@ impl CommitCoordinator {
             .map_err(|error| decision_error(&error))?;
         if decision.records.is_empty() {
             return Ok(empty_outcome(decision));
+        }
+        if let Some(dispatcher) = &self.dispatcher {
+            dispatcher.validate_before_commit(&input).map_err(|error| {
+                CommitCoordinatorError::ModelRequest {
+                    code: Arc::from(error.code),
+                }
+            })?;
         }
         let [append_batch_id] = env.ids.append_batch_ids() else {
             return Err(CommitCoordinatorError::AppendBatchIdCardinality);
@@ -274,8 +292,12 @@ impl CommitCoordinator {
         let Some(dispatcher) = &self.dispatcher else {
             return Err("effect_driver_unavailable");
         };
+        let dispatch = RuntimeDispatch {
+            action,
+            model: model_dispatch_seed(self.kernel.state(), action),
+        };
         dispatcher
-            .dispatch(action)
+            .dispatch(dispatch)
             .await
             .map_err(|error| error.code)
     }
@@ -285,15 +307,101 @@ impl CommitCoordinator {
         CommitCoordinatorError::BoundaryFault { code }
     }
 
+    #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+    pub(crate) fn install_dispatcher(&mut self, dispatcher: Arc<dyn PostCommitDispatcher>) {
+        self.dispatcher = Some(dispatcher);
+    }
+
+    #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+    pub(crate) fn materialize_model_progress(
+        &mut self,
+        progress: &[ModelProgress],
+        provider: &str,
+        now: Timestamp,
+    ) -> Result<Arc<[RunEvent]>, &'static str> {
+        let pending = self
+            .kernel
+            .state()
+            .pending_model_effect
+            .as_ref()
+            .ok_or("model_progress_without_pending_effect")?;
+        let state = self.kernel.state();
+        let accepted = state
+            .accepted
+            .as_ref()
+            .ok_or("model_progress_without_accepted_run")?;
+        let session_id = state.session_id.ok_or("model_progress_without_session")?;
+        let lane_id = state.lane_id.ok_or("model_progress_without_lane")?;
+        let effect_id = pending.requested.effect_id();
+        let mut events = Vec::with_capacity(progress.len());
+        for (offset, item) in progress.iter().enumerate() {
+            let transient_sequence = self
+                .next_transient_sequence
+                .checked_add(
+                    u64::try_from(offset).map_err(|_| "transient_event_sequence_exhausted")?,
+                )
+                .ok_or("transient_event_sequence_exhausted")?;
+            let body = match item {
+                ModelProgress::Text(text) => RunEventBody::ModelTextDelta(
+                    ModelTextDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
+                ),
+                ModelProgress::Reasoning(text) => RunEventBody::ReasoningDelta(
+                    ReasoningDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
+                ),
+                ModelProgress::Heartbeat(metadata) => RunEventBody::ProviderHeartbeat(
+                    ProviderHeartbeat::try_new(provider, Some(metadata.as_str()))
+                        .map_err(|_| "model_progress_invalid")?,
+                ),
+            };
+            events.push(
+                RunEvent::try_transient(
+                    finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
+                    finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
+                    transient_event_id(effect_id, transient_sequence),
+                    session_id,
+                    lane_id,
+                    accepted.run_id(),
+                    Some(pending.turn_id),
+                    Some(pending.model_request_id),
+                    None,
+                    Some(effect_id),
+                    None,
+                    transient_sequence,
+                    now,
+                    Sensitivity::Confidential,
+                    body,
+                )
+                .map_err(|_| "model_progress_invalid")?,
+            );
+        }
+        self.next_transient_sequence = self
+            .next_transient_sequence
+            .checked_add(
+                u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?,
+            )
+            .ok_or("transient_event_sequence_exhausted")?;
+        Ok(events.into())
+    }
+
     #[cfg(test)]
     fn with_test_dispatcher(
         store: Arc<dyn JournalStore>,
         dispatcher: Arc<dyn PostCommitDispatcher>,
     ) -> Self {
         let mut coordinator = Self::new(store);
-        coordinator.dispatcher = Some(dispatcher);
+        coordinator.install_dispatcher(dispatcher);
         coordinator
     }
+}
+
+#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+fn transient_event_id(effect_id: EffectId, transient_sequence: u64) -> EventId {
+    let mut bytes = effect_id.to_bytes();
+    let digest = finstack_ai_kernel::Digest::raw_json(
+        format!("{}:{transient_sequence}", effect_id.to_canonical_string()).as_bytes(),
+    );
+    bytes[9..].copy_from_slice(&digest.as_bytes()[..7]);
+    EventId::from_bytes(bytes)
 }
 
 fn decision_error(error: &KernelError) -> CommitCoordinatorError {
@@ -426,12 +534,69 @@ fn pending_effect_request(
     })
 }
 
-struct DispatchError {
-    code: &'static str,
+pub(crate) struct DispatchError {
+    pub(crate) code: &'static str,
 }
 
-trait PostCommitDispatcher: PortObject {
-    fn dispatch(&self, action: PostCommitAction) -> PortFuture<Result<(), DispatchError>>;
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+pub(crate) struct ModelDispatchSeed {
+    pub(crate) pending: PendingModelEffect,
+    pub(crate) locator: OperationLocator,
+    pub(crate) authorization: AuthorizationContext,
+    pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
+    pub(crate) attempt: u32,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+pub(crate) struct RuntimeDispatch {
+    pub(crate) action: PostCommitAction,
+    pub(crate) model: Option<ModelDispatchSeed>,
+}
+
+pub(crate) trait PostCommitDispatcher: PortObject {
+    fn validate_before_commit(&self, _input: &KernelInput) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
+    fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>>;
+}
+
+fn model_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<ModelDispatchSeed> {
+    let PostCommitAction::ExecuteEffect { effect_id } = action else {
+        return None;
+    };
+    let pending = state.pending_model_effect.as_ref()?;
+    if pending.requested.effect_id() != effect_id || pending.deferred.is_some() {
+        return None;
+    }
+    let accepted = state.accepted.as_ref()?;
+    let security = accepted.security();
+    let locator = OperationLocator::try_new(
+        security.tenant_scope(),
+        state.session_id?,
+        state.lane_id?,
+        accepted.run_id(),
+    )
+    .ok()?;
+    let authorization = AuthorizationContext {
+        principal: security.principal().clone(),
+        authentication_method: Arc::from(security.authentication_method()),
+        assurance_level: Arc::from(security.assurance_level()),
+        roles: Arc::from([]),
+        permitted_scopes: Arc::from([Arc::from(security.tenant_scope())]),
+        safe_claims: Metadata::empty(),
+        policy_version: Arc::from(security.authorization_policy_version()),
+        decision_id: Arc::from(security.authorization_decision_id()),
+    };
+    Some(ModelDispatchSeed {
+        pending: pending.clone(),
+        locator,
+        authorization,
+        budget_scope_id: accepted.relation().budget_scope_id(),
+        attempt: state.retry.attempts.checked_add(1)?,
+    })
 }
 
 #[cfg(test)]
@@ -791,8 +956,8 @@ mod tests {
     }
 
     impl PostCommitDispatcher for RecordingDispatcher {
-        fn dispatch(&self, action: PostCommitAction) -> PortFuture<Result<(), DispatchError>> {
-            self.actions.lock().expect("lock").push(action);
+        fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>> {
+            self.actions.lock().expect("lock").push(dispatch.action);
             Box::pin(async { Ok(()) })
         }
     }

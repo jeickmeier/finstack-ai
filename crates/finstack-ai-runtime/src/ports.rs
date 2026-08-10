@@ -2,6 +2,7 @@
 
 use core::future::Future;
 use core::pin::Pin;
+use futures_core::Stream;
 
 /// Object bound used by runtime ports on native targets.
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,3 +25,11 @@ pub type PortFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 /// Boxed local browser-WASM runtime future.
 #[cfg(target_arch = "wasm32")]
 pub type PortFuture<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
+
+/// Boxed native runtime stream.
+#[cfg(not(target_arch = "wasm32"))]
+pub type PortStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
+
+/// Boxed local browser-WASM runtime stream.
+#[cfg(target_arch = "wasm32")]
+pub type PortStream<T> = Pin<Box<dyn Stream<Item = T> + 'static>>;

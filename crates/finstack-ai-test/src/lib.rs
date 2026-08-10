@@ -33,7 +33,10 @@ pub use reducer_fixture::{
     ReducerExecution, ReducerRustAdapter, ReducerTerminalProjection, execute_reducer_trace,
     project_reducer_terminal,
 };
-pub use scripted_model::{ScriptedInput, ScriptedStep, ScriptedStepKind};
+pub use scripted_model::{
+    ScriptedInput, ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,
+    ScriptedStep, ScriptedStepKind,
+};
 pub use trace_fixture::{
     DurabilityClass, EffectExpectation, ExpectedTrace, GoldenTrace, NormalizedEvent,
     PayloadDeclaration, TraceError, TraceRecord, TransitionEnv, compare_normalized_bytes,

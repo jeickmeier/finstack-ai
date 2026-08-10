@@ -1,0 +1,9 @@
+PR-015 hosted validation status
+Date: 2026-08-10
+Branch: codex/pr-015-model-port
+Status: NOT RUN
+
+No issue or actual pull request exists yet. Linux/macOS/Windows, hosted
+security/supply-chain, coverage/fuzz, and immutable reviewed-head checks remain
+required before PR-015 acceptance can be closed. No hosted run ID, approval, or
+merge revision is claimed by this candidate artifact.

@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "subject": "model-context-profile",
+  "operation": "roundtrip",
+  "input": {
+    "provider": "scripted",
+    "model": "scripted-1",
+    "hard_input_bytes": 4096,
+    "context_window_tokens": 2048,
+    "max_output_tokens": 256,
+    "reserved_output_tokens": 256,
+    "provider_overhead_tokens": 16,
+    "estimator": {
+      "id": "scripted-bytes-upper-bound",
+      "version": "1",
+      "source": "conservative_upper_bound"
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

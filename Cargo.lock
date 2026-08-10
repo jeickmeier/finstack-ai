@@ -337,6 +337,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-model-port-leaf-fixture"
+version = "0.0.1"
+dependencies = [
+ "finstack-ai-runtime",
+ "futures-core",
+]
+
+[[package]]
 name = "finstack-ai-protocol"
 version = "0.0.1"
 dependencies = [
@@ -355,8 +363,10 @@ name = "finstack-ai-runtime"
 version = "0.0.1"
 dependencies = [
  "finstack-ai-kernel",
+ "futures-core",
  "getrandom",
  "serde",
+ "serde_json",
  "serde_json_canonicalizer",
  "thiserror",
  "tokio",
@@ -379,10 +389,13 @@ dependencies = [
  "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "futures-core",
  "jsonschema",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1183,6 +1196,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
 dependencies = [
  "pin-project-lite",
+ "tokio-macros",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

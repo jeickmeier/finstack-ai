@@ -13,6 +13,8 @@ use finstack_ai_kernel::{
     TIMESTAMP_MIN_MS, TimeError, Timestamp,
 };
 use serde::Deserialize;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::paths::compatibility_fixture;
@@ -205,9 +207,40 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
         | "pr012-record"
         | "pr014-record"
         | "corrupt-replay" => crate::pr009_fixture::run_pr009_subject(fixture),
+        "model-request-draft" => {
+            run_strict_runtime_subject::<finstack_ai_runtime::ModelRequestDraft>(fixture)
+        }
+        "model-context-profile" => {
+            run_strict_runtime_subject::<finstack_ai_runtime::ModelContextProfile>(fixture)
+        }
+        "tool-spec" => run_strict_runtime_subject::<finstack_ai_runtime::ToolSpec>(fixture),
         other => Err(PublicApiFixtureError::Failed(format!(
             "unknown subject {other}"
         ))),
+    }
+}
+
+fn run_strict_runtime_subject<T>(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError>
+where
+    T: DeserializeOwned + Serialize,
+{
+    let input = fixture
+        .input
+        .clone()
+        .ok_or_else(|| fail("runtime contract fixture requires input"))?;
+    match serde_json::from_value::<T>(input) {
+        Ok(value) => {
+            if !fixture.expect.ok {
+                return Err(fail("expected strict runtime contract decode failure"));
+            }
+            let encoded = serde_json::to_vec(&value).map_err(|error| fail(error.to_string()))?;
+            serde_json::from_slice::<T>(&encoded).map_err(|error| fail(error.to_string()))?;
+            Ok(())
+        }
+        Err(error) if fixture.expect.ok => Err(fail(format!(
+            "strict runtime contract decode failed: {error}"
+        ))),
+        Err(_) => assert_error_code(&fixture.expect, "strict_decode"),
     }
 }
 

@@ -13,6 +13,7 @@ description = "Scripted models, fakes, and conformance utilities for finstack-ai
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
+futures-core = { workspace = true }
 jsonschema = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -20,6 +21,9 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-store-memory = { workspace = true }
+tokio = { workspace = true }
 
 [[bench]]
 name = "conformance"
