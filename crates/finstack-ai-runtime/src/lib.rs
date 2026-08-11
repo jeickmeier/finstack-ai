@@ -83,7 +83,7 @@ pub use agent_invoker::{
 pub use artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ARTIFACT_INVALID_METADATA, ARTIFACT_NOT_FOUND,
     ARTIFACT_SCOPE_MISMATCH, ARTIFACT_TOO_LARGE, ARTIFACT_UNAVAILABLE, ArtifactError,
-    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+    ArtifactMetadata, ArtifactScope, ArtifactStore, MAX_ARTIFACT_BYTES, stage_required_artifact,
     validate_staged_artifact,
 };
 pub use audit::{
