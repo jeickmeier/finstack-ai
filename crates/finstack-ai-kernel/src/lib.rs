@@ -100,6 +100,7 @@
 
 mod agent;
 mod bounds;
+mod budget;
 mod capabilities;
 mod content;
 mod digest;
@@ -129,6 +130,12 @@ pub use agent::{
     StructuredResultSource, is_internal_tool_name,
 };
 pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
+pub use budget::{
+    BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetRecordError,
+    BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest, BudgetReservationReceipt,
+    BudgetReservationReleased, BudgetReservationRequested, BudgetReservationSettled,
+    BudgetReserveRequest,
+};
 pub use capabilities::{ActiveCapability, CapabilitiesActivated, CapabilityActivationSource};
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
@@ -208,15 +215,16 @@ pub use refs::{
 };
 pub use run::{
     BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
-    CancellationRequest, CancellationRequested, DeadlinePropagation, MAX_RUN_RELATION_DEPTH,
-    PrincipalPropagation, RunAccepted, RunError, RunPropagationPolicy, RunRelation,
-    RunRelationKind, RunSecurityContext,
+    CancellationRequest, CancellationRequested, ChildPlacement, ChildRunLocator, ChildRunPrepared,
+    DeadlinePropagation, MAX_RUN_RELATION_DEPTH, PrincipalPropagation, RemoteRouteRef, RunAccepted,
+    RunError, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
 pub use state::{
-    CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
-    ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
-    PendingModelEffect, RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate,
-    TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
+    BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
+    CurrentTurn, KernelState, ModelSettlementFingerprint, ModelSettlementHashEntryV1,
+    ModelSettlementKind, PendingModelEffect, RetryState, RunPhase, StageSettlementHashEntryV1,
+    TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
+    TransitionEnv,
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,

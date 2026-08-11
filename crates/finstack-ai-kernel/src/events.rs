@@ -1077,6 +1077,11 @@ fn run_event_body_from_record(
         | RecordBody::FinalResultRecorded(_)
         | RecordBody::OutputValidationFailed(_)
         | RecordBody::ExternalCommandRejected(_)
+        | RecordBody::ChildRunPrepared(_)
+        | RecordBody::BudgetReservationRequested(_)
+        | RecordBody::BudgetReservationSettled(_)
+        | RecordBody::BudgetChargeRecorded(_)
+        | RecordBody::BudgetReservationReleased(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1354,7 +1359,12 @@ pub fn derived_event_kind(
         | RecordBody::CapabilitiesActivated(_)
         | RecordBody::FinalResultRecorded(_)
         | RecordBody::OutputValidationFailed(_)
-        | RecordBody::ExternalCommandRejected(_) => {
+        | RecordBody::ExternalCommandRejected(_)
+        | RecordBody::ChildRunPrepared(_)
+        | RecordBody::BudgetReservationRequested(_)
+        | RecordBody::BudgetReservationSettled(_)
+        | RecordBody::BudgetChargeRecorded(_)
+        | RecordBody::BudgetReservationReleased(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

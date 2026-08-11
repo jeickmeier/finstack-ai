@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "finstack.agent.minimal",
+  "model": {
+    "id": "finstack.model.test",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "instructions": [],
+  "toolsets": [],
+  "context_providers": [],
+  "middleware": [],
+  "store": {
+    "id": "finstack.store.memory",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "observers": [],
+  "capabilities": [],
+  "limits": {},
+  "policy": {
+    "child_runs": {
+      "mode": "deny"
+    }
+  },
+  "extension_config": {}
+}

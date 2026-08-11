@@ -16,6 +16,7 @@ native-tokio = ["dep:getrandom", "dep:tokio"]
 wasm-host = []
 
 [dependencies]
+bytes = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

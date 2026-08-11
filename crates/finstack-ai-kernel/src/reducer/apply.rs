@@ -23,8 +23,9 @@ use crate::events::{EventCorrelations, RunEvent};
 use crate::message::MessageRole;
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RecordBody, RecordEnvelope};
 use crate::state::{
-    CancellationState, CompletionIdentity, CurrentTurn, KernelState, ModelSettlementFingerprint,
-    ModelSettlementKind, PendingModelEffect, RunPhase, TerminalCandidate, TerminalState,
+    BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn, KernelState,
+    ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
+    TerminalCandidate, TerminalState,
 };
 use crate::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchOutcome, ToolCallIdentity,
@@ -47,7 +48,12 @@ pub(super) fn apply(
         committed.records.as_ref(),
         [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
     );
+    let post_terminal_budget_release = committed
+        .records
+        .iter()
+        .all(|record| matches!(record.body(), RecordBody::BudgetReservationReleased(_)));
     if !external_rejection_only
+        && !post_terminal_budget_release
         && (original.terminal.is_some()
             || matches!(
                 original.phase,
@@ -276,10 +282,17 @@ fn validate_identities(state: &KernelState, records: &[RecordEnvelope]) -> Resul
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the phase matrix remains exhaustive and composition records add one independent durable sidecar shape"
+)]
 fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
+    if composition_record_shape(state, records) {
+        return Ok(());
+    }
     if state.accepted.is_some()
         && matches!(
             records,
@@ -377,6 +390,46 @@ fn validate_batch_shape(
         Ok(())
     } else {
         Err(KernelError::InvalidRecordOrder)
+    }
+}
+
+fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    match records {
+        [prepared]
+            if matches!(prepared.body(), RecordBody::ChildRunPrepared(value)
+            if value.budget_reservation_id.is_none()) =>
+        {
+            true
+        }
+        [prepared, requested] => matches!(
+            (prepared.body(), requested.body()),
+            (
+                RecordBody::ChildRunPrepared(child),
+                RecordBody::BudgetReservationRequested(budget),
+            ) if child.budget_reservation_id == Some(budget.request.reservation_id)
+                && child.child.operation.run_id == budget.request.run_id
+        ),
+        [record] => match record.body() {
+            RecordBody::BudgetReservationSettled(value) => state
+                .budget_reservations
+                .contains_key(&value.receipt.reservation_id),
+            RecordBody::BudgetChargeRecorded(value) => state
+                .budget_reservations
+                .get(&value.receipt.reservation_id)
+                .is_some_and(|reservation| reservation.settlement.is_some()),
+            RecordBody::BudgetReservationReleased(value) => {
+                state
+                    .budget_reservations
+                    .get(&value.receipt.reservation_id)
+                    .is_some_and(|reservation| reservation.settlement.is_some())
+                    && state
+                        .accepted
+                        .as_ref()
+                        .is_some_and(|accepted| accepted.run_id() == value.receipt.terminal_run_id)
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
@@ -1205,6 +1258,143 @@ fn apply_record(
             apply_validation_failure(state, failure)?;
         }
         RecordBody::ExternalCommandRejected(_) => {}
+        RecordBody::ChildRunPrepared(prepared) => {
+            let accepted = state
+                .accepted
+                .as_ref()
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            let parent_session_id = state.session_id.ok_or(KernelError::InvalidRecordOrder)?;
+            let same_session = prepared.child.operation.session_id == parent_session_id;
+            let placement_matches = match prepared.placement {
+                crate::ChildPlacement::CompatibleLaneInParentSession => {
+                    same_session
+                        && state
+                            .lane_id
+                            .is_some_and(|lane_id| prepared.child.operation.lane_id != lane_id)
+                }
+                crate::ChildPlacement::IsolatedChildSession
+                | crate::ChildPlacement::RemoteChildSession => !same_session,
+            };
+            if prepared.parent_run_id != accepted.run_id()
+                || prepared
+                    .validate(accepted.security().tenant_scope())
+                    .is_err()
+                || !placement_matches
+            {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            match state.child_preparations.get(&prepared.parent_effect_id) {
+                Some(existing) if existing == prepared => {}
+                Some(_) => return Err(KernelError::InvalidRecordOrder),
+                None => {
+                    state
+                        .child_preparations
+                        .insert(prepared.parent_effect_id, prepared.clone());
+                }
+            }
+            state.state_version = 5;
+        }
+        RecordBody::BudgetReservationRequested(requested) => {
+            requested
+                .request
+                .validate()
+                .map_err(|_| KernelError::InvalidRecordOrder)?;
+            let linked = state.child_preparations.values().any(|prepared| {
+                prepared.budget_reservation_id == Some(requested.request.reservation_id)
+                    && prepared.child.operation.run_id == requested.request.run_id
+            });
+            if !linked {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            match state
+                .budget_reservations
+                .get(&requested.request.reservation_id)
+            {
+                Some(existing) if existing.request == requested.request => {}
+                Some(_) => return Err(KernelError::InvalidRecordOrder),
+                None => {
+                    state.budget_reservations.insert(
+                        requested.request.reservation_id,
+                        BudgetReservationReplay {
+                            request: requested.request.clone(),
+                            settlement: None,
+                            release: None,
+                        },
+                    );
+                }
+            }
+            state.state_version = 5;
+        }
+        RecordBody::BudgetReservationSettled(settled) => {
+            settled
+                .receipt
+                .validate()
+                .map_err(|_| KernelError::InvalidRecordOrder)?;
+            let replay = state
+                .budget_reservations
+                .get_mut(&settled.receipt.reservation_id)
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            if settled.receipt.scope_id != replay.request.scope_id
+                || settled.receipt.request_digest != replay.request.request_digest
+                || settled.receipt.reserved != replay.request.amount
+            {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            match replay.settlement.as_ref() {
+                Some(existing) if existing == &settled.receipt => {}
+                Some(_) => return Err(KernelError::InvalidRecordOrder),
+                None => replay.settlement = Some(settled.receipt.clone()),
+            }
+            state.state_version = 5;
+        }
+        RecordBody::BudgetChargeRecorded(charged) => {
+            charged
+                .receipt
+                .validate()
+                .map_err(|_| KernelError::InvalidRecordOrder)?;
+            let replay = state
+                .budget_reservations
+                .get(&charged.receipt.reservation_id)
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            if replay.settlement.is_none() || replay.request.scope_id != charged.receipt.scope_id {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            match state.budget_charges.get(&charged.receipt.effect_id) {
+                Some(existing) if existing == &charged.receipt => {}
+                Some(_) => return Err(KernelError::InvalidRecordOrder),
+                None => {
+                    state
+                        .budget_charges
+                        .insert(charged.receipt.effect_id, charged.receipt.clone());
+                }
+            }
+            state.state_version = 5;
+        }
+        RecordBody::BudgetReservationReleased(released) => {
+            released
+                .receipt
+                .validate()
+                .map_err(|_| KernelError::InvalidRecordOrder)?;
+            let replay = state
+                .budget_reservations
+                .get_mut(&released.receipt.reservation_id)
+                .ok_or(KernelError::InvalidRecordOrder)?;
+            if replay.settlement.is_none()
+                || replay.request.scope_id != released.receipt.scope_id
+                || state
+                    .accepted
+                    .as_ref()
+                    .is_none_or(|accepted| accepted.run_id() != released.receipt.terminal_run_id)
+            {
+                return Err(KernelError::InvalidRecordOrder);
+            }
+            match replay.release.as_ref() {
+                Some(existing) if existing == &released.receipt => {}
+                Some(_) => return Err(KernelError::InvalidRecordOrder),
+                None => replay.release = Some(released.receipt.clone()),
+            }
+            state.state_version = 5;
+        }
         RecordBody::EffectCancelled(cancelled) => {
             if let Some(pending) = state.pending_model_effect.as_ref()
                 && pending.requested.effect_id() == cancelled.effect_id()
@@ -2415,6 +2605,202 @@ mod tests {
     use crate::{CommittedBatch, TextBlock};
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one end-to-end replay fixture keeps preparation, settlement, round-trip, and conflict evidence together"
+    )]
+    fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
+        let timestamp = Timestamp::from_unix_ms(1_000).expect("timestamp");
+        let session_id = fixed_id::<crate::SessionTag>(10);
+        let lane_id = fixed_id::<crate::LaneTag>(11);
+        let parent_run_id = fixed_id::<crate::RunTag>(12);
+        let parent_effect_id = fixed_id::<crate::EffectTag>(13);
+        let child_run_id = fixed_id::<crate::RunTag>(14);
+        let reservation_id = fixed_id::<crate::BudgetReservationTag>(15);
+        let scope_id = fixed_id::<crate::BudgetScopeTag>(16);
+        let accepted = crate::RunAccepted::try_new(
+            parent_run_id,
+            crate::RunRelation::root(parent_run_id).expect("root relation"),
+            crate::RunSecurityContext::try_new(
+                "tenant-a",
+                crate::PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                    .expect("principal"),
+                "oidc",
+                "high",
+                "policy-v1",
+                "decision-v1",
+                None,
+            )
+            .expect("security"),
+            None,
+            crate::RunLimits::empty(),
+            crate::RunPropagationPolicy {
+                cancellation: crate::CancellationPropagation::Cascade,
+                deadline: crate::DeadlinePropagation::MinimumOfParentAndChild,
+                budget: crate::BudgetPropagation::ReservedChildAllocation,
+                principal: crate::PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(b"agent-lock"),
+            None,
+        )
+        .expect("accepted");
+        let state = KernelState {
+            session_id: Some(session_id),
+            lane_id: Some(lane_id),
+            accepted: Some(accepted),
+            accepted_at: Some(timestamp),
+            phase: Some(RunPhase::BeforeRun),
+            ..KernelState::default()
+        };
+        let amount = crate::BudgetRequest {
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            cost: None,
+            extension_counters: BTreeMap::new(),
+        };
+        let request_digest = crate::BudgetReserveRequest::compute_digest(
+            scope_id,
+            reservation_id,
+            child_run_id,
+            &amount,
+        )
+        .expect("request digest");
+        let request = crate::BudgetReserveRequest {
+            scope_id,
+            reservation_id,
+            run_id: child_run_id,
+            amount: amount.clone(),
+            request_digest,
+        };
+        let prepared = crate::ChildRunPrepared {
+            parent_run_id,
+            parent_effect_id,
+            child: crate::ChildRunLocator {
+                operation: crate::OperationLocator::try_new(
+                    "tenant-a",
+                    session_id,
+                    fixed_id::<crate::LaneTag>(17),
+                    child_run_id,
+                )
+                .expect("child locator"),
+                remote: None,
+            },
+            request_digest: Digest::raw_json(b"child-request"),
+            placement: crate::ChildPlacement::CompatibleLaneInParentSession,
+            budget_reservation_id: Some(reservation_id),
+        };
+        let prepare_records = vec![
+            composition_envelope(
+                1,
+                timestamp,
+                session_id,
+                lane_id,
+                parent_run_id,
+                RecordBody::ChildRunPrepared(prepared.clone()),
+            ),
+            composition_envelope(
+                2,
+                timestamp,
+                session_id,
+                lane_id,
+                parent_run_id,
+                RecordBody::BudgetReservationRequested(crate::BudgetReservationRequested {
+                    request: request.clone(),
+                }),
+            ),
+        ];
+        let prepare_batch =
+            CommittedBatch::try_new(fixed_id::<crate::AppendBatchTag>(20), 1, 2, prepare_records)
+                .expect("prepare batch");
+        let applied = apply(&state, &prepare_batch, 0).expect("prepare apply").0;
+        assert_eq!(
+            applied.child_preparations.get(&parent_effect_id),
+            Some(&prepared)
+        );
+        assert_eq!(
+            applied
+                .budget_reservations
+                .get(&reservation_id)
+                .map(|replay| &replay.request),
+            Some(&request)
+        );
+
+        let receipt = crate::BudgetReservationReceipt {
+            scope_id,
+            reservation_id,
+            reserved: amount.clone(),
+            remaining: crate::BudgetRequest::default(),
+            request_digest,
+            receipt_digest: Digest::raw_json(b"reservation-receipt"),
+        };
+        let settlement = composition_envelope(
+            3,
+            timestamp,
+            session_id,
+            lane_id,
+            parent_run_id,
+            RecordBody::BudgetReservationSettled(crate::BudgetReservationSettled {
+                receipt: receipt.clone(),
+            }),
+        );
+        let settlement_batch = CommittedBatch::try_new(
+            fixed_id::<crate::AppendBatchTag>(21),
+            3,
+            3,
+            vec![settlement],
+        )
+        .expect("settlement batch");
+        let settled = apply(&applied, &settlement_batch, 0)
+            .expect("settlement apply")
+            .0;
+        assert_eq!(
+            settled
+                .budget_reservations
+                .get(&reservation_id)
+                .and_then(|replay| replay.settlement.as_ref()),
+            Some(&receipt)
+        );
+        let encoded = serde_json::to_vec(&settled).expect("v5 state JSON");
+        let decoded: KernelState = serde_json::from_slice(&encoded).expect("v5 replay state");
+        assert_eq!(decoded, settled);
+        assert_eq!(decoded.state_hash(), settled.state_hash());
+
+        let mut conflicting = prepared;
+        conflicting.request_digest = Digest::raw_json(b"conflicting-child-request");
+        let conflict_records = vec![
+            composition_envelope(
+                4,
+                timestamp,
+                session_id,
+                lane_id,
+                parent_run_id,
+                RecordBody::ChildRunPrepared(conflicting),
+            ),
+            composition_envelope(
+                5,
+                timestamp,
+                session_id,
+                lane_id,
+                parent_run_id,
+                RecordBody::BudgetReservationRequested(crate::BudgetReservationRequested {
+                    request,
+                }),
+            ),
+        ];
+        let conflict_batch = CommittedBatch::try_new(
+            fixed_id::<crate::AppendBatchTag>(22),
+            4,
+            5,
+            conflict_records,
+        )
+        .expect("conflict batch");
+        assert_eq!(
+            apply(&settled, &conflict_batch, 0),
+            Err(KernelError::InvalidRecordOrder)
+        );
+    }
+
+    #[test]
     fn semantic_tampering_precedes_capacity_failure() {
         let (state, batch) = external_batch_at_capacity(true);
         assert_eq!(
@@ -2561,6 +2947,33 @@ mod tests {
             body,
         )
         .expect("record")
+    }
+
+    fn composition_envelope(
+        sequence: u64,
+        timestamp: Timestamp,
+        session_id: crate::SessionId,
+        lane_id: crate::LaneId,
+        run_id: crate::RunId,
+        body: RecordBody,
+    ) -> RecordEnvelope {
+        RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            fixed_id::<crate::RecordTag>(sequence + 100),
+            session_id,
+            lane_id,
+            Some(run_id),
+            sequence,
+            timestamp,
+            None,
+            Digest::raw_json(b"payload"),
+            None,
+            Digest::raw_json(b"checksum"),
+            vec![],
+            body,
+        )
+        .expect("composition record")
     }
 
     fn fixed_id<T: crate::IdTag>(ordinal: u64) -> crate::Id<T> {
