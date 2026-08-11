@@ -1,0 +1,31 @@
+{
+  "checks": [
+    {
+      "maximum": 131072,
+      "measurement": "idle_bytes_per_session",
+      "status": "pass",
+      "value": 61952
+    },
+    {
+      "maximum": 500000,
+      "measurement": "model_reducer_mean_ns",
+      "status": "pass",
+      "value": 154851.62353515625
+    },
+    {
+      "maximum": 50000,
+      "measurement": "model_stream_256_items_mean_ns",
+      "status": "pass",
+      "value": 13864.603515625
+    },
+    {
+      "maximum": 2000000,
+      "measurement": "release_smoke_binary_bytes",
+      "status": "pass",
+      "value": 302624
+    }
+  ],
+  "format_version": 1,
+  "mode": "warning_only",
+  "status": "pass"
+}
