@@ -1,0 +1,85 @@
+PR-016 working-tree candidate validation
+Date: 2026-08-10
+Branch: codex/pr-016-toolset-scheduler
+Base revision: b8af2ae1d15307371a1413ad007328df50282198
+Implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1; cargo 1.97.1
+Disposition: PASS for the immutable implementation candidate; integration,
+hosted run, independent review, and G2 decision are not yet claimed
+
+Focused Toolset/runtime validation
+
+1. mise run test-tool
+   PASS: 15 Toolset integration tests, native and wasm32 default-feature-free
+   leaf compilation, and the release-mode native panic-containment fixture.
+
+2. mise run test-runtime
+   PASS: runtime units, journal-port bounds, memory-store coverage, doctests,
+   and all 14 model_port regressions.
+
+3. mise run test-model
+   PASS: Model contract/profile/request tests, all 14 model_port integration
+   tests, and native/WASM leaf compilation.
+
+4. mise run test-kernel
+   PASS: kernel units, model-only reducer, tool-batch source-order and FailRun
+   regressions, semantic reference, runtime contract, and public-Rust coverage.
+
+5. mise run conformance
+   PASS: strict public API, reducer/golden, scripted-model, Model runtime, and
+   all 15 Toolset/runtime acceptance and regression tests.
+
+Target, architecture, compatibility, and documentation validation
+
+6. mise run check-minimal
+   PASS: runtime default features remain empty.
+
+7. mise run check-wasm
+   PASS: kernel/runtime/facade/WASM and Toolset ABI leaf compile; the selected
+   WASM graph resolves no Tokio.
+
+8. mise run architecture
+   Initial sandboxed attempt could not open the configured uv cache. Approved
+   cache-access rerun: PASS, 22 checker tests and no architecture findings.
+
+9. mise run clippy
+   PASS with warnings denied.
+
+10. mise run docs
+    PASS.
+
+11. mise run schema-governance
+    Initial sandboxed attempt could not open the configured uv cache. Approved
+    cache-access rerun: PASS.
+
+12. mise run supply-chain
+    Initial sandboxed attempt could not use the configured advisory cache.
+    Approved cache-access rerun: PASS. Passing warnings were the existing syn
+    2/3 duplicate report and unmatched license allowances; no advisory or
+    denial failure occurred.
+
+Aggregate validation
+
+13. mise run ci
+    PASS on the finished code tree: format; Clippy with warnings denied;
+    workspace tests and rustdoc; minimal and WASM checks; architecture and
+    schema governance; conformance; benchmark compilation; workflow lint;
+    supply-chain and secret checks; release smoke; and Python source/wheel
+    builds.
+
+14. mise run release-reproducible
+    Initial sandboxed attempt could not open the configured uv cache. Approved
+    cache-access rerun exited successfully but skipped digest comparison because
+    the repository check is Linux-only and this host is Darwin. Linux
+    reproducibility is not claimed.
+
+Validation boundary
+
+The command results above apply to implementation commit
+aab7b81b8cb36eca82860ffa38ded7ba82a14247 and tree
+7895ef08523dfbb4d98b645ebd91b47cc2626006; the subsequent evidence-only
+commit does not change implementation files. The full cancellation-token tree,
+timer/retry service, persistent recovery, hosted cross-platform matrices, and
+independent security/release approval remain outside this record. The logical
+PR is not marked Done before integration.

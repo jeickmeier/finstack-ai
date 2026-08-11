@@ -1,0 +1,46 @@
+PR-016 local release validation
+Date: 2026-08-10
+Branch: codex/pr-016-toolset-scheduler
+Base revision: b8af2ae1d15307371a1413ad007328df50282198
+Implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
+Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1
+Result: PASS for local release behavior; Linux reproducibility and hosted
+matrices are not claimed
+
+Release policy
+
+- Cargo release panic policy changed from abort to unwind. This is required for
+  a native Toolset panic to be converted to a stable per-call failure without
+  terminating the run process.
+- Containment is placed at the direct native extension boundary, not around the
+  runtime worker. The outer scheduler and sibling calls survive.
+- Dropping the owner aborts the inner unwind boundary so an extension task
+  cannot detach from the owned JoinSet.
+
+Executed proof
+
+1. mise run test-tool
+   PASS, including the release-mode panic fixture. The affected call settles as
+   tool_panicked, sibling work and the worker complete, panic text/payload does
+   not enter ToolError or durable state, and active registrations are cleaned.
+
+2. mise run release-smoke
+   PASS directly and again as part of the final mise run ci aggregate after the
+   release-profile change.
+
+3. mise run supply-chain
+   PASS after approved cache access. No denial or advisory failure; existing
+   duplicate-syn and unused-license-allowance warnings remain non-blocking.
+
+4. mise run check-wasm
+   PASS. Runtime and Toolset leaf compile for wasm32 and the selected WASM graph
+   contains no Tokio.
+
+5. mise run release-reproducible
+   Cache-enabled invocation exits successfully and reports that digest
+   comparison is Linux-only, so it is skipped on Darwin. This is an explicit
+   evidence boundary, not a reproducibility pass for Linux or hosted targets.
+
+No package was published. No hosted release, signed artifact, cross-platform
+matrix, independent release approval, or integration result is claimed here.

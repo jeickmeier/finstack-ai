@@ -1,0 +1,92 @@
+PR-016 security and threat-model review
+Date: 2026-08-10
+Branch: codex/pr-016-toolset-scheduler
+Base revision: b8af2ae1d15307371a1413ad007328df50282198
+Reviewed implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Reviewed implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-016 scope at the immutable implementation tree; hosted and
+independent review remain outstanding
+
+Scope reviewed
+
+- Toolset ABI and reconciliation DTOs; schema compiler/catalog; pure policy
+  planner; model/tool router; bounded queues/semaphores; cancellation; stream
+  assembler; output envelope; exact ID allocation; kernel settlement; scripted
+  fixtures; release panic-policy change; and jsonschema dependency placement.
+- Threat Model TM-01, TM-02, TM-14, TM-16, TM-18 and SEC-INV-001,
+  SEC-INV-002, SEC-INV-004, SEC-INV-005, SEC-INV-007, SEC-INV-009,
+  SEC-INV-011, and SEC-INV-012.
+
+Control disposition
+
+PASS - TM-01 policy, schema, and approval enforcement
+Catalog publication rejects duplicate tool IDs/model names, missing policies,
+invalid schemas, unknown concurrency entries, and zero limits. Input validators
+are compiled once at registration and invoked only at plan_call. Unknown tools,
+invalid arguments, Required approval, stricter host/middleware approval, and
+denial close synthetically without dispatch. Approval metadata and general
+metadata are never authority; immutable ToolCallContext carries the committed
+run authorization context.
+
+PASS - TM-02 committed call integrity and deterministic settlement
+The combined coordinator creates ToolDispatchSeed only from a committed active
+tool effect and repeats authorization/deadline checks immediately before the
+bounded enqueue. A failed append executes no tool. Plans preserve kernel call,
+batch, source, group, name, canonical argument, mode, retry-safety, failure
+policy, deadline, and output-contract identity. Every arrival is submitted to
+the existing PR-010 reducer; the runtime does not duplicate contiguous-prefix
+or next-group release logic. Exact predicted record cardinalities are checked
+against every opening and settlement decision before append.
+
+PASS - TM-14 cancellation, deadlines, late results, and cleanup within PR-016
+Effect-local signals cover queued and active work; queued cancellation prevents
+Toolset entry. Run shutdown signals all registered children, and Drop aborts the
+owned inner panic-boundary task rather than detaching it. Active-map entries and
+semaphore permits are released on success, failure, cancellation, panic, and
+channel closure. The effective committed deadline is copied into plans and
+rechecked before dispatch. The complete cancellation-token tree, monotonic timer
+service, retries, and recovery polling remain PR-019/later scope and are not
+claimed here.
+
+PASS - TM-16 hostile schema/stream/output resource controls
+The jsonschema compiler uses Draft 2020-12, explicit in-memory resources, and a
+deny retriever; ambient filesystem/network reference resolution is unavailable.
+Compiled validators are retained in ResolvedTool. Catalog size, input/output
+schemas, validation issues, queues, global/per-tool concurrency, stream items,
+stream bytes, progress, usage, and result bytes are bounded. Streams are read to
+EOF and require monotonic cumulative usage, exactly one completion, and no
+post-terminal data or error. All outputs are size-checked; successful outputs
+are schema-validated and normalized to one runtime-authored JsonBlock in a
+ToolResultBlock with the committed call ID. Tool progress is sequenced as a
+Confidential transient event and is proven absent from the durable journal.
+
+PASS - panic containment and safe errors
+The release profile uses panic=unwind so the native extension boundary can
+contain panics. An inner Tokio task surrounds both Toolset::call and stream
+polling; a panic becomes fixed code tool_panicked with no panic payload or text
+in ToolError, ErrorDescriptor, or durable records. The release fixture proves a
+sibling and the outer worker survive and the active registry is cleaned. The
+Rust panic hook may still write process-local stderr before unwind; this review
+does not treat stderr as durable semantic state.
+
+PASS - TM-18 dependency, target, and release boundary
+jsonschema remains pinned to 0.40.2 with default features disabled and is now a
+runtime dependency. Native/WASM leaf and selected WASM/no-Tokio graph checks
+pass. Supply-chain, secret scan, release smoke, and the release-mode panic test
+pass. The release reproducibility command exits successfully but performs its
+digest comparison only on Linux, so no Darwin digest-equivalence claim is made.
+
+Residual obligations and review decision
+
+- No filesystem/shell tool, credential retrieval, network provider, WIT host,
+  binding, event-hub subscriber, external router, or persistent reconciliation
+  path is introduced.
+- PR-018 owns durable approval interactions; PR-019 owns the complete timer,
+  retry, and cancellation tree; later phases own bindings, hosted matrices,
+  isolation, and recovery.
+- Changing release panic policy to unwind is accepted for this local candidate
+  because containment and cleanup are directly release-tested. Hosted release
+  and independent security approval remain merge blockers outside this record.
+- No architecture conflict or new ADR trigger was found. This review does not
+  mark PR-016 Done and does not pass G2.

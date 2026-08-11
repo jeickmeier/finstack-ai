@@ -94,7 +94,7 @@ description = "Run Cargo workspace tests"
 run = "cargo test --workspace --locked"
 
 [tasks.test-kernel]
-description = "Run focused kernel/runtime and public-Rust-API tests through PR-015"
+description = "Run focused kernel/runtime and public-Rust-API tests through PR-016"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
@@ -121,8 +121,18 @@ cargo check -p finstack-ai-model-port-leaf-fixture --no-default-features --locke
 cargo check -p finstack-ai-model-port-leaf-fixture --no-default-features --target wasm32-unknown-unknown --locked
 """
 
+[tasks.test-tool]
+description = "Run PR-016 Toolset validation, scheduler, panic, ordering, and leaf ABI proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-test --test tool_port --locked
+cargo check -p finstack-ai-toolset-port-leaf-fixture --no-default-features --locked
+cargo check -p finstack-ai-toolset-port-leaf-fixture --no-default-features --target wasm32-unknown-unknown --locked
+cargo test --release -p finstack-ai-test --test tool_port native_panic_becomes_stable_call_failure_without_leaking_payload_or_killing_sibling --locked
+"""
+
 [tasks.conformance]
-description = "Run reducer traces and public compatibility through PR-015"
+description = "Run reducer traces and public compatibility through PR-016"
 run = "cargo test -p finstack-ai-test --locked"
 
 [tasks.test-benchmark]
