@@ -1,0 +1,81 @@
+PR-020 security and threat-model review
+Date: 2026-08-11
+Branch: codex/pr-020-native-runtime-gate
+Base revision: a39fd402f4e089cecf34074cfd57498de1e58e0b
+Reviewed implementation revision: 91a9faec7d58e4ea594e5459bc48f6f977975dbb
+Reviewed implementation tree: 6a286bc63fc2df6a8cd20d7d68b255b355bf88db
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-020 A01-A03 at the immutable implementation tree; local
+integration and the separate G2 decision remain pending
+
+Scope reviewed
+
+- Deterministic native manual drive, permit/controller closure, commit/apply/
+  event/recheck ordering, crash-prefix recovery, definite/ambiguous/conflict
+  store behavior, and exact execute/cancel effect identity.
+- RunTaskOwner task ownership, all configured queue/concurrency bounds, biased
+  settlement/command scheduling, tool semaphore ordering, cancellation,
+  backpressure, slow observers, stress cleanup, and shutdown reports.
+- Unsafe-free kernel/runtime scan, pinned representative Miri execution,
+  minimal/WASM feature boundaries, aggregate CI, supply chain, secrets, release
+  smoke, and benchmark-only process inspection.
+- SEC-INV-002, SEC-INV-004, SEC-INV-005, SEC-INV-007 through SEC-INV-012 and
+  Threat Model TM-14, TM-16, TM-17, and TM-18.
+
+Control disposition
+
+PASS - SEC-INV-002/004/008/009 / TM-14 commit-before-effect and race safety
+The manual-drive gate is reached only after an append receipt matches the frozen
+request, the committed batch applies, durable-derived events publish, and the
+effect's current authorization/deadline precondition passes. A blocked fixture
+recovers the exact pending committed effect while the dispatcher count is zero.
+A failed fourth append proves zero provider requests. Dropped permits/controllers
+fail closed with stable post-commit faults; continued ambiguous acknowledgement,
+receipt mismatch, replay/apply uncertainty, and repeated conflict do not dispatch.
+
+PASS - SEC-INV-005/007 / TM-16/TM-17 bounds and non-semantic observation
+Every Tokio channel, subscriber set, scheduler pending queue, model/tool result
+path, and manual-drive queue has a validated finite bound. Tool execution also
+requires global and per-tool semaphore permits. Slow-observer policy remains
+explicit, isolated, and unable to alter semantic state. The new manual-drive
+effect view contains only action kind and committed EffectId; it exposes no
+provider payload, credential, or mutable kernel state.
+
+PASS - SEC-INV-009/010/011 cleanup and observable failure
+The sole RunTaskOwner still owns and joins all spawned work. Stress fixtures
+prove 128 idle owners join gracefully, 24 end-to-end model runs leave no active
+stream, tool shutdown leaves no child stream, and stalled observers do not delay
+interactive delivery. Forced and owner-dropped paths remain bounded and
+observable. Manual drive is explicit test control: it can intentionally pause a
+run, but dropping its permit/controller unblocks with a fault and normal owner
+shutdown retains its configured abort deadline.
+
+PASS - SEC-INV-012 / TM-18 dependency and target containment
+Manual drive compiles only with native-tokio; the selected browser-WASM graph is
+unchanged and Tokio-free where required. The RSS probe exists only as a bench
+target, invokes ps with a numeric current-process id, and is absent from
+production dependencies. No new crate, network client, provider, database,
+workflow engine, plugin host, dynamic loading, credential surface, or serialized
+contract is introduced. Workspace Clippy, Rustdoc, architecture, supply-chain,
+secret, release, packaging, minimal, and WASM checks pass.
+
+PASS - feasible unsafe-free interpreter coverage
+No unsafe block exists in kernel/runtime source. Pinned Miri passes representative
+raw-JSON canonicalization, reducer semantic validation/apply, and deterministic
+fingerprint paths. The deliberately multi-megabyte source-ceiling fixture makes
+the complete 94-test interpreted suite impractical; it remains covered by normal
+and aggregate tests. This limitation is recorded rather than presented as a full
+Miri-suite pass.
+
+Residual obligations and review decision
+
+- Local integration, Phase 2 exit review, and a separate G2 decision remain
+  required before PR-020 A04, Phase 2, or G2 can pass.
+- Hosted OS matrices and independent review are not claimed. No plan requirement
+  found in the reviewed G2 criteria makes them a blocker for this authorized
+  local decision; later publication still requires its own authorization.
+- Durable database/workflow-engine clocks, public SDK/provider APIs, and plugin
+  isolation remain later planned work and are not implied by this gate.
+- No planning conflict, security exception, compatibility change, new trust
+  class, or ADR trigger was found. The explicit manual-drive suspension risk is
+  confined to opt-in native test control and does not affect the default path.
