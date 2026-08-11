@@ -525,6 +525,7 @@ done
 [tasks.ci]
 description = "Run the local CI aggregate used by contributors"
 run = """
+set -euo pipefail
 mise run format
 mise run clippy
 mise run test

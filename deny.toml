@@ -29,6 +29,9 @@ allow = [
     "Unicode-3.0",
     "MIT-0",
     "Zlib",
+    # PyO3 build-time target classification; LLVM exception preserves the
+    # Apache-2.0 grant while allowing LLVM-style redistribution.
+    "Apache-2.0 WITH LLVM-exception",
     # LLVM libFuzzer runtime linked only by the isolated cargo-fuzz workspace.
     "NCSA",
 ]
