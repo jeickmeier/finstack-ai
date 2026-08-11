@@ -714,5 +714,18 @@ pub(crate) fn fs_tool_error(
         .unwrap_or_else(|error| error)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
+
+#[cfg(all(test, not(unix)))]
+mod unsupported_platform_tests {
+    use super::{FileSystemError, FileSystemToolset};
+
+    #[test]
+    fn construction_fails_closed_without_capability_safe_primitives() {
+        assert!(matches!(
+            FileSystemToolset::try_new("."),
+            Err(FileSystemError::Unsupported)
+        ));
+    }
+}
