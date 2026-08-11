@@ -12,6 +12,7 @@ members = [
     "fixtures/ci/release-smoke",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
+    "fixtures/ci/extension-port-leaf",
 ]
 exclude = ["fuzz"]
 
