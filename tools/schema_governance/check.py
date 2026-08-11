@@ -634,7 +634,7 @@ def check_schema_fixture_coupling(
                 )
             changed_schema_keys.add(key)
 
-    def consider_fixture_path(path: str) -> None:
+    def consider_fixture_path(path: str, *, validate_name: bool = True) -> None:
         nonlocal diagnostics
         if not path.startswith("fixtures/compatibility/"):
             return
@@ -643,6 +643,8 @@ def check_schema_fixture_coupling(
             return
         keys = _contract_keys_from_fixture_path(path)
         if not keys:
+            if not validate_name:
+                return
             diagnostics.append(
                 Diagnostic(
                     "GOV005",
@@ -658,12 +660,15 @@ def check_schema_fixture_coupling(
             return
         changed_fixture_keys.update(keys)
 
-    for _status, path, rename_source in changes:
+    for status, path, rename_source in changes:
         consider_schema_path(path)
-        consider_fixture_path(path)
+        consider_fixture_path(path, validate_name=not status.startswith("D"))
         if rename_source:
             consider_schema_path(rename_source)
-            consider_fixture_path(rename_source)
+            # Historical source names can be the defect the change corrects.
+            # Keep valid source keys for coupling, but only enforce naming on
+            # fixture paths that remain in the candidate tree.
+            consider_fixture_path(rename_source, validate_name=False)
 
     for key in sorted(changed_schema_keys):
         if key not in changed_fixture_keys:

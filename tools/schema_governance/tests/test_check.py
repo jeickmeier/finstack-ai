@@ -375,6 +375,27 @@ class SchemaFixtureCouplingTests:
         diagnostics = check_schema_fixture_coupling(root, base_ref=base)
         assert any((d.check_id == "GOV005" for d in diagnostics))
 
+    def test_renaming_legacy_fixture_path_does_not_validate_source_name(self) -> None:
+        root = self._git_repo()
+        self._tmp_root = root
+        legacy = root / "fixtures/compatibility/agent-spec/v1/valid/minimal.json"
+        _write(legacy, "{}\n")
+        self._commit(root, "add legacy fixture")
+        base = self._head(root)
+        current = (
+            root / "fixtures/compatibility/agent-spec/v1/agent-spec/valid--minimal.json"
+        )
+        current.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "mv", str(legacy), str(current)],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+        self._commit(root, "correct fixture path")
+        diagnostics = check_schema_fixture_coupling(root, base_ref=base)
+        assert not any((d.check_id == "GOV005" for d in diagnostics))
+
     def test_wrong_draft_uri_fails_gov005(self) -> None:
         root = self._git_repo()
         self._tmp_root = root
