@@ -1,0 +1,30 @@
+PR-026 local integration validation
+Date: 2026-08-11
+
+Integration identity
+- target branch: main
+- merge commit: 93b7959b1edbe1e541c2449dcbcc78723bf4504b
+- merge tree: f8e43be9ce9c7f4727b8b8fd23f45f3a195ba0c4
+- first parent: f38a0763420224b845d1c5da2512adbbed8bc6f8
+- second parent / evidence commit: 08578a26240c4161ebb3da98285a632bab92f4af
+- implementation commit: b1bddac82041d1780651d9cee4d2378dba379ee5
+
+Post-merge validation
+- PASS: mise run test-pr026
+  - 22 SDK unit tests passed
+  - public test-kit passed
+  - strict Clippy passed
+  - isolated native-user and offline minimal/coding/service/diagnostic runs passed
+- PASS: mise run ci
+  - repository formatting, Clippy, tests, docs, minimal/WASM, architecture,
+    schema/helper/benchmark/workflow, supply-chain, secret, release-smoke, and
+    Python build checks passed
+  - cargo-deny emitted only the existing permitted warnings
+
+Disposition
+- Local integration is complete and the merged tree is validated.
+- PR-026 remains Blocked at acceptance 3/5.
+- A02 remains Pending because Linux and Windows did not execute test-pr026.
+- A05 remains Pending; G3 is Not ready and no G3-D decision exists.
+- No push, hosted run, actual pull request, publication, Linux/Windows
+  execution, live provider call, or independent review is claimed.

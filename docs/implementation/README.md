@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20 and local PR-025 merge `ee76c71354c2ca504283478a3208e1020c90cad6` on 2026-08-11:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20 and local PR-026 merge `93b7959b1edbe1e541c2449dcbcc78723bf4504b` on 2026-08-11:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-004–ADR-006, ADR-008, ADR-009, ADR-020, ADR-022, ADR-030, ADR-034, ADR-036, and ADR-037 are `In progress` / `Partial`; PR-022 adds immutable declarative capability, exact-lock, child/budget/artifact-service, and activation-rebuild evidence, while PR-023 adds immutable public adversarial compaction conformance. Explicitly mapped later work remains open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their remaining routing, durability, and lifecycle work is later. ADR-007 and ADR-024 also retain their documented partial later scope.
-- Phase 0 through Phase 2 are `Done`; Phase 3 is `Blocked`; PR-001–PR-025 are `Done`; PR-026 is `Blocked` at immutable candidate `b1bddac82041d1780651d9cee4d2378dba379ee5`; PR-027–PR-066 are `Todo`. Both Phase 3 entrance criteria pass, while PR-026 still requires Linux/Windows hosted example evidence before integration.
+- Phase 0 through Phase 2 are `Done`; Phase 3 is `Blocked`; PR-001–PR-025 are `Done`; PR-026 is locally integrated but remains `Blocked`; PR-027–PR-066 are `Todo`. Both Phase 3 entrance criteria pass, while PR-026 still requires Linux/Windows hosted example evidence before Phase 3 and G3 closeout.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3–G8 remain `Not ready`.
-- PR-001–PR-025 acceptance criteria are closed. PR-026 A01, A03, and A04 pass on the immutable candidate; A02 and A05 remain pending under blocker `PR-026-B-hosted-matrix-65c59e560b52`. Its candidate, security, performance, release, CI, and G3 readiness evidence is bound under [`artifacts/pr-026/`](artifacts/pr-026/). No PR-026 push, hosted run, actual pull request, integration, publication, live provider call, Linux/Windows execution, or independent review is claimed.
+- PR-001–PR-025 acceptance criteria are closed. PR-026 A01, A03, and A04 pass; A02 and A05 remain pending under blocker `PR-026-B-hosted-matrix-65c59e560b52`. Its candidate, security, performance, release, CI, local-integration, and G3 readiness evidence is bound under [`artifacts/pr-026/`](artifacts/pr-026/). No PR-026 push, hosted run, actual pull request, publication, live provider call, Linux/Windows execution, or independent review is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 
