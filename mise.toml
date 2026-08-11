@@ -58,6 +58,7 @@ cargo check -p finstack-ai-runtime --no-default-features --locked
 cargo check -p finstack-ai --no-default-features --locked
 cargo check -p finstack-ai-protocol --locked
 cargo check -p finstack-ai-test --no-default-features --locked
+cargo check -p finstack-ai-extension-port-leaf-fixture --no-default-features --locked
 """
 
 [tasks.check-wasm]
@@ -69,6 +70,7 @@ RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
   cargo test -p finstack-ai-kernel --target wasm32-unknown-unknown --no-run --locked && \
 RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
   cargo test -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host --no-run --locked && \
+cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --no-default-features --locked && \
 cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
 if cargo tree -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host -e normal | grep -q 'tokio '; then
   echo 'wasm-host unexpectedly resolves Tokio'
@@ -118,6 +120,17 @@ set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio event_hub::native::tests --locked
 cargo test -p finstack-ai-test --test model_port runtime_publishes_validated_progress_before_terminal_settlement --locked
 cargo test -p finstack-ai-test --test tool_port runtime_publishes_tool_progress_before_tool_settlement --locked
+"""
+
+[tasks.test-extensions]
+description = "Run PR-018 context, middleware, observer, compaction, recovery, and leaf-ABI proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio context::tests --locked
+cargo test -p finstack-ai-runtime --features native-tokio middleware::tests --locked
+cargo test -p finstack-ai-runtime --features native-tokio observer::tests --locked
+cargo check -p finstack-ai-extension-port-leaf-fixture --no-default-features --locked
+cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --no-default-features --locked
 """
 
 [tasks.test-model]

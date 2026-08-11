@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial through immutable PR-018 exact committed context/middleware guards, recorded output reconstruction, reuse/reconcile/recompute classification, and explicit non-repeatable uncertainty evidence (`PR-018-E-extensions-8c2a6f4d1b73`, `PR-018-E-security-7a1d4f8c3b62`, `PR-018-E-ci-2f6c9a5e1d84`) at `aac573b593dd3950a4143672aeadc3765fa88a29`; PR-048 end-to-end recovery remains

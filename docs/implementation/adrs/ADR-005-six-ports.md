@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial through immutable PR-015 Model, locally integrated PR-016 Toolset, and PR-018 `ContextProvider`/`Middleware`/`Observer` candidate evidence (`PR-018-E-extensions-8c2a6f4d1b73`, `PR-018-E-compat-5e9b3d7a2c16`) at `aac573b593dd3950a4143672aeadc3765fa88a29`; PR-021/PR-026 composition remains

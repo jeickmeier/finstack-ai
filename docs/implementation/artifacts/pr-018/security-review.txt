@@ -1,0 +1,104 @@
+PR-018 security and threat-model review
+Date: 2026-08-10
+Branch: codex/pr-018-context-middleware
+Base revision: 3e699c37865b0f9c97b3f956fe3314bb6a734c0b
+Reviewed implementation revision: aac573b593dd3950a4143672aeadc3765fa88a29
+Reviewed implementation tree: 622f2eb60a78246bbebf7d780ab0699026c9ec68
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-018 scope at the immutable implementation tree; hosted and
+independent review remain outstanding
+
+Scope reviewed
+
+- Context provider descriptors, budgets, contribution normalization, authority
+  projection, provenance, committed invocation guard, completion reconstruction,
+  deterministic assembly, and recovery classification.
+- Middleware descriptors, all seven stages, resolution graph, outcome matrix,
+  interaction path, committed invocation guard, recorded outcomes, recovery,
+  compaction projection/evidence/checkpoint validation, and related child Model
+  effect validation.
+- Observer trait and no-op/reference adapters, bounded retention, sensitivity
+  projections, native/WASM public leaf fixture, target graphs, and aggregate CI.
+- SEC-INV-001, SEC-INV-002, SEC-INV-005, SEC-INV-007, SEC-INV-009,
+  SEC-INV-012, SEC-INV-013 and Threat Model TM-01, TM-02, TM-04, TM-06,
+  TM-16, TM-17, TM-18, TM-21.
+
+Control disposition
+
+PASS - SEC-INV-001 / TM-01 retrieved content cannot self-elevate
+Every context item carries provenance and an explicit authority class. A provider
+may create trusted application instructions only when its locked descriptor grants
+that authority and the source is not external. Otherwise an Instruction result is
+downgraded to QuotedSource/Untrusted before it can enter the model projection.
+Fixed system, developer, capability, authorized reminder, external context,
+history, and current-user groups prevent lower-authority content from changing
+placement. The malicious retrieved-instruction fixture proves the downgrade.
+
+PASS - SEC-INV-002 / TM-02 external invocation identity is committed first
+`CommittedContextCall` and `CommittedMiddlewareCall` can be constructed only from
+an assigned committed `EffectRequested` envelope whose session, lane, run, effect,
+component/version/config, pipeline digest/index/stage, input, output contract,
+deadline, and retry contract match the runtime call. No port invocation method is
+available through the guard until those checks pass. Completed outputs validate
+against their exact requests before reuse. Recompute, reconcile, and explicit
+non-repeatable uncertainty remain distinct; no best-effort rerun is inferred.
+
+PASS - SEC-INV-009 / TM-17 observers remain non-semantic
+The public Observer input is an immutable shared event batch. Observer descriptors,
+views, and errors expose no kernel input, reducer, journal append, effect dispatcher,
+or behavior-changing outcome. Reference retention is explicitly bounded and fails
+without partially appending a batch. MetadataOnly reveals no body, Redacted reveals
+only Public bodies, and Full still withholds Credential bodies. Full is an explicit
+trusted-native mode, not a default. Existing PR-017 slow-observer isolation remains
+green in the aggregate runtime suite. Post-terminal changes are impossible through
+the Observer ABI.
+
+PASS - SEC-INV-013 / TM-21 compaction cannot rewrite canonical truth
+`CompactContext` returns only a model-visible replacement projection. Validation
+requires the unique late-tier compactor role; exact strategy/version/configuration,
+model-profile, source, protected-set and projection digests; all covered IDs; a
+source-ordered retained subset; byte-identical protected content; the active user
+request; tool call/result atomicity; and the hard input budget. Derived summaries
+must remain DerivedSummary/Untrusted and inherit the maximum source sensitivity.
+Checkpoint reuse additionally locks component, strategy/version, config, model
+profile, canonical covered prefix, summary digest, and sensitivity; a mismatch is
+an ignored cache miss. Tests prove protected omission, source reorder, split tool
+pairs, and stale configuration fail without mutating the canonical source entries.
+
+PASS - model-assisted compaction has one recorded child boundary
+`RequestCompactionModel` is valid only for the unique BeforeModel compactor. The
+request freezes the resolved model, provider-neutral request, explicit budget scope,
+full source sensitivity, residency-policy digest, and bounded resume state. Dispatch
+requires a committed child Model effect with the exact model version, request bytes,
+output contract, parent middleware EffectId, and CompactionSummary purpose. Wrong
+relations fail. Recorded parent/child cursor recovery reuses or reconciles effects;
+the middleware cannot receive a model port and call it directly through this ABI.
+Final tenant/egress allow-list policy remains the resolved-agent/runtime integration
+owned by later composition PRs and is not falsely claimed here.
+
+PASS - SEC-INV-005/007 / TM-04/TM-16 bounds and diagnostics are safe
+Context arrays, content, token estimates, byte counts, labels, cache keys, provider
+chains, middleware chains, resume state, retained observer events, compaction source
+and output arrays, and hard token budgets are checked before use. Truncation removes
+whole normalized items and reports component/count/token/byte totals without event
+or content payloads. Stable errors contain only safe bounded metadata. No credential,
+network, exporter, or ambient filesystem path is introduced.
+
+PASS - SEC-INV-012 / TM-06/TM-18 trust and target boundaries remain explicit
+The leaf ABI compiles with default features disabled on native and browser WASM.
+The selected production WASM graph remains Tokio-free. PR-018 adds no provider,
+network client, telemetry exporter, plugin engine, dynamic loading, or sandbox claim.
+In-process port implementations remain trusted native extensions. Workspace Clippy,
+architecture, supply-chain, secret, release-smoke, and packaging checks pass.
+
+Residual obligations and review decision
+
+- PR-020 owns the wider native runtime crash-prefix, race, leak, concurrency, and
+  performance gate and is required before G2.
+- PR-023 owns reusable ScriptedContextProvider/ScriptedMiddleware/RecordingObserver
+  test-kit batteries; later PR-048 owns end-to-end durable replay integration.
+- PR-056/PR-057 own broader adversarial security and telemetry/exporter batteries;
+  no exporter is added here.
+- No planning conflict, security exception, new port/stage/trust class, or ADR
+  trigger was found. This review passes PR-018 scope only and does not mark the
+  logical PR integrated or pass G2.
