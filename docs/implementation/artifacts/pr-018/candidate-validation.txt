@@ -1,0 +1,54 @@
+PR-018 immutable candidate validation
+Date: 2026-08-10
+Branch: codex/pr-018-context-middleware
+Base revision: 3e699c37865b0f9c97b3f956fe3314bb6a734c0b
+Implementation revision: aac573b593dd3950a4143672aeadc3765fa88a29
+Implementation tree: 622f2eb60a78246bbebf7d780ab0699026c9ec68
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1; cargo 1.97.1;
+wasm32-unknown-unknown; Python 3.14
+Disposition: PASS for the immutable implementation candidate; hosted run,
+independent review, local integration, and G2 decision are not claimed
+
+Ordered validation on the immutable implementation commit
+
+1. mise run test-extensions
+   PASS: 4 context tests, 6 middleware/compaction tests, 1 observer test,
+   and default-feature-free native plus wasm32 compilation of the public leaf
+   fixture. Coverage includes fixed authority groups, provider completion-order
+   permutations, chain gaps, deterministic truncation diagnostics, malicious
+   retrieved instructions, resolution cycles/missing requirements, duplicate and
+   post-compaction owners, before-finalize interaction, protected bytes, source
+   ordering, tool-pair atomicity, checkpoint invalidation, committed cursors,
+   wrong child-model relations, and credential observer projection.
+
+2. mise run ci
+   PASS: cargo format, workspace all-target Clippy with warnings denied,
+   workspace tests and doctests, rustdoc, minimal/default graph checks,
+   wasm32 kernel/runtime/facade/leaf checks with no Tokio in the selected
+   production graph, 22 architecture checker tests and clean scan, schema and
+   compatibility governance, conformance, benchmark compilation, workflow lint,
+   supply-chain and secret checks, release smoke, and Python source/wheel builds.
+   Non-failing supply-chain output remains the existing syn 2/3 duplicate and
+   unused MIT-0/Zlib/NCSA allowances.
+
+3. mise run test-runtime
+   PASS: 45 runtime unit tests, 1 JournalStore port-bound test, 5 memory-store
+   tests, and 15 model/runtime integration tests. Existing coordinator, event,
+   model, tool, ingress, task ownership, deadline, cancellation, and recovery
+   behavior remains green alongside PR-018.
+
+Additional immutable-tree checks
+
+- git status --short: empty after candidate validation.
+- git diff --check: PASS before the candidate commit.
+- docs/planning/: unchanged.
+- No kernel source file changed for PR-018.
+
+Validation boundary
+
+All executable commands above ran with HEAD at immutable implementation commit
+aac573b593dd3950a4143672aeadc3765fa88a29. This evidence-only documentation
+does not change the validated implementation tree. The record does not claim a
+hosted matrix, independent review, actual pull request, branch push, publication,
+local integration, first-party compaction strategy, semantic memory, telemetry
+exporter, later binding parity, the PR-020 fault/concurrency gate, or G2 passage.

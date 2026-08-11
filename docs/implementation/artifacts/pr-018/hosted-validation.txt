@@ -1,0 +1,10 @@
+PR-018 hosted and independent validation boundary
+Date: 2026-08-10
+Branch: codex/pr-018-context-middleware
+Implementation revision: aac573b593dd3950a4143672aeadc3765fa88a29
+
+No branch push, hosted pull request, hosted workflow, publication, or independent
+review was authorized or performed. The sequential execution envelope authorizes
+local worktree, branch, commit, and merge actions only. PR-018 acceptance is supported
+by local immutable candidate evidence and must not be described as hosted or
+independently reviewed.
