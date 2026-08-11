@@ -1,0 +1,8 @@
+data: {"id":"chat-tool-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"weather","arguments":"{\"city\":"}}]},"finish_reason":null}],"usage":null}
+
+data: {"id":"chat-tool-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Toronto\"}"}}]},"finish_reason":"tool_calls"}],"usage":null}
+
+data: {"id":"chat-tool-1","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":5,"total_tokens":13}}
+
+data: [DONE]
+

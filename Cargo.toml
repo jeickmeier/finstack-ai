@@ -9,6 +9,7 @@ members = [
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
     "extensions/stores/finstack-ai-store-memory",
+    "extensions/providers/finstack-ai-provider-openai-compatible",
     "fixtures/ci/release-smoke",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
@@ -62,6 +63,8 @@ uuid = { version = "1.24.0", default-features = false, features = ["std"] }
 serde_json_canonicalizer = "0.3.2"
 getrandom = "0.3.4"
 futures-core = "0.3.31"
+futures-util = "0.3.31"
+reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "rustls", "stream"] }
 tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt", "sync", "time"] }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 
