@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, AppendRequest, CommittedBatch, Decision, Diagnostic, EffectId,
-    EffectRequested, EventId, Kernel, KernelError, KernelInput, KernelState, Metadata,
+    ActiveToolCallStatus, AppendBatchId, AppendRequest, CommittedBatch, Decision, Diagnostic,
+    EffectId, EffectRequested, EventId, Kernel, KernelError, KernelInput, KernelState, Metadata,
     ModelTextDelta, OperationLocator, PendingModelEffect, PostCommitAction, ProviderHeartbeat,
-    ReasoningDelta, RecordBody, RunEvent, RunEventBody, Sensitivity, Timestamp, ToolBatchId,
-    ToolCallId, ToolProgress, TransitionEnv, ValidatedToolCall,
+    ReasoningDelta, RecordBody, RecordDraft, RunEvent, RunEventBody, Sensitivity, Timestamp,
+    ToolBatchId, ToolCallId, ToolProgress, TransitionEnv, ValidatedToolCall,
 };
 use thiserror::Error;
 
@@ -41,6 +41,9 @@ pub struct CommitOutcome {
 /// Commit-loop failures that do not have a fully applied outcome to return.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CommitCoordinatorError {
+    /// A durable composition identity already exists with different content.
+    #[error("durable composition sidecar conflicts with existing identity")]
+    SidecarConflict,
     /// Run was already faulted by an uncertain prior boundary.
     #[error("run faulted: {code}")]
     Faulted {
@@ -315,6 +318,99 @@ impl CommitCoordinator {
         }
     }
 
+    /// Commit zero-event composition records through the same append/apply boundary.
+    ///
+    /// This is intentionally narrower than general effect dispatch: it accepts
+    /// only PR-022 child/budget sidecar records and never calls an external service.
+    /// A sequence race reloads only the known session; equal durable identities
+    /// converge and different content fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a store/boundary failure, or [`CommitCoordinatorError::SidecarConflict`]
+    /// for conflicting durable idempotency reuse.
+    pub(crate) async fn commit_composition_records(
+        &mut self,
+        batch_id: AppendBatchId,
+        records: Vec<RecordDraft>,
+    ) -> Result<Option<CommittedBatch>, CommitCoordinatorError> {
+        if records.is_empty()
+            || records.iter().any(|record| {
+                !record.derived_event_ids().is_empty()
+                    || !matches!(
+                        record.body(),
+                        RecordBody::ChildRunPrepared(_)
+                            | RecordBody::BudgetReservationRequested(_)
+                            | RecordBody::BudgetReservationSettled(_)
+                            | RecordBody::BudgetChargeRecorded(_)
+                            | RecordBody::BudgetReservationReleased(_)
+                    )
+            })
+        {
+            return Err(CommitCoordinatorError::BoundaryFault {
+                code: "composition_records_invalid",
+            });
+        }
+        let session_id = records[0].session_id();
+        let mut conflicts = 0_u8;
+        loop {
+            match classify_composition_records(self.kernel.state(), &records) {
+                CompositionRecordStatus::Equal => return Ok(None),
+                CompositionRecordStatus::Conflict => {
+                    return Err(CommitCoordinatorError::SidecarConflict);
+                }
+                CompositionRecordStatus::Absent => {}
+            }
+            let expected_sequence = self
+                .kernel
+                .state()
+                .last_applied_sequence
+                .checked_add(1)
+                .ok_or_else(|| self.boundary_fault("composition_sequence_overflow"))?;
+            let request =
+                AppendRequest::try_new(batch_id, session_id, expected_sequence, records.clone())
+                    .map_err(|_| CommitCoordinatorError::BoundaryFault {
+                        code: "composition_append_request_invalid",
+                    })?;
+            let committed = match self.append_frozen(request).await {
+                Ok(committed) => committed,
+                Err(StoreError::Conflict { .. }) if conflicts == 0 => {
+                    conflicts = 1;
+                    let loaded = self
+                        .store
+                        .load(LoadRequest { session_id })
+                        .await
+                        .map_err(|_| self.boundary_fault("composition_conflict_reload_failed"))?;
+                    let (kernel, next_transient_sequence, pending_timer_scheduled_at) =
+                        replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    self.kernel = kernel;
+                    self.next_transient_sequence = next_transient_sequence;
+                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+                    continue;
+                }
+                Err(StoreError::Conflict { .. }) => {
+                    return Err(CommitCoordinatorError::Store(StoreError::Conflict {
+                        expected_sequence,
+                        actual_next_sequence: self
+                            .kernel
+                            .state()
+                            .last_applied_sequence
+                            .saturating_add(1),
+                    }));
+                }
+                Err(error) => return Err(CommitCoordinatorError::Store(error)),
+            };
+            let events = self
+                .kernel
+                .apply(&committed, self.next_transient_sequence)
+                .map_err(|_| self.boundary_fault("composition_apply_failed"))?;
+            if !events.is_empty() {
+                return Err(self.boundary_fault("composition_emitted_events"));
+            }
+            return Ok(Some(committed));
+        }
+    }
+
     async fn dispatch_after_recheck(
         &self,
         action: PostCommitAction,
@@ -520,6 +616,57 @@ impl CommitCoordinator {
         let mut coordinator = Self::new(store);
         coordinator.install_dispatcher(dispatcher);
         coordinator
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompositionRecordStatus {
+    Absent,
+    Equal,
+    Conflict,
+}
+
+fn classify_composition_records(
+    state: &KernelState,
+    records: &[RecordDraft],
+) -> CompositionRecordStatus {
+    let mut present = 0_usize;
+    for record in records {
+        let comparison = match record.body() {
+            RecordBody::ChildRunPrepared(value) => state
+                .child_preparations
+                .get(&value.parent_effect_id)
+                .map(|existing| existing == value),
+            RecordBody::BudgetReservationRequested(value) => state
+                .budget_reservations
+                .get(&value.request.reservation_id)
+                .map(|existing| existing.request == value.request),
+            RecordBody::BudgetReservationSettled(value) => state
+                .budget_reservations
+                .get(&value.receipt.reservation_id)
+                .and_then(|existing| existing.settlement.as_ref())
+                .map(|existing| existing == &value.receipt),
+            RecordBody::BudgetChargeRecorded(value) => state
+                .budget_charges
+                .get(&value.receipt.effect_id)
+                .map(|existing| existing == &value.receipt),
+            RecordBody::BudgetReservationReleased(value) => state
+                .budget_reservations
+                .get(&value.receipt.reservation_id)
+                .and_then(|existing| existing.release.as_ref())
+                .map(|existing| existing == &value.receipt),
+            _ => return CompositionRecordStatus::Conflict,
+        };
+        match comparison {
+            Some(true) => present += 1,
+            Some(false) => return CompositionRecordStatus::Conflict,
+            None => {}
+        }
+    }
+    if present == records.len() {
+        CompositionRecordStatus::Equal
+    } else {
+        CompositionRecordStatus::Absent
     }
 }
 
@@ -842,16 +989,25 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use finstack_ai_kernel::{
-        AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, ContentBlock,
-        DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, Id, IdTag, LaneTag,
-        Message, MessageRole, Metadata, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson,
-        RecordEnvelope, ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits,
-        RunPropagationPolicy, RunRelation, RunSecurityContext, SessionTag, Stage, StageCursor,
-        TextBlock, Timestamp,
+        AcceptRun, AllocatedIds, BudgetChargeReceipt, BudgetChargeRequest, BudgetPropagation,
+        BudgetReleaseReceipt, BudgetReleaseRequest, CancellationPropagation, ContentBlock,
+        DeadlinePropagation, Digest, EffectCompleted, EffectOutputContract, EffectOutputKind, Id,
+        IdTag, LaneTag, Message, MessageRole, Metadata, ModelSettled, ModelSettlement,
+        PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordEnvelope,
+        ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPropagationPolicy,
+        RunRelation, RunSecurityContext, SessionTag, Stage, StageCursor, TextBlock, Timestamp,
+        Usage,
     };
 
     use super::*;
-    use crate::{LoadedSession, SnapshotReceipt, SnapshotRequest, StoreHealth};
+    use crate::{
+        AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, BudgetCoordinator,
+        BudgetError, BudgetLedger, BudgetOperationIds, BudgetRequest, BudgetReservationReceipt,
+        BudgetReservationState, BudgetReserveRequest, ChildCoordinationIds, ChildPlacement,
+        ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunLocator, ChildRunRequest,
+        CompositionError, LoadedSession, OperationLocator, PortFuture, SnapshotReceipt,
+        SnapshotRequest, StoreHealth, child_relation_digest,
+    };
 
     fn block_on<T>(future: impl Future<Output = T>) -> T {
         let mut context = Context::from_waker(Waker::noop());
@@ -982,6 +1138,10 @@ mod tests {
             )
             .await
             .expect("accept");
+        drive_accepted_to_model_request(coordinator).await
+    }
+
+    async fn drive_accepted_to_model_request(coordinator: &mut CommitCoordinator) -> CommitOutcome {
         coordinator
             .submit(
                 env(1_100, &[2], &[], &[], &[], &[], &[], 102),
@@ -1033,6 +1193,7 @@ mod tests {
 
     struct FakeStore {
         inner: Mutex<FakeInner>,
+        composition_log: Option<Arc<Mutex<Vec<&'static str>>>>,
     }
 
     struct FakeInner {
@@ -1051,7 +1212,14 @@ mod tests {
                     batches: Vec::new(),
                     requests: BTreeMap::new(),
                 }),
+                composition_log: None,
             }
+        }
+
+        fn with_composition_log(log: Arc<Mutex<Vec<&'static str>>>) -> Self {
+            let mut store = Self::new(FakeMode::Normal);
+            store.composition_log = Some(log);
+            store
         }
 
         fn append_calls(&self) -> usize {
@@ -1061,6 +1229,19 @@ mod tests {
 
     impl JournalStore for FakeStore {
         fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
+            if let Some(log) = &self.composition_log {
+                for record in request.records() {
+                    let label = match record.body() {
+                        RecordBody::ChildRunPrepared(_) => Some("prepare_committed"),
+                        RecordBody::BudgetReservationRequested(_) => Some("reservation_requested"),
+                        RecordBody::BudgetReservationSettled(_) => Some("reservation_settled"),
+                        _ => None,
+                    };
+                    if let Some(label) = label {
+                        log.lock().expect("log").push(label);
+                    }
+                }
+            }
             let mut inner = self.inner.lock().expect("lock");
             inner.append_calls += 1;
             if let Some(existing) = inner.requests.get(&request.batch_id()) {
@@ -1145,6 +1326,148 @@ mod tests {
                     ready: true,
                     durable: false,
                     detail: Arc::from("test"),
+                })
+            })
+        }
+    }
+
+    struct AmbiguousReserveLedger {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        receipt: BudgetReservationReceipt,
+        charge_receipt: Option<finstack_ai_kernel::BudgetChargeReceipt>,
+        release_receipt: Option<finstack_ai_kernel::BudgetReleaseReceipt>,
+        reserved: Mutex<bool>,
+        fail_after_reserve_once: Mutex<bool>,
+        reserve_calls: Mutex<usize>,
+        charge_calls: Mutex<usize>,
+        release_calls: Mutex<usize>,
+    }
+
+    impl BudgetLedger for AmbiguousReserveLedger {
+        fn reserve(
+            &self,
+            request: BudgetReserveRequest,
+        ) -> PortFuture<Result<BudgetReservationReceipt, BudgetError>> {
+            self.log.lock().expect("log").push("reserve");
+            *self.reserve_calls.lock().expect("calls") += 1;
+            *self.reserved.lock().expect("reserved") = true;
+            let fail = std::mem::take(&mut *self.fail_after_reserve_once.lock().expect("fail"));
+            let receipt = self.receipt.clone();
+            assert_eq!(request.request_digest, receipt.request_digest);
+            Box::pin(async move {
+                if fail {
+                    Err(BudgetError::Unavailable {
+                        code: crate::BUDGET_UNAVAILABLE,
+                        message: Arc::from("ambiguous reserve acknowledgement"),
+                    })
+                } else {
+                    Ok(receipt)
+                }
+            })
+        }
+
+        fn reconcile(
+            &self,
+            scope_id: finstack_ai_kernel::BudgetScopeId,
+            reservation_id: finstack_ai_kernel::BudgetReservationId,
+        ) -> PortFuture<Result<BudgetReservationState, BudgetError>> {
+            self.log.lock().expect("log").push("reconcile");
+            let reserved = *self.reserved.lock().expect("reserved");
+            let receipt = self.receipt.clone();
+            assert_eq!(scope_id, receipt.scope_id);
+            assert_eq!(reservation_id, receipt.reservation_id);
+            Box::pin(async move {
+                Ok(if reserved {
+                    BudgetReservationState::Reserved(receipt)
+                } else {
+                    BudgetReservationState::NotFound
+                })
+            })
+        }
+
+        fn charge(
+            &self,
+            request: finstack_ai_kernel::BudgetChargeRequest,
+        ) -> PortFuture<Result<finstack_ai_kernel::BudgetChargeReceipt, BudgetError>> {
+            *self.charge_calls.lock().expect("calls") += 1;
+            let receipt = self.charge_receipt.clone();
+            Box::pin(async move {
+                receipt.map_or_else(
+                    || {
+                        Err(BudgetError::InvalidRequest {
+                            code: crate::BUDGET_INVALID_RECEIPT,
+                            message: Arc::from("charge not configured"),
+                        })
+                    },
+                    |receipt| {
+                        assert_eq!(receipt.effect_id, request.effect_id);
+                        Ok(receipt)
+                    },
+                )
+            })
+        }
+
+        fn release(
+            &self,
+            request: finstack_ai_kernel::BudgetReleaseRequest,
+        ) -> PortFuture<Result<finstack_ai_kernel::BudgetReleaseReceipt, BudgetError>> {
+            *self.release_calls.lock().expect("calls") += 1;
+            let receipt = self.release_receipt.clone();
+            Box::pin(async move {
+                receipt.map_or_else(
+                    || {
+                        Err(BudgetError::InvalidRequest {
+                            code: crate::BUDGET_INVALID_RECEIPT,
+                            message: Arc::from("release not configured"),
+                        })
+                    },
+                    |receipt| {
+                        assert_eq!(receipt.terminal_run_id, request.terminal_run_id);
+                        Ok(receipt)
+                    },
+                )
+            })
+        }
+    }
+
+    struct IdempotentChildInvoker {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        accepted: Mutex<BTreeMap<EffectId, Digest>>,
+        physical_starts: Mutex<usize>,
+    }
+
+    impl AgentInvoker for IdempotentChildInvoker {
+        fn start_or_attach(
+            &self,
+            context: ChildRunContext,
+            request: ChildRunRequest,
+        ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
+            self.log.lock().expect("log").push("invoke");
+            let relation_digest = child_relation_digest(&context, &request).expect("relation");
+            let mut accepted = self.accepted.lock().expect("accepted");
+            match accepted.get(&context.parent_effect_id) {
+                Some(existing) if *existing != request.request_digest => {
+                    let existing = *existing;
+                    let submitted = request.request_digest;
+                    return Box::pin(async move {
+                        Err(AgentInvokeError::Conflict {
+                            code: crate::AGENT_INVOKE_CONFLICT,
+                            existing,
+                            submitted,
+                        })
+                    });
+                }
+                Some(_) => {}
+                None => {
+                    accepted.insert(context.parent_effect_id, request.request_digest);
+                    *self.physical_starts.lock().expect("starts") += 1;
+                }
+            }
+            let locator = request.locator;
+            Box::pin(async move {
+                Ok(ChildRunHandle {
+                    locator,
+                    relation_digest,
                 })
             })
         }
@@ -1336,6 +1659,642 @@ mod tests {
                 code: "repeated_store_conflict"
             })
         ));
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the crash-recovery scenario is clearer as one chronological proof"
+    )]
+    fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let store = Arc::new(FakeStore::with_composition_log(log.clone()));
+        let mut commit = CommitCoordinator::new(store);
+        block_on(commit.submit(
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            accept_input(),
+        ))
+        .expect("accept parent");
+
+        let parent = OperationLocator {
+            tenant_scope: Arc::from("tenant-a"),
+            session_id: id(1),
+            lane_id: id(2),
+            run_id: id(3),
+        };
+        let child_locator = ChildRunLocator {
+            operation: OperationLocator {
+                tenant_scope: Arc::from("tenant-a"),
+                session_id: id(1),
+                lane_id: id(40),
+                run_id: id(41),
+            },
+            remote: None,
+        };
+        let budget = BudgetRequest {
+            input_tokens: Some(1_000),
+            output_tokens: Some(250),
+            cost: None,
+            extension_counters: BTreeMap::new(),
+        };
+        let scope_id = id(42);
+        let reservation_id = id(43);
+        let reserve_digest = BudgetReserveRequest::compute_digest(
+            scope_id,
+            reservation_id,
+            child_locator.operation.run_id,
+            &budget,
+        )
+        .expect("reserve digest");
+        let reserve = BudgetReserveRequest {
+            scope_id,
+            reservation_id,
+            run_id: child_locator.operation.run_id,
+            amount: budget.clone(),
+            request_digest: reserve_digest,
+        };
+        let receipt = BudgetReservationReceipt {
+            scope_id,
+            reservation_id,
+            reserved: budget.clone(),
+            remaining: BudgetRequest::default(),
+            request_digest: reserve_digest,
+            receipt_digest: Digest::raw_json(br#"{"receipt":"reserve"}"#),
+        };
+        let ledger = Arc::new(AmbiguousReserveLedger {
+            log: log.clone(),
+            receipt,
+            charge_receipt: None,
+            release_receipt: None,
+            reserved: Mutex::new(false),
+            fail_after_reserve_once: Mutex::new(true),
+            reserve_calls: Mutex::new(0),
+            charge_calls: Mutex::new(0),
+            release_calls: Mutex::new(0),
+        });
+        let invoker = Arc::new(IdempotentChildInvoker {
+            log: log.clone(),
+            accepted: Mutex::new(BTreeMap::new()),
+            physical_starts: Mutex::new(0),
+        });
+        let coordinator =
+            ChildRunCoordinator::new(invoker.clone()).with_budget_ledger(ledger.clone());
+        let context = ChildRunContext {
+            parent: parent.clone(),
+            parent_effect_id: id(44),
+            authorization: AuthorizationContext {
+                principal: PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                    .expect("principal"),
+                authentication_method: Arc::from("oidc"),
+                assurance_level: Arc::from("high"),
+                roles: Arc::from([]),
+                permitted_scopes: Arc::from([]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from("policy-v1"),
+                decision_id: Arc::from("decision-v1"),
+            },
+        };
+        let request = ChildRunRequest {
+            agent: AgentRef {
+                id: crate::AgentId::parse("finstack.agent.child").expect("agent id"),
+                bundle: None,
+                spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
+            },
+            input: Arc::from([ContentBlock::Text(
+                TextBlock::try_new("do the work").expect("text"),
+            )]),
+            placement: ChildPlacement::CompatibleLaneInParentSession,
+            locator: child_locator,
+            requested_deadline: Some(timestamp(5_000)),
+            requested_budget: budget,
+            delegation_id: None,
+            metadata: Metadata::empty(),
+            request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
+        };
+        let ids = ChildCoordinationIds {
+            preparation_batch_id: id(201),
+            preparation_record_id: id(202),
+            reservation_request_record_id: Some(id(203)),
+            reservation_settlement: Some(BudgetOperationIds {
+                batch_id: id(204),
+                record_id: id(205),
+            }),
+        };
+
+        assert!(matches!(
+            block_on(coordinator.start_or_attach(
+                &mut commit,
+                context.clone(),
+                request.clone(),
+                Some(reserve.clone()),
+                ids,
+                timestamp(1_100),
+            )),
+            Err(CompositionError::Budget(BudgetError::Unavailable { .. }))
+        ));
+        assert!(!log.lock().expect("log").contains(&"invoke"));
+
+        let first = block_on(coordinator.start_or_attach(
+            &mut commit,
+            context.clone(),
+            request.clone(),
+            Some(reserve.clone()),
+            ids,
+            timestamp(1_100),
+        ))
+        .expect("reconcile and invoke");
+        let attached = block_on(coordinator.start_or_attach(
+            &mut commit,
+            context.clone(),
+            request.clone(),
+            Some(reserve.clone()),
+            ids,
+            timestamp(1_100),
+        ))
+        .expect("attach equal retry");
+        assert_eq!(first, attached);
+        assert_eq!(*ledger.reserve_calls.lock().expect("calls"), 1);
+        assert_eq!(*invoker.physical_starts.lock().expect("starts"), 1);
+        assert_eq!(
+            log.lock().expect("log").as_slice(),
+            &[
+                "prepare_committed",
+                "reservation_requested",
+                "reconcile",
+                "reserve",
+                "reconcile",
+                "reservation_settled",
+                "invoke",
+                "invoke",
+            ]
+        );
+
+        let mut conflicting = request;
+        conflicting.request_digest = Digest::raw_json(br#"{"request":"child-b"}"#);
+        assert!(matches!(
+            block_on(coordinator.start_or_attach(
+                &mut commit,
+                context,
+                conflicting,
+                Some(reserve),
+                ids,
+                timestamp(1_100),
+            )),
+            Err(CompositionError::Commit(
+                CommitCoordinatorError::SidecarConflict
+            ))
+        ));
+        assert_eq!(*ledger.reserve_calls.lock().expect("calls"), 1);
+        assert_eq!(*invoker.physical_starts.lock().expect("starts"), 1);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "all placement policies share one table-driven handshake proof"
+    )]
+    fn every_child_placement_converges_and_rejects_conflicting_digest() {
+        let parent = OperationLocator {
+            tenant_scope: Arc::from("tenant-a"),
+            session_id: id(1),
+            lane_id: id(2),
+            run_id: id(3),
+        };
+        let remote = crate::RemoteRouteRef {
+            service: crate::ComponentRef::new(
+                crate::ComponentId::parse("finstack.remote.worker").expect("service"),
+                Some(crate::Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                }),
+            ),
+            route: crate::ExternalHandleRef::try_new(
+                crate::ComponentId::parse("finstack.remote.worker").expect("provider"),
+                "route-a",
+                RawJson::parse(r#"{"cluster":"a"}"#).expect("route metadata"),
+            )
+            .expect("route"),
+        };
+        let cases = [
+            (
+                ChildPlacement::CompatibleLaneInParentSession,
+                ChildRunLocator {
+                    operation: OperationLocator {
+                        tenant_scope: Arc::from("tenant-a"),
+                        session_id: id(1),
+                        lane_id: id(50),
+                        run_id: id(51),
+                    },
+                    remote: None,
+                },
+            ),
+            (
+                ChildPlacement::IsolatedChildSession,
+                ChildRunLocator {
+                    operation: OperationLocator {
+                        tenant_scope: Arc::from("tenant-a"),
+                        session_id: id(60),
+                        lane_id: id(61),
+                        run_id: id(62),
+                    },
+                    remote: None,
+                },
+            ),
+            (
+                ChildPlacement::RemoteChildSession,
+                ChildRunLocator {
+                    operation: OperationLocator {
+                        tenant_scope: Arc::from("tenant-a"),
+                        session_id: id(70),
+                        lane_id: id(71),
+                        run_id: id(72),
+                    },
+                    remote: Some(remote),
+                },
+            ),
+        ];
+
+        for (index, (placement, locator)) in cases.into_iter().enumerate() {
+            let store = Arc::new(FakeStore::new(FakeMode::Normal));
+            let mut commit = CommitCoordinator::new(store);
+            block_on(commit.submit(
+                env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+                accept_input(),
+            ))
+            .expect("accept parent");
+            let invoker = Arc::new(IdempotentChildInvoker {
+                log: Arc::new(Mutex::new(Vec::new())),
+                accepted: Mutex::new(BTreeMap::new()),
+                physical_starts: Mutex::new(0),
+            });
+            let coordinator = ChildRunCoordinator::new(invoker.clone());
+            let context = ChildRunContext {
+                parent: parent.clone(),
+                parent_effect_id: id(80 + u64::try_from(index).expect("index")),
+                authorization: AuthorizationContext {
+                    principal: PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                        .expect("principal"),
+                    authentication_method: Arc::from("oidc"),
+                    assurance_level: Arc::from("high"),
+                    roles: Arc::from([]),
+                    permitted_scopes: Arc::from([]),
+                    safe_claims: Metadata::empty(),
+                    policy_version: Arc::from("policy-v1"),
+                    decision_id: Arc::from("decision-v1"),
+                },
+            };
+            let request = ChildRunRequest {
+                agent: AgentRef {
+                    id: crate::AgentId::parse("finstack.agent.placement").expect("agent id"),
+                    bundle: None,
+                    spec_digest: Digest::raw_json(br#"{"agent":"placement"}"#),
+                },
+                input: Arc::from([]),
+                placement,
+                locator,
+                requested_deadline: None,
+                requested_budget: BudgetRequest::default(),
+                delegation_id: None,
+                metadata: Metadata::empty(),
+                request_digest: Digest::raw_json(format!(r#"{{"placement":{index}}}"#).as_bytes()),
+            };
+            let ordinal = 500 + u64::try_from(index).expect("index") * 10;
+            let ids = ChildCoordinationIds {
+                preparation_batch_id: id(ordinal),
+                preparation_record_id: id(ordinal + 1),
+                reservation_request_record_id: None,
+                reservation_settlement: None,
+            };
+            let first = block_on(coordinator.start_or_attach(
+                &mut commit,
+                context.clone(),
+                request.clone(),
+                None,
+                ids,
+                timestamp(1_100),
+            ))
+            .expect("start child");
+            let attached = block_on(coordinator.start_or_attach(
+                &mut commit,
+                context.clone(),
+                request.clone(),
+                None,
+                ids,
+                timestamp(1_100),
+            ))
+            .expect("attach child");
+            assert_eq!(first, attached);
+            assert_eq!(*invoker.physical_starts.lock().expect("starts"), 1);
+            assert_eq!(
+                commit
+                    .state()
+                    .child_preparations
+                    .get(&context.parent_effect_id)
+                    .map(|prepared| &prepared.child),
+                Some(&request.locator)
+            );
+
+            let mut conflicting = request;
+            conflicting.request_digest = Digest::raw_json(b"conflicting child request");
+            assert!(matches!(
+                block_on(coordinator.start_or_attach(
+                    &mut commit,
+                    context,
+                    conflicting,
+                    None,
+                    ids,
+                    timestamp(1_100),
+                )),
+                Err(CompositionError::Commit(
+                    CommitCoordinatorError::SidecarConflict
+                ))
+            ));
+            assert_eq!(*invoker.physical_starts.lock().expect("starts"), 1);
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the post-commit charge and release proof intentionally covers one lifecycle"
+    )]
+    fn budget_charge_and_release_are_post_commit_and_idempotent() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let store = Arc::new(FakeStore::new(FakeMode::Normal));
+        let dispatcher = Arc::new(RecordingDispatcher::default());
+        let mut commit = CommitCoordinator::with_test_dispatcher(store, dispatcher);
+        block_on(commit.submit(
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            accept_input(),
+        ))
+        .expect("accept parent");
+
+        let parent = OperationLocator {
+            tenant_scope: Arc::from("tenant-a"),
+            session_id: id(1),
+            lane_id: id(2),
+            run_id: id(3),
+        };
+        let child_locator = ChildRunLocator {
+            operation: OperationLocator {
+                tenant_scope: Arc::from("tenant-a"),
+                session_id: id(1),
+                lane_id: id(340),
+                run_id: id(341),
+            },
+            remote: None,
+        };
+        let budget = BudgetRequest {
+            input_tokens: Some(1_000),
+            output_tokens: Some(250),
+            cost: None,
+            extension_counters: BTreeMap::new(),
+        };
+        let scope_id = id(342);
+        let reservation_id = id(343);
+        let reserve_digest = BudgetReserveRequest::compute_digest(
+            scope_id,
+            reservation_id,
+            child_locator.operation.run_id,
+            &budget,
+        )
+        .expect("reserve digest");
+        let reserve = BudgetReserveRequest {
+            scope_id,
+            reservation_id,
+            run_id: child_locator.operation.run_id,
+            amount: budget.clone(),
+            request_digest: reserve_digest,
+        };
+        let reserve_receipt = BudgetReservationReceipt {
+            scope_id,
+            reservation_id,
+            reserved: budget.clone(),
+            remaining: BudgetRequest::default(),
+            request_digest: reserve_digest,
+            receipt_digest: Digest::raw_json(br#"{"receipt":"reserve"}"#),
+        };
+        let usage =
+            Usage::try_new(Some(20), Some(10), Some(30), None, BTreeMap::new()).expect("usage");
+        let usage_digest = Digest::effect_output(&usage.canonical_bytes().expect("usage bytes"));
+        let charge_request = BudgetChargeRequest {
+            scope_id,
+            reservation_id,
+            effect_id: id(103),
+            usage: usage.clone(),
+            usage_digest,
+        };
+        let charge_receipt = BudgetChargeReceipt {
+            scope_id,
+            reservation_id,
+            effect_id: id(103),
+            charged_usage: usage.clone(),
+            cumulative_usage: usage.clone(),
+            usage_digest,
+            receipt_digest: Digest::raw_json(br#"{"receipt":"charge"}"#),
+        };
+        let release_digest = BudgetReleaseRequest::compute_digest(scope_id, reservation_id, id(3))
+            .expect("release digest");
+        let release_request = BudgetReleaseRequest {
+            scope_id,
+            reservation_id,
+            terminal_run_id: id(3),
+            request_digest: release_digest,
+        };
+        let release_receipt = BudgetReleaseReceipt {
+            scope_id,
+            reservation_id,
+            terminal_run_id: id(3),
+            released_unused: BudgetRequest::default(),
+            request_digest: release_digest,
+            receipt_digest: Digest::raw_json(br#"{"receipt":"release"}"#),
+        };
+        let ledger = Arc::new(AmbiguousReserveLedger {
+            log: log.clone(),
+            receipt: reserve_receipt,
+            charge_receipt: Some(charge_receipt.clone()),
+            release_receipt: Some(release_receipt.clone()),
+            reserved: Mutex::new(false),
+            fail_after_reserve_once: Mutex::new(false),
+            reserve_calls: Mutex::new(0),
+            charge_calls: Mutex::new(0),
+            release_calls: Mutex::new(0),
+        });
+        let invoker = Arc::new(IdempotentChildInvoker {
+            log,
+            accepted: Mutex::new(BTreeMap::new()),
+            physical_starts: Mutex::new(0),
+        });
+        let child_coordinator =
+            ChildRunCoordinator::new(invoker).with_budget_ledger(ledger.clone());
+        let child_context = ChildRunContext {
+            parent: parent.clone(),
+            parent_effect_id: id(344),
+            authorization: AuthorizationContext {
+                principal: PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                    .expect("principal"),
+                authentication_method: Arc::from("oidc"),
+                assurance_level: Arc::from("high"),
+                roles: Arc::from([]),
+                permitted_scopes: Arc::from([]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from("policy-v1"),
+                decision_id: Arc::from("decision-v1"),
+            },
+        };
+        let child_request = ChildRunRequest {
+            agent: AgentRef {
+                id: crate::AgentId::parse("finstack.agent.budget-child").expect("agent id"),
+                bundle: None,
+                spec_digest: Digest::raw_json(br#"{"agent":"budget-child"}"#),
+            },
+            input: Arc::from([ContentBlock::Text(
+                TextBlock::try_new("budgeted work").expect("text"),
+            )]),
+            placement: ChildPlacement::CompatibleLaneInParentSession,
+            locator: child_locator,
+            requested_deadline: None,
+            requested_budget: budget,
+            delegation_id: None,
+            metadata: Metadata::empty(),
+            request_digest: Digest::raw_json(br#"{"request":"budget-child"}"#),
+        };
+        block_on(child_coordinator.start_or_attach(
+            &mut commit,
+            child_context,
+            child_request,
+            Some(reserve),
+            ChildCoordinationIds {
+                preparation_batch_id: id(401),
+                preparation_record_id: id(402),
+                reservation_request_record_id: Some(id(403)),
+                reservation_settlement: Some(BudgetOperationIds {
+                    batch_id: id(404),
+                    record_id: id(405),
+                }),
+            },
+            timestamp(1_050),
+        ))
+        .expect("prepare budgeted child");
+
+        let budget_coordinator = BudgetCoordinator::new(ledger.clone());
+        assert!(matches!(
+            block_on(budget_coordinator.charge_committed(
+                &mut commit,
+                &parent,
+                charge_request.clone(),
+                BudgetOperationIds {
+                    batch_id: id(406),
+                    record_id: id(407),
+                },
+                timestamp(1_350),
+            )),
+            Err(CompositionError::InvalidRequest {
+                code: "effect_usage_not_committed"
+            })
+        ));
+        assert_eq!(*ledger.charge_calls.lock().expect("calls"), 0);
+
+        block_on(drive_accepted_to_model_request(&mut commit));
+        let completion = EffectCompleted::try_new(
+            id(103),
+            output_contract(),
+            RawJson::parse(r#"{"text":"hello"}"#).expect("output"),
+            Some(usage),
+            vec![],
+            ProviderIds::empty(),
+            Some("budget-completion"),
+            None,
+        )
+        .expect("completion");
+        let assistant_message = Message::try_new(
+            id(104),
+            MessageRole::Assistant,
+            vec![ContentBlock::Text(
+                TextBlock::try_new("hello").expect("text"),
+            )],
+            timestamp(1_400),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("assistant message");
+        block_on(commit.submit(
+            env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[104], 105),
+            KernelInput::ModelSettled(ModelSettled {
+                turn_id: id(101),
+                model_request_id: id(102),
+                outcome: ModelSettlement::Completed {
+                    completion,
+                    assistant_message,
+                },
+            }),
+        ))
+        .expect("settle model");
+
+        let charge_ids = BudgetOperationIds {
+            batch_id: id(406),
+            record_id: id(407),
+        };
+        let charged = block_on(budget_coordinator.charge_committed(
+            &mut commit,
+            &parent,
+            charge_request.clone(),
+            charge_ids,
+            timestamp(1_450),
+        ))
+        .expect("charge committed usage");
+        assert_eq!(charged, charge_receipt);
+        assert_eq!(
+            block_on(budget_coordinator.charge_committed(
+                &mut commit,
+                &parent,
+                charge_request,
+                charge_ids,
+                timestamp(1_450),
+            ))
+            .expect("equal charge retry"),
+            charge_receipt
+        );
+        assert_eq!(*ledger.charge_calls.lock().expect("calls"), 1);
+
+        block_on(commit.submit(
+            env(1_500, &[9], &[], &[], &[], &[], &[], 106),
+            stage(Stage::AfterModel, ReducerStageOutcome::Continue),
+        ))
+        .expect("after model");
+        block_on(commit.submit(
+            env(1_600, &[10, 11], &[5], &[], &[], &[], &[], 107),
+            stage(Stage::BeforeFinalize, ReducerStageOutcome::FinalizeAccepted),
+        ))
+        .expect("terminal commit");
+
+        let release_ids = BudgetOperationIds {
+            batch_id: id(408),
+            record_id: id(409),
+        };
+        let released = block_on(budget_coordinator.release_committed(
+            &mut commit,
+            &parent,
+            release_request.clone(),
+            release_ids,
+            timestamp(1_650),
+        ))
+        .expect("release after terminal");
+        assert_eq!(released, release_receipt);
+        assert_eq!(
+            block_on(budget_coordinator.release_committed(
+                &mut commit,
+                &parent,
+                release_request,
+                release_ids,
+                timestamp(1_650),
+            ))
+            .expect("equal release retry"),
+            release_receipt
+        );
+        assert_eq!(*ledger.release_calls.lock().expect("calls"), 1);
     }
 
     #[test]

@@ -1587,9 +1587,45 @@ pub struct ResolvedAgent {
     run_plan: ResolvedRunPlan,
     report: ResolutionReport,
     lifecycles: Arc<[ResolvedLifecycle]>,
+    spec: Option<Arc<crate::AgentSpec>>,
+    lock: Option<Arc<crate::ResolvedAgentLock>>,
+    composition: Option<Arc<crate::bundle::CompositionRecipe>>,
 }
 
 impl ResolvedAgent {
+    /// Declarative agent specification when constructed through a bundle resolver.
+    #[must_use]
+    pub fn spec(&self) -> Option<&Arc<crate::AgentSpec>> {
+        self.spec.as_ref()
+    }
+
+    /// Exact credential-free resolution lock when constructed through a bundle resolver.
+    #[must_use]
+    pub fn lock(&self) -> Option<&Arc<crate::ResolvedAgentLock>> {
+        self.lock.as_ref()
+    }
+
+    /// Direct non-primary runtime services validated during composition.
+    #[must_use]
+    pub fn services(&self) -> Option<&crate::RuntimeServices> {
+        self.composition.as_ref().map(|recipe| &recipe.services)
+    }
+
+    pub(crate) fn attach_composition(
+        mut self,
+        spec: Arc<crate::AgentSpec>,
+        lock: Arc<crate::ResolvedAgentLock>,
+        composition: Arc<crate::bundle::CompositionRecipe>,
+    ) -> Self {
+        self.spec = Some(spec);
+        self.lock = Some(lock);
+        self.composition = Some(composition);
+        self
+    }
+
+    pub(crate) fn composition(&self) -> Option<&Arc<crate::bundle::CompositionRecipe>> {
+        self.composition.as_ref()
+    }
     /// Clone the immutable no-lookup run plan.
     #[must_use]
     pub fn run_plan(&self) -> ResolvedRunPlan {
@@ -1658,6 +1694,12 @@ enum ReadyOutcome {
 }
 
 impl Registry {
+    /// Look up one exact registered component descriptor without constructing it.
+    #[must_use]
+    pub fn registered_component(&self, id: &ComponentId) -> Option<&RegisteredComponentDescriptor> {
+        self.entries.get(id).map(RegisteredEntry::descriptor)
+    }
+
     /// Successful and replacement registration events in transaction order.
     #[must_use]
     pub const fn registration_events(&self) -> &Arc<[RegistrationEvent]> {
@@ -1891,6 +1933,9 @@ impl Registry {
                 diagnostics: diagnostics.into(),
             },
             lifecycles: lifecycles.into(),
+            spec: None,
+            lock: None,
+            composition: None,
         })
     }
 
@@ -2398,6 +2443,7 @@ fn validate_invocation(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;
 
     use finstack_ai_runtime::{
@@ -2519,6 +2565,455 @@ mod tests {
             component("test.agent.source"),
             AgentComponentSelection::new(model, exact("test.store.memory")),
         )
+    }
+
+    fn bundle_spec(
+        agent: crate::AgentSpec,
+        capability: crate::CapabilitySpec,
+        requirements: Vec<crate::BundleRequirement>,
+        conflicts: Vec<crate::BundleConflict>,
+    ) -> crate::BundleSpec {
+        crate::BundleSpec {
+            schema_version: crate::BUNDLE_SCHEMA_VERSION,
+            id: finstack_ai_runtime::BundleId::parse("test.bundle.composition").expect("bundle id"),
+            version: VERSION,
+            agents: Arc::from([agent]),
+            capabilities: Arc::from([capability]),
+            requirements: requirements.into(),
+            conflicts: conflicts.into(),
+            defaults: crate::BundleDefaults::default(),
+            config_schema: None,
+            compatibility: crate::CompatibilityRequirements::default(),
+        }
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one vertical acceptance fixture covers resolve, activation rebuild, digest invalidation, and exact lock re-import"
+    )]
+    async fn bundle_resolution_locks_capabilities_and_rebuilds_application_plan() {
+        let (model_extension, store_extension) = extensions();
+        let mut registrar = Registrar::new();
+        registrar
+            .register_extension(&model_extension)
+            .expect("model extension");
+        registrar
+            .register_extension(&store_extension)
+            .expect("store extension");
+        let mut registry = registrar.into_registry();
+
+        let capability_id = finstack_ai_runtime::CapabilityId::parse("test.capability.research")
+            .expect("capability id");
+        let agent = crate::AgentBuilder::new(
+            finstack_ai_runtime::AgentId::parse("test.agent.research").expect("agent id"),
+            ComponentRef::new(component("test.model.scripted"), Some(VERSION)),
+            ComponentRef::new(component("test.store.memory"), Some(VERSION)),
+        )
+        .capabilities(Arc::from([crate::CapabilityRef {
+            id: capability_id.clone(),
+            bundle: None,
+        }]))
+        .build()
+        .expect("agent spec");
+        let capability = crate::CapabilitySpec {
+            id: capability_id.clone(),
+            description: Arc::from("Research instruction set"),
+            instructions: Arc::from([
+                crate::InstructionSpec::try_new("Cite primary sources.").expect("instruction")
+            ]),
+            toolsets: Arc::from([]),
+            context_providers: Arc::from([]),
+            middleware: Arc::from([]),
+            activation: crate::CapabilityActivation::Application,
+        };
+        let bundle = bundle_spec(
+            agent,
+            capability,
+            vec![
+                crate::BundleRequirement::RequiredComponent {
+                    component: component("test.model.scripted"),
+                    version: crate::VersionRequirement::Exact { version: VERSION },
+                },
+                crate::BundleRequirement::RequiredComponent {
+                    component: component("test.store.memory"),
+                    version: crate::VersionRequirement::CompatibleMajor { major: 1 },
+                },
+            ],
+            vec![],
+        );
+        let bundle_id = bundle.id.clone();
+        let agent_id = bundle.agents[0].id.clone();
+        let mut catalog = crate::BundleCatalog::default();
+        catalog.install(bundle).expect("install bundle");
+        let bundle_resolver = crate::BundleResolver::new(
+            &catalog,
+            Version {
+                major: 0,
+                minor: 0,
+                patch: 1,
+            },
+            BTreeSet::new(),
+            crate::RuntimeServices::default(),
+        );
+        let bundle_agent = bundle_resolver
+            .resolve_agent(
+                &mut registry,
+                &bundle_id,
+                &agent_id,
+                BTreeMap::new(),
+                AgentConstructionContext::new(),
+            )
+            .await
+            .expect("resolve bundle agent");
+        let base_lock = bundle_agent.lock().expect("base lock");
+        assert_eq!(base_lock.capabilities.len(), 1);
+        assert!(!base_lock.capabilities[0].active);
+        let base_fingerprint = base_lock.fingerprint().expect("base fingerprint");
+
+        let activated = bundle_resolver
+            .activate_application(
+                &mut registry,
+                &bundle_agent,
+                [capability_id],
+                AgentConstructionContext::new(),
+            )
+            .await
+            .expect("activate application capability");
+        let activated_lock = activated.lock().expect("activated lock");
+        assert!(activated_lock.capabilities[0].active);
+        assert_ne!(
+            activated_lock.fingerprint().expect("activated fingerprint"),
+            base_fingerprint,
+            "active capability membership must invalidate plan/checkpoint digests"
+        );
+
+        let exported = activated_lock.to_json().expect("lock export");
+        let imported = crate::ResolvedAgentLock::from_json(&exported).expect("lock import");
+
+        let mut wrong_config = imported.clone();
+        wrong_config.effective_config_digest = Digest::raw_json(b"wrong-config");
+        assert!(
+            bundle_resolver
+                .resolve_lock(
+                    &mut registry,
+                    &wrong_config,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "effective configuration selection is exact"
+        );
+
+        let mut wrong_schema = imported.clone();
+        wrong_schema.schema_digests = Arc::from([Digest::raw_json(b"wrong-schema")]);
+        assert!(
+            bundle_resolver
+                .resolve_lock(
+                    &mut registry,
+                    &wrong_schema,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "schema selection is exact"
+        );
+
+        let mut wrong_version = imported.clone();
+        let mut components = wrong_version.components.to_vec();
+        let selected = &components[0].component;
+        components[0].component = ComponentRef::new(
+            selected.id().clone(),
+            Some(Version {
+                major: 9,
+                minor: 0,
+                patch: 0,
+            }),
+        );
+        wrong_version.components = components.into();
+        assert!(
+            bundle_resolver
+                .resolve_lock(
+                    &mut registry,
+                    &wrong_version,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "component version selection is exact"
+        );
+
+        let reconstructed = bundle_resolver
+            .resolve_lock(
+                &mut registry,
+                &imported,
+                BTreeMap::new(),
+                AgentConstructionContext::new(),
+            )
+            .await
+            .expect("exact lock reconstruction");
+        assert_eq!(reconstructed.lock().expect("lock").as_ref(), &imported);
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one negative fixture proves conflict, missing service, and unresolved agent admission failures"
+    )]
+    async fn bundle_conflicts_unresolved_refs_and_missing_services_fail_before_start() {
+        let (model_extension, store_extension) = extensions();
+        let mut registrar = Registrar::new();
+        registrar
+            .register_extension(&model_extension)
+            .expect("model extension");
+        registrar
+            .register_extension(&store_extension)
+            .expect("store extension");
+        let mut registry = registrar.into_registry();
+        let capability = crate::CapabilitySpec {
+            id: finstack_ai_runtime::CapabilityId::parse("test.capability.required")
+                .expect("capability"),
+            description: Arc::from("Required capability"),
+            instructions: Arc::from([]),
+            toolsets: Arc::from([]),
+            context_providers: Arc::from([]),
+            middleware: Arc::from([]),
+            activation: crate::CapabilityActivation::Always,
+        };
+        let agent = crate::AgentBuilder::new(
+            finstack_ai_runtime::AgentId::parse("test.agent.required").expect("agent"),
+            ComponentRef::new(component("test.model.scripted"), Some(VERSION)),
+            ComponentRef::new(component("test.store.memory"), Some(VERSION)),
+        )
+        .build()
+        .expect("agent spec");
+
+        let conflicting = bundle_spec(
+            agent.clone(),
+            capability.clone(),
+            vec![],
+            vec![crate::BundleConflict::Component {
+                component: component("test.model.scripted"),
+            }],
+        );
+        let conflict_id = conflicting.id.clone();
+        let conflict_agent = conflicting.agents[0].id.clone();
+        let mut conflict_catalog = crate::BundleCatalog::default();
+        conflict_catalog
+            .install(conflicting)
+            .expect("conflict bundle installs");
+        let conflict_resolver = crate::BundleResolver::new(
+            &conflict_catalog,
+            VERSION,
+            BTreeSet::new(),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            conflict_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &conflict_id,
+                    &conflict_agent,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err()
+        );
+
+        let incompatible_bundle = bundle_spec(
+            agent.clone(),
+            capability.clone(),
+            vec![crate::BundleRequirement::RequiredComponent {
+                component: component("test.model.scripted"),
+                version: crate::VersionRequirement::Exact {
+                    version: Version {
+                        major: 2,
+                        minor: 0,
+                        patch: 0,
+                    },
+                },
+            }],
+            vec![],
+        );
+        let incompatible_id = incompatible_bundle.id.clone();
+        let incompatible_agent = incompatible_bundle.agents[0].id.clone();
+        let mut incompatible_catalog = crate::BundleCatalog::default();
+        incompatible_catalog
+            .install(incompatible_bundle)
+            .expect("incompatible bundle installs");
+        let incompatible_resolver = crate::BundleResolver::new(
+            &incompatible_catalog,
+            VERSION,
+            BTreeSet::new(),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            incompatible_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &incompatible_id,
+                    &incompatible_agent,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "incompatible component versions must fail before start"
+        );
+
+        let mut unresolved_capability_agent = agent.clone();
+        unresolved_capability_agent.capabilities = Arc::from([crate::CapabilityRef {
+            id: finstack_ai_runtime::CapabilityId::parse("test.capability.missing")
+                .expect("missing capability"),
+            bundle: None,
+        }]);
+        let unresolved_capability_bundle = bundle_spec(
+            unresolved_capability_agent,
+            capability.clone(),
+            vec![],
+            vec![],
+        );
+        let unresolved_capability_id = unresolved_capability_bundle.id.clone();
+        let unresolved_capability_agent_id = unresolved_capability_bundle.agents[0].id.clone();
+        let mut unresolved_capability_catalog = crate::BundleCatalog::default();
+        unresolved_capability_catalog
+            .install(unresolved_capability_bundle)
+            .expect("unresolved capability bundle installs");
+        let unresolved_capability_resolver = crate::BundleResolver::new(
+            &unresolved_capability_catalog,
+            VERSION,
+            BTreeSet::new(),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            unresolved_capability_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &unresolved_capability_id,
+                    &unresolved_capability_agent_id,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "explicit capability refs must resolve to a locked definition"
+        );
+
+        let mut missing_store_agent = agent.clone();
+        missing_store_agent.store = None;
+        let missing_store_bundle =
+            bundle_spec(missing_store_agent, capability.clone(), vec![], vec![]);
+        let missing_store_id = missing_store_bundle.id.clone();
+        let missing_store_agent_id = missing_store_bundle.agents[0].id.clone();
+        let mut missing_store_catalog = crate::BundleCatalog::default();
+        missing_store_catalog
+            .install(missing_store_bundle)
+            .expect("declarative bundle installs");
+        let missing_store_resolver = crate::BundleResolver::new(
+            &missing_store_catalog,
+            VERSION,
+            BTreeSet::new(),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            missing_store_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &missing_store_id,
+                    &missing_store_agent_id,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "an executable resolved agent requires a journal store"
+        );
+
+        let service_bundle = bundle_spec(
+            agent.clone(),
+            capability.clone(),
+            vec![crate::BundleRequirement::RequiredHostFeature {
+                feature: crate::HostFeature::BudgetLedger,
+            }],
+            vec![],
+        );
+        let service_id = service_bundle.id.clone();
+        let service_agent = service_bundle.agents[0].id.clone();
+        let mut service_catalog = crate::BundleCatalog::default();
+        service_catalog
+            .install(service_bundle)
+            .expect("service bundle installs");
+        let service_resolver = crate::BundleResolver::new(
+            &service_catalog,
+            VERSION,
+            BTreeSet::from([crate::HostFeature::BudgetLedger]),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            service_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &service_id,
+                    &service_agent,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "required ledger must not be treated as optional"
+        );
+        assert!(
+            service_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &service_id,
+                    &finstack_ai_runtime::AgentId::parse("test.agent.missing")
+                        .expect("missing agent id"),
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "unresolved agent refs must fail before start"
+        );
+
+        let artifact_bundle = bundle_spec(
+            agent,
+            capability,
+            vec![crate::BundleRequirement::RequiredHostFeature {
+                feature: crate::HostFeature::ArtifactStore,
+            }],
+            vec![],
+        );
+        let artifact_id = artifact_bundle.id.clone();
+        let artifact_agent = artifact_bundle.agents[0].id.clone();
+        let mut artifact_catalog = crate::BundleCatalog::default();
+        artifact_catalog
+            .install(artifact_bundle)
+            .expect("artifact bundle installs");
+        let artifact_resolver = crate::BundleResolver::new(
+            &artifact_catalog,
+            VERSION,
+            BTreeSet::from([crate::HostFeature::ArtifactStore]),
+            crate::RuntimeServices::default(),
+        );
+        assert!(
+            artifact_resolver
+                .resolve_agent(
+                    &mut registry,
+                    &artifact_id,
+                    &artifact_agent,
+                    BTreeMap::new(),
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .is_err(),
+            "required artifact storage must not be treated as optional"
+        );
     }
 
     #[tokio::test]

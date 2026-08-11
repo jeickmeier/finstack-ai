@@ -8,6 +8,10 @@ use thiserror::Error;
 
 use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::budget::{
+    BudgetChargeRecorded, BudgetReservationReleased, BudgetReservationRequested,
+    BudgetReservationSettled,
+};
 use crate::capabilities::CapabilitiesActivated;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind,
@@ -23,7 +27,8 @@ use crate::external::ExternalCommandRejected;
 use crate::ids::{AppendBatchId, EventId, LaneId, RecordId, RunId, SessionId};
 use crate::limits::LimitReached;
 use crate::run::{
-    CancellationReconciled, CancellationRequested, RunAccepted, RunError, RunRelationKind,
+    CancellationReconciled, CancellationRequested, ChildRunPrepared, RunAccepted, RunError,
+    RunRelationKind,
 };
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolBatchOutcome, ToolCallSettled};
@@ -446,7 +451,7 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
     }
 }
 
-/// Record bodies owned through PR-012.
+/// Complete record bodies owned through PR-022.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {
@@ -510,6 +515,16 @@ pub enum RecordBody {
     OutputValidationFailed(OutputValidationFailed),
     /// Known authorized external command rejected by semantic validation.
     ExternalCommandRejected(ExternalCommandRejected),
+    /// Complete parent-owned child locator committed before invocation.
+    ChildRunPrepared(ChildRunPrepared),
+    /// Shared-budget reservation intent committed with child preparation.
+    BudgetReservationRequested(BudgetReservationRequested),
+    /// Shared-budget reservation receipt committed before child acceptance.
+    BudgetReservationSettled(BudgetReservationSettled),
+    /// Shared-budget charge receipt committed after an idempotent charge.
+    BudgetChargeRecorded(BudgetChargeRecorded),
+    /// Shared-budget release receipt committed after terminal release intent.
+    BudgetReservationReleased(BudgetReservationReleased),
 }
 
 impl RecordBody {
@@ -535,7 +550,12 @@ impl RecordBody {
             | Self::CapabilitiesActivated(_)
             | Self::FinalResultRecorded(_)
             | Self::OutputValidationFailed(_)
-            | Self::ExternalCommandRejected(_) => 0,
+            | Self::ExternalCommandRejected(_)
+            | Self::ChildRunPrepared(_)
+            | Self::BudgetReservationRequested(_)
+            | Self::BudgetReservationSettled(_)
+            | Self::BudgetChargeRecorded(_)
+            | Self::BudgetReservationReleased(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -575,6 +595,11 @@ impl RecordBody {
             Self::FinalResultRecorded(_) => "final_result_recorded",
             Self::OutputValidationFailed(_) => "output_validation_failed",
             Self::ExternalCommandRejected(_) => "external_command_rejected",
+            Self::ChildRunPrepared(_) => "child_run_prepared",
+            Self::BudgetReservationRequested(_) => "budget_reservation_requested",
+            Self::BudgetReservationSettled(_) => "budget_reservation_settled",
+            Self::BudgetChargeRecorded(_) => "budget_charge_recorded",
+            Self::BudgetReservationReleased(_) => "budget_reservation_released",
         }
     }
 }
@@ -798,6 +823,25 @@ fn validate_body_for_creation(body: &RecordBody) -> Result<(), RecordError> {
             .validate()
             .map_err(RecordError::InvalidErrorDescriptor)?;
     }
+    match body {
+        RecordBody::BudgetReservationRequested(value) => value
+            .request
+            .validate()
+            .map_err(|_| RecordError::InvalidBudgetRecord)?,
+        RecordBody::BudgetReservationSettled(value) => value
+            .receipt
+            .validate()
+            .map_err(|_| RecordError::InvalidBudgetRecord)?,
+        RecordBody::BudgetChargeRecorded(value) => value
+            .receipt
+            .validate()
+            .map_err(|_| RecordError::InvalidBudgetRecord)?,
+        RecordBody::BudgetReservationReleased(value) => value
+            .receipt
+            .validate()
+            .map_err(|_| RecordError::InvalidBudgetRecord)?,
+        _ => {}
+    }
     Ok(())
 }
 
@@ -813,6 +857,9 @@ fn validate_record_run_id(run_id: Option<RunId>, body: &RecordBody) -> Result<()
 /// Record construction errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RecordError {
+    /// Budget request or receipt is malformed.
+    #[error("invalid budget record")]
+    InvalidBudgetRecord,
     /// Unsupported envelope format version.
     #[error("unsupported record format_version {format_version}")]
     UnsupportedFormatVersion {
@@ -866,6 +913,7 @@ impl RecordError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
+            Self::InvalidBudgetRecord => "invalid_budget_record",
             Self::UnsupportedFormatVersion { .. } => "unsupported_format_version",
             Self::UnsupportedKindVersion { .. } => "unsupported_kind_version",
             Self::DerivedEventCount { .. } => "derived_event_count",

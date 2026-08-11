@@ -176,6 +176,11 @@ fn record_name(value: &RecordBody) -> &'static str {
         RecordBody::FinalResultRecorded(_) => "FinalResultRecorded",
         RecordBody::OutputValidationFailed(_) => "OutputValidationFailed",
         RecordBody::ExternalCommandRejected(_) => "ExternalCommandRejected",
+        RecordBody::ChildRunPrepared(_) => "ChildRunPrepared",
+        RecordBody::BudgetReservationRequested(_) => "BudgetReservationRequested",
+        RecordBody::BudgetReservationSettled(_) => "BudgetReservationSettled",
+        RecordBody::BudgetChargeRecorded(_) => "BudgetChargeRecorded",
+        RecordBody::BudgetReservationReleased(_) => "BudgetReservationReleased",
     }
 }
 

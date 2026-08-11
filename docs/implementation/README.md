@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20 and local PR-021 merge `ec56d175a8b31fe49d5ea672f89020bc3ec553cd` on 2026-08-11:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, local PR-021 closeout `72a27005613a7fb109daf0919c114e19ca893419`, and PR-022 admission on branch `codex/pr-022-agent-spec` on 2026-08-11:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-004, ADR-005, ADR-006, ADR-009, ADR-022, ADR-030, ADR-034, and ADR-037 are `In progress` / `Partial`; PR-020 adds locally integrated commit-before-effect, crash-prefix, slow-observer, stress/leak, Miri, benchmark, Phase 2 exit, and G2 evidence while explicitly mapped later work remains open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their remaining routing, durability, and lifecycle work is later. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
-- Phase 0 through Phase 2 are `Done`; Phase 3 is `In progress`; PR-001–PR-021 are `Done`; PR-022–PR-066 are `Todo`. Both Phase 3 entrance criteria and PR-021 A01–A05 are passed.
+- Phase 0 through Phase 2 are `Done`; Phase 3 is `In progress`; PR-001–PR-021 are `Done`; PR-022 is `In progress`; PR-023–PR-066 are `Todo`. Both Phase 3 entrance criteria and PR-021 A01–A05 are passed.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3–G8 remain `Not ready`.
-- PR-001–PR-021 acceptance criteria are closed. PR-020 A01–A04, all four Phase 2 exits, local integration, and G2 are bound under [`artifacts/pr-020/`](artifacts/pr-020/). PR-021 A01–A05, candidate validation, security review, and local integration are bound under [`artifacts/pr-021/`](artifacts/pr-021/). No PR-021 actual pull request, push, hosted run, independent review, publication, exception, or blocker is claimed.
+- PR-001–PR-021 acceptance criteria are closed. PR-020 A01–A04, all four Phase 2 exits, local integration, and G2 are bound under [`artifacts/pr-020/`](artifacts/pr-020/). PR-021 A01–A05, candidate validation, security review, and local integration are bound under [`artifacts/pr-021/`](artifacts/pr-021/). PR-022 A01–A12 are active with no completed disposition yet. No PR-022 actual pull request, push, hosted run, independent review, publication, exception, or blocker is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

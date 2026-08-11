@@ -7,8 +7,18 @@
 
 #![warn(missing_docs)]
 
+mod bundle;
 mod registry;
+mod result;
+mod spec;
 
+pub use bundle::{
+    BUNDLE_RESOLUTION_CONFLICT, BUNDLE_RESOLUTION_INVALID, BUNDLE_RESOLUTION_LOCK_MISMATCH,
+    BUNDLE_RESOLUTION_MISSING, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleConflict,
+    BundleDefaults, BundleRequirement, BundleResolutionError, BundleResolver, BundleSpec,
+    CompatibilityRequirements, HostFeature, LockedBundle, LockedCapability, LockedComponent,
+    LockedComponentKind, RequiredServices, ResolvedAgentLock, RuntimeServices, VersionRequirement,
+};
 pub use finstack_ai_runtime as runtime;
 pub use registry::{
     AGENT_BUILD_CANCELLED, AGENT_BUILD_CONFIGURATION_CONFLICT, AGENT_BUILD_DUPLICATE_SELECTION,
@@ -24,4 +34,11 @@ pub use registry::{
     RegistrationMetadata, Registry, ResolutionDiagnostic, ResolutionDiagnosticKind,
     ResolutionReport, ResolveRequest, ResolvedAgent, ResolvedComponent, ResolvedRunPlan,
     ShutdownOwnership,
+};
+pub use result::{
+    RESULT_DECODE_INVALID_VALUE, RESULT_DECODE_SCHEMA_MISMATCH, ResultDecodeError, RunResult,
+};
+pub use spec::{
+    AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, CapabilityActivation,
+    CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec, RunPolicy,
 };

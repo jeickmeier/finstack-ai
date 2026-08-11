@@ -11,6 +11,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::agent::{FinalResultRecorded, OutputConfiguration};
 use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
+use crate::budget::{
+    BudgetChargeReceipt, BudgetReleaseReceipt, BudgetReservationReceipt, BudgetReserveRequest,
+};
 use crate::capabilities::ActiveCapability;
 use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::digest::Digest;
@@ -20,11 +23,13 @@ use crate::entries::{
     StageCursor, TimerFired,
 };
 use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, LaneId, MessageId, ModelRequestId, SessionId, ToolCallId, TurnId};
+use crate::ids::{
+    BudgetReservationId, EffectId, LaneId, MessageId, ModelRequestId, SessionId, ToolCallId, TurnId,
+};
 use crate::limits::{LimitReached, LimitUsage};
 use crate::message::Message;
 use crate::reducer::KernelError;
-use crate::run::{CancellationRequest, RunAccepted};
+use crate::run::{CancellationRequest, ChildRunPrepared, RunAccepted};
 use crate::time::Timestamp;
 use crate::tools::{
     ActiveToolBatch, ActiveToolCallStatus, ToolBatchClosed, ToolCallIdentity, ToolCallPlan,
@@ -235,6 +240,20 @@ pub struct RetryState {
     pub timer_firings: BTreeMap<EffectId, TimerFired>,
 }
 
+/// Replay-derived lifecycle of one shared-budget reservation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BudgetReservationReplay {
+    /// Durable reservation request committed with child preparation.
+    pub request: BudgetReserveRequest,
+    /// Exact settled ledger receipt, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement: Option<BudgetReservationReceipt>,
+    /// Exact release receipt, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<BudgetReleaseReceipt>,
+}
+
 /// Sorted state-hash projection entry for one stage settlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -385,6 +404,12 @@ pub struct KernelState {
     pub final_result: Option<FinalResultRecorded>,
     /// Most recent invalid structured result and retry feedback.
     pub validation_failure: Option<OutputValidationFailed>,
+    /// Parent-owned child mappings indexed by parent effect.
+    pub child_preparations: BTreeMap<EffectId, ChildRunPrepared>,
+    /// Shared-budget reservation lifecycle indexed by reservation identity.
+    pub budget_reservations: BTreeMap<BudgetReservationId, BudgetReservationReplay>,
+    /// Shared-budget charge receipts indexed by settled effect identity.
+    pub budget_charges: BTreeMap<EffectId, BudgetChargeReceipt>,
     /// Replay-derived cumulative limit usage.
     pub limit_usage: LimitUsage,
     /// Active or completed cancellation control state.
@@ -446,6 +471,9 @@ impl Default for KernelState {
             resolved_plan_digest: None,
             final_result: None,
             validation_failure: None,
+            child_preparations: BTreeMap::new(),
+            budget_reservations: BTreeMap::new(),
+            budget_charges: BTreeMap::new(),
             limit_usage: LimitUsage::default(),
             cancellation: None,
             retry: RetryState::default(),
@@ -481,6 +509,9 @@ impl KernelState {
             ("tool_calls", self.tool_calls.len()),
             ("tool_settlements", self.tool_settlements.len()),
             ("timer_firings", self.retry.timer_firings.len()),
+            ("child_preparations", self.child_preparations.len()),
+            ("budget_reservations", self.budget_reservations.len()),
+            ("budget_charges", self.budget_charges.len()),
         ] {
             if length > SEMANTIC_MAP_MAX_ENTRIES {
                 return Err(KernelError::InvalidInputPayload {
@@ -513,10 +544,14 @@ impl KernelState {
             || self.resolved_plan_digest.is_some()
             || self.final_result.is_some()
             || self.validation_failure.is_some();
-        if !matches!(self.state_version, 1..=4)
+        let has_composition_state = !self.child_preparations.is_empty()
+            || !self.budget_reservations.is_empty()
+            || !self.budget_charges.is_empty();
+        if !matches!(self.state_version, 1..=5)
             || (self.state_version == 1 && has_tool_state)
             || (self.state_version < 3 && has_control_state)
             || (self.state_version < 4 && has_structured_state)
+            || (self.state_version < 5 && has_composition_state)
         {
             return Err(KernelError::InvalidInputPayload {
                 field: "state_version",
@@ -639,6 +674,86 @@ impl KernelState {
                     field: "terminal",
                     reason_code: "inconsistent_phase",
                 });
+            }
+        }
+        if self.state_version >= 5 {
+            let accepted = self
+                .accepted
+                .as_ref()
+                .ok_or(KernelError::InvalidInputPayload {
+                    field: "composition_state",
+                    reason_code: "missing_accepted_run",
+                })?;
+            let parent_session_id = self.session_id.ok_or(KernelError::InvalidInputPayload {
+                field: "composition_state",
+                reason_code: "missing_session_id",
+            })?;
+            let parent_lane_id = self.lane_id.ok_or(KernelError::InvalidInputPayload {
+                field: "composition_state",
+                reason_code: "missing_lane_id",
+            })?;
+            for (effect_id, prepared) in &self.child_preparations {
+                let same_session = prepared.child.operation.session_id == parent_session_id;
+                let placement_matches = match prepared.placement {
+                    crate::ChildPlacement::CompatibleLaneInParentSession => {
+                        same_session && prepared.child.operation.lane_id != parent_lane_id
+                    }
+                    crate::ChildPlacement::IsolatedChildSession
+                    | crate::ChildPlacement::RemoteChildSession => !same_session,
+                };
+                if effect_id != &prepared.parent_effect_id
+                    || prepared.parent_run_id != accepted.run_id()
+                    || prepared
+                        .validate(accepted.security().tenant_scope())
+                        .is_err()
+                    || !placement_matches
+                {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "child_preparations",
+                        reason_code: "inconsistent",
+                    });
+                }
+            }
+            for (reservation_id, replay) in &self.budget_reservations {
+                if reservation_id != &replay.request.reservation_id
+                    || replay.request.validate().is_err()
+                    || replay.settlement.as_ref().is_some_and(|receipt| {
+                        receipt.validate().is_err()
+                            || receipt.scope_id != replay.request.scope_id
+                            || receipt.reservation_id != replay.request.reservation_id
+                            || receipt.request_digest != replay.request.request_digest
+                            || receipt.reserved != replay.request.amount
+                    })
+                    || replay.release.as_ref().is_some_and(|receipt| {
+                        receipt.validate().is_err()
+                            || receipt.scope_id != replay.request.scope_id
+                            || receipt.reservation_id != replay.request.reservation_id
+                            || replay.settlement.is_none()
+                            || self.terminal.is_none()
+                    })
+                {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "budget_reservations",
+                        reason_code: "inconsistent",
+                    });
+                }
+            }
+            for (effect_id, receipt) in &self.budget_charges {
+                if effect_id != &receipt.effect_id
+                    || receipt.validate().is_err()
+                    || !self
+                        .budget_reservations
+                        .get(&receipt.reservation_id)
+                        .is_some_and(|reservation| {
+                            reservation.settlement.is_some()
+                                && reservation.request.scope_id == receipt.scope_id
+                        })
+                {
+                    return Err(KernelError::InvalidInputPayload {
+                        field: "budget_charges",
+                        reason_code: "inconsistent",
+                    });
+                }
             }
         }
         if self.state_version == 4 {
@@ -1122,9 +1237,21 @@ impl KernelState {
                 ),
                 &mut writer,
             )
-        } else {
+        } else if self.state_version == 4 {
             serde_json_canonicalizer::to_writer(
                 &hash_projection::KernelStateHashV4::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
+        } else {
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV5::from_state(
                     self,
                     stage_hash_entries(&self.stage_settlements),
                     model_hash_entries(&self.model_settlements),
@@ -1277,6 +1404,15 @@ struct KernelStateWireV4<'a> {
     terminal: Option<&'a TerminalState>,
 }
 
+#[derive(Serialize)]
+struct KernelStateWireV5<'a> {
+    #[serde(flatten)]
+    base: KernelStateWireV4<'a>,
+    child_preparations: Vec<&'a ChildRunPrepared>,
+    budget_reservations: Vec<&'a BudgetReservationReplay>,
+    budget_charges: Vec<&'a BudgetChargeReceipt>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KernelStateWireOwned {
@@ -1332,6 +1468,13 @@ struct KernelStateWireOwned {
     final_result: NullableField<FinalResultRecorded>,
     #[serde(default)]
     validation_failure: NullableField<OutputValidationFailed>,
+    #[serde(default)]
+    child_preparations: RequiredField<BoundedVec<ChildRunPrepared, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    budget_reservations:
+        RequiredField<BoundedVec<BudgetReservationReplay, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    budget_charges: RequiredField<BoundedVec<BudgetChargeReceipt, SEMANTIC_MAP_MAX_ENTRIES>>,
     #[serde(default)]
     terminal: Option<TerminalState>,
 }
@@ -1454,7 +1597,7 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
-        } else {
+        } else if self.state_version == 4 {
             KernelStateWireV4 {
                 state_version: self.state_version,
                 last_applied_sequence: self.last_applied_sequence,
@@ -1488,6 +1631,45 @@ impl Serialize for KernelState {
                 terminal: self.terminal.as_ref(),
             }
             .serialize(serializer)
+        } else {
+            KernelStateWireV5 {
+                base: KernelStateWireV4 {
+                    state_version: self.state_version,
+                    last_applied_sequence: self.last_applied_sequence,
+                    session_id: self.session_id,
+                    lane_id: self.lane_id,
+                    accepted: self.accepted.as_ref(),
+                    accepted_at: self.accepted_at,
+                    phase: self.phase,
+                    cycle: self.cycle,
+                    current_turn: self.current_turn.as_ref(),
+                    messages: self.messages.as_slice(),
+                    pending_model_effect: self.pending_model_effect.as_ref(),
+                    terminal_candidate: self.terminal_candidate.as_ref(),
+                    stage_settlements: stage_hash_entries(&self.stage_settlements),
+                    model_settlements: model_hash_entries(&self.model_settlements),
+                    completion_identities: completion_hash_entries(&self.completion_identities),
+                    active_tool_batch: self.active_tool_batch.as_ref(),
+                    tool_calls: tool_call_hash_entries(&self.tool_calls),
+                    tool_settlements: tool_settlement_hash_entries(&self.tool_settlements),
+                    last_tool_batch: self.last_tool_batch.as_ref(),
+                    limit_usage: &self.limit_usage,
+                    cancellation: self.cancellation.as_ref(),
+                    retry: &self.retry,
+                    last_limit: self.last_limit.as_ref(),
+                    suspension: self.suspension.as_ref(),
+                    output_configuration: self.output_configuration.as_ref(),
+                    active_capabilities: &self.active_capabilities,
+                    resolved_plan_digest: self.resolved_plan_digest,
+                    final_result: self.final_result.as_ref(),
+                    validation_failure: self.validation_failure.as_ref(),
+                    terminal: self.terminal.as_ref(),
+                },
+                child_preparations: self.child_preparations.values().collect(),
+                budget_reservations: self.budget_reservations.values().collect(),
+                budget_charges: self.budget_charges.values().collect(),
+            }
+            .serialize(serializer)
         }
     }
 }
@@ -1502,7 +1684,7 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1..=4) {
+        if !matches!(wire.state_version, 1..=5) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
         let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
@@ -1522,7 +1704,7 @@ impl<'de> Deserialize<'de> for KernelState {
             && matches!(&wire.tool_calls, RequiredField::Present(_))
             && matches!(&wire.tool_settlements, RequiredField::Present(_))
             && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if matches!(wire.state_version, 2..=4) && !all_tool_fields_present {
+        if matches!(wire.state_version, 2..=5) && !all_tool_fields_present {
             return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
         }
         let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
@@ -1558,9 +1740,27 @@ impl<'de> Deserialize<'de> for KernelState {
                 "v1/v2/v3 kernel state contains structured-output fields",
             ));
         }
-        if wire.state_version == 4 && !all_structured_fields_present {
+        if wire.state_version >= 4 && !all_structured_fields_present {
             return Err(de::Error::custom(
-                "v4 kernel state is missing structured-output fields",
+                "v4/v5 kernel state is missing structured-output fields",
+            ));
+        }
+        let composition_fields_present =
+            matches!(&wire.child_preparations, RequiredField::Present(_))
+                || matches!(&wire.budget_reservations, RequiredField::Present(_))
+                || matches!(&wire.budget_charges, RequiredField::Present(_));
+        let all_composition_fields_present =
+            matches!(&wire.child_preparations, RequiredField::Present(_))
+                && matches!(&wire.budget_reservations, RequiredField::Present(_))
+                && matches!(&wire.budget_charges, RequiredField::Present(_));
+        if wire.state_version < 5 && composition_fields_present {
+            return Err(de::Error::custom(
+                "v1/v2/v3/v4 kernel state contains composition fields",
+            ));
+        }
+        if wire.state_version == 5 && !all_composition_fields_present {
+            return Err(de::Error::custom(
+                "v5 kernel state is missing composition fields",
             ));
         }
         let mut stage_settlements = BTreeMap::new();
@@ -1650,6 +1850,42 @@ impl<'de> Deserialize<'de> for KernelState {
                 return Err(de::Error::custom("duplicate tool settlement identity"));
             }
         }
+        let mut child_preparations = BTreeMap::new();
+        let child_entries = match wire.child_preparations {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in child_entries {
+            if child_preparations
+                .insert(entry.parent_effect_id, entry)
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate child preparation identity"));
+            }
+        }
+        let mut budget_reservations = BTreeMap::new();
+        let reservation_entries = match wire.budget_reservations {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in reservation_entries {
+            if budget_reservations
+                .insert(entry.request.reservation_id, entry)
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate budget reservation identity"));
+            }
+        }
+        let mut budget_charges = BTreeMap::new();
+        let charge_entries = match wire.budget_charges {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in charge_entries {
+            if budget_charges.insert(entry.effect_id, entry).is_some() {
+                return Err(de::Error::custom("duplicate budget charge identity"));
+            }
+        }
         let state = Self {
             state_version: wire.state_version,
             last_applied_sequence: wire.last_applied_sequence,
@@ -1719,6 +1955,9 @@ impl<'de> Deserialize<'de> for KernelState {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
             },
+            child_preparations,
+            budget_reservations,
+            budget_charges,
             terminal: wire.terminal,
         };
         state.validate().map_err(de::Error::custom)?;

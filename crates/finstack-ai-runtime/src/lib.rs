@@ -12,25 +12,37 @@
 
 #![warn(missing_docs)]
 
+pub use bytes::Bytes;
 pub use finstack_ai_kernel::{
-    ArtifactRef, BudgetScopeId, CapabilityId, ComponentId, ComponentInvocation, ComponentRef,
-    ContentBlock, Digest, EffectCompleted, EffectId, EffectInput, EffectKind, EffectOutputContract,
-    EffectOutputKind, EffectPurpose, EffectRelation, EntryId, ErrorCategory, ErrorCode,
-    ExternalHandleRef, InteractionKind, InteractionRequest, InvocationRecovery, JsonBlock,
-    JsonSchemaDraft, LaneId, Message, MessageId, Metadata, ModelRequestId, OperationLocator,
-    OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds, RawJson,
-    ReconciliationPolicy, RecordBody, RecordEnvelope, RetryDirective, RetrySafety, RunEvent,
-    RunEventBody, RunEventClass, RunEventKind, RunId, SchemaRef, Sensitivity, SessionId, Stage,
-    Timestamp, ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan, ToolExecutionMode,
-    ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage, ValidatedToolCall,
-    ValidationIssue, ValidationOutcome, Version,
+    AGENT_SPEC_DIGEST_SCHEMA_VERSION, AgentId, AppendBatchId, ArtifactId, ArtifactRef, BlobRef,
+    BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetReleaseReceipt,
+    BudgetReleaseRequest, BudgetRequest, BudgetReservationId, BudgetReservationReceipt,
+    BudgetReservationReleased, BudgetReservationReplay, BudgetReservationRequested,
+    BudgetReservationSettled, BudgetReserveRequest, BudgetScopeId, BundleId, CapabilityId,
+    ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentInvocation,
+    ComponentRef, ContentBlock, CostLimit, DOMAIN_AGENT_SPEC, Digest, EffectCompleted, EffectId,
+    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation,
+    EntryId, ErrorCategory, ErrorCode, ExternalHandleRef, FinalResultRecorded, InteractionKind,
+    InteractionRequest, InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message,
+    MessageId, Metadata, MiddlewareRef, ModelRequestId, OperationLocator, OutputEndStrategy,
+    OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
+    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody,
+    RecordDraft, RecordEnvelope, RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent,
+    RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, SchemaRef, Sensitivity, SessionId,
+    Stage, StructuredResultSource, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan,
+    ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, TurnId, Usage,
+    ValidatedToolCall, ValidationIssue, ValidationOutcome, Version,
 };
 pub use finstack_ai_kernel::{
     ModelTextDelta as RunEventModelTextDelta, ProviderHeartbeat as RunEventProviderHeartbeat,
     QueueDepthWarning as RunEventQueueDepthWarning, ReasoningDelta as RunEventReasoningDelta,
 };
 
+mod agent_invoker;
+mod artifact;
 mod audit;
+mod budget;
+mod composition;
 mod context;
 mod coordinator;
 mod error;
@@ -63,9 +75,27 @@ mod timer_runtime;
 #[cfg(feature = "native-tokio")]
 mod ingress;
 
+pub use agent_invoker::{
+    AGENT_INVOKE_CONFLICT, AGENT_INVOKE_INVALID_ACCEPTANCE, AGENT_INVOKE_UNAVAILABLE,
+    AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext, ChildRunHandle, ChildRunRequest,
+};
+pub use artifact::{
+    ARTIFACT_INTEGRITY_FAILURE, ARTIFACT_INVALID_METADATA, ARTIFACT_NOT_FOUND,
+    ARTIFACT_SCOPE_MISMATCH, ARTIFACT_TOO_LARGE, ARTIFACT_UNAVAILABLE, ArtifactError,
+    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+    validate_staged_artifact,
+};
 pub use audit::{
     SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
+};
+pub use budget::{
+    BUDGET_CONFLICT, BUDGET_INVALID_RECEIPT, BUDGET_UNAVAILABLE, BUDGET_UNKNOWN, BudgetError,
+    BudgetLedger, BudgetReservationState,
+};
+pub use composition::{
+    BudgetCoordinator, BudgetOperationIds, ChildCoordinationIds, ChildRunCoordinator,
+    CompositionError, child_relation_digest,
 };
 
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::agent::{FinalResultRecorded, OutputConfiguration};
+use crate::budget::BudgetChargeReceipt;
 use crate::capabilities::ActiveCapability;
 use crate::digest::Digest;
 use crate::effects::{ComponentInvocation, EffectRelation, EffectRequested, PipelinePosition};
@@ -17,7 +18,8 @@ use crate::limits::{CostLimit, LimitReached, LimitUsage, RunLimits};
 use crate::projection::{ContentProjection, EffectDeferredProjection, ErrorProjection, MessageSeq};
 use crate::refs::{CostAmount, PrincipalRef};
 use crate::run::{
-    RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
+    ChildRunPrepared, RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind,
+    RunSecurityContext,
 };
 use crate::time::{Duration, Timestamp};
 use crate::tools::{
@@ -28,8 +30,8 @@ use crate::tools::{
 use crate::validation::OutputValidationFailed;
 
 use super::{
-    CancellationState, CompletionIdentityHashEntryV1, CurrentTurn, KernelState,
-    ModelSettlementHashEntryV1, PendingModelEffect, RetryState, RunPhase,
+    BudgetReservationReplay, CancellationState, CompletionIdentityHashEntryV1, CurrentTurn,
+    KernelState, ModelSettlementHashEntryV1, PendingModelEffect, RetryState, RunPhase,
     StageSettlementHashEntryV1, TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2,
     ToolSettlementHashEntryV2,
 };
@@ -326,6 +328,40 @@ impl<'a> KernelStateHashV4<'a> {
             final_result: state.final_result.as_ref(),
             validation_failure: state.validation_failure.as_ref(),
             terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct KernelStateHashV5<'a> {
+    #[serde(flatten)]
+    base: KernelStateHashV4<'a>,
+    child_preparations: Vec<&'a ChildRunPrepared>,
+    budget_reservations: Vec<&'a BudgetReservationReplay>,
+    budget_charges: Vec<&'a BudgetChargeReceipt>,
+}
+
+impl<'a> KernelStateHashV5<'a> {
+    pub(super) fn from_state(
+        state: &'a KernelState,
+        stage_settlements: Vec<StageSettlementHashEntryV1>,
+        model_settlements: Vec<ModelSettlementHashEntryV1>,
+        completion_identities: Vec<CompletionIdentityHashEntryV1>,
+        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_settlements: Vec<ToolSettlementHashEntryV2>,
+    ) -> Self {
+        Self {
+            base: KernelStateHashV4::from_state(
+                state,
+                stage_settlements,
+                model_settlements,
+                completion_identities,
+                tool_calls,
+                tool_settlements,
+            ),
+            child_preparations: state.child_preparations.values().collect(),
+            budget_reservations: state.budget_reservations.values().collect(),
+            budget_charges: state.budget_charges.values().collect(),
         }
     }
 }

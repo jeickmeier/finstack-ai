@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "id": "finstack.agent.invalid",
+  "model": { "id": "finstack.model.test" },
+  "instructions": [],
+  "toolsets": [],
+  "context_providers": [],
+  "middleware": [],
+  "store": { "id": "finstack.store.memory" },
+  "observers": [],
+  "capabilities": [],
+  "limits": {},
+  "policy": { "child_runs": { "mode": "deny" } },
+  "extension_config": {}
+}

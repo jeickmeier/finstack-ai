@@ -171,6 +171,16 @@ cargo check -p finstack-ai --no-default-features --locked
 cargo check -p finstack-ai --target wasm32-unknown-unknown --no-default-features --features wasm-host --locked
 """
 
+[tasks.test-pr022]
+description = "Run PR-022 spec, bundle, lock, child, budget, artifact, and decode proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-kernel --locked
+cargo test -p finstack-ai-runtime --all-features --locked
+cargo test -p finstack-ai --all-features --locked
+cargo clippy -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --all-targets --all-features --locked -- -D warnings
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """
