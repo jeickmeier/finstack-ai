@@ -1375,6 +1375,10 @@ async fn an_expired_committed_deadline_prevents_provider_execution() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the restart acceptance keeps the pre-crash and recovered owner states visible"
+)]
 async fn persisted_retry_timer_resumes_once_after_runtime_restart() {
     let store = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
