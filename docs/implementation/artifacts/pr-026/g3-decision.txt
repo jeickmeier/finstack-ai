@@ -1,0 +1,52 @@
+G3 Native Developer Preview gate decision
+Decision: G3-D-native-preview-14a386c7db24
+Date: 2026-08-11
+Approver: me@jeickmeier.com
+Result: PASSED
+
+Reviewed revisions and runs
+
+- PR-026 implementation: b1bddac82041d1780651d9cee4d2378dba379ee5
+- Initial local main merge: 93b7959b1edbe1e541c2449dcbcc78723bf4504b
+- Final hosted candidate: af6b93d3f10362ab0399c5de18affe4563740da7
+- Controlling CI: 31541987380 (success)
+- Controlling security: 31541987542 (success)
+
+Reviewed evidence
+
+- PR-021 through PR-026 acceptance evidence, with PR-026 A01-A05 passed.
+- Clean external Rust project, model-only agent, calculator tool loop, service
+  composition, diagnostic output, and public SDK/test-kit use.
+- Declarative capability/spec/bundle/lock resolution, direct ready handles,
+  typed committed-result decoding, child invocation, budget, and artifact
+  service contracts.
+- OpenAI-compatible provider fixtures and direct Rust calls plus deterministic
+  calculator and capability-safe filesystem tools.
+- Exact Linux, macOS, and Windows native-preview jobs in hosted CI run
+  31541987380; complete CI and security workflows passed at one revision.
+- Native performance report and versioned warning thresholds.
+- Reproducible Cargo archive and developer-preview staging evidence.
+- Phase 3 exit review PH3-E-exit-ergonomic-c9a9621c063b,
+  PH3-E-exit-provider-tools-f0a2080a7d6d,
+  PH3-E-exit-benchmarks-afc4b2e7e525, and
+  PH3-E-exit-reproducible-eb1712973581, all passed.
+- SEC-INV-002/004/005/007/008, TM-03/TM-04/TM-16/TM-18 controls,
+  credential-free specs/locks/staging, fail-closed unsupported primitives,
+  supply-chain checks, secret scanning, and the secret-scan canary.
+- No open blocker, active exception, unresolved compatibility finding, or
+  incomplete Phase 3 acceptance/exit criterion.
+
+Decision
+
+G3 - Native Developer Preview is Passed. PR-026 and Phase 3 are Done. The
+declared candidate binding surface may serve as the entrance baseline for the
+separately governed Python and browser/WASM phases.
+
+Residual scope
+
+The 0.0.1-dev checkpoint is reproducibly staged but not published. Performance
+thresholds are initial warning thresholds, not production SLOs. No live
+provider call or independent review is claimed. Python and browser/WASM
+bindings, durable databases/recovery, plugin isolation and ABI stability, the
+broader provider catalog, and later production hardening remain their mapped
+later-phase obligations. They are not G3 exceptions or blockers.

@@ -72,4 +72,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: PR-024-E-provider-6c2a8f4d1b75; PR-024-E-compat-3e7b9d1a5c82; PR-024-E-security-9d3a7c1e5b84; PR-024-E-benchmark-4f8a2d6c9b15; PR-024-E-ci-7b3d1a8c5e92; PR-024-E-integration-1f6a9c4e2b83
+- Implementation evidence: Verified by PR-024-E-provider-6c2a8f4d1b75, PR-024-E-compat-3e7b9d1a5c82, PR-024-E-security-9d3a7c1e5b84, PR-024-E-benchmark-4f8a2d6c9b15, PR-024-E-ci-7b3d1a8c5e92, PR-024-E-integration-1f6a9c4e2b83, `PH3-E-exit-provider-tools-f0a2080a7d6d`, exact hosted evidence `PR-026-E-hosted-56c3039835fb`, and passing decision `G3-D-native-preview-14a386c7db24`

@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through PR-015 Model, locally integrated PR-016 Toolset, and locally integrated PR-018 target-correct boxed `ContextProvider`/`Middleware`/`Observer` native/WASM leaf evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-026/G3 review remains
+- Implementation evidence: Verified through target-correct boxed Model/Toolset/ContextProvider/Middleware/Observer native/WASM evidence, `PR-026-E-compat-c24fa275210a`, Phase 3 performance evidence `PR-026-E-performance-75b910d4a4f2`, exact hosted evidence `PR-026-E-hosted-56c3039835fb`, and passing decision `G3-D-native-preview-14a386c7db24`; the material-dispatch-cost trigger did not require an ABI change

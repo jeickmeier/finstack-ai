@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through immutable direct Model/Toolset paths and locally integrated PR-018 native/WASM `ContextProvider`/`Middleware`/`Observer` leaf evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; later SDK/provider paths remain
+- Implementation evidence: Verified through direct ready-handle SDK resolution, OpenAI-compatible provider and calculator/filesystem tool calls, `PH3-E-exit-provider-tools-f0a2080a7d6d`, exact hosted evidence `PR-026-E-hosted-56c3039835fb`, and passing decision `G3-D-native-preview-14a386c7db24`

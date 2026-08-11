@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through immutable PR-015 Model, locally integrated PR-016 Toolset, and locally integrated PR-018 `ContextProvider`/`Middleware`/`Observer` evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-021/PR-026 composition remains
+- Implementation evidence: Verified through PR-015 Model, PR-016 Toolset, PR-018 `ContextProvider`/`Middleware`/`Observer`, PR-021 resolved SDK handles, exact Linux/macOS/Windows evidence `PR-026-E-hosted-56c3039835fb`, and passing decision `G3-D-native-preview-14a386c7db24`
