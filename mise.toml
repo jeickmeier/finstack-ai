@@ -215,6 +215,26 @@ fi
 mise run architecture
 """
 
+[tasks.test-pr025]
+description = "Run PR-025 calculator, scoped filesystem, race, artifact, and benchmark proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-tools-calculator -p finstack-ai-tools-filesystem --locked
+cargo clippy -p finstack-ai-tools-calculator -p finstack-ai-tools-filesystem --all-targets --locked -- -D warnings
+cargo bench -p finstack-ai-tools-calculator --bench calculator --no-run --locked
+cargo check -p finstack-ai-kernel --locked
+cargo check -p finstack-ai-runtime --no-default-features --locked
+if cargo tree -p finstack-ai-kernel -e normal --locked | grep -Eq 'finstack-ai-tools-(calculator|filesystem)|rustix'; then
+  echo 'kernel normal dependency graph unexpectedly includes a tool battery or filesystem syscall adapter'
+  exit 1
+fi
+if cargo tree -p finstack-ai-runtime --no-default-features -e normal --locked | grep -Eq 'finstack-ai-tools-(calculator|filesystem)|rustix'; then
+  echo 'runtime normal dependency graph unexpectedly includes a tool battery or filesystem syscall adapter'
+  exit 1
+fi
+mise run architecture
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """

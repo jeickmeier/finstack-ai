@@ -10,6 +10,8 @@ members = [
     "bindings/finstack-ai-wasm",
     "extensions/stores/finstack-ai-store-memory",
     "extensions/providers/finstack-ai-provider-openai-compatible",
+    "extensions/toolsets/finstack-ai-tools-calculator",
+    "extensions/toolsets/finstack-ai-tools-filesystem",
     "fixtures/ci/release-smoke",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
@@ -65,6 +67,8 @@ getrandom = "0.3.4"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
 reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "native-tls", "stream"] }
+rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
+tempfile = "3.27.0"
 tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt", "sync", "time"] }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 
