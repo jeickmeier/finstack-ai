@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-10 and reconciled against documentation pack v0.20, PR-014 merge `399f3a7d9d987268f4d79ab90f31b93f854084f8`, local PR-015 merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82`, local PR-016 merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec`, local PR-017 merge `966f047fd28972d35c835ddf0441f8ba67348b25`, and local PR-018 merge `3fe0314c6434211e1c8f493f24401888f9609050`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-10 and reconciled against documentation pack v0.20, PR-014 merge `399f3a7d9d987268f4d79ab90f31b93f854084f8`, local PR-015 merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82`, local PR-016 merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec`, local PR-017 merge `966f047fd28972d35c835ddf0441f8ba67348b25`, local PR-018 merge `3fe0314c6434211e1c8f493f24401888f9609050`, and local PR-019 merge `bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 2 | Phase 0–1 `Done`; Phase 2 `In progress`; Phase 3–9 `Todo` |
-| Logical PRs | 66 | 18 | PR-001–PR-018 `Done`; PR-019–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 101 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003–PR-006 A01–A05 `Passed`; PR-007 A01–A04 `Passed`; PR-008 A01–A08 `Passed` after review remediation; PR-009 A01–A05 `Passed`; PR-010 A01–A04 `Passed`; PR-011 A01–A06 `Passed`; PR-012 A01–A05 `Passed`; PR-013 A01–A04 `Passed`; PR-014 A01–A07 `Passed`; PR-015 A01–A04, PR-016 A01–A05, and PR-017 A01–A04 `Passed` with immutable local integration evidence; PR-018 A01–A08 and PR-019 A01–A04 `Passed` at immutable local candidates |
+| Logical PRs | 66 | 19 | PR-001–PR-019 `Done`; PR-020–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 101 | PR-001 A01–A06 `Passed`; PR-002 A01–A07 closed (4 `Passed`, 3 `Not applicable`); PR-003–PR-006 A01–A05 `Passed`; PR-007 A01–A04 `Passed`; PR-008 A01–A08 `Passed` after review remediation; PR-009 A01–A05 `Passed`; PR-010 A01–A04 `Passed`; PR-011 A01–A06 `Passed`; PR-012 A01–A05 `Passed`; PR-013 A01–A04 `Passed`; PR-014 A01–A07 `Passed`; PR-015 A01–A04, PR-016 A01–A05, PR-017 A01–A04, PR-018 A01–A08, and PR-019 A01–A04 `Passed` with immutable local integration evidence |
 | Phase entrance and exit bullets | 62 | 14 | Phase 0 entrance 1/1 and exit 5/5 `Passed`; Phase 1 entrance 2/2 and exit 4/4 `Passed`; Phase 2 entrance 2/2 `Passed` |
 | Program gates | 9 | 2 | G0–G1 `Passed`; G2–G8 `Not ready` |
 | Implementation tasks | 97 | 97 | PR-019 implementation, acceptance, immutable validation, and security review tasks are complete |
@@ -21,6 +21,8 @@ PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done`
 PR-017 is `Done` at local `main` merge `966f047fd28972d35c835ddf0441f8ba67348b25` (A01–A04 Passed; no GitHub issue or actual PR).
 
 PR-018 is `Done` at local `main` merge `3fe0314c6434211e1c8f493f24401888f9609050` (A01–A08 Passed; no GitHub issue or actual PR).
+
+PR-019 is `Done` at local `main` merge `bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b` (A01–A04 Passed; no GitHub issue or actual PR).
 
 ## Active execution envelope
 
@@ -87,7 +89,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
 | [Phase 0](../planning/04-finstack-ai-implementation-plan.md#8-phase-0-foundation-and-architecture-governance) | PR-001–PR-005 | 1/1 | 5/5 | G0 | Done | me@jeickmeier.com | — | — | PH0-E-entrance-abbcbb8c4715; PH0-E-exit-2ada36eb4a4b; G0-D-foundation-ready-bcf021e4873a @ `c1108d207389a947d16e9b0dd7a76026108c01eb` | 2026-08-08 |
 | [Phase 1](../planning/04-finstack-ai-implementation-plan.md#9-phase-1-semantic-agent-microkernel) | PR-006–PR-013 | 2/2 | 4/4 | G1 | Done | me@jeickmeier.com | — | — | PH1-E-entrance-g0-3467dedeb0bd; PH1-E-entrance-adrs-1284c162dae7; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e @ `fa6222f20e4a4616f600e867be94afe12967dcb9` | 2026-08-09 |
-| [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 2/2 | 0/4 | G2 | In progress | me@jeickmeier.com | PR-019 | — | PH2-E-entrance-g1-2a7d9c4e6b13; PH2-E-entrance-kernel-6f3b8d1a5c72; PR-014-E-integration-e7ec699722ab; PR-016-E-integration-b2f678693fcd; PR-017-E-integration-966f047fd289; PR-018-E-integration-3fe0314c6434; PR-019-E-lifecycle-6a2d8f4c1b73; PR-019-E-security-4c8e1a7d3b65 | 2026-08-10 |
+| [Phase 2](../planning/04-finstack-ai-implementation-plan.md#10-phase-2-native-runtime-and-effect-execution) | PR-014–PR-020 | 2/2 | 0/4 | G2 | In progress | me@jeickmeier.com | — | — | PH2-E-entrance-g1-2a7d9c4e6b13; PH2-E-entrance-kernel-6f3b8d1a5c72; PR-014-E-integration-e7ec699722ab; PR-016-E-integration-b2f678693fcd; PR-017-E-integration-966f047fd289; PR-018-E-integration-3fe0314c6434; PR-019-E-integration-bf748d5aa1ee | 2026-08-10 |
 | [Phase 3](../planning/04-finstack-ai-implementation-plan.md#11-phase-3-rust-sdk-and-native-developer-preview) | PR-021–PR-026 | 0/2 | 0/4 | G3 | Todo | — | — | — | — | — |
 | [Phase 4](../planning/04-finstack-ai-implementation-plan.md#12-phase-4-first-class-python-bindings) | PR-027–PR-032 | 0/2 | 0/4 | G4 | Todo | — | — | — | — | — |
 | [Phase 5](../planning/04-finstack-ai-implementation-plan.md#13-phase-5-browser-and-javascript-webassembly-bindings) | PR-033–PR-038 | 0/2 | 0/4 | G4 | Todo | — | — | — | — | — |
@@ -146,7 +148,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-016 | Done | me@jeickmeier.com | local `main` merge @ `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` of `codex/pr-016-toolset-scheduler` (no issue or actual PR) | 5 | 5/5 | PR-016-E-tool-8f2c4d7a1b63; PR-016-E-compat-3e9a6c1d5b72; PR-016-E-security-7c1e5a9d3b84; PR-016-E-release-2a6f8d4c1e95; PR-016-E-ci-5d9b2e7a4c16; PR-016-E-integration-b2f678693fcd | — | `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` / 2026-08-10 | 2026-08-10 |
 | PR-017 | Done | me@jeickmeier.com | local `main` merge @ `966f047fd28972d35c835ddf0441f8ba67348b25` of `codex/pr-017-event-hub` (no issue or actual PR) | 5 | 4/4 | PR-017-E-events-a3f7c9e1d5b2; PR-017-E-compat-6d2a8f4c1e93; PR-017-E-security-9b5e1c7a3d64; PR-017-E-ci-4f8a2d6c9b15; PR-017-E-integration-966f047fd289 | — | `966f047fd28972d35c835ddf0441f8ba67348b25` / 2026-08-10 | 2026-08-10 |
 | PR-018 | Done | me@jeickmeier.com | local `main` merge @ `3fe0314c6434211e1c8f493f24401888f9609050` of `codex/pr-018-context-middleware` (no issue or actual PR) | 5 | 8/8 | PR-018-E-extensions-8c2a6f4d1b73; PR-018-E-compat-5e9b3d7a2c16; PR-018-E-security-7a1d4f8c3b62; PR-018-E-ci-2f6c9a5e1d84; PR-018-E-integration-3fe0314c6434 | — | `3fe0314c6434211e1c8f493f24401888f9609050` / 2026-08-10 | 2026-08-10 |
-| PR-019 | In review | me@jeickmeier.com | `codex/pr-019-cancellation-timers` @ candidate `941403749648d2ec3e6e85a8af1a0b73afd80866` (no issue or actual PR) | 5 | 4/4 | PR-019-E-lifecycle-6a2d8f4c1b73; PR-019-E-compat-9e3b7d1a5c82; PR-019-E-security-4c8e1a7d3b65; PR-019-E-ci-2f7a9c5e1d84 | — | — | 2026-08-10 |
+| PR-019 | Done | me@jeickmeier.com | local `main` merge @ `bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b` of `codex/pr-019-cancellation-timers` (no issue or actual PR) | 5 | 4/4 | PR-019-E-lifecycle-6a2d8f4c1b73; PR-019-E-compat-9e3b7d1a5c82; PR-019-E-security-4c8e1a7d3b65; PR-019-E-ci-2f7a9c5e1d84; PR-019-E-integration-bf748d5aa1ee | — | `bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b` / 2026-08-10 | 2026-08-10 |
 | PR-020 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 
 ### Phase 3

@@ -6,12 +6,17 @@ implementation candidate is commit `941403749648d2ec3e6e85a8af1a0b73afd80866`
 with tree `31f65eb7ca93cfccd126637ead5bb0d225913770` on
 `codex/pr-019-cancellation-timers`.
 
+The branch was integrated locally into `main` by merge
+`bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b`. Its tree
+`352bf9bf417f9eee628c59f765ee880e58c4d3c7` exactly equals the PR-019
+evidence-commit tree at `56e7f64f52e84b2e289863355a3b04740115111c`.
+
 The exact local command inventory is in
 [`candidate-validation.txt`](candidate-validation.txt), the required security and
 threat-model disposition is in [`security-review.txt`](security-review.txt), and
 [`hosted-validation.txt`](hosted-validation.txt) records the external-evidence
-boundary. Local integration identity and post-merge validation are recorded only
-after the evidence commit is merged into `main`.
+boundary. Post-merge identity and validation are in
+[`integration-validation.txt`](integration-validation.txt).
 
 ## Local acceptance map
 
@@ -25,4 +30,5 @@ after the evidence commit is merged into `main`.
 The implementation introduces no durable database, workflow-engine clock,
 provider, hosted pull request, push, publication, or external service. PR-020
 still owns the broad crash-prefix, race, stress, leak, and concurrency gate, so
-G2 is not decided by this evidence bundle.
+G2 is not decided by this evidence bundle. PR-019 is `Done` at its immutable
+local merge with A01–A04 passed.

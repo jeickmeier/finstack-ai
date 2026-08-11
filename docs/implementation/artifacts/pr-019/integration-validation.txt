@@ -1,0 +1,44 @@
+PR-019 local integration validation
+Date: 2026-08-10
+Target branch: main
+Merge revision: bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b
+Merge tree: 352bf9bf417f9eee628c59f765ee880e58c4d3c7
+First parent: 3d9f671d9e046a5df67a87ac71c3a0997ac13cd6
+Second parent: 56e7f64f52e84b2e289863355a3b04740115111c
+Implementation revision: 941403749648d2ec3e6e85a8af1a0b73afd80866
+Implementation tree: 31f65eb7ca93cfccd126637ead5bb0d225913770
+Evidence revision: 56e7f64f52e84b2e289863355a3b04740115111c
+Evidence tree: 352bf9bf417f9eee628c59f765ee880e58c4d3c7
+Disposition: PASS for local integration; no hosted run, actual pull request,
+branch push, publication, or independent review is claimed
+
+Identity verification
+
+- The local merge has the expected unchanged main baseline and PR-019 evidence
+  commit as its two parents.
+- The merge tree exactly equals the evidence-commit tree, proving the merge added
+  no conflict resolution or implementation drift.
+- The evidence-only commit changes implementation records and retained artifacts;
+  executable code remains bound to implementation commit
+  941403749648d2ec3e6e85a8af1a0b73afd80866.
+
+Post-merge validation on main
+
+1. mise run test-lifecycle
+   PASS: cancellation hierarchy and durable reconciliation, monotonic/overdue/
+   backward-clock deadline behavior, pre-provider expiry, restart-safe retry
+   firing and attempt continuity, and graceful/forced model/tool cleanup.
+
+2. mise run ci
+   PASS: format, workspace Clippy/tests/doctests/rustdoc, minimal and wasm32
+   graphs, 22 architecture tests and repository scan, schema/conformance,
+   benchmark compilation, workflow lint, supply-chain and secret checks, release
+   smoke, and Python source/wheel builds. Non-failing supply-chain output remains
+   the existing syn 2/3 duplicate and unused MIT-0/Zlib/NCSA allowances.
+
+Closeout
+
+PR-019 A01–A04 remain passed and the logical PR is Done at this local merge.
+PR-020 may begin under the active sequential integrated execution envelope. G2
+remains Not ready until PR-020, all Phase 2 exit evidence, and a separate passing
+gate decision exist.
