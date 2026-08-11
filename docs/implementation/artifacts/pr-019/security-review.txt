@@ -1,0 +1,74 @@
+PR-019 security and threat-model review
+Date: 2026-08-10
+Branch: codex/pr-019-cancellation-timers
+Base revision: 3d9f671d9e046a5df67a87ac71c3a0997ac13cd6
+Reviewed implementation revision: 941403749648d2ec3e6e85a8af1a0b73afd80866
+Reviewed implementation tree: 31f65eb7ca93cfccd126637ead5bb0d225913770
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-019 scope at the immutable implementation tree; hosted and
+independent review remain outstanding
+
+Scope reviewed
+
+- CancellationSignal hierarchy, post-commit cancellation dispatch, model/tool
+  reconciliation, source-ordered kernel closures, shutdown propagation, bounded
+  grace, task abort, and safe shutdown diagnostics.
+- Persisted wall-deadline conversion, process-local monotonic waits, forward and
+  backward wall anomalies, pre-provider and post-result deadline fences, durable
+  timer dispatch/recovery, retry-attempt continuity, and timer diagnostics.
+- Native feature gating, minimal and browser-WASM graphs, aggregate CI, dependency
+  review, release smoke, and secret scanning.
+- SEC-INV-002, SEC-INV-004, SEC-INV-007, SEC-INV-008, SEC-INV-009,
+  SEC-INV-010, SEC-INV-011, SEC-INV-012 and Threat Model TM-14, TM-16, TM-18.
+
+Control disposition
+
+PASS - SEC-INV-002 / TM-14 durable intent controls cancellation and timer work
+The kernel's committed post-commit actions remain the only path to model, tool,
+or timer dispatch. Cancellation intent is committed before the runtime signals an
+effect-local descendant token. RetryScheduled and its timer EffectRequested record
+are committed before the timer dispatcher installs a wait. Recovery reconstructs
+the pending timer seed from committed records; process memory never invents timer
+intent or an attempt number.
+
+PASS - SEC-INV-004/008/009 / TM-14 late races fail closed
+Cancellation reconciliation uses the exact committed request ID and outstanding
+EffectId. A post-cancellation driver terminal is classified only as completed or
+cancelled evidence and cannot resume ordinary progress. The kernel remains the
+source of source-ordered synthetic tool closures and terminal precedence. Model and
+tool deadlines are checked before child-task creation and again before settlement;
+an overdue model fixture proves zero provider calls. Timer firing carries the exact
+scheduled effect ID and due time, and kernel duplicate/conflict rules remain intact.
+
+PASS - SEC-INV-007 / TM-16 time, retries, queues, and shutdown are bounded
+All new job and result paths reuse configured bounded channels. A persisted timer's
+original maximum is derived from its committed scheduling interval; backward wall
+movement is clamped to that maximum. Retry jitter is supplied outside the pure
+kernel and rejected when it exceeds its declared maximum or overflows. Cancellation
+grace uses the existing non-zero shutdown deadline. Forced abort counts and timer
+anomaly counters are numeric diagnostics without payload content.
+
+PASS - SEC-INV-010/011 explicit clock and recovery failures are observable
+Invalid persisted intervals, clock-source failures, monotonic overflow, unknown
+allocation kinds, timer queue closure, and timer registry faults produce stable
+runtime errors rather than guessed state. Already-due and backward-clamped timer
+conversions increment safe process-local diagnostics. A restart fixture proves one
+firing, one persisted attempt, cleared pending state, and no duplicate wakeup.
+
+PASS - SEC-INV-012 / TM-18 target and dependency boundaries remain narrow
+The timer and Tokio task modules compile only with `native-tokio`. Minimal/default
+checks and wasm32 production graphs remain green and Tokio-free where required.
+No provider, network client, durable database, workflow engine, plugin engine,
+dynamic loading, new dependency, credential surface, or external publication is
+introduced. Workspace Clippy, architecture, supply-chain, secret, release-smoke,
+and packaging checks pass.
+
+Residual obligations and review decision
+
+- PR-020 owns the broader crash-prefix matrix, manual-drive scheduler, race/stress
+  tests, leak checks, concurrency benchmarks, and complete G2 evidence.
+- Durable database/workflow-engine clocks and cross-process recovery remain later
+  planned work; this PR proves the memory-store fixture and native adapter only.
+- No planning conflict, security exception, serialized compatibility change, new
+  trust class, or ADR trigger was found. This review passes PR-019 scope only and
+  does not mark the logical PR integrated or pass G2.

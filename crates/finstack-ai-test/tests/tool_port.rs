@@ -1365,7 +1365,8 @@ async fn cancellation_cleans_running_and_queued_calls_without_starting_the_queue
         completed_tool(1),
         completed_tool(2),
     ];
-    let (mut owner, _, toolset, handle) = setup(3, plans, 1, 3, ToolExecutionMode::Parallel).await;
+    let (mut owner, store, toolset, handle) =
+        setup(3, plans, 1, 3, ToolExecutionMode::Parallel).await;
     while toolset.control().entries("cancel-running") == 0 {
         tokio::task::yield_now().await;
     }
@@ -1382,9 +1383,7 @@ async fn cancellation_cleans_running_and_queued_calls_without_starting_the_queue
     while toolset.active_call_count() != 0 {
         tokio::task::yield_now().await;
     }
-    for _ in 0..32 {
-        tokio::task::yield_now().await;
-    }
+    wait_for_phase(&store, RunPhase::Cancelled).await;
     assert_eq!(toolset.call_count(), 1);
     assert_eq!(toolset.active_call_count(), 0);
     owner.shutdown().await;

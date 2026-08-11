@@ -105,7 +105,7 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.test-runtime]
-description = "Run PR-014/PR-015 runtime, task-owner, ingress, model, and memory-store tests"
+description = "Run runtime, task-owner, ingress, model, lifecycle, timer, and memory-store tests through PR-019"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio --locked
@@ -131,6 +131,22 @@ cargo test -p finstack-ai-runtime --features native-tokio middleware::tests --lo
 cargo test -p finstack-ai-runtime --features native-tokio observer::tests --locked
 cargo check -p finstack-ai-extension-port-leaf-fixture --no-default-features --locked
 cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --no-default-features --locked
+"""
+
+[tasks.test-lifecycle]
+description = "Run PR-019 cancellation-tree, deadline, retry-timer, restart, and shutdown proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio model::tests::cancellation_hierarchy --locked
+cargo test -p finstack-ai-runtime --features native-tokio time::tests --locked
+cargo test -p finstack-ai-runtime --features native-tokio timer_runtime::tests --locked
+cargo test -p finstack-ai-runtime --features native-tokio task::tests --locked
+cargo test -p finstack-ai-test --test model_port an_expired_committed_deadline_prevents_provider_execution --locked
+cargo test -p finstack-ai-test --test model_port runtime_routes_cancel_effect_to_only_the_active_model_task --locked
+cargo test -p finstack-ai-test --test model_port persisted_retry_timer_resumes_once_after_runtime_restart --locked
+cargo test -p finstack-ai-test --test model_port shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline --locked
+cargo test -p finstack-ai-test --test tool_port cancellation_cleans_running_and_queued_calls_without_starting_the_queue --locked
+cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_children_without_leaks --locked
 """
 
 [tasks.test-model]

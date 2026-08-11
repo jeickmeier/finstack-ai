@@ -6,12 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchId, AppendBatchTag, ContentBlock, EffectCompleted, EffectDeferred,
-    EffectFailed, EffectId, EffectTag, ErrorCategory, EventId, EventTag, Id, IdTag, KernelInput,
-    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelSettled, ModelSettlement,
-    ProviderIds, RawJson, RecordId, RecordTag, ReducerStageOutcome, RunPhase, Stage, StageCursor,
-    StageSettled, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolCallBlock, ToolCallId,
-    ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement, TransitionEnv,
+    AllocatedIds, AppendBatchId, AppendBatchTag, CancellationReconciledInput,
+    CancellationRequestTag, ContentBlock, EffectCompleted, EffectDeferred, EffectFailed, EffectId,
+    EffectTag, ErrorCategory, EventId, EventTag, Id, IdTag, InteractionTag, KernelError,
+    KernelInput, Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelRequestTag,
+    ModelSettled, ModelSettlement, ProviderIds, RawJson, RecordId, RecordTag, ReducerStageOutcome,
+    RunPhase, Stage, StageCursor, StageSettled, ToolBatchContinuation, ToolBatchSettled,
+    ToolBatchTag, ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy,
+    ToolSettlement, TransitionEnv, TurnTag,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -22,17 +24,21 @@ use crate::event_hub::{EventHubHandle, event_hub};
 use crate::model_runtime::{
     ModelDispatcher, ModelDriverMessage, ModelDriverResult, run_model_jobs,
 };
+use crate::timer_runtime::{
+    TimerDispatcher, TimerDriverMessage, TimerDriverResult, run_timer_jobs,
+};
 use crate::tool_runtime::{
-    RuntimeDispatcher, ToolDispatcher, ToolDriverMessage, ToolDriverResult, ToolTaskConfig,
-    run_tool_jobs,
+    RuntimeDispatcher, ToolDispatcher, ToolDriverMessage, ToolDriverResult, ToolExecutionContext,
+    ToolTaskConfig, run_tool_jobs,
 };
 use crate::{
     CancellationSignal, Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome,
-    EventHubConfig, EventSubscription, EventSubscriptionConfig, EventSubscriptionError,
-    IdGenerationError, LockedModelContextProfile, Model, ModelContextProfileOverride, ModelError,
-    ModelProgress, ModelStreamAssembler, ModelStreamLimits, ModelTerminal, ModelWarmupContext,
-    RandomSource, ResolvedToolCatalog, ToolError, ToolProgress, ToolStreamAssembler,
-    UuidV7Generator, normalize_tool_result, resolve_model_context_profile,
+    DeadlineDiagnostic, EventHubConfig, EventSubscription, EventSubscriptionConfig,
+    EventSubscriptionError, IdGenerationError, LockedModelContextProfile, Model,
+    ModelContextProfileOverride, ModelError, ModelProgress, ModelStreamAssembler,
+    ModelStreamLimits, ModelTerminal, ModelWarmupContext, RandomSource, ResolvedToolCatalog,
+    ToolError, ToolProgress, ToolStreamAssembler, UuidV7Generator, normalize_tool_result,
+    resolve_model_context_profile,
 };
 
 /// Observable lifecycle of one owned runtime task.
@@ -49,6 +55,37 @@ pub enum RunStatus {
         /// Stable fault code.
         code: &'static str,
     },
+}
+
+/// How owned runtime tasks stopped during explicit shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownOutcome {
+    /// Every owned task joined within the configured grace period.
+    Graceful,
+    /// Remaining owned tasks were aborted after the grace period elapsed.
+    Forced,
+    /// Dropping the sole task owner forced immediate local termination.
+    OwnerDropped,
+}
+
+/// Safe operational diagnostics for one completed shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShutdownReport {
+    /// Graceful or forced termination classification.
+    pub outcome: ShutdownOutcome,
+    /// Active effect/timer signals present when shutdown began.
+    pub signalled_effects: usize,
+    /// Owned tasks still present when forced termination began.
+    pub aborted_tasks: usize,
+}
+
+/// Process-local diagnostics from durable wall-to-monotonic timer conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimerDiagnostics {
+    /// Timers already due when installed or restored.
+    pub already_due: u64,
+    /// Restored timers clamped after a backward wall-clock anomaly.
+    pub backward_clock_clamped: u64,
 }
 
 /// Configuration for a bounded native run task.
@@ -182,6 +219,28 @@ impl RunHandle {
         self.status.clone()
     }
 
+    /// Read the shutdown report after the owner has settled.
+    #[must_use]
+    pub fn shutdown_report(&self) -> Option<ShutdownReport> {
+        self.shared
+            .shutdown_report
+            .lock()
+            .ok()
+            .and_then(|report| *report)
+    }
+
+    /// Read cumulative safe timer diagnostics for this process-local run owner.
+    #[must_use]
+    pub fn timer_diagnostics(&self) -> TimerDiagnostics {
+        TimerDiagnostics {
+            already_due: self.shared.timer_already_due.load(Ordering::Acquire),
+            backward_clock_clamped: self
+                .shared
+                .timer_backward_clock_clamped
+                .load(Ordering::Acquire),
+        }
+    }
+
     fn closed_error(&self) -> RunHandleError {
         match self.status() {
             RunStatus::Running => RunHandleError::IntakeClosed,
@@ -197,6 +256,7 @@ pub struct RunTaskOwner {
     handle: RunHandle,
     tasks: JoinSet<()>,
     active_effects: Vec<Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>>,
+    run_cancellation: CancellationSignal,
     shutdown_deadline: Duration,
     joined: bool,
 }
@@ -222,6 +282,9 @@ impl RunTaskOwner {
             shutting_down: AtomicBool::new(false),
             status: status_sender,
             events: event_handle,
+            shutdown_report: Mutex::new(None),
+            timer_already_due: AtomicU64::new(0),
+            timer_backward_clock_clamped: AtomicU64::new(0),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -234,6 +297,7 @@ impl RunTaskOwner {
             handle,
             tasks,
             active_effects: Vec::new(),
+            run_cancellation: CancellationSignal::new(),
             shutdown_deadline: config.shutdown_deadline,
             joined: false,
         })
@@ -268,9 +332,13 @@ impl RunTaskOwner {
         let assembler = model_config.validate()?;
         validate_model_binding(model.as_ref(), &profile)?;
         let sources = SettlementSources::try_new(clock, random)?;
+        let runtime_clock = sources.clock();
+        let run_cancellation = CancellationSignal::new();
+        let model_cancellation = run_cancellation.child();
+        let timer_cancellation = run_cancellation.child();
         model
             .warmup(ModelWarmupContext {
-                cancellation: crate::CancellationSignal::new(),
+                cancellation: model_cancellation.child(),
                 deadline: model_config.warmup_deadline,
                 metadata: model_config.warmup_metadata.clone(),
             })
@@ -280,13 +348,32 @@ impl RunTaskOwner {
         let (sender, receiver) = mpsc::channel(run_config.command_capacity);
         let (job_sender, job_receiver) = mpsc::channel(model_config.job_capacity);
         let (result_sender, result_receiver) = mpsc::channel(model_config.result_capacity);
-        let dispatcher = Arc::new(ModelDispatcher::new(
+        let (timer_job_sender, timer_job_receiver) = mpsc::channel(run_config.command_capacity);
+        let (timer_result_sender, timer_result_receiver) =
+            mpsc::channel(run_config.command_capacity);
+        let model_dispatcher = Arc::new(ModelDispatcher::new(
             Arc::clone(&model),
             profile,
             job_sender,
+            model_cancellation,
         ));
-        let active = dispatcher.active();
-        coordinator.install_dispatcher(dispatcher);
+        let model_active = model_dispatcher.active();
+        let timer_dispatcher = Arc::new(TimerDispatcher::new(
+            Arc::clone(&runtime_clock),
+            timer_job_sender,
+            timer_cancellation,
+        ));
+        let timer_active = timer_dispatcher.active();
+        if let Some(seed) = coordinator.pending_timer_seed() {
+            timer_dispatcher
+                .resume(seed)
+                .await
+                .map_err(|error| RunHandleError::Timer { code: error.code })?;
+        }
+        coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::model_only(
+            model_dispatcher,
+            timer_dispatcher,
+        )));
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {
@@ -294,6 +381,9 @@ impl RunTaskOwner {
             shutting_down: AtomicBool::new(false),
             status: status_sender,
             events: event_handle,
+            shutdown_report: Mutex::new(None),
+            timer_already_due: AtomicU64::new(0),
+            timer_backward_clock_clamped: AtomicU64::new(0),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -304,21 +394,31 @@ impl RunTaskOwner {
             coordinator,
             receiver,
             result_receiver,
+            timer_result_receiver,
             Arc::clone(&shared),
             sources,
         ));
         tasks.spawn(run_model_jobs(
             model,
             assembler,
-            Arc::clone(&active),
+            Arc::clone(&model_active),
             job_receiver,
             result_sender,
+            Arc::clone(&runtime_clock),
+            run_config.shutdown_deadline,
+        ));
+        tasks.spawn(run_timer_jobs(
+            runtime_clock,
+            Arc::clone(&timer_active),
+            timer_job_receiver,
+            timer_result_sender,
         ));
         tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
-            active_effects: vec![active],
+            active_effects: vec![model_active, timer_active],
+            run_cancellation,
             shutdown_deadline: run_config.shutdown_deadline,
             joined: false,
         })
@@ -336,6 +436,7 @@ impl RunTaskOwner {
     /// a run handle.
     #[expect(
         clippy::too_many_arguments,
+        clippy::too_many_lines,
         reason = "the public constructor receives the two explicit port configurations and injected identity sources"
     )]
     pub async fn spawn_with_model_and_tools<C, R>(
@@ -363,9 +464,14 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::InvalidConfiguration)?;
         validate_model_binding(model.as_ref(), &profile)?;
         let sources = SettlementSources::try_new(clock, random)?;
+        let runtime_clock = sources.clock();
+        let run_cancellation = CancellationSignal::new();
+        let model_cancellation = run_cancellation.child();
+        let tool_batch_cancellation = run_cancellation.child();
+        let timer_cancellation = run_cancellation.child();
         model
             .warmup(ModelWarmupContext {
-                cancellation: crate::CancellationSignal::new(),
+                cancellation: model_cancellation.child(),
                 deadline: model_config.warmup_deadline,
                 metadata: model_config.warmup_metadata.clone(),
             })
@@ -378,19 +484,40 @@ impl RunTaskOwner {
             mpsc::channel(model_config.result_capacity);
         let (tool_job_sender, tool_job_receiver) = mpsc::channel(tool_config.job_capacity);
         let (tool_result_sender, tool_result_receiver) = mpsc::channel(tool_config.result_capacity);
+        let (timer_job_sender, timer_job_receiver) = mpsc::channel(run_config.command_capacity);
+        let (timer_result_sender, timer_result_receiver) =
+            mpsc::channel(run_config.command_capacity);
 
         let model_dispatcher = Arc::new(ModelDispatcher::new(
             Arc::clone(&model),
             profile,
             model_job_sender,
+            model_cancellation,
         ));
         let model_active = model_dispatcher.active();
-        let tool_dispatcher = Arc::new(ToolDispatcher::new(Arc::clone(&catalog), tool_job_sender));
+        let tool_dispatcher = Arc::new(ToolDispatcher::new(
+            Arc::clone(&catalog),
+            tool_job_sender,
+            tool_batch_cancellation,
+        ));
         let tool_active = tool_dispatcher.active();
         let tool_semaphores = tool_dispatcher.semaphores();
-        coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::new(
+        let timer_dispatcher = Arc::new(TimerDispatcher::new(
+            Arc::clone(&runtime_clock),
+            timer_job_sender,
+            timer_cancellation,
+        ));
+        let timer_active = timer_dispatcher.active();
+        if let Some(seed) = coordinator.pending_timer_seed() {
+            timer_dispatcher
+                .resume(seed)
+                .await
+                .map_err(|error| RunHandleError::Timer { code: error.code })?;
+        }
+        coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::with_tools(
             Arc::clone(&model_dispatcher),
             tool_dispatcher,
+            timer_dispatcher,
         )));
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
@@ -399,6 +526,9 @@ impl RunTaskOwner {
             shutting_down: AtomicBool::new(false),
             status: status_sender,
             events: event_handle,
+            shutdown_report: Mutex::new(None),
+            timer_already_due: AtomicU64::new(0),
+            timer_backward_clock_clamped: AtomicU64::new(0),
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -410,6 +540,7 @@ impl RunTaskOwner {
             receiver,
             model_result_receiver,
             tool_result_receiver,
+            timer_result_receiver,
             Arc::clone(&shared),
             sources,
             catalog,
@@ -420,20 +551,33 @@ impl RunTaskOwner {
             Arc::clone(&model_active),
             model_job_receiver,
             model_result_sender,
+            Arc::clone(&runtime_clock),
+            run_config.shutdown_deadline,
         ));
         tasks.spawn(run_tool_jobs(
-            ToolStreamAssembler::new(tool_config.stream_limits),
             tool_config,
-            Arc::clone(&tool_active),
             tool_semaphores,
             tool_job_receiver,
-            tool_result_sender,
+            ToolExecutionContext::new(
+                ToolStreamAssembler::new(tool_config.stream_limits),
+                Arc::clone(&tool_active),
+                tool_result_sender,
+                Arc::clone(&runtime_clock),
+                run_config.shutdown_deadline,
+            ),
+        ));
+        tasks.spawn(run_timer_jobs(
+            runtime_clock,
+            Arc::clone(&timer_active),
+            timer_job_receiver,
+            timer_result_sender,
         ));
         tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
-            active_effects: vec![model_active, tool_active],
+            active_effects: vec![model_active, tool_active, timer_active],
+            run_cancellation,
             shutdown_deadline: run_config.shutdown_deadline,
             joined: false,
         })
@@ -446,35 +590,52 @@ impl RunTaskOwner {
     }
 
     /// Close intake, join normally, and abort on deadline expiry.
-    pub async fn shutdown(&mut self) {
+    pub async fn shutdown(&mut self) -> ShutdownReport {
         if self.joined {
-            return;
+            return self.handle.shutdown_report().unwrap_or(ShutdownReport {
+                outcome: ShutdownOutcome::Graceful,
+                signalled_effects: 0,
+                aborted_tasks: 0,
+            });
         }
         self.handle.shutdown();
-        self.cancel_active_effects();
+        let signalled_effects = self.active_effect_count();
+        self.run_cancellation.cancel();
         let joined = timeout(self.shutdown_deadline, async {
             while self.tasks.join_next().await.is_some() {}
         })
         .await
         .is_ok();
+        let mut aborted_tasks = 0;
         if !joined {
+            aborted_tasks = self.tasks.len();
             self.tasks.abort_all();
             while self.tasks.join_next().await.is_some() {}
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
                 self.handle.shared.status.send_replace(RunStatus::Stopped);
             }
         }
+        let report = ShutdownReport {
+            outcome: if joined {
+                ShutdownOutcome::Graceful
+            } else {
+                ShutdownOutcome::Forced
+            },
+            signalled_effects,
+            aborted_tasks,
+        };
+        if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
+            *value = Some(report);
+        }
         self.joined = true;
+        report
     }
 
-    fn cancel_active_effects(&self) {
-        for active in &self.active_effects {
-            if let Ok(values) = active.lock() {
-                for cancellation in values.values() {
-                    cancellation.cancel();
-                }
-            }
-        }
+    fn active_effect_count(&self) -> usize {
+        self.active_effects
+            .iter()
+            .filter_map(|active| active.lock().ok().map(|values| values.len()))
+            .sum()
     }
 }
 
@@ -482,10 +643,19 @@ impl Drop for RunTaskOwner {
     fn drop(&mut self) {
         if !self.joined {
             self.handle.shutdown();
-            self.cancel_active_effects();
+            let signalled_effects = self.active_effect_count();
+            self.run_cancellation.cancel();
+            let aborted_tasks = self.tasks.len();
             self.tasks.abort_all();
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
                 self.handle.shared.status.send_replace(RunStatus::Stopped);
+            }
+            if let Ok(mut value) = self.handle.shared.shutdown_report.lock() {
+                *value = Some(ShutdownReport {
+                    outcome: ShutdownOutcome::OwnerDropped,
+                    signalled_effects,
+                    aborted_tasks,
+                });
             }
         }
     }
@@ -539,6 +709,18 @@ pub enum RunHandleError {
         /// Stable runtime code.
         code: &'static str,
     },
+    /// Durable timer adapter failed before a firing could be committed.
+    #[error("timer adapter failed: {code}")]
+    Timer {
+        /// Stable runtime code.
+        code: &'static str,
+    },
+    /// Cancellation reconciliation could not be normalized or committed.
+    #[error("cancellation reconciliation failed: {code}")]
+    CancellationSettlement {
+        /// Stable runtime code.
+        code: &'static str,
+    },
     /// Runtime event publication failed after apply and before dispatch.
     #[error("event delivery failed: {code}")]
     EventDelivery {
@@ -552,6 +734,9 @@ struct Shared {
     shutting_down: AtomicBool,
     status: watch::Sender<RunStatus>,
     events: EventHubHandle,
+    shutdown_report: Mutex<Option<ShutdownReport>>,
+    timer_already_due: AtomicU64,
+    timer_backward_clock_clamped: AtomicU64,
 }
 
 struct RunCommand {
@@ -600,7 +785,7 @@ async fn run_worker(
 }
 
 struct SettlementSources<C, R> {
-    clock: C,
+    clock: Arc<C>,
     random: R,
     progress_random: ProgressRandom,
 }
@@ -609,7 +794,7 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
     fn try_new(clock: C, random: R) -> Result<Self, RunHandleError> {
         let progress_random = ProgressRandom::try_new(&random)?;
         Ok(Self {
-            clock,
+            clock: Arc::new(clock),
             random,
             progress_random,
         })
@@ -619,14 +804,18 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
         self.clock.now().map_err(id_source_error)
     }
 
+    fn clock(&self) -> Arc<C> {
+        Arc::clone(&self.clock)
+    }
+
     fn generate<T: IdTag>(&self) -> Result<Id<T>, RunHandleError> {
-        UuidV7Generator::new(&self.clock, &self.random)
+        UuidV7Generator::new(self.clock.as_ref(), &self.random)
             .generate()
             .map_err(id_source_error)
     }
 
     fn generate_progress_event(&self) -> Result<EventId, RunHandleError> {
-        UuidV7Generator::new(&self.clock, &self.progress_random)
+        UuidV7Generator::new(self.clock.as_ref(), &self.progress_random)
             .generate()
             .map_err(id_source_error)
     }
@@ -676,6 +865,7 @@ async fn run_worker_with_model<C, R>(
     mut coordinator: CommitCoordinator,
     mut receiver: mpsc::Receiver<RunCommand>,
     mut results: mpsc::Receiver<ModelDriverMessage>,
+    mut timers: mpsc::Receiver<TimerDriverMessage>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
 ) where
@@ -683,12 +873,16 @@ async fn run_worker_with_model<C, R>(
     R: RandomSource + Send + Sync + 'static,
 {
     let mut result_path_open = true;
+    let mut timer_path_open = true;
     loop {
         tokio::select! {
             biased;
             result = results.recv(), if result_path_open => {
                 match result {
                     Some(ModelDriverMessage::Progress { effect_id, provider, progress }) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(error) = process_model_progress(
                             &mut coordinator,
                             effect_id,
@@ -701,12 +895,34 @@ async fn run_worker_with_model<C, R>(
                         }
                     }
                     Some(ModelDriverMessage::Terminal(result)) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(error) = process_model_result(&mut coordinator, *result, &sources).await {
                             fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
                             break;
                         }
                     }
                     None => result_path_open = false,
+                }
+            }
+            timer = timers.recv(), if timer_path_open => {
+                match timer {
+                    Some(TimerDriverMessage::Fired(result)) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        record_timer_diagnostic(&shared, result.diagnostic);
+                        if let Err(error) = process_timer_result(&mut coordinator, result, &sources).await {
+                            fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    Some(TimerDriverMessage::Failed) => {
+                        fault_worker(&shared, &mut receiver, "timer_clock_failed");
+                        break;
+                    }
+                    None => timer_path_open = false,
                 }
             }
             command = receiver.recv() => {
@@ -734,11 +950,17 @@ async fn run_worker_with_model<C, R>(
     shared.events.close().await;
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the single owner select keeps command, model, tool, and timer ordering visibly contiguous"
+)]
 async fn run_worker_with_model_and_tools<C, R>(
     mut coordinator: CommitCoordinator,
     mut receiver: mpsc::Receiver<RunCommand>,
     mut model_results: mpsc::Receiver<ModelDriverMessage>,
     mut tool_results: mpsc::Receiver<ToolDriverMessage>,
+    mut timer_results: mpsc::Receiver<TimerDriverMessage>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
@@ -748,12 +970,16 @@ async fn run_worker_with_model_and_tools<C, R>(
 {
     let mut model_path_open = true;
     let mut tool_path_open = true;
+    let mut timer_path_open = true;
     loop {
         tokio::select! {
             biased;
             result = model_results.recv(), if model_path_open => {
                 match result {
                     Some(ModelDriverMessage::Progress { effect_id, provider, progress }) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(error) = process_model_progress(
                             &mut coordinator,
                             effect_id,
@@ -766,6 +992,9 @@ async fn run_worker_with_model_and_tools<C, R>(
                         }
                     }
                     Some(ModelDriverMessage::Terminal(result)) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         let processed = process_model_result(&mut coordinator, *result, &sources).await;
                         let processed = match processed {
                             Ok(()) => prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await,
@@ -782,6 +1011,9 @@ async fn run_worker_with_model_and_tools<C, R>(
             result = tool_results.recv(), if tool_path_open => {
                 match result {
                     Some(ToolDriverMessage::Progress { effect_id, progress }) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(error) = process_tool_progress(
                             &mut coordinator,
                             effect_id,
@@ -793,12 +1025,34 @@ async fn run_worker_with_model_and_tools<C, R>(
                         }
                     }
                     Some(ToolDriverMessage::Terminal(result)) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
                         if let Err(error) = process_tool_result(&mut coordinator, *result, &sources).await {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
                         }
                     }
                     None => tool_path_open = false,
+                }
+            }
+            result = timer_results.recv(), if timer_path_open => {
+                match result {
+                    Some(TimerDriverMessage::Fired(result)) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        record_timer_diagnostic(&shared, result.diagnostic);
+                        if let Err(error) = process_timer_result(&mut coordinator, result, &sources).await {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    Some(TimerDriverMessage::Failed) => {
+                        fault_worker(&shared, &mut receiver, "timer_clock_failed");
+                        break;
+                    }
+                    None => timer_path_open = false,
                 }
             }
             command = receiver.recv() => {
@@ -906,6 +1160,198 @@ async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     Ok(())
 }
 
+async fn process_timer_result<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    result: TimerDriverResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let TimerDriverResult {
+        input,
+        diagnostic: _,
+    } = result;
+    let now = input.fired_at;
+    let ids = AllocatedIds::try_new(
+        vec![sources.generate::<RecordTag>()?],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![sources.generate::<AppendBatchTag>()?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::Timer {
+        code: "timer_firing_ids_invalid",
+    })?;
+    let input = KernelInput::TimerFired(input);
+    coordinator
+        .classify(
+            &TransitionEnv {
+                now,
+                ids: ids.clone(),
+            },
+            input.clone(),
+        )
+        .map_err(|_| RunHandleError::Timer {
+            code: "timer_firing_allocation_mismatch",
+        })?;
+    let outcome = coordinator
+        .submit(TransitionEnv { now, ids }, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+fn record_timer_diagnostic(shared: &Shared, diagnostic: DeadlineDiagnostic) {
+    match diagnostic {
+        DeadlineDiagnostic::None => {}
+        DeadlineDiagnostic::AlreadyDue => {
+            shared.timer_already_due.fetch_add(1, Ordering::AcqRel);
+        }
+        DeadlineDiagnostic::BackwardClockClamped => {
+            shared
+                .timer_backward_clock_clamped
+                .fetch_add(1, Ordering::AcqRel);
+        }
+    }
+}
+
+async fn reconcile_cancelled_effect<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    effect_id: EffectId,
+    cancelled: bool,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let request_id = coordinator
+        .state()
+        .cancellation
+        .as_ref()
+        .ok_or(RunHandleError::CancellationSettlement {
+            code: "cancellation_request_missing",
+        })?
+        .request
+        .request_id;
+    let (completed_effects, cancelled_effects) = if cancelled {
+        (Arc::from([]), Arc::from([effect_id]))
+    } else {
+        (Arc::from([effect_id]), Arc::from([]))
+    };
+    let input = KernelInput::CancellationReconciled(CancellationReconciledInput {
+        request_id,
+        completed_effects,
+        cancelled_effects,
+        uncertain_effects: Arc::from([]),
+    });
+    let now = sources.now()?;
+    let ids = allocate_for_runtime_input(coordinator, now, &input, sources)?;
+    let outcome = coordinator
+        .submit(TransitionEnv { now, ids }, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct RuntimeIdAllocation {
+    records: Vec<RecordId>,
+    events: Vec<EventId>,
+    effects: Vec<Id<EffectTag>>,
+    interactions: Vec<Id<InteractionTag>>,
+    messages: Vec<MessageId>,
+    turns: Vec<Id<TurnTag>>,
+    model_requests: Vec<Id<ModelRequestTag>>,
+    tool_batches: Vec<Id<ToolBatchTag>>,
+    tool_calls: Vec<Id<ToolCallTag>>,
+    cancellations: Vec<Id<CancellationRequestTag>>,
+}
+
+impl RuntimeIdAllocation {
+    fn freeze(&self, append_batch_id: AppendBatchId) -> Result<AllocatedIds, RunHandleError> {
+        AllocatedIds::try_new(
+            self.records.clone(),
+            self.events.clone(),
+            self.effects.clone(),
+            self.interactions.clone(),
+            self.messages.clone(),
+            self.turns.clone(),
+            self.model_requests.clone(),
+            self.tool_batches.clone(),
+            self.tool_calls.clone(),
+            vec![append_batch_id],
+            self.cancellations.clone(),
+        )
+        .map_err(|_| RunHandleError::CancellationSettlement {
+            code: "runtime_input_ids_invalid",
+        })
+    }
+}
+
+fn allocate_for_runtime_input<C: Clock, R: RandomSource>(
+    coordinator: &CommitCoordinator,
+    now: finstack_ai_kernel::Timestamp,
+    input: &KernelInput,
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    let append_batch_id = sources.generate::<AppendBatchTag>()?;
+    let mut allocation = RuntimeIdAllocation::default();
+    for _ in 0..finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS {
+        let ids = allocation.freeze(append_batch_id)?;
+        match coordinator.classify(
+            &TransitionEnv {
+                now,
+                ids: ids.clone(),
+            },
+            input.clone(),
+        ) {
+            Ok(_) => return Ok(ids),
+            Err(KernelError::AllocatedIdsExhausted { kind }) => match kind {
+                "record_ids" => allocation.records.push(sources.generate::<RecordTag>()?),
+                "event_ids" => allocation.events.push(sources.generate::<EventTag>()?),
+                "effect_ids" => allocation.effects.push(sources.generate::<EffectTag>()?),
+                "interaction_ids" => allocation
+                    .interactions
+                    .push(sources.generate::<InteractionTag>()?),
+                "message_ids" => allocation.messages.push(sources.generate::<MessageTag>()?),
+                "turn_ids" => allocation.turns.push(sources.generate::<TurnTag>()?),
+                "model_request_ids" => allocation
+                    .model_requests
+                    .push(sources.generate::<ModelRequestTag>()?),
+                "tool_batch_ids" => allocation
+                    .tool_batches
+                    .push(sources.generate::<ToolBatchTag>()?),
+                "tool_call_ids" => allocation
+                    .tool_calls
+                    .push(sources.generate::<ToolCallTag>()?),
+                "cancellation_request_ids" => allocation
+                    .cancellations
+                    .push(sources.generate::<CancellationRequestTag>()?),
+                _ => {
+                    return Err(RunHandleError::CancellationSettlement {
+                        code: "runtime_input_id_kind_unknown",
+                    });
+                }
+            },
+            Err(_) => {
+                return Err(RunHandleError::CancellationSettlement {
+                    code: "runtime_input_rejected",
+                });
+            }
+        }
+    }
+    Err(RunHandleError::CancellationSettlement {
+        code: "runtime_input_allocation_exhausted",
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ToolOpeningCounts {
     records: usize,
@@ -991,13 +1437,21 @@ async fn process_tool_result<C: Clock, R: RandomSource>(
     else {
         return Ok(());
     };
+    if let Some(cancellation) = state.cancellation.as_ref()
+        && cancellation.outstanding_effects.contains(&effect_id)
+    {
+        let cancelled = driver_result
+            .result
+            .as_ref()
+            .is_err_and(|error| error.category() == ErrorCategory::Cancellation);
+        return reconcile_cancelled_effect(coordinator, effect_id, cancelled, sources).await;
+    }
     if batch.opened.tool_batch_id != driver_result.seed.tool_batch_id
         || !matches!(
             active.status,
             finstack_ai_kernel::ActiveToolCallStatus::Requested { deferred: None, .. }
         )
         || state.terminal.is_some()
-        || state.cancellation.is_some()
     {
         return Ok(());
     }
@@ -1289,11 +1743,19 @@ async fn process_model_result<C: Clock, R: RandomSource>(
     let Some(pending) = state.pending_model_effect.as_ref() else {
         return Ok(());
     };
+    if let Some(cancellation) = state.cancellation.as_ref()
+        && cancellation.outstanding_effects.contains(&effect_id)
+    {
+        let cancelled = driver_result
+            .result
+            .as_ref()
+            .is_err_and(|error| error.category() == ErrorCategory::Cancellation);
+        return reconcile_cancelled_effect(coordinator, effect_id, cancelled, sources).await;
+    }
     if pending.requested.effect_id() != effect_id
         || pending.model_request_id != driver_result.seed.pending.model_request_id
         || pending.deferred.is_some()
         || state.terminal.is_some()
-        || state.cancellation.is_some()
     {
         return Ok(());
     }
@@ -1558,6 +2020,8 @@ fn model_runtime_fault(error: &RunHandleError) -> &'static str {
     match error {
         RunHandleError::Faulted { code }
         | RunHandleError::ModelSettlement { code }
+        | RunHandleError::Timer { code }
+        | RunHandleError::CancellationSettlement { code }
         | RunHandleError::EventDelivery { code }
         | RunHandleError::Coordinator(
             CommitCoordinatorError::BoundaryFault { code }
