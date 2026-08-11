@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial through immutable PR-017 event-hub, bounded observer-route, and TM-17 evidence at `1bfc653c36312187f34c6ad7ba787a360145612d`; PR-018, PR-020, and PR-057 remain
