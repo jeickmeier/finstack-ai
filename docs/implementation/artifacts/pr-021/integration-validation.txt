@@ -1,0 +1,32 @@
+PR-021 local integration validation
+Date: 2026-08-11
+Target: main
+Target parent: 6d69aa720b426ebb9afe3524743a6bb464737516
+Evidence parent: beb3e00ca9171a447447e16ece8a54700e3e4b5f
+Implementation revision: d12abc5ec917be1d725cafdd7e9250cb23f9799f
+Merge revision: ec56d175a8b31fe49d5ea672f89020bc3ec553cd
+Merge tree: 9ae786ac4bf881794b02b003b35577d28eeb436d
+Evidence parent tree: 9ae786ac4bf881794b02b003b35577d28eeb436d
+Integration evidence: PR-021-E-integration-ec56d175a8b3
+Disposition: PASS; PR-021 A01-A05 and local integration are complete
+
+Identity proof
+
+- The merge has exactly the expected target and evidence parents.
+- The merge tree exactly equals the evidence-parent tree; local integration
+  introduced no conflict resolution or unreviewed source delta.
+- `docs/planning/` is unchanged.
+
+Post-merge validation
+
+1. mise run test-sdk
+   PASS: seven SDK registration/resolution/lifecycle tests, strict Clippy,
+   no-default native check, and selected wasm-host check.
+
+2. git status --short
+   PASS: empty immediately after the post-merge SDK matrix.
+
+Candidate aggregate validation remains bound to implementation revision
+`d12abc5ec917be1d725cafdd7e9250cb23f9799f` and is valid for the merge because
+the evidence and merge trees are identical. No push, hosted pull request,
+hosted merge, hosted matrix, publication, or independent review is claimed.
