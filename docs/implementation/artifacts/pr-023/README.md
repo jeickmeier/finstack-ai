@@ -11,7 +11,11 @@ conformance. The immutable implementation candidate is commit
 The exact candidate command inventory is in
 [`candidate-validation.txt`](candidate-validation.txt), and the security and
 threat-model disposition is in [`security-review.txt`](security-review.txt).
-Local integration evidence is pending.
+The reviewed evidence commit `f19558431f9bd39d581f57cf759207ccc896f043`
+was merged locally to `main` at
+`949f34010a2fe121b62681560f00eac1f58dfe76`; the merge tree exactly matches the
+reviewed evidence tree. Post-merge focused and aggregate proof is in
+[`integration-validation.txt`](integration-validation.txt).
 
 ## Local acceptance map
 
