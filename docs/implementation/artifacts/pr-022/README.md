@@ -8,10 +8,14 @@ The immutable implementation candidate is commit
 `994dfc467dbf7a9b9efc8d998a31ecf675eb92c6` on
 `codex/pr-022-agent-spec`.
 
-The exact local command inventory is in
+The exact candidate command inventory is in
 [`candidate-validation.txt`](candidate-validation.txt), and the security and
 threat-model disposition is in [`security-review.txt`](security-review.txt).
-Local integration remains pending.
+The reviewed evidence commit `8ca2460a85da671dd9bbec8d90ddee3f4f3dbdd1`
+was merged locally to `main` at
+`9f4385b588ba840690c0b82f1816ee8378b2740e`; the merge tree exactly matches the
+reviewed evidence tree. Post-merge focused and aggregate proof is in
+[`integration-validation.txt`](integration-validation.txt).
 
 ## Local acceptance map
 
