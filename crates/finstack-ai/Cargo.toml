@@ -21,6 +21,12 @@ wasm-host = ["finstack-ai-runtime/wasm-host"]
 
 [dependencies]
 finstack-ai-runtime = { workspace = true, default-features = false }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+finstack-ai-store-memory = { workspace = true }
+finstack-ai-test = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

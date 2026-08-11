@@ -314,6 +314,10 @@ name = "finstack-ai"
 version = "0.0.1"
 dependencies = [
  "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
