@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through immutable PR-018 unique compaction ownership, protected source-ordered projection, tool-pair atomicity, evidence/checkpoint digests, child Model relation, native/WASM, and TM-21 evidence (`PR-018-E-extensions-8c2a6f4d1b73`, `PR-018-E-security-7a1d4f8c3b62`, `PR-018-E-ci-2f6c9a5e1d84`) at `aac573b593dd3950a4143672aeadc3765fa88a29`; PR-023/PR-048/PR-056 remain
+- Implementation evidence: Partial through locally integrated PR-018 unique compaction ownership, protected source-ordered projection, tool-pair atomicity, evidence/checkpoint digests, child Model relation, native/WASM, and TM-21 evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-023/PR-048/PR-056 remain

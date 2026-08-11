@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, local PR-017 merge `966f047fd28972d35c835ddf0441f8ba67348b25`, and immutable PR-018 candidate `aac573b593dd3950a4143672aeadc3765fa88a29` on 2026-08-10:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, local PR-017 merge `966f047fd28972d35c835ddf0441f8ba67348b25`, and local PR-018 merge `3fe0314c6434211e1c8f493f24401888f9609050` on 2026-08-10:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-005, ADR-006, ADR-009, ADR-022, ADR-030, ADR-034, and ADR-037 are `In progress` / `Partial`; PR-018 adds immutable ContextProvider/Middleware/Observer, direct-native, boxed-ABI, durable-outcome, and compaction evidence while its local integration and later mapped work remain open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their remaining runtime, routing, durability, and lifecycle work is later. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
-- Phase 0 and Phase 1 are `Done`; PR-001–PR-017 are `Done`; PR-018 is `In progress`; PR-019–PR-066 are `Todo`.
+- Phase 0 and Phase 1 are `Done`; PR-001–PR-018 are `Done`; PR-019–PR-066 are `Todo`.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2–G8 remain `Not ready`.
-- PR-001–PR-017 acceptance criteria are closed. PR-018 A01–A08 pass at its immutable local candidate with evidence under [`artifacts/pr-018/`](artifacts/pr-018/), but the logical PR remains open until local integration verification. No PR-018 actual pull request, push, hosted run, independent review, G2 decision, exception, or blocker is claimed.
+- PR-001–PR-018 acceptance criteria are closed. PR-018 A01–A08 are bound to immutable implementation and local merge evidence under [`artifacts/pr-018/`](artifacts/pr-018/). No PR-018 actual pull request, push, hosted run, independent review, G2 decision, exception, or blocker is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

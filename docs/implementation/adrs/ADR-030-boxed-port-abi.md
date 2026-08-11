@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through PR-015 Model, locally integrated PR-016 Toolset, and immutable PR-018 target-correct boxed `ContextProvider`/`Middleware`/`Observer` native/WASM leaf evidence (`PR-018-E-extensions-8c2a6f4d1b73`, `PR-018-E-compat-5e9b3d7a2c16`) at `aac573b593dd3950a4143672aeadc3765fa88a29`; PR-026/G3 review remains
+- Implementation evidence: Partial through PR-015 Model, locally integrated PR-016 Toolset, and locally integrated PR-018 target-correct boxed `ContextProvider`/`Middleware`/`Observer` native/WASM leaf evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-026/G3 review remains

@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through PR-013 typed DTO semantics and immutable PR-018 `RequestInteraction` outcome/approval-profile evidence (`PR-018-E-extensions-8c2a6f4d1b73`, `PR-018-E-security-7a1d4f8c3b62`) at `aac573b593dd3950a4143672aeadc3765fa88a29`; PR-044/PR-048 routing and lifecycle remain
+- Implementation evidence: Partial through PR-013 typed DTO semantics and locally integrated PR-018 `RequestInteraction` outcome/approval-profile evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-044/PR-048 routing and lifecycle remain
