@@ -96,7 +96,19 @@ def test_build_metadata_includes_required_identity_fields() -> None:
         )
     for key in ("rustc", "target", "commit", "features", "platform", "host_triple"):
         assert key in metadata
-    assert metadata["workload"] == "conformance-noop-and-pr009-reducer-groups"
-    assert "no-op" in metadata["notes"]
-    assert "PR-009 reducer" in metadata["notes"]
+    assert (
+        metadata["workload"] == "reducer-model-tool-throughput-and-idle-session-memory"
+    )
+    assert "model stream throughput" in metadata["notes"]
+    assert "idle-session RSS" in metadata["notes"]
     bench.validate_metadata(metadata)
+
+
+def test_parse_idle_memory_requires_one_complete_integer_result() -> None:
+    parsed = bench.parse_idle_memory(
+        'noise\nIDLE_SESSION_MEMORY {"baseline_kib":10,"resident_kib":20,'
+        '"incremental_kib":10,"sessions":2,"bytes_per_session":5120}\n'
+    )
+    assert parsed["bytes_per_session"] == 5120
+    with pytest.raises(SystemExit):
+        bench.parse_idle_memory("missing")

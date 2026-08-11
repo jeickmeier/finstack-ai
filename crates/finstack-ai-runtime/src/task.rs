@@ -2362,4 +2362,33 @@ mod tests {
             ));
         });
     }
+
+    #[test]
+    fn repeated_idle_owners_join_every_owned_task_without_abort() {
+        runtime().block_on(async {
+            for _ in 0..128 {
+                let store = Arc::new(BlockingStore::new(false));
+                let mut owner = RunTaskOwner::spawn(
+                    CommitCoordinator::new(store),
+                    RunTaskConfig {
+                        command_capacity: 1,
+                        event_hub: EventHubConfig {
+                            source_capacity: 1,
+                            max_subscribers: 1,
+                        },
+                        shutdown_deadline: Duration::from_millis(100),
+                    },
+                )
+                .expect("owner");
+                let handle = owner.handle();
+
+                let report = owner.shutdown().await;
+
+                assert_eq!(report.outcome, ShutdownOutcome::Graceful);
+                assert_eq!(report.signalled_effects, 0);
+                assert_eq!(report.aborted_tasks, 0);
+                assert_eq!(handle.status(), RunStatus::Stopped);
+            }
+        });
+    }
 }

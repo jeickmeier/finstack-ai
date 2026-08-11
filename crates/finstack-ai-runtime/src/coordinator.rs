@@ -88,6 +88,8 @@ pub struct CommitCoordinator {
     fault: Option<RunFault>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
     #[cfg(feature = "native-tokio")]
+    manual_drive: Option<crate::manual_drive::ManualDriveGate>,
+    #[cfg(feature = "native-tokio")]
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
 }
 
@@ -102,6 +104,8 @@ impl CommitCoordinator {
             pending_timer_scheduled_at: None,
             fault: None,
             dispatcher: None,
+            #[cfg(feature = "native-tokio")]
+            manual_drive: None,
             #[cfg(feature = "native-tokio")]
             event_publisher: None,
         }
@@ -129,6 +133,8 @@ impl CommitCoordinator {
             pending_timer_scheduled_at,
             fault: None,
             dispatcher: None,
+            #[cfg(feature = "native-tokio")]
+            manual_drive: None,
             #[cfg(feature = "native-tokio")]
             event_publisher: None,
         })
@@ -331,6 +337,10 @@ impl CommitCoordinator {
                 self.pending_timer_scheduled_at,
             ),
         };
+        #[cfg(feature = "native-tokio")]
+        if let Some(manual_drive) = &self.manual_drive {
+            manual_drive.pause(action).await?;
+        }
         dispatcher
             .dispatch(dispatch)
             .await
@@ -345,6 +355,25 @@ impl CommitCoordinator {
     #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
     pub(crate) fn install_dispatcher(&mut self, dispatcher: Arc<dyn PostCommitDispatcher>) {
         self.dispatcher = Some(dispatcher);
+    }
+
+    /// Pause every committed execute/cancel action immediately before external dispatch.
+    ///
+    /// This deterministic native test mode preserves normal validation, append,
+    /// apply, event publication, and dispatch precondition checks. The returned
+    /// exclusive controller must explicitly release each action.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::ManualDriveError::ZeroCapacity`] when `capacity` is zero.
+    #[cfg(feature = "native-tokio")]
+    pub fn enable_manual_drive(
+        &mut self,
+        capacity: usize,
+    ) -> Result<crate::ManualDriveController, crate::ManualDriveError> {
+        let (gate, controller) = crate::manual_drive::manual_drive(capacity)?;
+        self.manual_drive = Some(gate);
+        Ok(controller)
     }
 
     #[cfg(feature = "native-tokio")]
@@ -1183,6 +1212,63 @@ mod tests {
         assert_eq!(
             coordinator.state().phase,
             Some(finstack_ai_kernel::RunPhase::AwaitingModel)
+        );
+    }
+
+    #[cfg(feature = "native-tokio")]
+    #[tokio::test]
+    async fn manual_drive_exposes_a_recoverable_committed_prefix_before_dispatch() {
+        let store = Arc::new(FakeStore::new(FakeMode::Normal));
+        let dispatcher = Arc::new(RecordingDispatcher::default());
+        let mut coordinator =
+            CommitCoordinator::with_test_dispatcher(store.clone(), dispatcher.clone());
+        let mut controller = coordinator.enable_manual_drive(1).expect("manual drive");
+
+        let blocked = tokio::spawn(async move {
+            let outcome = drive_to_model_request(&mut coordinator).await;
+            (coordinator, outcome)
+        });
+        let permit = controller.next_effect().await.expect("paused dispatch");
+
+        assert_eq!(permit.effect().action, crate::ManualDriveAction::Execute);
+        assert_eq!(store.append_calls(), 4);
+        assert!(dispatcher.actions.lock().expect("lock").is_empty());
+        let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
+            .await
+            .expect("recover committed prefix");
+        assert_eq!(
+            recovered.state().phase,
+            Some(finstack_ai_kernel::RunPhase::AwaitingModel)
+        );
+        assert!(recovered.state().pending_model_effect.is_some());
+
+        blocked.abort();
+        assert!(matches!(blocked.await, Err(error) if error.is_cancelled()));
+        drop(permit);
+        assert!(dispatcher.actions.lock().expect("lock").is_empty());
+    }
+
+    #[cfg(feature = "native-tokio")]
+    #[tokio::test]
+    async fn manual_drive_releases_exactly_the_observed_committed_action() {
+        let store = Arc::new(FakeStore::new(FakeMode::Normal));
+        let dispatcher = Arc::new(RecordingDispatcher::default());
+        let mut coordinator = CommitCoordinator::with_test_dispatcher(store, dispatcher.clone());
+        let mut controller = coordinator.enable_manual_drive(1).expect("manual drive");
+        let blocked = tokio::spawn(async move { drive_to_model_request(&mut coordinator).await });
+
+        let permit = controller.next_effect().await.expect("paused dispatch");
+        let effect = permit.effect();
+        permit.continue_dispatch();
+        let outcome = blocked.await.expect("join");
+
+        assert!(outcome.fault.is_none());
+        assert_eq!(outcome.dispatched_actions, 1);
+        assert_eq!(
+            dispatcher.actions.lock().expect("lock").as_slice(),
+            &[PostCommitAction::ExecuteEffect {
+                effect_id: effect.effect_id,
+            }]
         );
     }
 
