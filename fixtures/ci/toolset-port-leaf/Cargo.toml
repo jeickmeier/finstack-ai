@@ -10,5 +10,9 @@ publish = false
 finstack-ai-runtime = { workspace = true, default-features = false }
 futures-core = { workspace = true }
 
+[dev-dependencies]
+finstack-ai-test = { workspace = true }
+tokio = { workspace = true }
+
 [lints]
 workspace = true

@@ -14,4 +14,9 @@ reducer tests execute them through real `decide` and committed `apply`, compare
 source-ordered records/messages/events, and replay every committed batch to
 prove the live and replayed schema-2 state hashes are equal.
 
-See `v1/scripted-input/` and `v1/trace/`.
+PR-023 publishes the strict `v1/test-kit/` scenario suite for child lineage,
+deferred external completion, typed interactions, duplicate completion,
+before-finalize continuation, and replay-safe compaction. Public test-kit APIs
+load the suite and bind each scenario to stable diagnostic contract labels.
+
+See `v1/scripted-input/`, `v1/trace/`, and `v1/test-kit/`.

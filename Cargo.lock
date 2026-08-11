@@ -356,7 +356,9 @@ name = "finstack-ai-model-port-leaf-fixture"
 version = "0.0.1"
 dependencies = [
  "finstack-ai-runtime",
+ "finstack-ai-test",
  "futures-core",
+ "tokio",
 ]
 
 [[package]]
@@ -411,6 +413,7 @@ dependencies = [
  "jsonschema",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "thiserror",
  "tokio",
 ]
@@ -420,7 +423,9 @@ name = "finstack-ai-toolset-port-leaf-fixture"
 version = "0.0.1"
 dependencies = [
  "finstack-ai-runtime",
+ "finstack-ai-test",
  "futures-core",
+ "tokio",
 ]
 
 [[package]]
