@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-10 (PR-015 locally merged; later mapped port work remains).
+Index last reconciled: 2026-08-10 (PR-016 local candidate evidence recorded; candidate is not committed, merged, or hosted).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -29,8 +29,8 @@ Index last reconciled: 2026-08-10 (PR-015 locally merged; later mapped port work
 | ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 exhaustive continuation evidence and G1) |
 | ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 hosted property/fuzz evidence and G1) |
 | ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
-| ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 immutable Model-port and local integration evidence](artifacts/pr-015/README.md); remaining ports pending) |
-| ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 retained direct `Arc<dyn Model>` local integration evidence](artifacts/pr-015/README.md); later paths pending) |
+| ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 immutable Model-port evidence](artifacts/pr-015/README.md) and [PR-016 local Toolset-port evidence](artifacts/pr-016/README.md); remaining ports and immutable PR-016 delivery pending) |
+| ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 direct `Arc<dyn Model>` evidence](artifacts/pr-015/README.md) and [PR-016 direct `Arc<dyn Toolset>` local evidence](artifacts/pr-016/README.md); later paths pending) |
 | ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Standalone | In progress | Partial (PR-005 harness Done @ `c1108d2`; Python/WASM parity deferred) |
 | ADR-008 | `declarative-capabilities` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Standalone | Not started | Missing |
@@ -46,7 +46,7 @@ Index last reconciled: 2026-08-10 (PR-015 locally merged; later mapped port work
 | ADR-019 | `browser-host-adapter` | Bindings lead | PR-034, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-020 | `capability-delivery` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Standalone | Not started | Missing |
-| ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Standalone | Not started | Missing |
+| ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Standalone | In progress | Partial ([PR-016 Draft 2020-12 compile-once validator, offline reference, parity, native/WASM evidence](artifacts/pr-016/README.md); binding peers remain) |
 | ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Accepted | Standalone | Not started | Missing |
 | ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004; G0 | Accepted | Standalone | In progress | Partial |
 | ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 deferral identity; runtime lifecycle remains) |
@@ -54,7 +54,7 @@ Index last reconciled: 2026-08-10 (PR-015 locally merged; later mapped port work
 | ADR-027 | `typed-interactions` | Durability/ecosystem lead | PR-008, PR-018, PR-044, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 DTO evidence; routing/lifecycle remains) |
 | ADR-028 | `before-finalize` | Core/runtime lead | PR-009, PR-018, PR-048 | Accepted | Standalone | In progress | Partial (PR-013 final-boundary evidence; PR-018/PR-048 remain) |
 | ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Implemented | Verified |
-| ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | In progress | Partial ([PR-015 immutable target-correct boxed Model future/stream and native/WASM leaf proof](artifacts/pr-015/README.md); later boxed ports pending) |
+| ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | In progress | Partial ([PR-015 boxed Model evidence](artifacts/pr-015/README.md) and [PR-016 target-correct boxed Toolset future/stream native/WASM leaf proof](artifacts/pr-016/README.md); later boxed ports pending) |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-032 | `disposable-snapshots` | Durability/ecosystem lead | PR-041 | Accepted | Standalone | Not started | Missing |
 | ADR-033 | `explicit-interruption` | Core/runtime lead | PR-042 | Accepted | Standalone | Not started | Missing |
@@ -173,6 +173,11 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-09 | ADR-002 | Evidence | me@jeickmeier.com | Partial | Verified | Exhaustive transition, reference-machine, replay, timer/retry/cancellation, hosted fuzz, and G1 evidence passed | PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-long-fuzz-31339772213; G1-D-kernel-semantics-4f52c8a91d6e | me@jeickmeier.com |
 | 2026-08-09 | ADR-003 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-013 merged as `fa6222f20e4a4616f600e867be94afe12967dcb9`; Phase 1 deterministic effect semantics delivery is complete | PR-013-E-integration-fa6222f20e4a; PH1-E-exit-kernel-fa6222f20e4a | me@jeickmeier.com |
 | 2026-08-09 | ADR-003 | Evidence | me@jeickmeier.com | Partial | Verified | Commit-before-action, duplicate/deferral identity, replay, hosted fuzz, security review, and G1 evidence passed | PR-013-E-long-fuzz-31339772213; PR-013-E-security-7d2a5f9c1e84; G1-D-kernel-semantics-4f52c8a91d6e | me@jeickmeier.com |
+| 2026-08-10 | ADR-005 | Evidence | me@jeickmeier.com | Partial | Partial | [PR-016 local candidate](artifacts/pr-016/README.md) adds the executable sixth-port Toolset boundary and native/WASM local results; remaining ports and immutable evidence remain | — | me@jeickmeier.com |
+| 2026-08-10 | ADR-006 | Evidence | me@jeickmeier.com | Partial | Partial | [PR-016 local candidate](artifacts/pr-016/README.md) adds the direct native Arc<dyn Toolset> execution path; later providers, plugins, and immutable evidence remain | — | me@jeickmeier.com |
+| 2026-08-10 | ADR-022 | Implementation | me@jeickmeier.com | Not started | In progress | [PR-016 local candidate](artifacts/pr-016/README.md) implements compile-once Draft 2020-12 validation with explicit offline resources; binding peers remain | — | me@jeickmeier.com |
+| 2026-08-10 | ADR-022 | Evidence | me@jeickmeier.com | Missing | Partial | Default/fixture parity, offline reference success/failure, and native/WASM validation pass locally; immutable and binding evidence remain | — | me@jeickmeier.com |
+| 2026-08-10 | ADR-030 | Evidence | me@jeickmeier.com | Partial | Partial | [PR-016 local candidate](artifacts/pr-016/README.md) adds target-correct boxed Toolset future/stream ABI and native/WASM leaf results; later ports and immutable evidence remain | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -182,8 +187,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-002 | [ADR-002-kernel-continuation.md](adrs/ADR-002-kernel-continuation.md) | me@jeickmeier.com | Verified: PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-long-fuzz-31339772213; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` | PR-004 standalone ADR; PR-013 [#6](https://github.com/jeickmeier/finstack-ai/pull/6); G1 Passed | 2026-08-09 |
 | ADR-003 | [ADR-003-deterministic-effects.md](adrs/ADR-003-deterministic-effects.md) | me@jeickmeier.com | Verified: PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-long-fuzz-31339772213; PR-013-E-security-7d2a5f9c1e84; PH1-E-exit-kernel-fa6222f20e4a; G1-D-kernel-semantics-4f52c8a91d6e at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` | PR-004 standalone ADR; PR-013 [#6](https://github.com/jeickmeier/finstack-ai/pull/6); G1 Passed | 2026-08-09 |
 | ADR-004 | [ADR-004-commit-before-effect.md](adrs/ADR-004-commit-before-effect.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-005 | [ADR-005-six-ports.md](adrs/ADR-005-six-ports.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-006 | [ADR-006-direct-native-path.md](adrs/ADR-006-direct-native-path.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-005 | [ADR-005-six-ports.md](adrs/ADR-005-six-ports.md) | me@jeickmeier.com | Partial: immutable PR-015 Model evidence plus [PR-016 local Toolset implementation and validation results](artifacts/pr-016/README.md); remaining ports and immutable PR-016 evidence pending | PR-004 standalone ADR; PR-015 local merge; PR-016 local candidate | 2026-08-10 |
+| ADR-006 | [ADR-006-direct-native-path.md](adrs/ADR-006-direct-native-path.md) | me@jeickmeier.com | Partial: immutable PR-015 direct Model path plus [PR-016 local direct native Toolset path](artifacts/pr-016/README.md); later paths and immutable PR-016 evidence pending | PR-004 standalone ADR; PR-015 local merge; PR-016 local candidate | 2026-08-10 |
 | ADR-007 | [ADR-007-shared-binding-engine.md](adrs/ADR-007-shared-binding-engine.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-008 | [ADR-008-declarative-capabilities.md](adrs/ADR-008-declarative-capabilities.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-009 | [ADR-009-observer-middleware-separation.md](adrs/ADR-009-observer-middleware-separation.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
@@ -199,7 +204,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-019 | [ADR-019-browser-host-adapter.md](adrs/ADR-019-browser-host-adapter.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-020 | [ADR-020-capability-delivery.md](adrs/ADR-020-capability-delivery.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-021 | [ADR-021-shared-framing.md](adrs/ADR-021-shared-framing.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-022 | [ADR-022-json-schema-2020-12.md](adrs/ADR-022-json-schema-2020-12.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-022 | [ADR-022-json-schema-2020-12.md](adrs/ADR-022-json-schema-2020-12.md) | me@jeickmeier.com | Partial: [PR-016 local candidate results](artifacts/pr-016/README.md) cover compile-once Draft 2020-12, offline resources, validator parity, and native/WASM targets; binding peers and immutable evidence remain | PR-004 standalone ADR; PR-016 local candidate | 2026-08-10 |
 | ADR-023 | [ADR-023-reference-provider.md](adrs/ADR-023-reference-provider.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-024 | [ADR-024-governance-and-license.md](adrs/ADR-024-governance-and-license.md) | me@jeickmeier.com | Standalone record plus PR-001 license/governance files at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`; evidence IDs PR-001-E-ownership-review-b14626f70259, PR-001-E-security-md-f70391db8ac2 | PR-004 standalone ADR; PR-001 license/governance files | 2026-08-08 |
 | ADR-025 | [ADR-025-generic-deferred-effects.md](adrs/ADR-025-generic-deferred-effects.md) | me@jeickmeier.com | Partial (PR-013 deferral identity): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-014/PR-042–PR-044/PR-048 remain | 2026-08-09 |
@@ -207,7 +212,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-027 | [ADR-027-typed-interactions.md](adrs/ADR-027-typed-interactions.md) | me@jeickmeier.com | Partial (PR-013 DTO semantics): PR-013-E-conformance-8c1d6f4a9b27; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-018/PR-044/PR-048 remain | 2026-08-09 |
 | ADR-028 | [ADR-028-before-finalize.md](adrs/ADR-028-before-finalize.md) | me@jeickmeier.com | Partial (PR-013 final boundary): PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84 at `aba26764a448f6b2691bfac62a0f36f865f61ed6` | PR-004 standalone ADR; PR-018/PR-048 remain | 2026-08-09 |
 | ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | Verified: PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-hosted-ci-9a1ccbb88ae5 at merge `56d7777956df145213b03d2b0b5c1922db42b346` | PR-004 standalone ADR; PR-006 [#4](https://github.com/jeickmeier/finstack-ai/pull/4) | 2026-08-08 |
-| ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
+| ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | Partial: immutable PR-015 Model ABI plus [PR-016 target-correct boxed Toolset future/stream native/WASM results](artifacts/pr-016/README.md); later ports and immutable PR-016 evidence remain | PR-004 standalone ADR; PR-015 local merge; PR-016 local candidate | 2026-08-10 |
 | ADR-031 | [ADR-031-worker-based-wasm.md](adrs/ADR-031-worker-based-wasm.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-032 | [ADR-032-disposable-snapshots.md](adrs/ADR-032-disposable-snapshots.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-033 | [ADR-033-explicit-interruption.md](adrs/ADR-033-explicit-interruption.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |

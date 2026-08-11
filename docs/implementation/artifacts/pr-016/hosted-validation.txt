@@ -1,0 +1,15 @@
+PR-016 hosted validation status
+Date: 2026-08-10
+Branch: codex/pr-016-toolset-scheduler
+Status: NOT RUN
+
+No issue or actual pull request was created, and the local candidate is not
+committed, merged, pushed, or hosted. Linux/Windows matrices, Linux release
+digest comparison, hosted security/supply-chain runs, coverage/fuzz, and
+independent approval are not claimed. Local Darwin CI, native/WASM Toolset leaf
+compilation, release-mode panic containment, release smoke, and the manual
+security/release review are retained in the adjacent artifacts.
+
+If this work is later committed and submitted, append immutable candidate,
+hosted, review, and integration evidence rather than rewriting this local
+working-tree boundary.

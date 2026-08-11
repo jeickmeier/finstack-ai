@@ -179,6 +179,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-015-A02 | PR-015 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-015-E-model-4e91b7c2d6a8; PR-015-E-security-2d8a6f1c4b79; PR-015-E-integration-a6c2e8f14d53 | — | me@jeickmeier.com | 2026-08-10 |
 | PR-015-A03 | PR-015 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-015-E-model-4e91b7c2d6a8; PR-015-E-compat-9c3f2a7e5b10; PR-015-E-security-2d8a6f1c4b79 | — | me@jeickmeier.com | 2026-08-10 |
 | PR-015-A04 | PR-015 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-015-E-model-4e91b7c2d6a8; PR-015-E-compat-9c3f2a7e5b10; PR-015-E-integration-a6c2e8f14d53 | — | me@jeickmeier.com | 2026-08-10 |
+| PR-016-A01 | PR-016 | PLAN-0.18 / [PR-016](../planning/04-finstack-ai-implementation-plan.md#pr-016---implement-the-toolset-port-and-scheduler) | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-016-A02 | PR-016 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-016-A03 | PR-016 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-016-A04 | PR-016 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-016-A05 | PR-016 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

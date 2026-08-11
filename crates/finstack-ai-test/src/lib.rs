@@ -17,6 +17,7 @@ mod pr009_fixture;
 mod public_api_fixture;
 mod reducer_fixture;
 mod scripted_model;
+mod scripted_toolset;
 mod trace_fixture;
 
 pub use conformance::{
@@ -36,6 +37,9 @@ pub use reducer_fixture::{
 pub use scripted_model::{
     ScriptedInput, ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,
     ScriptedStep, ScriptedStepKind,
+};
+pub use scripted_toolset::{
+    ScriptedToolAction, ScriptedToolPlan, ScriptedToolset, ScriptedToolsetControl,
 };
 pub use trace_fixture::{
     DurabilityClass, EffectExpectation, ExpectedTrace, GoldenTrace, NormalizedEvent,

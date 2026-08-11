@@ -365,6 +365,7 @@ dependencies = [
  "finstack-ai-kernel",
  "futures-core",
  "getrandom",
+ "jsonschema",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -396,6 +397,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "finstack-ai-toolset-port-leaf-fixture"
+version = "0.0.1"
+dependencies = [
+ "finstack-ai-runtime",
+ "futures-core",
 ]
 
 [[package]]

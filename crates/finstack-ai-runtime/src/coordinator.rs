@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AppendRequest, CommittedBatch, Decision, Diagnostic, EffectId, EventId, Kernel, KernelError,
-    KernelInput, KernelState, Metadata, ModelTextDelta, OperationLocator, PendingModelEffect,
-    PostCommitAction, ProviderHeartbeat, ReasoningDelta, RecordBody, RunEvent, RunEventBody,
-    Sensitivity, Timestamp, TransitionEnv,
+    ActiveToolCallStatus, AppendRequest, CommittedBatch, Decision, Diagnostic, EffectId,
+    EffectRequested, EventId, Kernel, KernelError, KernelInput, KernelState, Metadata,
+    ModelTextDelta, OperationLocator, PendingModelEffect, PostCommitAction, ProviderHeartbeat,
+    ReasoningDelta, RecordBody, RunEvent, RunEventBody, Sensitivity, Timestamp, ToolBatchId,
+    ToolCallId, ToolProgress, TransitionEnv, ValidatedToolCall,
 };
 use thiserror::Error;
 
@@ -295,6 +296,7 @@ impl CommitCoordinator {
         let dispatch = RuntimeDispatch {
             action,
             model: model_dispatch_seed(self.kernel.state(), action),
+            tool: tool_dispatch_seed(self.kernel.state(), action),
         };
         dispatcher
             .dispatch(dispatch)
@@ -372,6 +374,71 @@ impl CommitCoordinator {
                     body,
                 )
                 .map_err(|_| "model_progress_invalid")?,
+            );
+        }
+        self.next_transient_sequence = self
+            .next_transient_sequence
+            .checked_add(
+                u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?,
+            )
+            .ok_or("transient_event_sequence_exhausted")?;
+        Ok(events.into())
+    }
+
+    #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+    pub(crate) fn materialize_tool_progress(
+        &mut self,
+        progress: &[ToolProgress],
+        effect_id: EffectId,
+        now: Timestamp,
+    ) -> Result<Arc<[RunEvent]>, &'static str> {
+        let state = self.kernel.state();
+        let accepted = state
+            .accepted
+            .as_ref()
+            .ok_or("tool_progress_without_accepted_run")?;
+        let session_id = state.session_id.ok_or("tool_progress_without_session")?;
+        let lane_id = state.lane_id.ok_or("tool_progress_without_lane")?;
+        let batch = state
+            .active_tool_batch
+            .as_ref()
+            .ok_or("tool_progress_without_active_batch")?;
+        let call = batch
+            .calls
+            .iter()
+            .find(|call| call.assigned.effect_id == effect_id)
+            .ok_or("tool_progress_without_active_call")?;
+        let run_id = accepted.run_id();
+        let turn_id = batch.opened.turn_id;
+        let tool_batch_id = batch.opened.tool_batch_id;
+        let tool_call_id = *call.assigned.plan.call().tool_call_id();
+        let mut events = Vec::with_capacity(progress.len());
+        for (offset, item) in progress.iter().enumerate() {
+            let transient_sequence = self
+                .next_transient_sequence
+                .checked_add(
+                    u64::try_from(offset).map_err(|_| "transient_event_sequence_exhausted")?,
+                )
+                .ok_or("transient_event_sequence_exhausted")?;
+            events.push(
+                RunEvent::try_transient(
+                    finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
+                    finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
+                    transient_event_id(effect_id, transient_sequence),
+                    session_id,
+                    lane_id,
+                    run_id,
+                    Some(turn_id),
+                    None,
+                    Some(tool_batch_id),
+                    Some(effect_id),
+                    Some(tool_call_id),
+                    transient_sequence,
+                    now,
+                    Sensitivity::Confidential,
+                    RunEventBody::ToolProgress(item.clone()),
+                )
+                .map_err(|_| "tool_progress_invalid")?,
             );
         }
         self.next_transient_sequence = self
@@ -550,9 +617,23 @@ pub(crate) struct ModelDispatchSeed {
 
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+pub(crate) struct ToolDispatchSeed {
+    pub(crate) requested: EffectRequested,
+    pub(crate) tool_batch_id: ToolBatchId,
+    pub(crate) tool_call_id: ToolCallId,
+    pub(crate) call: ValidatedToolCall,
+    pub(crate) locator: OperationLocator,
+    pub(crate) authorization: AuthorizationContext,
+    pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
+    pub(crate) attempt: u32,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
 pub(crate) struct RuntimeDispatch {
     pub(crate) action: PostCommitAction,
     pub(crate) model: Option<ModelDispatchSeed>,
+    pub(crate) tool: Option<ToolDispatchSeed>,
 }
 
 pub(crate) trait PostCommitDispatcher: PortObject {
@@ -571,6 +652,54 @@ fn model_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<
     if pending.requested.effect_id() != effect_id || pending.deferred.is_some() {
         return None;
     }
+    let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+    Some(ModelDispatchSeed {
+        pending: pending.clone(),
+        locator,
+        authorization,
+        budget_scope_id,
+        attempt: state.retry.attempts.checked_add(1)?,
+    })
+}
+
+fn tool_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<ToolDispatchSeed> {
+    let PostCommitAction::ExecuteEffect { effect_id } = action else {
+        return None;
+    };
+    let batch = state.active_tool_batch.as_ref()?;
+    let active = batch.calls.iter().find(|call| {
+        call.assigned.effect_id == effect_id
+            && matches!(
+                call.status,
+                ActiveToolCallStatus::Requested { deferred: None, .. }
+            )
+    })?;
+    let ActiveToolCallStatus::Requested { requested, .. } = &active.status else {
+        return None;
+    };
+    let finstack_ai_kernel::ToolCallPlan::Execute(call) = &active.assigned.plan else {
+        return None;
+    };
+    let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+    Some(ToolDispatchSeed {
+        requested: requested.clone(),
+        tool_batch_id: batch.opened.tool_batch_id,
+        tool_call_id: *call.call.tool_call_id(),
+        call: call.clone(),
+        locator,
+        authorization,
+        budget_scope_id,
+        attempt: 1,
+    })
+}
+
+fn dispatch_security_context(
+    state: &KernelState,
+) -> Option<(
+    OperationLocator,
+    AuthorizationContext,
+    Option<finstack_ai_kernel::BudgetScopeId>,
+)> {
     let accepted = state.accepted.as_ref()?;
     let security = accepted.security();
     let locator = OperationLocator::try_new(
@@ -590,13 +719,11 @@ fn model_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<
         policy_version: Arc::from(security.authorization_policy_version()),
         decision_id: Arc::from(security.authorization_decision_id()),
     };
-    Some(ModelDispatchSeed {
-        pending: pending.clone(),
+    Some((
         locator,
         authorization,
-        budget_scope_id: accepted.relation().budget_scope_id(),
-        attempt: state.retry.attempts.checked_add(1)?,
-    })
+        accepted.relation().budget_scope_id(),
+    ))
 }
 
 #[cfg(test)]

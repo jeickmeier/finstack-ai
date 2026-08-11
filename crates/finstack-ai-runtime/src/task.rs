@@ -1,14 +1,17 @@
 //! Bounded native Tokio task ownership for one runtime coordinator.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchId, AppendBatchTag, ContentBlock, EffectCompleted, EffectDeferred,
-    EffectFailed, ErrorCategory, EventId, EventTag, Id, IdTag, KernelInput, Message, MessageId,
-    MessageRole, MessageTag, Metadata, ModelRef, ModelSettled, ModelSettlement, RawJson, RecordId,
-    RecordTag, ToolCallBlock, ToolCallId, ToolCallTag, TransitionEnv,
+    EffectFailed, EffectId, EffectTag, ErrorCategory, EventId, EventTag, Id, IdTag, KernelInput,
+    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelSettled, ModelSettlement,
+    ProviderIds, RawJson, RecordId, RecordTag, ReducerStageOutcome, RunPhase, Stage, StageCursor,
+    StageSettled, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolCallBlock, ToolCallId,
+    ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement, TransitionEnv,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -16,11 +19,15 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::model_runtime::{ModelDispatcher, ModelDriverResult, run_model_jobs};
+use crate::tool_runtime::{
+    RuntimeDispatcher, ToolDispatcher, ToolDriverResult, ToolTaskConfig, run_tool_jobs,
+};
 use crate::{
-    Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome, IdGenerationError,
-    LockedModelContextProfile, Model, ModelContextProfileOverride, ModelError,
+    CancellationSignal, Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome,
+    IdGenerationError, LockedModelContextProfile, Model, ModelContextProfileOverride, ModelError,
     ModelStreamAssembler, ModelStreamLimits, ModelTerminal, ModelWarmupContext, RandomSource,
-    UuidV7Generator, resolve_model_context_profile,
+    ResolvedToolCatalog, ToolError, ToolStreamAssembler, UuidV7Generator, normalize_tool_result,
+    resolve_model_context_profile,
 };
 
 /// Observable lifecycle of one owned runtime task.
@@ -167,6 +174,7 @@ impl RunHandle {
 pub struct RunTaskOwner {
     handle: RunHandle,
     tasks: JoinSet<()>,
+    active_effects: Vec<Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>>,
     shutdown_deadline: Duration,
     joined: bool,
 }
@@ -198,6 +206,7 @@ impl RunTaskOwner {
         Ok(Self {
             handle,
             tasks,
+            active_effects: Vec::new(),
             shutdown_deadline: config.shutdown_deadline,
             joined: false,
         })
@@ -269,13 +278,123 @@ impl RunTaskOwner {
         tasks.spawn(run_model_jobs(
             model,
             assembler,
-            active,
+            Arc::clone(&active),
             job_receiver,
             result_sender,
         ));
         Ok(Self {
             handle,
             tasks,
+            active_effects: vec![active],
+            shutdown_deadline: run_config.shutdown_deadline,
+            joined: false,
+        })
+    }
+
+    /// Warm one retained model and spawn the combined bounded model/tool runtime.
+    ///
+    /// Tool effects are routed only after their request records commit and the
+    /// coordinator repeats its authorization/deadline check. The kernel remains
+    /// the sole owner of execution groups and durable source ordering.
+    ///
+    /// # Errors
+    ///
+    /// Returns configuration, model warmup, or binding errors before publishing
+    /// a run handle.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the public constructor receives the two explicit port configurations and injected identity sources"
+    )]
+    pub async fn spawn_with_model_and_tools<C, R>(
+        mut coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        tool_config: ToolTaskConfig,
+        model: Arc<dyn Model>,
+        profile: LockedModelContextProfile,
+        catalog: Arc<ResolvedToolCatalog>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
+        let run_config = run_config.validate()?;
+        let model_assembler = model_config.validate()?;
+        let tool_config = tool_config
+            .validate()
+            .map_err(|_| RunHandleError::InvalidConfiguration)?;
+        validate_model_binding(model.as_ref(), &profile)?;
+        model
+            .warmup(ModelWarmupContext {
+                cancellation: crate::CancellationSignal::new(),
+                deadline: model_config.warmup_deadline,
+                metadata: model_config.warmup_metadata.clone(),
+            })
+            .await
+            .map_err(|error| model_handle_error(&error))?;
+
+        let (sender, receiver) = mpsc::channel(run_config.command_capacity);
+        let (model_job_sender, model_job_receiver) = mpsc::channel(model_config.job_capacity);
+        let (model_result_sender, model_result_receiver) =
+            mpsc::channel(model_config.result_capacity);
+        let (tool_job_sender, tool_job_receiver) = mpsc::channel(tool_config.job_capacity);
+        let (tool_result_sender, tool_result_receiver) = mpsc::channel(tool_config.result_capacity);
+
+        let model_dispatcher = Arc::new(ModelDispatcher::new(
+            Arc::clone(&model),
+            profile,
+            model_job_sender,
+        ));
+        let model_active = model_dispatcher.active();
+        let tool_dispatcher = Arc::new(ToolDispatcher::new(Arc::clone(&catalog), tool_job_sender));
+        let tool_active = tool_dispatcher.active();
+        let tool_semaphores = tool_dispatcher.semaphores();
+        coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::new(
+            Arc::clone(&model_dispatcher),
+            tool_dispatcher,
+        )));
+
+        let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
+        let shared = Arc::new(Shared {
+            sender: Mutex::new(Some(sender)),
+            shutting_down: AtomicBool::new(false),
+            status: status_sender,
+        });
+        let handle = RunHandle {
+            shared: Arc::clone(&shared),
+            status: status_receiver,
+        };
+        let mut tasks = JoinSet::new();
+        tasks.spawn(run_worker_with_model_and_tools(
+            coordinator,
+            receiver,
+            model_result_receiver,
+            tool_result_receiver,
+            Arc::clone(&shared),
+            SettlementSources { clock, random },
+            catalog,
+        ));
+        tasks.spawn(run_model_jobs(
+            model,
+            model_assembler,
+            Arc::clone(&model_active),
+            model_job_receiver,
+            model_result_sender,
+        ));
+        tasks.spawn(run_tool_jobs(
+            ToolStreamAssembler::new(tool_config.stream_limits),
+            tool_config,
+            Arc::clone(&tool_active),
+            tool_semaphores,
+            tool_job_receiver,
+            tool_result_sender,
+        ));
+        Ok(Self {
+            handle,
+            tasks,
+            active_effects: vec![model_active, tool_active],
             shutdown_deadline: run_config.shutdown_deadline,
             joined: false,
         })
@@ -293,6 +412,7 @@ impl RunTaskOwner {
             return;
         }
         self.handle.shutdown();
+        self.cancel_active_effects();
         let joined = timeout(self.shutdown_deadline, async {
             while self.tasks.join_next().await.is_some() {}
         })
@@ -307,12 +427,23 @@ impl RunTaskOwner {
         }
         self.joined = true;
     }
+
+    fn cancel_active_effects(&self) {
+        for active in &self.active_effects {
+            if let Ok(values) = active.lock() {
+                for cancellation in values.values() {
+                    cancellation.cancel();
+                }
+            }
+        }
+    }
 }
 
 impl Drop for RunTaskOwner {
     fn drop(&mut self) {
         if !self.joined {
             self.handle.shutdown();
+            self.cancel_active_effects();
             self.tasks.abort_all();
             if !matches!(self.handle.status(), RunStatus::Faulted { .. }) {
                 self.handle.shared.status.send_replace(RunStatus::Stopped);
@@ -354,6 +485,18 @@ pub enum RunHandleError {
     /// Runtime could not construct a valid kernel settlement.
     #[error("model settlement construction failed: {code}")]
     ModelSettlement {
+        /// Stable runtime code.
+        code: &'static str,
+    },
+    /// Tool execution adapter failed before a durable settlement.
+    #[error("tool adapter failed: {code}")]
+    Tool {
+        /// Stable adapter code.
+        code: Arc<str>,
+    },
+    /// Runtime could not construct a valid kernel tool settlement.
+    #[error("tool settlement construction failed: {code}")]
+    ToolSettlement {
         /// Stable runtime code.
         code: &'static str,
     },
@@ -472,6 +615,496 @@ async fn run_worker_with_model<C, R>(
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
         shared.status.send_replace(RunStatus::Stopped);
     }
+}
+
+async fn run_worker_with_model_and_tools<C, R>(
+    mut coordinator: CommitCoordinator,
+    mut receiver: mpsc::Receiver<RunCommand>,
+    mut model_results: mpsc::Receiver<ModelDriverResult>,
+    mut tool_results: mpsc::Receiver<ToolDriverResult>,
+    shared: Arc<Shared>,
+    sources: SettlementSources<C, R>,
+    catalog: Arc<ResolvedToolCatalog>,
+) where
+    C: Clock + Send + Sync + 'static,
+    R: RandomSource + Send + Sync + 'static,
+{
+    let mut model_path_open = true;
+    let mut tool_path_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            result = model_results.recv(), if model_path_open => {
+                match result {
+                    Some(result) => {
+                        let processed = process_model_result(&mut coordinator, result, &sources).await;
+                        let processed = match processed {
+                            Ok(()) => prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await,
+                            Err(error) => Err(error),
+                        };
+                        if let Err(error) = processed {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    None => model_path_open = false,
+                }
+            }
+            result = tool_results.recv(), if tool_path_open => {
+                match result {
+                    Some(result) => {
+                        if let Err(error) = process_tool_result(&mut coordinator, result, &sources).await {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    None => tool_path_open = false,
+                }
+            }
+            command = receiver.recv() => {
+                let Some(command) = command else { break; };
+                if shared.shutting_down.load(Ordering::Acquire) {
+                    let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
+                    continue;
+                }
+                let mut result = coordinator
+                    .submit(command.env, command.input)
+                    .await
+                    .map_err(RunHandleError::Coordinator);
+                if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
+                    && let Err(error) = prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await
+                {
+                    result = Err(error);
+                }
+                let fault_code = result_fault_code(&result);
+                let _ = command.reply.send(result);
+                if let Some(code) = fault_code {
+                    fault_worker(&shared, &mut receiver, code);
+                    break;
+                }
+            }
+        }
+    }
+    if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
+        shared.status.send_replace(RunStatus::Stopped);
+    }
+}
+
+async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    catalog: &ResolvedToolCatalog,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    if coordinator.state().phase != Some(RunPhase::BeforeToolBatch) {
+        return Ok(());
+    }
+    let state = coordinator.state();
+    let source = state
+        .messages
+        .last()
+        .ok_or(RunHandleError::ToolSettlement {
+            code: "tool_source_message_missing",
+        })?;
+    let calls = source
+        .content()
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall(call)
+                if !finstack_ai_kernel::is_internal_tool_name(call.tool_name()) =>
+            {
+                Some(call.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if calls.is_empty() {
+        return Err(RunHandleError::ToolSettlement {
+            code: "tool_source_calls_missing",
+        });
+    }
+    let deadline = state
+        .accepted
+        .as_ref()
+        .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
+    let plans = calls
+        .into_iter()
+        .map(|call| catalog.plan_call(call, deadline, None))
+        .collect::<Vec<_>>();
+    let continuation = if state.final_result.is_some() {
+        ToolBatchContinuation::Finalize
+    } else {
+        ToolBatchContinuation::ContinueModel
+    };
+    let input = KernelInput::StageSettled(StageSettled {
+        cursor: StageCursor {
+            cycle: state.cycle,
+            stage: Stage::BeforeToolBatch,
+        },
+        outcome: ReducerStageOutcome::ToolBatchPrepared {
+            calls: plans.clone().into(),
+            continuation,
+        },
+    });
+    let now = sources.now()?;
+    let ids = allocate_tool_opening(&plans, sources)?;
+    let env = TransitionEnv { now, ids };
+    let decision =
+        coordinator
+            .classify(&env, input.clone())
+            .map_err(|_| RunHandleError::ToolSettlement {
+                code: "tool_opening_allocation_mismatch",
+            })?;
+    debug_assert_eq!(decision.records.len(), env.ids.record_ids().len());
+    let outcome = coordinator
+        .submit(env, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ToolOpeningCounts {
+    records: usize,
+    events: usize,
+    effects: usize,
+    messages: usize,
+}
+
+fn tool_opening_counts(plans: &[ToolCallPlan]) -> Result<ToolOpeningCounts, RunHandleError> {
+    let mut groups = Vec::with_capacity(plans.len());
+    let mut group = 0_u32;
+    for (index, plan) in plans.iter().enumerate() {
+        if index > 0
+            && !(plans[index - 1].execution() == finstack_ai_kernel::ToolExecutionMode::Parallel
+                && plan.execution() == finstack_ai_kernel::ToolExecutionMode::Parallel)
+        {
+            group = group.checked_add(1).ok_or(RunHandleError::ToolSettlement {
+                code: "tool_group_count_overflow",
+            })?;
+        }
+        groups.push(group);
+    }
+    let first_executable_group = plans
+        .iter()
+        .zip(&groups)
+        .find_map(|(plan, group)| matches!(plan, ToolCallPlan::Execute(_)).then_some(*group));
+    let requests = first_executable_group.map_or(0, |first| {
+        plans
+            .iter()
+            .zip(&groups)
+            .filter(|(plan, group)| **group == first && matches!(plan, ToolCallPlan::Execute(_)))
+            .count()
+    });
+    let messages = plans
+        .iter()
+        .take_while(|plan| matches!(plan, ToolCallPlan::SyntheticClosure(_)))
+        .count();
+    Ok(ToolOpeningCounts {
+        records: 2 + requests + messages + usize::from(first_executable_group.is_none()),
+        events: requests + 2 * messages,
+        effects: plans.len(),
+        messages,
+    })
+}
+
+fn allocate_tool_opening<C: Clock, R: RandomSource>(
+    plans: &[ToolCallPlan],
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    let counts = tool_opening_counts(plans)?;
+    AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(counts.records, sources)?,
+        generate_tool_ids::<EventTag, _, _>(counts.events, sources)?,
+        generate_tool_ids::<EffectTag, _, _>(counts.effects, sources)?,
+        Vec::new(),
+        generate_tool_ids::<MessageTag, _, _>(counts.messages, sources)?,
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<ToolBatchTag, _, _>(sources)?],
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "tool_opening_ids_invalid",
+    })
+}
+
+async fn process_tool_result<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    mut driver_result: ToolDriverResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let effect_id = driver_result.seed.requested.effect_id();
+    let state = coordinator.state();
+    let Some(batch) = state.active_tool_batch.as_ref() else {
+        return Ok(());
+    };
+    let Some(active) = batch
+        .calls
+        .iter()
+        .find(|call| call.assigned.effect_id == effect_id)
+    else {
+        return Ok(());
+    };
+    if batch.opened.tool_batch_id != driver_result.seed.tool_batch_id
+        || !matches!(
+            active.status,
+            finstack_ai_kernel::ActiveToolCallStatus::Requested { deferred: None, .. }
+        )
+        || state.terminal.is_some()
+        || state.cancellation.is_some()
+    {
+        return Ok(());
+    }
+    let now = sources.now()?;
+    if driver_result
+        .seed
+        .requested
+        .deadline()
+        .is_some_and(|deadline| deadline <= now)
+    {
+        driver_result.result = Err(ToolError::try_new(
+            crate::TOOL_DEADLINE_EXCEEDED,
+            ErrorCategory::Deadline,
+            false,
+            "tool result arrived after the committed deadline",
+            Metadata::empty(),
+        )
+        .map_err(|error| tool_handle_error(&error))?);
+    }
+    if let Ok(assembled) = &driver_result.result {
+        let _events = coordinator
+            .materialize_tool_progress(&assembled.progress, effect_id, now)
+            .map_err(|code| RunHandleError::ToolSettlement { code })?;
+    }
+    let settled = build_tool_settlement(driver_result)?;
+    let input = KernelInput::ToolBatchSettled(settled.clone());
+    let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
+    let env = TransitionEnv {
+        now,
+        ids: allocation,
+    };
+    coordinator
+        .classify(&env, input.clone())
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "tool_settlement_allocation_mismatch",
+        })?;
+    let outcome = coordinator
+        .submit(env, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, RunHandleError> {
+    let requested = &result.seed.requested;
+    let effect_id = requested.effect_id();
+    let outcome = match result.result {
+        Ok(assembled) => {
+            let block = normalize_tool_result(result.seed.tool_call_id, assembled.result)
+                .map_err(|error| tool_handle_error(&error))?;
+            let bytes = serde_json_canonicalizer::to_vec(&block).map_err(|_| {
+                RunHandleError::ToolSettlement {
+                    code: "tool_result_serialize_failed",
+                }
+            })?;
+            let output = RawJson::parse(bytes).map_err(|_| RunHandleError::ToolSettlement {
+                code: "tool_result_output_invalid",
+            })?;
+            ToolSettlement::Completed(
+                EffectCompleted::try_new(
+                    effect_id,
+                    requested.output_contract().clone(),
+                    output,
+                    assembled.usage,
+                    Vec::new(),
+                    ProviderIds::empty(),
+                    None::<&str>,
+                    None,
+                )
+                .map_err(|_| RunHandleError::ToolSettlement {
+                    code: "tool_effect_completion_invalid",
+                })?,
+            )
+        }
+        Err(error) => {
+            let descriptor = error
+                .to_descriptor()
+                .map_err(|error| tool_handle_error(&error))?;
+            ToolSettlement::Failed(
+                EffectFailed::try_new(
+                    effect_id,
+                    requested.output_contract().clone(),
+                    descriptor,
+                    None,
+                    None::<&str>,
+                )
+                .map_err(|_| RunHandleError::ToolSettlement {
+                    code: "tool_effect_failure_invalid",
+                })?,
+            )
+        }
+    };
+    Ok(ToolBatchSettled {
+        tool_batch_id: result.seed.tool_batch_id,
+        outcome,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PredictedToolStatus {
+    Undispatched,
+    Requested,
+    Buffered,
+    Settled,
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "exact allocation mirrors the kernel's contiguous-prefix and next-group cardinalities"
+)]
+fn allocate_tool_settlement<C: Clock, R: RandomSource>(
+    state: &finstack_ai_kernel::KernelState,
+    settled: &ToolBatchSettled,
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    let batch = state
+        .active_tool_batch
+        .as_ref()
+        .ok_or(RunHandleError::ToolSettlement {
+            code: "tool_settlement_batch_missing",
+        })?;
+    let effect_id = match &settled.outcome {
+        ToolSettlement::Completed(value) => value.effect_id(),
+        ToolSettlement::Failed(value) => value.effect_id(),
+        ToolSettlement::Deferred(value) => value.effect_id,
+    };
+    let target = batch
+        .calls
+        .iter()
+        .position(|call| call.assigned.effect_id == effect_id)
+        .ok_or(RunHandleError::ToolSettlement {
+            code: "tool_settlement_call_missing",
+        })?;
+    let mut statuses = batch
+        .calls
+        .iter()
+        .map(|call| match call.status {
+            finstack_ai_kernel::ActiveToolCallStatus::Undispatched => {
+                PredictedToolStatus::Undispatched
+            }
+            finstack_ai_kernel::ActiveToolCallStatus::Requested { .. } => {
+                PredictedToolStatus::Requested
+            }
+            finstack_ai_kernel::ActiveToolCallStatus::Buffered { .. } => {
+                PredictedToolStatus::Buffered
+            }
+            finstack_ai_kernel::ActiveToolCallStatus::Settled { .. } => {
+                PredictedToolStatus::Settled
+            }
+        })
+        .collect::<Vec<_>>();
+    statuses[target] = PredictedToolStatus::Buffered;
+    let target_plan = &batch.calls[target].assigned.plan;
+    let fatal = batch.fatal_error.is_some()
+        || (matches!(settled.outcome, ToolSettlement::Failed(_))
+            && target_plan.failure_policy() == ToolFailurePolicy::FailRun);
+    let current_complete = batch.calls.iter().enumerate().all(|(index, call)| {
+        call.assigned.group_index != batch.current_group
+            || matches!(
+                statuses[index],
+                PredictedToolStatus::Buffered | PredictedToolStatus::Settled
+            )
+    });
+    if fatal && current_complete {
+        for status in &mut statuses {
+            if *status == PredictedToolStatus::Undispatched {
+                *status = PredictedToolStatus::Buffered;
+            }
+        }
+    }
+    let mut messages = 0_usize;
+    let start =
+        usize::try_from(batch.next_source_index).map_err(|_| RunHandleError::ToolSettlement {
+            code: "tool_source_index_invalid",
+        })?;
+    for status in statuses.iter_mut().skip(start) {
+        if *status != PredictedToolStatus::Buffered {
+            break;
+        }
+        *status = PredictedToolStatus::Settled;
+        messages += 1;
+    }
+    let requests = if !fatal && current_complete {
+        let next_group = batch.calls.iter().enumerate().find_map(|(index, call)| {
+            (statuses[index] == PredictedToolStatus::Undispatched
+                && matches!(call.assigned.plan, ToolCallPlan::Execute(_)))
+            .then_some(call.assigned.group_index)
+        });
+        next_group.map_or(0, |group| {
+            batch
+                .calls
+                .iter()
+                .enumerate()
+                .filter(|(index, call)| {
+                    statuses[*index] == PredictedToolStatus::Undispatched
+                        && call.assigned.group_index == group
+                        && matches!(call.assigned.plan, ToolCallPlan::Execute(_))
+                })
+                .count()
+        })
+    } else {
+        0
+    };
+    let close = usize::from(
+        statuses
+            .iter()
+            .all(|status| *status == PredictedToolStatus::Settled),
+    );
+    let records = 1 + messages + requests + close;
+    let events = 1 + 2 * messages + requests;
+    AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(records, sources)?,
+        generate_tool_ids::<EventTag, _, _>(events, sources)?,
+        Vec::new(),
+        Vec::new(),
+        generate_tool_ids::<MessageTag, _, _>(messages, sources)?,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "tool_settlement_ids_invalid",
+    })
+}
+
+fn generate_tool_ids<T: IdTag, C: Clock, R: RandomSource>(
+    count: usize,
+    sources: &SettlementSources<C, R>,
+) -> Result<Vec<Id<T>>, RunHandleError> {
+    (0..count)
+        .map(|_| generate_tool_id::<T, _, _>(sources))
+        .collect()
+}
+
+fn generate_tool_id<T: IdTag, C: Clock, R: RandomSource>(
+    sources: &SettlementSources<C, R>,
+) -> Result<Id<T>, RunHandleError> {
+    sources
+        .generate::<T>()
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "tool_settlement_id_source_failed",
+        })
 }
 
 async fn process_model_result<C: Clock, R: RandomSource>(
@@ -709,10 +1342,15 @@ fn build_settlement(
 fn result_fault_code(result: &Result<CommitOutcome, RunHandleError>) -> Option<&'static str> {
     match result {
         Ok(outcome) => outcome.fault.map(|fault| fault.code),
-        Err(RunHandleError::Coordinator(
-            CommitCoordinatorError::BoundaryFault { code }
-            | CommitCoordinatorError::Faulted { code },
-        )) => Some(*code),
+        Err(
+            RunHandleError::Faulted { code }
+            | RunHandleError::ModelSettlement { code }
+            | RunHandleError::ToolSettlement { code }
+            | RunHandleError::Coordinator(
+                CommitCoordinatorError::BoundaryFault { code }
+                | CommitCoordinatorError::Faulted { code },
+            ),
+        ) => Some(*code),
         _ => None,
     }
 }
@@ -732,14 +1370,28 @@ fn model_runtime_fault(error: &RunHandleError) -> &'static str {
         | RunHandleError::ModelSettlement { code }
         | RunHandleError::Coordinator(
             CommitCoordinatorError::BoundaryFault { code }
+            | CommitCoordinatorError::Decision { code }
             | CommitCoordinatorError::Faulted { code },
         ) => code,
         _ => "model_runtime_failed",
     }
 }
 
+fn runtime_fault(error: &RunHandleError) -> &'static str {
+    match error {
+        RunHandleError::ToolSettlement { code } => code,
+        _ => model_runtime_fault(error),
+    }
+}
+
 fn model_handle_error(error: &ModelError) -> RunHandleError {
     RunHandleError::Model {
+        code: Arc::from(error.code()),
+    }
+}
+
+fn tool_handle_error(error: &ToolError) -> RunHandleError {
+    RunHandleError::Tool {
         code: Arc::from(error.code()),
     }
 }

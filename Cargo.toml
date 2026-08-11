@@ -11,6 +11,7 @@ members = [
     "extensions/stores/finstack-ai-store-memory",
     "fixtures/ci/release-smoke",
     "fixtures/ci/model-port-leaf",
+    "fixtures/ci/toolset-port-leaf",
 ]
 exclude = ["fuzz"]
 
@@ -18,7 +19,7 @@ exclude = ["fuzz"]
 codegen-units = 1
 lto = true
 strip = "symbols"
-panic = "abort"
+panic = "unwind"
 opt-level = 3
 debug = false
 incremental = false

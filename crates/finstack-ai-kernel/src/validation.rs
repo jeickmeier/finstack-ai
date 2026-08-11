@@ -48,6 +48,28 @@ pub struct ValidationIssue {
 }
 
 impl ValidationIssue {
+    /// Construct one bounded validator-independent issue.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation reason when a pointer, keyword, or message
+    /// violates the semantic text bounds.
+    pub fn try_new(
+        instance_path: impl Into<Arc<str>>,
+        schema_path: impl Into<Arc<str>>,
+        keyword: Option<impl Into<Arc<str>>>,
+        message: impl Into<Arc<str>>,
+    ) -> Result<Self, &'static str> {
+        let value = Self {
+            instance_path: instance_path.into(),
+            schema_path: schema_path.into(),
+            keyword: keyword.map(Into::into),
+            message: message.into(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
     fn validate(&self) -> Result<(), &'static str> {
         if self.instance_path.len() > TEXT_MAX_BYTES
             || self.schema_path.len() > TEXT_MAX_BYTES
@@ -110,6 +132,24 @@ pub enum ValidationOutcome {
 }
 
 impl ValidationOutcome {
+    /// Construct a bounded invalid outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation reason when issue cardinality or feedback
+    /// violates the semantic bounds.
+    pub fn try_invalid(
+        issues: impl Into<Arc<[ValidationIssue]>>,
+        feedback: impl Into<Arc<str>>,
+    ) -> Result<Self, &'static str> {
+        let value = Self::Invalid {
+            issues: issues.into(),
+            feedback: feedback.into(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
     fn validate(&self) -> Result<(), &'static str> {
         if let Self::Invalid { issues, feedback } = self {
             if issues.is_empty() || issues.len() > SEMANTIC_ARRAY_MAX_ITEMS {

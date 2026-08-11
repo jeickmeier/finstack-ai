@@ -28,9 +28,9 @@ If implementation reveals a required design change, mark the affected work `Bloc
 The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20 and local PR-015 merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` on 2026-08-10:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-005, ADR-006, and ADR-030 are `In progress` / `Partial`; PR-015 contributes immutable Model-port evidence while their remaining mapped ports and paths are open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their planned runtime, routing, durability, and lifecycle work remains. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
-- Phase 0 and Phase 1 are `Done`; PR-001–PR-015 are `Done`; PR-016–PR-066 are `Todo`.
+- Phase 0 and Phase 1 are `Done`; PR-001–PR-015 are `Done`; PR-016 is `In progress` on `codex/pr-016-toolset-scheduler` with A01–A05 locally exercised but still `Pending`; PR-017–PR-066 are `Todo`.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2–G8 remain `Not ready`.
-- PR-001–PR-015 acceptance criteria are closed. PR-015 A01–A04 are bound to the immutable implementation and local merge evidence retained under [`artifacts/pr-015/`](artifacts/pr-015/). No hosted PR evidence is claimed. No exceptions or blockers are open.
+- PR-001–PR-015 acceptance criteria are closed. PR-015 A01–A04 are bound to the immutable implementation and local merge evidence retained under [`artifacts/pr-015/`](artifacts/pr-015/). PR-016 A01–A05 have local working-tree validation and review results under [`artifacts/pr-016/`](artifacts/pr-016/), but remain `Pending` because no immutable candidate, actual pull request, hosted run, independent review, integration, or completion is claimed. No exceptions or blockers are open.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

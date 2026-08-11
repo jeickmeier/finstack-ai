@@ -9,10 +9,12 @@
 #![warn(missing_docs)]
 
 pub use finstack_ai_kernel::{
-    BudgetScopeId, ContentBlock, Digest, EffectId, ErrorCategory, ExternalHandleRef, Message,
-    Metadata, ModelRequestId, OperationLocator, OutputSpec, PendingModelEffect, PrincipalRef,
-    ProviderIds, RawJson, ReconciliationPolicy, RetrySafety, Timestamp, ToolExecutionMode, ToolId,
-    Usage,
+    BudgetScopeId, ComponentInvocation, ContentBlock, Digest, EffectId, EffectOutputContract,
+    EffectOutputKind, ErrorCategory, ExternalHandleRef, JsonBlock, Message, Metadata,
+    ModelRequestId, OperationLocator, OutputSpec, PendingModelEffect, PrincipalRef, ProviderIds,
+    RawJson, ReconciliationPolicy, RetrySafety, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
+    Usage, ValidatedToolCall, ValidationIssue, ValidationOutcome,
 };
 
 mod audit;
@@ -22,12 +24,16 @@ mod id_generation;
 mod journal;
 mod model;
 mod ports;
+mod tool;
 
 #[cfg(feature = "native-tokio")]
 mod task;
 
 #[cfg(feature = "native-tokio")]
 mod model_runtime;
+
+#[cfg(feature = "native-tokio")]
+mod tool_runtime;
 
 #[cfg(feature = "native-tokio")]
 mod ingress;
@@ -64,11 +70,24 @@ pub use model::{
     ToolSpec, UsageDelta, resolve_model_context_profile, validate_model_request,
 };
 pub use ports::{PortFuture, PortObject, PortStream};
+pub use tool::{
+    AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
+    ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
+    TOOL_DEADLINE_EXCEEDED, TOOL_OUTPUT_INVALID, TOOL_PANICKED, TOOL_POLICY_DENIED,
+    TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID,
+    TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolDeferral, ToolError, ToolEventStream,
+    ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolStreamAssembler,
+    ToolStreamItem, ToolStreamLimits, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL, normalize_tool_result,
+};
 
 #[cfg(feature = "native-tokio")]
 pub use task::{
     ModelTaskConfig, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
 };
+
+#[cfg(feature = "native-tokio")]
+pub use tool_runtime::ToolTaskConfig;
 
 #[cfg(feature = "native-tokio")]
 pub use audit::{SecurityAuditGate, SecurityAuditGateError};
