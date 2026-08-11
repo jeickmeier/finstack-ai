@@ -1,0 +1,38 @@
+PR-025 immutable candidate validation
+Date: 2026-08-11
+Candidate: faac2e30f8a31e319b6af68abf4db5dd450f421b
+Tree: 6e64a3d17a5edfbb4084f921009b47063705c6b4
+Branch: codex/pr-025-filesystem-tools
+Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1
+
+PASS  mise run test-pr025
+      - calculator: 3 tests
+      - filesystem/policy: 9 tests
+      - strict all-target Clippy for both leaves
+      - calculator Criterion target compile
+      - kernel/runtime normal-graph exclusion checks
+      - architecture: 22 tests and no findings
+
+PASS  cargo bench -p finstack-ai-tools-calculator --bench calculator -- --test
+      - optimized calculator_add_256_operands execution: Success
+
+PASS  mise run ci
+      - formatting and workspace all-target Clippy
+      - complete workspace tests and rustdoc
+      - minimal/default feature checks
+      - kernel/runtime/browser WASM checks
+      - architecture, schema governance, helper tests, benchmark compilation,
+        workflow lint, cargo-deny, secret scan and canary, release smoke, and
+        Python source/wheel packaging
+      - cargo-deny emitted only the repository's existing permitted unmatched
+        license and duplicate-version warnings
+
+Target and scope limits:
+  - The filesystem battery is a trusted native leaf and is not a browser-WASM
+    package. An exploratory direct wasm32 build was therefore non-applicable
+    and failed in the runtime native-tokio feature before compiling the leaf.
+  - macOS/Unix no-follow behavior and race fixtures ran locally. No Windows
+    target is installed; non-Unix construction is implemented as a fail-closed
+    `filesystem_unsupported` result but was not cross-compiled in this run.
+  - No hosted matrix, shell battery, live external service, publication, or
+    independent security review ran.
