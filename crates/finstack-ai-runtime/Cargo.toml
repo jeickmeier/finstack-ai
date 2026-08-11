@@ -27,5 +27,8 @@ serde_json_canonicalizer = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [lints]
 workspace = true

@@ -11,9 +11,10 @@ use tokio::task::{JoinHandle, JoinSet};
 
 use crate::coordinator::{DispatchError, PostCommitDispatcher, RuntimeDispatch, ToolDispatchSeed};
 use crate::model_runtime::ModelDispatcher;
+use crate::tool::AssembledToolTerminal;
 use crate::{
-    AssembledToolStream, CancellationSignal, PortFuture, ResolvedTool, ResolvedToolCatalog,
-    RunCallContext, TOOL_CANCELLED, TOOL_PANICKED, ToolCallContext, ToolError, ToolStreamAssembler,
+    CancellationSignal, PortFuture, ResolvedTool, ResolvedToolCatalog, RunCallContext,
+    TOOL_CANCELLED, TOOL_PANICKED, ToolCallContext, ToolError, ToolProgress, ToolStreamAssembler,
     ToolStreamLimits,
 };
 
@@ -22,7 +23,7 @@ use crate::{
 pub struct ToolTaskConfig {
     /// Bounded committed tool-job queue capacity.
     pub job_capacity: usize,
-    /// Bounded terminal result queue capacity.
+    /// Bounded incremental driver-message queue capacity.
     pub result_capacity: usize,
     /// Executor-wide active-call ceiling.
     pub global_max_concurrency: usize,
@@ -52,7 +53,15 @@ pub(crate) struct ToolJob {
 
 pub(crate) struct ToolDriverResult {
     pub(crate) seed: ToolDispatchSeed,
-    pub(crate) result: Result<AssembledToolStream, ToolError>,
+    pub(crate) result: Result<AssembledToolTerminal, ToolError>,
+}
+
+pub(crate) enum ToolDriverMessage {
+    Progress {
+        effect_id: EffectId,
+        progress: ToolProgress,
+    },
+    Terminal(Box<ToolDriverResult>),
 }
 
 type ActiveEffects = Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>;
@@ -290,7 +299,7 @@ pub(crate) async fn run_tool_jobs(
     active: ActiveEffects,
     per_tool: BTreeMap<ToolId, Arc<Semaphore>>,
     mut jobs: mpsc::Receiver<ToolJob>,
-    results: mpsc::Sender<ToolDriverResult>,
+    results: mpsc::Sender<ToolDriverMessage>,
 ) {
     let global = Arc::new(Semaphore::new(config.global_max_concurrency));
     let mut pending = VecDeque::new();
@@ -334,7 +343,7 @@ fn spawn_ready(
     per_tool: &BTreeMap<ToolId, Arc<Semaphore>>,
     assembler: ToolStreamAssembler,
     active: &ActiveEffects,
-    results: &mpsc::Sender<ToolDriverResult>,
+    results: &mpsc::Sender<ToolDriverMessage>,
 ) {
     loop {
         let Ok(global_permit) = Arc::clone(global).try_acquire_owned() else {
@@ -381,7 +390,7 @@ async fn run_scheduled(
     scheduled: ScheduledJob,
     assembler: ToolStreamAssembler,
     active: ActiveEffects,
-    results: mpsc::Sender<ToolDriverResult>,
+    results: mpsc::Sender<ToolDriverMessage>,
 ) {
     let ScheduledJob {
         job,
@@ -397,25 +406,43 @@ async fn run_scheduled(
         drop(per_tool);
         drop(global);
         let _ = results
-            .send(ToolDriverResult {
+            .send(ToolDriverMessage::Terminal(Box::new(ToolDriverResult {
                 seed: job.seed,
                 result: Err(ToolError::stable(
                     TOOL_CANCELLED,
                     "tool call was cancelled before execution",
                 )),
-            })
+            })))
             .await;
         return;
     }
     let resolved = Arc::clone(&job.resolved);
     let call = job.seed.call.clone();
+    let progress_results = results.clone();
     let mut child = AbortOnDrop(tokio::spawn(async move {
         let stream = resolved.toolset.call(job.context, call).await?;
         assembler
-            .assemble(
+            .assemble_incremental(
                 stream,
                 resolved.output_validator.as_deref(),
                 resolved.spec.max_result_bytes,
+                move |progress| {
+                    let sender = progress_results.clone();
+                    async move {
+                        sender
+                            .send(ToolDriverMessage::Progress {
+                                effect_id,
+                                progress,
+                            })
+                            .await
+                            .map_err(|_| {
+                                ToolError::stable(
+                                    crate::TOOL_STREAM_INVALID,
+                                    "runtime tool progress path closed",
+                                )
+                            })
+                    }
+                },
             )
             .await
     }));
@@ -440,9 +467,9 @@ async fn run_scheduled(
     drop(per_tool);
     drop(global);
     let _ = results
-        .send(ToolDriverResult {
+        .send(ToolDriverMessage::Terminal(Box::new(ToolDriverResult {
             seed: job.seed,
             result,
-        })
+        })))
         .await;
 }

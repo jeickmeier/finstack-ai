@@ -184,6 +184,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-016-A03 | PR-016 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-016-E-tool-8f2c4d7a1b63; PR-016-E-compat-3e9a6c1d5b72; PR-016-E-ci-5d9b2e7a4c16; PR-016-E-integration-b2f678693fcd | — | me@jeickmeier.com | 2026-08-10 |
 | PR-016-A04 | PR-016 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-016-E-tool-8f2c4d7a1b63; PR-016-E-security-7c1e5a9d3b84; PR-016-E-integration-b2f678693fcd | — | me@jeickmeier.com | 2026-08-10 |
 | PR-016-A05 | PR-016 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-016-E-tool-8f2c4d7a1b63; PR-016-E-compat-3e9a6c1d5b72; PR-016-E-integration-b2f678693fcd | — | me@jeickmeier.com | 2026-08-10 |
+| PR-017-A01 | PR-017 | PLAN-0.18 / [PR-017](../planning/04-finstack-ai-implementation-plan.md#pr-017---implement-the-event-hub-batching-and-backpressure) | Pending | me@jeickmeier.com | Target: bounded-queue and architecture evidence | — | — | — |
+| PR-017-A02 | PR-017 | PLAN-0.18 / same | Pending | me@jeickmeier.com | Target: batching and logical-order evidence | — | — | — |
+| PR-017-A03 | PR-017 | PLAN-0.18 / same | Pending | me@jeickmeier.com | Target: slow-observer isolation and TM-17 evidence | — | — | — |
+| PR-017-A04 | PR-017 | PLAN-0.18 / same | Pending | me@jeickmeier.com | Target: progress-drop reporting and durable-terminal recovery evidence | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

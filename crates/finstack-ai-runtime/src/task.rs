@@ -1,7 +1,7 @@
 //! Bounded native Tokio task ownership for one runtime coordinator.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,16 +18,21 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
-use crate::model_runtime::{ModelDispatcher, ModelDriverResult, run_model_jobs};
+use crate::event_hub::{EventHubHandle, event_hub};
+use crate::model_runtime::{
+    ModelDispatcher, ModelDriverMessage, ModelDriverResult, run_model_jobs,
+};
 use crate::tool_runtime::{
-    RuntimeDispatcher, ToolDispatcher, ToolDriverResult, ToolTaskConfig, run_tool_jobs,
+    RuntimeDispatcher, ToolDispatcher, ToolDriverMessage, ToolDriverResult, ToolTaskConfig,
+    run_tool_jobs,
 };
 use crate::{
     CancellationSignal, Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome,
+    EventHubConfig, EventSubscription, EventSubscriptionConfig, EventSubscriptionError,
     IdGenerationError, LockedModelContextProfile, Model, ModelContextProfileOverride, ModelError,
-    ModelStreamAssembler, ModelStreamLimits, ModelTerminal, ModelWarmupContext, RandomSource,
-    ResolvedToolCatalog, ToolError, ToolStreamAssembler, UuidV7Generator, normalize_tool_result,
-    resolve_model_context_profile,
+    ModelProgress, ModelStreamAssembler, ModelStreamLimits, ModelTerminal, ModelWarmupContext,
+    RandomSource, ResolvedToolCatalog, ToolError, ToolProgress, ToolStreamAssembler,
+    UuidV7Generator, normalize_tool_result, resolve_model_context_profile,
 };
 
 /// Observable lifecycle of one owned runtime task.
@@ -51,6 +56,8 @@ pub enum RunStatus {
 pub struct RunTaskConfig {
     /// Bounded command queue capacity.
     pub command_capacity: usize,
+    /// Bounded event-hub source and subscriber limits.
+    pub event_hub: EventHubConfig,
     /// Maximum time the owner waits before aborting owned tasks.
     pub shutdown_deadline: Duration,
 }
@@ -60,7 +67,7 @@ pub struct RunTaskConfig {
 pub struct ModelTaskConfig {
     /// Bounded committed model-job queue capacity.
     pub job_capacity: usize,
-    /// Bounded terminal result queue capacity.
+    /// Bounded incremental driver-message queue capacity.
     pub result_capacity: usize,
     /// Pure stream-assembler bounds.
     pub stream_limits: ModelStreamLimits,
@@ -87,7 +94,10 @@ impl RunTaskConfig {
     ///
     /// Returns [`RunHandleError::InvalidConfiguration`] for a zero bound.
     pub fn validate(self) -> Result<Self, RunHandleError> {
-        if self.command_capacity == 0 || self.shutdown_deadline.is_zero() {
+        if self.command_capacity == 0
+            || self.shutdown_deadline.is_zero()
+            || self.event_hub.validate().is_err()
+        {
             return Err(RunHandleError::InvalidConfiguration);
         }
         Ok(self)
@@ -102,6 +112,18 @@ pub struct RunHandle {
 }
 
 impl RunHandle {
+    /// Register an interactive subscription before publishing later run events.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid configuration, exhausted subscriber capacity, or a closed hub.
+    pub async fn subscribe_events(
+        &self,
+        config: EventSubscriptionConfig,
+    ) -> Result<EventSubscription, EventSubscriptionError> {
+        self.shared.events.subscribe_interactive(config).await
+    }
+
     /// Submit one command, awaiting bounded-channel capacity when necessary.
     ///
     /// # Errors
@@ -186,16 +208,20 @@ impl RunTaskOwner {
     ///
     /// Returns [`RunHandleError::InvalidConfiguration`] for zero bounds.
     pub fn spawn(
-        coordinator: CommitCoordinator,
+        mut coordinator: CommitCoordinator,
         config: RunTaskConfig,
     ) -> Result<Self, RunHandleError> {
         let config = config.validate()?;
+        let (event_handle, event_task) =
+            event_hub(config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
+        coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let (sender, receiver) = mpsc::channel(config.command_capacity);
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            events: event_handle,
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -203,6 +229,7 @@ impl RunTaskOwner {
         };
         let mut tasks = JoinSet::new();
         tasks.spawn(run_worker(coordinator, receiver, shared));
+        tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
@@ -235,8 +262,12 @@ impl RunTaskOwner {
         R: RandomSource + Send + Sync + 'static,
     {
         let run_config = run_config.validate()?;
+        let (event_handle, event_task) =
+            event_hub(run_config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
+        coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let assembler = model_config.validate()?;
         validate_model_binding(model.as_ref(), &profile)?;
+        let sources = SettlementSources::try_new(clock, random)?;
         model
             .warmup(ModelWarmupContext {
                 cancellation: crate::CancellationSignal::new(),
@@ -262,6 +293,7 @@ impl RunTaskOwner {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            events: event_handle,
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -273,7 +305,7 @@ impl RunTaskOwner {
             receiver,
             result_receiver,
             Arc::clone(&shared),
-            SettlementSources { clock, random },
+            sources,
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -282,6 +314,7 @@ impl RunTaskOwner {
             job_receiver,
             result_sender,
         ));
+        tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
@@ -321,11 +354,15 @@ impl RunTaskOwner {
         R: RandomSource + Send + Sync + 'static,
     {
         let run_config = run_config.validate()?;
+        let (event_handle, event_task) =
+            event_hub(run_config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
+        coordinator.install_event_publisher(Arc::new(event_handle.clone()));
         let model_assembler = model_config.validate()?;
         let tool_config = tool_config
             .validate()
             .map_err(|_| RunHandleError::InvalidConfiguration)?;
         validate_model_binding(model.as_ref(), &profile)?;
+        let sources = SettlementSources::try_new(clock, random)?;
         model
             .warmup(ModelWarmupContext {
                 cancellation: crate::CancellationSignal::new(),
@@ -361,6 +398,7 @@ impl RunTaskOwner {
             sender: Mutex::new(Some(sender)),
             shutting_down: AtomicBool::new(false),
             status: status_sender,
+            events: event_handle,
         });
         let handle = RunHandle {
             shared: Arc::clone(&shared),
@@ -373,7 +411,7 @@ impl RunTaskOwner {
             model_result_receiver,
             tool_result_receiver,
             Arc::clone(&shared),
-            SettlementSources { clock, random },
+            sources,
             catalog,
         ));
         tasks.spawn(run_model_jobs(
@@ -391,6 +429,7 @@ impl RunTaskOwner {
             tool_job_receiver,
             tool_result_sender,
         ));
+        tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
@@ -500,12 +539,19 @@ pub enum RunHandleError {
         /// Stable runtime code.
         code: &'static str,
     },
+    /// Runtime event publication failed after apply and before dispatch.
+    #[error("event delivery failed: {code}")]
+    EventDelivery {
+        /// Stable event-delivery code.
+        code: &'static str,
+    },
 }
 
 struct Shared {
     sender: Mutex<Option<mpsc::Sender<RunCommand>>>,
     shutting_down: AtomicBool,
     status: watch::Sender<RunStatus>,
+    events: EventHubHandle,
 }
 
 struct RunCommand {
@@ -532,7 +578,8 @@ async fn run_worker(
             Ok(outcome) => outcome.fault.map(|fault| fault.code),
             Err(RunHandleError::Coordinator(
                 CommitCoordinatorError::BoundaryFault { code }
-                | CommitCoordinatorError::Faulted { code },
+                | CommitCoordinatorError::Faulted { code }
+                | CommitCoordinatorError::EventDelivery { code },
             )) => Some(*code),
             _ => None,
         };
@@ -549,14 +596,25 @@ async fn run_worker(
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
         shared.status.send_replace(RunStatus::Stopped);
     }
+    shared.events.close().await;
 }
 
 struct SettlementSources<C, R> {
     clock: C,
     random: R,
+    progress_random: ProgressRandom,
 }
 
 impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
+    fn try_new(clock: C, random: R) -> Result<Self, RunHandleError> {
+        let progress_random = ProgressRandom::try_new(&random)?;
+        Ok(Self {
+            clock,
+            random,
+            progress_random,
+        })
+    }
+
     fn now(&self) -> Result<finstack_ai_kernel::Timestamp, RunHandleError> {
         self.clock.now().map_err(id_source_error)
     }
@@ -566,12 +624,58 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             .generate()
             .map_err(id_source_error)
     }
+
+    fn generate_progress_event(&self) -> Result<EventId, RunHandleError> {
+        UuidV7Generator::new(&self.clock, &self.progress_random)
+            .generate()
+            .map_err(id_source_error)
+    }
+}
+
+struct ProgressRandom {
+    seed: [u8; 32],
+    counter: AtomicU64,
+}
+
+impl ProgressRandom {
+    fn try_new(random: &impl RandomSource) -> Result<Self, RunHandleError> {
+        let mut seed = [0_u8; 32];
+        random.fill_bytes(&mut seed).map_err(id_source_error)?;
+        Ok(Self {
+            seed,
+            counter: AtomicU64::new(0),
+        })
+    }
+}
+
+impl RandomSource for ProgressRandom {
+    fn fill_bytes(&self, bytes: &mut [u8]) -> Result<(), IdGenerationError> {
+        let mut written = 0_usize;
+        while written < bytes.len() {
+            let counter = self
+                .counter
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                    value.checked_add(1)
+                })
+                .map_err(|_| {
+                    IdGenerationError::Source("progress event entropy exhausted".into())
+                })?;
+            let mut material = [0_u8; 40];
+            material[..32].copy_from_slice(&self.seed);
+            material[32..].copy_from_slice(&counter.to_be_bytes());
+            let digest = finstack_ai_kernel::Digest::raw_json(&material);
+            let count = (bytes.len() - written).min(digest.as_bytes().len());
+            bytes[written..written + count].copy_from_slice(&digest.as_bytes()[..count]);
+            written += count;
+        }
+        Ok(())
+    }
 }
 
 async fn run_worker_with_model<C, R>(
     mut coordinator: CommitCoordinator,
     mut receiver: mpsc::Receiver<RunCommand>,
-    mut results: mpsc::Receiver<ModelDriverResult>,
+    mut results: mpsc::Receiver<ModelDriverMessage>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
 ) where
@@ -584,8 +688,20 @@ async fn run_worker_with_model<C, R>(
             biased;
             result = results.recv(), if result_path_open => {
                 match result {
-                    Some(result) => {
-                        if let Err(error) = process_model_result(&mut coordinator, result, &sources).await {
+                    Some(ModelDriverMessage::Progress { effect_id, provider, progress }) => {
+                        if let Err(error) = process_model_progress(
+                            &mut coordinator,
+                            effect_id,
+                            &provider,
+                            progress,
+                            &sources,
+                        ).await {
+                            fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    Some(ModelDriverMessage::Terminal(result)) => {
+                        if let Err(error) = process_model_result(&mut coordinator, *result, &sources).await {
                             fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
                             break;
                         }
@@ -615,13 +731,14 @@ async fn run_worker_with_model<C, R>(
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
         shared.status.send_replace(RunStatus::Stopped);
     }
+    shared.events.close().await;
 }
 
 async fn run_worker_with_model_and_tools<C, R>(
     mut coordinator: CommitCoordinator,
     mut receiver: mpsc::Receiver<RunCommand>,
-    mut model_results: mpsc::Receiver<ModelDriverResult>,
-    mut tool_results: mpsc::Receiver<ToolDriverResult>,
+    mut model_results: mpsc::Receiver<ModelDriverMessage>,
+    mut tool_results: mpsc::Receiver<ToolDriverMessage>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
@@ -636,8 +753,20 @@ async fn run_worker_with_model_and_tools<C, R>(
             biased;
             result = model_results.recv(), if model_path_open => {
                 match result {
-                    Some(result) => {
-                        let processed = process_model_result(&mut coordinator, result, &sources).await;
+                    Some(ModelDriverMessage::Progress { effect_id, provider, progress }) => {
+                        if let Err(error) = process_model_progress(
+                            &mut coordinator,
+                            effect_id,
+                            &provider,
+                            progress,
+                            &sources,
+                        ).await {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    Some(ModelDriverMessage::Terminal(result)) => {
+                        let processed = process_model_result(&mut coordinator, *result, &sources).await;
                         let processed = match processed {
                             Ok(()) => prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await,
                             Err(error) => Err(error),
@@ -652,8 +781,19 @@ async fn run_worker_with_model_and_tools<C, R>(
             }
             result = tool_results.recv(), if tool_path_open => {
                 match result {
-                    Some(result) => {
-                        if let Err(error) = process_tool_result(&mut coordinator, result, &sources).await {
+                    Some(ToolDriverMessage::Progress { effect_id, progress }) => {
+                        if let Err(error) = process_tool_progress(
+                            &mut coordinator,
+                            effect_id,
+                            progress,
+                            &sources,
+                        ).await {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    Some(ToolDriverMessage::Terminal(result)) => {
+                        if let Err(error) = process_tool_result(&mut coordinator, *result, &sources).await {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
                         }
@@ -688,6 +828,7 @@ async fn run_worker_with_model_and_tools<C, R>(
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
         shared.status.send_replace(RunStatus::Stopped);
     }
+    shared.events.close().await;
 }
 
 async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
@@ -876,11 +1017,6 @@ async fn process_tool_result<C: Clock, R: RandomSource>(
         )
         .map_err(|error| tool_handle_error(&error))?);
     }
-    if let Ok(assembled) = &driver_result.result {
-        let _events = coordinator
-            .materialize_tool_progress(&assembled.progress, effect_id, now)
-            .map_err(|code| RunHandleError::ToolSettlement { code })?;
-    }
     let settled = build_tool_settlement(driver_result)?;
     let input = KernelInput::ToolBatchSettled(settled.clone());
     let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
@@ -901,6 +1037,42 @@ async fn process_tool_result<C: Clock, R: RandomSource>(
         return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
+}
+
+async fn process_tool_progress<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    effect_id: EffectId,
+    progress: ToolProgress,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let state = coordinator.state();
+    let Some(batch) = state.active_tool_batch.as_ref() else {
+        return Ok(());
+    };
+    let Some(active) = batch
+        .calls
+        .iter()
+        .find(|call| call.assigned.effect_id == effect_id)
+    else {
+        return Ok(());
+    };
+    if !matches!(
+        active.status,
+        finstack_ai_kernel::ActiveToolCallStatus::Requested { deferred: None, .. }
+    ) || state.terminal.is_some()
+        || state.cancellation.is_some()
+    {
+        return Ok(());
+    }
+    let now = sources.now()?;
+    let event_id = sources.generate_progress_event()?;
+    let event = coordinator
+        .materialize_tool_progress(&progress, event_id, effect_id, now)
+        .map_err(|code| RunHandleError::ToolSettlement { code })?;
+    coordinator
+        .publish_events(Arc::from([event]))
+        .await
+        .map_err(RunHandleError::Coordinator)
 }
 
 fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, RunHandleError> {
@@ -1140,13 +1312,6 @@ async fn process_model_result<C: Clock, R: RandomSource>(
         )
         .map_err(|error| model_handle_error(&error))?);
     }
-
-    if let Ok(assembled) = &driver_result.result {
-        let _events = coordinator
-            .materialize_model_progress(&assembled.progress, &driver_result.provider, now)
-            .map_err(|code| RunHandleError::ModelSettlement { code })?;
-    }
-
     let allocation = allocate_settlement(&driver_result, sources)?;
     let settled = build_settlement(driver_result, now, &allocation)?;
     let outcome = coordinator
@@ -1165,6 +1330,35 @@ async fn process_model_result<C: Clock, R: RandomSource>(
     Ok(())
 }
 
+async fn process_model_progress<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    effect_id: EffectId,
+    provider: &str,
+    progress: ModelProgress,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let state = coordinator.state();
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return Ok(());
+    };
+    if pending.requested.effect_id() != effect_id
+        || pending.deferred.is_some()
+        || state.terminal.is_some()
+        || state.cancellation.is_some()
+    {
+        return Ok(());
+    }
+    let now = sources.now()?;
+    let event_id = sources.generate_progress_event()?;
+    let event = coordinator
+        .materialize_model_progress(&progress, event_id, provider, now)
+        .map_err(|code| RunHandleError::ModelSettlement { code })?;
+    coordinator
+        .publish_events(Arc::from([event]))
+        .await
+        .map_err(RunHandleError::Coordinator)
+}
+
 struct SettlementAllocation {
     ids: AllocatedIds,
     message_id: Option<MessageId>,
@@ -1175,15 +1369,9 @@ fn allocate_settlement<C: Clock, R: RandomSource>(
     result: &ModelDriverResult,
     sources: &SettlementSources<C, R>,
 ) -> Result<SettlementAllocation, RunHandleError> {
-    let completed = matches!(
-        result.result,
-        Ok(crate::AssembledModelStream {
-            terminal: ModelTerminal::Completed(_),
-            ..
-        })
-    );
+    let completed = matches!(result.result, Ok(ModelTerminal::Completed(_)));
     let tool_count = match &result.result {
-        Ok(value) => match &value.terminal {
+        Ok(value) => match value {
             ModelTerminal::Completed(response) => response.tool_calls.len(),
             ModelTerminal::Deferred(_) => 0,
         },
@@ -1239,7 +1427,7 @@ fn build_settlement(
     let requested = &result.seed.pending.requested;
     let effect_id = requested.effect_id();
     let outcome = match result.result {
-        Ok(assembled) => match assembled.terminal {
+        Ok(terminal) => match terminal {
             ModelTerminal::Completed(response) => {
                 let output_bytes = serde_json_canonicalizer::to_vec(&response).map_err(|_| {
                     RunHandleError::ModelSettlement {
@@ -1346,9 +1534,11 @@ fn result_fault_code(result: &Result<CommitOutcome, RunHandleError>) -> Option<&
             RunHandleError::Faulted { code }
             | RunHandleError::ModelSettlement { code }
             | RunHandleError::ToolSettlement { code }
+            | RunHandleError::EventDelivery { code }
             | RunHandleError::Coordinator(
                 CommitCoordinatorError::BoundaryFault { code }
-                | CommitCoordinatorError::Faulted { code },
+                | CommitCoordinatorError::Faulted { code }
+                | CommitCoordinatorError::EventDelivery { code },
             ),
         ) => Some(*code),
         _ => None,
@@ -1368,10 +1558,12 @@ fn model_runtime_fault(error: &RunHandleError) -> &'static str {
     match error {
         RunHandleError::Faulted { code }
         | RunHandleError::ModelSettlement { code }
+        | RunHandleError::EventDelivery { code }
         | RunHandleError::Coordinator(
             CommitCoordinatorError::BoundaryFault { code }
             | CommitCoordinatorError::Decision { code }
-            | CommitCoordinatorError::Faulted { code },
+            | CommitCoordinatorError::Faulted { code }
+            | CommitCoordinatorError::EventDelivery { code },
         ) => code,
         _ => "model_runtime_failed",
     }
@@ -1602,6 +1794,10 @@ mod tests {
                 CommitCoordinator::new(store.clone()),
                 RunTaskConfig {
                     command_capacity: 1,
+                    event_hub: EventHubConfig {
+                        source_capacity: 8,
+                        max_subscribers: 4,
+                    },
                     shutdown_deadline: Duration::from_millis(100),
                 },
             )
@@ -1643,6 +1839,10 @@ mod tests {
                 CommitCoordinator::new(store),
                 RunTaskConfig {
                     command_capacity: 1,
+                    event_hub: EventHubConfig {
+                        source_capacity: 8,
+                        max_subscribers: 4,
+                    },
                     shutdown_deadline: Duration::from_millis(100),
                 },
             )
@@ -1673,6 +1873,10 @@ mod tests {
                 CommitCoordinator::new(store.clone()),
                 RunTaskConfig {
                     command_capacity: 1,
+                    event_hub: EventHubConfig {
+                        source_capacity: 8,
+                        max_subscribers: 4,
+                    },
                     shutdown_deadline: Duration::from_millis(5),
                 },
             )

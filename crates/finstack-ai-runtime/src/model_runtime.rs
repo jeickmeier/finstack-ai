@@ -11,9 +11,9 @@ use tokio::task::JoinSet;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
 use crate::{
-    AssembledModelStream, CancellationSignal, LockedModelContextProfile, Model, ModelCallContext,
-    ModelError, ModelRequest, ModelRequestDraft, ModelStreamAssembler, PortFuture, RunCallContext,
-    validate_model_request,
+    CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelError,
+    ModelProgress, ModelRequest, ModelRequestDraft, ModelStreamAssembler, ModelTerminal,
+    PortFuture, RunCallContext, validate_model_request,
 };
 
 pub(crate) struct ModelJob {
@@ -25,7 +25,16 @@ pub(crate) struct ModelDriverResult {
     pub(crate) seed: ModelDispatchSeed,
     pub(crate) draft: ModelRequestDraft,
     pub(crate) provider: Arc<str>,
-    pub(crate) result: Result<AssembledModelStream, ModelError>,
+    pub(crate) result: Result<ModelTerminal, ModelError>,
+}
+
+pub(crate) enum ModelDriverMessage {
+    Progress {
+        effect_id: EffectId,
+        provider: Arc<str>,
+        progress: ModelProgress,
+    },
+    Terminal(Box<ModelDriverResult>),
 }
 
 type ActiveEffects = Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>;
@@ -200,7 +209,7 @@ pub(crate) async fn run_model_jobs(
     assembler: ModelStreamAssembler,
     active: ActiveEffects,
     mut jobs: mpsc::Receiver<ModelJob>,
-    results: mpsc::Sender<ModelDriverResult>,
+    results: mpsc::Sender<ModelDriverMessage>,
 ) {
     let provider = model.descriptor().provider;
     let mut tasks = JoinSet::new();
@@ -216,19 +225,31 @@ pub(crate) async fn run_model_jobs(
                     tasks.spawn(async move {
                         let effect_id = job.seed.pending.requested.effect_id();
                         let draft = job.request.draft.clone();
+                        let progress_sender = results.clone();
+                        let progress_provider = Arc::clone(&provider);
                         let result = match model.request(job.request).await {
-                            Ok(stream) => assembler.assemble(stream).await,
+                            Ok(stream) => assembler.assemble_incremental(stream, move |progress| {
+                                let sender = progress_sender.clone();
+                                let provider = Arc::clone(&progress_provider);
+                                async move {
+                                    sender.send(ModelDriverMessage::Progress {
+                                        effect_id,
+                                        provider,
+                                        progress,
+                                    }).await.map_err(|_| progress_delivery_error())
+                                }
+                            }).await,
                             Err(error) => Err(error),
                         };
                         if let Ok(mut values) = active.lock() {
                             values.remove(&effect_id);
                         }
-                        let _ = results.send(ModelDriverResult {
+                        let _ = results.send(ModelDriverMessage::Terminal(Box::new(ModelDriverResult {
                             seed: job.seed,
                             draft,
                             provider,
                             result,
-                        }).await;
+                        }))).await;
                     });
                 } else {
                     intake_open = false;
@@ -242,6 +263,17 @@ pub(crate) async fn run_model_jobs(
             _ = tasks.join_next(), if !tasks.is_empty() => {}
         }
     }
+}
+
+fn progress_delivery_error() -> ModelError {
+    ModelError::try_new(
+        "model_progress_delivery_closed",
+        finstack_ai_kernel::ErrorCategory::Internal,
+        false,
+        "runtime model progress delivery closed",
+        finstack_ai_kernel::Metadata::empty(),
+    )
+    .expect("frozen model progress delivery error")
 }
 
 fn stable_dispatch_code(code: &str) -> &'static str {

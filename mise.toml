@@ -111,6 +111,15 @@ cargo test -p finstack-ai-store-memory --locked
 cargo test -p finstack-ai-test --test model_port --locked
 """
 
+[tasks.test-events]
+description = "Run PR-017 event hub, batching, backpressure, and incremental progress proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio event_hub::native::tests --locked
+cargo test -p finstack-ai-test --test model_port runtime_publishes_validated_progress_before_terminal_settlement --locked
+cargo test -p finstack-ai-test --test tool_port runtime_publishes_tool_progress_before_tool_settlement --locked
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """

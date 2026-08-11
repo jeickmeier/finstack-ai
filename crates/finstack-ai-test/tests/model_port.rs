@@ -11,23 +11,26 @@ use finstack_ai_kernel::{
     ComponentId, ContentBlock, Digest, EffectOutputContract, EffectOutputKind, ExternalHandleRef,
     Id, IdTag, KernelInput, LaneTag, Message, MessageRole, Metadata, OperationLocator, OutputSpec,
     PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
-    ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
-    RunSecurityContext, SessionTag, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
+    ReducerStageOutcome, RetrySafety, RunAccepted, RunEventBody, RunEventKind, RunLimits,
+    RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity, SessionTag, Stage,
+    StageCursor, TextBlock, Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, CommitCoordinator, CommitCoordinatorError,
-    IdGenerationError, JournalStore, LoadRequest, LoadedSession, LockedModelContextProfile,
-    MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionCloseReason,
+    EventSubscriptionConfig, IdGenerationError, JournalStore, LoadRequest, LoadedSession,
+    LockedModelContextProfile, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
     MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
     MODEL_STREAM_MISSING_COMPLETION, MODEL_TOOL_CALL_ARGUMENTS_INVALID,
     MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE, MODEL_USAGE_INVALID, Model,
     ModelCallContext, ModelContextProfile, ModelDeferral, ModelError, ModelProgress, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamAssembler,
     ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelTerminal, ModelToolCall,
-    ModelWarmupContext, OpaqueProviderEvent, PortFuture, RandomSource, ReasoningDelta,
-    RunCallContext, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
-    SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, ToolCallDelta, UsageDelta, resolve_model_context_profile,
+    ModelWarmupContext, OpaqueProviderEvent, PortFuture, ProgressCoalescing, RandomSource,
+    ReasoningDelta, RunCallContext, RunHandle, RunHandleError, RunStatus, RunTaskConfig,
+    RunTaskOwner, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, UsageDelta,
+    resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -794,6 +797,172 @@ async fn drive_to_active_model_request(handle: &RunHandle) {
         .expect("model request");
 }
 
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the proof keeps live progress, lag closure, finalization, and journal recovery contiguous"
+)]
+async fn runtime_publishes_validated_progress_before_terminal_settlement() {
+    let store = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 1,
+            batches_per_session: 16,
+            records_per_session: 32,
+            snapshot_bytes: 1_024,
+        })
+        .expect("store"),
+    );
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(TextDelta {
+                    text: Arc::from("early progress"),
+                }))),
+                ScriptedModelAction::Block(Arc::from("terminal-gate")),
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(completed(
+                    "early progress",
+                )))),
+            ],
+        }],
+    ));
+    let control = model.control();
+    let model_port: Arc<dyn Model> = model.clone();
+    let mut owner = RunTaskOwner::spawn_with_model(
+        CommitCoordinator::new(store.clone()),
+        RunTaskConfig {
+            command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 4,
+                max_subscribers: 2,
+            },
+            shutdown_deadline: StdDuration::from_millis(250),
+        },
+        ModelTaskConfig {
+            job_capacity: 1,
+            result_capacity: 1,
+            stream_limits: ModelStreamLimits::default(),
+            warmup_deadline: None,
+            warmup_metadata: Metadata::empty(),
+        },
+        model_port,
+        locked_profile(),
+        FixedClock::new(timestamp(2_000)),
+        CounterRandom(AtomicU64::new(500)),
+    )
+    .await
+    .expect("owner");
+    let handle = owner.handle();
+    let mut subscription = handle
+        .subscribe_events(EventSubscriptionConfig {
+            queue_capacity: 2,
+            filter: EventFilter {
+                include_durable: false,
+                include_transient: true,
+                kinds: Arc::from([RunEventKind::ModelTextDelta]),
+                max_sensitivity: Sensitivity::Confidential,
+            },
+            batching: EventBatchConfig {
+                flush_count: 8,
+                flush_bytes: 64 * 1_024,
+                flush_interval: StdDuration::from_secs(1),
+            },
+            progress_coalescing: ProgressCoalescing::Disabled,
+            lag_policy: EventLagPolicy::BlockBounded {
+                timeout: StdDuration::from_millis(100),
+            },
+        })
+        .await
+        .expect("subscription");
+    let mut stalled_durable = handle
+        .subscribe_events(EventSubscriptionConfig {
+            queue_capacity: 1,
+            filter: EventFilter {
+                include_durable: true,
+                include_transient: false,
+                kinds: Arc::from([]),
+                max_sensitivity: Sensitivity::Confidential,
+            },
+            batching: EventBatchConfig {
+                flush_count: 1,
+                flush_bytes: 64 * 1_024,
+                flush_interval: StdDuration::from_secs(1),
+            },
+            progress_coalescing: ProgressCoalescing::Enabled,
+            lag_policy: EventLagPolicy::DropProgress {
+                durable_timeout: StdDuration::from_millis(1),
+            },
+        })
+        .await
+        .expect("stalled durable subscription");
+
+    drive_to_active_model_request(&handle).await;
+    while control.entries("terminal-gate") == 0 {
+        tokio::task::yield_now().await;
+    }
+    let batch = subscription.next_batch().await.expect("progress batch");
+    assert_eq!(batch.events().len(), 1);
+    let RunEventBody::ModelTextDelta(delta) = batch.events()[0].body() else {
+        panic!("expected model text progress");
+    };
+    assert_eq!(delta.text(), "early progress");
+    let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
+        .await
+        .expect("recover before terminal");
+    assert!(recovered.state().pending_model_effect.is_some());
+    assert!(recovered.state().model_settlements.is_empty());
+
+    control.release("terminal-gate");
+    loop {
+        let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
+            .await
+            .expect("recover after terminal");
+        if recovered.state().model_settlements.len() == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    handle
+        .submit(
+            env(2_100, &[7], &[], &[], &[], &[], &[], 105),
+            stage(Stage::AfterModel, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("after model");
+    handle
+        .submit(
+            env(2_200, &[8, 9], &[3], &[], &[], &[], &[], 106),
+            stage(Stage::BeforeFinalize, ReducerStageOutcome::FinalizeAccepted),
+        )
+        .await
+        .expect("finalize");
+    let recovered = CommitCoordinator::recover(store, id::<SessionTag>(1))
+        .await
+        .expect("recover completed run");
+    assert!(recovered.state().terminal.is_some());
+    assert_eq!(
+        stalled_durable.status().close_reason,
+        Some(EventSubscriptionCloseReason::MissedDurable)
+    );
+    let delivered_before_lag = stalled_durable
+        .next_batch()
+        .await
+        .expect("first durable batch");
+    assert!(
+        !matches!(
+            delivered_before_lag
+                .events()
+                .last()
+                .map(finstack_ai_kernel::RunEvent::kind),
+            Some(RunEventKind::RunCompleted | RunEventKind::RunFailed | RunEventKind::RunCancelled)
+        ),
+        "the terminal event was not delivered to the disconnected subscriber"
+    );
+    assert!(stalled_durable.next_batch().await.is_none());
+    owner.shutdown().await;
+    assert_eq!(handle.status(), RunStatus::Stopped);
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct RuntimeProjection {
     record_bodies: Vec<Vec<u8>>,
@@ -827,6 +996,10 @@ async fn run_runtime_chunks(count: usize, response_text: &str) -> RuntimeProject
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(250),
         },
         ModelTaskConfig {
@@ -981,6 +1154,10 @@ async fn failed_model_request_append_never_executes_the_model() {
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(250),
         },
         ModelTaskConfig {
@@ -1094,6 +1271,10 @@ async fn malformed_stream_settles_as_failure_without_partial_durable_success() {
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(250),
         },
         ModelTaskConfig {
@@ -1151,6 +1332,10 @@ async fn a_result_observed_after_the_committed_deadline_cannot_fabricate_success
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(250),
         },
         ModelTaskConfig {
@@ -1215,6 +1400,10 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(250),
         },
         ModelTaskConfig {
@@ -1361,6 +1550,10 @@ async fn shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline() 
         CommitCoordinator::new(store),
         RunTaskConfig {
             command_capacity: 4,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(10),
         },
         ModelTaskConfig {

@@ -12,23 +12,24 @@ use finstack_ai_kernel::{
     CancellationInitiator, CancellationPropagation, CancellationRequestTag, CommittedBatch,
     ContentBlock, Digest, EffectOutputContract, EffectOutputKind, Id, IdTag, KernelInput, LaneTag,
     Message, MessageRole, Metadata, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
-    RawJson, RecordBody, ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPhase,
-    RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity, SessionTag, Stage,
-    StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock, ToolCallId, ToolCallPlan,
-    ToolCallTag, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
-    TransitionEnv, Usage, ValidationIssue, ValidationOutcome,
+    RawJson, RecordBody, ReducerStageOutcome, RetrySafety, RunAccepted, RunEventBody, RunEventKind,
+    RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity,
+    SessionTag, Stage, StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock, ToolCallId,
+    ToolCallPlan, ToolCallTag, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress,
+    ToolResultBlock, TransitionEnv, Usage, ValidationIssue, ValidationOutcome,
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, CommitCoordinator, CommitCoordinatorError,
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
     IdGenerationError, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, LoadedSession,
     LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
     ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelToolCall, PortFuture, RandomSource, ResolvedToolCatalog, RunHandle, RunHandleError,
-    RunStatus, RunTaskConfig, RunTaskOwner, SideEffectClass, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolError,
-    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamAssembler,
-    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler,
-    Toolset, ToolsetRegistration, UsageDelta, resolve_model_context_profile,
+    ModelToolCall, PortFuture, ProgressCoalescing, RandomSource, ResolvedToolCatalog, RunHandle,
+    RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner, SideEffectClass, SnapshotReceipt,
+    SnapshotRequest, StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource,
+    ToolCallDelta, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
+    ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, UsageDelta, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -545,6 +546,10 @@ async fn setup_with_failure_policy(
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 8,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(500),
         },
         ModelTaskConfig {
@@ -1099,6 +1104,76 @@ async fn next_model_sequence_for_plan(
 }
 
 #[tokio::test]
+async fn runtime_publishes_tool_progress_before_tool_settlement() {
+    let completed = ToolResult {
+        output: RawJson::parse(br#"{"ok":true,"value":1}"#).expect("output"),
+        is_error: false,
+    };
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![
+            ScriptedToolAction::Block(Arc::from("progress-start")),
+            ScriptedToolAction::Emit(Ok(ToolStreamItem::Progress(
+                ToolProgress::try_new("halfway", Some(50)).expect("progress"),
+            ))),
+            ScriptedToolAction::Block(Arc::from("terminal-gate")),
+            ScriptedToolAction::Emit(Ok(ToolStreamItem::Completed(completed))),
+        ],
+    };
+    let (mut owner, store, toolset, handle) =
+        setup(1, vec![plan], 1, 1, ToolExecutionMode::Parallel).await;
+    let control = toolset.control();
+    while control.entries("progress-start") == 0 {
+        tokio::task::yield_now().await;
+    }
+    let mut subscription = handle
+        .subscribe_events(EventSubscriptionConfig {
+            queue_capacity: 2,
+            filter: EventFilter {
+                include_durable: false,
+                include_transient: true,
+                kinds: Arc::from([RunEventKind::ToolProgress]),
+                max_sensitivity: Sensitivity::Confidential,
+            },
+            batching: EventBatchConfig {
+                flush_count: 8,
+                flush_bytes: 64 * 1_024,
+                flush_interval: StdDuration::from_secs(1),
+            },
+            progress_coalescing: ProgressCoalescing::Disabled,
+            lag_policy: EventLagPolicy::BlockBounded {
+                timeout: StdDuration::from_millis(100),
+            },
+        })
+        .await
+        .expect("subscription");
+
+    control.release("progress-start");
+    while control.entries("terminal-gate") == 0 {
+        tokio::task::yield_now().await;
+    }
+    let batch = subscription.next_batch().await.expect("progress batch");
+    assert_eq!(batch.events().len(), 1);
+    let RunEventBody::ToolProgress(progress) = batch.events()[0].body() else {
+        panic!("expected tool progress");
+    };
+    assert_eq!(
+        progress,
+        &ToolProgress::try_new("halfway", Some(50)).expect("expected progress")
+    );
+    let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
+        .await
+        .expect("recover before terminal");
+    assert!(recovered.state().active_tool_batch.is_some());
+    assert!(recovered.state().tool_settlements.is_empty());
+
+    control.release("terminal-gate");
+    wait_for_phase(&store, RunPhase::AfterToolBatch).await;
+    owner.shutdown().await;
+    assert_eq!(handle.status(), RunStatus::Stopped);
+}
+
+#[tokio::test]
 async fn tool_progress_advances_the_transient_sequence_without_entering_the_journal() {
     let completed = ToolResult {
         output: RawJson::parse(br#"{"ok":true,"value":1}"#).expect("output"),
@@ -1200,6 +1275,10 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
         CommitCoordinator::new(store.clone()),
         RunTaskConfig {
             command_capacity: 8,
+            event_hub: EventHubConfig {
+                source_capacity: 16,
+                max_subscribers: 8,
+            },
             shutdown_deadline: StdDuration::from_millis(500),
         },
         ModelTaskConfig {
