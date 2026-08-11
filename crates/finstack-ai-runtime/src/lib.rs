@@ -206,3 +206,43 @@ pub use ingress::{
 
 #[cfg(feature = "native-tokio")]
 pub use id_generation::{OsRandomSource, SystemClock};
+
+/// Native driver utilities used by the SDK facade without exposing Tokio
+/// types in its public API.
+#[cfg(feature = "native-tokio")]
+pub mod native_driver {
+    use std::future::Future;
+    use std::time::Duration;
+
+    /// The native driver deadline elapsed before the future completed.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct TimeoutElapsed;
+
+    impl std::fmt::Display for TimeoutElapsed {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("native driver deadline elapsed")
+        }
+    }
+
+    impl std::error::Error for TimeoutElapsed {}
+
+    /// Await a future until the native driver deadline elapses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TimeoutElapsed`] when the future does not complete before the
+    /// requested duration.
+    pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, TimeoutElapsed>
+    where
+        F: Future,
+    {
+        tokio::time::timeout(duration, future)
+            .await
+            .map_err(|_| TimeoutElapsed)
+    }
+
+    /// Cooperatively yield one turn to the native driver.
+    pub async fn yield_now() {
+        tokio::task::yield_now().await;
+    }
+}

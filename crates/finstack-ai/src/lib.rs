@@ -7,11 +7,19 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "native-tokio")]
+mod agent;
 mod bundle;
 mod registry;
 mod result;
 mod spec;
 
+#[cfg(feature = "native-tokio")]
+pub use agent::{
+    AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE, AGENT_RUN_TIMEOUT,
+    AGENT_RUN_UNSUPPORTED_PLAN, Agent, AgentRunError, AgentRunOutput, AgentRunRequest,
+    NativeAgentBuilder,
+};
 pub use bundle::{
     BUNDLE_RESOLUTION_CONFLICT, BUNDLE_RESOLUTION_INVALID, BUNDLE_RESOLUTION_LOCK_MISMATCH,
     BUNDLE_RESOLUTION_MISSING, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleConflict,
@@ -19,6 +27,8 @@ pub use bundle::{
     CompatibilityRequirements, HostFeature, LockedBundle, LockedCapability, LockedComponent,
     LockedComponentKind, RequiredServices, ResolvedAgentLock, RuntimeServices, VersionRequirement,
 };
+#[cfg(feature = "native-tokio")]
+pub use finstack_ai_kernel::{OperationLocator, PrincipalRef, RunSecurityContext, SessionId};
 pub use finstack_ai_runtime as runtime;
 pub use registry::{
     AGENT_BUILD_CANCELLED, AGENT_BUILD_CONFIGURATION_CONFLICT, AGENT_BUILD_DUPLICATE_SELECTION,

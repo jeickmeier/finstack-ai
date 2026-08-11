@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "mode": "warning_only",
+  "thresholds": {
+    "idle_bytes_per_session_max": 131072,
+    "model_reducer_mean_ns_max": 500000,
+    "model_stream_256_items_mean_ns_max": 50000,
+    "release_smoke_binary_bytes_max": 2000000
+  }
+}

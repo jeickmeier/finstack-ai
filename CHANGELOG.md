@@ -24,6 +24,7 @@ Through pre-1.0, semantic core crates, Python/JavaScript binding distributions, 
 - Golden-trace and scripted-input schemas, fixtures, and Rust conformance harness (PR-005)
 - Criterion benchmark groups with machine-readable metadata and non-blocking `benchmark.yml` (PR-005)
 - `mise run conformance`, `benchmark`, and `benchmark-smoke` tasks (PR-005)
+- Native `Agent` execution facade and strict direct-handle builder, offline OpenAI-compatible model/tool-loop examples, calculator and capability-scoped filesystem batteries, and reproducible `0.0.1-dev` staging (PR-026)
 
 ### Changed
 

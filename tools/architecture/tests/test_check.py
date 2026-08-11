@@ -139,6 +139,26 @@ class EdgeTests:
         check_workspace_edges(ctx, meta)
         assert any(d.check_id == "ARCH004" for d in ctx.failing())
 
+    def test_application_may_compose_native_extension_leaves(self) -> None:
+        policy = load_toml(TOOL_DIR / "policy.toml")
+        ctx = CheckContext(repo_root=REPO_ROOT, policy=policy, allowlist=[])
+        application = _pkg("example", "app-id", str(REPO_ROOT / "examples/example/Cargo.toml"))
+        provider = _pkg("provider", "provider-id", str(REPO_ROOT / "extensions/providers/example/Cargo.toml"))
+        toolset = _pkg("toolset", "tool-id", str(REPO_ROOT / "extensions/toolsets/example/Cargo.toml"))
+        store = _pkg("store", "store-id", str(REPO_ROOT / "extensions/stores/example/Cargo.toml"))
+        meta = _metadata(
+            [application, provider, toolset, store],
+            {
+                "app-id": ["provider-id", "tool-id", "store-id"],
+                "provider-id": [],
+                "tool-id": [],
+                "store-id": [],
+            },
+            ["app-id", "provider-id", "tool-id", "store-id"],
+        )
+        check_workspace_edges(ctx, meta)
+        assert ctx.failing() == []
+
 
 class SourceStripTests:
     def test_strips_comments_and_strings(self) -> None:

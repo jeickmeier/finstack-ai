@@ -1,0 +1,14 @@
+[package]
+name = "finstack-ai-native-user-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+finstack-ai = { path = "../../../crates/finstack-ai" }
+finstack-ai-native-examples = { path = "../../../examples/rust-minimal" }
+finstack-ai-provider-openai-compatible = { path = "../../../extensions/providers/finstack-ai-provider-openai-compatible" }
+finstack-ai-tools-calculator = { path = "../../../extensions/toolsets/finstack-ai-tools-calculator" }
+tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt-multi-thread"] }
