@@ -20,7 +20,7 @@ from pathlib import Path
 TOOL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOL_DIR.parents[1]
 PACKAGE = "finstack-ai-test"
-WORKLOAD = "conformance-noop-and-pr009-reducer-groups"
+WORKLOAD = "reducer-model-tool-throughput-and-idle-session-memory"
 ARTIFACT_ROOT = REPO_ROOT / "target" / "benchmark"
 METADATA_SCHEMA = (
     REPO_ROOT / "schemas" / "benchmark-report" / "v1" / "metadata.schema.json"
@@ -31,6 +31,21 @@ def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> 
     """Run a command and fail loudly on non-zero exit."""
     print("+", " ".join(command), flush=True)
     subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def run_capture(command: list[str], *, cwd: Path) -> str:
+    """Run a command and return merged text output."""
+    print("+", " ".join(command), flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    output = completed.stdout + completed.stderr
+    print(output, end="")
+    return output
 
 
 def require_ci_commit() -> bool:
@@ -150,9 +165,9 @@ def build_metadata(
         },
         "generated_at_unix_ms": int(time.time() * 1000),
         "notes": (
-            "Non-blocking aggregate Criterion evidence: no-op fixture "
-            "load/normalize/compare and real PR-009 reducer execution groups. "
-            "Framework-only paths; no external model latency."
+            "Non-blocking framework-only evidence: reducer cost, normalized model "
+            "stream throughput, normalized tool stream throughput, and incremental "
+            "idle-session RSS. No external provider, network, or storage latency."
         ),
     }
 
@@ -193,6 +208,69 @@ def compile_benches() -> None:
         ],
         cwd=REPO_ROOT,
     )
+    run(
+        [
+            "cargo",
+            "bench",
+            "-p",
+            PACKAGE,
+            "--bench",
+            "native_runtime",
+            "--locked",
+            "--no-run",
+        ],
+        cwd=REPO_ROOT,
+    )
+
+
+def parse_idle_memory(output: str) -> dict[str, int]:
+    """Parse the native idle-session measurement marker."""
+    prefix = "IDLE_SESSION_MEMORY "
+    matches = [
+        line.removeprefix(prefix)
+        for line in output.splitlines()
+        if line.startswith(prefix)
+    ]
+    if len(matches) != 1:
+        raise SystemExit("benchmark expected exactly one idle-session memory result")
+    parsed = json.loads(matches[0])
+    required = {
+        "baseline_kib",
+        "resident_kib",
+        "incremental_kib",
+        "sessions",
+        "bytes_per_session",
+    }
+    if set(parsed) != required or not all(
+        isinstance(value, int) for value in parsed.values()
+    ):
+        raise SystemExit("benchmark received invalid idle-session memory result")
+    return parsed
+
+
+def measure_idle_memory(*, smoke: bool, raw_dir: Path) -> None:
+    """Run the bounded native idle-session RSS baseline."""
+    sessions = 128 if smoke else 512
+    output = run_capture(
+        [
+            "cargo",
+            "bench",
+            "-p",
+            PACKAGE,
+            "--bench",
+            "native_runtime",
+            "--locked",
+            "--",
+            "--sessions",
+            str(sessions),
+        ],
+        cwd=REPO_ROOT,
+    )
+    measurement = parse_idle_memory(output)
+    (raw_dir / "idle-session-memory.json").write_text(
+        json.dumps(measurement, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def run_benches(*, smoke: bool, raw_dir: Path) -> None:
@@ -214,6 +292,7 @@ def run_benches(*, smoke: bool, raw_dir: Path) -> None:
         # `--quick` is mutually exclusive with explicit sample/time overrides.
         args.extend(["--", "--quick"])
     run(args, cwd=REPO_ROOT, env=env)
+    measure_idle_memory(smoke=smoke, raw_dir=raw_dir)
     criterion_dir = REPO_ROOT / "target" / "criterion"
     if criterion_dir.is_dir():
         staged = raw_dir / "criterion"

@@ -149,6 +149,18 @@ cargo test -p finstack-ai-test --test tool_port cancellation_cleans_running_and_
 cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_children_without_leaks --locked
 """
 
+[tasks.test-runtime-gate]
+description = "Run PR-020 commit-prefix, bounded scheduling, stress, and leak proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-runtime --features native-tokio coordinator::tests --locked
+cargo test -p finstack-ai-runtime --features native-tokio repeated_idle_owners_join_every_owned_task_without_abort --locked
+cargo test -p finstack-ai-runtime --features native-tokio event_hub::native::tests::stalled_observer_does_not_delay_interactive_delivery --locked
+cargo test -p finstack-ai-test --test model_port failed_model_request_append_never_executes_the_model --locked
+cargo test -p finstack-ai-test --test model_port repeated_model_runs_settle_and_shutdown_without_stream_or_task_leaks --locked
+cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_children_without_leaks --locked
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """
@@ -362,6 +374,21 @@ rustup target add --toolchain nightly-2026-08-01 wasm32-unknown-unknown
 cargo +nightly-2026-08-01 check --workspace --all-targets --locked
 cargo +nightly-2026-08-01 check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
 cargo +nightly-2026-08-01 check --manifest-path fuzz/Cargo.toml --all-targets --locked
+"""
+
+[tasks.test-miri]
+description = "Run representative unsafe-free kernel core paths under pinned Miri"
+run = """
+set -euo pipefail
+rustup toolchain install nightly-2026-08-01 --profile minimal
+rustup component add --toolchain nightly-2026-08-01 miri rust-src
+if rg -n '\bunsafe\b' crates/finstack-ai-kernel crates/finstack-ai-runtime; then
+  echo 'kernel/runtime source unexpectedly contains unsafe code'
+  exit 1
+fi
+cargo +nightly-2026-08-01 miri test -p finstack-ai-kernel --lib raw_json::tests::parse_canonicalizes_and_shares_bytes_on_clone --locked -- --exact
+cargo +nightly-2026-08-01 miri test -p finstack-ai-kernel --lib reducer::apply::tests::semantic_tampering_precedes_capacity_failure --locked -- --exact
+cargo +nightly-2026-08-01 miri test -p finstack-ai-kernel --lib reducer::fingerprint::tests::semantically_equal_canonical_raw_json_has_equal_fingerprints --locked -- --exact
 """
 
 [tasks.fuzz-smoke]

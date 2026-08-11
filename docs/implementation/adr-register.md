@@ -21,19 +21,19 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-10 (PR-018 locally integrated at `3fe0314c6434211e1c8f493f24401888f9609050`; hosted and independent evidence not claimed).
+Index last reconciled: 2026-08-11 (PR-020 immutable implementation candidate at `91a9faec7d58e4ea594e5459bc48f6f977975dbb`; local integration, G2, hosted, and independent evidence not yet claimed).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | ADR-001 | `microkernel-boundary` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 merge and G1 boundary evidence) |
 | ADR-002 | `kernel-continuation` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 exhaustive continuation evidence and G1) |
 | ADR-003 | `deterministic-effects` | Core/runtime lead | PR-002, PR-008–PR-010; G1 | Accepted | Standalone | Implemented | Verified (PR-013 hosted property/fuzz evidence and G1) |
-| ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | Not started | Missing |
+| ADR-004 | `commit-before-effect` | Core/runtime lead | PR-014, PR-020, PR-048; G2, G5 | Accepted | Standalone | In progress | Partial ([PR-014 commit loop](artifacts/pr-014/README.md) and [PR-020 immutable crash-prefix/manual-drive evidence](artifacts/pr-020/README.md); local integration/G2 and PR-048/G5 remain) |
 | ADR-005 | `six-ports` | Core/runtime lead | PR-002, PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 Model](artifacts/pr-015/README.md), [PR-016 Toolset](artifacts/pr-016/README.md), and [PR-018 ContextProvider/Middleware/Observer](artifacts/pr-018/README.md) immutable evidence; SDK composition remains) |
 | ADR-006 | `direct-native-path` | Core/runtime lead | PR-015–PR-018, PR-021, PR-026 | Accepted | Standalone | In progress | Partial ([PR-015 Model](artifacts/pr-015/README.md), [PR-016 Toolset](artifacts/pr-016/README.md), and [PR-018 direct native extension](artifacts/pr-018/README.md) immutable evidence; SDK/provider paths remain) |
 | ADR-007 | `shared-binding-engine` | Bindings lead | PR-005, PR-027–PR-038; G4 | Accepted | Standalone | In progress | Partial (PR-005 harness Done @ `c1108d2`; Python/WASM parity deferred) |
 | ADR-008 | `declarative-capabilities` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Not started | Missing |
-| ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Standalone | In progress | Partial ([PR-017 bounded delivery](artifacts/pr-017/README.md) and [PR-018 immutable Observer/Middleware separation and TM-17 evidence](artifacts/pr-018/README.md); PR-020 and PR-057 remain) |
+| ADR-009 | `observer-middleware-separation` | Core/runtime lead | PR-017, PR-018, PR-020, PR-057 | Accepted | Standalone | In progress | Partial ([PR-017 bounded delivery](artifacts/pr-017/README.md), [PR-018 Observer/Middleware separation](artifacts/pr-018/README.md), and [PR-020 immutable slow-observer/stress evidence](artifacts/pr-020/README.md); local integration and PR-057 remain) |
 | ADR-010 | `optional-wasm-isolation` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Standalone | In progress | Partial (PR-002 wasm-host / graph checks) |
 | ADR-011 | `no-native-dylib-abi` | Runtime/security owner | PR-002, PR-049–PR-054; G6 | Accepted | Standalone | In progress | Partial (PR-002 plugin-path classification) |
 | ADR-012 | `immutable-lanes` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
@@ -207,6 +207,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-10 | ADR-030 | Evidence | me@jeickmeier.com | Partial | Partial | PR-018 target-correct boxed extension ABI is locally integrated; PR-026/G3 review remains | PR-018-E-integration-3fe0314c6434 | me@jeickmeier.com |
 | 2026-08-10 | ADR-034 | Evidence | me@jeickmeier.com | Partial | Partial | PR-018 committed middleware outcome and recovery evidence is locally integrated; PR-048 end-to-end recovery remains | PR-018-E-integration-3fe0314c6434 | me@jeickmeier.com |
 | 2026-08-10 | ADR-037 | Evidence | me@jeickmeier.com | Partial | Partial | PR-018 compaction and TM-21 evidence is locally integrated; PR-023/PR-048/PR-056 remain | PR-018-E-integration-3fe0314c6434 | me@jeickmeier.com |
+| 2026-08-11 | ADR-004 | Implementation | me@jeickmeier.com | Not started | In progress | PR-014 commit coordinator plus PR-020 immutable manual-drive and crash-prefix delivery establish the native commit-before-effect boundary; PR-048 durable end-to-end work remains | PR-014-E-integration-e7ec699722ab; PR-020-E-faults-6d3a8f1c5b72 | me@jeickmeier.com |
+| 2026-08-11 | ADR-004 | Evidence | me@jeickmeier.com | Missing | Partial | Immutable store-failure, append/apply/recheck, zero-dispatch recovery, explicit release, aggregate CI, and security evidence pass; local integration/G2 and PR-048/G5 remain | PR-020-E-faults-6d3a8f1c5b72; PR-020-E-security-7b3d1a8c5e92; PR-020-E-ci-1f6a9c4e2b83 | me@jeickmeier.com |
+| 2026-08-11 | ADR-009 | Evidence | me@jeickmeier.com | Partial | Partial | PR-020 immutable stress evidence proves stalled observers remain isolated while bounded owner/model/tool cleanup succeeds; local integration and PR-057 remain | PR-020-E-stress-8c1f5a3d7b94; PR-020-E-security-7b3d1a8c5e92 | me@jeickmeier.com |
 
 ## Current record and evidence links
 

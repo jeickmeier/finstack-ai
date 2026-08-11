@@ -8,6 +8,7 @@
 //! PR-017 adds bounded native event delivery, batching, and backpressure.
 //! PR-018 completes the six-port surface with context, middleware, and observer contracts.
 //! PR-019 connects durable cancellation, deadlines, retry timers, and task shutdown.
+//! PR-020 adds deterministic pre-dispatch manual drive and the native runtime gate proofs.
 
 #![warn(missing_docs)]
 
@@ -35,6 +36,8 @@ mod error;
 mod event_hub;
 mod id_generation;
 mod journal;
+#[cfg(feature = "native-tokio")]
+mod manual_drive;
 mod middleware;
 mod model;
 mod observer;
@@ -88,6 +91,11 @@ pub use id_generation::{Clock, IdGenerationError, RandomSource, UuidV7Generator}
 pub use journal::{
     JournalStore, LoadRequest, LoadedSession, OpaqueSnapshot, SnapshotReceipt, SnapshotRequest,
     StoreCommitTimestamp, StoreError, StoreHealth,
+};
+#[cfg(feature = "native-tokio")]
+pub use manual_drive::{
+    ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
+    ManualDrivePermit,
 };
 pub use middleware::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,

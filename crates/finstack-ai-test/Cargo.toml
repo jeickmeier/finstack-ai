@@ -29,5 +29,9 @@ tokio = { workspace = true }
 name = "conformance"
 harness = false
 
+[[bench]]
+name = "native_runtime"
+harness = false
+
 [lints]
 workspace = true
