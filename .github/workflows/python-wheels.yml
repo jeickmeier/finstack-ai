@@ -7,7 +7,9 @@ name: python-wheels
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "codex/pr-*"
   workflow_dispatch:
 
 permissions:
