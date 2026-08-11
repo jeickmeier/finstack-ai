@@ -1,0 +1,66 @@
+PR-016 immutable local integration validation
+Date: 2026-08-10
+Base revision: b8af2ae1d15307371a1413ad007328df50282198
+Implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
+Candidate-evidence revision: 9f7c42d77c966d71ac67b5c44f1d7a64ffa242b6
+Candidate-evidence tree: fe657d9eed055c9424471854854816de37f6f890
+Local merge revision: b2f678693fcd3eb2fe09aafca55c4e06c17371ec
+Merge parents: b8af2ae1d15307371a1413ad007328df50282198 and
+  9f7c42d77c966d71ac67b5c44f1d7a64ffa242b6
+Merge tree: fe657d9eed055c9424471854854816de37f6f890
+Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1; Python 3.14
+Result: PASS for local integration
+
+Integration identity
+
+- The no-fast-forward merge has the expected base and candidate-evidence
+  parents.
+- The merge tree exactly equals the candidate-evidence tree.
+- The evidence-only commit changes docs/implementation files only; production
+  code and tests remain the implementation tree introduced by
+  aab7b81b8cb36eca82860ffa38ded7ba82a14247.
+- The worktree was clean immediately after the merge.
+
+Post-merge validation
+
+1. mise run test-tool
+   PASS: all 15 Toolset integration tests, native/WASM default-feature-free ABI
+   leaf checks, and the release-mode native panic-containment fixture pass.
+
+2. mise run ci
+   The first post-merge invocation returned success but its retained output
+   exposed transient missing Cargo artifacts in docs and check-minimal. Those
+   two gates were not credited from that invocation. Serial mise run docs and
+   mise run check-minimal reruns both passed. A warmed full mise run ci rerun
+   then passed without task errors; its retained output was scanned for hidden
+   task, compiler, and test failures.
+
+3. mise run release-reproducible
+   Exited successfully and reported that digest comparison is Linux-only, so
+   the comparison was skipped on Darwin. Linux reproducibility is not claimed.
+
+4. Supply-chain and security boundary
+   The clean aggregate includes supply-chain, secret, architecture, schema,
+   WASM/no-Tokio, release-smoke, workflow, benchmark-compile, and package-build
+   gates. Existing duplicate syn 2/3 and unused license-allowance warnings are
+   non-blocking; no advisory, denial, or secret finding occurred.
+
+Security and release closeout
+
+- The mandatory PR-016 scope review passed for TM-01, TM-02, TM-14, TM-16,
+  TM-18, the mapped SEC-INV controls, the jsonschema dependency change, and
+  the release panic-policy change. No unresolved PR-016-scope security or
+  release blocker remains for this local integration.
+- Hosted matrices and independent review remain unavailable evidence, not a
+  claimed result of this local no-push/no-PR delivery path. Their absence does
+  not pass G2 or any later release gate.
+
+Acceptance disposition
+
+- PR-016-A01 through PR-016-A05 remain Passed against the immutable
+  implementation evidence and are now linked to this exact local integration.
+- PR-016 is locally integrated and may be recorded Done.
+- No GitHub issue, actual pull request, push, hosted matrix, independent review,
+  Linux digest comparison, G2 decision, or later recovery/binding behavior is
+  claimed.
