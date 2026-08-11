@@ -235,6 +235,32 @@ fi
 mise run architecture
 """
 
+[tasks.test-pr026]
+description = "Run PR-026 native facade and offline developer-preview examples"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai --locked
+cargo clippy -p finstack-ai -p finstack-ai-native-examples --all-targets --locked -- -D warnings
+cargo run --quiet --manifest-path fixtures/ci/native-user/Cargo.toml --locked
+cargo run --quiet -p finstack-ai-native-examples --bin minimal --locked
+cargo run --quiet -p finstack-ai-native-examples --bin coding --locked
+cargo run --quiet -p finstack-ai-native-examples --bin service --locked
+cargo run --quiet -p finstack-ai-native-examples --bin diagnostic --locked
+"""
+
+[tasks.preview-performance]
+description = "Generate native preview benchmark, memory, binary-size, and warning reports"
+run = """
+set -euo pipefail
+mise run benchmark-smoke
+mise run release-smoke
+uv run --no-project python tools/preview/check.py
+"""
+
+[tasks.preview-stage]
+description = "Reproducibly stage the native 0.0.1-dev developer preview"
+run = "uv run --no-project python tools/preview/release.py"
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """
@@ -308,11 +334,11 @@ uv run --no-project python tools/architecture/check.py
 
 [tasks.lint-ci]
 description = "Lint CI helper Python sources"
-run = "uv run --no-project --with ruff==0.12.11 ruff check tools/ci tools/security"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/ci tools/security tools/preview"
 
 [tasks.format-ci]
 description = "Check CI helper Python formatting"
-run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/ci tools/security"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/ci tools/security tools/preview"
 
 [tasks.test-ci]
 description = "Run CI and security helper unit tests"

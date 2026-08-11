@@ -40,7 +40,7 @@ toolset = ["runtime"]
 observer = ["runtime"]
 store = ["kernel", "runtime", "protocol"]
 plugin = ["runtime", "sdk", "protocol"]
-application = ["sdk", "runtime", "protocol"]
+application = ["sdk", "runtime", "protocol", "provider", "toolset", "observer", "store", "plugin"]
 # Fixtures and tooling may depend on core packages for checks.
 fixture = ["kernel", "runtime", "sdk", "protocol", "test"]
 tooling = ["kernel", "runtime", "sdk", "protocol", "test"]

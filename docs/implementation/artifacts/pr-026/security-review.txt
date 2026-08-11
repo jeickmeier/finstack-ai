@@ -1,0 +1,32 @@
+PR-026 native preview security review
+Date: 2026-08-11
+Candidate: b1bddac82041d1780651d9cee4d2378dba379ee5
+Reviewer: me@jeickmeier.com
+Result: PASS for implemented candidate scope
+
+Reviewed controls
+
+- SEC-INV-002: Agent execution still submits kernel transitions through the
+  commit coordinator; model/tool work remains owned by the existing
+  commit-before-effect runtime.
+- SEC-INV-004/007/008: run security context and exact locator are constructed
+  before acceptance; the facade is cycle- and timeout-bounded; write-class
+  tools receive RequireApproval rather than ambient authorization.
+- SEC-INV-005 and TM-04: examples are keyless loopback fixtures; AgentSpec,
+  BundleSpec, exact locks, diagnostics, staged manifests, and release reports
+  contain no credential material; the aggregate secret scan and canary pass.
+- TM-03/TM-16: filesystem access remains in the PR-025 capability-scoped leaf;
+  the facade rejects unsupported resolved context/middleware/observer stages
+  rather than silently bypassing their semantics.
+- TM-18: Cargo package verification, cargo-deny, pinned workflow actions,
+  architecture checks, and exact archive hashes passed on the candidate.
+
+Residual conditions
+
+- Native extensions are trusted in-process code, not an OS sandbox.
+- The local examples do not authorize side-effecting filesystem calls.
+- Live endpoint credentials, hosted CI, Linux/Windows execution, publication,
+  and independent security review were not exercised.
+
+No exception or ADR trigger was required for the implemented candidate. The
+missing hosted matrix is a delivery/gate blocker, not a security waiver.

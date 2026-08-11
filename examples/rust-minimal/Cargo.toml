@@ -1,0 +1,22 @@
+[package]
+name = "finstack-ai-native-examples"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Offline native developer-preview examples for finstack-ai"
+publish = false
+
+[dependencies]
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-provider-openai-compatible = { workspace = true }
+finstack-ai-store-memory = { workspace = true }
+finstack-ai-tools-calculator = { workspace = true }
+finstack-ai-tools-filesystem = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
+
+[lints]
+workspace = true
