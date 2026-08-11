@@ -60,7 +60,7 @@ impl ManualClock {
     ///
     /// # Errors
     ///
-    /// Returns a source error for a poisoned clock or [`TimeError`] on overflow.
+    /// Returns a source error for a poisoned clock or time-range overflow.
     pub fn advance(&self, duration: Duration) -> Result<Timestamp, IdGenerationError> {
         let mut now = self
             .now
