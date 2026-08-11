@@ -2,15 +2,16 @@
 
 PR-024 implements the trusted native OpenAI-compatible Chat Completions
 provider for the public runtime `Model` port. The immutable implementation
-candidate is commit `54cb0e40612161abddb62eda1ffb03b99819e267` with tree
-`3c3d79a42e0405808ce37f31dbee4b482f421f36` on
-`codex/pr-024-openai-provider`.
+candidate is commit `54cb0e40612161abddb62eda1ffb03b99819e267`; its evidence
+commit is `4dcb555af58a3cb4c35dc22b01f084e612dd394f`. The local `main`
+merge is `4aac8026c0334892c58787f259a0b34b0b5c4d4b`, whose tree exactly
+matches the evidence tree `31876c33426d8e242a808626bd1eb181f93c6f40`.
 
 The exact candidate command inventory is in
 [`candidate-validation.txt`](candidate-validation.txt), and the security and
 threat-model disposition is in [`security-review.txt`](security-review.txt).
-Local integration evidence will be added after the candidate evidence commit is
-merged to `main` and post-merge gates pass.
+Local merge identity and post-merge gates are recorded in
+[`integration-validation.txt`](integration-validation.txt).
 
 ## Local acceptance map
 
@@ -26,4 +27,3 @@ The implementation adds no provider router, OAuth flow, Responses API, browser
 adapter, credential acquisition, kernel port, or semantic-model replacement.
 The optional live smoke remains ignored and was not run. No hosted run, actual
 pull request, push, publication, or independent review is claimed.
-
