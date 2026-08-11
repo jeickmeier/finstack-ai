@@ -1,0 +1,65 @@
+PR-021 security and threat-model review
+Date: 2026-08-11
+Branch: codex/pr-021-rust-sdk
+Base revision: 6d69aa720b426ebb9afe3524743a6bb464737516
+Reviewed implementation revision: d12abc5ec917be1d725cafdd7e9250cb23f9799f
+Reviewed implementation tree: 5e4b2c4b9476d66f5c0071995ef58a8d5549a3f2
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-021 A01-A05 at the immutable implementation tree; local
+integration remains pending
+
+Scope reviewed
+
+- Trusted native extension source identity, aliases, duplicate/replacement
+  policy, typed ready handles and factories, canonical configuration identity,
+  construction cancellation/deadline propagation, model warmup, lifecycle
+  ownership, resolution diagnostics, and immutable direct-handle plans.
+- FR-EXT, Architecture section 7, TDD sections 8.2, 9, 17.4, and 29.2;
+  ADR-005, ADR-006, ADR-030, ADR-037; Threat Model TM-06.
+- Aggregate minimal/WASM/architecture, dependency, supply-chain, secret,
+  compatibility, packaging, and Rust API validation.
+
+Control disposition
+
+PASS - explicit trusted in-process boundary / TM-06
+Every extension declares `ExtensionTrust::TrustedInProcess`; the SDK makes no
+sandbox or reduced-authority claim. Registration is transactional and bound to
+one validated namespaced source. Dynamic loading, package discovery, isolated
+plugins, and marketplace trust remain excluded and retain their later owners.
+
+PASS - substitution and ambiguity controls
+Duplicate identities reject by default. Replacement requires an exact existing
+source and primary kind, and emits the replaced source. Aliases are local,
+bounded, conflict checked, and expanded before exact kind/version validation.
+Diagnostics retain request and registration sources without retaining the
+registry or performing later name lookup.
+
+PASS - construction, configuration, and lifecycle controls
+Typed factories receive only the exact selected component, optional canonical
+configuration, bounded non-secret metadata, a child cancellation signal, and a
+communicated deadline. Successful results are cached against the canonical
+configuration digest. A conflicting later configuration fails closed. Selected
+model warmup occurs once before a resolved agent is returned. Resolved-agent
+shutdown hooks are at-most-once; host-owned hooks remain explicitly host-owned.
+
+PASS - secret and hot-path containment
+Resolution reports never retain raw configuration, credentials, factory error
+sources, or port payloads. Errors expose stable codes and bounded safe messages.
+`ResolvedAgent` and `ResolvedRunPlan` retain only frozen metadata and direct port
+handles, so token/tool progress cannot re-enter registry name lookup. No logging,
+network client, filesystem authority, environment read, provider credential
+surface, or serialized kernel contract is added.
+
+Residual obligations and review decision
+
+- Trusted native extensions retain the full authority of their embedding
+  process by design. Isolated WIT/Wasmtime plugin controls remain later work and
+  are not implied by PR-021.
+- Hosts remain responsible for cancelling the construction signal when the
+  communicated absolute deadline fires; PR-019 owns the runtime timer behavior.
+- Package discovery/dynamic loading, `AgentSpec`, capabilities/bundles,
+  providers, tools, bindings, and developer-preview publication remain in
+  PR-022 and later logical PRs.
+- No planning conflict, security exception, compatibility break, new trust
+  class, seventh port, or ADR trigger was found. Hosted OS matrices and
+  independent review are not claimed.

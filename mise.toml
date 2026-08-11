@@ -161,6 +161,16 @@ cargo test -p finstack-ai-test --test model_port repeated_model_runs_settle_and_
 cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_children_without_leaks --locked
 """
 
+[tasks.test-sdk]
+description = "Run PR-021 typed registration, factory, lifecycle, resolution, and target checks"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai --locked
+cargo clippy -p finstack-ai --all-targets --all-features --locked -- -D warnings
+cargo check -p finstack-ai --no-default-features --locked
+cargo check -p finstack-ai --target wasm32-unknown-unknown --no-default-features --features wasm-host --locked
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """
