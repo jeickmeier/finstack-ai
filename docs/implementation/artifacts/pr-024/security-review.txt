@@ -1,0 +1,68 @@
+PR-024 security and threat-model review
+Date: 2026-08-11
+Branch: codex/pr-024-openai-provider
+Reviewed implementation: 54cb0e40612161abddb62eda1ffb03b99819e267
+Reviewed tree: 3c3d79a42e0405808ce37f31dbee4b482f421f36
+Reviewer: me@jeickmeier.com
+Result: PASS for PR-024 A01-A05; local integration remains pending
+
+Scope reviewed
+
+- Authentication, secret custom headers, base URL/path/query configuration,
+  request IDs, private request DTOs, response/error handling, and Debug output.
+- Bounded incremental SSE framing, normalized stream assembly, cancellation,
+  timeouts, malformed/oversized input, and consumer-drop behavior.
+- Native structured output schema binding, tool-call arguments, usage, and
+  completion identity.
+- Provider/runtime/kernel dependency direction, native TLS dependency graph,
+  ADR-023, SEC-INV-005/007/012, and TM-04/TM-16/TM-18.
+
+PASS - TM-04 / SEC-INV-005 secret containment
+
+`SecretString`, `Authentication`, `SecretHeader`, and provider configuration use
+redacted Debug implementations. HTTP authentication and custom secret headers
+are built only inside the native client and require HTTPS; keyless local HTTP is
+explicit. URL userinfo/query/fragment input is rejected, and common secret query
+names fail closed. Provider error messages never include response bodies,
+configured header values, URLs, or transport source formatting. A canary is
+tested across every public secret-bearing Debug surface, an error-body canary is
+not exposed, recorded fixtures contain no credentials, and aggregate gitleaks
+plus the repository secret-scan canary pass. No secret enters a kernel record,
+runtime event, observer DTO, or provider descriptor.
+
+PASS - TM-16 / SEC-INV-007 hostile stream bounds
+
+Raw SSE events and the entire response body have independently configurable
+non-zero ceilings enforced before retained parsing. The channel between the
+network driver and consumer is bounded. Invalid UTF-8/JSON, mid-event EOF,
+missing `[DONE]`, multiple/non-zero choices, changed completion/tool names,
+non-contiguous tool indices, invalid JSON arguments/output, and invalid provider
+identities fail closed with bounded stable errors. Runtime model assembly retains
+its existing text/reasoning/tool/usage terminal validation as the next boundary.
+Cancellation races network reads and closes the stream with a stable
+non-retryable cancellation error; dropping the consumer aborts the owned task.
+
+PASS - SEC-INV-012 / TM-18 dependency posture
+
+The provider is a trusted native leaf implementing the public runtime `Model`
+port. Kernel and runtime normal graphs contain neither the provider nor reqwest,
+and architecture checks pass after removing an initially detected direct
+provider-to-kernel edge. Redirects are disabled and one pooled client is reused.
+Native TLS satisfies the existing cargo-deny source/advisory/license policy
+without expanding the allowlist; the rejected rustls candidate is retained in
+candidate evidence. The provider is not enabled by kernel/runtime features and
+does not alter minimal or WASM production graphs.
+
+Architecture and residual-risk disposition
+
+- ADR-023 is implemented as accepted: Chat Completions is the reference network
+  provider and the scripted model remains the semantic reference.
+- Endpoint compatibility is an explicit versioned quirks table; unknown gateway
+  behavior is conservative. Exact service-specific live coverage remains an
+  opt-in ignored smoke and was not claimed.
+- Trusted host configuration can still direct requests to an arbitrary HTTP(S)
+  endpoint; this is explicit native authority, not isolated-plugin authority.
+- No router, OAuth acquisition, Responses API, browser credential path, dynamic
+  provider loading, new trust class, planning conflict, or ADR trigger was found.
+- Hosted OS matrices and independent review are not claimed.
+

@@ -1,0 +1,6 @@
+data: {"id":"chat-json-1","choices":[{"index":0,"delta":{"content":"{\"answer\":42}"},"finish_reason":"stop"}],"usage":null}
+
+data: {"id":"chat-json-1","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":4,"total_tokens":9}}
+
+data: [DONE]
+
