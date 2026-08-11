@@ -9,6 +9,7 @@ JSON Schema 2020-12 documents for scripted inputs and golden traces:
 ```text
 schemas/golden-trace/v1/scripted-input.schema.json
 schemas/golden-trace/v1/trace.schema.json
+schemas/golden-trace/v1/test-kit.schema.json
 ```
 
 Payload declaration ceilings mirror Technical Design §6.5. Format v1 retains

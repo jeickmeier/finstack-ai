@@ -1,0 +1,91 @@
+{
+  "format_version": 1,
+  "scenarios": [
+    {
+      "id": "child_run_lineage",
+      "input": {
+        "placements": ["same_session_new_lane", "isolated_session", "remote_session"],
+        "equal_retry": true
+      },
+      "expected": {
+        "exact_locator_committed": true,
+        "equal_retry_attaches": true,
+        "conflicting_request_fails_closed": true
+      },
+      "contracts": ["child.lineage.exact_locator", "child.lineage.equal_retry"]
+    },
+    {
+      "id": "deferred_external_completion",
+      "input": {
+        "original_effect_required": true,
+        "completion_scope": "tenant_session_effect"
+      },
+      "expected": {
+        "same_digest_idempotent": true,
+        "different_digest_conflict": true,
+        "restart_stable": true
+      },
+      "contracts": ["external_completion.identity", "external_completion.restart"]
+    },
+    {
+      "id": "typed_interaction_schema",
+      "input": {
+        "schema_draft": "draft_2020_12",
+        "strict_unknown_fields": true
+      },
+      "expected": {
+        "schema_validated_before_resume": true,
+        "stable_nested_paths": true
+      },
+      "contracts": ["interaction.schema.exact", "interaction.validation.path"]
+    },
+    {
+      "id": "duplicate_completion",
+      "input": {
+        "same_identity": true,
+        "equal_and_conflicting_payloads": true
+      },
+      "expected": {
+        "equal_duplicate_noop": true,
+        "conflicting_duplicate_rejected": true
+      },
+      "contracts": ["completion.idempotent", "completion.conflict"]
+    },
+    {
+      "id": "before_finalize_continuation",
+      "input": {
+        "candidate_exists": true,
+        "continue_model_once": true
+      },
+      "expected": {
+        "no_terminal_record_before_acceptance": true,
+        "fresh_model_cycle": true
+      },
+      "contracts": ["before_finalize.continuation", "before_finalize.terminal_boundary"]
+    },
+    {
+      "id": "compaction_projection",
+      "input": {
+        "protected_system_and_latest_user": true,
+        "complete_tool_pair": true,
+        "checkpoint_present": true
+      },
+      "expected": {
+        "canonical_history_immutable": true,
+        "protected_items_retained": true,
+        "tool_pair_atomic": true,
+        "checkpoint_digest_mismatch_is_cache_miss": true,
+        "hard_budget_enforced": true,
+        "shared_projection_bytes_equal": true
+      },
+      "contracts": [
+        "compaction.canonical_history_immutable",
+        "compaction.protected.retained",
+        "compaction.tool_pair.atomic",
+        "compaction.checkpoint.invalidated",
+        "compaction.hard_budget.enforced",
+        "compaction.projection.binding_parity"
+      ]
+    }
+  ]
+}

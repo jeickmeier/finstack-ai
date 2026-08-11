@@ -8,24 +8,44 @@
 
 #![warn(missing_docs)]
 
+mod compaction_conformance;
 mod conformance;
 mod fakes;
+mod golden_scenarios;
 mod message_fixture;
 mod paths;
+mod port_conformance;
 mod pr008_fixture;
 mod pr009_fixture;
 mod public_api_fixture;
 mod reducer_fixture;
+mod scripted_extensions;
 mod scripted_model;
 mod scripted_toolset;
 mod trace_fixture;
 
+pub use compaction_conformance::{
+    CompactionConformanceCase, CompactionConformanceReport, SharedCompactionProjection,
+    check_compaction_conformance,
+};
 pub use conformance::{
     AdapterCapability, AdapterOutcome, ConformanceAdapter, ConformanceReport, ConformanceRunner,
     DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
 };
-pub use fakes::{FixedClock, PatternRandomSource};
+pub use fakes::{
+    DeterministicIdSource, FixedClock, ManualClock, ManualGate, PatternRandomSource,
+    SequenceRandomSource,
+};
+pub use golden_scenarios::{
+    GoldenScenario, GoldenScenarioId, GoldenScenarioSuite, load_pr023_golden_scenarios,
+};
 pub use paths::{compatibility_fixture, repo_root, schema_path};
+pub use port_conformance::{
+    ContextConformanceCase, JournalStoreConformanceCase, MiddlewareConformanceCase,
+    ModelConformanceCase, PortConformanceFailure, ToolsetConformanceCase,
+    check_context_conformance, check_journal_store_conformance, check_middleware_conformance,
+    check_model_conformance, check_observer_conformance, check_toolset_conformance,
+};
 pub use public_api_fixture::{
     Expect, PublicApiFixture, PublicApiFixtureError, Recipe, discover_public_api_fixtures,
     load_public_api_fixture, run_all_public_api_fixtures, run_public_api_fixture,
@@ -33,6 +53,10 @@ pub use public_api_fixture::{
 pub use reducer_fixture::{
     ReducerExecution, ReducerRustAdapter, ReducerTerminalProjection, execute_reducer_trace,
     project_reducer_terminal,
+};
+pub use scripted_extensions::{
+    FaultJournalStore, ScriptedContextAction, ScriptedContextProvider, ScriptedMiddleware,
+    ScriptedMiddlewareAction, ScriptedObserver, ScriptedObserverAction, StoreOperation,
 };
 pub use scripted_model::{
     ScriptedInput, ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,

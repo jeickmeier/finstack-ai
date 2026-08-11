@@ -181,6 +181,19 @@ cargo test -p finstack-ai --all-features --locked
 cargo clippy -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --all-targets --all-features --locked -- -D warnings
 """
 
+[tasks.test-pr023]
+description = "Run PR-023 public test-kit, six-port, golden, and compaction conformance proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-test --locked
+cargo test -p finstack-ai-model-port-leaf-fixture -p finstack-ai-toolset-port-leaf-fixture --locked
+cargo test -p finstack-ai --test public_test_kit --locked
+cargo clippy -p finstack-ai-test -p finstack-ai-model-port-leaf-fixture -p finstack-ai-toolset-port-leaf-fixture -p finstack-ai --all-targets --locked -- -D warnings
+cargo check -p finstack-ai-test --no-default-features --locked
+mise run schema-governance
+mise run architecture
+"""
+
 [tasks.test-model]
 description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
 run = """

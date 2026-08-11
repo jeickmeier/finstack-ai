@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/golden-trace/v1/test-kit.schema.json",
+  "title": "TestKitGoldenScenarioSuite",
+  "description": "Language-neutral PR-023 public conformance scenarios.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "scenarios"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "scenarios": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "input", "expected", "contracts"],
+        "properties": {
+          "id": {
+            "enum": [
+              "child_run_lineage",
+              "deferred_external_completion",
+              "typed_interaction_schema",
+              "duplicate_completion",
+              "before_finalize_continuation",
+              "compaction_projection"
+            ]
+          },
+          "input": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": true
+          },
+          "expected": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": true
+          },
+          "contracts": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      }
+    }
+  }
+}
