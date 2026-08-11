@@ -2,18 +2,20 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use finstack_ai_kernel::{
     EffectId, EffectInput, KernelInput, PostCommitAction, ReducerStageOutcome,
 };
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
 use crate::{
-    CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelError,
-    ModelProgress, ModelRequest, ModelRequestDraft, ModelStreamAssembler, ModelTerminal,
-    PortFuture, RunCallContext, validate_model_request,
+    CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
+    ModelError, ModelProgress, ModelRequest, ModelRequestDraft, ModelStreamAssembler,
+    ModelTerminal, MonotonicDeadline, PortFuture, RunCallContext, validate_model_request,
 };
 
 pub(crate) struct ModelJob {
@@ -44,6 +46,7 @@ pub(crate) struct ModelDispatcher {
     profile: LockedModelContextProfile,
     jobs: mpsc::Sender<ModelJob>,
     active: ActiveEffects,
+    parent: CancellationSignal,
 }
 
 impl ModelDispatcher {
@@ -51,12 +54,14 @@ impl ModelDispatcher {
         model: Arc<dyn Model>,
         profile: LockedModelContextProfile,
         jobs: mpsc::Sender<ModelJob>,
+        parent: CancellationSignal,
     ) -> Self {
         Self {
             model,
             profile,
             jobs,
             active: Arc::new(Mutex::new(BTreeMap::new())),
+            parent,
         }
     }
 
@@ -153,7 +158,7 @@ impl PostCommitDispatcher for ModelDispatcher {
                         });
                     }
                 };
-                let cancellation = CancellationSignal::new();
+                let cancellation = self.parent.child();
                 {
                     let Ok(mut active) = self.active.lock() else {
                         return Box::pin(async {
@@ -204,13 +209,17 @@ impl PostCommitDispatcher for ModelDispatcher {
     }
 }
 
-pub(crate) async fn run_model_jobs(
+pub(crate) async fn run_model_jobs<C>(
     model: Arc<dyn Model>,
     assembler: ModelStreamAssembler,
     active: ActiveEffects,
     mut jobs: mpsc::Receiver<ModelJob>,
     results: mpsc::Sender<ModelDriverMessage>,
-) {
+    clock: Arc<C>,
+    cancellation_grace: Duration,
+) where
+    C: Clock + Send + Sync + 'static,
+{
     let provider = model.descriptor().provider;
     let mut tasks = JoinSet::new();
     let mut intake_open = true;
@@ -222,24 +231,69 @@ pub(crate) async fn run_model_jobs(
                     let provider = Arc::clone(&provider);
                     let results = results.clone();
                     let active = Arc::clone(&active);
+                    let clock = Arc::clone(&clock);
                     tasks.spawn(async move {
                         let effect_id = job.seed.pending.requested.effect_id();
                         let draft = job.request.draft.clone();
                         let progress_sender = results.clone();
                         let progress_provider = Arc::clone(&provider);
-                        let result = match model.request(job.request).await {
-                            Ok(stream) => assembler.assemble_incremental(stream, move |progress| {
-                                let sender = progress_sender.clone();
-                                let provider = Arc::clone(&progress_provider);
-                                async move {
-                                    sender.send(ModelDriverMessage::Progress {
-                                        effect_id,
-                                        provider,
-                                        progress,
-                                    }).await.map_err(|_| progress_delivery_error())
-                                }
-                            }).await,
+                        let cancellation = job.request.call.run.cancellation.clone();
+                        let deadline = job
+                            .request
+                            .call
+                            .run
+                            .deadline
+                            .map(|deadline| {
+                                MonotonicDeadline::from_persisted(
+                                    clock.as_ref(),
+                                    job.seed.requested_at,
+                                    deadline,
+                                )
+                            })
+                            .transpose();
+                        let result = match model_job_preflight(deadline, &cancellation) {
                             Err(error) => Err(error),
+                            Ok(deadline) => {
+                            let mut child = tokio::spawn(async move {
+                                match model.request(job.request).await {
+                                    Ok(stream) => assembler.assemble_incremental(stream, move |progress| {
+                                        let sender = progress_sender.clone();
+                                        let provider = Arc::clone(&progress_provider);
+                                        async move {
+                                            sender.send(ModelDriverMessage::Progress {
+                                                effect_id,
+                                                provider,
+                                                progress,
+                                            }).await.map_err(|_| progress_delivery_error())
+                                        }
+                                    }).await,
+                                    Err(error) => Err(error),
+                                }
+                            });
+                            if let Some(deadline) = deadline {
+                                tokio::select! {
+                                    biased;
+                                    () = cancellation.cancelled() => {
+                                        settle_model_cancellation(&mut child, cancellation_grace).await
+                                    }
+                                    () = deadline.wait() => {
+                                        cancellation.cancel();
+                                        child.abort();
+                                        let _ = (&mut child).await;
+                                        Err(model_deadline_error())
+                                    }
+                                    joined = &mut child => joined_model_result(joined),
+                                }
+                            } else {
+                                tokio::select! {
+                                    biased;
+                                    () = cancellation.cancelled() => {
+                                        settle_model_cancellation(&mut child, cancellation_grace).await
+                                    }
+                                    joined = &mut child => joined_model_result(joined),
+                                }
+                            }
+                            }
                         };
                         if let Ok(mut values) = active.lock() {
                             values.remove(&effect_id);
@@ -263,6 +317,78 @@ pub(crate) async fn run_model_jobs(
             _ = tasks.join_next(), if !tasks.is_empty() => {}
         }
     }
+}
+
+async fn settle_model_cancellation(
+    child: &mut tokio::task::JoinHandle<Result<ModelTerminal, ModelError>>,
+    grace: Duration,
+) -> Result<ModelTerminal, ModelError> {
+    if let Ok(joined) = timeout(grace, &mut *child).await {
+        return joined_model_result(joined);
+    }
+    child.abort();
+    let _ = child.await;
+    Err(model_cancellation_error(
+        "model request exceeded its cancellation grace period",
+    ))
+}
+
+fn model_job_preflight(
+    deadline: Result<Option<MonotonicDeadline>, crate::RuntimeTimeError>,
+    cancellation: &CancellationSignal,
+) -> Result<Option<MonotonicDeadline>, ModelError> {
+    if cancellation.is_cancelled() {
+        return Err(model_cancellation_error(
+            "model request was cancelled before execution",
+        ));
+    }
+    let deadline = deadline.map_err(|_| model_deadline_error())?;
+    if deadline
+        .as_ref()
+        .is_some_and(|deadline| deadline.remaining() == finstack_ai_kernel::Duration::ZERO)
+    {
+        cancellation.cancel();
+        return Err(model_deadline_error());
+    }
+    Ok(deadline)
+}
+
+fn model_cancellation_error(message: &'static str) -> ModelError {
+    ModelError::try_new(
+        "model_cancelled",
+        finstack_ai_kernel::ErrorCategory::Cancellation,
+        false,
+        message,
+        Metadata::empty(),
+    )
+    .expect("frozen model cancellation error")
+}
+
+fn joined_model_result(
+    joined: Result<Result<ModelTerminal, ModelError>, tokio::task::JoinError>,
+) -> Result<ModelTerminal, ModelError> {
+    match joined {
+        Ok(result) => result,
+        Err(_) => Err(ModelError::try_new(
+            "model_panicked",
+            finstack_ai_kernel::ErrorCategory::Internal,
+            false,
+            "model execution failed at the native task boundary",
+            Metadata::empty(),
+        )
+        .expect("frozen model task error")),
+    }
+}
+
+fn model_deadline_error() -> ModelError {
+    ModelError::try_new(
+        "model_deadline_exceeded",
+        finstack_ai_kernel::ErrorCategory::Deadline,
+        false,
+        "model request exceeded its committed deadline",
+        Metadata::empty(),
+    )
+    .expect("frozen model deadline error")
 }
 
 fn progress_delivery_error() -> ModelError {

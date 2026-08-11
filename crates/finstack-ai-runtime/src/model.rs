@@ -5,7 +5,7 @@ use core::future::{Future, poll_fn, ready};
 use core::task::Waker;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use finstack_ai_kernel::{
     BudgetScopeId, ContentBlock, Digest, EffectId, ErrorCategory, ErrorCode, ErrorDescriptor,
@@ -490,6 +490,7 @@ pub struct AuthorizationContext {
 struct CancellationState {
     cancelled: AtomicBool,
     waiters: Mutex<Vec<Waker>>,
+    children: Mutex<Vec<Weak<CancellationState>>>,
 }
 
 /// Cloneable, target-portable, effect-local cancellation signal.
@@ -509,7 +510,31 @@ impl CancellationSignal {
         Self(Arc::new(CancellationState {
             cancelled: AtomicBool::new(false),
             waiters: Mutex::new(Vec::new()),
+            children: Mutex::new(Vec::new()),
         }))
+    }
+
+    /// Construct a descendant that is cancelled when this signal is cancelled.
+    ///
+    /// Cancelling the child never changes its parent or siblings. Registration
+    /// is race-safe with concurrent parent cancellation: the new child is
+    /// either registered before propagation or observes the cancelled parent
+    /// and starts cancelled.
+    #[must_use]
+    pub fn child(&self) -> Self {
+        let child = Self::new();
+        let Ok(mut children) = self.0.children.lock() else {
+            // A poisoned hierarchy cannot safely promise propagation.
+            child.cancel();
+            return child;
+        };
+        if self.is_cancelled() {
+            drop(children);
+            child.cancel();
+        } else {
+            children.push(Arc::downgrade(&child.0));
+        }
+        child
     }
 
     /// Mark the signal cancelled and wake registered observers.
@@ -521,6 +546,15 @@ impl CancellationSignal {
             for waiter in waiters.drain(..) {
                 waiter.wake();
             }
+        }
+        let children = self
+            .0
+            .children
+            .lock()
+            .map(|mut children| children.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        for child in children.into_iter().filter_map(|child| child.upgrade()) {
+            Self(child).cancel();
         }
     }
 
@@ -1674,6 +1708,27 @@ mod tests {
                 max_output_tokens: 20,
             },
         }
+    }
+
+    #[test]
+    fn cancellation_hierarchy_propagates_downward_only_and_late_children_start_cancelled() {
+        let run = CancellationSignal::new();
+        let model = run.child();
+        let tool_batch = run.child();
+        let first_tool = tool_batch.child();
+        let second_tool = tool_batch.child();
+
+        first_tool.cancel();
+        assert!(first_tool.is_cancelled());
+        assert!(!second_tool.is_cancelled());
+        assert!(!tool_batch.is_cancelled());
+        assert!(!run.is_cancelled());
+
+        run.cancel();
+        assert!(model.is_cancelled());
+        assert!(tool_batch.is_cancelled());
+        assert!(second_tool.is_cancelled());
+        assert!(run.child().is_cancelled());
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //! PR-015 adds the provider-neutral model port and deterministic stream driver.
 //! PR-017 adds bounded native event delivery, batching, and backpressure.
 //! PR-018 completes the six-port surface with context, middleware, and observer contracts.
+//! PR-019 connects durable cancellation, deadlines, retry timers, and task shutdown.
 
 #![warn(missing_docs)]
 
@@ -48,6 +49,12 @@ mod model_runtime;
 
 #[cfg(feature = "native-tokio")]
 mod tool_runtime;
+
+#[cfg(feature = "native-tokio")]
+mod time;
+
+#[cfg(feature = "native-tokio")]
+mod timer_runtime;
 
 #[cfg(feature = "native-tokio")]
 mod ingress;
@@ -134,6 +141,7 @@ pub use tool::{
 #[cfg(feature = "native-tokio")]
 pub use task::{
     ModelTaskConfig, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
+    ShutdownOutcome, ShutdownReport, TimerDiagnostics,
 };
 
 #[cfg(feature = "native-tokio")]
@@ -141,6 +149,12 @@ pub use event_hub::EventSubscription;
 
 #[cfg(feature = "native-tokio")]
 pub use tool_runtime::ToolTaskConfig;
+
+#[cfg(feature = "native-tokio")]
+pub use time::{
+    DeadlineDiagnostic, MonotonicDeadline, NoRetryJitter, RetryJitterSource, RuntimeTimeError,
+    retry_backoff_with_jitter,
+};
 
 #[cfg(feature = "native-tokio")]
 pub use audit::{SecurityAuditGate, SecurityAuditGateError};

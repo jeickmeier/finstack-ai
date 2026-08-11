@@ -84,6 +84,7 @@ pub struct CommitCoordinator {
     kernel: Kernel,
     store: Arc<dyn JournalStore>,
     next_transient_sequence: u64,
+    pending_timer_scheduled_at: Option<Timestamp>,
     fault: Option<RunFault>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
     #[cfg(feature = "native-tokio")]
@@ -98,6 +99,7 @@ impl CommitCoordinator {
             kernel: Kernel::default(),
             store,
             next_transient_sequence: 0,
+            pending_timer_scheduled_at: None,
             fault: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
@@ -118,12 +120,13 @@ impl CommitCoordinator {
             .load(LoadRequest { session_id })
             .await
             .map_err(CommitCoordinatorError::Store)?;
-        let (kernel, next_transient_sequence) = replay_loaded(&loaded)
+        let (kernel, next_transient_sequence, pending_timer_scheduled_at) = replay_loaded(&loaded)
             .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         Ok(Self {
             kernel,
             store,
             next_transient_sequence,
+            pending_timer_scheduled_at,
             fault: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
@@ -141,6 +144,14 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn fault(&self) -> Option<RunFault> {
         self.fault
+    }
+
+    #[cfg(feature = "native-tokio")]
+    pub(crate) fn pending_timer_seed(&self) -> Option<TimerDispatchSeed> {
+        Some(TimerDispatchSeed {
+            scheduled: self.kernel.state().retry.pending.clone()?,
+            scheduled_at: self.pending_timer_scheduled_at?,
+        })
     }
 
     #[cfg(feature = "native-tokio")]
@@ -217,10 +228,11 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("conflict_reload_failed"))?;
-                    let (kernel, next_transient_sequence) =
+                    let (kernel, next_transient_sequence, pending_timer_scheduled_at) =
                         replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
                     self.kernel = kernel;
                     self.next_transient_sequence = next_transient_sequence;
+                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
                     decision = self
                         .kernel
                         .decide(&env, input.clone())
@@ -249,6 +261,7 @@ impl CommitCoordinator {
             let Ok(events) = self.kernel.apply(&committed, self.next_transient_sequence) else {
                 return Err(self.boundary_fault("committed_batch_apply_failed"));
             };
+            update_pending_timer_timestamp(&mut self.pending_timer_scheduled_at, &committed);
             self.next_transient_sequence = self
                 .next_transient_sequence
                 .checked_add(
@@ -310,8 +323,13 @@ impl CommitCoordinator {
         };
         let dispatch = RuntimeDispatch {
             action,
-            model: model_dispatch_seed(self.kernel.state(), action),
-            tool: tool_dispatch_seed(self.kernel.state(), action),
+            model: model_dispatch_seed(self.kernel.state(), action, committed),
+            tool: tool_dispatch_seed(self.kernel.state(), action, committed),
+            timer: timer_dispatch_seed(
+                self.kernel.state(),
+                action,
+                self.pending_timer_scheduled_at,
+            ),
         };
         dispatcher
             .dispatch(dispatch)
@@ -490,10 +508,11 @@ fn empty_outcome(decision: Decision) -> CommitOutcome {
     }
 }
 
-fn replay_loaded(loaded: &LoadedSession) -> Result<(Kernel, u64), &'static str> {
+fn replay_loaded(loaded: &LoadedSession) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
     let mut kernel = Kernel::default();
     let mut next_transient_sequence = 0_u64;
     let mut last_batch_sequence = 0_u64;
+    let mut pending_timer_scheduled_at = None;
     for batch in loaded.committed_batches.iter() {
         let events = kernel
             .apply(batch, next_transient_sequence)
@@ -504,13 +523,24 @@ fn replay_loaded(loaded: &LoadedSession) -> Result<(Kernel, u64), &'static str> 
             )
             .ok_or("transient_event_sequence_exhausted")?;
         last_batch_sequence = batch.last_sequence;
+        update_pending_timer_timestamp(&mut pending_timer_scheduled_at, batch);
     }
     if last_batch_sequence != loaded.head_sequence
         || kernel.state().last_applied_sequence != loaded.head_sequence
     {
         return Err("loaded_head_mismatch");
     }
-    Ok((kernel, next_transient_sequence))
+    Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
+}
+
+fn update_pending_timer_timestamp(pending: &mut Option<Timestamp>, committed: &CommittedBatch) {
+    for record in committed.records.iter() {
+        match record.body() {
+            RecordBody::RetryScheduled(_) => *pending = Some(record.timestamp()),
+            RecordBody::TimerFired(_) => *pending = None,
+            _ => {}
+        }
+    }
 }
 
 fn committed_matches_request(committed: &CommittedBatch, request: &AppendRequest) -> bool {
@@ -606,6 +636,7 @@ fn pending_effect_request(
     })
 }
 
+#[derive(Debug)]
 pub(crate) struct DispatchError {
     pub(crate) code: &'static str,
 }
@@ -618,6 +649,7 @@ pub(crate) struct ModelDispatchSeed {
     pub(crate) authorization: AuthorizationContext,
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
+    pub(crate) requested_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -631,6 +663,14 @@ pub(crate) struct ToolDispatchSeed {
     pub(crate) authorization: AuthorizationContext,
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
+    pub(crate) requested_at: Timestamp,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
+pub(crate) struct TimerDispatchSeed {
+    pub(crate) scheduled: finstack_ai_kernel::RetryScheduled,
+    pub(crate) scheduled_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -639,6 +679,7 @@ pub(crate) struct RuntimeDispatch {
     pub(crate) action: PostCommitAction,
     pub(crate) model: Option<ModelDispatchSeed>,
     pub(crate) tool: Option<ToolDispatchSeed>,
+    pub(crate) timer: Option<TimerDispatchSeed>,
 }
 
 pub(crate) trait PostCommitDispatcher: PortObject {
@@ -649,7 +690,11 @@ pub(crate) trait PostCommitDispatcher: PortObject {
     fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>>;
 }
 
-fn model_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<ModelDispatchSeed> {
+fn model_dispatch_seed(
+    state: &KernelState,
+    action: PostCommitAction,
+    committed: &CommittedBatch,
+) -> Option<ModelDispatchSeed> {
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
     };
@@ -664,10 +709,15 @@ fn model_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<
         authorization,
         budget_scope_id,
         attempt: state.retry.attempts.checked_add(1)?,
+        requested_at: effect_requested_at(committed, effect_id)?,
     })
 }
 
-fn tool_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<ToolDispatchSeed> {
+fn tool_dispatch_seed(
+    state: &KernelState,
+    action: PostCommitAction,
+    committed: &CommittedBatch,
+) -> Option<ToolDispatchSeed> {
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
     };
@@ -695,6 +745,30 @@ fn tool_dispatch_seed(state: &KernelState, action: PostCommitAction) -> Option<T
         authorization,
         budget_scope_id,
         attempt: 1,
+        requested_at: effect_requested_at(committed, effect_id)?,
+    })
+}
+
+fn timer_dispatch_seed(
+    state: &KernelState,
+    action: PostCommitAction,
+    scheduled_at: Option<Timestamp>,
+) -> Option<TimerDispatchSeed> {
+    let PostCommitAction::ExecuteEffect { effect_id } = action else {
+        return None;
+    };
+    let scheduled = state.retry.pending.as_ref()?;
+    let scheduled_at = scheduled_at?;
+    (scheduled.timer_effect_id == effect_id).then(|| TimerDispatchSeed {
+        scheduled: scheduled.clone(),
+        scheduled_at,
+    })
+}
+
+fn effect_requested_at(committed: &CommittedBatch, effect_id: EffectId) -> Option<Timestamp> {
+    committed.records.iter().find_map(|record| {
+        matches!(record.body(), RecordBody::EffectRequested(request) if request.effect_id() == effect_id)
+            .then(|| record.timestamp())
     })
 }
 
