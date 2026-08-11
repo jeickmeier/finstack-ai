@@ -3,8 +3,8 @@ Date: 2026-08-10
 Branch: codex/pr-016-toolset-scheduler
 Status: NOT RUN
 
-No issue or actual pull request was created, and the local candidate is not
-committed, merged, pushed, or hosted. Linux/Windows matrices, Linux release
+No issue or actual pull request was created. The implementation candidate is
+committed locally but is not yet merged, pushed, or hosted. Linux/Windows matrices, Linux release
 digest comparison, hosted security/supply-chain runs, coverage/fuzz, and
 independent approval are not claimed. Local Darwin CI, native/WASM Toolset leaf
 compilation, release-mode panic containment, release smoke, and the manual

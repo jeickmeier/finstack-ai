@@ -2,10 +2,11 @@ PR-016 working-tree candidate validation
 Date: 2026-08-10
 Branch: codex/pr-016-toolset-scheduler
 Base revision: b8af2ae1d15307371a1413ad007328df50282198
-Candidate revision: uncommitted working tree
+Implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
 Environment: Darwin 25.5.0 arm64; rustc 1.97.1; cargo 1.97.1
-Disposition: PASS for the local candidate; no immutable revision, integration,
-hosted run, independent review, or G2 decision is claimed
+Disposition: PASS for the immutable implementation candidate; integration,
+hosted run, independent review, and G2 decision are not yet claimed
 
 Focused Toolset/runtime validation
 
@@ -75,7 +76,10 @@ Aggregate validation
 
 Validation boundary
 
-The acceptance evidence is local working-tree evidence only. The full
-cancellation-token tree, timer/retry service, persistent recovery, hosted
-cross-platform matrices, and independent security/release approval remain
-outside this record. The logical PR is not marked Done.
+The command results above apply to implementation commit
+aab7b81b8cb36eca82860ffa38ded7ba82a14247 and tree
+7895ef08523dfbb4d98b645ebd91b47cc2626006; the subsequent evidence-only
+commit does not change implementation files. The full cancellation-token tree,
+timer/retry service, persistent recovery, hosted cross-platform matrices, and
+independent security/release approval remain outside this record. The logical
+PR is not marked Done before integration.

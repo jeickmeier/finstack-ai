@@ -2,7 +2,8 @@ PR-016 local release validation
 Date: 2026-08-10
 Branch: codex/pr-016-toolset-scheduler
 Base revision: b8af2ae1d15307371a1413ad007328df50282198
-Candidate revision: uncommitted working tree
+Implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
 Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1
 Result: PASS for local release behavior; Linux reproducibility and hosted
 matrices are not claimed
@@ -42,4 +43,4 @@ Executed proof
    evidence boundary, not a reproducibility pass for Linux or hosted targets.
 
 No package was published. No hosted release, signed artifact, cross-platform
-matrix, independent release approval, or final immutable candidate exists.
+matrix, independent release approval, or integration result is claimed here.

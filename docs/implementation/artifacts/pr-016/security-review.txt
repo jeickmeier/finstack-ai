@@ -2,9 +2,10 @@ PR-016 security and threat-model review
 Date: 2026-08-10
 Branch: codex/pr-016-toolset-scheduler
 Base revision: b8af2ae1d15307371a1413ad007328df50282198
-Reviewed candidate: uncommitted working tree
+Reviewed implementation revision: aab7b81b8cb36eca82860ffa38ded7ba82a14247
+Reviewed implementation tree: 7895ef08523dfbb4d98b645ebd91b47cc2626006
 Reviewer: me@jeickmeier.com
-Result: PASS for the local PR-016 candidate scope; immutable, hosted, and
+Result: PASS for PR-016 scope at the immutable implementation tree; hosted and
 independent review remain outstanding
 
 Scope reviewed
