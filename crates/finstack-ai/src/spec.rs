@@ -717,16 +717,19 @@ mod tests {
     #[test]
     fn compatibility_vectors_enforce_strict_spec_ingress() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/compatibility/agent-spec/v1");
-        let valid = std::fs::read(root.join("valid/minimal.json")).expect("valid fixture");
+            .join("../../fixtures/compatibility/agent-spec/v1/agent-spec");
+        let valid = std::fs::read(root.join("valid--minimal.json")).expect("valid fixture");
         let spec = AgentSpec::from_json(&valid).expect("valid fixture must decode");
         assert_eq!(
             spec.id,
             AgentId::parse("finstack.agent.minimal").expect("fixture id")
         );
 
-        for name in ["unknown-field.json", "unsupported-version.json"] {
-            let invalid = std::fs::read(root.join("invalid").join(name)).expect("invalid fixture");
+        for name in [
+            "invalid--unknown-field.json",
+            "invalid--unsupported-version.json",
+        ] {
+            let invalid = std::fs::read(root.join(name)).expect("invalid fixture");
             assert!(
                 AgentSpec::from_json(&invalid).is_err(),
                 "{name} must fail strict decoding"

@@ -1,5 +1,7 @@
 use std::future::Future;
-use std::sync::{Arc, Barrier, Mutex};
+#[cfg(unix)]
+use std::sync::Barrier;
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_runtime::{
     ArtifactError, ArtifactId, ArtifactRef, ArtifactScope, ArtifactStore, AuthorizationContext,

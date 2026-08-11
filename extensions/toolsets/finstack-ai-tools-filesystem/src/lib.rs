@@ -1,6 +1,13 @@
 //! Capability-scoped filesystem implementation of the public `Toolset` port.
 
 #![warn(missing_docs)]
+#![cfg_attr(
+    not(unix),
+    allow(
+        dead_code,
+        reason = "the public constructor fails closed when no capability-safe backend exists"
+    )
+)]
 
 mod operation;
 mod policy;
@@ -10,12 +17,15 @@ mod unix;
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(unix)]
+use finstack_ai_runtime::ToolStreamItem;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     ErrorCategory, Metadata, PortFuture, RawJson, RetrySafety, Sensitivity, SideEffectClass,
     ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
 };
+#[cfg(unix)]
 use futures_util::stream;
 use serde::Deserialize;
 use thiserror::Error;
@@ -232,42 +242,49 @@ impl Toolset for FileSystemToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        let tool_ids = Arc::clone(&self.tool_ids);
-        let limits = self.limits;
-        let protected = self.protected.clone();
-        let artifact_store = self.artifact_store.clone();
-        let sensitivity = self.sensitivity;
-        #[cfg(unix)]
-        let root = self.root.clone();
-        Box::pin(async move {
-            verify_authority(&ctx)?;
-            let operation = decode_operation(&call, &tool_ids, &protected, limits)?;
-            let cancellation = ctx.run.cancellation.clone();
-            #[cfg(unix)]
-            let output = tokio::task::spawn_blocking(move || {
-                operation.execute(&root, limits, &protected, &cancellation)
+        #[cfg(not(unix))]
+        {
+            let _ = (ctx, call);
+            Box::pin(async {
+                Err(fs_tool_error(
+                    FILESYSTEM_UNSUPPORTED,
+                    ErrorCategory::Configuration,
+                    "safe filesystem primitives are unavailable",
+                ))
             })
-            .await
-            .map_err(|_| {
-                fs_tool_error(
-                    FILESYSTEM_IO_ERROR,
-                    ErrorCategory::Internal,
-                    "filesystem worker failed",
-                )
-            })??;
-            #[cfg(not(unix))]
-            let output: OperationOutput = return Err(fs_tool_error(
-                FILESYSTEM_UNSUPPORTED,
-                ErrorCategory::Configuration,
-                "safe filesystem primitives are unavailable",
-            ));
+        }
 
-            let result =
-                normalize_output(output, &ctx, limits, artifact_store, sensitivity).await?;
-            Ok(Box::pin(stream::once(async move {
-                Ok(ToolStreamItem::Completed(result))
-            })) as ToolEventStream)
-        })
+        #[cfg(unix)]
+        {
+            let tool_ids = Arc::clone(&self.tool_ids);
+            let limits = self.limits;
+            let protected = self.protected.clone();
+            let artifact_store = self.artifact_store.clone();
+            let sensitivity = self.sensitivity;
+            let root = self.root.clone();
+            Box::pin(async move {
+                verify_authority(&ctx)?;
+                let operation = decode_operation(&call, &tool_ids, &protected, limits)?;
+                let cancellation = ctx.run.cancellation.clone();
+                let output = tokio::task::spawn_blocking(move || {
+                    operation.execute(&root, limits, &protected, &cancellation)
+                })
+                .await
+                .map_err(|_| {
+                    fs_tool_error(
+                        FILESYSTEM_IO_ERROR,
+                        ErrorCategory::Internal,
+                        "filesystem worker failed",
+                    )
+                })??;
+
+                let result =
+                    normalize_output(output, &ctx, limits, artifact_store, sensitivity).await?;
+                Ok(Box::pin(stream::once(async move {
+                    Ok(ToolStreamItem::Completed(result))
+                })) as ToolEventStream)
+            })
+        }
     }
 }
 

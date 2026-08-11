@@ -1,7 +1,13 @@
-use finstack_ai_runtime::{CancellationSignal, ErrorCategory, ToolError};
+#[cfg(unix)]
+use finstack_ai_runtime::CancellationSignal;
+use finstack_ai_runtime::{ErrorCategory, ToolError};
 
-use crate::policy::{ProtectedPaths, ValidatedPath};
-use crate::{FILESYSTEM_LIMIT_EXCEEDED, FileSystemLimits, fs_tool_error};
+#[cfg(unix)]
+use crate::FileSystemLimits;
+#[cfg(unix)]
+use crate::policy::ProtectedPaths;
+use crate::policy::ValidatedPath;
+use crate::{FILESYSTEM_LIMIT_EXCEEDED, fs_tool_error};
 
 pub(crate) enum FileOperation {
     Read(ValidatedPath),

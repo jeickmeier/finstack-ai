@@ -18,12 +18,14 @@ use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-const TEXT_SSE: &str =
-    include_str!("../../../../fixtures/compatibility/providers/openai-compatible/v1/text.sse");
-const TOOL_SSE: &str =
-    include_str!("../../../../fixtures/compatibility/providers/openai-compatible/v1/tool.sse");
+const TEXT_SSE: &str = include_str!(
+    "../../../../fixtures/compatibility/providers/v1/openai-compatible/valid--text.sse"
+);
+const TOOL_SSE: &str = include_str!(
+    "../../../../fixtures/compatibility/providers/v1/openai-compatible/valid--tool.sse"
+);
 const STRUCTURED_SSE: &str = include_str!(
-    "../../../../fixtures/compatibility/providers/openai-compatible/v1/structured.sse"
+    "../../../../fixtures/compatibility/providers/v1/openai-compatible/valid--structured.sse"
 );
 
 #[tokio::test(flavor = "multi_thread")]
