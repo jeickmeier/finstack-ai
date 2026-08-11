@@ -5,6 +5,7 @@
 //!
 //! PR-014 adds the journal-store boundary and the authoritative commit loop.
 //! PR-015 adds the provider-neutral model port and deterministic stream driver.
+//! PR-017 adds bounded native event delivery, batching, and backpressure.
 
 #![warn(missing_docs)]
 
@@ -12,14 +13,20 @@ pub use finstack_ai_kernel::{
     BudgetScopeId, ComponentInvocation, ContentBlock, Digest, EffectId, EffectOutputContract,
     EffectOutputKind, ErrorCategory, ExternalHandleRef, JsonBlock, Message, Metadata,
     ModelRequestId, OperationLocator, OutputSpec, PendingModelEffect, PrincipalRef, ProviderIds,
-    RawJson, ReconciliationPolicy, RetrySafety, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
-    ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
-    Usage, ValidatedToolCall, ValidationIssue, ValidationOutcome,
+    RawJson, ReconciliationPolicy, RetrySafety, RunEvent, RunEventBody, RunEventClass,
+    RunEventKind, Sensitivity, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan,
+    ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage,
+    ValidatedToolCall, ValidationIssue, ValidationOutcome,
+};
+pub use finstack_ai_kernel::{
+    ModelTextDelta as RunEventModelTextDelta, ProviderHeartbeat as RunEventProviderHeartbeat,
+    QueueDepthWarning as RunEventQueueDepthWarning, ReasoningDelta as RunEventReasoningDelta,
 };
 
 mod audit;
 mod coordinator;
 mod error;
+mod event_hub;
 mod id_generation;
 mod journal;
 mod model;
@@ -46,6 +53,11 @@ pub use audit::{
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
 
 pub use error::FrameworkError;
+pub use event_hub::{
+    EventBatch, EventBatchConfig, EventDeliveryStats, EventFilter, EventHubConfig, EventLagPolicy,
+    EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
+    EventSubscriptionStatus, ProgressCoalescing,
+};
 pub use id_generation::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
 pub use journal::{
     JournalStore, LoadRequest, LoadedSession, OpaqueSnapshot, SnapshotReceipt, SnapshotRequest,
@@ -85,6 +97,9 @@ pub use tool::{
 pub use task::{
     ModelTaskConfig, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
 };
+
+#[cfg(feature = "native-tokio")]
+pub use event_hub::EventSubscription;
 
 #[cfg(feature = "native-tokio")]
 pub use tool_runtime::ToolTaskConfig;

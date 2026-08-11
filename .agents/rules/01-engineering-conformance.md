@@ -18,6 +18,18 @@ Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-py
 - Do not combine unrelated logical PRs or implement deferred scope.
 - Prefer the smallest implementation that completes the selected behavior. New abstractions require a current requirement and a concrete use; placeholder frameworks and unused extension seams are prohibited.
 
+## Execute an explicitly authorized PR range
+
+Range mode is active only for an explicit inclusive `PR-NNN` through `PR-MMM` instruction with `NNN <= MMM`, an execution mode, and the local or external actions it authorizes. Do not infer a range from `continue`, `next PRs`, a phase name, or several mentioned PRs. Before editing:
+
+- Resolve every included ID against the current Implementation Plan and pin the plan baseline, starting branch and commit, execution mode, integration target when applicable, and authorized actions.
+- Read every included PR entry sufficiently to validate the dependency chain. Immediately before implementing each PR, read its complete entry and directly affected requirements, ADRs, design sections, security controls, acceptance evidence, and exclusions.
+- Confirm the first PR is eligible and that each successor can become eligible through the stated predecessor sequence. Range authorization does not satisfy a dependency, phase entrance, gate, review, ADR, security, waiver, or change-control condition.
+- Preserve every PR's principal changes, acceptance evidence, dependencies, traceability, and exclusions as authoritative scope. Keep exactly one logical PR active and do not place changes owned only by a later PR into the current candidate.
+- Snapshot the starting branch, commit, and existing worktree changes. Never stash, discard, reset, rebase, commit, or overwrite unrelated work. Use an isolated branch or worktree when unrelated changes can be cleanly separated. If existing or concurrent changes overlap the active PR, generated outputs, integration target, planning baseline, or implementation registers and ownership cannot be proved, stop and request direction.
+
+At each transition, recheck the plan baseline, predecessor evidence, phase and gate state, ADR state, worktree, branch, integration base, and the successor's dependencies and exclusions. A blocked range member is not permission to skip ahead; revise the range only through explicit user direction.
+
 ## Preserve package and semantic boundaries
 
 - `finstack-ai-kernel` is synchronous and I/O-free. It owns semantic IDs, state, normalized inputs, records, events, effects, and the pure decision/apply model.
@@ -61,7 +73,9 @@ Language-specific coding and docstring rules live in `03-rust-coding.md`, `04-py
 
 ## Hard stops
 
-Stop the affected implementation when it lacks an eligible logical PR, crosses an unopened gate, conflicts with an authoritative document, or depends on an unresolved required decision. Before coding, check Implementation Plan section 6.3 ADR triggers and Security and Threat Model section 18 review triggers. Reviewer unavailability blocks review or merge, not coding, unless pre-implementation approval is explicit or that reviewer must resolve an open decision.
+Stop the affected implementation when it lacks an eligible logical PR, requires a program gate not recorded `Passed`, conflicts with an authoritative document, or depends on an unresolved required decision. Work expressly permitted to begin in parallel by the Implementation Plan may proceed before a later gate only when that PR's own dependencies and stated entrance criteria are evidenced. Before coding, check Implementation Plan section 6.3 ADR triggers and Security and Threat Model section 18 review triggers. Reviewer unavailability blocks review or merge, not coding, unless pre-implementation approval is explicit or that reviewer must resolve an open decision.
+
+In range mode, a hard stop suspends the current PR and every remaining PR; it does not authorize skipping the blocked member. A gate-closing PR may reach reviewable implementation and phase-exit evidence, but range authorization is not a gate decision and the range may cross the gate only after a separate named passing decision exists. Resume stopped work only after the authoritative decision is accepted, affected documents are reconciled, the active slice is reread, and affected validation is rerun.
 
 `docs/planning/` is read-only during normal coding. Do not edit planning documents to match implementation preference, paper over conflicts, or “fix” requirements in place. If implementation exposes a genuine conflict or ADR trigger, stop the affected work and use change control. Implementation registers under `docs/implementation/` remain the place for delivery evidence updates.
 

@@ -1,0 +1,13 @@
+PR-017 hosted and independent validation boundary
+Date: 2026-08-10
+Branch: codex/pr-017-event-hub
+Implementation revision: 1bfc653c36312187f34c6ad7ba787a360145612d
+
+No actual pull request was created, no branch was pushed, and no hosted CI run
+or independent review was performed for this local candidate. No merge or
+post-integration result is claimed. The evidence register records only local
+commands and the named local TM-17 review against the immutable implementation
+commit.
+
+Hosted cross-platform matrices, independent security review, merge identity,
+and G2 approval remain outstanding.

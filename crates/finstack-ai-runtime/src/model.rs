@@ -1,7 +1,7 @@
 //! Provider-neutral model port, immutable context profiles, and stream assembly.
 
 use core::fmt;
-use core::future::poll_fn;
+use core::future::{Future, poll_fn, ready};
 use core::task::Waker;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1220,19 +1220,40 @@ impl ModelStreamAssembler {
     /// # Errors
     ///
     /// Returns stable ordering, bound, usage, tool-call, and response mismatch errors.
+    pub async fn assemble(
+        &self,
+        stream: ModelEventStream,
+    ) -> Result<AssembledModelStream, ModelError> {
+        let mut progress = Vec::new();
+        let terminal = self
+            .assemble_incremental(stream, |item| {
+                progress.push(item);
+                ready(Ok(()))
+            })
+            .await?;
+        Ok(AssembledModelStream {
+            progress: progress.into(),
+            terminal,
+        })
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the stream state machine keeps all ordering and terminal transitions contiguous"
     )]
-    pub async fn assemble(
+    pub(crate) async fn assemble_incremental<F, Fut>(
         &self,
         mut stream: ModelEventStream,
-    ) -> Result<AssembledModelStream, ModelError> {
+        mut emit_progress: F,
+    ) -> Result<ModelTerminal, ModelError>
+    where
+        F: FnMut(ModelProgress) -> Fut,
+        Fut: Future<Output = Result<(), ModelError>>,
+    {
         let mut item_count = 0_usize;
         let mut byte_count = 0_usize;
         let mut text = String::new();
         let mut reasoning_bytes = 0_usize;
-        let mut progress = Vec::new();
         let mut tools = BTreeMap::<u32, PartialToolCall>::new();
         let mut order = Vec::<u32>::new();
         let mut usage: Option<Usage> = None;
@@ -1270,7 +1291,7 @@ impl ModelStreamAssembler {
                     if text.len() > STREAM_TEXT_MAX_BYTES {
                         return Err(stream_limit_error());
                     }
-                    progress.push(ModelProgress::Text(delta.text));
+                    emit_progress(ModelProgress::Text(delta.text)).await?;
                 }
                 ModelStreamItem::ReasoningDelta(delta) => {
                     validate_delta(&delta.text)?;
@@ -1281,7 +1302,7 @@ impl ModelStreamAssembler {
                     if reasoning_bytes > STREAM_REASONING_MAX_BYTES {
                         return Err(stream_limit_error());
                     }
-                    progress.push(ModelProgress::Reasoning(delta.text));
+                    emit_progress(ModelProgress::Reasoning(delta.text)).await?;
                 }
                 ModelStreamItem::ToolCallDelta(delta) => {
                     let is_new = !tools.contains_key(&delta.index);
@@ -1324,7 +1345,7 @@ impl ModelStreamAssembler {
                         metadata.as_bytes().len(),
                         self.limits.max_bytes,
                     )?;
-                    progress.push(ModelProgress::Heartbeat(metadata));
+                    emit_progress(ModelProgress::Heartbeat(metadata)).await?;
                 }
                 ModelStreamItem::ProviderEvent(event) => {
                     validated_label(&event.namespace, "provider_event.namespace")?;
@@ -1391,10 +1412,7 @@ impl ModelStreamAssembler {
                 }
             }
         }
-        Ok(AssembledModelStream {
-            progress: progress.into(),
-            terminal,
-        })
+        Ok(terminal)
     }
 }
 

@@ -71,6 +71,12 @@ pub enum CommitCoordinatorError {
         /// Stable fault code.
         code: &'static str,
     },
+    /// The installed runtime event hub failed after apply and before dispatch.
+    #[error("event delivery faulted: {code}")]
+    EventDelivery {
+        /// Stable event-delivery error code.
+        code: &'static str,
+    },
 }
 
 /// One-run coordinator for the authoritative commit-before-effect path.
@@ -80,6 +86,8 @@ pub struct CommitCoordinator {
     next_transient_sequence: u64,
     fault: Option<RunFault>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
+    #[cfg(feature = "native-tokio")]
+    event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
 }
 
 impl CommitCoordinator {
@@ -92,6 +100,8 @@ impl CommitCoordinator {
             next_transient_sequence: 0,
             fault: None,
             dispatcher: None,
+            #[cfg(feature = "native-tokio")]
+            event_publisher: None,
         }
     }
 
@@ -116,6 +126,8 @@ impl CommitCoordinator {
             next_transient_sequence,
             fault: None,
             dispatcher: None,
+            #[cfg(feature = "native-tokio")]
+            event_publisher: None,
         })
     }
 
@@ -245,6 +257,9 @@ impl CommitCoordinator {
                 )
                 .ok_or_else(|| self.boundary_fault("transient_event_sequence_exhausted"))?;
 
+            #[cfg(feature = "native-tokio")]
+            self.publish_events(Arc::clone(&events)).await?;
+
             let diagnostics: Arc<[Diagnostic]> = decision.diagnostics.into();
             let mut dispatched_actions = 0;
             for action in decision.actions {
@@ -314,13 +329,36 @@ impl CommitCoordinator {
         self.dispatcher = Some(dispatcher);
     }
 
+    #[cfg(feature = "native-tokio")]
+    pub(crate) fn install_event_publisher(
+        &mut self,
+        publisher: Arc<dyn crate::event_hub::RuntimeEventPublisher>,
+    ) {
+        self.event_publisher = Some(publisher);
+    }
+
+    #[cfg(feature = "native-tokio")]
+    pub(crate) async fn publish_events(
+        &mut self,
+        events: Arc<[RunEvent]>,
+    ) -> Result<(), CommitCoordinatorError> {
+        let Some(publisher) = self.event_publisher.clone() else {
+            return Ok(());
+        };
+        publisher.publish(events).await.map_err(|error| {
+            self.fault = Some(RunFault { code: error.code });
+            CommitCoordinatorError::EventDelivery { code: error.code }
+        })
+    }
+
     #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
     pub(crate) fn materialize_model_progress(
         &mut self,
-        progress: &[ModelProgress],
+        progress: &ModelProgress,
+        event_id: EventId,
         provider: &str,
         now: Timestamp,
-    ) -> Result<Arc<[RunEvent]>, &'static str> {
+    ) -> Result<RunEvent, &'static str> {
         let pending = self
             .kernel
             .state()
@@ -335,63 +373,52 @@ impl CommitCoordinator {
         let session_id = state.session_id.ok_or("model_progress_without_session")?;
         let lane_id = state.lane_id.ok_or("model_progress_without_lane")?;
         let effect_id = pending.requested.effect_id();
-        let mut events = Vec::with_capacity(progress.len());
-        for (offset, item) in progress.iter().enumerate() {
-            let transient_sequence = self
-                .next_transient_sequence
-                .checked_add(
-                    u64::try_from(offset).map_err(|_| "transient_event_sequence_exhausted")?,
-                )
-                .ok_or("transient_event_sequence_exhausted")?;
-            let body = match item {
-                ModelProgress::Text(text) => RunEventBody::ModelTextDelta(
-                    ModelTextDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
-                ),
-                ModelProgress::Reasoning(text) => RunEventBody::ReasoningDelta(
-                    ReasoningDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
-                ),
-                ModelProgress::Heartbeat(metadata) => RunEventBody::ProviderHeartbeat(
-                    ProviderHeartbeat::try_new(provider, Some(metadata.as_str()))
-                        .map_err(|_| "model_progress_invalid")?,
-                ),
-            };
-            events.push(
-                RunEvent::try_transient(
-                    finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
-                    finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
-                    transient_event_id(effect_id, transient_sequence),
-                    session_id,
-                    lane_id,
-                    accepted.run_id(),
-                    Some(pending.turn_id),
-                    Some(pending.model_request_id),
-                    None,
-                    Some(effect_id),
-                    None,
-                    transient_sequence,
-                    now,
-                    Sensitivity::Confidential,
-                    body,
-                )
-                .map_err(|_| "model_progress_invalid")?,
-            );
-        }
+        let transient_sequence = self.next_transient_sequence;
+        let body = match progress {
+            ModelProgress::Text(text) => RunEventBody::ModelTextDelta(
+                ModelTextDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
+            ),
+            ModelProgress::Reasoning(text) => RunEventBody::ReasoningDelta(
+                ReasoningDelta::try_new(text).map_err(|_| "model_progress_invalid")?,
+            ),
+            ModelProgress::Heartbeat(metadata) => RunEventBody::ProviderHeartbeat(
+                ProviderHeartbeat::try_new(provider, Some(metadata.as_str()))
+                    .map_err(|_| "model_progress_invalid")?,
+            ),
+        };
+        let event = RunEvent::try_transient(
+            finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
+            finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
+            event_id,
+            session_id,
+            lane_id,
+            accepted.run_id(),
+            Some(pending.turn_id),
+            Some(pending.model_request_id),
+            None,
+            Some(effect_id),
+            None,
+            transient_sequence,
+            now,
+            Sensitivity::Confidential,
+            body,
+        )
+        .map_err(|_| "model_progress_invalid")?;
         self.next_transient_sequence = self
             .next_transient_sequence
-            .checked_add(
-                u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?,
-            )
+            .checked_add(1)
             .ok_or("transient_event_sequence_exhausted")?;
-        Ok(events.into())
+        Ok(event)
     }
 
     #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
     pub(crate) fn materialize_tool_progress(
         &mut self,
-        progress: &[ToolProgress],
+        progress: &ToolProgress,
+        event_id: EventId,
         effect_id: EffectId,
         now: Timestamp,
-    ) -> Result<Arc<[RunEvent]>, &'static str> {
+    ) -> Result<RunEvent, &'static str> {
         let state = self.kernel.state();
         let accepted = state
             .accepted
@@ -412,42 +439,30 @@ impl CommitCoordinator {
         let turn_id = batch.opened.turn_id;
         let tool_batch_id = batch.opened.tool_batch_id;
         let tool_call_id = *call.assigned.plan.call().tool_call_id();
-        let mut events = Vec::with_capacity(progress.len());
-        for (offset, item) in progress.iter().enumerate() {
-            let transient_sequence = self
-                .next_transient_sequence
-                .checked_add(
-                    u64::try_from(offset).map_err(|_| "transient_event_sequence_exhausted")?,
-                )
-                .ok_or("transient_event_sequence_exhausted")?;
-            events.push(
-                RunEvent::try_transient(
-                    finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
-                    finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
-                    transient_event_id(effect_id, transient_sequence),
-                    session_id,
-                    lane_id,
-                    run_id,
-                    Some(turn_id),
-                    None,
-                    Some(tool_batch_id),
-                    Some(effect_id),
-                    Some(tool_call_id),
-                    transient_sequence,
-                    now,
-                    Sensitivity::Confidential,
-                    RunEventBody::ToolProgress(item.clone()),
-                )
-                .map_err(|_| "tool_progress_invalid")?,
-            );
-        }
+        let transient_sequence = self.next_transient_sequence;
+        let event = RunEvent::try_transient(
+            finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION,
+            finstack_ai_kernel::RUN_EVENT_KIND_VERSION,
+            event_id,
+            session_id,
+            lane_id,
+            run_id,
+            Some(turn_id),
+            None,
+            Some(tool_batch_id),
+            Some(effect_id),
+            Some(tool_call_id),
+            transient_sequence,
+            now,
+            Sensitivity::Confidential,
+            RunEventBody::ToolProgress(progress.clone()),
+        )
+        .map_err(|_| "tool_progress_invalid")?;
         self.next_transient_sequence = self
             .next_transient_sequence
-            .checked_add(
-                u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?,
-            )
+            .checked_add(1)
             .ok_or("transient_event_sequence_exhausted")?;
-        Ok(events.into())
+        Ok(event)
     }
 
     #[cfg(test)]
@@ -459,16 +474,6 @@ impl CommitCoordinator {
         coordinator.install_dispatcher(dispatcher);
         coordinator
     }
-}
-
-#[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
-fn transient_event_id(effect_id: EffectId, transient_sequence: u64) -> EventId {
-    let mut bytes = effect_id.to_bytes();
-    let digest = finstack_ai_kernel::Digest::raw_json(
-        format!("{}:{transient_sequence}", effect_id.to_canonical_string()).as_bytes(),
-    );
-    bytes[9..].copy_from_slice(&digest.as_bytes()[..7]);
-    EventId::from_bytes(bytes)
 }
 
 fn decision_error(error: &KernelError) -> CommitCoordinatorError {

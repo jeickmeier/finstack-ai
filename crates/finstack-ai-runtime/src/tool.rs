@@ -1,7 +1,7 @@
 //! Target-neutral Toolset port, offline schema resolution, and stream normalization.
 
 use core::fmt;
-use core::future::poll_fn;
+use core::future::{Future, poll_fn, ready};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -793,6 +793,12 @@ pub struct AssembledToolStream {
     pub result: ToolResult,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AssembledToolTerminal {
+    pub(crate) usage: Option<Usage>,
+    pub(crate) result: ToolResult,
+}
+
 /// Target-neutral strict tool stream driver.
 #[derive(Debug, Clone, Copy)]
 pub struct ToolStreamAssembler {
@@ -814,13 +820,37 @@ impl ToolStreamAssembler {
     /// regressing usage, oversized streams/results, and invalid successful output.
     pub async fn assemble(
         self,
-        mut stream: ToolEventStream,
+        stream: ToolEventStream,
         output_validator: Option<&dyn ToolValidator>,
         max_result_bytes: u64,
     ) -> Result<AssembledToolStream, ToolError> {
+        let mut progress = Vec::new();
+        let terminal = self
+            .assemble_incremental(stream, output_validator, max_result_bytes, |item| {
+                progress.push(item);
+                ready(Ok(()))
+            })
+            .await?;
+        Ok(AssembledToolStream {
+            progress: progress.into(),
+            usage: terminal.usage,
+            result: terminal.result,
+        })
+    }
+
+    pub(crate) async fn assemble_incremental<F, Fut>(
+        self,
+        mut stream: ToolEventStream,
+        output_validator: Option<&dyn ToolValidator>,
+        max_result_bytes: u64,
+        mut emit_progress: F,
+    ) -> Result<AssembledToolTerminal, ToolError>
+    where
+        F: FnMut(ToolProgress) -> Fut,
+        Fut: Future<Output = Result<(), ToolError>>,
+    {
         let mut count = 0_usize;
         let mut stream_bytes = 0_usize;
-        let mut progress = Vec::new();
         let mut usage: Option<Usage> = None;
         let mut result = None;
         while let Some(item) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
@@ -853,7 +883,7 @@ impl ToolStreamAssembler {
                             .len(),
                         self.limits.max_stream_bytes,
                     )?;
-                    progress.push(value);
+                    emit_progress(value).await?;
                 }
                 ToolStreamItem::Usage(value) => {
                     validate_usage(&value.usage, usage.as_ref())?;
@@ -898,11 +928,7 @@ impl ToolStreamAssembler {
                 "tool stream ended without a completion",
             )
         })?;
-        Ok(AssembledToolStream {
-            progress: progress.into(),
-            usage,
-            result,
-        })
+        Ok(AssembledToolTerminal { usage, result })
     }
 }
 
