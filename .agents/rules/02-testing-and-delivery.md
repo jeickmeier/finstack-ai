@@ -31,7 +31,21 @@ Every fixture must demonstrably activate the behavior it claims to test. Tests m
 - For TypeScript/npm public surface changes, run the configured declaration/type-check against the published entrypoints once that task exists; report declaration drift as a failure. Before handoff, smoke-check that IDE hover shows TSDoc for new or changed public exports (`05-typescript-coding.md`).
 - Report exact commands, targets, results, and validation limits. Never claim an unavailable or unrun check passed.
 
-## Complete the implementation handoff
+## Transition an authorized PR range
+
+Apply this state machine independently to every logical PR in an explicitly authorized range:
+
+1. **Admit.** Recheck dependencies, phase entrance, gate and ADR state, tracking reference, exclusions, branch and base, worktree ownership, and required reviews. Move only the active PR to truthful `Ready` or `In progress`.
+2. **Implement.** Complete only that PR's coherent vertical slice and focused tests.
+3. **Candidate.** Create an immutable candidate commit, run the PR's complete affected validation against that revision, retain artifacts and digests, and update acceptance, review, blocker, ADR, exception, task, and delivery records truthfully.
+4. **Transition.** In `stacked` mode, leave the PR `In review`, preserve its separate candidate and evidence commits, and base the successor on its committed review head; do not claim integration or `Done`. In `integrated` mode, merge only into the target authorized in the execution envelope, verify the resulting integration tree, rerun integration-sensitive checks, complete the register transaction, and mark `Done` only when the existing completion rules are satisfied. Base the successor on the verified integrated commit.
+5. **Advance.** Re-evaluate the successor's eligibility and continue without a routine handoff only while the original execution envelope remains valid.
+
+Validation or implementation failure keeps the current PR active. Preserve material failing evidence, link remediation, create a new immutable candidate when source changes, and rerun the affected and required final checks before advancing. A recoverable tooling or environment failure may be diagnosed and retried against the same candidate with bounded targeted reruns or serialized task execution; it is not a product pass and must not cause source changes unless source is proven responsible.
+
+Do not repair unrelated failures as part of the range. Continue only when an isolated clean candidate proves the failure is unrelated and every acceptance requirement for the active PR remains evidenced; otherwise record the blocker and stop the range. Never convert an aggregate failure into a pass by omission. An unresolved authority, design, gate, security, evidence, or worktree-ownership failure blocks the range rather than permitting a skip.
+
+## Complete the PR boundary and final handoff
 
 Use `docs/implementation/README.md` for the update transaction. At minimum:
 
@@ -42,4 +56,10 @@ Use `docs/implementation/README.md` for the update transaction. At minimum:
 3. Update `adr-register.md` when code implements, verifies, or supersedes a decision.
 4. Track eligible standards waivers through every state in `exceptions-register.md`; only approved, unexpired exceptions support `Waived` acceptance.
 
+For every range member, treat these register changes as one status transaction at the same final revision. Reconcile the logical-PR row, tasks, blockers, acceptance coverage, snapshot totals, derived phase state, evidence, ADR state, and exceptions together. If any claim lacks support, retain the conservative prior status rather than partially recording completion. Append failures and superseding evidence; never rewrite history.
+
 During coding, use truthful `In progress` or `In review` state and report local validation without treating an uncommitted worktree as immutable evidence. `Done`, merged commits and dates, final verification, approvals, and gate passage are post-merge or authorized-review actions. Do not mark a logical PR `Done` until mapped work is merged or validly dispositioned, acceptance and required reviews are complete at the integrated commit, and blockers are closed. Phases additionally require exit evidence; gates require a named decision and are never inferred.
+
+When the last PR in a phase contains gate-sign-off acceptance, first bring the PR and phase-exit evidence to reviewable state. The named approver then records a separate gate decision; only afterward may that decision satisfy the gate criterion and the PR, phase, and gate statuses be reconciled. Range authorization is never that decision.
+
+Provide one consolidated range handoff when the range completes or stops. Report the requested and executed range, mode, per-PR candidate and integrated commits, statuses, exact validation and limits, evidence and register transactions, retained failures and remediation, blockers, gate state, external actions actually taken, final worktree state, and the precise next eligible action.

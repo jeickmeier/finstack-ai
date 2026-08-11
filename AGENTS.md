@@ -16,6 +16,12 @@ Implement the workspace defined by `docs/planning/03-finstack-ai-technical-desig
 
 Implementation code and tests are the primary deliverable. Follow this loop: select the smallest eligible logical PR, start with its referenced contracts and follow directly affected cross-references, inspect the code, implement one coherent vertical slice, add focused tests, run affected validation, update execution records, and hand off truthfully. Do not mix adjacent logical PRs for convenience or build deferred capabilities early.
 
+### Authorized sequential ranges
+
+An inclusive logical-PR range runs only when the user explicitly names both endpoints and requests sequential execution. Record an execution envelope containing `mode=stacked|integrated`, the starting branch and commit, the integration target when applicable, authorized local Git actions, and any separately authorized external actions. `Integrated` mode requires an explicitly named target and merge authorization. Pushes, hosted pull requests or merges, publication, and gate approval are prohibited unless separately named. Do not infer range authorization from `continue`, a phase name, or several mentioned PRs.
+
+Range authorization changes handoff cadence only. Keep exactly one logical PR active at a time, preserve a separate candidate, evidence set, and review unit for every PR, and advance only after the current PR reaches its mode-specific transition condition. Do not request a routine handoff between eligible PRs while the envelope remains valid. Dependencies, exclusions, gates, ADRs, security review, change control, and completion rules remain authoritative. For example: `Run PR-017 through PR-020 sequentially; mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; stop before any gate crossing unless a separate passing gate decision exists.`
+
 Planning files are read-only during normal coding. If implementation exposes a genuine conflict or ADR trigger, stop the affected work and use change control. A threat-model review trigger does not automatically require an ADR or stop coding; complete its controls, tests, and review before merge. The current phase produces evidence for its own gate. Later-phase work requires preceding gates and entrance criteria unless explicitly parallel.
 
 ## Coding Style and Architecture
