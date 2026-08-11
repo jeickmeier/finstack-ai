@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-11 (PR-026 final hosted candidate `af6b93d3f10362ab0399c5de18affe4563740da7`; G3 Passed; publication, live-provider smoke, and independent review not claimed).
+Index last reconciled: 2026-08-11 (PR-027 immutable local source candidate `6d1c06f79fb8d81c8b10d6a46fd599516e859a3b`; hosted Python matrix pending; publication, live-provider smoke, and independent review not claimed).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -41,8 +41,8 @@ Index last reconciled: 2026-08-11 (PR-026 final hosted candidate `af6b93d3f10362
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Standalone | Not started | Missing |
 | ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Not started | Missing |
 | ADR-016 | `sqlite-before-multilane` | Durability/ecosystem lead | PR-040 before PR-047 | Accepted | Standalone | Not started | Missing |
-| ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Missing |
-| ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Missing |
+| ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Partial ([PR-027 single-extension package and reproducible wheel/sdist evidence](artifacts/pr-027/README.md); semantic completion and release staging remain PR-028–PR-032) |
+| ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Partial ([PR-027 per-version workflow and local package evidence](artifacts/pr-027/README.md); exact hosted matrix pending and later PR-028–PR-032 remain) |
 | ADR-019 | `browser-host-adapter` | Bindings lead | PR-034, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-020 | `capability-delivery` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | In progress | Partial ([PR-022 Always/Application activation and reserved Model evidence](artifacts/pr-022/README.md); later bindings/final integration remain) |
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Standalone | Not started | Missing |
@@ -128,6 +128,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-018 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-018-python-version-matrix.md | — | me@jeickmeier.com |
 | 2026-08-11 | ADR-017 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 single-extension-module package and curated provider composition on `codex/pr-027-python-package` | — | — |
 | 2026-08-11 | ADR-018 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 per-version CPython/manylinux/macOS/Windows wheel pipeline on `codex/pr-027-python-package` | — | — |
+| 2026-08-11 | ADR-017 | Evidence | me@jeickmeier.com | Missing | Partial | PR-027 immutable single-extension package, linked curated provider, typed facade, and reproducible wheel/sdist local evidence; PR-028–PR-032 remain | PR-027-E-rust-graph-704dc7f12b23; PR-027-E-release-d6ec0810b7c5 | me@jeickmeier.com |
+| 2026-08-11 | ADR-018 | Evidence | me@jeickmeier.com | Missing | Partial | PR-027 per-interpreter non-abi3 matrix, 3.14t contract, and local package evidence; exact hosted execution and PR-028–PR-032 remain | PR-027-E-version-a7a45b1095c5; PR-027-E-ci-6d1c06f79fb8 | me@jeickmeier.com |
 | 2026-08-08 | ADR-019 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-019-browser-host-adapter.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-020 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-020-capability-delivery.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-021 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-021-shared-framing.md | — | me@jeickmeier.com |
