@@ -7,15 +7,26 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Python bindings placeholder for finstack-ai"
+description = "PyO3 bindings for the finstack-ai agent engine"
 publish = false
 
 [lib]
-name = "finstack_ai_python"
+name = "_finstack_ai"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+test = false
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-finstack-ai = { workspace = true, default-features = false }
+finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-provider-openai-compatible = { workspace = true }
+pyo3 = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = { workspace = true }
 
 [lints]
 workspace = true

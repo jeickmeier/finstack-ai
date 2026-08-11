@@ -41,8 +41,8 @@ Index last reconciled: 2026-08-11 (PR-026 final hosted candidate `af6b93d3f10362
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Standalone | Not started | Missing |
 | ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Not started | Missing |
 | ADR-016 | `sqlite-before-multilane` | Durability/ecosystem lead | PR-040 before PR-047 | Accepted | Standalone | Not started | Missing |
-| ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | Not started | Missing |
-| ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | Not started | Missing |
+| ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Missing |
+| ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | In progress | Missing |
 | ADR-019 | `browser-host-adapter` | Bindings lead | PR-034, PR-038 | Accepted | Standalone | Not started | Missing |
 | ADR-020 | `capability-delivery` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | In progress | Partial ([PR-022 Always/Application activation and reserved Model evidence](artifacts/pr-022/README.md); later bindings/final integration remain) |
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Standalone | Not started | Missing |
@@ -126,6 +126,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-08 | ADR-016 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-016-sqlite-before-multilane.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-017 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-017-single-python-wheel.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-018 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-018-python-version-matrix.md | — | me@jeickmeier.com |
+| 2026-08-11 | ADR-017 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 single-extension-module package and curated provider composition on `codex/pr-027-python-package` | — | — |
+| 2026-08-11 | ADR-018 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 per-version CPython/manylinux/macOS/Windows wheel pipeline on `codex/pr-027-python-package` | — | — |
 | 2026-08-08 | ADR-019 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-019-browser-host-adapter.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-020 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-020-capability-delivery.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-021 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-021-shared-framing.md | — | me@jeickmeier.com |

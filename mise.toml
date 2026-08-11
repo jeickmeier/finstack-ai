@@ -548,16 +548,189 @@ mise run supply-chain
 mise run secret-scan
 mise run secret-scan-canary
 mise run release-smoke
-mise run build-python
+mise run test-pr027
 """
 
 # Build tasks
 
 [tasks.build-python]
-description = "Build the Python binding package with pinned hashed setuptools"
+description = "Build the Python wheel and sdist with pinned hashed maturin"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 uv build \
   --project bindings/finstack-ai-python \
+  --out-dir target/python-dist \
+  --clear \
+  --no-create-gitignore \
   --build-constraints bindings/finstack-ai-python/constraints-build.txt \
   --require-hashes
+"""
+
+[tasks.python-develop]
+description = "Open an isolated shell-ready Python environment with the binding installed editable"
+run = """
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  python -c 'import finstack_ai; print(finstack_ai.build_metadata())'
+"""
+
+[tasks.lint-python-binding]
+description = "Lint Python package, tests, and artifact checker"
+run = """
+uv run --no-project --with ruff==0.12.11 ruff check \
+  bindings/finstack-ai-python/python \
+  bindings/finstack-ai-python/tests \
+  tools/python_package
+uv run --no-project --with ruff==0.12.11 ruff format --check \
+  bindings/finstack-ai-python/python \
+  bindings/finstack-ai-python/tests \
+  tools/python_package
+"""
+
+[tasks.typecheck-python-binding]
+description = "Strictly type-check the Python package and artifact checker"
+run = """
+uv run --isolated --no-project \
+  --with mypy==2.3.0 \
+  mypy --strict \
+    bindings/finstack-ai-python/python \
+    tools/python_package
+"""
+
+[tasks.test-python-binding]
+description = "Run Python import, metadata, typing, and side-effect smoke tests"
+run = """
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.test-python-wheel]
+description = "Install the built wheel without a compiler and run its smoke tests"
+run = """
+set -euo pipefail
+set -- target/python-dist/*.whl
+if [ "$#" -ne 1 ]; then
+  echo 'expected exactly one built wheel in target/python-dist' >&2
+  exit 1
+fi
+uv run --isolated --no-project \
+  --with "$1" \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.build-python-wheel-ci]
+description = "Build one native macOS or Windows wheel for the hosted CPython matrix"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+set -euo pipefail
+: "${PYTHON_VERSION:?PYTHON_VERSION is required}"
+: "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
+uv python install "${PYTHON_VERSION}"
+interpreter="$(uv python find "${PYTHON_VERSION}")"
+uv run --no-project --with maturin==1.14.1 maturin build \
+  --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  --release \
+  --locked \
+  --interpreter "${interpreter}" \
+  --out "${PYTHON_DIST_DIR}"
+"""
+
+[tasks.smoke-python-wheel-ci]
+description = "Install and smoke one hosted per-interpreter wheel"
+run = """
+set -euo pipefail
+: "${PYTHON_VERSION:?PYTHON_VERSION is required}"
+: "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
+uv python install "${PYTHON_VERSION}"
+set -- "${PYTHON_DIST_DIR}"/*.whl
+if [ "$#" -ne 1 ]; then
+  echo "expected exactly one wheel in ${PYTHON_DIST_DIR}" >&2
+  exit 1
+fi
+case "$1" in
+  *abi3*)
+    echo 'classic abi3 wheel is prohibited by ADR-018' >&2
+    exit 1
+    ;;
+esac
+uv run --python "${PYTHON_VERSION}" --isolated --no-project \
+  --with "$1" \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.build-python-sdist-ci]
+description = "Build the hosted Python source distribution"
+env = { PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+uv build \
+  --project bindings/finstack-ai-python \
+  --sdist \
+  --out-dir target/python-sdist \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+"""
+
+[tasks.stage-python]
+description = "Build twice and validate reproducible Python release artifacts"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+set -euo pipefail
+uv build \
+  --project bindings/finstack-ai-python \
+  --out-dir target/python-stage-a \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+uv build \
+  --project bindings/finstack-ai-python \
+  --out-dir target/python-stage-b \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+uv run --no-project python tools/python_package/check.py \
+  target/python-stage-a target/python-stage-b
+"""
+
+[tasks.test-pr027]
+description = "Run PR-027 native module, package, dependency, and release proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-python --locked
+cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings
+mise run lint-python-binding
+mise run typecheck-python-binding
+mise run test-python-binding
+mise run build-python
+mise run test-python-wheel
+mise run stage-python
+python_graph="$(cargo tree -p finstack-ai-python -e normal,build --locked)"
+case "${python_graph}" in
+  *pyo3*) ;;
+  *)
+    echo 'Python binding graph must link PyO3' >&2
+    exit 1
+    ;;
+esac
+case "${python_graph}" in
+  *finstack-ai-provider-openai-compatible*) ;;
+  *)
+    echo 'Python binding graph must link the OpenAI-compatible provider' >&2
+    exit 1
+    ;;
+esac
+for package in finstack-ai-kernel finstack-ai-runtime; do
+  if cargo tree -p "${package}" -e normal,build --locked | grep -Eq 'pyo3|finstack-ai-python'; then
+    echo "${package} unexpectedly includes Python binding dependencies" >&2
+    exit 1
+  fi
+done
+mise run architecture
 """

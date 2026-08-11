@@ -171,8 +171,8 @@ jobs:
           mise run test-benchmark
           uv run --no-project python tools/benchmark/run.py compile
 
-      - name: Python package smoke
-        run: mise run build-python
+      - name: Python package validation
+        run: mise run test-pr027
 
   coverage:
     name: coverage
