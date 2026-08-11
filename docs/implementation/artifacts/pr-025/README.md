@@ -3,14 +3,16 @@
 PR-025 implements the trusted native calculator and capability-scoped
 filesystem toolsets. The immutable implementation candidate is commit
 `faac2e30f8a31e319b6af68abf4db5dd450f421b` with tree
-`6e64a3d17a5edfbb4084f921009b47063705c6b4` on
-`codex/pr-025-filesystem-tools`.
+`6e64a3d17a5edfbb4084f921009b47063705c6b4`; its evidence commit is
+`3e6157a2116cc58620257f1eb4cd01eb5fc6e1d0`. The local `main` merge is
+`ee76c71354c2ca504283478a3208e1020c90cad6`, whose tree exactly matches
+the evidence tree `9619754f442061e1e34870488749194266196d8a`.
 
 The exact candidate command inventory is in
 [`candidate-validation.txt`](candidate-validation.txt), and the TM-03 control
-review is in [`security-review.txt`](security-review.txt). Local integration
-evidence will be added only after the evidence commit is merged to `main` and
-post-merge gates pass.
+review is in [`security-review.txt`](security-review.txt). Local merge identity
+and post-merge gates are recorded in
+[`integration-validation.txt`](integration-validation.txt).
 
 ## Local acceptance map
 
