@@ -25,12 +25,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, local PR-019 merge `bf748d5aa1ee7ffa11cf9ac3ab2dea399034dd0b`, and immutable PR-020 implementation candidate `91a9faec7d58e4ea594e5459bc48f6f977975dbb` on 2026-08-11:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20 and local PR-020 merge `f101b260dd6c9ca6ffa82d805824669c5d974ca0` on 2026-08-11:
 
-- 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-004, ADR-005, ADR-006, ADR-009, ADR-022, ADR-030, ADR-034, and ADR-037 are `In progress` / `Partial`; PR-020 adds immutable commit-before-effect, crash-prefix, slow-observer, stress/leak, Miri, and benchmark evidence while local integration and later mapped work remain open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their remaining routing, durability, and lifecycle work is later. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
-- Phase 0 and Phase 1 are `Done`; Phase 2 is `In progress`; PR-001–PR-019 are `Done`; PR-020 is `In review`; PR-021–PR-066 are `Todo`.
-- G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2–G8 remain `Not ready`.
-- PR-001–PR-019 acceptance criteria are closed. PR-020 A01–A03 are bound to immutable local implementation evidence under [`artifacts/pr-020/`](artifacts/pr-020/); A04, local integration, Phase 2 exit review, and G2 remain open. No PR-020 actual pull request, push, hosted run, independent review, publication, exception, or blocker is claimed.
+- 37 decisions are accepted and indexed. ADR-001 through ADR-003 are `Implemented` / `Verified` through the merged Phase 1 evidence and G1 decision. ADR-004, ADR-005, ADR-006, ADR-009, ADR-022, ADR-030, ADR-034, and ADR-037 are `In progress` / `Partial`; PR-020 adds locally integrated commit-before-effect, crash-prefix, slow-observer, stress/leak, Miri, benchmark, Phase 2 exit, and G2 evidence while explicitly mapped later work remains open. ADR-025 through ADR-028 remain `In progress` / `Partial` because their remaining routing, durability, and lifecycle work is later. ADR-007, ADR-024, and ADR-036 also retain their documented partial later scope.
+- Phase 0 through Phase 2 are `Done`; PR-001–PR-020 are `Done`; PR-021–PR-066 are `Todo`. Both Phase 3 entrance criteria are passed.
+- G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3–G8 remain `Not ready`.
+- PR-001–PR-020 acceptance criteria are closed. PR-020 A01–A04, all four Phase 2 exits, local integration, and G2 are bound under [`artifacts/pr-020/`](artifacts/pr-020/). No PR-020 actual pull request, push, hosted run, independent review, publication, exception, or blocker is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

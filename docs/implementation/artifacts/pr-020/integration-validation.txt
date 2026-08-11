@@ -1,0 +1,48 @@
+PR-020 local integration validation
+Date: 2026-08-11
+Target branch: main
+Merge revision: f101b260dd6c9ca6ffa82d805824669c5d974ca0
+Merge tree: 4010384d8f235af548a92948ea6e53144765fd70
+First parent: a39fd402f4e089cecf34074cfd57498de1e58e0b
+Second parent: 283b676ebd92b82fae43a9c8189688f13a19f784
+Implementation revision: 91a9faec7d58e4ea594e5459bc48f6f977975dbb
+Implementation tree: 6a286bc63fc2df6a8cd20d7d68b255b355bf88db
+Evidence revision: 283b676ebd92b82fae43a9c8189688f13a19f784
+Evidence tree: 4010384d8f235af548a92948ea6e53144765fd70
+Disposition: PASS for local integration; no hosted run, actual pull request,
+branch push, publication, or independent review is claimed
+
+Identity verification
+
+- The local merge has the expected unchanged main baseline and PR-020 evidence
+  commit as its two parents.
+- The merge tree exactly equals the evidence-commit tree, proving the merge added
+  no conflict resolution or implementation drift.
+- The evidence-only commit changes implementation records and retained artifacts;
+  executable code remains bound to implementation commit
+  91a9faec7d58e4ea594e5459bc48f6f977975dbb.
+
+Post-merge validation on main
+
+1. mise run test-runtime-gate
+   PASS: all seven coordinator fault/manual-drive cases, 128 repeated idle-owner
+   joins, stalled-observer isolation, failed-append provider exclusion, 24
+   repeated model runs, and streaming-tool shutdown cleanup passed.
+
+2. mise run test-miri
+   PASS on the pinned nightly-2026-08-01 toolchain: raw-JSON canonicalization,
+   reducer semantic-tampering/apply, and deterministic fingerprint tests passed
+   under Miri. The first sandboxed invocation could not create a Rustup temporary
+   file; the permitted retry used the existing pinned toolchain and passed.
+
+3. mise run ci
+   PASS: format, workspace Clippy/tests/doctests/rustdoc, minimal and wasm32
+   graphs, architecture/schema/conformance checks, benchmark compilation,
+   workflow lint, supply-chain and secret checks, release smoke, and Python
+   source/wheel builds. Non-failing supply-chain output remains the existing
+   syn 2/3 duplicate and unused MIT-0/Zlib/NCSA allowances.
+
+Closeout
+
+PR-020 A01-A04 pass and the logical PR is Done at this local merge. All four
+Phase 2 exits pass. The separate G2 decision is recorded in g2-decision.txt.
