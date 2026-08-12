@@ -577,6 +577,71 @@ enum EventStreamState {
     StartupFailed(AgentRunError),
 }
 
+struct EventConsumerGuard {
+    inner: Arc<AgentRunInner>,
+    subscription: Option<EventSubscription>,
+}
+
+impl EventConsumerGuard {
+    fn subscription_mut(&mut self) -> &mut EventSubscription {
+        self.subscription
+            .as_mut()
+            .expect("event consumer guard owns its subscription")
+    }
+
+    fn finish(mut self, batch: Option<EventBatch>) -> Result<Option<EventBatch>, AgentRunError> {
+        let mut state = self
+            .inner
+            .events
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run event lock is poisoned"))?;
+        let mut subscription = self
+            .subscription
+            .take()
+            .expect("event consumer guard owns its subscription");
+        match &*state {
+            EventStreamState::CloseRequested | EventStreamState::Closed => {
+                subscription.close();
+                *state = EventStreamState::Closed;
+                Ok(None)
+            }
+            EventStreamState::Busy => {
+                if batch.is_some() {
+                    *state = EventStreamState::Active(subscription);
+                } else {
+                    *state = EventStreamState::Closed;
+                }
+                Ok(batch)
+            }
+            _ => {
+                subscription.close();
+                *state = EventStreamState::Closed;
+                Err(AgentRunError::runtime_message(
+                    "run event consumer state is inconsistent",
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for EventConsumerGuard {
+    fn drop(&mut self) {
+        let Some(mut subscription) = self.subscription.take() else {
+            return;
+        };
+        let Ok(mut state) = self.inner.events.lock() else {
+            subscription.close();
+            return;
+        };
+        if matches!(&*state, EventStreamState::Busy) {
+            *state = EventStreamState::Active(subscription);
+        } else {
+            subscription.close();
+            *state = EventStreamState::Closed;
+        }
+    }
+}
+
 #[derive(Default)]
 struct CancellationState {
     started: bool,
@@ -710,36 +775,16 @@ impl AgentRun {
                     }
                 }
             };
-            let Some(mut subscription) = subscription else {
+            let Some(subscription) = subscription else {
                 finstack_ai_runtime::native_driver::yield_now().await;
                 continue;
             };
-            let batch = subscription.next_batch().await;
-            let mut state = self
-                .inner
-                .events
-                .lock()
-                .map_err(|_| AgentRunError::runtime_message("run event lock is poisoned"))?;
-            match &*state {
-                EventStreamState::CloseRequested | EventStreamState::Closed => {
-                    subscription.close();
-                    *state = EventStreamState::Closed;
-                    return Ok(None);
-                }
-                EventStreamState::Busy => {
-                    if batch.is_some() {
-                        *state = EventStreamState::Active(subscription);
-                    } else {
-                        *state = EventStreamState::Closed;
-                    }
-                    return Ok(batch);
-                }
-                _ => {
-                    return Err(AgentRunError::runtime_message(
-                        "run event consumer state is inconsistent",
-                    ));
-                }
-            }
+            let mut guard = EventConsumerGuard {
+                inner: Arc::clone(&self.inner),
+                subscription: Some(subscription),
+            };
+            let batch = guard.subscription_mut().next_batch().await;
+            return guard.finish(batch);
         }
     }
 
@@ -1876,6 +1921,55 @@ mod tests {
         assert_eq!(second.text(), "batched");
         assert_eq!(first.locator, second.locator);
         assert_eq!(model.request_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_event_wait_restores_the_single_consumer() {
+        let control_name = Arc::<str>::from("cancelled-event-wait");
+        let mut plan = completed("event delivery resumed");
+        plan.actions
+            .insert(0, ScriptedModelAction::Block(Arc::clone(&control_name)));
+        let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+        let control = model.control();
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+        let run = agent
+            .start(request("resume event delivery"))
+            .expect("start");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while control.entries(&control_name) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("model reached gate");
+
+        let mut cancelled_wait = false;
+        for _ in 0..32 {
+            match tokio::time::timeout(Duration::from_millis(20), run.next_event_batch()).await {
+                Ok(Ok(Some(_))) => {}
+                Ok(Ok(None)) => panic!("event stream closed before model release"),
+                Ok(Err(error)) => panic!("event delivery failed: {error}"),
+                Err(_) => {
+                    cancelled_wait = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            cancelled_wait,
+            "expected one pending batch wait to be cancelled"
+        );
+
+        control.release(&control_name);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while run.next_event_batch().await.expect("event batch").is_some() {}
+        })
+        .await
+        .expect("event delivery resumed after waiter cancellation");
+        assert_eq!(
+            run.result().await.expect("retained result").text(),
+            "event delivery resumed"
+        );
     }
 
     #[tokio::test]
