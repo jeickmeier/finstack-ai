@@ -646,7 +646,7 @@ esac
 "${resolved_cargo}" --version
 uv tool install --force maturin==1.14.1
 "${maturin_command}" --version
-"${maturin_command}" build \
+CARGO="${resolved_cargo}" "${maturin_command}" build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \
   --locked \
