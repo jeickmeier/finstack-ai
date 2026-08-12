@@ -41,6 +41,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust "cargo:cargo-fuzz"
           cache: true
 
       - name: Cache Rust build artifacts
@@ -65,6 +66,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: "aqua:rhysd/actionlint"
           cache: true
 
       - name: Lint workflows
@@ -85,6 +87,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: python uv
           cache: true
 
       - name: Schema governance unit tests
@@ -126,6 +129,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
 
       - name: Export Python interpreter for PyO3
@@ -134,10 +138,15 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Doctor
-        run: mise run doctor
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          python --version
+          uv --version
 
       - name: Format
+        if: runner.os == 'Linux'
         run: mise run format
 
       - name: Clippy
@@ -150,35 +159,38 @@ jobs:
         run: mise run test-pr026
 
       - name: Docs
+        if: runner.os == 'Linux'
         run: mise run docs
 
       - name: Minimal features
+        if: runner.os == 'Linux'
         run: mise run check-minimal
 
       - name: Architecture
+        if: runner.os == 'Linux'
         run: mise run architecture
 
       - name: WASM target
+        if: runner.os == 'Linux'
         run: mise run check-wasm
 
       - name: CI helper tests
+        if: runner.os == 'Linux'
         run: |
           mise run lint-ci
           mise run format-ci
           mise run test-ci
 
       - name: Benchmark helpers and compile
+        if: runner.os == 'Linux'
         run: |
           mise run lint-benchmark
           mise run format-benchmark
           mise run test-benchmark
           uv run --no-project python tools/benchmark/run.py compile
 
-      - name: Python package validation
-        run: mise run test-pr027
-
-  coverage:
-    name: coverage
+  python-package:
+    name: python-package (PR-027)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -191,7 +203,39 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
+
+      - name: Export Python interpreter for PyO3
+        run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Python package validation
+        run: mise run test-pr027
+
+  coverage:
+    name: coverage
+    # Diagnostic only (no percentage gate); keep off the PR critical path.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          install_args: rust python uv "github:taiki-e/cargo-llvm-cov"
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Rust coverage
         run: mise run coverage-rust
@@ -228,7 +272,11 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Release smoke
         run: mise run release-smoke

@@ -92,7 +92,7 @@ Security run 31550172093 passed all three jobs at the same revision. CI run
 31550170624 was still completing when the final replacement candidate was
 prepared and cannot close that replacement candidate.
 
-Final replacement source candidate: d5bbd41ef802591669342f5ee1a8f2ac455b363a
+Attempt 3 replacement source candidate: d5bbd41ef802591669342f5ee1a8f2ac455b363a
 Tree: a77ff70902b64bc366ebbfe41ca631b90301f6b7
 Remediation:
   - install both exact OpenSSL Perl modules, IPC::Cmd and Time::Piece;
@@ -100,13 +100,97 @@ Remediation:
   - execute the maturin tool binary directly so Windows retains Cargo PATH;
   - retain explicit Cargo and maturin version probes before the build.
 
-Final local replacement validation:
+Attempt 3 local replacement validation:
   PASS  mise run lint-workflows
   PASS  mise run build-python-wheel-ci
   PASS  mise run coverage-python (72 tests)
   PASS  mise run ci
 
-Replacement hosted run: PENDING
+Attempt 4 - FAILED AND SUPERSEDED
+Evidence revision: 5fd6bf9db28db6f755a6bcb662063d2a5ec386c2
+Python-wheels run: 31550749159
+URL: https://github.com/jeickmeier/finstack-ai/actions/runs/31550749159
+Result:
+  PASS  source distribution and all five macOS arm64 rows
+  FAIL  four Windows rows because the directly invoked maturin process still
+        could not discover Cargo across the Git Bash/native-process boundary
+  CANCEL remaining rows after the diagnostic failure was superseded
+
+Representative failed job:
+  Windows x64 / CPython 3.12 93972739500
+
+Security run 31550754577 passed all three jobs. CI run 31550753458 was
+cancelled when the replacement was prepared and closes no acceptance item.
+
+Attempt 4 replacement source candidate: de6aa6f0b29108e1899d844120c9ce4d2576e64f
+Remediation:
+  - export the already-probed native Cargo executable through CARGO before
+    invoking maturin.
+
+Attempt 5 - FAILED AND SUPERSEDED
+Evidence revision: de6aa6f0b29108e1899d844120c9ce4d2576e64f
+Python-wheels run: 31551035518
+URL: https://github.com/jeickmeier/finstack-ai/actions/runs/31551035518
+Result:
+  PASS  source distribution and completed macOS/manylinux rows
+  FAIL  all five Windows rows because setting CARGO did not repair maturin's
+        Git Bash/native process-boundary discovery
+  CANCEL remaining rows after the diagnostic failure was superseded
+
+Representative failed job:
+  Windows x64 / CPython 3.11 93973621662
+
+Security run 31551207888 passed all three jobs. CI run 31551204469 was
+cancelled when the replacement was prepared and closes no acceptance item.
+
+Attempt 5 replacement source candidate: d9489419b55013eccbbb8300dcda4e132d801208
+Remediation:
+  - run the Windows wheel task under native PowerShell;
+  - resolve the interpreter, Cargo, and maturin.exe without crossing the Git
+    Bash/native subprocess boundary.
+
+Attempt 6 - FAILED AND SUPERSEDED
+Evidence revision: d9489419b55013eccbbb8300dcda4e132d801208
+Python-wheels run: 31551367717
+CI run: 31551373442
+Security run: 31551374661
+Result:
+  PASS  all 20 wheel rows and the source distribution
+  PASS  all three security jobs
+  PASS  nine of ten aggregate CI jobs, including Linux and macOS Rust jobs
+  FAIL  Windows Rust job 93974712614 during `uv build`; Maturin dynamically
+        requested unpinned `puccinialin` because its PEP 517 process could not
+        find Cargo, and strict hash mode rejected the bootstrap dependency
+
+Attempt 6 replacement source candidate: 1dd60c5ec96464f07057d027dfda3d8a1d151855
+Tree: 1e2c100813d6adb6493faf021a15b06b888ffffb
+Remediation:
+  - set MATURIN_NO_INSTALL_RUST=1 on every reproducible uv/Maturin build task;
+  - require the checked-in Rust toolchain instead of admitting Maturin's
+    conditional network bootstrap path.
+
+Attempt 7 - FINAL CANDIDATE, AGGREGATE CI PENDING
+Evidence revision: 1dd60c5ec96464f07057d027dfda3d8a1d151855
+Python-wheels run: 31553481318
+Security run: 31553503003
+CI run: 31553502541
+Result so far:
+  PASS  source distribution job 93980955669
+  PASS  all 20 wheel rows:
+        manylinux x86_64 3.11 93980955682; 3.12 93980955693;
+        3.13 93980955691; 3.14 93980955696; 3.14t 93980955707
+        manylinux aarch64 3.11 93980955755; 3.12 93980955699;
+        3.13 93980955708; 3.14 93980955705; 3.14t 93980955698
+        macOS arm64 3.11 93980955704; 3.12 93980955753;
+        3.13 93980955730; 3.14 93980955781; 3.14t 93980955850
+        Windows x64 3.11 93980955720; 3.12 93980955747;
+        3.13 93980955731; 3.14 93980955775; 3.14t 93980955806
+  PASS  security jobs 93981017430, 93981017445, and 93981017477
+  PENDING aggregate CI run 31553502541
+
+Final local candidate validation:
+  PASS  mise run test-pr027
+  PASS  byte-identical wheel/sdist staging with unchanged hashes
 
 The failed attempts are diagnostic evidence only and close no acceptance item.
 No package publication, hosted pull request, or hosted merge occurred.

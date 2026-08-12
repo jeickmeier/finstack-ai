@@ -1,0 +1,46 @@
+PR-027 final replacement candidate validation
+Date: 2026-08-11
+Candidate: 1dd60c5ec96464f07057d027dfda3d8a1d151855
+Tree: 1e2c100813d6adb6493faf021a15b06b888ffffb
+Branch: codex/pr-027-python-package
+Baseline: b68d4179b8da6db081d9c6acdef76e33fa67948d
+Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1; Python 3.14.6;
+             uv 0.10.11; mise 2026.8.3 macos-arm64
+
+Final-candidate delta after the base package evidence at
+d5bbd41ef802591669342f5ee1a8f2ac455b363a:
+
+- Linux wheel builds install the two exact Perl modules required by vendored
+  OpenSSL.
+- Hosted Rust jobs resolve and export an explicit Python interpreter for PyO3.
+- Windows wheel builds run through native PowerShell with native Cargo,
+  interpreter, and maturin.exe paths.
+- Reproducible uv/Maturin build tasks set MATURIN_NO_INSTALL_RUST=1, requiring
+  the repository toolchain and prohibiting Maturin's conditional Rust bootstrap.
+
+PASS  mise run test-pr027
+      - binding crate tests, doc tests, and strict all-target Clippy
+      - Ruff lint/format and strict mypy
+      - editable and clean installed-wheel smoke tests
+      - import/health side-effect subprocess audit
+      - one wheel plus one sdist built twice and compared byte-for-byte
+      - binding graph includes PyO3/provider while kernel/runtime exclude them
+      - 24 architecture tests
+
+PASS  final reproducibility observation
+      wheel aa05454b636d58491ffe2a522b6ea7895d6396d98c1518b74567141ce83b681c
+      sdist c1489f3f9cce3e42e893ecb4cb3284235c9e9e843dbd1b59958784f4369d6235
+
+Moving-worktree observation
+
+`mise run ci` also completed successfully after the candidate push, but an
+uncommitted user-owned edit to `.github/workflows/python-wheels.yml` appeared
+during that run at 2026-08-11T21:27:39-0400. Its log sha256 is
+38628c2a94b9b0cffe807e8d73dfebc495b7910c5af7cd4420c6cfd2ae6672cf.
+Because the working tree no longer exactly matched the candidate for the full
+duration, that aggregate is retained as diagnostic confirmation only and is
+not promoted as immutable final-candidate evidence. Exact aggregate evidence is
+the hosted CI run recorded in `hosted-validation.txt`.
+
+No package publication, hosted pull request, hosted merge, live external
+provider call, or independent review occurred.

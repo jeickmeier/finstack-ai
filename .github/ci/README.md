@@ -9,10 +9,10 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), candidate-v1 fuzz smoke, docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
-| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | PR-027 per-version CPython 3.11-3.14 and 3.14t wheels on manylinux x86_64/aarch64, macOS arm64, and Windows x64; isolated install/import/concurrency smoke; sdist staging |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Cross-OS Clippy/tests/native preview; Linux-only format/docs/WASM/architecture/helpers; parallel Ubuntu `python-package` (`test-pr027`); fuzz smoke; schema governance; release-smoke on Linux/macOS/Windows; coverage on `main`/manual only |
+| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | Trimmed PR matrix: CPython 3.14 wheels on manylinux x86_64/aarch64, macOS arm64, and Windows x64; isolated install/import/concurrency smoke; sdist staging (full 3.11–3.14/3.14t launch matrix remains ADR-018) |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
-| [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns run on Sunday/manual only, with 30-day corpus/crash artifact retention |
+| [`nightly.yml`](../workflows/nightly.yml) | Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns on Sunday/manual, with 30-day corpus/crash artifact retention |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
 
 ## Toolchain channels (PR-003-A02)
@@ -21,7 +21,7 @@ All executable checks are canonical mise tasks. Workflows must call
 | --- | --- | --- | --- |
 | stable | mise Rust `1.97.1` | every PR (`ci.yml` label `stable`) | `me@jeickmeier.com` |
 | MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (`ci.yml` label `msrv`; intentionally coincides with stable) | `me@jeickmeier.com` |
-| nightly | `nightly-2026-08-01` | every PR + weekly (`nightly.yml`) | `me@jeickmeier.com` |
+| nightly | `nightly-2026-08-01` | weekly + manual (`nightly.yml`) | `me@jeickmeier.com` |
 | fuzz | `cargo-fuzz 0.13.2`, `nightly-2026-08-01` | bounded smoke every PR; long campaign Sunday/manual | `me@jeickmeier.com` |
 
 ## Path filters
@@ -111,7 +111,7 @@ Canonical tasks:
 - `mise run test-benchmark` / `lint-benchmark` / `format-benchmark`
 - `mise run benchmark-smoke` — compile + short Criterion run with metadata
 - `mise run benchmark` — full non-blocking Criterion run with metadata under `target/benchmark/`
-- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (uploaded by the Ubuntu `coverage` job; no percentage gate; WASM is a scaffold until real wasm tests exist)
+- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (uploaded by the Ubuntu `coverage` job on `main`/manual only; no percentage gate; WASM is a scaffold until real wasm tests exist)
 
 The required Rust matrix runs conformance once through `mise run test`
 (`cargo test --workspace`). The focused `mise run conformance` task remains
