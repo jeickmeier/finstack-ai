@@ -234,6 +234,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-029-A02 | PR-029 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-029-E-fast-path-e238f55524c7; PR-029-E-local-e238f55524c7; PR-029-E-wheel-matrix-e238f55524c7; PR-029-E-hosted-ci-e238f55524c7; PR-029-E-integration-b79210e61af5 | — | me@jeickmeier.com | 2026-08-12 |
 | PR-029-A03 | PR-029 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-029-E-fast-path-e238f55524c7; PR-029-E-local-e238f55524c7; PR-029-E-hosted-ci-e238f55524c7; PR-029-E-integration-b79210e61af5 | — | me@jeickmeier.com | 2026-08-12 |
 | PR-029-A04 | PR-029 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-029-E-fast-path-e238f55524c7; PR-029-E-local-e238f55524c7; PR-029-E-integration-b79210e61af5 | — | me@jeickmeier.com | 2026-08-12 |
+| PR-030-A01 | PR-030 | PLAN-0.18 / [PR-030](../planning/04-finstack-ai-implementation-plan.md#pr-030---add-python-model-toolset-context-middleware-and-observer-adapters) | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-030-A02 | PR-030 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-030-A03 | PR-030 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-030-A04 | PR-030 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-030-A05 | PR-030 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

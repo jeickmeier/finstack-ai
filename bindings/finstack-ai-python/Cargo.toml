@@ -19,6 +19,7 @@ test = false
 [features]
 default = []
 benchmark-fixture = ["dep:finstack-ai-test"]
+callback-fixture = ["dep:finstack-ai-test"]
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
@@ -29,6 +30,7 @@ finstack-ai-test = { workspace = true, optional = true }
 futures-util = { workspace = true }
 pyo3 = { workspace = true }
 pyo3-async-runtimes = { workspace = true, features = ["tokio-runtime"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]

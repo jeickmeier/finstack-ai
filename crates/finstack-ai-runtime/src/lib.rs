@@ -22,10 +22,11 @@ pub use finstack_ai_kernel::{
     ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentInvocation,
     ComponentRef, ContentBlock, CostLimit, DOMAIN_AGENT_SPEC, Digest, EffectCompleted, EffectId,
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation,
-    EntryId, ErrorCategory, ErrorCode, ExternalHandleRef, FinalResultRecorded, InteractionKind,
-    InteractionRequest, InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message,
-    MessageId, MessageRole, Metadata, MiddlewareRef, ModelRequestId, OperationLocator,
-    OutputEndStrategy, OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
+    EntryId, ErrorCategory, ErrorCode, ExternalEffectCompletionCommand, ExternalHandleRef,
+    FinalResultRecorded, InteractionKind, InteractionRequest, InteractionResolutionCommand,
+    InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message, MessageId,
+    MessageRole, Metadata, MiddlewareRef, ModelRequestId, OperationLocator, OutputEndStrategy,
+    OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody,
     RecordDraft, RecordEnvelope, RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent,
     RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL,
@@ -278,6 +279,27 @@ pub mod native_driver {
         tokio::time::timeout(duration, future)
             .await
             .map_err(|_| TimeoutElapsed)
+    }
+
+    /// Run one blocking function on the native driver's blocking executor.
+    ///
+    /// This keeps synchronous extension code off runtime worker threads while
+    /// avoiding a dependency on a guest-language executor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DriverUnavailable`] when no native runtime is active or when
+    /// the blocking task cannot be joined.
+    pub async fn run_blocking<F, R>(function: F) -> Result<R, DriverUnavailable>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| DriverUnavailable)?;
+        handle
+            .spawn_blocking(function)
+            .await
+            .map_err(|_| DriverUnavailable)
     }
 
     /// Spawn one detached SDK driver future on the active native runtime.
