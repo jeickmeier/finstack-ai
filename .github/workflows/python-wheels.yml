@@ -72,11 +72,18 @@ jobs:
           sccache: false
 
       - name: Build native wheel
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         env:
           PYTHON_VERSION: ${{ matrix.python }}
           PYTHON_DIST_DIR: dist
         run: mise run build-python-wheel-ci
+
+      - name: Build native Windows wheel
+        if: runner.os == 'Windows'
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+          PYTHON_DIST_DIR: dist
+        run: mise run build-python-wheel-windows-ci
 
       - name: Install and smoke wheel
         env:

@@ -626,7 +626,7 @@ uv run --isolated --no-project \
 """
 
 [tasks.build-python-wheel-ci]
-description = "Build one native macOS or Windows wheel for the hosted CPython matrix"
+description = "Build one native macOS wheel for the hosted CPython matrix"
 env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 set -euo pipefail
@@ -634,24 +634,39 @@ set -euo pipefail
 : "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
 uv python install "${PYTHON_VERSION}"
 interpreter="$(uv python find "${PYTHON_VERSION}")"
-resolved_cargo="$(command -v cargo)"
 maturin_bin="$(uv tool dir --bin)"
-case "$(uname -s)" in
-  MINGW*|MSYS*)
-    resolved_cargo="$(cygpath -w "$(command -v cargo.exe)")"
-    maturin_command="$(cygpath -u "${maturin_bin}")/maturin.exe"
-    ;;
-  *) maturin_command="${maturin_bin}/maturin" ;;
-esac
-"${resolved_cargo}" --version
+cargo --version
 uv tool install --force maturin==1.14.1
-"${maturin_command}" --version
-CARGO="${resolved_cargo}" "${maturin_command}" build \
+"${maturin_bin}/maturin" --version
+"${maturin_bin}/maturin" build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \
   --locked \
   --interpreter "${interpreter}" \
   --out "${PYTHON_DIST_DIR}"
+"""
+
+[tasks.build-python-wheel-windows-ci]
+description = "Build one native Windows wheel for the hosted CPython matrix"
+shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+if (-not $env:PYTHON_VERSION) { throw "PYTHON_VERSION is required" }
+if (-not $env:PYTHON_DIST_DIR) { throw "PYTHON_DIST_DIR is required" }
+uv python install $env:PYTHON_VERSION
+$interpreter = uv python find $env:PYTHON_VERSION
+$maturin = Join-Path (uv tool dir --bin) "maturin.exe"
+cargo --version
+uv tool install --force maturin==1.14.1
+& $maturin --version
+& $maturin build `
+  --manifest-path bindings/finstack-ai-python/Cargo.toml `
+  --release `
+  --locked `
+  --interpreter $interpreter `
+  --out $env:PYTHON_DIST_DIR
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
 [tasks.smoke-python-wheel-ci]
