@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "workload": "rust-backed-python-fast-path-v1",
+  "commit": "0123456789abcdef",
+  "platform": { "system": "Darwin", "machine": "arm64", "release": "25.5.0" },
+  "python": "3.14.3",
+  "parameters": { "deltas_per_run": 128, "runs_per_sample": 4, "samples": 3 },
+  "timing_ns": {
+    "import_median": 100,
+    "construction_median": 100,
+    "native_runs_median": 1000,
+    "python_runs_median": 1050,
+    "ffi_batch_conversion": 100,
+    "external_io": 0
+  },
+  "binding": { "overhead_percent": 5.0, "target_percent": 10.0, "within_target": true },
+  "event_delivery": {
+    "model_deltas": 128,
+    "logical_events": 130,
+    "ffi_batches": 5,
+    "python_callbacks": 0,
+    "serialized_bytes": 4096,
+    "batch_conversion_ns": 100,
+    "rust_model_requests": 1
+  },
+  "throughput": {
+    "native_model_deltas_per_second": 100000.0,
+    "python_model_deltas_per_second": 95000.0,
+    "target_model_deltas_per_second": 100000.0,
+    "native_within_target": true
+  },
+  "allocation": {
+    "python_tracemalloc_peak_bytes": 4096,
+    "scope": "Python frontend heap; Rust allocator excluded"
+  },
+  "idle_memory": {
+    "python_heap_bytes_per_idle_handle_pair": 128,
+    "native_session_reference": null,
+    "target_bytes_per_session": 32768,
+    "native_within_target": null
+  },
+  "concurrency": {
+    "entries_before_release": 2,
+    "independent_runs_completed": 2,
+    "overlapped": true
+  },
+  "external_io": {
+    "measured_ns": 0,
+    "included_in_binding_comparison": false,
+    "scope": "No external I/O"
+  }
+}

@@ -8,7 +8,10 @@ JSON Schema 2020-12 document for machine-readable Criterion metadata:
 
 ```text
 schemas/benchmark-report/v1/metadata.schema.json
+schemas/benchmark-report/v1/python-fast-path.schema.json
 ```
 
 Required fields include compiler, target, commit, feature set, and machine
 metadata (PR-005-A03; TDD §33.4). Benchmark regression remains non-merge-blocking.
+The Python fast-path report separates import, construction, FFI, external I/O,
+throughput, allocation, and idle-memory evidence for PR-029.

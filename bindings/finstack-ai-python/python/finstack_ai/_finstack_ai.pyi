@@ -66,6 +66,12 @@ class EventBatch:
         """Expand the batch into individual immutable event snapshots."""
     def to_json(self) -> str:
         """Serialize the complete batch explicitly."""
+    def to_json_bytes(self) -> bytes:
+        """Serialize once and copy directly into Python bytes.
+
+        Returns:
+            UTF-8 JSON for every event in this transport batch.
+        """
 
 class EventBatchIterator(AsyncIterator[EventBatch]):
     """Single-consumer asynchronous batch iterator."""

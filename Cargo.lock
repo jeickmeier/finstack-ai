@@ -449,6 +449,7 @@ dependencies = [
  "finstack-ai",
  "finstack-ai-provider-openai-compatible",
  "finstack-ai-store-memory",
+ "finstack-ai-test",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",
