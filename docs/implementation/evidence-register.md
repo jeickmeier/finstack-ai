@@ -226,6 +226,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-027-A03 | PR-027 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-027-E-version-a7a45b1095c5; PR-027-E-wheel-matrix-6ef57c2bdc95; PR-027-E-hosted-ci-6ef57c2bdc95 | — | me@jeickmeier.com | 2026-08-12 |
 | PR-027-A04 | PR-027 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-027-E-rust-graph-704dc7f12b23; PR-027-E-hosted-ci-6ef57c2bdc95 | — | me@jeickmeier.com | 2026-08-12 |
 | PR-027-A05 | PR-027 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-027-E-release-d6ec0810b7c5; PR-027-E-final-local-6ef57c2bdc95; PR-027-E-hosted-security-6ef57c2bdc95 | — | me@jeickmeier.com | 2026-08-12 |
+| PR-028-A01 | PR-028 | PLAN-0.18 / [PR-028](../planning/04-finstack-ai-implementation-plan.md#pr-028---expose-agent-run-session-result-and-eventbatch-handles) | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-028-A02 | PR-028 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-028-A03 | PR-028 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-028-A04 | PR-028 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
