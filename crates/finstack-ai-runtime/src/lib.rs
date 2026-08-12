@@ -281,6 +281,27 @@ pub mod native_driver {
             .map_err(|_| TimeoutElapsed)
     }
 
+    /// Run one blocking function on the native driver's blocking executor.
+    ///
+    /// This keeps synchronous extension code off runtime worker threads while
+    /// avoiding a dependency on a guest-language executor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DriverUnavailable`] when no native runtime is active or when
+    /// the blocking task cannot be joined.
+    pub async fn run_blocking<F, R>(function: F) -> Result<R, DriverUnavailable>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| DriverUnavailable)?;
+        handle
+            .spawn_blocking(function)
+            .await
+            .map_err(|_| DriverUnavailable)
+    }
+
     /// Spawn one detached SDK driver future on the active native runtime.
     ///
     /// # Errors

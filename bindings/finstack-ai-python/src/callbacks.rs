@@ -290,9 +290,8 @@ struct PythonCallback {
     callable: Py<PyAny>,
     json_loads: Py<PyAny>,
     json_dumps: Py<PyAny>,
-    to_thread: Py<PyAny>,
     is_async: bool,
-    task_locals: pyo3_async_runtimes::TaskLocals,
+    task_locals: Option<pyo3_async_runtimes::TaskLocals>,
     timeout: Duration,
 }
 
@@ -316,14 +315,12 @@ impl PythonCallback {
             is_async = classifier.call1((call_method,))?.is_truthy()?;
         }
         let json = py.import("json")?;
-        let asyncio = py.import("asyncio")?;
         Ok(Self {
             callable,
             json_loads: json.getattr("loads")?.unbind(),
             json_dumps: json.getattr("dumps")?.unbind(),
-            to_thread: asyncio.getattr("to_thread")?.unbind(),
             is_async,
-            task_locals: callback_task_locals(py)?,
+            task_locals: is_async.then(|| callback_task_locals(py)).transpose()?,
             timeout: Duration::from_secs_f64(timeout_seconds),
         })
     }
@@ -341,29 +338,45 @@ impl PythonCallback {
             serde_json::to_vec(request).map_err(|_| CallbackFailure::InvalidResult)?;
         let cancellation = context.cancellation.clone();
         let lease = CallbackLease(context.state.clone());
-        let callback = Python::attach(|py| {
-            let request_bytes = PyBytes::new(py, &request_bytes);
-            let request = self.json_loads.call1(py, (request_bytes,))?;
-            let context = Py::new(py, context)?;
-            let awaitable = if self.is_async {
-                self.callable.call1(py, (context, request))?
-            } else {
-                self.to_thread
-                    .call1(py, (self.callable.clone_ref(py), context, request))?
-            };
-            pyo3_async_runtimes::into_future_with_locals(
-                &self.task_locals,
-                awaitable.into_bound(py),
-            )
-        })
-        .map_err(|_| CallbackFailure::Exception)?;
+        let callback: PortFuture<Result<Py<PyAny>, CallbackFailure>> = if self.is_async {
+            let callback = Python::attach(|py| {
+                let request_bytes = PyBytes::new(py, &request_bytes);
+                let request = self.json_loads.call1(py, (request_bytes,))?;
+                let context = Py::new(py, context)?;
+                let awaitable = self.callable.call1(py, (context, request))?;
+                pyo3_async_runtimes::into_future_with_locals(
+                    self.task_locals
+                        .as_ref()
+                        .expect("async callbacks retain task locals"),
+                    awaitable.into_bound(py),
+                )
+            })
+            .map_err(|_| CallbackFailure::Exception)?;
+            Box::pin(async move { callback.await.map_err(|_| CallbackFailure::Exception) })
+        } else {
+            let (callable, json_loads) =
+                Python::attach(|py| (self.callable.clone_ref(py), self.json_loads.clone_ref(py)));
+            Box::pin(async move {
+                finstack_ai::runtime::native_driver::run_blocking(move || {
+                    Python::attach(|py| {
+                        let request_bytes = PyBytes::new(py, &request_bytes);
+                        let request = json_loads.call1(py, (request_bytes,))?;
+                        let context = Py::new(py, context)?;
+                        callable.call1(py, (context, request))
+                    })
+                })
+                .await
+                .map_err(|_| CallbackFailure::Exception)?
+                .map_err(|_| CallbackFailure::Exception)
+            })
+        };
 
         let bounded = finstack_ai::runtime::native_driver::timeout(self.timeout, callback).fuse();
         let cancelled = cancellation.cancelled().fuse();
         pin_mut!(bounded, cancelled);
         let result = match select(bounded, cancelled).await {
             Either::Left((Ok(Ok(value)), _)) => value,
-            Either::Left((Ok(Err(_)), _)) => return Err(CallbackFailure::Exception),
+            Either::Left((Ok(Err(failure)), _)) => return Err(failure),
             Either::Left((Err(_), _)) => return Err(CallbackFailure::Timeout),
             Either::Right(((), callback)) => {
                 // Give a cooperative callback one bounded turn to observe the
@@ -395,24 +408,39 @@ impl PythonCallback {
     {
         let request_bytes =
             serde_json::to_vec(request).map_err(|_| CallbackFailure::InvalidResult)?;
-        let callback = Python::attach(|py| {
-            let request_bytes = PyBytes::new(py, &request_bytes);
-            let request = self.json_loads.call1(py, (request_bytes,))?;
-            let awaitable = if self.is_async {
-                self.callable.call1(py, (request,))?
-            } else {
-                self.to_thread
-                    .call1(py, (self.callable.clone_ref(py), request))?
-            };
-            pyo3_async_runtimes::into_future_with_locals(
-                &self.task_locals,
-                awaitable.into_bound(py),
-            )
-        })
-        .map_err(|_| CallbackFailure::Exception)?;
+        let callback: PortFuture<Result<Py<PyAny>, CallbackFailure>> = if self.is_async {
+            let callback = Python::attach(|py| {
+                let request_bytes = PyBytes::new(py, &request_bytes);
+                let request = self.json_loads.call1(py, (request_bytes,))?;
+                let awaitable = self.callable.call1(py, (request,))?;
+                pyo3_async_runtimes::into_future_with_locals(
+                    self.task_locals
+                        .as_ref()
+                        .expect("async callbacks retain task locals"),
+                    awaitable.into_bound(py),
+                )
+            })
+            .map_err(|_| CallbackFailure::Exception)?;
+            Box::pin(async move { callback.await.map_err(|_| CallbackFailure::Exception) })
+        } else {
+            let (callable, json_loads) =
+                Python::attach(|py| (self.callable.clone_ref(py), self.json_loads.clone_ref(py)));
+            Box::pin(async move {
+                finstack_ai::runtime::native_driver::run_blocking(move || {
+                    Python::attach(|py| {
+                        let request_bytes = PyBytes::new(py, &request_bytes);
+                        let request = json_loads.call1(py, (request_bytes,))?;
+                        callable.call1(py, (request,))
+                    })
+                })
+                .await
+                .map_err(|_| CallbackFailure::Exception)?
+                .map_err(|_| CallbackFailure::Exception)
+            })
+        };
         match finstack_ai::runtime::native_driver::timeout(self.timeout, callback).await {
             Ok(Ok(_)) => Ok(()),
-            Ok(Err(_)) => Err(CallbackFailure::Exception),
+            Ok(Err(failure)) => Err(failure),
             Err(_) => Err(CallbackFailure::Timeout),
         }
     }
