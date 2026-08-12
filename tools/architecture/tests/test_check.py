@@ -159,7 +159,7 @@ class EdgeTests:
         check_workspace_edges(ctx, meta)
         assert ctx.failing() == []
 
-    def test_binding_may_compose_a_curated_provider_leaf(self) -> None:
+    def test_binding_may_compose_curated_provider_and_store_leaves(self) -> None:
         policy = load_toml(TOOL_DIR / "policy.toml")
         ctx = CheckContext(repo_root=REPO_ROOT, policy=policy, allowlist=[])
         binding = _pkg(
@@ -172,10 +172,19 @@ class EdgeTests:
             "provider-id",
             str(REPO_ROOT / "extensions/providers/example/Cargo.toml"),
         )
+        store = _pkg(
+            "store",
+            "store-id",
+            str(REPO_ROOT / "extensions/stores/example/Cargo.toml"),
+        )
         meta = _metadata(
-            [binding, provider],
-            {"binding-id": ["provider-id"], "provider-id": []},
-            ["binding-id", "provider-id"],
+            [binding, provider, store],
+            {
+                "binding-id": ["provider-id", "store-id"],
+                "provider-id": [],
+                "store-id": [],
+            },
+            ["binding-id", "provider-id", "store-id"],
         )
         check_workspace_edges(ctx, meta)
         assert ctx.failing() == []

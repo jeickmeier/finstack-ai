@@ -3,6 +3,20 @@
 from typing import TypedDict, cast
 
 from . import _finstack_ai as _native
+from ._finstack_ai import (
+    Agent,
+    CancelledError,
+    ConfigurationError,
+    Event,
+    EventBatch,
+    EventBatchIterator,
+    FinstackError,
+    Run,
+    RunResult,
+    RuntimeError,
+    Session,
+    TimeoutError,
+)
 
 __version__ = _native.__version__
 
@@ -18,7 +32,7 @@ class BuildMetadata(TypedDict):
 
 
 def health() -> str:
-    """Return ``"ok"`` when the native module loaded successfully.
+    """Return ``\"ok\"`` when the native module loaded successfully.
 
     Returns:
         The constant health status. This function performs no I/O and does not
@@ -50,7 +64,19 @@ def linked_providers() -> tuple[str, ...]:
 
 
 __all__ = [
+    "Agent",
     "BuildMetadata",
+    "CancelledError",
+    "ConfigurationError",
+    "Event",
+    "EventBatch",
+    "EventBatchIterator",
+    "FinstackError",
+    "Run",
+    "RunResult",
+    "RuntimeError",
+    "Session",
+    "TimeoutError",
     "__version__",
     "build_metadata",
     "health",

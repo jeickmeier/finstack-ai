@@ -34,9 +34,9 @@ runtime = ["kernel"]
 sdk = ["runtime", "kernel"]
 protocol = ["kernel"]
 test = ["kernel", "runtime"]
-# Native bindings may compose curated provider leaf crates into their package;
+# Native bindings may compose curated provider and store leaf crates into their package;
 # browser graph checks independently reject native-I/O dependencies.
-binding = ["sdk", "provider"]
+binding = ["sdk", "provider", "store"]
 provider = ["runtime"]
 toolset = ["runtime"]
 observer = ["runtime"]
