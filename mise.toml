@@ -388,7 +388,10 @@ description = "Generate Python helper and binding-smoke coverage under target/co
 run = """
 set -euo pipefail
 mkdir -p target/coverage/python/html
-uv run --no-project --with pytest==9.1.1 --with pytest-cov==7.1.0 \
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  --with pytest-cov==7.1.0 \
   pytest \
   --cov \
   --cov-report=term-missing \
@@ -525,6 +528,7 @@ done
 [tasks.ci]
 description = "Run the local CI aggregate used by contributors"
 run = """
+set -euo pipefail
 mise run format
 mise run clippy
 mise run test
@@ -548,16 +552,253 @@ mise run supply-chain
 mise run secret-scan
 mise run secret-scan-canary
 mise run release-smoke
-mise run build-python
+mise run test-pr027
 """
 
 # Build tasks
 
 [tasks.build-python]
-description = "Build the Python binding package with pinned hashed setuptools"
+description = "Build the Python wheel and sdist with pinned hashed maturin"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 uv build \
   --project bindings/finstack-ai-python \
+  --out-dir target/python-dist \
+  --clear \
+  --no-create-gitignore \
   --build-constraints bindings/finstack-ai-python/constraints-build.txt \
   --require-hashes
+"""
+run_windows = "mise run build-python-windows"
+
+[tasks.build-python-windows]
+description = "Build the Python wheel and sdist from a native Windows shell"
+shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+uv build `
+  --project bindings/finstack-ai-python `
+  --out-dir target/python-dist `
+  --clear `
+  --no-create-gitignore `
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
+  --require-hashes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
+
+[tasks.python-develop]
+description = "Open an isolated shell-ready Python environment with the binding installed editable"
+run = """
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  python -c 'import finstack_ai; print(finstack_ai.build_metadata())'
+"""
+
+[tasks.lint-python-binding]
+description = "Lint Python package, tests, and artifact checker"
+run = """
+uv run --no-project --with ruff==0.12.11 ruff check \
+  bindings/finstack-ai-python/python \
+  bindings/finstack-ai-python/tests \
+  tools/python_package
+uv run --no-project --with ruff==0.12.11 ruff format --check \
+  bindings/finstack-ai-python/python \
+  bindings/finstack-ai-python/tests \
+  tools/python_package
+"""
+
+[tasks.typecheck-python-binding]
+description = "Strictly type-check the Python package and artifact checker"
+run = """
+uv run --isolated --no-project \
+  --with mypy==2.3.0 \
+  mypy --strict \
+    bindings/finstack-ai-python/python \
+    tools/python_package
+"""
+
+[tasks.test-python-binding]
+description = "Run Python import, metadata, typing, and side-effect smoke tests"
+run = """
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.test-python-wheel]
+description = "Install the built wheel without a compiler and run its smoke tests"
+run = """
+set -euo pipefail
+set -- target/python-dist/*.whl
+if [ "$#" -ne 1 ]; then
+  echo 'expected exactly one built wheel in target/python-dist' >&2
+  exit 1
+fi
+uv run --isolated --no-project \
+  --with "$1" \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.build-python-wheel-ci]
+description = "Build one native macOS wheel for the hosted CPython matrix"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+set -euo pipefail
+: "${PYTHON_VERSION:?PYTHON_VERSION is required}"
+: "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
+uv python install "${PYTHON_VERSION}"
+interpreter="$(uv python find "${PYTHON_VERSION}")"
+maturin_bin="$(uv tool dir --bin)"
+cargo --version
+uv tool install --force maturin==1.14.1
+"${maturin_bin}/maturin" --version
+"${maturin_bin}/maturin" build \
+  --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  --release \
+  --locked \
+  --interpreter "${interpreter}" \
+  --out "${PYTHON_DIST_DIR}"
+"""
+
+[tasks.build-python-wheel-windows-ci]
+description = "Build one native Windows wheel for the hosted CPython matrix"
+shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+if (-not $env:PYTHON_VERSION) { throw "PYTHON_VERSION is required" }
+if (-not $env:PYTHON_DIST_DIR) { throw "PYTHON_DIST_DIR is required" }
+uv python install $env:PYTHON_VERSION
+$interpreter = uv python find $env:PYTHON_VERSION
+$maturin = Join-Path (uv tool dir --bin) "maturin.exe"
+cargo --version
+uv tool install --force maturin==1.14.1
+& $maturin --version
+& $maturin build `
+  --manifest-path bindings/finstack-ai-python/Cargo.toml `
+  --release `
+  --locked `
+  --interpreter $interpreter `
+  --out $env:PYTHON_DIST_DIR
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
+
+[tasks.smoke-python-wheel-ci]
+description = "Install and smoke one hosted per-interpreter wheel"
+run = """
+set -euo pipefail
+: "${PYTHON_VERSION:?PYTHON_VERSION is required}"
+: "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
+uv python install "${PYTHON_VERSION}"
+set -- "${PYTHON_DIST_DIR}"/*.whl
+if [ "$#" -ne 1 ]; then
+  echo "expected exactly one wheel in ${PYTHON_DIST_DIR}" >&2
+  exit 1
+fi
+case "$1" in
+  *abi3*)
+    echo 'classic abi3 wheel is prohibited by ADR-018' >&2
+    exit 1
+    ;;
+esac
+uv run --python "${PYTHON_VERSION}" --isolated --no-project \
+  --with "$1" \
+  --with pytest==9.1.1 \
+  pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.build-python-sdist-ci]
+description = "Build the hosted Python source distribution"
+env = { MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+uv build \
+  --project bindings/finstack-ai-python \
+  --sdist \
+  --out-dir target/python-sdist \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+"""
+
+[tasks.stage-python]
+description = "Build twice and validate reproducible Python release artifacts"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+set -euo pipefail
+uv build \
+  --project bindings/finstack-ai-python \
+  --out-dir target/python-stage-a \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+uv build \
+  --project bindings/finstack-ai-python \
+  --out-dir target/python-stage-b \
+  --clear \
+  --no-create-gitignore \
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt \
+  --require-hashes
+uv run --no-project python tools/python_package/check.py \
+  target/python-stage-a target/python-stage-b
+"""
+run_windows = "mise run stage-python-windows"
+
+[tasks.stage-python-windows]
+description = "Build and inspect Python artifacts from a native Windows shell"
+shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+uv build `
+  --project bindings/finstack-ai-python `
+  --out-dir target/python-stage-windows `
+  --clear `
+  --no-create-gitignore `
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
+  --require-hashes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+uv run --no-project python tools/python_package/check.py --validate-only `
+  target/python-stage-windows
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
+
+[tasks.test-pr027]
+description = "Run PR-027 native module, package, dependency, and release proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-python --locked
+cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings
+mise run lint-python-binding
+mise run typecheck-python-binding
+mise run test-python-binding
+mise run build-python
+mise run test-python-wheel
+mise run stage-python
+python_graph="$(cargo tree -p finstack-ai-python -e normal,build --locked)"
+case "${python_graph}" in
+  *pyo3*) ;;
+  *)
+    echo 'Python binding graph must link PyO3' >&2
+    exit 1
+    ;;
+esac
+case "${python_graph}" in
+  *finstack-ai-provider-openai-compatible*) ;;
+  *)
+    echo 'Python binding graph must link the OpenAI-compatible provider' >&2
+    exit 1
+    ;;
+esac
+for package in finstack-ai-kernel finstack-ai-runtime; do
+  if cargo tree -p "${package}" -e normal,build --locked | grep -Eq 'pyo3|finstack-ai-python'; then
+    echo "${package} unexpectedly includes Python binding dependencies" >&2
+    exit 1
+  fi
+done
+mise run architecture
 """

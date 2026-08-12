@@ -11,6 +11,8 @@ build/
 dist/
 wheels/
 *.egg-info
+/bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.*.so
+/bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.*.pyd
 
 # Virtual environments
 .venv

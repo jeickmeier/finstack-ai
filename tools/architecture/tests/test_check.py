@@ -159,6 +159,27 @@ class EdgeTests:
         check_workspace_edges(ctx, meta)
         assert ctx.failing() == []
 
+    def test_binding_may_compose_a_curated_provider_leaf(self) -> None:
+        policy = load_toml(TOOL_DIR / "policy.toml")
+        ctx = CheckContext(repo_root=REPO_ROOT, policy=policy, allowlist=[])
+        binding = _pkg(
+            "finstack-ai-python",
+            "binding-id",
+            str(REPO_ROOT / "bindings/finstack-ai-python/Cargo.toml"),
+        )
+        provider = _pkg(
+            "provider",
+            "provider-id",
+            str(REPO_ROOT / "extensions/providers/example/Cargo.toml"),
+        )
+        meta = _metadata(
+            [binding, provider],
+            {"binding-id": ["provider-id"], "provider-id": []},
+            ["binding-id", "provider-id"],
+        )
+        check_workspace_edges(ctx, meta)
+        assert ctx.failing() == []
+
 
 class SourceStripTests:
     def test_strips_comments_and_strings(self) -> None:

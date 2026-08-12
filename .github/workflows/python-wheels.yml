@@ -1,0 +1,128 @@
+# Required PR-027 per-interpreter wheel and source-distribution matrix.
+# Owner: me@jeickmeier.com
+# Cadence: every pull request, pushes to main, and workflow_dispatch.
+
+name: python-wheels
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/pr-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-wheels-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  wheels:
+    name: wheel (${{ matrix.platform.name }} / CPython ${{ matrix.python }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: manylinux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64
+          - name: manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64
+          - name: macos-arm64
+            runner: macos-15
+            target: aarch64
+          - name: windows-x64
+            runner: windows-2025
+            target: x64
+        python: ["3.11", "3.12", "3.13", "3.14", "3.14t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Build manylinux wheel
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        with:
+          maturin-version: v1.14.1
+          target: ${{ matrix.platform.target }}
+          args: >-
+            --release --locked --out dist
+            --interpreter python${{ matrix.python }}
+            --manifest-path bindings/finstack-ai-python/Cargo.toml
+          manylinux: 2_28
+          before-script-linux: dnf install -y perl-IPC-Cmd perl-Time-Piece
+          sccache: false
+
+      - name: Build native wheel
+        if: runner.os == 'macOS'
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+          PYTHON_DIST_DIR: dist
+        run: mise run build-python-wheel-ci
+
+      - name: Build native Windows wheel
+        if: runner.os == 'Windows'
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+          PYTHON_DIST_DIR: dist
+        run: mise run build-python-wheel-windows-ci
+
+      - name: Install and smoke wheel
+        env:
+          FINSTACK_EXPECT_FREE_THREADED: ${{ matrix.python == '3.14t' && '1' || '0' }}
+          PYTHON_VERSION: ${{ matrix.python }}
+          PYTHON_DIST_DIR: dist
+        run: mise run smoke-python-wheel-ci
+
+      - name: Upload staged wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finstack-ai-${{ matrix.platform.name }}-cp${{ matrix.python }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 30
+
+  sdist:
+    name: source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Build source distribution
+        run: mise run build-python-sdist-ci
+
+      - name: Upload source distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finstack-ai-sdist
+          path: target/python-sdist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30

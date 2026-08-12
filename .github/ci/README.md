@@ -10,6 +10,7 @@ All executable checks are canonical mise tasks. Workflows must call
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
 | [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), candidate-v1 fuzz smoke, docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, release-smoke on Linux/macOS/Windows |
+| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | PR-027 per-version CPython 3.11-3.14 and 3.14t wheels on manylinux x86_64/aarch64, macOS arm64, and Windows x64; isolated install/import/concurrency smoke; sdist staging |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns run on Sunday/manual only, with 30-day corpus/crash artifact retention |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
@@ -61,7 +62,7 @@ Current inventory:
 
 | Surface | Status | Regeneration | Dirty-tree policy |
 | --- | --- | --- | --- |
-| Python binding package | hand-authored setuptools placeholder | `mise run build-python` | no generator tree yet |
+| Python binding package | maturin mixed Rust/Python project with checked-in type stubs | `mise run test-pr027`; `mise run build-python` | stubs are hand-authored until later API PRs own generation; wheel/sdist artifacts are verified for contents, size, and reproducibility |
 | Browser WASM binding | hand-authored crate placeholder | `mise run check-wasm` | no wasm-bindgen glue yet |
 | WIT / schema codegen | not present | deferred to owning PRs | when generators exist, CI must regenerate and fail on dirty output |
 | Schema / ADR governance | hand-authored reserved roots + checker | `mise run schema-governance` | schema path changes without fixture updates fail GOV006 when a base SHA is available; reserved README-only dirs are not conformance evidence |
@@ -95,7 +96,6 @@ These reservations are documentation-only. Do not add green placeholder jobs.
 
 | Matrix | Reservation | Cadence (once activated) | Activation | Owner |
 | --- | --- | --- | --- | --- |
-| Python wheels | CPython 3.11–3.14 and 3.14t; manylinux x86_64/aarch64, macOS arm64, Windows x64 | every PR for smoke subset; scheduled full matrix | PR-027 | `me@jeickmeier.com` |
 | Headless browser smoke | browser WASM conformance placeholders | every PR once browser package exists | PR-033–PR-036 | `me@jeickmeier.com` |
 | Parser fuzz beyond candidate-v1 | protocol framing, CBOR, provider streams, and binding/browser inputs remain unimplemented | activate with the owning later-phase parser | owning parser PR | `me@jeickmeier.com` |
 | Security-boundary suites | adversarial authorization/permission suites | every PR for owning surface | owning runtime/binding/plugin PRs | `me@jeickmeier.com` |
