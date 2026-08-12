@@ -907,6 +907,16 @@ set -euo pipefail
 cargo check -p finstack-ai-python --features callback-fixture --locked
 cargo clippy -p finstack-ai-python --all-targets --features callback-fixture --locked -- -D warnings
 mise run test-pr029
+mise run python-callback-smoke
+mise run schema-governance
+mise run architecture
+"""
+
+[tasks.python-callback-smoke]
+description = "Build and test the non-default PR-030 callback fixture wheel"
+run_windows = "mise run python-callback-smoke-windows"
+run = """
+set -euo pipefail
 mkdir -p target/python-callback-dist
 find target/python-callback-dist -maxdepth 1 -type f -name '*.whl' -delete
 uv run --no-project --with maturin==1.14.1 -- maturin build \
@@ -921,6 +931,29 @@ if [ "$#" -ne 1 ]; then
 fi
 uv run --isolated --no-project --with "$1" --with pytest==9.1.1 \
   pytest bindings/finstack-ai-python/tests/test_callback_conformance.py -q
-mise run schema-governance
-mise run architecture
+"""
+
+[tasks.python-callback-smoke-windows]
+description = "Build and test the non-default PR-030 callback fixture wheel from PowerShell"
+shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
+run = """
+$ErrorActionPreference = "Stop"
+$dist = "target/python-callback-dist"
+New-Item -ItemType Directory -Force $dist | Out-Null
+Get-ChildItem -Path $dist -Filter "*.whl" -File | Remove-Item -Force
+$maturin = Join-Path (uv tool dir --bin) "maturin.exe"
+cargo --version
+uv tool install --force maturin==1.14.1
+& $maturin --version
+& $maturin build `
+  --manifest-path bindings/finstack-ai-python/Cargo.toml `
+  --locked `
+  --features extension-module,callback-fixture `
+  --out $dist
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$wheels = @(Get-ChildItem -Path $dist -Filter "*.whl" -File)
+if ($wheels.Count -ne 1) { throw "expected exactly one callback fixture wheel" }
+uv run --isolated --no-project --with $wheels[0].FullName --with pytest==9.1.1 `
+  pytest bindings/finstack-ai-python/tests/test_callback_conformance.py -q
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
