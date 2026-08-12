@@ -25,7 +25,8 @@ Date: 2026-08-12
 - Python callbacks are trusted in-process extensions with host memory and
   authority; they are not an isolation boundary.
 - One lazily started callback loop owns async callbacks across caller threads.
-  Sync callbacks run through `asyncio.to_thread` on that loop.
+  Sync callbacks run on the native runtime's blocking executor and therefore do
+  not depend on the Python event loop's default thread pool.
 - No Rust lock is held across a Python callback. Each invocation has a bounded
   timeout and cancellation grace; late completion is discarded.
 - Callback contexts are invalidated on settlement. Retained access fails with
