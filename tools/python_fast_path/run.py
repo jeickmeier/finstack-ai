@@ -22,6 +22,10 @@ WORKLOAD = "rust-backed-python-fast-path-v1"
 OVERHEAD_TARGET_PERCENT = 10.0
 EVENT_THROUGHPUT_TARGET = 100_000.0
 IDLE_SESSION_TARGET_BYTES = 32 * 1024
+COMPARISON_DELTAS = 512
+COMPARISON_RUNS = 64
+SMOKE_SAMPLES = 5
+FULL_SAMPLES = 9
 
 
 def _git_commit() -> str:
@@ -253,8 +257,13 @@ def _validate_report(report: dict[str, object]) -> None:
         raise RuntimeError("report binding/event sections must be objects")
     if not isinstance(concurrency, dict):
         raise RuntimeError("report concurrency section must be an object")
-    if float(binding["overhead_percent"]) > float(binding["target_percent"]):
-        raise RuntimeError("Rust-backed Python workload exceeds the overhead target")
+    overhead_percent = float(binding["overhead_percent"])
+    target_percent = float(binding["target_percent"])
+    if overhead_percent > target_percent:
+        raise RuntimeError(
+            "Rust-backed Python workload exceeds the overhead target: "
+            f"{overhead_percent:.3f}% > {target_percent:.3f}%"
+        )
     if int(events["ffi_batches"]) >= int(events["model_deltas"]):
         raise RuntimeError("event delivery regressed to one crossing per model delta")
     if int(events["python_callbacks"]) != 0:
@@ -266,9 +275,9 @@ def _validate_report(report: dict[str, object]) -> None:
 async def _run(smoke: bool) -> dict[str, object]:
     import finstack_ai._finstack_ai as native
 
-    deltas = 256 if smoke else 512
-    runs = 4 if smoke else 12
-    samples = 5 if smoke else 9
+    deltas = COMPARISON_DELTAS
+    runs = COMPARISON_RUNS
+    samples = SMOKE_SAMPLES if smoke else FULL_SAMPLES
     import_ns = _measure_import_ns(samples)
     construction_ns = await _measure_construction(native, samples)
     native_ns, python_ns, total_deltas = await _measure_runs(

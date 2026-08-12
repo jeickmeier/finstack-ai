@@ -84,5 +84,12 @@ def test_report_rejects_acceptance_regressions(section: str) -> None:
         report["event_delivery"]["ffi_batches"] = 128  # type: ignore[index]
     else:
         report["concurrency"]["overlapped"] = False  # type: ignore[index]
-    with pytest.raises(RuntimeError):
+    match = "10.100% > 10.000%" if section == "binding" else None
+    with pytest.raises(RuntimeError, match=match):
         runner._validate_report(report)
+
+
+def test_comparison_workload_is_long_and_bounded() -> None:
+    assert runner.COMPARISON_DELTAS * runner.COMPARISON_RUNS == 32_768
+    assert runner.SMOKE_SAMPLES >= 5
+    assert runner.FULL_SAMPLES >= runner.SMOKE_SAMPLES
