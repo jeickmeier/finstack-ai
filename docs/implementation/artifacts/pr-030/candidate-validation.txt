@@ -1,7 +1,7 @@
 PR-030 immutable local candidate validation
 Date: 2026-08-12
-Candidate: 7dd4566043aa0c047ad9bfa3285be179007d2608
-Tree: a6881d3c0e0e709c368d51bbaa3ea7371c4be08e
+Candidate: 0342057f6bef524650858fdc9cf2b93ed3e981d6
+Tree: 416c02a513ae8f223f6d45e264a650578de97ac4
 Branch: codex/pr-030-python-callbacks
 Baseline: b824467
 Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
@@ -34,20 +34,20 @@ PASS  mise run test-pr030
 
 PASS  inherited native fast-path regression proof
       workload: 512 model deltas/run, 64 runs/sample, 5 alternating samples
-      native runs median: 122,306,583 ns
-      Python runs median: 124,745,125 ns
-      binding overhead: 1.9937945613% (target <= 10%; Passed)
-      native throughput: 267,917 model deltas/s
-      Python throughput: 262,680 model deltas/s
+      native runs median: 129,071,625 ns
+      Python runs median: 130,831,042 ns
+      binding overhead: 1.3631322919% (target <= 10%; Passed)
+      native throughput: 253,875 model deltas/s
+      Python throughput: 250,460 model deltas/s
       FFI delivery: 21 batches / 512 model deltas / 517 logical events
       Python callbacks in fast-path workload: 0
       Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
-      native idle-session reference: 61,696 bytes/session
+      native idle-session reference: 61,568 bytes/session
       Python idle benchmark handle pair: 88 traced Python bytes/pair
       concurrency: 2/2 Rust streams entered before release; Passed
 
 WARN  NFR-PERF-005 idle-session target
-      The measured native reference is 61,696 bytes/session versus the future
+      The measured native reference is 61,568 bytes/session versus the future
       32,768-byte target. This remains a warning/regression datum pending the
       PR-063 ratification gate and is not claimed as passing by PR-030.
 
@@ -66,10 +66,10 @@ Reproducible default local artifacts:
   wheel bytes 3679843
 
 Durable command-log identities:
-  focused sha256 5bad93e76f83e0bfc280b8d038a3deb9542f8f4d9f435722cc12784527b124c1
-  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786550083_mise_run_test-pr030.log
-  aggregate sha256 1fe59ff131db9c29d9dde4684c9129a3711c89dbfa0f161eab310f2a4b841675
-  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786550443_mise_run_ci.log
+  focused sha256 ce7cc9c8ca23fa9c2e150b3def4ea5a1e73db7b247edde2c8730445be6855b9f
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786572327_mise_run_test-pr030.log
+  aggregate sha256 60f619643f19eaa55580fd8dc522e1322aee647187a18b590d80b3247f3c2de5
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786572755_mise_run_ci.log
 
 Retained superseded hosted evidence:
   - candidate c7b313273befa00367adce9d6a0d45c98fcd8882 passed local
@@ -87,6 +87,15 @@ Retained superseded hosted evidence:
     native runtime's blocking executor, retains the dedicated Python loop only
     for async callbacks, and keeps the bounded timeout and settled-context
     behavior unchanged
+  - evidence head 6c0301e then passed all 21 jobs in wheel run 31644727155,
+    including Windows x64 CPython 3.14t, and all 3 jobs in security run
+    31644744576, confirming the callback runtime repair across the wheel matrix
+  - CI run 31644742869 was cancelled after its superseded predecessor
+    31612766248 isolated a separate Windows task defect: job 94168110358 reached
+    the callback fixture build and `uv run maturin` could no longer find Cargo
+  - final candidate 0342057 factors the callback fixture build into a dedicated
+    cross-platform task; Windows now invokes pinned maturin directly from the uv
+    tool directory under native PowerShell, matching the proven PR-029 pattern
 
 Review disposition:
   - no seventh primary port, eighth middleware stage, kernel I/O,
