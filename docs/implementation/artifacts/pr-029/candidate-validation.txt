@@ -1,7 +1,7 @@
 PR-029 immutable local candidate validation
 Date: 2026-08-12
-Candidate: 2329fcd17f6002b18333951eb148aeea393bdbc6
-Tree: db83d1f20621d8683477524cc95105a506ac0aea
+Candidate: e83013ee65de2c2b25508c36f97ddcca3949ee32
+Tree: e6b27e6ebbb4d843390d88770bb85892248a3824
 Branch: codex/pr-029-python-fast-path
 Baseline: d2489c4
 Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
@@ -30,26 +30,26 @@ PASS  mise run test-pr029
 
 PASS  full synthetic benchmark
       command: installed non-default fixture wheel, tools/python_fast_path/run.py
-      workload: 512 model deltas/run, 12 runs/sample, 9 alternating samples
-      native runs median: 23,834,333 ns
-      Python runs median: 24,474,667 ns
-      binding overhead: 2.6866033969% (target <= 10%; Passed)
-      native throughput: 257,779 model deltas/s
-      Python throughput: 251,035 model deltas/s
+      workload: 512 model deltas/run, 64 runs/sample, 9 alternating samples
+      native runs median: 123,285,208 ns
+      Python runs median: 126,795,833 ns
+      binding overhead: 2.8475638375% (target <= 10%; Passed)
+      native throughput: 265,790 model deltas/s
+      Python throughput: 258,431 model deltas/s
       FFI delivery: 21 batches / 512 model deltas / 517 logical events
       Python callbacks: 0
-      import median: 3,824,042 ns
-      construction median: 78,584 ns
-      batch conversion: 268,417 ns
+      import median: 3,756,334 ns
+      construction median: 79,458 ns
+      batch conversion: 259,125 ns
       external I/O included: 0 ns / false
       Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
-      native idle-session reference: 61,568 bytes/session
+      native idle-session reference: 61,824 bytes/session
       Python idle benchmark handle pair: 148 traced Python bytes/pair
       concurrency: 2/2 Rust streams entered before release; Passed
-      report sha256 2fa7f2e68b34b94181a4ca3ade3ee68addffc06151395fa58c6c040f45e26e84
+      report sha256 eaac211ab684cbd144ab216dc478be5628efa1946ae8f3a8d83df5a481f39dec
 
 WARN  NFR-PERF-005 idle-session target
-      The measured native reference is 61,568 bytes/session versus the future
+      The measured native reference is 61,824 bytes/session versus the future
       32,768-byte target, so python-fast-path-report.json records
       native_within_target=false. The PRD makes NFR-PERF targets warning and
       regression evidence before PR-063 ratifies the 1.0 workloads and budgets.
@@ -70,10 +70,10 @@ Reproducible default local artifacts:
   wheel bytes 3478008
 
 Durable command-log identities:
-  focused sha256 90ea9c73114680deedff3311208a53ee84f15ee57b0e8a6f60011dd9f0a18436
-  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786524374_mise_run_test-pr029.log
-  aggregate sha256 542d702d82900a61e0f1bacc83baa8e03abc1f2109ce96b8108b9df22f2f8942
-  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786524641_mise_run_ci.log
+  focused sha256 bb5fb402dc542506175d542be0bf461ffb560ee33d77a0dee3290ce318643c0f
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786526684_mise_run_test-pr029.log
+  aggregate sha256 8acc996575dc3c7c34d248e31fb868022c63a426f076afc1ff15e275be9e2155
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786526957_mise_run_ci.log
 
 Retained superseded hosted evidence:
   - evidence head 75059946b4f4ba715b074d722c188254c85f03ef
@@ -86,6 +86,15 @@ Retained superseded hosted evidence:
   - replacement candidate 2329fcd captures Cargo's absolute executable path
     before entering that isolated tool environment; no production code or
     benchmark acceptance logic changed
+  - evidence head 9c87a970f94635ef662413a45df2b7bdd667392e
+    passed Python wheels 31580362177 (21/21) and security 31580379179 (3/3),
+    but aggregate CI 31580374081 failed the short smoke comparison on Ubuntu
+    job 94061814558 and macOS job 94061814637 after their package builds
+  - the 4-run smoke sample completed in only a few milliseconds and was not a
+    stable hosted-runner measurement; candidate e83013e keeps the 10% rule,
+    uses bounded 64-run samples (about 125 ms locally), reports measured and
+    target percentages on failure, and passed five sequential local smoke
+    repetitions at 1.25% through 3.66% overhead
 
 Review disposition:
   - no seventh primary port, eighth middleware stage, kernel I/O, per-token
