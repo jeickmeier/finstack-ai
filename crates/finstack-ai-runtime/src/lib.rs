@@ -212,6 +212,7 @@ pub use id_generation::{OsRandomSource, SystemClock};
 #[cfg(feature = "native-tokio")]
 pub mod native_driver {
     use std::future::Future;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use crate::PortFuture;
@@ -239,6 +240,30 @@ pub mod native_driver {
     }
 
     impl std::error::Error for TimeoutElapsed {}
+
+    /// Cloneable one-way notification used by native SDK state machines.
+    #[derive(Clone, Default)]
+    pub struct Signal {
+        inner: Arc<tokio::sync::Notify>,
+    }
+
+    impl Signal {
+        /// Create an empty notification signal.
+        #[must_use]
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Register a waiter before checking its guarded state.
+        pub fn notified(&self) -> impl Future<Output = ()> + '_ {
+            self.inner.notified()
+        }
+
+        /// Wake every waiter registered before this call.
+        pub fn notify_waiters(&self) {
+            self.inner.notify_waiters();
+        }
+    }
 
     /// Await a future until the native driver deadline elapses.
     ///

@@ -170,9 +170,12 @@ impl Agent {
             locator,
             cancellation_initiator,
             handle: Mutex::new(None),
+            handle_ready: finstack_ai_runtime::native_driver::Signal::new(),
             result: Mutex::new(None),
+            result_ready: finstack_ai_runtime::native_driver::Signal::new(),
             events: Mutex::new(EventStreamState::Waiting),
             cancellation: Mutex::new(CancellationState::default()),
+            cancellation_ready: finstack_ai_runtime::native_driver::Signal::new(),
         });
         let execution = Arc::downgrade(&inner);
         let agent = self.clone();
@@ -563,9 +566,12 @@ struct AgentRunInner {
     locator: OperationLocator,
     cancellation_initiator: CancellationInitiator,
     handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
+    handle_ready: finstack_ai_runtime::native_driver::Signal,
     result: Mutex<Option<Result<AgentRunOutput, AgentRunError>>>,
+    result_ready: finstack_ai_runtime::native_driver::Signal,
     events: Mutex<EventStreamState>,
     cancellation: Mutex<CancellationState>,
+    cancellation_ready: finstack_ai_runtime::native_driver::Signal,
 }
 
 enum EventStreamState {
@@ -675,6 +681,7 @@ impl AgentRun {
     /// error that settled the run.
     pub async fn result(&self) -> Result<AgentRunOutput, AgentRunError> {
         loop {
+            let notified = self.inner.result_ready.notified();
             let result = self
                 .inner
                 .result
@@ -684,7 +691,7 @@ impl AgentRun {
             if let Some(result) = result {
                 return result;
             }
-            finstack_ai_runtime::native_driver::yield_now().await;
+            notified.await;
         }
     }
 
@@ -720,15 +727,18 @@ impl AgentRun {
                 if let Ok(mut cancellation) = run.inner.cancellation.lock() {
                     cancellation.result = Some(result);
                 }
+                run.inner.cancellation_ready.notify_waiters();
             })) {
                 let error = AgentRunError::runtime_message(error.to_string());
                 let mut cancellation = self.inner.cancellation.lock().map_err(|_| {
                     AgentRunError::runtime_message("run cancellation lock is poisoned")
                 })?;
                 cancellation.result = Some(Err(error));
+                self.inner.cancellation_ready.notify_waiters();
             }
         }
         loop {
+            let notified = self.inner.cancellation_ready.notified();
             let result = self
                 .inner
                 .cancellation
@@ -739,7 +749,7 @@ impl AgentRun {
             if let Some(result) = result {
                 return result;
             }
-            finstack_ai_runtime::native_driver::yield_now().await;
+            notified.await;
         }
     }
 
@@ -805,6 +815,7 @@ impl AgentRun {
 
     async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
         loop {
+            let notified = self.inner.handle_ready.notified();
             let result = self
                 .inner
                 .handle
@@ -814,7 +825,7 @@ impl AgentRun {
             if let Some(result) = result {
                 return result;
             }
-            finstack_ai_runtime::native_driver::yield_now().await;
+            notified.await;
         }
     }
 
@@ -848,6 +859,7 @@ fn publish_start_failure(execution: &Weak<AgentRunInner>, error: &AgentRunError)
     if let Ok(mut handle) = inner.handle.lock() {
         *handle = Some(Err(error.clone()));
     }
+    inner.handle_ready.notify_waiters();
     if let Ok(mut events) = inner.events.lock()
         && matches!(*events, EventStreamState::Waiting)
     {
@@ -866,6 +878,7 @@ fn publish_started(
     if let Ok(mut handle) = inner.handle.lock() {
         *handle = Some(Ok(runtime_handle));
     }
+    inner.handle_ready.notify_waiters();
     if let Ok(mut events) = inner.events.lock()
         && matches!(*events, EventStreamState::Waiting)
     {
@@ -880,6 +893,7 @@ fn publish_result(execution: &Weak<AgentRunInner>, result: Result<AgentRunOutput
     if let Ok(mut retained) = inner.result.lock() {
         *retained = Some(result);
     }
+    inner.result_ready.notify_waiters();
 }
 
 /// Ergonomic native composition builder over direct ready handles.
