@@ -5,12 +5,18 @@ from typing import TypedDict, cast
 from . import _finstack_ai as _native
 from ._finstack_ai import (
     Agent,
+    CallbackContext,
     CancelledError,
     ConfigurationError,
     Event,
     EventBatch,
     EventBatchIterator,
     FinstackError,
+    PythonContextProvider,
+    PythonMiddleware,
+    PythonModel,
+    PythonObserver,
+    PythonToolset,
     Run,
     RunResult,
     RuntimeError,
@@ -63,15 +69,42 @@ def linked_providers() -> tuple[str, ...]:
     return _native.linked_providers()
 
 
+def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
+    """Validate a pre-beta Rust-owned lineage or external-command shape.
+
+    Supported kinds are ``child_run_prepared``, ``interaction_resolution``,
+    and ``external_effect_completion``. This data-only API does not route a
+    command or claim durable restart support; PR-048 owns that beta gate.
+
+    Args:
+        kind: Stable shape family.
+        value: Candidate normalized mapping.
+
+    Returns:
+        The Rust-validated normalized mapping.
+
+    Raises:
+        TypeError: If the kind or shape is invalid.
+    """
+
+    return _native.normalize_prebeta_shape(kind, value)
+
+
 __all__ = [
     "Agent",
     "BuildMetadata",
+    "CallbackContext",
     "CancelledError",
     "ConfigurationError",
     "Event",
     "EventBatch",
     "EventBatchIterator",
     "FinstackError",
+    "PythonContextProvider",
+    "PythonMiddleware",
+    "PythonModel",
+    "PythonObserver",
+    "PythonToolset",
     "Run",
     "RunResult",
     "RuntimeError",
@@ -81,4 +114,5 @@ __all__ = [
     "build_metadata",
     "health",
     "linked_providers",
+    "normalize_prebeta_shape",
 ]

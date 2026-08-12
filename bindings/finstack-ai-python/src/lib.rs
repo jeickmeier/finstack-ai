@@ -18,12 +18,20 @@ use finstack_ai_provider_openai_compatible::{
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyStopAsyncIteration};
+use pyo3::exceptions::{PyException, PyStopAsyncIteration, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 #[cfg(feature = "benchmark-fixture")]
 mod benchmark_fixture;
+#[cfg(feature = "callback-fixture")]
+mod callback_fixture;
+mod callbacks;
+
+use callbacks::{
+    PyCallbackContext, PyPythonContextProvider, PyPythonMiddleware, PyPythonModel,
+    PyPythonObserver, PyPythonToolset,
+};
 
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const OPENAI_COMPATIBLE_PROVIDER: &str = "openai-compatible";
@@ -80,6 +88,41 @@ fn linked_providers() -> (&'static str,) {
     (OPENAI_COMPATIBLE_PROVIDER,)
 }
 
+/// Normalize a pre-beta lineage or authenticated external-command shape.
+#[pyfunction]
+fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let json = py.import("json")?;
+    let encoded = json
+        .getattr("dumps")?
+        .call1((value,))?
+        .extract::<String>()?;
+    let normalized = match kind {
+        "child_run_prepared" => normalize_shape::<finstack_ai::runtime::ChildRunPrepared>(&encoded),
+        "interaction_resolution" => {
+            normalize_shape::<finstack_ai::runtime::InteractionResolutionCommand>(&encoded)
+        }
+        "external_effect_completion" => {
+            normalize_shape::<finstack_ai::runtime::ExternalEffectCompletionCommand>(&encoded)
+        }
+        _ => {
+            return Err(PyTypeError::new_err(format!(
+                "unsupported pre-beta shape: {kind}"
+            )));
+        }
+    }?;
+    Ok(json.getattr("loads")?.call1((normalized,))?.unbind())
+}
+
+fn normalize_shape<T>(encoded: &str) -> PyResult<String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let value: T = serde_json::from_str(encoded)
+        .map_err(|error| PyTypeError::new_err(format!("invalid pre-beta shape: {error}")))?;
+    serde_json::to_string(&value)
+        .map_err(|_| PyException::new_err("pre-beta shape serialization failed"))
+}
+
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 fn build_metadata(py: Python<'_>) -> PyResult<Py<PyDict>> {
@@ -115,6 +158,32 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_openai_compatible_agent(base_url, model, instruction).await;
+            Python::attach(|py| match built {
+                Ok(value) => Py::new(py, value),
+                Err(error) => Err(agent_error(py, &error, None)),
+            })
+        })
+    }
+
+    /// Construct an agent from trusted coarse Python model and Toolset callbacks.
+    #[staticmethod]
+    #[pyo3(signature = (model, toolsets = None, instruction = None))]
+    fn from_python<'py>(
+        py: Python<'py>,
+        model: &Bound<'py, PyPythonModel>,
+        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        instruction: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let model = model.borrow();
+        let model_name = model.model_name();
+        let model = model.registration();
+        let toolsets = toolsets
+            .unwrap_or_default()
+            .into_iter()
+            .map(|toolset| toolset.bind(py).borrow().registration())
+            .collect::<Vec<_>>();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let built = build_python_agent(model_name, model, toolsets, instruction).await;
             Python::attach(|py| match built {
                 Ok(value) => Py::new(py, value),
                 Err(error) => Err(agent_error(py, &error, None)),
@@ -477,6 +546,42 @@ async fn build_openai_compatible_agent(
     })
 }
 
+async fn build_python_agent(
+    model_name: ModelName,
+    model: (ComponentRef, Arc<dyn Model>),
+    toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
+    instruction: Option<String>,
+) -> Result<PyAgent, AgentRunError> {
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 64,
+            batches_per_session: 256,
+            records_per_session: 4_096,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .map_err(|error| configuration_error(error.to_string()))?,
+    );
+    let mut builder = Agent::builder(
+        AgentId::parse("python.agent.callbacks")
+            .map_err(|error| configuration_error(error.to_string()))?,
+        BundleId::parse("python.bundle.callbacks")
+            .map_err(|error| configuration_error(error.to_string()))?,
+        model,
+        (component("python.store.memory")?, store),
+    );
+    for (component, toolset) in toolsets {
+        builder = builder.toolset(component, toolset);
+    }
+    if let Some(instruction) = instruction {
+        builder = builder.try_instruction(instruction)?;
+    }
+    let agent = builder.build().await?;
+    Ok(PyAgent {
+        inner: Arc::new(agent),
+        model: model_name,
+    })
+}
+
 fn run_request(
     model: &ModelName,
     input: String,
@@ -598,10 +703,19 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyRunResult>()?;
     module.add_class::<PyEvent>()?;
     module.add_class::<PyEventBatch>()?;
+    module.add_class::<PyCallbackContext>()?;
+    module.add_class::<PyPythonModel>()?;
+    module.add_class::<PyPythonToolset>()?;
+    module.add_class::<PyPythonContextProvider>()?;
+    module.add_class::<PyPythonMiddleware>()?;
+    module.add_class::<PyPythonObserver>()?;
     module.add_function(wrap_pyfunction!(health, module)?)?;
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(linked_providers, module)?)?;
+    module.add_function(wrap_pyfunction!(normalize_prebeta_shape, module)?)?;
     #[cfg(feature = "benchmark-fixture")]
     benchmark_fixture::register(module)?;
+    #[cfg(feature = "callback-fixture")]
+    callback_fixture::register(module)?;
     Ok(())
 }
