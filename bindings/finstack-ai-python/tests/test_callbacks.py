@@ -321,7 +321,10 @@ def test_python_callback_agent_is_shareable_across_threads() -> None:
         return {"text": "shared", "completion_id": "python-shared-1"}
 
     async def build() -> finstack_ai.Agent:
-        return await finstack_ai.Agent.from_python(_model(callback))
+        # This case proves cross-thread sharing rather than timeout behavior.
+        # Use the public adapter default so a loaded free-threaded Windows
+        # runner cannot turn scheduler latency into a false concurrency error.
+        return await finstack_ai.Agent.from_python(_model(callback, timeout=30.0))
 
     agent = asyncio.run(build())
 
