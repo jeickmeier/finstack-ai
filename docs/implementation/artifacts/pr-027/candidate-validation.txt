@@ -1,7 +1,7 @@
 PR-027 immutable local candidate validation
 Date: 2026-08-11
-Candidate: 6d1c06f79fb8d81c8b10d6a46fd599516e859a3b
-Tree: 780b40824b3a578f4ce79c2efe89fae144e3fb90
+Candidate: 513a86d0fe5b480d26d139f1421e3183b2f749fb
+Tree: c96def8c1b03b35b60ca2a23e2268dc15bda64f5
 Branch: codex/pr-027-python-package
 Baseline: b68d4179b8da6db081d9c6acdef76e33fa67948d
 Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1; Python 3.14.6;
@@ -27,8 +27,8 @@ PASS  mise run test-pr027 (nested in the aggregate)
       - 24 architecture tests
 
 Durable aggregate command-log identity:
-  sha256 c6a82deac6461b3203c4d856f4554a72c1454b9a2ec5c115ced0f9315ae285d8
-  local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786492470_mise_run_ci.log
+  sha256 ad158fd054a0ee457f79a75f7d31f415474984b08db333870bfd586a7a439555
+  local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786493203_mise_run_ci.log
 
 Cross-platform disposition before hosted execution:
   macOS arm64 / CPython 3.14  PASS (local exact source candidate)
