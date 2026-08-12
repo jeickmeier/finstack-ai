@@ -16,9 +16,9 @@ mod spec;
 
 #[cfg(feature = "native-tokio")]
 pub use agent::{
-    AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE, AGENT_RUN_TIMEOUT,
-    AGENT_RUN_UNSUPPORTED_PLAN, Agent, AgentRunError, AgentRunOutput, AgentRunRequest,
-    NativeAgentBuilder,
+    AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
+    AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, Agent, AgentRun, AgentRunError, AgentRunOutput,
+    AgentRunRequest, NativeAgentBuilder,
 };
 pub use bundle::{
     BUNDLE_RESOLUTION_CONFLICT, BUNDLE_RESOLUTION_INVALID, BUNDLE_RESOLUTION_LOCK_MISMATCH,

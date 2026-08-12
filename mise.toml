@@ -552,7 +552,7 @@ mise run supply-chain
 mise run secret-scan
 mise run secret-scan-canary
 mise run release-smoke
-mise run test-pr027
+mise run test-pr028
 """
 
 # Build tasks
@@ -800,5 +800,23 @@ for package in finstack-ai-kernel finstack-ai-runtime; do
     exit 1
   fi
 done
+mise run architecture
+"""
+
+[tasks.test-pr028]
+description = "Run PR-028 Rust-owned handle, async binding, batching, and package proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai agent::tests --locked
+cargo clippy -p finstack-ai --all-targets --locked -- -D warnings
+mise run test-pr027
+python_graph="$(cargo tree -p finstack-ai-python -e normal,build --locked)"
+case "${python_graph}" in
+  *pyo3-async-runtimes*) ;;
+  *)
+    echo 'Python binding graph must link pyo3-async-runtimes' >&2
+    exit 1
+    ;;
+esac
 mise run architecture
 """

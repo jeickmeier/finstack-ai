@@ -1,30 +1,8 @@
 //! Native developer-preview execution facade.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-
-use finstack_ai_kernel::{
-    AcceptRun, AgentId, AllocatedIds, AppendBatchTag, BudgetPropagation, BundleId,
-    CancellationPropagation, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
-    EffectOutputContract, EffectOutputKind, EventTag, KernelInput, LaneId, LaneTag, Message,
-    MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator,
-    PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome, RetrySafety,
-    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
-    SessionId, SessionTag, Stage, StageCursor, StageSettled, TerminalState, TextBlock, Timestamp,
-    TransitionEnv, TurnTag, Version,
-};
-use finstack_ai_runtime::{
-    CommitCoordinator, EventHubConfig, IdGenerationError, JsonSchemaToolValidatorCompiler,
-    LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
-    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
-    ModelWarmupContext, OsRandomSource, PendingModelEffect, PortFuture, ReconcileContext,
-    ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner, SideEffectClass,
-    SystemClock, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision, ToolStreamLimits,
-    ToolTaskConfig, Toolset, ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
-};
-use thiserror::Error;
 
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
@@ -32,6 +10,30 @@ use crate::{
     InstructionSpec, ReadyComponent, Registrar, RegistrationError, RegistrationMetadata,
     ResolvedAgent, RuntimeServices,
 };
+use finstack_ai_kernel::{
+    AcceptRun, AgentId, AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation,
+    BundleId, CancelRequested, CancellationInitiator, CancellationPropagation,
+    CancellationRequestTag, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
+    EffectOutputContract, EffectOutputKind, EventTag, KernelInput, LaneId, LaneTag, Message,
+    MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator,
+    PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome, RetrySafety,
+    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
+    Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled, TerminalState, TextBlock,
+    Timestamp, TransitionEnv, TurnTag, Version,
+};
+use finstack_ai_runtime::{
+    CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
+    EventSubscription, EventSubscriptionConfig, IdGenerationError, JsonSchemaToolValidatorCompiler,
+    LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
+    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
+    ModelWarmupContext, OsRandomSource, PendingModelEffect, PortFuture, ProgressCoalescing,
+    ReconcileContext, ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
+    SideEffectClass, SystemClock, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
+    ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration, UuidV7Generator,
+    resolve_model_context_profile,
+};
+use thiserror::Error;
 
 /// Invalid public run configuration.
 pub const AGENT_RUN_INVALID_CONFIGURATION: &str = "agent_run_invalid_configuration";
@@ -41,12 +43,18 @@ pub const AGENT_RUN_UNSUPPORTED_PLAN: &str = "agent_run_unsupported_plan";
 pub const AGENT_RUN_RUNTIME_FAILURE: &str = "agent_run_runtime_failure";
 /// The operational run deadline elapsed.
 pub const AGENT_RUN_TIMEOUT: &str = "agent_run_timeout";
+/// The run reached its durable cancelled terminal state.
+pub const AGENT_RUN_CANCELLED: &str = "agent_run_cancelled";
 
 const DEFAULT_QUEUE_CAPACITY: usize = 32;
 const DEFAULT_MAX_CYCLES: u64 = 16;
 const MAX_CONFIGURED_CYCLES: u64 = 1_024;
+const DEFAULT_EVENT_BATCH_COUNT: usize = 32;
+const DEFAULT_EVENT_BATCH_BYTES: usize = 64 * 1_024;
+const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Immutable native facade over one fully resolved agent.
+#[derive(Clone)]
 pub struct Agent {
     resolved: Arc<ResolvedAgent>,
     tools: Arc<ResolvedToolCatalog>,
@@ -145,16 +153,47 @@ impl Agent {
         &self.resolved
     }
 
+    /// Start one bounded native run and return its detached control handle.
+    ///
+    /// The caller must already be inside a Tokio runtime. Dropping the returned
+    /// handle detaches frontend observation; it does not cancel the durable run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable configuration or runtime error before the background
+    /// run task is accepted.
+    pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
+        let prepared = self.prepare(request)?;
+        let locator = prepared.locator.clone();
+        let cancellation_initiator = prepared.cancellation_initiator()?;
+        let inner = Arc::new(AgentRunInner {
+            locator,
+            cancellation_initiator,
+            handle: Mutex::new(None),
+            result: Mutex::new(None),
+            events: Mutex::new(EventStreamState::Waiting),
+            cancellation: Mutex::new(CancellationState::default()),
+        });
+        let execution = Arc::downgrade(&inner);
+        let agent = self.clone();
+        finstack_ai_runtime::native_driver::spawn(Box::pin(async move {
+            let result = Box::pin(agent.execute_started(prepared, &execution)).await;
+            publish_result(&execution, result);
+        }))
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        Ok(AgentRun { inner })
+    }
+
     /// Execute one bounded native run through the commit-before-effect runtime.
     ///
     /// # Errors
     ///
-    /// Returns a stable configuration, runtime, terminal, or timeout error.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "construction keeps one resolved-model and owned-task lifetime contiguous"
-    )]
+    /// Returns a stable configuration, runtime, cancellation, or timeout error.
     pub async fn run(&self, request: AgentRunRequest) -> Result<AgentRunOutput, AgentRunError> {
+        self.start(request)?.result().await
+    }
+
+    fn prepare(&self, request: AgentRunRequest) -> Result<PreparedAgentRun, AgentRunError> {
         request.validate()?;
         let plan = self.resolved.run_plan();
         let model = Arc::clone(plan.model().handle());
@@ -211,20 +250,37 @@ impl Agent {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;
 
-        let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(model));
-        let coordinator = CommitCoordinator::new(Arc::clone(&store));
-        let mut owner = if self.tools.is_empty() {
+        Ok(PreparedAgentRun {
+            model,
+            profile,
+            store,
+            session_id,
+            lane_id,
+            accepted,
+            request,
+            locator,
+        })
+    }
+
+    async fn execute_started(
+        &self,
+        prepared: PreparedAgentRun,
+        execution: &Weak<AgentRunInner>,
+    ) -> Result<AgentRunOutput, AgentRunError> {
+        let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(Arc::clone(&prepared.model)));
+        let coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
+        let owner = if self.tools.is_empty() {
             RunTaskOwner::spawn_with_model(
                 coordinator,
                 run_task_config(),
                 model_task_config(),
                 ready_model,
-                profile.clone(),
+                prepared.profile.clone(),
                 SystemClock,
                 OsRandomSource,
             )
             .await
-            .map_err(AgentRunError::runtime)?
+            .map_err(AgentRunError::runtime)
         } else {
             RunTaskOwner::spawn_with_model_and_tools(
                 coordinator,
@@ -232,20 +288,44 @@ impl Agent {
                 model_task_config(),
                 tool_task_config(),
                 ready_model,
-                profile.clone(),
+                prepared.profile.clone(),
                 Arc::clone(&self.tools),
                 SystemClock,
                 OsRandomSource,
             )
             .await
-            .map_err(AgentRunError::runtime)?
+            .map_err(AgentRunError::runtime)
+        };
+        let mut owner = match owner {
+            Ok(owner) => owner,
+            Err(error) => {
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
         };
         let handle = owner.handle();
-        let timeout = request.timeout;
+        let subscription = match handle.subscribe_events(default_event_subscription()).await {
+            Ok(subscription) => subscription,
+            Err(error) => {
+                let error = AgentRunError::runtime_message(error.to_string());
+                let _shutdown = owner.shutdown().await;
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+        };
+        publish_started(execution, handle.clone(), subscription);
+        let timeout = prepared.request.timeout;
         let result = finstack_ai_runtime::native_driver::timeout(
             timeout,
             Box::pin(self.drive(
-                &handle, store, session_id, lane_id, accepted, request, profile, locator,
+                &handle,
+                prepared.store,
+                prepared.session_id,
+                prepared.lane_id,
+                prepared.accepted,
+                prepared.request,
+                prepared.profile,
+                prepared.locator,
             )),
         )
         .await;
@@ -448,6 +528,312 @@ impl Agent {
         )?);
         messages.extend_from_slice(committed);
         Ok(messages.into())
+    }
+}
+
+struct PreparedAgentRun {
+    model: Arc<dyn Model>,
+    profile: LockedModelContextProfile,
+    store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    session_id: SessionId,
+    lane_id: LaneId,
+    accepted: RunAccepted,
+    request: AgentRunRequest,
+    locator: OperationLocator,
+}
+
+impl PreparedAgentRun {
+    fn cancellation_initiator(&self) -> Result<CancellationInitiator, AgentRunError> {
+        let security = &self.request.security;
+        let authorization = AuthorizationEvidence::try_new(
+            security.authorization_policy_version(),
+            security.authorization_decision_id(),
+        )
+        .map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        Ok(CancellationInitiator::Principal {
+            principal: security.principal().clone(),
+            authorization,
+        })
+    }
+}
+
+struct AgentRunInner {
+    locator: OperationLocator,
+    cancellation_initiator: CancellationInitiator,
+    handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
+    result: Mutex<Option<Result<AgentRunOutput, AgentRunError>>>,
+    events: Mutex<EventStreamState>,
+    cancellation: Mutex<CancellationState>,
+}
+
+enum EventStreamState {
+    Waiting,
+    Active(EventSubscription),
+    Busy,
+    CloseRequested,
+    Closed,
+    StartupFailed(AgentRunError),
+}
+
+#[derive(Default)]
+struct CancellationState {
+    started: bool,
+    result: Option<Result<(), AgentRunError>>,
+}
+
+/// Cloneable control and observation handle for one Rust-owned native run.
+///
+/// Dropping every clone detaches local observation but does not cancel the
+/// durable run. Call [`AgentRun::cancel`] for explicit durable cancellation.
+#[derive(Clone)]
+pub struct AgentRun {
+    inner: Arc<AgentRunInner>,
+}
+
+impl AgentRun {
+    /// Borrow the immutable durable locator allocated before run execution.
+    #[must_use]
+    pub fn locator(&self) -> &OperationLocator {
+        &self.inner.locator
+    }
+
+    /// Wait for the final committed result.
+    ///
+    /// The result is retained, so multiple callers observe the same terminal
+    /// value without rerunning any model or tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable configuration, runtime, cancellation, or timeout
+    /// error that settled the run.
+    pub async fn result(&self) -> Result<AgentRunOutput, AgentRunError> {
+        loop {
+            let result = self
+                .inner
+                .result
+                .lock()
+                .map_err(|_| AgentRunError::runtime_message("run result lock is poisoned"))?
+                .clone();
+            if let Some(result) = result {
+                return result;
+            }
+            finstack_ai_runtime::native_driver::yield_now().await;
+        }
+    }
+
+    /// Submit one idempotent durable cancellation request.
+    ///
+    /// Cancellation is explicit and independent of Python/Rust handle drops.
+    /// Repeated calls share the first submission outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable runtime failure if run startup or cancellation commit
+    /// fails.
+    pub async fn cancel(&self) -> Result<(), AgentRunError> {
+        let should_start = {
+            let mut cancellation =
+                self.inner.cancellation.lock().map_err(|_| {
+                    AgentRunError::runtime_message("run cancellation lock is poisoned")
+                })?;
+            if let Some(result) = cancellation.result.clone() {
+                return result;
+            }
+            if cancellation.started {
+                false
+            } else {
+                cancellation.started = true;
+                true
+            }
+        };
+        if should_start {
+            let run = self.clone();
+            if let Err(error) = finstack_ai_runtime::native_driver::spawn(Box::pin(async move {
+                let result = run.submit_cancellation().await;
+                if let Ok(mut cancellation) = run.inner.cancellation.lock() {
+                    cancellation.result = Some(result);
+                }
+            })) {
+                let error = AgentRunError::runtime_message(error.to_string());
+                let mut cancellation = self.inner.cancellation.lock().map_err(|_| {
+                    AgentRunError::runtime_message("run cancellation lock is poisoned")
+                })?;
+                cancellation.result = Some(Err(error));
+            }
+        }
+        loop {
+            let result = self
+                .inner
+                .cancellation
+                .lock()
+                .map_err(|_| AgentRunError::runtime_message("run cancellation lock is poisoned"))?
+                .result
+                .clone();
+            if let Some(result) = result {
+                return result;
+            }
+            finstack_ai_runtime::native_driver::yield_now().await;
+        }
+    }
+
+    /// Receive the next bounded transport batch in source order.
+    ///
+    /// Exactly one consumer may advance this subscription. `None` means the
+    /// event hub closed after terminal settlement or explicit event closure.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stable startup failure if the run could not publish its
+    /// event subscription.
+    pub async fn next_event_batch(&self) -> Result<Option<EventBatch>, AgentRunError> {
+        loop {
+            let subscription = {
+                let mut state =
+                    self.inner.events.lock().map_err(|_| {
+                        AgentRunError::runtime_message("run event lock is poisoned")
+                    })?;
+                match &*state {
+                    EventStreamState::Waiting
+                    | EventStreamState::Busy
+                    | EventStreamState::CloseRequested => None,
+                    EventStreamState::Closed => return Ok(None),
+                    EventStreamState::StartupFailed(error) => return Err(error.clone()),
+                    EventStreamState::Active(_) => {
+                        let EventStreamState::Active(subscription) =
+                            std::mem::replace(&mut *state, EventStreamState::Busy)
+                        else {
+                            unreachable!("active event state changed while locked")
+                        };
+                        Some(subscription)
+                    }
+                }
+            };
+            let Some(mut subscription) = subscription else {
+                finstack_ai_runtime::native_driver::yield_now().await;
+                continue;
+            };
+            let batch = subscription.next_batch().await;
+            let mut state = self
+                .inner
+                .events
+                .lock()
+                .map_err(|_| AgentRunError::runtime_message("run event lock is poisoned"))?;
+            match &*state {
+                EventStreamState::CloseRequested | EventStreamState::Closed => {
+                    subscription.close();
+                    *state = EventStreamState::Closed;
+                    return Ok(None);
+                }
+                EventStreamState::Busy => {
+                    if batch.is_some() {
+                        *state = EventStreamState::Active(subscription);
+                    } else {
+                        *state = EventStreamState::Closed;
+                    }
+                    return Ok(batch);
+                }
+                _ => {
+                    return Err(AgentRunError::runtime_message(
+                        "run event consumer state is inconsistent",
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Close frontend event delivery without cancelling the owning run.
+    pub fn close_events(&self) {
+        let Ok(mut state) = self.inner.events.lock() else {
+            return;
+        };
+        match &mut *state {
+            EventStreamState::Active(subscription) => {
+                subscription.close();
+                *state = EventStreamState::Closed;
+            }
+            EventStreamState::Busy => *state = EventStreamState::CloseRequested,
+            _ => *state = EventStreamState::Closed,
+        }
+    }
+
+    async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
+        loop {
+            let result = self
+                .inner
+                .handle
+                .lock()
+                .map_err(|_| AgentRunError::runtime_message("run handle lock is poisoned"))?
+                .clone();
+            if let Some(result) = result {
+                return result;
+            }
+            finstack_ai_runtime::native_driver::yield_now().await;
+        }
+    }
+
+    async fn submit_cancellation(&self) -> Result<(), AgentRunError> {
+        if self
+            .inner
+            .result
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run result lock is poisoned"))?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let handle = self.runtime_handle().await?;
+        submit(
+            &handle,
+            NativeIds::cancellation_environment()?,
+            KernelInput::CancelRequested(CancelRequested {
+                initiator: self.inner.cancellation_initiator.clone(),
+                reason: Some(Arc::from("frontend cancellation")),
+            }),
+        )
+        .await
+    }
+}
+
+fn publish_start_failure(execution: &Weak<AgentRunInner>, error: &AgentRunError) {
+    let Some(inner) = execution.upgrade() else {
+        return;
+    };
+    if let Ok(mut handle) = inner.handle.lock() {
+        *handle = Some(Err(error.clone()));
+    }
+    if let Ok(mut events) = inner.events.lock()
+        && matches!(*events, EventStreamState::Waiting)
+    {
+        *events = EventStreamState::StartupFailed(error.clone());
+    }
+}
+
+fn publish_started(
+    execution: &Weak<AgentRunInner>,
+    runtime_handle: RunHandle,
+    subscription: EventSubscription,
+) {
+    let Some(inner) = execution.upgrade() else {
+        return;
+    };
+    if let Ok(mut handle) = inner.handle.lock() {
+        *handle = Some(Ok(runtime_handle));
+    }
+    if let Ok(mut events) = inner.events.lock()
+        && matches!(*events, EventStreamState::Waiting)
+    {
+        *events = EventStreamState::Active(subscription);
+    }
+}
+
+fn publish_result(execution: &Weak<AgentRunInner>, result: Result<AgentRunOutput, AgentRunError>) {
+    let Some(inner) = execution.upgrade() else {
+        return;
+    };
+    if let Ok(mut retained) = inner.result.lock() {
+        *retained = Some(result);
     }
 }
 
@@ -721,7 +1107,7 @@ impl AgentRunOutput {
 }
 
 /// Stable native facade failure.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum AgentRunError {
     /// Invalid or unsupported resolved/run configuration.
     #[error("{code}: {message}")]
@@ -747,9 +1133,35 @@ pub enum AgentRunError {
         /// Configured deadline.
         timeout: Duration,
     },
+    /// Explicit durable cancellation reached its terminal state.
+    #[error("{code}: run was cancelled")]
+    Cancelled {
+        /// Stable error code.
+        code: &'static str,
+    },
 }
 
 impl AgentRunError {
+    /// Stable machine-readable error code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Configuration { code, .. }
+            | Self::Runtime { code, .. }
+            | Self::Timeout { code, .. }
+            | Self::Cancelled { code } => code,
+        }
+    }
+
+    /// Whether an identical frontend call is safe to retry automatically.
+    ///
+    /// Native run errors remain non-retryable because committed acceptance or
+    /// external-effect state may already exist.
+    #[must_use]
+    pub const fn retryable(&self) -> bool {
+        false
+    }
+
     fn configuration(code: &'static str, message: impl Into<String>) -> Self {
         Self::Configuration {
             code,
@@ -824,6 +1236,26 @@ impl NativeIds {
                 Vec::new(),
                 generate_many::<AppendBatchTag>(1)?,
                 Vec::new(),
+            )
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
+        })
+    }
+
+    fn cancellation_environment() -> Result<TransitionEnv, AgentRunError> {
+        Ok(TransitionEnv {
+            now: Self::now()?,
+            ids: AllocatedIds::try_new(
+                generate_many::<RecordTag>(1)?,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                generate_many::<AppendBatchTag>(1)?,
+                generate_many::<CancellationRequestTag>(1)?,
             )
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
         })
@@ -963,9 +1395,9 @@ fn ensure_nonterminal_failure(
             "run failed: {}",
             failed.error.code
         ))),
-        Some(TerminalState::Cancelled(_)) => {
-            Err(AgentRunError::runtime_message("run was cancelled"))
-        }
+        Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Cancelled {
+            code: AGENT_RUN_CANCELLED,
+        }),
         _ => Ok(()),
     }
 }
@@ -1056,6 +1488,27 @@ fn run_task_config() -> RunTaskConfig {
     }
 }
 
+fn default_event_subscription() -> EventSubscriptionConfig {
+    EventSubscriptionConfig {
+        queue_capacity: DEFAULT_QUEUE_CAPACITY,
+        filter: EventFilter {
+            include_durable: true,
+            include_transient: true,
+            kinds: Arc::from([]),
+            max_sensitivity: Sensitivity::Confidential,
+        },
+        batching: EventBatchConfig {
+            flush_count: DEFAULT_EVENT_BATCH_COUNT,
+            flush_bytes: DEFAULT_EVENT_BATCH_BYTES,
+            flush_interval: DEFAULT_EVENT_BATCH_INTERVAL,
+        },
+        progress_coalescing: ProgressCoalescing::Enabled,
+        lag_policy: EventLagPolicy::DropProgress {
+            durable_timeout: Duration::from_secs(2),
+        },
+    }
+}
+
 fn model_task_config() -> ModelTaskConfig {
     ModelTaskConfig {
         job_capacity: DEFAULT_QUEUE_CAPACITY,
@@ -1115,7 +1568,9 @@ impl Model for ReadyModel {
 mod tests {
     use std::collections::BTreeSet;
 
-    use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Usage, Version};
+    use finstack_ai_kernel::{
+        AgentId, BundleId, ComponentId, ComponentRef, RunEventClass, Usage, Version,
+    };
     use finstack_ai_runtime::{
         JournalStore, ModelContextProfile, ModelResponse, ModelStreamItem, ModelToolCall,
         TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Toolset,
@@ -1261,14 +1716,9 @@ mod tests {
         .expect("security")
     }
 
-    #[tokio::test]
-    async fn model_only_agent_completes_without_double_warmup() {
+    async fn model_only_agent(model: Arc<ScriptedModel>) -> (Agent, Arc<MemoryJournalStore>) {
         let model_id = ComponentId::parse("test.model.preview").expect("model id");
         let store_id = ComponentId::parse("test.store.preview").expect("store id");
-        let model = Arc::new(ScriptedModel::from_plans(
-            profile(),
-            vec![completed("preview ready")],
-        ));
         let store = Arc::new(
             MemoryJournalStore::try_new(MemoryStoreLimits {
                 sessions: 4,
@@ -1283,8 +1733,8 @@ mod tests {
             .register_extension(&PreviewExtension {
                 model_id: model_id.clone(),
                 store_id: store_id.clone(),
-                model: Arc::clone(&model),
-                store,
+                model,
+                store: Arc::clone(&store),
                 calculator: None,
             })
             .expect("registration");
@@ -1313,38 +1763,188 @@ mod tests {
                 compatibility: CompatibilityRequirements::default(),
             })
             .expect("bundle");
-        let bundle_resolver = BundleResolver::new(
+        let composed_agent = BundleResolver::new(
             &catalog,
             VERSION,
             BTreeSet::new(),
             RuntimeServices::default(),
-        );
-        let composed_agent = bundle_resolver
-            .resolve_agent(
-                &mut registry,
-                &bundle_id,
-                &agent_id,
-                BTreeMap::new(),
-                AgentConstructionContext::new(),
-            )
-            .await
-            .expect("resolved");
+        )
+        .resolve_agent(
+            &mut registry,
+            &bundle_id,
+            &agent_id,
+            BTreeMap::new(),
+            AgentConstructionContext::new(),
+        )
+        .await
+        .expect("resolved");
+        (
+            Agent::try_from_resolved(Arc::new(composed_agent)).expect("Agent"),
+            store,
+        )
+    }
+
+    fn request(input: &str) -> AgentRunRequest {
+        AgentRunRequest::try_new(
+            ModelName::try_new("preview-1").expect("model name"),
+            input,
+            security(),
+        )
+        .expect("request")
+    }
+
+    #[tokio::test]
+    async fn model_only_agent_completes_without_double_warmup() {
+        let model = Arc::new(ScriptedModel::from_plans(
+            profile(),
+            vec![completed("preview ready")],
+        ));
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
         assert_eq!(model.warmup_count(), 1);
-        let agent = Agent::try_from_resolved(Arc::new(composed_agent)).expect("Agent");
-        let output = agent
-            .run(
-                AgentRunRequest::try_new(
-                    ModelName::try_new("preview-1").expect("model name"),
-                    "Say hello",
-                    security(),
-                )
-                .expect("request"),
-            )
-            .await
-            .expect("run");
+        let output = agent.run(request("Say hello")).await.expect("run");
         assert_eq!(output.text(), "preview ready");
         assert_eq!(model.request_count(), 1);
         assert_eq!(model.warmup_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn started_run_retains_result_and_delivers_bounded_batches() {
+        let mut plan = completed("batched");
+        plan.actions.splice(
+            0..1,
+            ["b", "a", "t", "c", "h", "e", "d"].map(|text| {
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                    finstack_ai_runtime::TextDelta {
+                        text: Arc::from(text),
+                    },
+                )))
+            }),
+        );
+        let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+        let run = agent.start(request("batch events")).expect("start");
+        let observer = run.clone();
+
+        let batches = tokio::time::timeout(Duration::from_secs(3), async move {
+            let mut batches = Vec::new();
+            while let Some(batch) = observer.next_event_batch().await.expect("event batch") {
+                assert_eq!(
+                    batch.first_sequence(),
+                    batch
+                        .events()
+                        .first()
+                        .expect("first event")
+                        .transient_sequence()
+                );
+                assert_eq!(
+                    batch.last_sequence(),
+                    batch
+                        .events()
+                        .last()
+                        .expect("last event")
+                        .transient_sequence()
+                );
+                assert!(
+                    batch
+                        .events()
+                        .windows(2)
+                        .all(|events| events[0].transient_sequence()
+                            < events[1].transient_sequence())
+                );
+                batches.push(batch);
+            }
+            batches
+        })
+        .await
+        .expect("event delivery settled");
+        let event_count = batches
+            .iter()
+            .map(|batch| batch.events().len())
+            .sum::<usize>();
+        assert!(batches.iter().any(|batch| batch.events().len() > 1));
+        assert!(event_count > batches.len());
+        assert!(batches.iter().any(|batch| {
+            batch
+                .events()
+                .iter()
+                .any(|event| event.class() == RunEventClass::Transient)
+        }));
+
+        let first = run.result().await.expect("first retained result");
+        let second = run.result().await.expect("second retained result");
+        assert_eq!(first.text(), "batched");
+        assert_eq!(second.text(), "batched");
+        assert_eq!(first.locator, second.locator);
+        assert_eq!(model.request_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn explicit_cancellation_is_idempotent_and_terminal() {
+        let model = Arc::new(ScriptedModel::from_plans(
+            profile(),
+            vec![ScriptedModelPlan {
+                actions: vec![ScriptedModelAction::AwaitCancellation],
+            }],
+        ));
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+        let run = agent
+            .start(request("wait for cancellation"))
+            .expect("start");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while model.request_count() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("model request started");
+
+        run.cancel().await.expect("first cancellation");
+        run.cancel().await.expect("idempotent cancellation");
+        let error = run.result().await.expect_err("cancelled result");
+        assert_eq!(error.code(), AGENT_RUN_CANCELLED);
+        assert!(!error.retryable());
+        assert_eq!(model.cancellation_acknowledgement_count(), 1);
+        assert_eq!(model.active_stream_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn dropping_last_handle_detaches_without_cancelling_execution() {
+        let control_name = Arc::<str>::from("detached-run");
+        let mut plan = completed("detached completion");
+        plan.actions
+            .insert(0, ScriptedModelAction::Block(Arc::clone(&control_name)));
+        let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+        let control = model.control();
+        let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+        let run = agent.start(request("detach")).expect("start");
+        let session_id = run.locator().session_id;
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while control.entries(&control_name) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("model reached gate");
+
+        drop(run);
+        control.release(&control_name);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let journal: Arc<dyn JournalStore> = store.clone();
+                let state = CommitCoordinator::recover(journal, session_id)
+                    .await
+                    .expect("recover detached run");
+                if matches!(state.state().terminal, Some(TerminalState::Completed(_))) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("detached run completed");
+        assert_eq!(model.cancellation_acknowledgement_count(), 0);
+        assert_eq!(model.active_stream_count(), 0);
+        assert_eq!(model.dropped_stream_count(), 1);
     }
 
     #[tokio::test]

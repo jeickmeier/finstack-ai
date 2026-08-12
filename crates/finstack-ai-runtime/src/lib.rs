@@ -214,6 +214,20 @@ pub mod native_driver {
     use std::future::Future;
     use std::time::Duration;
 
+    use crate::PortFuture;
+
+    /// No native runtime is active for a requested driver operation.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct DriverUnavailable;
+
+    impl std::fmt::Display for DriverUnavailable {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("native driver is unavailable")
+        }
+    }
+
+    impl std::error::Error for DriverUnavailable {}
+
     /// The native driver deadline elapsed before the future completed.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct TimeoutElapsed;
@@ -239,6 +253,18 @@ pub mod native_driver {
         tokio::time::timeout(duration, future)
             .await
             .map_err(|_| TimeoutElapsed)
+    }
+
+    /// Spawn one detached SDK driver future on the active native runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DriverUnavailable`] when the caller is not inside the native
+    /// runtime context.
+    pub fn spawn(future: PortFuture<()>) -> Result<(), DriverUnavailable> {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| DriverUnavailable)?;
+        handle.spawn(future);
+        Ok(())
     }
 
     /// Cooperatively yield one turn to the native driver.
