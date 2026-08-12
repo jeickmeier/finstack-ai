@@ -322,6 +322,7 @@ run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/python
 
 [tasks.python-fast-path-smoke]
 description = "Build the non-default PR-029 fixture wheel and stage its separated benchmark report"
+run_windows = "mise run python-fast-path-smoke-windows"
 run = """
 set -euo pipefail
 mkdir -p target/python-fast-path-dist
@@ -339,6 +340,32 @@ if [ "$#" -ne 1 ]; then
 fi
 uv run --isolated --no-project --with "$1" \
   python tools/python_fast_path/run.py --smoke
+"""
+
+[tasks.python-fast-path-smoke-windows]
+description = "Build and smoke the non-default PR-029 fixture wheel from PowerShell"
+shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+run = """
+$ErrorActionPreference = "Stop"
+$dist = "target/python-fast-path-dist"
+New-Item -ItemType Directory -Force $dist | Out-Null
+Get-ChildItem -Path $dist -Filter "*.whl" -File | Remove-Item -Force
+$maturin = Join-Path (uv tool dir --bin) "maturin.exe"
+cargo --version
+uv tool install --force maturin==1.14.1
+& $maturin --version
+& $maturin build `
+  --manifest-path bindings/finstack-ai-python/Cargo.toml `
+  --release `
+  --locked `
+  --features extension-module,benchmark-fixture `
+  --out $dist
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$wheels = @(Get-ChildItem -Path $dist -Filter "*.whl" -File)
+if ($wheels.Count -ne 1) { throw "expected exactly one benchmark fixture wheel" }
+uv run --isolated --no-project --with $wheels[0].FullName `
+  python tools/python_fast_path/run.py --smoke
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
 [tasks.docs]
