@@ -22,7 +22,7 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
-finstack-ai-provider-openai-compatible = { workspace = true }
+finstack-ai-provider-openai-compatible = { workspace = true, features = ["vendored-tls"] }
 pyo3 = { workspace = true }
 
 [build-dependencies]

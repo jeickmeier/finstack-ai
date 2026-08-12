@@ -631,6 +631,11 @@ set -euo pipefail
 : "${PYTHON_DIST_DIR:?PYTHON_DIST_DIR is required}"
 uv python install "${PYTHON_VERSION}"
 interpreter="$(uv python find "${PYTHON_VERSION}")"
+resolved_cargo="$(command -v cargo)"
+case "$(uname -s)" in
+  MINGW*|MSYS*) resolved_cargo="$(cygpath -w "${resolved_cargo}")" ;;
+esac
+export CARGO="${resolved_cargo}"
 uv run --no-project --with maturin==1.14.1 maturin build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \
