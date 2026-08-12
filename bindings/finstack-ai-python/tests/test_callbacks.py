@@ -168,6 +168,24 @@ def test_prebeta_external_shapes_match_rust_public_fixtures(
     assert finstack_ai.normalize_prebeta_shape(kind, value) == value
 
 
+def test_prebeta_child_lineage_shape_matches_rust() -> None:
+    value = {
+        "parent_run_id": "01234567-89ab-7cde-89ab-0123456789ab",
+        "parent_effect_id": "01234567-89ab-7cde-89ab-0123456789ad",
+        "child": {
+            "operation": {
+                "tenant_scope": "tenant-a",
+                "session_id": "01234567-89ab-7cde-89ab-0123456789ae",
+                "lane_id": "01234567-89ab-7cde-89ab-0123456789af",
+                "run_id": "01234567-89ab-7cde-89ab-0123456789b0",
+            }
+        },
+        "request_digest": "00" * 32,
+        "placement": "compatible_lane_in_parent_session",
+    }
+    assert finstack_ai.normalize_prebeta_shape("child_run_prepared", value) == value
+
+
 def test_prebeta_shape_rejects_unknown_fields() -> None:
     fixture = (
         _REPO_ROOT
