@@ -2,7 +2,7 @@
 
 #![warn(missing_docs)]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use finstack_ai::runtime::{
@@ -20,7 +20,10 @@ use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
+
+#[cfg(feature = "benchmark-fixture")]
+mod benchmark_fixture;
 
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const OPENAI_COMPATIBLE_PROVIDER: &str = "openai-compatible";
@@ -128,15 +131,15 @@ impl PyAgent {
         timeout_seconds: f64,
         max_cycles: u64,
     ) -> PyResult<PyRun> {
-        let request = run_request(&self.model, input, timeout_seconds, max_cycles)
-            .map_err(|error| agent_error(py, &error, None))?;
-        let runtime = pyo3_async_runtimes::tokio::get_runtime();
-        let _guard = runtime.enter();
-        let inner = self
-            .inner
-            .start(request)
-            .map_err(|error| agent_error(py, &error, None))?;
-        Ok(PyRun { inner })
+        let model = self.model.clone();
+        let agent = Arc::clone(&self.inner);
+        py.detach(move || {
+            let request = run_request(&model, input, timeout_seconds, max_cycles)?;
+            let runtime = pyo3_async_runtimes::tokio::get_runtime();
+            let _guard = runtime.enter();
+            agent.start(request).map(|inner| PyRun { inner })
+        })
+        .map_err(|error| agent_error(py, &error, None))
     }
 
     /// Execute one run and await its committed result.
@@ -148,10 +151,13 @@ impl PyAgent {
         timeout_seconds: f64,
         max_cycles: u64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let request = run_request(&self.model, input, timeout_seconds, max_cycles)
-            .map_err(|error| agent_error(py, &error, None))?;
+        let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let request = match run_request(&model, input, timeout_seconds, max_cycles) {
+                Ok(request) => request,
+                Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
+            };
             let run = match agent.start(request) {
                 Ok(run) => run,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
@@ -239,7 +245,15 @@ impl PyEventIterator {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let locator = run.locator().clone();
             match run.next_event_batch().await {
-                Ok(Some(batch)) => Python::attach(|py| Py::new(py, PyEventBatch { inner: batch })),
+                Ok(Some(batch)) => Python::attach(|py| {
+                    Py::new(
+                        py,
+                        PyEventBatch {
+                            inner: batch,
+                            serialized: OnceLock::new(),
+                        },
+                    )
+                }),
                 Ok(None) => Err(PyStopAsyncIteration::new_err(())),
                 Err(error) => Err(Python::attach(|py| agent_error(py, &error, Some(&locator)))),
             }
@@ -357,6 +371,7 @@ impl PyEvent {
 #[pyclass(module = "finstack_ai._finstack_ai", name = "EventBatch", frozen)]
 struct PyEventBatch {
     inner: finstack_ai::runtime::EventBatch,
+    serialized: OnceLock<Result<Arc<[u8]>, Arc<str>>>,
 }
 
 #[pymethods]
@@ -392,8 +407,29 @@ impl PyEventBatch {
 
     /// Serialize the complete batch on explicit request.
     fn to_json(&self) -> PyResult<String> {
-        serde_json::to_string(self.inner.events())
-            .map_err(|_| PyException::new_err("event batch serialization failed"))
+        let bytes = self.serialized_bytes()?;
+        std::str::from_utf8(bytes)
+            .map(ToOwned::to_owned)
+            .map_err(|_| PyException::new_err("event batch serialization produced invalid UTF-8"))
+    }
+
+    /// Serialize the complete batch once and copy it directly into Python bytes.
+    fn to_json_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.serialized_bytes()
+            .map(|bytes| PyBytes::new(py, bytes.as_ref()))
+    }
+}
+
+impl PyEventBatch {
+    fn serialized_bytes(&self) -> PyResult<&Arc<[u8]>> {
+        self.serialized
+            .get_or_init(|| {
+                serde_json::to_vec(self.inner.events())
+                    .map(Arc::from)
+                    .map_err(|_| Arc::from("event batch serialization failed"))
+            })
+            .as_ref()
+            .map_err(|message| PyException::new_err(message.to_string()))
     }
 }
 
@@ -565,5 +601,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(health, module)?)?;
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(linked_providers, module)?)?;
+    #[cfg(feature = "benchmark-fixture")]
+    benchmark_fixture::register(module)?;
     Ok(())
 }

@@ -308,6 +308,66 @@ uv run --no-project python tools/benchmark/run.py smoke
 description = "Run Criterion benches and stage machine-readable metadata (non-blocking)"
 run = "uv run --no-project python tools/benchmark/run.py full"
 
+[tasks.test-python-fast-path]
+description = "Run PR-029 fast-path report helper unit tests"
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/python_fast_path/tests -q"
+
+[tasks.lint-python-fast-path]
+description = "Lint PR-029 fast-path report helper sources"
+run = "uv run --no-project --with ruff==0.12.11 ruff check tools/python_fast_path"
+
+[tasks.format-python-fast-path]
+description = "Check PR-029 fast-path report helper formatting"
+run = "uv run --no-project --with ruff==0.12.11 ruff format --check tools/python_fast_path"
+
+[tasks.python-fast-path-smoke]
+description = "Build the non-default PR-029 fixture wheel and stage its separated benchmark report"
+run_windows = "mise run python-fast-path-smoke-windows"
+run = """
+set -euo pipefail
+mkdir -p target/python-fast-path-dist
+find target/python-fast-path-dist -maxdepth 1 -type f -name '*.whl' -delete
+uv run --no-project --with maturin==1.14.1 -- maturin build \
+  --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  --release \
+  --locked \
+  --features extension-module,benchmark-fixture \
+  --out target/python-fast-path-dist
+set -- target/python-fast-path-dist/*.whl
+if [ "$#" -ne 1 ]; then
+  echo 'expected exactly one benchmark fixture wheel' >&2
+  exit 1
+fi
+uv run --isolated --no-project --with "$1" \
+  python tools/python_fast_path/run.py --smoke
+"""
+
+[tasks.python-fast-path-smoke-windows]
+description = "Build and smoke the non-default PR-029 fixture wheel from PowerShell"
+shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
+run = """
+$ErrorActionPreference = "Stop"
+$dist = "target/python-fast-path-dist"
+New-Item -ItemType Directory -Force $dist | Out-Null
+Get-ChildItem -Path $dist -Filter "*.whl" -File | Remove-Item -Force
+$maturin = Join-Path (uv tool dir --bin) "maturin.exe"
+cargo --version
+uv tool install --force maturin==1.14.1
+& $maturin --version
+& $maturin build `
+  --manifest-path bindings/finstack-ai-python/Cargo.toml `
+  --release `
+  --locked `
+  --features extension-module,benchmark-fixture `
+  --out $dist
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$wheels = @(Get-ChildItem -Path $dist -Filter "*.whl" -File)
+if ($wheels.Count -ne 1) { throw "expected exactly one benchmark fixture wheel" }
+uv run --isolated --no-project --with $wheels[0].FullName `
+  python tools/python_fast_path/run.py --smoke
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
+
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
 env = { RUSTDOCFLAGS = "-D warnings" }
@@ -552,7 +612,7 @@ mise run supply-chain
 mise run secret-scan
 mise run secret-scan-canary
 mise run release-smoke
-mise run test-pr028
+mise run test-pr029
 """
 
 # Build tasks
@@ -822,5 +882,20 @@ case "${python_graph}" in
     exit 1
     ;;
 esac
+mise run architecture
+"""
+
+[tasks.test-pr029]
+description = "Run PR-029 GIL, batching, concurrency, benchmark, and package proofs"
+run = """
+set -euo pipefail
+cargo check -p finstack-ai-python --features benchmark-fixture --locked
+cargo clippy -p finstack-ai-python --all-targets --features benchmark-fixture --locked -- -D warnings
+mise run lint-python-fast-path
+mise run format-python-fast-path
+mise run test-python-fast-path
+mise run test-pr028
+mise run python-fast-path-smoke
+mise run schema-governance
 mise run architecture
 """

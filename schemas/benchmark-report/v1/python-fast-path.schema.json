@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/benchmark-report/v1/python-fast-path.schema.json",
+  "title": "PythonFastPathBenchmarkReport",
+  "description": "Separated native and Rust-backed Python fast-path measurements (PR-029).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "workload",
+    "commit",
+    "platform",
+    "python",
+    "parameters",
+    "timing_ns",
+    "binding",
+    "event_delivery",
+    "throughput",
+    "allocation",
+    "idle_memory",
+    "concurrency",
+    "external_io"
+  ],
+  "properties": {
+    "format_version": { "const": 1 },
+    "workload": { "const": "rust-backed-python-fast-path-v1" },
+    "commit": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "platform": { "$ref": "#/$defs/platform" },
+    "python": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deltas_per_run", "runs_per_sample", "samples"],
+      "properties": {
+        "deltas_per_run": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "runs_per_sample": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "samples": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "timing_ns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "import_median",
+        "construction_median",
+        "native_runs_median",
+        "python_runs_median",
+        "ffi_batch_conversion",
+        "external_io"
+      ],
+      "properties": {
+        "import_median": { "$ref": "#/$defs/nonNegativeInteger" },
+        "construction_median": { "$ref": "#/$defs/nonNegativeInteger" },
+        "native_runs_median": { "$ref": "#/$defs/nonNegativeInteger" },
+        "python_runs_median": { "$ref": "#/$defs/nonNegativeInteger" },
+        "ffi_batch_conversion": { "$ref": "#/$defs/nonNegativeInteger" },
+        "external_io": { "const": 0 }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overhead_percent", "target_percent", "within_target"],
+      "properties": {
+        "overhead_percent": { "type": "number" },
+        "target_percent": { "const": 10.0 },
+        "within_target": { "type": "boolean" }
+      }
+    },
+    "event_delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_deltas",
+        "logical_events",
+        "ffi_batches",
+        "python_callbacks",
+        "serialized_bytes",
+        "batch_conversion_ns",
+        "rust_model_requests"
+      ],
+      "properties": {
+        "model_deltas": { "$ref": "#/$defs/positiveInteger" },
+        "logical_events": { "$ref": "#/$defs/positiveInteger" },
+        "ffi_batches": { "$ref": "#/$defs/positiveInteger" },
+        "python_callbacks": { "const": 0 },
+        "serialized_bytes": { "$ref": "#/$defs/positiveInteger" },
+        "batch_conversion_ns": { "$ref": "#/$defs/nonNegativeInteger" },
+        "rust_model_requests": { "$ref": "#/$defs/positiveInteger" }
+      }
+    },
+    "throughput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native_model_deltas_per_second",
+        "python_model_deltas_per_second",
+        "target_model_deltas_per_second",
+        "native_within_target"
+      ],
+      "properties": {
+        "native_model_deltas_per_second": { "type": "number", "exclusiveMinimum": 0 },
+        "python_model_deltas_per_second": { "type": "number", "exclusiveMinimum": 0 },
+        "target_model_deltas_per_second": { "const": 100000.0 },
+        "native_within_target": { "type": "boolean" }
+      }
+    },
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_tracemalloc_peak_bytes", "scope"],
+      "properties": {
+        "python_tracemalloc_peak_bytes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "scope": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "idle_memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python_heap_bytes_per_idle_handle_pair",
+        "native_session_reference",
+        "target_bytes_per_session",
+        "native_within_target"
+      ],
+      "properties": {
+        "python_heap_bytes_per_idle_handle_pair": { "$ref": "#/$defs/nonNegativeInteger" },
+        "native_session_reference": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/nativeIdleMemory" }
+          ]
+        },
+        "target_bytes_per_session": { "const": 32768 },
+        "native_within_target": { "type": ["boolean", "null"] }
+      }
+    },
+    "concurrency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries_before_release", "independent_runs_completed", "overlapped"],
+      "properties": {
+        "entries_before_release": { "const": 2 },
+        "independent_runs_completed": { "const": 2 },
+        "overlapped": { "const": true }
+      }
+    },
+    "external_io": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measured_ns", "included_in_binding_comparison", "scope"],
+      "properties": {
+        "measured_ns": { "const": 0 },
+        "included_in_binding_comparison": { "const": false },
+        "scope": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  },
+  "$defs": {
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "machine", "release"],
+      "properties": {
+        "system": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "machine": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "release": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "nativeIdleMemory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_kib",
+        "resident_kib",
+        "incremental_kib",
+        "sessions",
+        "bytes_per_session"
+      ],
+      "properties": {
+        "baseline_kib": { "$ref": "#/$defs/nonNegativeInteger" },
+        "resident_kib": { "$ref": "#/$defs/nonNegativeInteger" },
+        "incremental_kib": { "$ref": "#/$defs/nonNegativeInteger" },
+        "sessions": { "$ref": "#/$defs/positiveInteger" },
+        "bytes_per_session": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    }
+  }
+}

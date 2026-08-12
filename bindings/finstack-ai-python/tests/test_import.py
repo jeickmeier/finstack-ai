@@ -45,6 +45,13 @@ def test_typing_files_ship_beside_the_package() -> None:
     assert (package_dir / "_finstack_ai.pyi").is_file()
 
 
+def test_release_module_excludes_non_default_benchmark_fixture() -> None:
+    from finstack_ai import _finstack_ai
+
+    assert not hasattr(_finstack_ai, "_benchmark_agent")
+    assert not hasattr(_finstack_ai, "_benchmark_native")
+
+
 def test_import_does_not_start_runtime_threads_or_python_network_calls() -> None:
     script = r"""
 import json

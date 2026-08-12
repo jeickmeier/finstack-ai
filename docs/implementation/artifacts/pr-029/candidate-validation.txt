@@ -1,0 +1,135 @@
+PR-029 immutable local candidate validation
+Date: 2026-08-12
+Candidate: e238f55524c7d447ae34c80d209b2f8a8b3c0978
+Tree: 18713d612879ab1b83ff8381887fda31c0257883
+Branch: codex/pr-029-python-fast-path
+Baseline: d2489c4
+Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
+             rustc/cargo 1.97.1; Python 3.14.3; uv 0.10.11;
+             mise 2026.8.3 macos-arm64
+
+PASS  mise run test-pr029
+      - default and benchmark-feature binding graphs compile with locked inputs;
+        strict all-target Clippy passes with warnings denied
+      - Rust-only request preparation and synchronous start scheduling detach
+        from the interpreter; async construction, provider/store work, HTTP
+        streaming, and waits remain inside Send Rust futures
+      - cached Arc-backed event-batch JSON serializes once and copies directly
+        into Python bytes; facade stubs and runtime behavior agree
+      - 11 editable-install and 11 installed-wheel tests pass, including a
+        gate-controlled two-run HTTP fixture that reaches both independent Rust
+        requests before either response is released
+      - the release module excludes the non-default benchmark functions
+      - four report-helper tests, Ruff lint/format, strict binding mypy,
+        benchmark schema governance, and 24 architecture tests pass
+      - default sdist and wheel build twice, compare byte-for-byte, and remain
+        within the 10 MiB package budget
+      - release-mode synthetic smoke passes its 10% binding-overhead target,
+        event batching, zero-callback, independent-await, and separated-timing
+        assertions
+
+PASS  full synthetic benchmark
+      command: installed non-default fixture wheel, tools/python_fast_path/run.py
+      workload: 512 model deltas/run, 64 runs/sample, 9 alternating samples
+      native runs median: 126,337,417 ns
+      Python runs median: 130,319,000 ns
+      binding overhead: 3.1515469404% (target <= 10%; Passed)
+      native throughput: 259,369 model deltas/s
+      Python throughput: 251,445 model deltas/s
+      FFI delivery: 21 batches / 512 model deltas / 517 logical events
+      Python callbacks: 0
+      import median: 3,855,791 ns
+      construction median: 85,083 ns
+      batch conversion: 278,584 ns
+      external I/O included: 0 ns / false
+      Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
+      native idle-session reference: 61,824 bytes/session
+      Python idle benchmark handle pair: 148 traced Python bytes/pair
+      concurrency: 2/2 Rust streams entered before release; Passed
+      report sha256 bfe3bdc2e1e44ada87b24ca2538b7683b535a5f4dd67351c81b442cb87925add
+
+WARN  NFR-PERF-005 idle-session target
+      The measured native reference is 61,824 bytes/session versus the future
+      32,768-byte target, so python-fast-path-report.json records
+      native_within_target=false. The PRD makes NFR-PERF targets warning and
+      regression evidence before PR-063 ratifies the 1.0 workloads and budgets.
+      PR-029 does not claim this later target passes.
+
+PASS  mise run ci
+      - repository aggregate formatting, workspace Clippy/tests/rustdoc,
+        minimal graphs, native/browser-WASM checks, architecture, schemas,
+        benchmark/CI helpers, workflow checks, supply chain, secret scan/canary,
+        release smoke, and nested mise run test-pr029 all pass
+      - existing cargo-deny duplicate and unmatched-license allow-list notices
+        remain non-failing warnings; policy returned success
+
+Reproducible default local artifacts:
+  sdist sha256 8f539a48c9899055012cedefa14db72e6309772cc4696184a93ed9d34d9a3e3a
+  sdist bytes 550463
+  wheel sha256 d3efa34ffaf807b4a8e703032334f5eb6c51cb25412b3b0f238072c0ba67f971
+  wheel bytes 3478008
+
+Durable command-log identities:
+  focused sha256 b02f25f0b587e0b3221f11ef39752d42d832c96bcb0952c643d93d30eac9b865
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786536542_mise_run_test-pr029.log
+  aggregate sha256 f89c73c8aa4451dfe405ebdbae3c6925884b4f13c618a14810252a01090313e8
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786536807_mise_run_ci.log
+
+Retained superseded hosted evidence:
+  - evidence head 75059946b4f4ba715b074d722c188254c85f03ef
+  - Python wheels run 31575863256 passed all 21 jobs
+  - security run 31575890137 passed all three jobs
+  - aggregate CI run 31575894523 passed 9/10 jobs
+  - Windows Rust job 94047806814 failed in `mise run test-pr029` after
+    the default package build, when the benchmark-feature `maturin` process
+    could not rediscover Cargo inside `uv tool run`
+  - replacement candidate 2329fcd captures Cargo's absolute executable path
+    before entering that isolated tool environment; no production code or
+    benchmark acceptance logic changed
+  - evidence head 9c87a970f94635ef662413a45df2b7bdd667392e
+    passed Python wheels 31580362177 (21/21) and security 31580379179 (3/3),
+    but aggregate CI 31580374081 failed the short smoke comparison on Ubuntu
+    job 94061814558 and macOS job 94061814637 after their package builds
+  - the 4-run smoke sample completed in only a few milliseconds and was not a
+    stable hosted-runner measurement; candidate e83013e keeps the 10% rule,
+    uses bounded 64-run samples (about 125 ms locally), reports measured and
+    target percentages on failure, and passed five sequential local smoke
+    repetitions at 1.25% through 3.66% overhead
+  - stabilized evidence head 19d98b62a529585f0ab4924439e5eff1566b7823
+    passed Python wheels 31583511864 (21/21), security 31583529424 (3/3),
+    and 9/10 aggregate CI jobs in run 31583524956; Windows job 94071993828
+    still failed because `uv tool run` isolated maturin from Cargo
+  - candidate af23813 used the documented non-project `uv run --with` form
+    when project isolation is not wanted
+  - evidence head a57307cb9ebf42c9b13070578c664e5e6cc3d1c2 passed security
+    31587572441 (3/3); Python wheels 31587562873 passed 21/21 after the
+    macOS 3.14t attempt-one mise download failed with curl certificate error
+    before repository validation and its failed-job retry passed on attempt two
+  - aggregate CI 31587568990 passed 9/10; Windows job 94084854863 completed
+    the default sdist/wheel build, then the benchmark-fixture smoke still lost
+    Cargo discovery when maturin was launched through `uv run --with`
+  - final candidate ce0493a reuses the already-proven Windows wheel pattern:
+    PowerShell installs pinned maturin, resolves its standalone executable via
+    `uv tool dir --bin`, and invokes that executable without an intervening uv
+    environment; Unix behavior, production code, the benchmark workload, and
+    the acceptance threshold are unchanged
+  - evidence head bdf27035d759b4cbe0d4132ef3600ad8402ce606 passed Python
+    wheels 31592200130 (21/21), security 31592297723 (3/3), and 9/10 aggregate
+    CI jobs in run 31592293353; Windows job 94099779462 failed before executing
+    its dedicated smoke script because the image did not expose `pwsh`
+  - final candidate e238f55 selects the same absolute Windows PowerShell 5.1
+    executable already proven by `build-python-windows`; the smoke script,
+    production code, benchmark workload, and acceptance threshold are unchanged
+
+Review disposition:
+  - no seventh primary port, eighth middleware stage, kernel I/O, per-token
+    callback, commit-order change, protocol/WIT policy change, native dynamic
+    loading, forbidden kernel dependency, or stronger effect claim is added
+  - no Threat Model section 18 review trigger is introduced
+  - benchmark-only scripted-model code is behind a non-default feature, is
+    absent from release wheels, is bounded to 65,536 total deltas, and still
+    drives the production SDK/runtime/store semantic path
+
+No independent review or approval is claimed by this record. No actual pull
+request, hosted merge, package publication, live credentialed provider,
+Python-defined callback, PR-063 budget ratification, or G4 approval is claimed.

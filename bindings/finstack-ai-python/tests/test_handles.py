@@ -45,12 +45,18 @@ class _FixtureServer(ThreadingHTTPServer):
         self.request_started = threading.Event()
         self.release_response = threading.Event()
         self.requests: list[dict[str, object]] = []
-        self.requests_lock = threading.Lock()
+        self.requests_changed = threading.Condition()
 
     @property
     def base_url(self) -> str:
         host, port = self.server_address
         return f"http://{host}:{port}"
+
+    def wait_for_requests(self, count: int, timeout: float) -> bool:
+        with self.requests_changed:
+            return self.requests_changed.wait_for(
+                lambda: len(self.requests) >= count, timeout=timeout
+            )
 
 
 class _FixtureHandler(BaseHTTPRequestHandler):
@@ -59,8 +65,9 @@ class _FixtureHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers.get("content-length", "0"))
         request = json.loads(self.rfile.read(content_length))
-        with self.server.requests_lock:
+        with self.server.requests_changed:
             self.server.requests.append(request)
+            self.server.requests_changed.notify_all()
         self.server.request_started.set()
         if self.server.hold_response:
             self.server.release_response.wait(timeout=5)
@@ -139,6 +146,7 @@ def test_rust_backed_run_batches_events_and_retains_result() -> None:
     assert any(event.kind == "model_text_delta" for event in events)
     assert events[-1].kind == "run_completed"
     assert json.loads(batches[-1].to_json())[-1]["kind"] == "run_completed"
+    assert batches[-1].to_json_bytes().decode() == batches[-1].to_json()
     assert all(batch.first_sequence <= batch.last_sequence for batch in batches)
     assert all(batch.dropped_progress == 0 for batch in batches)
     assert server.requests[0]["model"] == "fixture-model"
@@ -150,6 +158,24 @@ def test_rust_backed_run_batches_events_and_retains_result() -> None:
     with ThreadPoolExecutor(max_workers=4) as executor:
         texts = list(executor.map(lambda _: asyncio.run(retained_text()), range(16)))
     assert texts == ["hello world"] * 16
+
+
+def test_independent_rust_runs_reach_io_without_gil_serialization() -> None:
+    async def exercise(server: _FixtureServer) -> None:
+        agent = await _agent(server)
+
+        async def run(input_text: str) -> str:
+            return (await agent.run(input_text)).text
+
+        first = asyncio.create_task(run("first"))
+        second = asyncio.create_task(run("second"))
+        both_started = await asyncio.to_thread(server.wait_for_requests, 2, 3.0)
+        assert both_started
+        server.release_response.set()
+        assert await asyncio.gather(first, second) == ["concurrent", "concurrent"]
+
+    with _server(_text_sse(["concurrent"]), hold_response=True) as server:
+        asyncio.run(exercise(server))
 
 
 def test_explicit_cancellation_is_idempotent_and_contextual() -> None:
