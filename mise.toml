@@ -731,6 +731,8 @@ run = """
 set -euo pipefail
 uv build \
   --project bindings/finstack-ai-python \
+  --sdist \
+  --wheel \
   --out-dir target/python-stage-a \
   --clear \
   --no-create-gitignore \
@@ -738,6 +740,8 @@ uv build \
   --require-hashes
 uv build \
   --project bindings/finstack-ai-python \
+  --sdist \
+  --wheel \
   --out-dir target/python-stage-b \
   --clear \
   --no-create-gitignore \
