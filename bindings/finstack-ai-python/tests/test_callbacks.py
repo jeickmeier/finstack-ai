@@ -235,8 +235,8 @@ def test_python_model_and_toolset_complete_a_tool_cycle() -> None:
 
 def test_callback_cancellation_is_forwarded_and_context_expires() -> None:
     retained: list[finstack_ai.CallbackContext] = []
-    started = asyncio.Event()
-    cancellation_seen = asyncio.Event()
+    started = threading.Event()
+    cancellation_seen = threading.Event()
 
     async def callback(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
@@ -253,7 +253,7 @@ def test_callback_cancellation_is_forwarded_and_context_expires() -> None:
         agent = await finstack_ai.Agent.from_python(_model(callback))
         run = agent.start("wait")
         events = asyncio.create_task(_collect_event_json(run))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        assert await asyncio.to_thread(started.wait, 1)
         await run.cancel()
         try:
             await run.result()
@@ -262,7 +262,7 @@ def test_callback_cancellation_is_forwarded_and_context_expires() -> None:
             assert error.code == "agent_run_cancelled"
         else:
             pytest.fail("cancelled callback run completed successfully")
-        await asyncio.wait_for(cancellation_seen.wait(), timeout=1)
+        assert await asyncio.to_thread(cancellation_seen.wait, 1)
 
     asyncio.run(exercise())
     with pytest.raises(finstack_ai.RuntimeError) as caught:
