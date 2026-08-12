@@ -559,7 +559,7 @@ mise run test-pr027
 
 [tasks.build-python]
 description = "Build the Python wheel and sdist with pinned hashed maturin"
-env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 uv build \
   --project bindings/finstack-ai-python \
@@ -695,7 +695,7 @@ uv run --python "${PYTHON_VERSION}" --isolated --no-project \
 
 [tasks.build-python-sdist-ci]
 description = "Build the hosted Python source distribution"
-env = { PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+env = { MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 uv build \
   --project bindings/finstack-ai-python \
@@ -709,7 +709,7 @@ uv build \
 
 [tasks.stage-python]
 description = "Build twice and validate reproducible Python release artifacts"
-env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 set -euo pipefail
 uv build \
