@@ -230,6 +230,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-028-A02 | PR-028 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-028-E-handles-e1108816b2f7; PR-028-E-local-e1108816b2f7; PR-028-E-hosted-ci-e1108816b2f7; PR-028-E-hosted-security-e1108816b2f7; PR-028-E-integration-b0c76f8fd66f | — | me@jeickmeier.com | 2026-08-12 |
 | PR-028-A03 | PR-028 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-028-E-handles-e1108816b2f7; PR-028-E-wheel-matrix-e1108816b2f7; PR-028-E-hosted-ci-e1108816b2f7; PR-028-E-integration-b0c76f8fd66f | — | me@jeickmeier.com | 2026-08-12 |
 | PR-028-A04 | PR-028 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-028-E-handles-e1108816b2f7; PR-028-E-local-e1108816b2f7; PR-028-E-wheel-matrix-e1108816b2f7; PR-028-E-integration-b0c76f8fd66f | — | me@jeickmeier.com | 2026-08-12 |
+| PR-029-A01 | PR-029 | PLAN-0.18 / [PR-029](../planning/04-finstack-ai-implementation-plan.md#pr-029---optimize-the-rust-backed-python-fast-path-and-gil-behavior) | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-029-A02 | PR-029 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-029-A03 | PR-029 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
+| PR-029-A04 | PR-029 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | me@jeickmeier.com | 2026-08-12 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
