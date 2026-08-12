@@ -1,0 +1,54 @@
+PR-029 local integration validation
+Date: 2026-08-12
+Disposition: PASS
+
+Final source candidate: e238f55524c7d447ae34c80d209b2f8a8b3c0978
+Hosted evidence head: 358303287c804ec37eb670687e8db4b6bc6ab348
+Final evidence commit: 390612ef0ee18c52506c3886916787b0a1473f76
+Local merge: b79210e61af550d8f84946f1933d9fe5063ddd81
+Merge parents:
+  d2489c4b8533bff3bc7229df9093e82b6ac66adf
+  390612ef0ee18c52506c3886916787b0a1473f76
+Merged/evidence tree: 28d2eab3de7afb1bccff59e4f1c927b542e8828c
+
+The merge is a signed-off local no-fast-forward integration into `main`. Its
+tree is byte-identical to the final PR-029 evidence commit tree. No unrelated
+source change was introduced by integration.
+
+PASS  mise run test-pr029
+  Log sha256: 5de18af7f101c2b55299346552f1f819aba9bd268c30169c35e7bbdedf7f3d39
+  Local log: /Users/jeickmeier/Library/Application Support/rtk/tee/1786542230_mise_run_test-pr029.log
+  Result: benchmark-feature binding checks and Clippy, Rust-owned scheduling,
+  cached batch conversion, Ruff, mypy, editable and installed-wheel tests,
+  independent-await concurrency, schema governance, 24 architecture tests,
+  and release-mode fast-path smoke passed on the exact merged tree.
+  Artifacts:
+    sdist 8f539a48c9899055012cedefa14db72e6309772cc4696184a93ed9d34d9a3e3a (550463 bytes)
+    wheel d3efa34ffaf807b4a8e703032334f5eb6c51cb25412b3b0f238072c0ba67f971 (3478008 bytes)
+
+PASS  mise run ci
+  Log sha256: e8cc21a3cade264919019285290e76e0b8b86ae98816b372800a8bba25d5889c
+  Local log: /Users/jeickmeier/Library/Application Support/rtk/tee/1786542500_mise_run_ci.log
+  Result: fail-closed aggregate formatting, workspace Clippy/tests/rustdoc,
+  minimal dependency graphs, architecture, native/browser-WASM checks,
+  schema/helper/benchmark/workflow tests, supply-chain policy, secret scan and
+  canary, release smoke, and nested `mise run test-pr029` passed on the exact
+  merged tree. Cargo-deny emitted only the permitted existing duplicate and
+  unmatched-license warnings and returned success.
+
+Immutable hosted source-candidate evidence retained at evidence head
+358303287c804ec37eb670687e8db4b6bc6ab348:
+  python-wheels 31595598407: 21/21 jobs passed
+  ci 31595605524: effective 10/10 jobs passed after same-SHA failed-job retry
+  security 31595609770: 3/3 jobs passed
+
+The NFR-PERF-005 native idle-session reference remains 61,824 bytes/session
+against the future 32,768-byte target. This is a warning and regression datum
+until PR-063 ratifies the 1.0 workload and budgets; PR-029 does not claim that
+later target passes.
+
+PR-029 A01-A04 remain passed after local integration. This record closes the
+logical PR's integrated-mode transition condition only. No hosted pull request
+or merge, package publication, live credentialed provider, Python-defined
+callback, independent review, PR-063 budget ratification, or G4 approval is
+claimed.
