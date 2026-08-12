@@ -1,0 +1,89 @@
+PR-029 hosted validation
+Date: 2026-08-12
+Final source candidate: e238f55524c7d447ae34c80d209b2f8a8b3c0978
+Hosted evidence head: 358303287c804ec37eb670687e8db4b6bc6ab348
+Branch: codex/pr-029-python-fast-path
+
+Final disposition: PASS
+
+Python wheels 31595598407
+  https://github.com/jeickmeier/finstack-ai/actions/runs/31595598407
+  Result: 21/21 jobs passed at the hosted evidence head.
+  Coverage: one source distribution plus CPython 3.11, 3.12, 3.13,
+  3.14, and free-threaded 3.14t wheels for manylinux x86_64,
+  manylinux aarch64, macOS arm64, and Windows x64.
+  Jobs:
+    source distribution 94110207661
+    macos-arm64 3.11 94110207880
+    macos-arm64 3.12 94110207807
+    macos-arm64 3.13 94110207848
+    macos-arm64 3.14 94110207769
+    macos-arm64 3.14t 94110207726
+    manylinux-aarch64 3.11 94110207824
+    manylinux-aarch64 3.12 94110207760
+    manylinux-aarch64 3.13 94110207770
+    manylinux-aarch64 3.14 94110207720
+    manylinux-aarch64 3.14t 94110207862
+    manylinux-x86_64 3.11 94110207746
+    manylinux-x86_64 3.12 94110207877
+    manylinux-x86_64 3.13 94110207889
+    manylinux-x86_64 3.14 94110207783
+    manylinux-x86_64 3.14t 94110207735
+    windows-x64 3.11 94110207839
+    windows-x64 3.12 94110207897
+    windows-x64 3.13 94110207908
+    windows-x64 3.14 94110208091
+    windows-x64 3.14t 94110207855
+
+Aggregate CI 31595605524
+  https://github.com/jeickmeier/finstack-ai/actions/runs/31595605524
+  Effective result: 10/10 jobs passed at the hosted evidence head after the
+  failed Ubuntu job was retried on attempt two.
+  Attempt one jobs already passed:
+    coverage 94110237160
+    rust macos-15 94110237193
+    fuzz-smoke 94110237195
+    release-smoke ubuntu-24.04 94110237238
+    workflow-lint 94110237246
+    schema-governance 94110237251
+    release-smoke macos-15 94110237315
+    release-smoke windows-2025 94110237360
+  Attempt one rust ubuntu-24.04 job 94110237177 failed in the generic workspace
+  `Test` step because
+  `shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline`
+  observed one task after the shutdown grace deadline instead of zero. Its 16
+  sibling model-port tests passed. The failure precedes PR-029-specific package
+  validation, is unrelated to the final Windows shell selector, and has passed
+  locally plus on earlier exact-candidate hosted runs. It is retained as a
+  same-SHA flaky-test failure.
+  Attempt two rust ubuntu-24.04 job 94126844254 passed every step, including
+  the formerly failing workspace `Test`, native preview, benchmark helpers,
+  and `Python package validation`. No source, workflow, or evidence-head change
+  occurred between attempts.
+  Attempt one rust windows-2025 job 94110237336 passed every step, including
+  the corrected `Python package validation` under the absolute Windows
+  PowerShell 5.1 executable.
+
+Security 31595609770
+  https://github.com/jeickmeier/finstack-ai/actions/runs/31595609770
+  Result: 3/3 jobs passed at the hosted evidence head.
+  Jobs:
+    supply-chain 94110252498
+    secret-scan-canary 94110252545
+    secret-scan 94110252624
+
+Retained superseded Windows evidence
+
+The immutable candidate record retains all earlier hosted attempts and their
+exact dispositions. In summary, the PR-029 production fast path and benchmark
+acceptance were unchanged while the dedicated Windows benchmark-wheel smoke
+was corrected from isolated `uv tool run`, through `uv run --with`, to the
+already-proven direct pinned maturin executable. Evidence head bdf2703 then
+passed 21/21 wheels and 3/3 security jobs but its Windows Rust job failed before
+the dedicated script because `pwsh` was not available. Final source candidate
+e238f55 selects the same absolute Windows PowerShell 5.1 executable used by the
+existing package build; no production code, workload, or threshold changed.
+
+No hosted pull request or merge was created. No package was published. This
+record claims hosted workflow evidence only; it does not claim an independent
+manual review or G4 approval.
