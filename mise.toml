@@ -569,6 +569,23 @@ uv build \
   --build-constraints bindings/finstack-ai-python/constraints-build.txt \
   --require-hashes
 """
+run_windows = "mise run build-python-windows"
+
+[tasks.build-python-windows]
+description = "Build the Python wheel and sdist from a native Windows shell"
+shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+uv build `
+  --project bindings/finstack-ai-python `
+  --out-dir target/python-dist `
+  --clear `
+  --no-create-gitignore `
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
+  --require-hashes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+"""
 
 [tasks.python-develop]
 description = "Open an isolated shell-ready Python environment with the binding installed editable"
@@ -728,6 +745,34 @@ uv build \
   --require-hashes
 uv run --no-project python tools/python_package/check.py \
   target/python-stage-a target/python-stage-b
+"""
+run_windows = "mise run stage-python-windows"
+
+[tasks.stage-python-windows]
+description = "Build twice and validate reproducible Python artifacts from a native Windows shell"
+shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+$ErrorActionPreference = "Stop"
+uv build `
+  --project bindings/finstack-ai-python `
+  --out-dir target/python-stage-a `
+  --clear `
+  --no-create-gitignore `
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
+  --require-hashes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+uv build `
+  --project bindings/finstack-ai-python `
+  --out-dir target/python-stage-b `
+  --clear `
+  --no-create-gitignore `
+  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
+  --require-hashes
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+uv run --no-project python tools/python_package/check.py `
+  target/python-stage-a target/python-stage-b
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
 [tasks.test-pr027]
