@@ -1,0 +1,89 @@
+PR-029 immutable local candidate validation
+Date: 2026-08-12
+Candidate: 56807c5e4048032a4e23bf37fa87d7226465f542
+Tree: 90dc6fff5f9770e20960b826989a8f3c4b66c5cd
+Branch: codex/pr-029-python-fast-path
+Baseline: d2489c4
+Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
+             rustc/cargo 1.97.1; Python 3.14.3; uv 0.10.11;
+             mise 2026.8.3 macos-arm64
+
+PASS  mise run test-pr029
+      - default and benchmark-feature binding graphs compile with locked inputs;
+        strict all-target Clippy passes with warnings denied
+      - Rust-only request preparation and synchronous start scheduling detach
+        from the interpreter; async construction, provider/store work, HTTP
+        streaming, and waits remain inside Send Rust futures
+      - cached Arc-backed event-batch JSON serializes once and copies directly
+        into Python bytes; facade stubs and runtime behavior agree
+      - 11 editable-install and 11 installed-wheel tests pass, including a
+        gate-controlled two-run HTTP fixture that reaches both independent Rust
+        requests before either response is released
+      - the release module excludes the non-default benchmark functions
+      - four report-helper tests, Ruff lint/format, strict binding mypy,
+        benchmark schema governance, and 24 architecture tests pass
+      - default sdist and wheel build twice, compare byte-for-byte, and remain
+        within the 10 MiB package budget
+      - release-mode synthetic smoke passes its 10% binding-overhead target,
+        event batching, zero-callback, independent-await, and separated-timing
+        assertions
+
+PASS  full synthetic benchmark
+      command: installed non-default fixture wheel, tools/python_fast_path/run.py
+      workload: 512 model deltas/run, 12 runs/sample, 9 alternating samples
+      native runs median: 22,574,375 ns
+      Python runs median: 23,356,916 ns
+      binding overhead: 3.4665012874% (target <= 10%; Passed)
+      native throughput: 272,167 model deltas/s
+      Python throughput: 263,048 model deltas/s
+      FFI delivery: 21 batches / 512 model deltas / 517 logical events
+      Python callbacks: 0
+      import median: 3,904,167 ns
+      construction median: 78,084 ns
+      batch conversion: 263,042 ns
+      external I/O included: 0 ns / false
+      Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
+      native idle-session reference: 61,696 bytes/session
+      Python idle benchmark handle pair: 148 traced Python bytes/pair
+      concurrency: 2/2 Rust streams entered before release; Passed
+      report sha256 c37872317c7e78ea34e017ad252e9d0b9dcae41f02695ea3cad8c441e82f3e9d
+
+WARN  NFR-PERF-005 idle-session target
+      The measured native reference is 61,696 bytes/session versus the future
+      32,768-byte target, so python-fast-path-report.json records
+      native_within_target=false. The PRD makes NFR-PERF targets warning and
+      regression evidence before PR-063 ratifies the 1.0 workloads and budgets.
+      PR-029 does not claim this later target passes.
+
+PASS  mise run ci
+      - repository aggregate formatting, workspace Clippy/tests/rustdoc,
+        minimal graphs, native/browser-WASM checks, architecture, schemas,
+        benchmark/CI helpers, workflow checks, supply chain, secret scan/canary,
+        release smoke, and nested mise run test-pr029 all pass
+      - existing cargo-deny duplicate and unmatched-license allow-list notices
+        remain non-failing warnings; policy returned success
+
+Reproducible default local artifacts:
+  sdist sha256 8f539a48c9899055012cedefa14db72e6309772cc4696184a93ed9d34d9a3e3a
+  sdist bytes 550463
+  wheel sha256 d3efa34ffaf807b4a8e703032334f5eb6c51cb25412b3b0f238072c0ba67f971
+  wheel bytes 3478008
+
+Durable command-log identities:
+  focused sha256 22dd9bf2ce23ed0638ebbbd2a4c1ddc1038a66ff7770a58ef291247f50bd021b
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786520803_mise_run_test-pr029.log
+  aggregate sha256 49ca57640af88bcb2171b42643dc0195fd247131cd9f081087817d66a4ddbbc2
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786521087_mise_run_ci.log
+
+Review disposition:
+  - no seventh primary port, eighth middleware stage, kernel I/O, per-token
+    callback, commit-order change, protocol/WIT policy change, native dynamic
+    loading, forbidden kernel dependency, or stronger effect claim is added
+  - no Threat Model section 18 review trigger is introduced
+  - benchmark-only scripted-model code is behind a non-default feature, is
+    absent from release wheels, is bounded to 65,536 total deltas, and still
+    drives the production SDK/runtime/store semantic path
+
+No independent review or approval is claimed by this record. No actual pull
+request, hosted merge, package publication, live credentialed provider,
+Python-defined callback, PR-063 budget ratification, or G4 approval is claimed.
