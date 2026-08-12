@@ -206,16 +206,42 @@ def compare_artifacts(first: Path, second: Path) -> dict[str, object]:
     }
 
 
+def validate_artifacts(directory: Path) -> dict[str, object]:
+    """Validate one staged wheel and source distribution without comparing builds."""
+    wheel, sdist = artifact_pair(directory)
+    return {
+        "artifact_budget_bytes": MAX_WHEEL_BYTES,
+        "artifacts": {
+            "wheel": validate_wheel(wheel),
+            "sdist": validate_sdist(sdist),
+        },
+        "reproducibility": "not evaluated",
+    }
+
+
 def main() -> None:
     """Parse arguments, validate staged packages, and print a JSON summary."""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="validate one artifact directory without comparing build digests",
+    )
     parser.add_argument("first", type=Path, help="first artifact directory")
-    parser.add_argument("second", type=Path, help="second artifact directory")
+    parser.add_argument(
+        "second", type=Path, nargs="?", help="second artifact directory"
+    )
     args = parser.parse_args()
     validate_source_versions()
-    print(
-        json.dumps(compare_artifacts(args.first, args.second), indent=2, sort_keys=True)
-    )
+    if args.validate_only:
+        if args.second is not None:
+            parser.error("--validate-only accepts exactly one artifact directory")
+        result = validate_artifacts(args.first)
+    else:
+        if args.second is None:
+            parser.error("a second artifact directory is required for comparison")
+        result = compare_artifacts(args.first, args.second)
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

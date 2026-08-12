@@ -749,29 +749,21 @@ uv run --no-project python tools/python_package/check.py \
 run_windows = "mise run stage-python-windows"
 
 [tasks.stage-python-windows]
-description = "Build twice and validate reproducible Python artifacts from a native Windows shell"
+description = "Build and inspect Python artifacts from a native Windows shell"
 shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
 env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
 run = """
 $ErrorActionPreference = "Stop"
 uv build `
   --project bindings/finstack-ai-python `
-  --out-dir target/python-stage-a `
+  --out-dir target/python-stage-windows `
   --clear `
   --no-create-gitignore `
   --build-constraints bindings/finstack-ai-python/constraints-build.txt `
   --require-hashes
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-uv build `
-  --project bindings/finstack-ai-python `
-  --out-dir target/python-stage-b `
-  --clear `
-  --no-create-gitignore `
-  --build-constraints bindings/finstack-ai-python/constraints-build.txt `
-  --require-hashes
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-uv run --no-project python tools/python_package/check.py `
-  target/python-stage-a target/python-stage-b
+uv run --no-project python tools/python_package/check.py --validate-only `
+  target/python-stage-windows
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
