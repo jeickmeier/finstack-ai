@@ -326,8 +326,7 @@ run = """
 set -euo pipefail
 mkdir -p target/python-fast-path-dist
 find target/python-fast-path-dist -maxdepth 1 -type f -name '*.whl' -delete
-export CARGO="$(command -v cargo)"
-uv tool run --from maturin==1.14.1 maturin build \
+uv run --no-project --with maturin==1.14.1 -- maturin build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \
   --locked \
