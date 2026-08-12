@@ -1,7 +1,7 @@
 PR-029 immutable local candidate validation
 Date: 2026-08-12
-Candidate: ce0493a79da05cc27e58ae558fa1a80098bbfe2c
-Tree: fcffee148b856164dec351781c8342fb707abdcd
+Candidate: e238f55524c7d447ae34c80d209b2f8a8b3c0978
+Tree: 18713d612879ab1b83ff8381887fda31c0257883
 Branch: codex/pr-029-python-fast-path
 Baseline: d2489c4
 Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
@@ -31,25 +31,25 @@ PASS  mise run test-pr029
 PASS  full synthetic benchmark
       command: installed non-default fixture wheel, tools/python_fast_path/run.py
       workload: 512 model deltas/run, 64 runs/sample, 9 alternating samples
-      native runs median: 127,328,708 ns
-      Python runs median: 130,599,209 ns
-      binding overhead: 2.5685495843% (target <= 10%; Passed)
-      native throughput: 257,350 model deltas/s
-      Python throughput: 250,905 model deltas/s
+      native runs median: 126,337,417 ns
+      Python runs median: 130,319,000 ns
+      binding overhead: 3.1515469404% (target <= 10%; Passed)
+      native throughput: 259,369 model deltas/s
+      Python throughput: 251,445 model deltas/s
       FFI delivery: 21 batches / 512 model deltas / 517 logical events
       Python callbacks: 0
-      import median: 3,950,833 ns
-      construction median: 78,334 ns
-      batch conversion: 275,083 ns
+      import median: 3,855,791 ns
+      construction median: 85,083 ns
+      batch conversion: 278,584 ns
       external I/O included: 0 ns / false
       Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
-      native idle-session reference: 61,696 bytes/session
+      native idle-session reference: 61,824 bytes/session
       Python idle benchmark handle pair: 148 traced Python bytes/pair
       concurrency: 2/2 Rust streams entered before release; Passed
-      report sha256 da43dde532dc1811ebff9f5b31f151fadf8e16d2c07d02b372266f4adcffe423
+      report sha256 bfe3bdc2e1e44ada87b24ca2538b7683b535a5f4dd67351c81b442cb87925add
 
 WARN  NFR-PERF-005 idle-session target
-      The measured native reference is 61,696 bytes/session versus the future
+      The measured native reference is 61,824 bytes/session versus the future
       32,768-byte target, so python-fast-path-report.json records
       native_within_target=false. The PRD makes NFR-PERF targets warning and
       regression evidence before PR-063 ratifies the 1.0 workloads and budgets.
@@ -70,10 +70,10 @@ Reproducible default local artifacts:
   wheel bytes 3478008
 
 Durable command-log identities:
-  focused sha256 70c90727570241a81a188c565448fbda0f84179d33da83eaf8dd70d2d6af4096
-  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786533892_mise_run_test-pr029.log
-  aggregate sha256 8fc7a31b568124fefda130b3cec097b9d95dff14b2f0077099b13c468dcf28ce
-  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786534164_mise_run_ci.log
+  focused sha256 b02f25f0b587e0b3221f11ef39752d42d832c96bcb0952c643d93d30eac9b865
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786536542_mise_run_test-pr029.log
+  aggregate sha256 f89c73c8aa4451dfe405ebdbae3c6925884b4f13c618a14810252a01090313e8
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786536807_mise_run_ci.log
 
 Retained superseded hosted evidence:
   - evidence head 75059946b4f4ba715b074d722c188254c85f03ef
@@ -113,6 +113,13 @@ Retained superseded hosted evidence:
     `uv tool dir --bin`, and invokes that executable without an intervening uv
     environment; Unix behavior, production code, the benchmark workload, and
     the acceptance threshold are unchanged
+  - evidence head bdf27035d759b4cbe0d4132ef3600ad8402ce606 passed Python
+    wheels 31592200130 (21/21), security 31592297723 (3/3), and 9/10 aggregate
+    CI jobs in run 31592293353; Windows job 94099779462 failed before executing
+    its dedicated smoke script because the image did not expose `pwsh`
+  - final candidate e238f55 selects the same absolute Windows PowerShell 5.1
+    executable already proven by `build-python-windows`; the smoke script,
+    production code, benchmark workload, and acceptance threshold are unchanged
 
 Review disposition:
   - no seventh primary port, eighth middleware stage, kernel I/O, per-token
