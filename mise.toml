@@ -635,12 +635,18 @@ set -euo pipefail
 uv python install "${PYTHON_VERSION}"
 interpreter="$(uv python find "${PYTHON_VERSION}")"
 resolved_cargo="$(command -v cargo)"
+maturin_bin="$(uv tool dir --bin)"
 case "$(uname -s)" in
-  MINGW*|MSYS*) resolved_cargo="$(cygpath -w "$(command -v cargo.exe)")" ;;
+  MINGW*|MSYS*)
+    resolved_cargo="$(cygpath -w "$(command -v cargo.exe)")"
+    maturin_command="$(cygpath -u "${maturin_bin}")/maturin.exe"
+    ;;
+  *) maturin_command="${maturin_bin}/maturin" ;;
 esac
-export CARGO="${resolved_cargo}"
-"${CARGO}" --version
-uv run --no-project --with maturin==1.14.1 maturin build \
+"${resolved_cargo}" --version
+uv tool install --force maturin==1.14.1
+"${maturin_command}" --version
+"${maturin_command}" build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \
   --locked \
