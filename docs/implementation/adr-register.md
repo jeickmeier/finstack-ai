@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-12 (PR-027 replacement immutable source candidate `6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2`; exact security, local aggregate, 20-row hosted Python matrix, and aggregate CI pass after nine retained failed/superseded evidence sets; local integration remains; publication, live-provider smoke, and independent review not claimed).
+Index last reconciled: 2026-08-12 (PR-027 immutable source candidate `6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2` and local merge `729ece099e0f889f632ddee8795505223bff48cb`; exact security, local aggregate, 20-row hosted Python matrix, aggregate CI, and post-merge checks pass after nine retained failed/superseded evidence sets; publication, live-provider smoke, and independent review not claimed).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |

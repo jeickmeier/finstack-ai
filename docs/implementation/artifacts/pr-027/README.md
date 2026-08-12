@@ -23,7 +23,8 @@ Exact commands, revision identity, and validation scope are recorded in
 [`security-review.txt`](security-review.txt). Hosted run and job identities are
 retained in [`hosted-validation.txt`](hosted-validation.txt); nine failed or
 superseded evidence sets remain diagnostic only. All final-candidate acceptance
-evidence is complete; local integration remains.
+evidence is complete. The exact local merge and post-merge checks pass under
+[`integration-validation.txt`](integration-validation.txt); PR-027 is `Done`.
 
 No package publication, hosted pull request, hosted merge, live provider call,
 or independent review is claimed.
