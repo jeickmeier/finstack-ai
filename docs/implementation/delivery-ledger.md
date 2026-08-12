@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-11 and reconciled against documentation pack v0.20 through final PR-026 hosted candidate `af6b93d3f10362ab0399c5de18affe4563740da7`, CI run 31541987380, security run 31541987542, and passing G3 decision `G3-D-native-preview-14a386c7db24`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-12 and reconciled against documentation pack v0.20 through final PR-027 source candidate `6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2`, wheel run 31559829920, CI run 31559848364, and security run 31559849496. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 4 | Phase 0–3 `Done`; Phase 4 `In progress`; Phase 5–9 `Todo` |
 | Logical PRs | 66 | 26 | PR-001–PR-026 `Done`; PR-027 `In progress`; PR-028–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 146 | PR-001–PR-026 acceptance is closed; PR-027 A02–A05 `Passed`, A01 hosted matrix pending |
+| PR acceptance-evidence bullets | 345 | 147 | PR-001–PR-026 acceptance is closed; PR-027 A01–A05 `Passed`, local integration pending |
 | Phase entrance and exit bullets | 62 | 26 | Phase 0 entrance 1/1 and exit 5/5 `Passed`; Phase 1 entrance 2/2 and exit 4/4 `Passed`; Phase 2 entrance 2/2 and exit 4/4 `Passed`; Phase 3 entrance 2/2 and exit 4/4 `Passed`; Phase 4 entrance 2/2 `Passed` |
 | Program gates | 9 | 4 | G0–G3 `Passed`; G4–G8 `Not ready` |
 | Implementation tasks | 144 | 143 | All PR-001–PR-026 tasks and five PR-027 implementation tasks are `Done`; PR-027 validation is active |
@@ -176,7 +176,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-027 | In progress | me@jeickmeier.com | final replacement immutable local source candidate `d5bbd41ef802591669342f5ee1a8f2ac455b363a` on `codex/pr-027-python-package` (no issue or actual PR) | 9 | 4/5 | PR-027-E-import-41e1cf84e64a; PR-027-E-version-a7a45b1095c5; PR-027-E-rust-graph-704dc7f12b23; PR-027-E-release-d6ec0810b7c5; PR-027-E-security-89bfc8a22a0c; PR-027-E-ci-d5bbd41ef802; PR-027-E-hosted-attempt1-31548406544; PR-027-E-hosted-attempt2-31549174921; PR-027-E-hosted-attempt3-31550165234 | — | — | 2026-08-11 |
+| PR-027 | In progress | me@jeickmeier.com | final immutable source candidate `6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2` on `codex/pr-027-evidence` (no issue or actual PR) | 9 | 5/5 | PR-027-E-import-41e1cf84e64a; PR-027-E-version-a7a45b1095c5; PR-027-E-rust-graph-704dc7f12b23; PR-027-E-release-d6ec0810b7c5; PR-027-E-final-local-6ef57c2bdc95; PR-027-E-wheel-matrix-6ef57c2bdc95; PR-027-E-hosted-ci-6ef57c2bdc95; PR-027-E-hosted-security-6ef57c2bdc95 | — | — | 2026-08-12 |
 | PR-028 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-029 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-030 | Todo | — | — | 0 | 0/5 | — | — | — | — |
@@ -404,7 +404,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-027-T-package-8168718966d1 | PR-027 | Configure maturin mixed-project packaging, typed facade, editable development, sdist, license metadata, and reproducible generated-artifact ownership | Done | me@jeickmeier.com | PR-027-T-module-5823baa99a0a | `codex/pr-027-python-package` | PR-027-A01–A05 | [`artifacts/pr-027/plan.md`](artifacts/pr-027/plan.md) | 2026-08-11 | 2026-08-11 | Classic abi3 remains prohibited; deterministic SBOM/provenance staging remains PR-032 scope |
 | PR-027-T-matrix-5681d851f54a | PR-027 | Add the approved CPython 3.11–3.14/3.14t wheel matrix for manylinux x86_64/aarch64, macOS arm64, and Windows x64 | Done | me@jeickmeier.com | PR-027-T-package-8168718966d1 | `codex/pr-027-python-package` | PR-027-A01; PR-027-A03 | [`.github/workflows/python-wheels.yml`](../../.github/workflows/python-wheels.yml) | 2026-08-11 | 2026-08-11 | Hosted runs must execute; workflow text alone is not acceptance evidence |
 | PR-027-T-smoke-02c1f5e0d2fc | PR-027 | Add import, metadata, side-effect, wheel/sdist contents, clean-install, free-threaded concurrency, Rust-only graph, and size-budget tests | Done | me@jeickmeier.com | PR-027-T-package-8168718966d1; PR-027-T-matrix-5681d851f54a | `codex/pr-027-python-package` | PR-027-A01–A05 | [`bindings/finstack-ai-python/tests/test_import.py`](../../bindings/finstack-ai-python/tests/test_import.py); [`tools/python_package/check.py`](../../tools/python_package/check.py) | 2026-08-11 | 2026-08-11 | Tests remain offline and credential-free |
-| PR-027-T-validation-881e90b956d8 | PR-027 | Run focused/package/dependency/architecture/security/aggregate validation, bind immutable local and hosted evidence, and integrate to `main` | In progress | me@jeickmeier.com | PR-027-T-smoke-02c1f5e0d2fc | final replacement local source candidate `d5bbd41ef802591669342f5ee1a8f2ac455b363a` | PR-027-A01–A05 | PR-027-E-import-41e1cf84e64a; PR-027-E-version-a7a45b1095c5; PR-027-E-rust-graph-704dc7f12b23; PR-027-E-release-d6ec0810b7c5; PR-027-E-security-89bfc8a22a0c; PR-027-E-ci-d5bbd41ef802; PR-027-E-hosted-attempt1-31548406544; PR-027-E-hosted-attempt2-31549174921; PR-027-E-hosted-attempt3-31550165234 | 2026-08-11 | 2026-08-11 | Local A02–A05 pass; three hosted attempts failed and are superseded; corrected hosted matrix and integration remain; no publication, hosted PR/merge, or independent review |
+| PR-027-T-validation-881e90b956d8 | PR-027 | Run focused/package/dependency/architecture/security/aggregate validation, bind immutable local and hosted evidence, and integrate to `main` | In progress | me@jeickmeier.com | PR-027-T-smoke-02c1f5e0d2fc | final immutable source candidate `6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2` | PR-027-A01–A05 | PR-027-E-final-local-6ef57c2bdc95; PR-027-E-wheel-matrix-6ef57c2bdc95; PR-027-E-hosted-ci-6ef57c2bdc95; PR-027-E-hosted-security-6ef57c2bdc95 | 2026-08-11 | 2026-08-12 | All five acceptance items pass at one immutable source candidate; local integration remains; no publication, hosted PR/merge, or independent review |
 
 ## Blocker ledger
 

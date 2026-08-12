@@ -1,11 +1,14 @@
 PR-027 Python package and wheel-pipeline security review
 Date: 2026-08-11
-Candidate: d5bbd41ef802591669342f5ee1a8f2ac455b363a
+Candidate: 6ef57c2bdc95d1f1722f35c2a42a9249e3b17ce2
 Reviewer: me@jeickmeier.com
-Result: PASS for implemented local candidate scope; hosted provenance pending
+Result: PASS for implemented candidate scope
 
 Reviewed controls
 
+- Reproducible uv/Maturin builds set `MATURIN_NO_INSTALL_RUST=1`. The checked-in
+  Rust toolchain is mandatory, so a missing Cargo executable fails closed
+  instead of adding Maturin's conditional network bootstrap dependency.
 - TM-18: PyO3 and maturin are exactly pinned; the PEP 517 build dependency is
   hash-constrained; Cargo.lock is required; workflow actions are full-SHA
   pinned; cargo-deny, actionlint, archive inspection, exact hashes, secret scan,
@@ -33,9 +36,9 @@ Reviewed controls
 Residual conditions
 
 - A PyO3 native extension is trusted in-process code, not an OS sandbox.
-- Exact manylinux, Windows, and remaining interpreter execution is pending the
-  replacement hosted matrix and cannot be inferred from local macOS CPython
-  3.14 or the two superseded hosted attempts.
+- The final exact candidate passed all three hosted security jobs and the
+  complete manylinux x86_64/aarch64, macOS arm64, and Windows x64 CPython
+  3.11-3.14/3.14t wheel matrix. Retained attempts close no item.
 - The OpenAI-compatible provider is linked but no client is created and no live
   provider or credential path is exercised.
 - Deterministic SBOM/provenance staging and publication controls remain PR-032.
