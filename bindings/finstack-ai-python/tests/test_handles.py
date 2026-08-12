@@ -179,7 +179,11 @@ def test_cancelling_one_result_waiter_does_not_cancel_the_run() -> None:
         run = agent.start("detach one waiter")
         started = await asyncio.to_thread(server.request_started.wait, 3)
         assert started
-        waiter = asyncio.create_task(run.result())
+
+        async def wait_for_result() -> finstack_ai.RunResult:
+            return await run.result()
+
+        waiter = asyncio.create_task(wait_for_result())
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
