@@ -633,9 +633,10 @@ uv python install "${PYTHON_VERSION}"
 interpreter="$(uv python find "${PYTHON_VERSION}")"
 resolved_cargo="$(command -v cargo)"
 case "$(uname -s)" in
-  MINGW*|MSYS*) resolved_cargo="$(cygpath -w "${resolved_cargo}")" ;;
+  MINGW*|MSYS*) resolved_cargo="$(cygpath -w "$(command -v cargo.exe)")" ;;
 esac
 export CARGO="${resolved_cargo}"
+"${CARGO}" --version
 uv run --no-project --with maturin==1.14.1 maturin build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --release \

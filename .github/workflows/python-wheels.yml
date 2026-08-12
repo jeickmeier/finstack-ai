@@ -61,12 +61,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
+          maturin-version: v1.14.1
           target: ${{ matrix.platform.target }}
           args: >-
             --release --locked --out dist
             --interpreter python${{ matrix.python }}
             --manifest-path bindings/finstack-ai-python/Cargo.toml
-          manylinux: auto
+          manylinux: 2_28
+          before-script-linux: dnf install -y perl-IPC-Cmd
           sccache: false
 
       - name: Build native wheel
