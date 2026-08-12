@@ -388,7 +388,10 @@ description = "Generate Python helper and binding-smoke coverage under target/co
 run = """
 set -euo pipefail
 mkdir -p target/coverage/python/html
-uv run --no-project --with pytest==9.1.1 --with pytest-cov==7.1.0 \
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  --with pytest-cov==7.1.0 \
   pytest \
   --cov \
   --cov-report=term-missing \
