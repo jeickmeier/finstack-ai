@@ -1,7 +1,7 @@
 PR-027 immutable local candidate validation
 Date: 2026-08-11
-Candidate: 513a86d0fe5b480d26d139f1421e3183b2f749fb
-Tree: c96def8c1b03b35b60ca2a23e2268dc15bda64f5
+Candidate: 81bc1aa769e8e8f5eefb8b36273862ff14f411ed
+Tree: 8ca2a2a78baa0d97f029aeccc4a92b3cc89c3fe8
 Branch: codex/pr-027-python-package
 Baseline: b68d4179b8da6db081d9c6acdef76e33fa67948d
 Environment: Darwin 25.5.0 arm64; rustc/cargo 1.97.1; Python 3.14.6;
@@ -26,9 +26,16 @@ PASS  mise run test-pr027 (nested in the aggregate)
       - kernel/runtime production graphs exclude PyO3 and Python bindings
       - 24 architecture tests
 
-Durable aggregate command-log identity:
-  sha256 ad158fd054a0ee457f79a75f7d31f415474984b08db333870bfd586a7a439555
-  local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786493203_mise_run_ci.log
+PASS  mise run coverage-python
+      - installs the exact local mixed project before importing binding tests
+      - 72 tests pass, including all five Python package tests
+      - Python facade coverage is 100%; provider facade coverage is 83%/100%
+
+Durable command-log identities:
+  aggregate sha256 68022fcced5659e3e16797f109237b5e4bcd57dcb540e0d82c6b9465dc3ea280
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786494109_mise_run_ci.log
+  coverage sha256 a6bdca005b588d73303cf9e18cb6f203a00cce3eb162de2546888ea0addd53dc
+  coverage local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786494148_mise_run_coverage-python.log
 
 Cross-platform disposition before hosted execution:
   macOS arm64 / CPython 3.14  PASS (local exact source candidate)

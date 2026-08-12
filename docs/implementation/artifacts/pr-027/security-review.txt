@@ -1,6 +1,6 @@
 PR-027 Python package and wheel-pipeline security review
 Date: 2026-08-11
-Candidate: 513a86d0fe5b480d26d139f1421e3183b2f749fb
+Candidate: 81bc1aa769e8e8f5eefb8b36273862ff14f411ed
 Reviewer: me@jeickmeier.com
 Result: PASS for implemented local candidate scope; hosted provenance pending
 
@@ -10,6 +10,9 @@ Reviewed controls
   hash-constrained; Cargo.lock is required; workflow actions are full-SHA
   pinned; cargo-deny, actionlint, archive inspection, exact hashes, secret scan,
   and the secret-scan canary pass.
+- Hosted CI resolves and exports an explicit Python interpreter before PyO3
+  compilation, and coverage installs the mixed project before importing it;
+  neither check can silently substitute a source-only facade.
 - The Python composition alone enables the provider's narrowly forwarded
   vendored-native-TLS feature so portable Linux wheels do not depend on an
   undeclared system OpenSSL. The provider's accepted default native-TLS policy
@@ -32,7 +35,7 @@ Residual conditions
 - A PyO3 native extension is trusted in-process code, not an OS sandbox.
 - Exact manylinux, Windows, and remaining interpreter execution is pending the
   replacement hosted matrix and cannot be inferred from local macOS CPython
-  3.14 or the superseded first hosted attempt.
+  3.14 or the two superseded hosted attempts.
 - The OpenAI-compatible provider is linked but no client is created and no live
   provider or credential path is exercised.
 - Deterministic SBOM/provenance staging and publication controls remain PR-032.

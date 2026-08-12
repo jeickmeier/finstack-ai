@@ -24,16 +24,52 @@ Security run 31548412393 passed all three jobs at the same revision. CI run
 31548411268 was still completing when this replacement evidence was prepared;
 its result cannot close the replacement candidate.
 
-Replacement source candidate: 513a86d0fe5b480d26d139f1421e3183b2f749fb
+Attempt 1 replacement source candidate: 513a86d0fe5b480d26d139f1421e3183b2f749fb
 Remediation:
   - forward reqwest/native-tls-vendored only into the Python composition;
   - add and lock openssl-src 300.6.1+3.6.3;
   - resolve Cargo before entering uv and pass maturin an absolute CARGO path,
     converting the Git Bash path to a Windows path when required.
 
-Local replacement validation:
+Local attempt 1 replacement validation:
   PASS  mise run supply-chain
   PASS  mise run test-pr027
+  PASS  mise run ci
+
+Attempt 2 - FAILED AND SUPERSEDED
+Evidence revision: a076fa2b9afb199d3c8d3992b571ccc9668c0b5c
+Python-wheels run: 31549174921
+URL: https://github.com/jeickmeier/finstack-ai/actions/runs/31549174921
+Result:
+  PASS  source distribution job 93967897464
+  PASS  all five macOS arm64 rows, including CPython 3.14t
+  FAIL  all ten manylinux rows because vendored OpenSSL's Perl configure step
+        required IPC::Cmd, which was absent from the manylinux container
+  FAIL  all five Windows rows because the absolute Cargo path omitted .exe
+
+Representative failed jobs:
+  manylinux x86_64 / CPython 3.14 93967897468
+  manylinux aarch64 / CPython 3.12 93967897480
+  Windows x64 / CPython 3.12       93967897620
+
+Security run 31549180849 passed all three jobs at the same revision. CI run
+31549179609 retained two additional integration failures: Windows Clippy could
+not discover a Python interpreter for PyO3, and Python coverage imported the
+source facade without first installing the native mixed project.
+
+Final replacement source candidate: 81bc1aa769e8e8f5eefb8b36273862ff14f411ed
+Tree: 8ca2a2a78baa0d97f029aeccc4a92b3cc89c3fe8
+Remediation:
+  - pin maturin 1.14.1 and manylinux 2_28 in maturin-action;
+  - install perl-IPC-Cmd inside the manylinux build container;
+  - resolve cargo.exe before converting the Windows Cargo path;
+  - export the uv-resolved Python interpreter to PyO3 in the Rust matrix;
+  - install the mixed Python project before coverage imports binding tests.
+
+Final local replacement validation:
+  PASS  mise run lint-workflows
+  PASS  mise run supply-chain
+  PASS  mise run coverage-python (72 tests)
   PASS  mise run ci
 
 Replacement hosted run: PENDING
