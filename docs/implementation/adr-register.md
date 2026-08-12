@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-11 (PR-027 final replacement immutable local source candidate `81bc1aa769e8e8f5eefb8b36273862ff14f411ed`; hosted Python matrix pending after two retained failed attempts; publication, live-provider smoke, and independent review not claimed).
+Index last reconciled: 2026-08-11 (PR-027 final replacement immutable local source candidate `d5bbd41ef802591669342f5ee1a8f2ac455b363a`; hosted Python matrix pending after three retained failed attempts; publication, live-provider smoke, and independent review not claimed).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -129,7 +129,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-11 | ADR-017 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 single-extension-module package and curated provider composition on `codex/pr-027-python-package` | — | — |
 | 2026-08-11 | ADR-018 | Implementation | me@jeickmeier.com | Not started | In progress | PR-027 per-version CPython/manylinux/macOS/Windows wheel pipeline on `codex/pr-027-python-package` | — | — |
 | 2026-08-11 | ADR-017 | Evidence | me@jeickmeier.com | Missing | Partial | PR-027 immutable single-extension package, linked curated provider, typed facade, and reproducible wheel/sdist local evidence; PR-028–PR-032 remain | PR-027-E-rust-graph-704dc7f12b23; PR-027-E-release-d6ec0810b7c5 | me@jeickmeier.com |
-| 2026-08-11 | ADR-018 | Evidence | me@jeickmeier.com | Missing | Partial | PR-027 per-interpreter non-abi3 matrix, 3.14t contract, and local package evidence; exact hosted execution and PR-028–PR-032 remain | PR-027-E-version-a7a45b1095c5; PR-027-E-ci-81bc1aa769e8 | me@jeickmeier.com |
+| 2026-08-11 | ADR-018 | Evidence | me@jeickmeier.com | Missing | Partial | PR-027 per-interpreter non-abi3 matrix, 3.14t contract, and local package evidence; exact hosted execution and PR-028–PR-032 remain | PR-027-E-version-a7a45b1095c5; PR-027-E-ci-d5bbd41ef802 | me@jeickmeier.com |
 | 2026-08-08 | ADR-019 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-019-browser-host-adapter.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-020 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-020-capability-delivery.md | — | me@jeickmeier.com |
 | 2026-08-08 | ADR-021 | Record | me@jeickmeier.com | Indexed | Standalone | PR-004 standalone record ADR-021-shared-framing.md | — | me@jeickmeier.com |

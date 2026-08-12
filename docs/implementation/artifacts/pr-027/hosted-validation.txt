@@ -57,7 +57,7 @@ Security run 31549180849 passed all three jobs at the same revision. CI run
 not discover a Python interpreter for PyO3, and Python coverage imported the
 source facade without first installing the native mixed project.
 
-Final replacement source candidate: 81bc1aa769e8e8f5eefb8b36273862ff14f411ed
+Attempt 2 replacement source candidate: 81bc1aa769e8e8f5eefb8b36273862ff14f411ed
 Tree: 8ca2a2a78baa0d97f029aeccc4a92b3cc89c3fe8
 Remediation:
   - pin maturin 1.14.1 and manylinux 2_28 in maturin-action;
@@ -66,13 +66,47 @@ Remediation:
   - export the uv-resolved Python interpreter to PyO3 in the Rust matrix;
   - install the mixed Python project before coverage imports binding tests.
 
-Final local replacement validation:
+Local attempt 2 replacement validation:
   PASS  mise run lint-workflows
   PASS  mise run supply-chain
   PASS  mise run coverage-python (72 tests)
   PASS  mise run ci
 
+Attempt 3 - FAILED AND SUPERSEDED
+Evidence revision: 164368a9a9efebb1dfc99228ab59788af68806d7
+Python-wheels run: 31550165234
+URL: https://github.com/jeickmeier/finstack-ai/actions/runs/31550165234
+Result:
+  PASS  source distribution job 93970953978
+  PASS  all five macOS arm64 rows, including CPython 3.14t
+  FAIL  all ten manylinux rows because OpenSSL 3.6 next required Time::Piece
+  FAIL  all five Windows rows because uv's isolated tool run still hid Cargo
+        from maturin even though the resolved cargo.exe executed successfully
+
+Representative failed jobs:
+  manylinux x86_64 / CPython 3.11 93970954087
+  manylinux aarch64 / CPython 3.11 93970954066
+  Windows x64 / CPython 3.13       93970954189
+
+Security run 31550172093 passed all three jobs at the same revision. CI run
+31550170624 was still completing when the final replacement candidate was
+prepared and cannot close that replacement candidate.
+
+Final replacement source candidate: d5bbd41ef802591669342f5ee1a8f2ac455b363a
+Tree: a77ff70902b64bc366ebbfe41ca631b90301f6b7
+Remediation:
+  - install both exact OpenSSL Perl modules, IPC::Cmd and Time::Piece;
+  - install pinned maturin 1.14.1 with uv tool install;
+  - execute the maturin tool binary directly so Windows retains Cargo PATH;
+  - retain explicit Cargo and maturin version probes before the build.
+
+Final local replacement validation:
+  PASS  mise run lint-workflows
+  PASS  mise run build-python-wheel-ci
+  PASS  mise run coverage-python (72 tests)
+  PASS  mise run ci
+
 Replacement hosted run: PENDING
 
-The failed attempt is diagnostic evidence only and closes no acceptance item.
+The failed attempts are diagnostic evidence only and close no acceptance item.
 No package publication, hosted pull request, or hosted merge occurred.

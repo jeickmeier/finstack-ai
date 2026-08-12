@@ -2,7 +2,7 @@
 
 PR-027 creates the first-class `finstack-ai` Python distribution as one typed
 mixed Rust/Python package. The immutable local source candidate is
-`81bc1aa769e8e8f5eefb8b36273862ff14f411ed`. Local acceptance A02–A05 passes;
+`d5bbd41ef802591669342f5ee1a8f2ac455b363a`. Local acceptance A02–A05 passes;
 A01 remains pending until the approved 20-row hosted wheel matrix and source
 distribution job complete against the evidence revision.
 
@@ -20,7 +20,7 @@ Exact commands, revision identity, and validation scope are recorded in
 [`candidate-validation.txt`](candidate-validation.txt), artifact hashes in
 [`reproducibility.txt`](reproducibility.txt), and the TM-18 review in
 [`security-review.txt`](security-review.txt). Hosted run and job identities will
-be retained in [`hosted-validation.txt`](hosted-validation.txt); two failed
+be retained in [`hosted-validation.txt`](hosted-validation.txt); three failed
 attempts are retained as diagnostic evidence, and the corrected replacement
 attempt remains pending.
 
