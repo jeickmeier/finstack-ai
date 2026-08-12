@@ -344,7 +344,7 @@ uv run --isolated --no-project --with "$1" \
 
 [tasks.python-fast-path-smoke-windows]
 description = "Build and smoke the non-default PR-029 fixture wheel from PowerShell"
-shell = "pwsh -NoLogo -NoProfile -NonInteractive -Command"
+shell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command"
 run = """
 $ErrorActionPreference = "Stop"
 $dist = "target/python-fast-path-dist"
