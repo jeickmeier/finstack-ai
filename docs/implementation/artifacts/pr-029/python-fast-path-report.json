@@ -4,18 +4,18 @@
     "scope": "Python frontend heap; Rust allocator excluded"
   },
   "binding": {
-    "overhead_percent": 2.84756383750433,
+    "overhead_percent": 2.4636568718662266,
     "target_percent": 10.0,
     "within_target": true
   },
-  "commit": "e83013ee65de2c2b25508c36f97ddcca3949ee32",
+  "commit": "af238138d6e77225722706a73ee478a0eb33dcd6",
   "concurrency": {
     "entries_before_release": 2,
     "independent_runs_completed": 2,
     "overlapped": true
   },
   "event_delivery": {
-    "batch_conversion_ns": 259125,
+    "batch_conversion_ns": 253084,
     "ffi_batches": 21,
     "logical_events": 517,
     "model_deltas": 512,
@@ -32,9 +32,9 @@
   "idle_memory": {
     "native_session_reference": {
       "baseline_kib": 1792,
-      "bytes_per_session": 61824,
-      "incremental_kib": 7728,
-      "resident_kib": 9520,
+      "bytes_per_session": 61568,
+      "incremental_kib": 7696,
+      "resident_kib": 9488,
       "sessions": 128
     },
     "native_within_target": false,
@@ -53,18 +53,18 @@
   },
   "python": "3.14.3",
   "throughput": {
-    "native_model_deltas_per_second": 265790.1992589411,
+    "native_model_deltas_per_second": 269786.51232103014,
     "native_within_target": true,
-    "python_model_deltas_per_second": 258431.2057005848,
+    "python_model_deltas_per_second": 263299.71089984226,
     "target_model_deltas_per_second": 100000.0
   },
   "timing_ns": {
-    "construction_median": 79458,
+    "construction_median": 75208,
     "external_io": 0,
-    "ffi_batch_conversion": 259125,
-    "import_median": 3756334,
-    "native_runs_median": 123285208,
-    "python_runs_median": 126795833
+    "ffi_batch_conversion": 253084,
+    "import_median": 3776542,
+    "native_runs_median": 121459000,
+    "python_runs_median": 124451333
   },
   "workload": "rust-backed-python-fast-path-v1"
 }

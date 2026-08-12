@@ -1,7 +1,7 @@
 PR-029 immutable local candidate validation
 Date: 2026-08-12
-Candidate: e83013ee65de2c2b25508c36f97ddcca3949ee32
-Tree: e6b27e6ebbb4d843390d88770bb85892248a3824
+Candidate: af238138d6e77225722706a73ee478a0eb33dcd6
+Tree: c1f219f8f0efff33e68a68f31128c447617c2bf1
 Branch: codex/pr-029-python-fast-path
 Baseline: d2489c4
 Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
@@ -31,25 +31,25 @@ PASS  mise run test-pr029
 PASS  full synthetic benchmark
       command: installed non-default fixture wheel, tools/python_fast_path/run.py
       workload: 512 model deltas/run, 64 runs/sample, 9 alternating samples
-      native runs median: 123,285,208 ns
-      Python runs median: 126,795,833 ns
-      binding overhead: 2.8475638375% (target <= 10%; Passed)
-      native throughput: 265,790 model deltas/s
-      Python throughput: 258,431 model deltas/s
+      native runs median: 121,459,000 ns
+      Python runs median: 124,451,333 ns
+      binding overhead: 2.4636568719% (target <= 10%; Passed)
+      native throughput: 269,787 model deltas/s
+      Python throughput: 263,300 model deltas/s
       FFI delivery: 21 batches / 512 model deltas / 517 logical events
       Python callbacks: 0
-      import median: 3,756,334 ns
-      construction median: 79,458 ns
-      batch conversion: 259,125 ns
+      import median: 3,776,542 ns
+      construction median: 75,208 ns
+      batch conversion: 253,084 ns
       external I/O included: 0 ns / false
       Python traced peak allocation: 5,040 bytes (Rust allocator excluded)
-      native idle-session reference: 61,824 bytes/session
+      native idle-session reference: 61,568 bytes/session
       Python idle benchmark handle pair: 148 traced Python bytes/pair
       concurrency: 2/2 Rust streams entered before release; Passed
-      report sha256 eaac211ab684cbd144ab216dc478be5628efa1946ae8f3a8d83df5a481f39dec
+      report sha256 41feca778ad53ac70dc871c8e381332d900301b357edeb1e39283da6313fb5ec
 
 WARN  NFR-PERF-005 idle-session target
-      The measured native reference is 61,824 bytes/session versus the future
+      The measured native reference is 61,568 bytes/session versus the future
       32,768-byte target, so python-fast-path-report.json records
       native_within_target=false. The PRD makes NFR-PERF targets warning and
       regression evidence before PR-063 ratifies the 1.0 workloads and budgets.
@@ -70,10 +70,10 @@ Reproducible default local artifacts:
   wheel bytes 3478008
 
 Durable command-log identities:
-  focused sha256 bb5fb402dc542506175d542be0bf461ffb560ee33d77a0dee3290ce318643c0f
-  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786526684_mise_run_test-pr029.log
-  aggregate sha256 8acc996575dc3c7c34d248e31fb868022c63a426f076afc1ff15e275be9e2155
-  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786526957_mise_run_ci.log
+  focused sha256 71a0977c7fb672bf0b1c515b5eb6b96423b6f2fa146c8b5b6e2f0d4d89dab7e6
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786530128_mise_run_test-pr029.log
+  aggregate sha256 4a263e3cd9b0c22ef5936b6ebf57a4a61a40287ae55f3b1fb6cd4e6cecb66928
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786530400_mise_run_ci.log
 
 Retained superseded hosted evidence:
   - evidence head 75059946b4f4ba715b074d722c188254c85f03ef
@@ -95,6 +95,13 @@ Retained superseded hosted evidence:
     uses bounded 64-run samples (about 125 ms locally), reports measured and
     target percentages on failure, and passed five sequential local smoke
     repetitions at 1.25% through 3.66% overhead
+  - stabilized evidence head 19d98b62a529585f0ab4924439e5eff1566b7823
+    passed Python wheels 31583511864 (21/21), security 31583529424 (3/3),
+    and 9/10 aggregate CI jobs in run 31583524956; Windows job 94071993828
+    still failed because `uv tool run` isolated maturin from Cargo
+  - final candidate af23813 uses the documented non-project `uv run --with`
+    form when project isolation is not wanted; the production implementation,
+    benchmark workload, and acceptance threshold are unchanged
 
 Review disposition:
   - no seventh primary port, eighth middleware stage, kernel I/O, per-token
