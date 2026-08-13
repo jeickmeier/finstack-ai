@@ -1,0 +1,66 @@
+PR-031 local integration validation
+Date: 2026-08-12 (America/Toronto; hosted runs completed 2026-08-13 UTC)
+Disposition: PASS
+
+Final source candidate: ee5d8c5f345917d11a08742751127a1730a6f822
+Hosted evidence head: 0f658d871c1f360ca4897bd63cc81cc89e71071f
+Final evidence commit: 5d926766724b3ee90a774ab0b2f660c875ba9703
+Local merge: 2d46e8d966c64b6b5b847b86d5af958b984fb431
+Merge parents:
+  73e2863cd090dd0a88b5f91c2c69987856685193
+  5d926766724b3ee90a774ab0b2f660c875ba9703
+Merged/evidence tree: 18453479778ffd889381bc52087e200f93ccea6b
+
+The merge is a local no-fast-forward integration into `main`. Its tree is
+byte-identical to the final PR-031 evidence commit tree. No unrelated source
+change was introduced by integration.
+
+PASS  mise run test-pr031
+  Log sha256: 8d16b10b8e3e5d171acda3bd8f4c282ee3f988deda900d6aeb5cc5ac04c9f0be
+  Local log: /Users/jeickmeier/Library/Application Support/rtk/tee/1786587274_mise_run_test-pr031.log
+  Result: native structured-output and validation-retry tests, Rust/PyO3
+  Clippy, inherited PR-027 through PR-030 package/callback/fast-path proofs,
+  default editable and installed-wheel suites, pinned Pydantic editable and
+  installed-wheel suites, reproducible artifacts, schema governance, and
+  architecture checks passed on the exact merged tree.
+  Base editable/wheel suites: 24 passed, 2 intentional skips each.
+  Pydantic editable/wheel suites: 7 passed each.
+  Artifacts:
+    sdist 5ab15db93de2a5418e23bd27e51837e1df9f1046c47922a6edde37211043931a (577346 bytes)
+    wheel 3b4817661b2fbbfe687a5410dd78fd48060fd72c9acf69009a88696b37fdb489 (3711889 bytes)
+
+PASS  mise run ci
+  Log sha256: 18a525b170f3b016c47fc6edb09d2d3796a189189d083e1fc3f4916bc42903ba
+  Local log: /Users/jeickmeier/Library/Application Support/rtk/tee/1786587596_mise_run_ci.log
+  Result: fail-closed aggregate formatting, workspace Clippy/tests/rustdoc,
+  minimal dependency graphs, architecture, native/browser-WASM checks,
+  schema/helper/benchmark/workflow tests, supply-chain policy, secret scan and
+  canary, release smoke, and nested `mise run test-pr031` passed on the exact
+  merged tree. Cargo-deny emitted only permitted existing warnings and returned
+  success.
+
+The first sandboxed post-merge focused attempt reached inherited Python
+fast-path validation and then failed before that command ran because the
+sandbox denied the configured UV cache under `/Users/jeickmeier/.cache/uv`.
+The exact command was rerun with the required cache access and passed without a
+source, merge, evidence, or configuration change. The passing log above is the
+authoritative post-merge result; the environment-only failure is retained here.
+
+Immutable hosted evidence retained at evidence head
+0f658d871c1f360ca4897bd63cc81cc89e71071f:
+  python-wheels 31654525324: effective 21/21 jobs passed after same-SHA retry
+  initial CI 31654530487: 9/10 passed; Windows mise download failed pre-command
+  same-SHA CI replay 31656384206: 10/10 jobs passed
+  security 31654531654: 3/3 jobs passed
+
+The inherited native fast-path proof reported 4.9677% binding overhead against
+the 10% target and zero Python callbacks in that workload. The native
+idle-session reference was 61,952 bytes/session against the future 32,768-byte
+target. It remains a warning until PR-063 ratifies the 1.0 workload and budgets;
+PR-031 does not claim that later target passes.
+
+PR-031 A01-A05 pass after local integration. This record closes the logical
+PR's integrated-mode transition condition only. ADR-022 remains partial because
+browser/WASM binding peers remain mapped later. No hosted pull request or merge,
+package publication, live credentialed provider, independent review, PR-048
+durability parity, PR-063 budget ratification, or G4 approval is claimed.
