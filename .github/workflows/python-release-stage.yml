@@ -1,0 +1,66 @@
+# PR-032 staged-only Python alpha candidate.
+# This workflow has no registry credential and cannot publish to PyPI.
+
+name: python-release-stage
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/pr-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: python-release-stage-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  stage:
+    name: reproducible artifacts, SBOM, and keyless signatures
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Stage reproducible release candidate
+        run: mise run stage-python-release
+
+      - name: Sign and verify staged subjects with Sigstore
+        uses: sigstore/gh-action-sigstore-python@a5caf349bc536fbef3668a10ed7f5cd309a4b53d # v3.2.0
+        with:
+          inputs: |
+            target/python-release/*.whl
+            target/python-release/*.tar.gz
+            target/python-release/finstack-ai-python.cdx.json
+            target/python-release/SHA256SUMS
+            target/python-release/release-manifest.json
+          verify: true
+          verify-cert-identity: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/python-release-stage.yml@${{ github.ref }}
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
+          upload-signing-artifacts: false
+          release-signing-artifacts: false
+
+      - name: Upload staged candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: finstack-ai-python-0.0.2-alpha-candidate
+          path: target/python-release/
+          if-no-files-found: error
+          retention-days: 30

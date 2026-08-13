@@ -16,7 +16,7 @@ pub enum CapabilityActivationSource {
     Always,
     /// Selected by the application before execution.
     Application,
-    /// Reserved model-driven activation path.
+    /// Selected by the bounded model-catalog policy.
     Model,
 }
 
@@ -43,16 +43,13 @@ pub struct CapabilitiesActivated {
 }
 
 impl CapabilitiesActivated {
-    /// Validate ordering, uniqueness, and the PR-012 activation-source boundary.
+    /// Validate ordering and uniqueness for one complete activation set.
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if self.active.len() > SEMANTIC_ARRAY_MAX_ITEMS {
             return Err("too_many_items");
         }
         let mut prior = None;
         for item in self.active.iter() {
-            if item.source == CapabilityActivationSource::Model {
-                return Err("model_activation_reserved");
-            }
             if prior
                 .as_ref()
                 .is_some_and(|value: &&ActiveCapability| value.capability_id >= item.capability_id)

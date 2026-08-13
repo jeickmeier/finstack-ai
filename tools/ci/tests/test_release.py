@@ -34,7 +34,7 @@ def test_binary_name_uses_exe_suffix_on_windows() -> None:
 
 def test_cargo_package_metadata_reads_workspace_version() -> None:
     package = release.cargo_package_metadata()
-    assert package["version"] == "0.0.1"
+    assert package["version"] == "0.0.2"
     assert package["facade_dependency"] == "finstack-ai"
     assert "native-tokio" in package["features"]
 
@@ -59,7 +59,7 @@ def test_write_metadata_uses_cargo_version_and_commit() -> None:
             mock.patch(
                 "ci.release.cargo_package_metadata",
                 return_value={
-                    "version": "0.0.1",
+                    "version": "0.0.2",
                     "features": ["native-tokio"],
                     "facade_dependency": "finstack-ai",
                 },
@@ -67,7 +67,7 @@ def test_write_metadata_uses_cargo_version_and_commit() -> None:
         ):
             path = release.write_metadata(artifact_dir, binary, "deadbeef")
         metadata = json.loads(path.read_text(encoding="utf-8"))
-        assert metadata["version"] == "0.0.1"
+        assert metadata["version"] == "0.0.2"
         assert metadata["commit"] == "abc123"
         assert metadata["features"] == ["native-tokio"]
         assert metadata["facade_dependency"] == "finstack-ai"

@@ -772,10 +772,6 @@ impl KernelState {
                     .active_capabilities
                     .windows(2)
                     .any(|pair| pair[0].capability_id >= pair[1].capability_id)
-                || self
-                    .active_capabilities
-                    .iter()
-                    .any(|item| item.source == crate::CapabilityActivationSource::Model)
             {
                 return Err(KernelError::InvalidInputPayload {
                     field: "active_capabilities",

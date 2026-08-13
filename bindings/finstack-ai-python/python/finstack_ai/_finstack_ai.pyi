@@ -1,7 +1,7 @@
 """Native Rust-backed finstack-ai control and observation handles."""
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 __version__: str
 __engine_version__: str
@@ -55,6 +55,43 @@ class CallbackContext:
 Callback = Callable[
     [CallbackContext, dict[str, Any]], dict[str, Any] | Awaitable[dict[str, Any]]
 ]
+
+CapabilityActivation = Literal["always", "application", "model", "disabled"]
+
+class CapabilityCatalogItem(TypedDict):
+    """One compact model-visible capability entry."""
+
+    id: str
+    description: str
+
+class ActiveCapability(TypedDict):
+    """One Rust-owned capability activation committed for a run."""
+
+    id: str
+    source: Literal["always", "application", "model"]
+
+class Capability:
+    """Bounded declarative capability composed by the Rust SDK.
+
+    Python capabilities in the alpha surface contribute instructions. Native
+    bundle specifications may additionally contribute registered Toolset,
+    ContextProvider, and Middleware references.
+    """
+
+    def __init__(
+        self,
+        id: str,
+        description: str,
+        instructions: list[str],
+        *,
+        activation: CapabilityActivation = "application",
+    ) -> None: ...
+    @property
+    def id(self) -> str: ...
+    @property
+    def description(self) -> str: ...
+    @property
+    def activation(self) -> CapabilityActivation: ...
 
 class PythonModel:
     """Trusted coarse Python implementation of the Rust Model port.
@@ -230,6 +267,12 @@ class RunResult:
     def retry_attempts(self) -> int:
         """Durable retry attempts consumed by this run."""
     @property
+    def active_capabilities(self) -> list[ActiveCapability]:
+        """Complete Rust-owned activation set committed for this run."""
+    @property
+    def trace(self) -> list[str]:
+        """Stable Rust-owned committed record-kind trace in journal order."""
+    @property
     def session(self) -> Session: ...
     def to_dict(self) -> dict[str, str]:
         """Serialize the terminal result explicitly."""
@@ -253,7 +296,11 @@ class Agent:
 
     @staticmethod
     async def openai_compatible(
-        base_url: str, model: str, instruction: str | None = None
+        base_url: str,
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed OpenAI-compatible agent."""
     @staticmethod
@@ -262,8 +309,14 @@ class Agent:
         toolsets: list[PythonToolset] | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
     ) -> Agent:
         """Build an agent from trusted callbacks and optional Pydantic output type."""
+    def capability_catalog(self) -> list[CapabilityCatalogItem]:
+        """Return the bounded model-activated catalog in identity order."""
+    def compact_capability_catalog(self) -> str:
+        """Render the compact model-facing catalog without activation."""
     def start(
         self,
         input: str,

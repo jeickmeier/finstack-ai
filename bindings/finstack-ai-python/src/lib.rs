@@ -6,12 +6,13 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, OperationLocator,
-    RawJson, RunEvent, RunEventClass, Version,
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, JournalStore, Model, ModelName,
+    OperationLocator, RawJson, RunEvent, RunEventClass, Version,
 };
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
-    AgentRunOutput, AgentRunRequest, PrincipalRef, RunSecurityContext,
+    AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, InstructionSpec,
+    PrincipalRef, RunSecurityContext,
 };
 use finstack_ai_provider_openai_compatible::{
     EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
@@ -158,6 +159,81 @@ fn build_metadata(py: Python<'_>) -> PyResult<Py<PyDict>> {
     Ok(metadata.unbind())
 }
 
+/// Data-only declarative capability accepted by both Python agent factories.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "Capability",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+struct PyCapability {
+    inner: CapabilitySpec,
+}
+
+#[pymethods]
+impl PyCapability {
+    /// Construct one bounded declarative capability.
+    #[new]
+    #[pyo3(signature = (id, description, instructions, *, activation = "application"))]
+    fn new(
+        id: String,
+        description: String,
+        instructions: Vec<String>,
+        activation: &str,
+    ) -> PyResult<Self> {
+        let activation = match activation {
+            "always" => CapabilityActivation::Always,
+            "application" => CapabilityActivation::Application,
+            "model" => CapabilityActivation::Model,
+            "disabled" => CapabilityActivation::Disabled,
+            _ => {
+                return Err(PyTypeError::new_err(
+                    "activation must be always, application, model, or disabled",
+                ));
+            }
+        };
+        let instructions = instructions
+            .into_iter()
+            .map(InstructionSpec::try_new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let inner = CapabilitySpec {
+            id: CapabilityId::parse(id).map_err(|error| PyTypeError::new_err(error.to_string()))?,
+            description: Arc::from(description),
+            instructions: instructions.into(),
+            toolsets: Arc::from([]),
+            context_providers: Arc::from([]),
+            middleware: Arc::from([]),
+            activation,
+        };
+        inner
+            .validate()
+            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    #[getter]
+    fn id(&self) -> &str {
+        self.inner.id.as_str()
+    }
+
+    #[getter]
+    fn description(&self) -> &str {
+        &self.inner.description
+    }
+
+    #[getter]
+    fn activation(&self) -> &'static str {
+        match self.inner.activation {
+            CapabilityActivation::Always => "always",
+            CapabilityActivation::Application => "application",
+            CapabilityActivation::Model => "model",
+            CapabilityActivation::Disabled => "disabled",
+        }
+    }
+}
+
 /// Rust-owned resolved agent handle.
 #[pyclass(module = "finstack_ai._finstack_ai", name = "Agent", frozen)]
 struct PyAgent {
@@ -170,15 +246,26 @@ struct PyAgent {
 impl PyAgent {
     /// Construct a keyless Rust-backed OpenAI-compatible agent.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None))]
     fn openai_compatible(
         py: Python<'_>,
         base_url: String,
         model: String,
         instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
     ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_openai_compatible_agent(base_url, model, instruction).await;
+            let built = build_openai_compatible_agent(
+                base_url,
+                model,
+                instruction,
+                capabilities,
+                active_capabilities,
+            )
+            .await;
             Python::attach(|py| match built {
                 Ok(value) => Py::new(py, value),
                 Err(error) => Err(agent_error(py, &error, None)),
@@ -188,13 +275,15 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None))]
     fn from_python<'py>(
         py: Python<'py>,
         model: &Bound<'py, PyPythonModel>,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         instruction: Option<String>,
         output_type: Option<Py<PyAny>>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
@@ -207,13 +296,43 @@ impl PyAgent {
         let output = output_type
             .map(|target| prepare_pydantic_output(py, target))
             .transpose()?;
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_python_agent(model_name, model, toolsets, instruction, output).await;
+            let built = build_python_agent(
+                model_name,
+                model,
+                toolsets,
+                instruction,
+                output,
+                capabilities,
+                active_capabilities,
+            )
+            .await;
             Python::attach(|py| match built {
                 Ok(value) => Py::new(py, value),
                 Err(error) => Err(agent_error(py, &error, None)),
             })
         })
+    }
+
+    /// Return the bounded model-activated catalog in stable identity order.
+    fn capability_catalog(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+        self.inner
+            .capability_catalog()
+            .into_iter()
+            .map(|entry| {
+                let value = PyDict::new(py);
+                value.set_item("id", entry.id().as_str())?;
+                value.set_item("description", entry.description())?;
+                Ok(value.unbind())
+            })
+            .collect()
+    }
+
+    /// Render the compact model-facing catalog without activating a capability.
+    fn compact_capability_catalog(&self) -> String {
+        self.inner.compact_capability_catalog()
     }
 
     /// Start a run and return its shared control handle immediately.
@@ -490,6 +609,38 @@ impl PyRunResult {
         self.inner.retry_attempts()
     }
 
+    /// Complete Rust-owned capability activation set for this run.
+    #[getter]
+    fn active_capabilities(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+        self.inner
+            .active_capabilities()
+            .iter()
+            .map(|active| {
+                let value = PyDict::new(py);
+                value.set_item("id", active.capability_id.as_str())?;
+                value.set_item(
+                    "source",
+                    match active.source {
+                        finstack_ai::CapabilityActivationSource::Always => "always",
+                        finstack_ai::CapabilityActivationSource::Application => "application",
+                        finstack_ai::CapabilityActivationSource::Model => "model",
+                    },
+                )?;
+                Ok(value.unbind())
+            })
+            .collect()
+    }
+
+    /// Stable Rust-owned committed record-kind trace in journal order.
+    #[getter]
+    fn trace(&self) -> Vec<&str> {
+        self.inner
+            .record_kinds()
+            .iter()
+            .map(AsRef::as_ref)
+            .collect()
+    }
+
     #[getter]
     fn session(&self) -> PySession {
         PySession {
@@ -619,6 +770,8 @@ async fn build_openai_compatible_agent(
     base_url: String,
     model: String,
     instruction: Option<String>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
 ) -> Result<PyAgent, AgentRunError> {
     let config = OpenAiCompatibleConfig::try_new(base_url, EndpointKind::Gateway)
         .map_err(model_configuration_error)?;
@@ -652,6 +805,12 @@ async fn build_openai_compatible_agent(
     if let Some(instruction) = instruction {
         builder = builder.try_instruction(instruction)?;
     }
+    for capability in capabilities {
+        builder = builder.capability(capability);
+    }
+    for capability in active_capabilities {
+        builder = builder.activate_application(capability);
+    }
     let agent = builder.build().await?;
     Ok(PyAgent {
         inner: Arc::new(agent),
@@ -666,6 +825,8 @@ async fn build_python_agent(
     toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
     instruction: Option<String>,
     output: Option<PreparedPydanticOutput>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
 ) -> Result<PyAgent, AgentRunError> {
     let store: Arc<dyn JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
@@ -690,6 +851,12 @@ async fn build_python_agent(
     if let Some(instruction) = instruction {
         builder = builder.try_instruction(instruction)?;
     }
+    for capability in capabilities {
+        builder = builder.capability(capability);
+    }
+    for capability in active_capabilities {
+        builder = builder.activate_application(capability);
+    }
     let agent = builder.build().await?;
     let (agent, output_adapter) = if let Some(output) = output {
         (
@@ -704,6 +871,25 @@ async fn build_python_agent(
         model: model_name,
         output_adapter,
     })
+}
+
+fn capability_configuration(
+    py: Python<'_>,
+    capabilities: Option<Vec<Py<PyCapability>>>,
+    active_capabilities: Option<Vec<String>>,
+) -> PyResult<(Vec<CapabilitySpec>, Vec<CapabilityId>)> {
+    let capabilities = capabilities
+        .unwrap_or_default()
+        .into_iter()
+        .map(|capability| capability.bind(py).borrow().inner.clone())
+        .collect();
+    let active_capabilities = active_capabilities
+        .unwrap_or_default()
+        .into_iter()
+        .map(CapabilityId::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+    Ok((capabilities, active_capabilities))
 }
 
 fn run_request(
@@ -834,6 +1020,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("CancelledError", module.py().get_type::<CancelledError>())?;
     module.add("TimeoutError", module.py().get_type::<TimeoutError>())?;
     module.add_class::<PyAgent>()?;
+    module.add_class::<PyCapability>()?;
     module.add_class::<PyRun>()?;
     module.add_class::<PyEventIterator>()?;
     module.add_class::<PySession>()?;

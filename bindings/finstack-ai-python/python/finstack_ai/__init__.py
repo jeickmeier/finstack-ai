@@ -6,6 +6,7 @@ from . import _finstack_ai as _native
 from ._finstack_ai import (
     Agent,
     CallbackContext,
+    Capability,
     CancelledError,
     ConfigurationError,
     Event,
@@ -95,6 +96,7 @@ __all__ = [
     "Agent",
     "BuildMetadata",
     "CallbackContext",
+    "Capability",
     "CancelledError",
     "ConfigurationError",
     "Event",

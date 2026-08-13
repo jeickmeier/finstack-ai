@@ -496,7 +496,7 @@ fn unowned_internal_tool_names_are_rejected_before_dispatch() {
 }
 
 #[test]
-fn capability_activation_is_sorted_replay_complete_and_model_source_is_reserved() {
+fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
     let mut harness = Harness::default();
     accept(&mut harness);
     let activation = CapabilitiesActivated {
@@ -534,7 +534,7 @@ fn capability_activation_is_sorted_replay_complete_and_model_source_is_reserved(
     assert!(duplicate.records.is_empty());
     assert_structured_golden("valid--pr012-capabilities.json", &harness);
 
-    let reserved = CapabilitiesActivated {
+    let model_selected = CapabilitiesActivated {
         prior_plan_digest: harness.kernel.state().resolved_plan_digest,
         resolved_plan_digest: Digest::raw_json(br#"{"plan":2}"#),
         active: Arc::from([ActiveCapability {
@@ -543,12 +543,13 @@ fn capability_activation_is_sorted_replay_complete_and_model_source_is_reserved(
             source: CapabilityActivationSource::Model,
         }]),
     };
-    assert_error_code(
-        harness.kernel.decide(
-            &transition_env(1_070, &[3], &[], &[], &[], &[], &[]),
-            KernelInput::CapabilitiesActivated(reserved),
-        ),
-        "invalid_input_payload",
+    harness.apply_input(
+        transition_env(1_070, &[3], &[], &[], &[], &[], &[]),
+        KernelInput::CapabilitiesActivated(model_selected.clone()),
+    );
+    assert_eq!(
+        harness.kernel.state().active_capabilities,
+        model_selected.active
     );
 
     let duplicate_id = finstack_ai_kernel::CapabilityId::parse("finstack.capability.alpha")

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
 import pytest
@@ -13,6 +15,9 @@ import finstack_ai
 
 pydantic = pytest.importorskip("pydantic")
 from typing_extensions import TypedDict  # noqa: E402 - optional test dependency
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Answer(pydantic.BaseModel):
@@ -60,6 +65,14 @@ def test_structured_output_type_retries_through_the_kernel() -> None:
     assert result.retry_attempts == 1
     assert calls == 2
     assert sum("effect_requested" in event for event in events) >= 3
+    golden = json.loads(
+        (
+            _REPO_ROOT
+            / "fixtures/compatibility/golden-trace/v1/structured-output"
+            / "valid--pr012-validation-retry.json"
+        ).read_text()
+    )
+    assert result.trace[: len(golden["records"])] == golden["records"]
 
 
 @dataclass
@@ -119,20 +132,32 @@ def test_annotated_tool_supports_dataclass_typeddict_and_typeadapter_shapes() ->
             }
         return {"text": "typed tool complete", "completion_id": "pydantic-tool-done"}
 
-    async def exercise() -> str:
+    async def exercise() -> finstack_ai.RunResult:
         toolset = finstack_ai.pydantic_toolset(
             typed_echo,
             component="python.toolset.pydantic-fixture",
             name="pydantic-fixture-tools",
         )
         agent = await finstack_ai.Agent.from_python(_model(model_callback), [toolset])
-        return (await agent.run("echo")).text
+        return await agent.run("echo")
 
     assert typed_echo.schema_generation == 1
     assert typed_echo.input_schema["additionalProperties"] is False
     assert typed_echo.output_schema is not None
-    assert asyncio.run(exercise()) == "typed tool complete"
+    result = asyncio.run(exercise())
+    assert result.text == "typed tool complete"
     assert model_calls == 2
+    golden = json.loads(
+        (
+            _REPO_ROOT
+            / "fixtures/compatibility/golden-trace/v1/tool-batch"
+            / "valid--pr010-continue-model.json"
+        ).read_text()
+    )
+    start = result.trace.index("tool_batch_opened")
+    expected = golden["records_after_open"]
+    semantic_trace = [kind for kind in result.trace[start:] if kind in expected]
+    assert semantic_trace[: len(expected)] == expected
 
 
 def test_schema_generation_is_cached_until_explicit_refresh() -> None:

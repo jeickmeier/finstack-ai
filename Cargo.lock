@@ -356,7 +356,7 @@ checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
 
 [[package]]
 name = "finstack-ai"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -373,21 +373,21 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-ci-smoke"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai",
 ]
 
 [[package]]
 name = "finstack-ai-extension-port-leaf-fixture"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-runtime",
 ]
 
 [[package]]
 name = "finstack-ai-kernel"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bytes",
  "proptest",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-model-port-leaf-fixture"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-native-examples"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai",
  "finstack-ai-provider-openai-compatible",
@@ -422,14 +422,14 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-protocol"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-kernel",
 ]
 
 [[package]]
 name = "finstack-ai-provider-openai-compatible"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "criterion",
  "finstack-ai-runtime",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-python"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai",
  "finstack-ai-provider-openai-compatible",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-runtime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bytes",
  "finstack-ai-kernel",
@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-store-memory"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-test"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "criterion",
  "finstack-ai-kernel",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-calculator"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "criterion",
  "finstack-ai-runtime",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-filesystem"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-runtime",
  "futures-util",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-toolset-port-leaf-fixture"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-wasm"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "finstack-ai",
 ]

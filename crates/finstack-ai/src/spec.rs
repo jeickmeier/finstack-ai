@@ -77,7 +77,7 @@ pub enum CapabilityActivation {
     Always,
     /// Make available for explicit application activation.
     Application,
-    /// Reserved for a later delivery stage.
+    /// Make available to the bounded model-catalog activation policy.
     Model,
     /// Keep the definition unavailable for activation.
     Disabled,
