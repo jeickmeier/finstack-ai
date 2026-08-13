@@ -1,8 +1,8 @@
 PR-032 release identity, signing, provenance, and capability security review
-Date: 2026-08-12
-Candidate: e6608b52e5838fc620492965c7575dc79638bb97
+Date: 2026-08-13
+Candidate: 058893b85c8eaca3a4f6ef049d21998d8740138f
 Reviewer: me@jeickmeier.com
-Decision: Pass for source controls; hosted attestation evidence required before merge
+Decision: Pass for source controls; hosted keyless-signing evidence required before merge
 
 Scope reviewed:
   .github/workflows/python-release-stage.yml
@@ -16,16 +16,24 @@ Scope reviewed:
 
 PASS  TM-18 build/release identity and least privilege
       The release-staging job uses GitHub Actions OIDC identity with only
-      contents:read, id-token:write, and attestations:write. Checkout disables
-      credential persistence. No PyPI token, GitHub release permission, private
-      signing key, tag, publication command, or package-registry environment is
-      present. The workflow can stage, attest, and upload only.
+      contents:read and id-token:write. Checkout disables credential persistence.
+      No PyPI token, GitHub release permission, private signing key, tag,
+      publication command, or package-registry environment is present. The
+      workflow can stage, sign, verify, and upload only.
 
 PASS  Immutable third-party workflow inputs
-      Checkout, mise, actions/attest v4, and upload-artifact are pinned to full
-      immutable revisions. The attestation revision was resolved against the
-      current GitHub Actions contract. Local actionlint passes. Hosted execution
-      remains required to prove the platform accepts build and SBOM subjects.
+      Checkout, mise, Sigstore gh-action-sigstore-python v3.2.0, and
+      upload-artifact are pinned to full immutable revisions. The Sigstore
+      revision and inputs were resolved against current official documentation.
+      Local actionlint passes. Hosted execution remains required to prove signing
+      and exact workflow-identity verification for every staged subject.
+
+PASS  Explicit external transparency boundary
+      Artifact digests and GitHub workflow signing identity metadata are sent to
+      Sigstore Fulcio/Rekor with explicit user approval. Artifact bytes remain in
+      the private GitHub workflow artifact. The workflow disables release asset
+      attachment and the action's separate signing-artifact upload, then retains
+      each `.sigstore.json` bundle beside its signed subject in one bounded upload.
 
 PASS  Deterministic artifact provenance
       Release staging requires a clean committed source revision, validates
@@ -68,10 +76,10 @@ PASS  Supply-chain and lockstep version boundary
       duplicate/unmatched-license notices remain non-failing policy warnings.
 
 Residual conditions:
-  - Hosted build and SBOM attestations plus the approved wheel matrix must pass
+  - Hosted keyless signing/verification plus the approved wheel matrix must pass
     on an immutable branch head before PR-032 can merge.
-  - GitHub-hosted attestations prove workflow identity and artifact subjects;
-    they do not publish a package or establish the cross-binding checkpoint.
+  - Sigstore bundles prove workflow identity and artifact subjects; they do not
+    publish a package or establish the cross-binding checkpoint.
   - Python callbacks remain trusted T2 code. Untrusted code still requires the
     later isolated WIT/Wasmtime host.
   - Model activation is a deterministic token heuristic, not an authorization
