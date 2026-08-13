@@ -6,10 +6,12 @@ Rust-owned `Agent`, `Run`, `Session`, `RunResult`, `Event`, and `EventBatch`
 handles, async result/cancellation, and batch-first event observation.
 PR-030 adds trusted coarse Python adapters for Model, Toolset,
 ContextProvider, Middleware, and batched Observer ports.
+PR-031 adds optional Pydantic tool and structured-output ergonomics while the
+Rust validator and kernel continue to own schema outcomes and retries.
 
 ```bash
 mise run python-develop
-mise run test-pr028
+mise run test-pr031
 ```
 
 The initial distribution links the Rust-backed OpenAI-compatible provider into
@@ -47,5 +49,57 @@ independent work and return the normalized callback result instead.
 interaction-resolution, and authenticated external-completion shapes. It does
 not route those commands or claim durable restart, pruning, or duplicate
 completion semantics; PR-048 remains the blocking beta gate for those claims.
+
+## Optional Pydantic adapters
+
+Install Pydantic only when typed Python callbacks need it:
+
+```bash
+python -m pip install 'finstack-ai[pydantic]'
+```
+
+Top-level `import finstack_ai` does not import Pydantic. `@tool` accepts fully
+annotated sync or async functions and caches one validation-mode input adapter
+plus one serialization-mode output adapter. `pydantic_toolset()` registers the
+derived canonical schemas with Rust; invalid model arguments never enter the
+Python function, and invalid Python results re-enter the same Rust output
+validation path as native tools.
+
+```python
+from pydantic import BaseModel
+
+import finstack_ai
+
+
+class Answer(BaseModel):
+    answer: int
+
+
+@finstack_ai.tool
+def add(left: int, right: int) -> Answer:
+    """Add two integers."""
+    return Answer(answer=left + right)
+
+
+tools = finstack_ai.pydantic_toolset(
+    add,
+    component="python.toolset.math",
+    name="math",
+)
+agent = await finstack_ai.Agent.from_python(
+    model,
+    [tools],
+    output_type=Answer,
+)
+result = await agent.run("Add 20 and 22")
+assert result.output == Answer(answer=42)
+```
+
+Generated schemas use Draft 2020-12 and a deliberately small portable subset:
+closed objects with all properties required, primitive types, arrays, enums,
+constants, `anyOf`, and local `$defs`/`$ref`. Unsupported constraints fail at
+registration with the exact keyword and JSON pointer. Call
+`decorated_tool.refresh_schema()` before constructing a new toolset only when
+annotations have intentionally changed.
 
 See the repository [README](../../README.md) for project bootstrap and documentation routing. License texts are centralized under [`../../licenses/`](../../licenses/).

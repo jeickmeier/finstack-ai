@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use finstack_ai::runtime::{
     AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, OperationLocator,
-    RunEvent, RunEventClass, Version,
+    RawJson, RunEvent, RunEventClass, Version,
 };
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
@@ -30,7 +30,7 @@ mod callbacks;
 
 use callbacks::{
     PyCallbackContext, PyPythonContextProvider, PyPythonMiddleware, PyPythonModel,
-    PyPythonObserver, PyPythonToolset,
+    PyPythonObserver, PyPythonToolset, normalize_pydantic_schema,
 };
 
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -113,6 +113,26 @@ fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyRe
     Ok(json.getattr("loads")?.call1((normalized,))?.unbind())
 }
 
+/// Normalize one generated Pydantic schema into the portable binding subset.
+#[pyfunction]
+fn _normalize_pydantic_schema(
+    py: Python<'_>,
+    schema: Py<PyAny>,
+    kind: &str,
+) -> PyResult<Py<PyAny>> {
+    let json = py.import("json")?;
+    let encoded = json
+        .getattr("dumps")?
+        .call1((schema,))?
+        .extract::<String>()?;
+    let value = serde_json::from_str(&encoded)
+        .map_err(|_| PyTypeError::new_err("Pydantic schema is not JSON serializable"))?;
+    let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
+    let encoded = serde_json::to_string(&normalized)
+        .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
+    Ok(json.getattr("loads")?.call1((encoded,))?.unbind())
+}
+
 fn normalize_shape<T>(encoded: &str) -> PyResult<String>
 where
     T: serde::de::DeserializeOwned + serde::Serialize,
@@ -143,6 +163,7 @@ fn build_metadata(py: Python<'_>) -> PyResult<Py<PyDict>> {
 struct PyAgent {
     inner: Arc<Agent>,
     model: ModelName,
+    output_adapter: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -167,12 +188,13 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None))]
     fn from_python<'py>(
         py: Python<'py>,
         model: &Bound<'py, PyPythonModel>,
         toolsets: Option<Vec<Py<PyPythonToolset>>>,
         instruction: Option<String>,
+        output_type: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
@@ -182,8 +204,11 @@ impl PyAgent {
             .into_iter()
             .map(|toolset| toolset.bind(py).borrow().registration())
             .collect::<Vec<_>>();
+        let output = output_type
+            .map(|target| prepare_pydantic_output(py, target))
+            .transpose()?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_python_agent(model_name, model, toolsets, instruction).await;
+            let built = build_python_agent(model_name, model, toolsets, instruction, output).await;
             Python::attach(|py| match built {
                 Ok(value) => Py::new(py, value),
                 Err(error) => Err(agent_error(py, &error, None)),
@@ -192,38 +217,63 @@ impl PyAgent {
     }
 
     /// Start a run and return its shared control handle immediately.
-    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES))]
+    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1))]
     fn start(
         &self,
         py: Python<'_>,
         input: String,
         timeout_seconds: f64,
         max_cycles: u64,
+        max_output_retries: u32,
     ) -> PyResult<PyRun> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
+        let output_adapter = self
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
         py.detach(move || {
-            let request = run_request(&model, input, timeout_seconds, max_cycles)?;
+            let request = run_request(
+                &model,
+                input,
+                timeout_seconds,
+                max_cycles,
+                max_output_retries,
+            )?;
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
-            agent.start(request).map(|inner| PyRun { inner })
+            agent.start(request).map(|inner| PyRun {
+                inner,
+                output_adapter,
+            })
         })
         .map_err(|error| agent_error(py, &error, None))
     }
 
     /// Execute one run and await its committed result.
-    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES))]
+    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1))]
     fn run<'py>(
         &self,
         py: Python<'py>,
         input: String,
         timeout_seconds: f64,
         max_cycles: u64,
+        max_output_retries: u32,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
+        let output_adapter = self
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let request = match run_request(&model, input, timeout_seconds, max_cycles) {
+            let request = match run_request(
+                &model,
+                input,
+                timeout_seconds,
+                max_cycles,
+                max_output_retries,
+            ) {
                 Ok(request) => request,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
             };
@@ -233,7 +283,9 @@ impl PyAgent {
             };
             let locator = run.locator().clone();
             let result = run.result().await;
-            Python::attach(|py| result_to_python_with_locator(py, result, Some(&locator)))
+            Python::attach(|py| {
+                result_to_python_with_locator(py, result, Some(&locator), output_adapter)
+            })
         })
     }
 }
@@ -242,6 +294,7 @@ impl PyAgent {
 #[pyclass(module = "finstack_ai._finstack_ai", name = "Run", frozen)]
 struct PyRun {
     inner: finstack_ai::AgentRun,
+    output_adapter: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -257,10 +310,16 @@ impl PyRun {
     /// Wait for the retained terminal result.
     fn result<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let run = self.inner.clone();
+        let output_adapter = self
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let locator = run.locator().clone();
             let result = run.result().await;
-            Python::attach(|py| result_to_python_with_locator(py, result, Some(&locator)))
+            Python::attach(|py| {
+                result_to_python_with_locator(py, result, Some(&locator), output_adapter)
+            })
         })
     }
 
@@ -368,6 +427,48 @@ impl PySession {
 #[pyclass(module = "finstack_ai._finstack_ai", name = "RunResult", frozen)]
 struct PyRunResult {
     inner: AgentRunOutput,
+    output: Option<Py<PyAny>>,
+}
+
+struct PreparedPydanticOutput {
+    adapter: Py<PyAny>,
+    schema: RawJson,
+}
+
+fn prepare_pydantic_output(py: Python<'_>, target: Py<PyAny>) -> PyResult<PreparedPydanticOutput> {
+    let pydantic = py.import("pydantic").map_err(|_| {
+        PyTypeError::new_err(
+            "output_type requires the optional Pydantic extra: install finstack-ai[pydantic]",
+        )
+    })?;
+    let adapter_type = pydantic.getattr("TypeAdapter")?;
+    let adapter = if target.bind(py).is_instance(&adapter_type)? {
+        target
+    } else {
+        adapter_type.call1((target,))?.unbind()
+    };
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("mode", "validation")?;
+    let schema = adapter
+        .bind(py)
+        .call_method("json_schema", (), Some(&kwargs))?
+        .unbind();
+    let schema = raw_pydantic_schema(py, schema, "structured_output")?;
+    Ok(PreparedPydanticOutput { adapter, schema })
+}
+
+fn raw_pydantic_schema(py: Python<'_>, schema: Py<PyAny>, kind: &str) -> PyResult<RawJson> {
+    let encoded = py
+        .import("json")?
+        .getattr("dumps")?
+        .call1((schema,))?
+        .extract::<String>()?;
+    let value = serde_json::from_str(&encoded)
+        .map_err(|_| PyTypeError::new_err("Pydantic schema is not JSON serializable"))?;
+    let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
+    let bytes = serde_json::to_vec(&normalized)
+        .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
+    RawJson::parse(bytes).map_err(|_| PyException::new_err("Pydantic schema is invalid JSON"))
 }
 
 #[pymethods]
@@ -375,6 +476,18 @@ impl PyRunResult {
     #[getter]
     fn text(&self) -> String {
         self.inner.text()
+    }
+
+    /// Typed structured output, when this run configured `output_type`.
+    #[getter]
+    fn output(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.output.as_ref().map(|output| output.clone_ref(py))
+    }
+
+    /// Durable retry attempts consumed by this run.
+    #[getter]
+    fn retry_attempts(&self) -> u32 {
+        self.inner.retry_attempts()
     }
 
     #[getter]
@@ -543,6 +656,7 @@ async fn build_openai_compatible_agent(
     Ok(PyAgent {
         inner: Arc::new(agent),
         model: model_name,
+        output_adapter: None,
     })
 }
 
@@ -551,6 +665,7 @@ async fn build_python_agent(
     model: (ComponentRef, Arc<dyn Model>),
     toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
     instruction: Option<String>,
+    output: Option<PreparedPydanticOutput>,
 ) -> Result<PyAgent, AgentRunError> {
     let store: Arc<dyn JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
@@ -576,9 +691,18 @@ async fn build_python_agent(
         builder = builder.try_instruction(instruction)?;
     }
     let agent = builder.build().await?;
+    let (agent, output_adapter) = if let Some(output) = output {
+        (
+            agent.try_with_output_schema(&output.schema)?,
+            Some(output.adapter),
+        )
+    } else {
+        (agent, None)
+    };
     Ok(PyAgent {
         inner: Arc::new(agent),
         model: model_name,
+        output_adapter,
     })
 }
 
@@ -587,6 +711,7 @@ fn run_request(
     input: String,
     timeout_seconds: f64,
     max_cycles: u64,
+    max_output_retries: u32,
 ) -> Result<AgentRunRequest, AgentRunError> {
     if !timeout_seconds.is_finite()
         || timeout_seconds <= 0.0
@@ -610,6 +735,7 @@ fn run_request(
     let mut request = AgentRunRequest::try_new(model.clone(), input, security)?;
     request.timeout = Duration::from_secs_f64(timeout_seconds);
     request.max_cycles = max_cycles;
+    request.max_output_retries = max_output_retries;
     Ok(request)
 }
 
@@ -639,9 +765,20 @@ fn result_to_python_with_locator(
     py: Python<'_>,
     result: Result<AgentRunOutput, AgentRunError>,
     locator: Option<&OperationLocator>,
+    output_adapter: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyRunResult>> {
     match result {
-        Ok(inner) => Py::new(py, PyRunResult { inner }),
+        Ok(inner) => {
+            let output = output_adapter
+                .map(|adapter| {
+                    let raw = inner.structured_json().ok_or_else(|| {
+                        PyException::new_err("structured result is missing canonical JSON")
+                    })?;
+                    adapter.call_method1(py, "validate_json", (PyBytes::new(py, raw.as_bytes()),))
+                })
+                .transpose()?;
+            Py::new(py, PyRunResult { inner, output })
+        }
         Err(error) => Err(agent_error(py, &error, locator)),
     }
 }
@@ -713,6 +850,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(linked_providers, module)?)?;
     module.add_function(wrap_pyfunction!(normalize_prebeta_shape, module)?)?;
+    module.add_function(wrap_pyfunction!(_normalize_pydantic_schema, module)?)?;
     #[cfg(feature = "benchmark-fixture")]
     benchmark_fixture::register(module)?;
     #[cfg(feature = "callback-fixture")]

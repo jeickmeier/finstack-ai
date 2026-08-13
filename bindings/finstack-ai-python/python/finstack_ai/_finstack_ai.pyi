@@ -224,6 +224,12 @@ class RunResult:
     @property
     def text(self) -> str: ...
     @property
+    def output(self) -> Any | None:
+        """Typed structured output selected by ``output_type``."""
+    @property
+    def retry_attempts(self) -> int:
+        """Durable retry attempts consumed by this run."""
+    @property
     def session(self) -> Session: ...
     def to_dict(self) -> dict[str, str]:
         """Serialize the terminal result explicitly."""
@@ -255,14 +261,16 @@ class Agent:
         model: PythonModel,
         toolsets: list[PythonToolset] | None = None,
         instruction: str | None = None,
+        output_type: Any | None = None,
     ) -> Agent:
-        """Build an agent from trusted coarse Python callbacks."""
+        """Build an agent from trusted callbacks and optional Pydantic output type."""
     def start(
         self,
         input: str,
         *,
         timeout_seconds: float = 30.0,
         max_cycles: int = 16,
+        max_output_retries: int = 1,
     ) -> Run:
         """Start a run and return its shared handle immediately."""
     async def run(
@@ -271,6 +279,7 @@ class Agent:
         *,
         timeout_seconds: float = 30.0,
         max_cycles: int = 16,
+        max_output_retries: int = 1,
     ) -> RunResult:
         """Execute one run and await its committed result."""
 
@@ -285,3 +294,6 @@ def linked_providers() -> tuple[str, ...]:
 
 def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
     """Validate one Rust-owned pre-beta lineage or external-command shape."""
+
+def _normalize_pydantic_schema(schema: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Normalize one generated schema into the portable Pydantic subset."""

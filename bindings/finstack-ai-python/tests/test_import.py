@@ -71,7 +71,12 @@ after = [
     for thread in threading.enumerate()
     if thread.ident not in before
 ]
-print(json.dumps({"events": events, "threads": after, "health": finstack_ai.health()}))
+print(json.dumps({
+    "events": events,
+    "threads": after,
+    "health": finstack_ai.health(),
+    "pydantic_loaded": "pydantic" in sys.modules,
+}))
 """
     completed = subprocess.run(
         [sys.executable, "-I", "-c", script],
@@ -80,7 +85,12 @@ print(json.dumps({"events": events, "threads": after, "health": finstack_ai.heal
         text=True,
     )
     result = json.loads(completed.stdout)
-    assert result == {"events": [], "threads": [], "health": "ok"}
+    assert result == {
+        "events": [],
+        "threads": [],
+        "health": "ok",
+        "pydantic_loaded": False,
+    }
 
 
 def test_free_threaded_build_handles_concurrent_native_calls() -> None:
