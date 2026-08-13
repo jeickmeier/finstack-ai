@@ -101,6 +101,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             format!("native synthetic run {index}"),
             30.0,
             1,
+            1,
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
@@ -156,6 +157,7 @@ async fn build_agent(
         PyAgent {
             inner: Arc::new(agent),
             model: model_name,
+            output_adapter: None,
         },
         PyBenchmarkControl { model, control },
     ))
