@@ -1,0 +1,84 @@
+PR-032 release identity, signing, provenance, and capability security review
+Date: 2026-08-12
+Candidate: e6608b52e5838fc620492965c7575dc79638bb97
+Reviewer: me@jeickmeier.com
+Decision: Pass for source controls; hosted attestation evidence required before merge
+
+Scope reviewed:
+  .github/workflows/python-release-stage.yml
+  tools/python_package/check.py
+  tools/python_package/release.py
+  Cargo.toml, Cargo.lock, fuzz/Cargo.toml, and fuzz/Cargo.lock
+  crates/finstack-ai-kernel capability state and validation
+  crates/finstack-ai shared bundle resolution and native activation policy
+  bindings/finstack-ai-python runtime/stub/tests/docs/starters
+  release/version metadata, mise tasks, and CI workflow
+
+PASS  TM-18 build/release identity and least privilege
+      The release-staging job uses GitHub Actions OIDC identity with only
+      contents:read, id-token:write, and attestations:write. Checkout disables
+      credential persistence. No PyPI token, GitHub release permission, private
+      signing key, tag, publication command, or package-registry environment is
+      present. The workflow can stage, attest, and upload only.
+
+PASS  Immutable third-party workflow inputs
+      Checkout, mise, actions/attest v4, and upload-artifact are pinned to full
+      immutable revisions. The attestation revision was resolved against the
+      current GitHub Actions contract. Local actionlint passes. Hosted execution
+      remains required to prove the platform accepts build and SBOM subjects.
+
+PASS  Deterministic artifact provenance
+      Release staging requires a clean committed source revision, validates
+      aligned Cargo/Python/checker versions, builds sdist and wheel twice under
+      fixed SOURCE_DATE_EPOCH, and requires byte-identical names and digests.
+      The staged manifest binds exact subject names, sizes, hashes, source
+      revision, candidate-not-cut status, and staged-not-published status.
+
+PASS  SBOM and archive ingress controls
+      CycloneDX 1.6 metadata is generated offline from the committed Cargo.lock,
+      sorted deterministically, and contains no local build/extraction paths.
+      Subject hashes bind the SBOM to both distributions. Artifact validation
+      rejects absolute/traversal/backslash paths, archive links, generated or
+      private paths, classic abi3 wheels, oversized wheels, missing typing or
+      license files, and incorrect version/license/Python metadata.
+
+PASS  SEC-INV-001/002 capability authority and ordering
+      Model selection operates only over application-declared, intrinsically
+      validated capability definitions whose complete resolved variants are
+      built before runs. Selection cannot register components, load code, grant
+      authority, or bypass existing tool policy and approval. The kernel owns
+      the sorted CapabilitiesActivated record and commit-before-effect ordering.
+
+PASS  SEC-INV-005/011 non-secret failures and bounded inputs
+      The compact catalog is limited to 8 KiB at registration. IDs,
+      descriptions, and instructions retain existing semantic bounds. Errors
+      expose stable configuration diagnostics without raw model/provider data.
+      Aggregate secret scan and the known-positive canary both pass.
+
+PASS  SEC-INV-004/009/010 replay and immutable-plan integrity
+      Model activation performs a full resolver rebuild, middleware validation,
+      exact lock construction, and lock fingerprinting. The existing plan is
+      never mutated. Kernel replay/state validation now accepts the previously
+      reserved Model source while preserving ordering, uniqueness, terminal
+      immutability, and replay-hash proofs.
+
+PASS  Supply-chain and lockstep version boundary
+      Workspace and excluded fuzz manifests/locks agree on 0.0.2. cargo-deny
+      advisory, ban, license, and source policies pass for both graphs. Existing
+      duplicate/unmatched-license notices remain non-failing policy warnings.
+
+Residual conditions:
+  - Hosted build and SBOM attestations plus the approved wheel matrix must pass
+    on an immutable branch head before PR-032 can merge.
+  - GitHub-hosted attestations prove workflow identity and artifact subjects;
+    they do not publish a package or establish the cross-binding checkpoint.
+  - Python callbacks remain trusted T2 code. Untrusted code still requires the
+    later isolated WIT/Wasmtime host.
+  - Model activation is a deterministic token heuristic, not an authorization
+    decision or unrestricted model-selected extension mechanism.
+  - The final PR-063 performance/memory budget and PR-048 restart parity remain
+    later gated work.
+
+No independent review, external approval, PyPI publication, Git tag, GitHub
+release, actual hosted pull request/merge, browser/WASM parity, exact 0.0.2
+checkpoint, or G4 decision is claimed by this source review.
