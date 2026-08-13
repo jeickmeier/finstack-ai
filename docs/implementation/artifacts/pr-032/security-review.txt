@@ -2,7 +2,7 @@ PR-032 release identity, signing, provenance, and capability security review
 Date: 2026-08-13
 Candidate: 058893b85c8eaca3a4f6ef049d21998d8740138f
 Reviewer: me@jeickmeier.com
-Decision: Pass for source controls; hosted keyless-signing evidence required before merge
+Decision: Pass; source controls and hosted keyless-signing evidence complete
 
 Scope reviewed:
   .github/workflows/python-release-stage.yml
@@ -25,8 +25,8 @@ PASS  Immutable third-party workflow inputs
       Checkout, mise, Sigstore gh-action-sigstore-python v3.2.0, and
       upload-artifact are pinned to full immutable revisions. The Sigstore
       revision and inputs were resolved against current official documentation.
-      Local actionlint passes. Hosted execution remains required to prove signing
-      and exact workflow-identity verification for every staged subject.
+      Local actionlint passes. Hosted runs 31747608876 and 31751625623 prove
+      signing and exact workflow-identity verification for every staged subject.
 
 PASS  Explicit external transparency boundary
       Artifact digests and GitHub workflow signing identity metadata are sent to
@@ -76,8 +76,10 @@ PASS  Supply-chain and lockstep version boundary
       duplicate/unmatched-license notices remain non-failing policy warnings.
 
 Residual conditions:
-  - Hosted keyless signing/verification plus the approved wheel matrix must pass
-    on an immutable branch head before PR-032 can merge.
+  - The approved wheel matrix passed effectively 21/21 at immutable evidence
+    head bc1403f15062e599bf6b7140ec69da28e55a9a7f; later PR-032 through PR-038
+    candidates use the user-authorized one-wheel Linux envelope. Restoring and
+    running the full matrix is user-owned and will not be dispatched automatically.
   - Sigstore bundles prove workflow identity and artifact subjects; they do not
     publish a package or establish the cross-binding checkpoint.
   - Python callbacks remain trusted T2 code. Untrusted code still requires the

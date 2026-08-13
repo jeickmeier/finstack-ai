@@ -92,8 +92,10 @@ Review disposition:
     staged-only checksum/SBOM metadata and no publication authority
   - Rust remains the single semantic owner for activation, traces, results,
     validation, ordering, and exact immutable plan construction
-  - hosted wheel matrix, same-head CI/security, and verified keyless signatures are
-    still required before local integration
+  - the complete approved wheel matrix, hosted Linux CI/security, and verified
+    keyless signatures are recorded in hosted-validation.txt; the subsequent
+    one-wheel Linux envelope is explicit and full-matrix restoration/execution
+    is user-owned
 
 No independent review or approval is claimed by this record. No actual pull
 request, hosted merge, package publication, Git tag/release, browser/WASM
