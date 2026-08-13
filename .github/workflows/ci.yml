@@ -1,6 +1,6 @@
 # Required CI for PR-003.
-# PR-032 through PR-038 use the user-authorized temporary Linux-only envelope;
-# the full cross-platform matrix is revisited at the end of that range.
+# PR-032 through PR-038 use the user-authorized Linux-only envelope.
+# Cross-platform restoration and execution are explicitly user-owned.
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, pushes to main, and workflow_dispatch.
 # Path filters: none for required checks (PR-003-A01).

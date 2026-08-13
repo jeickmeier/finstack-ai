@@ -2,8 +2,8 @@
 # Owner: me@jeickmeier.com
 # Cadence: weekly schedule and workflow_dispatch only.
 # Does not gate pull-request merge (PR-003 reservation; PR-005 activation).
-# PR-032 through PR-038 use the user-authorized temporary Linux-only envelope;
-# the full cross-platform matrix is revisited at the end of that range.
+# PR-032 through PR-038 use the user-authorized Linux-only envelope.
+# Cross-platform restoration and execution are explicitly user-owned.
 
 name: benchmark
 

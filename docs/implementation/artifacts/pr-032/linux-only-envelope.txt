@@ -7,12 +7,12 @@ Decision
   Linux only for the remainder of PR-032 through PR-038.
 - The active aggregate CI run 31747647242 was cancelled while its Windows Rust
   job repeated the full PR-032 Python package-validation suite.
-- The Linux wheel matrix retains both manylinux x86_64 and manylinux aarch64
-  across CPython 3.11, 3.12, 3.13, 3.14, and free-threaded 3.14t, plus the
-  source-distribution job: 11 hosted jobs total.
-- The full macOS and Windows matrices must be restored and revisited at the end
-  of the authorized range. This temporary envelope is not evidence that those
-  deferred platforms passed future candidates.
+- The wheel workflow retains one CPython 3.14 manylinux x86_64 wheel plus the
+  source-distribution job: two hosted jobs total.
+- Restoring and running the full interpreter, architecture, macOS, and Windows
+  matrices is explicitly user-owned. The agent must not restore or dispatch
+  that pass automatically. This envelope is not evidence that those deferred
+  configurations passed future candidates.
 
 PR-032 retained evidence
 - Python wheels run 31747608834 attempt 2 already passed the complete 21-job
@@ -28,4 +28,5 @@ Nonclaims
 - No weakening or retroactive replacement of historical PR-027 through PR-031
   evidence.
 - No macOS or Windows acceptance claim for later source candidates.
+- No automatic full-matrix restoration or final cross-platform dispatch.
 - No publication, tag, release, checkpoint, G4 decision, or external merge.

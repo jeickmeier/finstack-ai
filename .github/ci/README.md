@@ -10,15 +10,16 @@ All executable checks are canonical mise tasks. Workflows must call
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
 | [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | format, Clippy, workspace tests (including conformance), candidate-v1 fuzz smoke, docs, minimal features, architecture, explicit WASM target checks, schema governance, benchmark compile checks, Python package smoke, and Linux release-smoke |
-| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | PR-027 per-version CPython 3.11-3.14 and 3.14t wheels on manylinux x86_64/aarch64; isolated install/import/concurrency smoke; sdist staging |
+| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | temporary CPython 3.14 manylinux x86_64 wheel; isolated install/import/concurrency smoke; sdist staging |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | every PR, Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns run on Sunday/manual only, with 30-day corpus/crash artifact retention |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
 
 PR-032 through PR-038 run under a user-authorized temporary Linux-only hosted
-execution envelope. macOS and Windows jobs are removed from these workflows for
-that interval; the full cross-platform matrix must be restored and revisited at
-the end of the range. Historical evidence remains unchanged.
+execution envelope with one CPython 3.14 manylinux x86_64 wheel. The other
+interpreter and platform jobs are removed for that interval. Restoring and
+running the full matrix is explicitly user-owned and must not be dispatched
+automatically. Historical evidence remains unchanged.
 
 ## Toolchain channels (PR-003-A02)
 

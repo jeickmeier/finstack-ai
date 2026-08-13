@@ -1,6 +1,6 @@
-# Required PR-027 per-interpreter wheel and source-distribution matrix.
-# PR-032 through PR-038 use the user-authorized temporary Linux-only envelope;
-# the full cross-platform matrix is revisited at the end of that range.
+# Required PR-027 wheel and source-distribution workflow.
+# PR-032 through PR-038 use the user-authorized one-wheel envelope.
+# Full-matrix restoration and execution are explicitly user-owned.
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, pushes to main, and workflow_dispatch.
 
@@ -27,19 +27,8 @@ defaults:
 
 jobs:
   wheels:
-    name: wheel (${{ matrix.platform.name }} / CPython ${{ matrix.python }})
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - name: manylinux-x86_64
-            runner: ubuntu-24.04
-            target: x86_64
-          - name: manylinux-aarch64
-            runner: ubuntu-24.04-arm
-            target: aarch64
-        python: ["3.11", "3.12", "3.13", "3.14", "3.14t"]
+    name: wheel (manylinux-x86_64 / CPython 3.14)
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,10 +47,10 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           maturin-version: v1.14.1
-          target: ${{ matrix.platform.target }}
+          target: x86_64
           args: >-
             --release --locked --out dist
-            --interpreter python${{ matrix.python }}
+            --interpreter python3.14
             --manifest-path bindings/finstack-ai-python/Cargo.toml
           manylinux: 2_28
           before-script-linux: dnf install -y perl-IPC-Cmd perl-Time-Piece
@@ -69,15 +58,15 @@ jobs:
 
       - name: Install and smoke wheel
         env:
-          FINSTACK_EXPECT_FREE_THREADED: ${{ matrix.python == '3.14t' && '1' || '0' }}
-          PYTHON_VERSION: ${{ matrix.python }}
+          FINSTACK_EXPECT_FREE_THREADED: "0"
+          PYTHON_VERSION: "3.14"
           PYTHON_DIST_DIR: dist
         run: mise run smoke-python-wheel-ci
 
       - name: Upload staged wheel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: finstack-ai-${{ matrix.platform.name }}-cp${{ matrix.python }}
+          name: finstack-ai-manylinux-x86_64-cp3.14
           path: dist/*.whl
           if-no-files-found: error
           retention-days: 30
