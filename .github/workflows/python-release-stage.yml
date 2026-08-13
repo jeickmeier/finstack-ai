@@ -13,7 +13,6 @@ on:
 permissions:
   contents: read
   id-token: write
-  attestations: write
 
 concurrency:
   group: python-release-stage-${{ github.ref }}
@@ -25,7 +24,7 @@ defaults:
 
 jobs:
   stage:
-    name: reproducible artifacts, SBOM, and signed attestations
+    name: reproducible artifacts, SBOM, and keyless signatures
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -43,20 +42,20 @@ jobs:
       - name: Stage reproducible release candidate
         run: mise run stage-python-release
 
-      - name: Attest build provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+      - name: Sign and verify staged subjects with Sigstore
+        uses: sigstore/gh-action-sigstore-python@a5caf349bc536fbef3668a10ed7f5cd309a4b53d # v3.2.0
         with:
-          subject-path: |
+          inputs: |
             target/python-release/*.whl
             target/python-release/*.tar.gz
-
-      - name: Attest CycloneDX SBOM
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
-        with:
-          subject-path: |
-            target/python-release/*.whl
-            target/python-release/*.tar.gz
-          sbom-path: target/python-release/finstack-ai-python.cdx.json
+            target/python-release/finstack-ai-python.cdx.json
+            target/python-release/SHA256SUMS
+            target/python-release/release-manifest.json
+          verify: true
+          verify-cert-identity: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/python-release-stage.yml@${{ github.ref }}
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
+          upload-signing-artifacts: false
+          release-signing-artifacts: false
 
       - name: Upload staged candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

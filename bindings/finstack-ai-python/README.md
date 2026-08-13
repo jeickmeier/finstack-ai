@@ -10,7 +10,7 @@ PR-031 adds optional Pydantic tool and structured-output ergonomics while the
 Rust validator and kernel continue to own schema outcomes and retries.
 PR-032 completes the Python alpha candidate with shared golden traces,
 declarative capability activation, starter projects, API/migration references,
-and staged checksums/SBOM/attestations.
+and staged checksums/SBOM/keyless signatures.
 
 ```bash
 mise run python-develop

@@ -24,4 +24,4 @@ cut until browser WASM conformance and G4 pass in PR-038.
 - Python callbacks remain trusted in-process code, not plugins or sandboxes.
 - No durable restart/pruning parity is claimed before PR-048.
 - No PyPI publication, stable API guarantee, or G4 passage is implied by a
-  staged artifact or signed attestation.
+  staged artifact or verified keyless signature bundle.

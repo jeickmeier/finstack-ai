@@ -25,7 +25,7 @@ Plan baseline: documentation pack v0.20 / PLAN-0.18
 | PR-032-A02 | Build the release-candidate sdist and complete wheel matrix, install in clean compiler-free environments, and run the supported Python conformance/examples. |
 | PR-032-A03 | Complete runtime/stub typing, API reference, migration notes, pytest fixtures, and two clean starter projects: Rust-backed and trusted Python-callback. |
 | PR-032-A04 | Add the compact shared capability catalog and deterministic activation policy, expose `Always`, `Application`, and `Model` idiomatically in Python, and prove activation appends after an unchanged stable prompt prefix. |
-| PR-032-A05 | Stage the Python half of version `0.0.2` with deterministic checksums and CycloneDX SBOM references, then generate GitHub-signed build/SBOM attestations without publishing, tagging, or claiming the cross-binding checkpoint. |
+| PR-032-A05 | Stage the Python half of version `0.0.2` with deterministic checksums and CycloneDX SBOM references, then generate and verify OIDC-backed Sigstore signature bundles without publishing, tagging, or claiming the cross-binding checkpoint. |
 
 ## Implementation slices
 
@@ -39,21 +39,24 @@ Plan baseline: documentation pack v0.20 / PLAN-0.18
 4. Advance lockstep workspace/Python staging metadata to `0.0.2`; extend the
    existing reproducible build with deterministic checksums and a CycloneDX
    SBOM generated from locked source metadata.
-5. Add a manual/branch release-staging workflow that uses the current GitHub
-   artifact-attestation contract with least privilege. Actions remain pinned by
-   immutable digest. The workflow uploads staging artifacts only; it does not
-   publish to PyPI or create a release/tag.
+5. Add a manual/branch release-staging workflow that uses Sigstore keyless
+   signing with GitHub Actions OIDC and least privilege. Actions remain pinned
+   by immutable digest. The workflow verifies every generated signature against
+   its exact workflow identity, uploads staging artifacts and bundles only, and
+   does not publish to PyPI or create a release/tag.
 6. Run focused, package, type, docs, benchmark, supply-chain, aggregate, hosted
    wheel/CI/security/release-staging, and post-merge checks; bind immutable
    candidate, hosted, security-review, and integration evidence.
 
 ## Current documentation baseline
 
-Context7 was queried for the current GitHub Actions artifact-attestation
-contract. GitHub documents `actions/attest@v4`, `subject-path`, `sbom-path`, and
-the required `contents: read`, `id-token: write`, and `attestations: write`
-permissions. The implementation will pin the resolved action commit rather
-than a mutable major tag.
+Context7 was queried for the current Sigstore GitHub Actions contract. Sigstore
+documents `gh-action-sigstore-python@v3.2.0`, whitespace-separated or globbed
+inputs, `id-token: write`, in-workflow verification, exact certificate identity,
+and the GitHub OIDC issuer. The implementation pins the resolved action commit
+rather than a mutable tag. GitHub's native artifact-attestation action was
+retained as failed evidence because it is unavailable for a user-owned private
+repository; repository visibility was not changed.
 
 The repository `finstack-production-release-prep` skill informed the release
 hygiene, dependency/security, artifact, checksum, SBOM, reproducibility, and
@@ -63,10 +66,13 @@ this repository's checked-in `mise run` tasks remain authoritative.
 ## Security disposition
 
 - Signing identity is the GitHub Actions OIDC workflow identity at an immutable
-  source revision; no private signing key is stored in the repository.
-- Attestation jobs receive no package-registry credential and cannot publish.
+  source revision; no private signing key is stored in the repository. Artifact
+  digests and signing identity metadata are recorded through Fulcio/Rekor while
+  artifact bytes remain in the private GitHub workflow artifact.
+- Signing jobs receive no package-registry credential and cannot publish.
 - Release inputs and third-party actions are pinned; artifacts are checksummed
-  before attestation and retained as ordinary workflow artifacts.
+  before signing and retained with their `.sigstore.json` bundles as one
+  ordinary workflow artifact.
 - SBOM generation is deterministic, offline, bounded, and based on committed
   lock/source metadata. It must not embed local extraction paths or credentials.
 - Model capability selection cannot grant ambient authority. Only

@@ -16,7 +16,7 @@ remains gated on PR-038 and G4.
 
 - Stage the lockstep `0.0.2` alpha candidate with Python conformance,
   declarative capability activation, complete typing/examples, deterministic
-  checksums/SBOM references, and signed hosted attestations. The exact
+  checksums/SBOM references, and verified hosted keyless signatures. The exact
   cross-binding checkpoint remains gated on PR-038 and G4.
 
 ### Added

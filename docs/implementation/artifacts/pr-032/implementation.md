@@ -30,10 +30,11 @@ Branch: `codex/pr-032-python-release-staging`
   byte-identical pairs, writes checksums, emits a deterministic CycloneDX 1.6
   SBOM from committed lock metadata, and binds all subjects to the source
   revision in a staged-only manifest.
-- A least-privilege GitHub workflow stages the candidate, creates GitHub OIDC
-  build and SBOM attestations with an immutable `actions/attest` revision, and
-  uploads an ordinary retained artifact. It has no registry credential or
-  publication step.
+- A least-privilege GitHub workflow stages the candidate, creates Sigstore
+  keyless signatures for the distributions, checksums, SBOM, and manifest with
+  an immutable action revision, verifies every bundle against the exact GitHub
+  workflow identity and OIDC issuer, and uploads one ordinary retained artifact.
+  It has no registry credential or publication step.
 
 ## Invariants retained
 
@@ -50,7 +51,8 @@ Branch: `codex/pr-032-python-release-staging`
   ordering, and direct-handle execution are unchanged.
 - Build metadata, checksums, SBOM content, and staged manifest contain no
   credentials or local extraction paths. Hosted signing uses workflow identity
-  rather than a repository private key.
+  rather than a repository private key; Fulcio/Rekor receive artifact digests
+  and signing identity metadata, not the private artifact bytes.
 
 ## Explicit limits and nonclaims
 
