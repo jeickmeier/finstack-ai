@@ -629,6 +629,7 @@ pub(crate) struct CompositionRecipe {
     pub application_config: BTreeMap<ComponentId, RawJson>,
     pub capabilities: BTreeMap<CapabilityId, (LockedBundle, Arc<CapabilitySpec>)>,
     pub active_application: BTreeSet<CapabilityId>,
+    pub active_model: BTreeSet<CapabilityId>,
     pub services: RuntimeServices,
 }
 
@@ -698,6 +699,7 @@ impl<'a> BundleResolver<'a> {
             application_config,
             capabilities,
             active_application: BTreeSet::new(),
+            active_model: BTreeSet::new(),
             services: self.services.clone(),
         });
         self.resolve_recipe(registry, recipe, context).await
@@ -749,6 +751,60 @@ impl<'a> BundleResolver<'a> {
             application_config: current_recipe.application_config.clone(),
             capabilities: current_recipe.capabilities.clone(),
             active_application: active,
+            active_model: current_recipe.active_model.clone(),
+            services: current_recipe.services.clone(),
+        });
+        self.resolve_recipe(registry, recipe, context).await
+    }
+
+    /// Rebuild an immutable plan with bounded model-selected capability IDs active.
+    ///
+    /// The caller owns selection policy. This method only validates declared
+    /// `Model` capabilities and reruns complete component and middleware
+    /// resolution without mutating the current plan.
+    ///
+    /// # Errors
+    ///
+    /// Rejects unknown, disabled, application-only, or conflicting activation.
+    pub async fn activate_model(
+        &self,
+        registry: &mut Registry,
+        current: &ResolvedAgent,
+        capabilities: impl IntoIterator<Item = CapabilityId>,
+        context: AgentConstructionContext,
+    ) -> Result<ResolvedAgent, BundleResolutionError> {
+        let current_recipe =
+            current
+                .composition()
+                .ok_or_else(|| BundleResolutionError::Invalid {
+                    code: BUNDLE_RESOLUTION_INVALID,
+                    message: Arc::from("agent_was_not_bundle_resolved"),
+                })?;
+        let mut active = current_recipe.active_model.clone();
+        for capability_id in capabilities {
+            let (_, capability) =
+                current_recipe
+                    .capabilities
+                    .get(&capability_id)
+                    .ok_or_else(|| BundleResolutionError::Missing {
+                        code: BUNDLE_RESOLUTION_MISSING,
+                        item: Arc::from(capability_id.as_str()),
+                    })?;
+            if capability.activation != CapabilityActivation::Model {
+                return Err(BundleResolutionError::Invalid {
+                    code: BUNDLE_RESOLUTION_INVALID,
+                    message: Arc::from("capability_not_model_activated"),
+                });
+            }
+            active.insert(capability_id);
+        }
+        let recipe = Arc::new(CompositionRecipe {
+            bundle: Arc::clone(&current_recipe.bundle),
+            base_spec: Arc::clone(&current_recipe.base_spec),
+            application_config: current_recipe.application_config.clone(),
+            capabilities: current_recipe.capabilities.clone(),
+            active_application: current_recipe.active_application.clone(),
+            active_model: active,
             services: current_recipe.services.clone(),
         });
         self.resolve_recipe(registry, recipe, context).await
@@ -820,7 +876,21 @@ impl<'a> BundleResolver<'a> {
         let resolved = if active.is_empty() {
             resolved
         } else {
-            self.activate_application(registry, &resolved, active, context)
+            self.activate_application(registry, &resolved, active, context.clone())
+                .await?
+        };
+        let active_model = lock
+            .capabilities
+            .iter()
+            .filter(|capability| {
+                capability.active && capability.activation == CapabilityActivation::Model
+            })
+            .map(|capability| capability.id.clone())
+            .collect::<Vec<_>>();
+        let resolved = if active_model.is_empty() {
+            resolved
+        } else {
+            self.activate_model(registry, &resolved, active_model, context)
                 .await?
         };
         let reconstructed = resolved
@@ -979,12 +1049,6 @@ impl<'a> BundleResolver<'a> {
                         item: Arc::from(reference.id.as_str()),
                     })?,
             );
-            if capability.activation == CapabilityActivation::Model {
-                return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
-                    message: Arc::from("model_capability_activation_is_reserved"),
-                });
-            }
             if resolved
                 .insert(
                     reference.id.clone(),
@@ -1045,7 +1109,7 @@ impl<'a> BundleResolver<'a> {
             &effective_config,
         )?);
         lock.validate()?;
-        Ok(resolved.attach_composition(Arc::clone(&recipe.base_spec), lock, recipe))
+        Ok(resolved.attach_composition(effective_spec, lock, recipe))
     }
 }
 
@@ -1056,9 +1120,28 @@ fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, BundleResolution
     let mut context = spec.context_providers.to_vec();
     let mut middleware = spec.middleware.to_vec();
     for (id, (_, capability)) in &recipe.capabilities {
-        let active = capability.activation == CapabilityActivation::Always
-            || recipe.active_application.contains(id);
+        let active = capability.activation != CapabilityActivation::Model
+            && (capability.activation == CapabilityActivation::Always
+                || recipe.active_application.contains(id));
         if active {
+            instructions.extend(capability.instructions.iter().cloned());
+            toolsets.extend(capability.toolsets.iter().cloned());
+            context.extend(capability.context_providers.iter().cloned());
+            for component in capability.middleware.iter().cloned() {
+                middleware.push(
+                    finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
+                        |error| BundleResolutionError::Invalid {
+                            code: BUNDLE_RESOLUTION_INVALID,
+                            message: Arc::from(error.to_string()),
+                        },
+                    )?,
+                );
+            }
+        }
+    }
+    for (id, (_, capability)) in &recipe.capabilities {
+        if capability.activation == CapabilityActivation::Model && recipe.active_model.contains(id)
+        {
             instructions.extend(capability.instructions.iter().cloned());
             toolsets.extend(capability.toolsets.iter().cloned());
             context.extend(capability.context_providers.iter().cloned());
@@ -1178,31 +1261,7 @@ fn build_lock(
     for component in run_plan.observers() {
         push(component.descriptor());
     }
-    let capabilities = recipe
-        .capabilities
-        .iter()
-        .map(|(id, (bundle, capability))| {
-            let bytes = serde_json_canonicalizer::to_vec(capability.as_ref()).map_err(|error| {
-                BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
-                    message: Arc::from(error.to_string()),
-                }
-            })?;
-            let definition_digest = Digest::domain_separated("capability-spec", 1, &bytes)
-                .map_err(|error| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
-                    message: Arc::from(error.to_string()),
-                })?;
-            Ok(LockedCapability {
-                id: id.clone(),
-                bundle: bundle.clone(),
-                activation: capability.activation,
-                active: capability.activation == CapabilityActivation::Always
-                    || recipe.active_application.contains(id),
-                definition_digest,
-            })
-        })
-        .collect::<Result<Vec<_>, BundleResolutionError>>()?;
+    let capabilities = locked_capabilities(recipe)?;
     let config_bytes = serde_json_canonicalizer::to_vec(effective_config).map_err(|error| {
         BundleResolutionError::Invalid {
             code: BUNDLE_RESOLUTION_INVALID,
@@ -1252,6 +1311,37 @@ fn build_lock(
         schema_digests: schema_digests.into(),
         required_services: required_services(&recipe.bundle),
     })
+}
+
+fn locked_capabilities(
+    recipe: &CompositionRecipe,
+) -> Result<Vec<LockedCapability>, BundleResolutionError> {
+    recipe
+        .capabilities
+        .iter()
+        .map(|(id, (bundle, capability))| {
+            let bytes = serde_json_canonicalizer::to_vec(capability.as_ref()).map_err(|error| {
+                BundleResolutionError::Invalid {
+                    code: BUNDLE_RESOLUTION_INVALID,
+                    message: Arc::from(error.to_string()),
+                }
+            })?;
+            let definition_digest = Digest::domain_separated("capability-spec", 1, &bytes)
+                .map_err(|error| BundleResolutionError::Invalid {
+                    code: BUNDLE_RESOLUTION_INVALID,
+                    message: Arc::from(error.to_string()),
+                })?;
+            Ok(LockedCapability {
+                id: id.clone(),
+                bundle: bundle.clone(),
+                activation: capability.activation,
+                active: capability.activation == CapabilityActivation::Always
+                    || recipe.active_application.contains(id)
+                    || recipe.active_model.contains(id),
+                definition_digest,
+            })
+        })
+        .collect()
 }
 
 fn required_services(bundle: &BundleSpec) -> RequiredServices {

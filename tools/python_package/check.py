@@ -12,7 +12,7 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
-PACKAGE_VERSION = "0.0.1"
+PACKAGE_VERSION = "0.0.2"
 MAX_WHEEL_BYTES = 10 * 1024 * 1024
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

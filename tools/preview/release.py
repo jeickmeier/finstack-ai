@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducibly stage the native ``0.0.1-dev`` preview bundle."""
+"""Reproducibly stage the current ``0.0.2-alpha-candidate`` bundle."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CHECKPOINT = "0.0.1-dev"
+CHECKPOINT = "0.0.2-alpha-candidate"
+PACKAGE_VERSION = "0.0.2"
 STAGE = REPO_ROOT / "target" / "preview" / CHECKPOINT
 PACKAGES = (
     "finstack-ai-kernel",
@@ -137,7 +138,9 @@ def package_set(target: Path) -> dict[str, Path]:
                 *patch_arguments(package),
             ]
         )
-        archive = REPO_ROOT / "target" / "package" / f"{package}-0.0.1.crate"
+        archive = (
+            REPO_ROOT / "target" / "package" / f"{package}-{PACKAGE_VERSION}.crate"
+        )
         if not archive.is_file():
             raise SystemExit(f"Cargo package archive is missing: {archive}")
         archive = Path(shutil.copy2(archive, target / archive.name))
@@ -249,6 +252,7 @@ def stage() -> None:
     files = sorted(path for path in STAGE.rglob("*") if path.is_file())
     manifest = {
         "checkpoint": CHECKPOINT,
+        "checkpoint_status": "candidate_not_cut",
         "commit": git_commit(),
         "host": platform.platform(),
         "publication": "staged_not_published",

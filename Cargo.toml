@@ -30,7 +30,7 @@ debug = false
 incremental = false
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
@@ -43,15 +43,15 @@ description = "Deterministic agent microkernel, runtime, and bindings"
 license-files = ["licenses/LICENSE-MIT", "licenses/LICENSE-APACHE"]
 
 [workspace.dependencies]
-finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "0.0.1" }
-finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.0.1", default-features = false }
-finstack-ai = { path = "crates/finstack-ai", version = "0.0.1", default-features = false }
-finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.0.1" }
-finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.0.1" }
-finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "0.0.1" }
-finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack-ai-provider-openai-compatible", version = "0.0.1" }
-finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.0.1" }
-finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.0.1" }
+finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "0.0.2" }
+finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.0.2", default-features = false }
+finstack-ai = { path = "crates/finstack-ai", version = "0.0.2", default-features = false }
+finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.0.2" }
+finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.0.2" }
+finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "0.0.2" }
+finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack-ai-provider-openai-compatible", version = "0.0.2" }
+finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.0.2" }
+finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.0.2" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"

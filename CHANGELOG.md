@@ -5,9 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Through pre-1.0, semantic core crates, Python/JavaScript binding distributions, and bundled first-party leaf crates share one lockstep workspace version (`0.0.1` while bootstrapping).
+Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
+and bundled first-party leaf crates share one lockstep workspace version. The
+current staged alpha candidate is `0.0.2`; the exact cross-binding checkpoint
+remains gated on PR-038 and G4.
 
 ## [Unreleased]
+
+### Changed
+
+- Stage the lockstep `0.0.2` alpha candidate with Python conformance,
+  declarative capability activation, complete typing/examples, deterministic
+  checksums/SBOM references, and signed hosted attestations. The exact
+  cross-binding checkpoint remains gated on PR-038 and G4.
 
 ### Added
 

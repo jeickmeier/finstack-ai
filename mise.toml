@@ -258,7 +258,7 @@ uv run --no-project python tools/preview/check.py
 """
 
 [tasks.preview-stage]
-description = "Reproducibly stage the native 0.0.1-dev developer preview"
+description = "Reproducibly stage the current 0.0.2 alpha candidate"
 run = "uv run --no-project python tools/preview/release.py"
 
 [tasks.test-model]
@@ -728,6 +728,25 @@ uv run --isolated --no-project \
   pytest bindings/finstack-ai-python/tests/test_pydantic_adapters.py -q
 """
 
+[tasks.test-python-starters]
+description = "Type-check and run both clean Python starter projects from the built wheel"
+run = """
+set -euo pipefail
+set -- target/python-dist/*.whl
+if [ "$#" -ne 1 ]; then
+  echo 'expected exactly one built wheel in target/python-dist' >&2
+  exit 1
+fi
+uv run --isolated --no-project --with "$1" --with mypy==2.3.0 \
+  mypy --strict examples/python-minimal/rust-backed/main.py
+uv run --isolated --no-project --with "$1" --with mypy==2.3.0 \
+  mypy --strict examples/python-minimal/python-callback/main.py
+uv run --isolated --no-project --with "$1" \
+  python examples/python-minimal/rust-backed/main.py
+uv run --isolated --no-project --with "$1" \
+  python examples/python-minimal/python-callback/main.py
+"""
+
 [tasks.build-python-wheel-ci]
 description = "Build one native macOS wheel for the hosted CPython matrix"
 env = { CARGO_INCREMENTAL = "0", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
@@ -838,6 +857,20 @@ uv run --no-project python tools/python_package/check.py \
   target/python-stage-a target/python-stage-b
 """
 run_windows = "mise run stage-python-windows"
+
+[tasks.stage-python-release]
+description = "Stage reproducible Python 0.0.2 candidate with checksums and CycloneDX SBOM"
+env = { CARGO_INCREMENTAL = "0", MATURIN_NO_INSTALL_RUST = "1", PYTHONDONTWRITEBYTECODE = "1", SOURCE_DATE_EPOCH = "315532800" }
+run = """
+set -euo pipefail
+mise run stage-python
+PYTHONPATH=tools uv run --no-project python -m python_package.release \
+  target/python-stage-a target/python-stage-b target/python-release
+"""
+
+[tasks.test-python-release]
+description = "Test deterministic Python release staging helpers"
+run = "uv run --no-project --with pytest==9.1.1 pytest tools/python_package/tests -q"
 
 [tasks.stage-python-windows]
 description = "Build and inspect Python artifacts from a native Windows shell"
@@ -951,6 +984,24 @@ mise run test-python-pydantic-binding
 mise run test-python-pydantic-wheel
 mise run schema-governance
 mise run architecture
+"""
+
+[tasks.test-pr032]
+description = "Run PR-032 Python conformance, activation, docs, starter, and release-stage proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-kernel --locked
+cargo test -p finstack-ai --locked
+cargo clippy -p finstack-ai-kernel -p finstack-ai -p finstack-ai-python --all-targets --locked -- -D warnings
+mise run test-pr031
+mise run test-python-release
+mise run test-python-starters
+mise run stage-python-release
+mise run docs
+mise run lint-workflows
+mise run schema-governance
+mise run architecture
+mise run supply-chain
 """
 
 [tasks.python-callback-smoke]

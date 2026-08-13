@@ -1,32 +1,32 @@
 //! Native developer-preview execution facade.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
-    BundleResolver, BundleSpec, CompatibilityRequirements, Extension, ExtensionDescriptor,
-    InstructionSpec, ReadyComponent, Registrar, RegistrationError, RegistrationMetadata,
-    ResolvedAgent, RuntimeServices,
+    BundleResolver, BundleSpec, CapabilityActivation, CapabilityRef, CapabilitySpec,
+    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
+    Registrar, RegistrationError, RegistrationMetadata, Registry, ResolvedAgent, RuntimeServices,
 };
 use finstack_ai_kernel::{
-    AcceptRun, AgentId, AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation,
-    BundleId, CancelRequested, CancellationInitiator, CancellationPropagation,
-    CancellationRequestTag, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
-    EffectOutputContract, EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneId,
-    LaneTag, Message, MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag,
-    OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
-    PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
-    RetryClassification, RetryDirective, RetrySafety, RunAccepted, RunPhase, RunPropagationPolicy,
-    RunRelation, RunSecurityContext, RunTag, SchemaRef, Sensitivity, SessionId, SessionTag, Stage,
-    StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock, Timestamp,
-    TransitionEnv, TurnTag, Version,
+    AcceptRun, ActiveCapability, AgentId, AllocatedIds, AppendBatchTag, AuthorizationEvidence,
+    BudgetPropagation, BundleId, CancelRequested, CancellationInitiator, CancellationPropagation,
+    CancellationRequestTag, CapabilitiesActivated, CapabilityActivationSource, CapabilityId,
+    ComponentRef, ContentBlock, DeadlinePropagation, Digest, EffectOutputContract,
+    EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneId, LaneTag, Message, MessageId,
+    MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator, OutputConfiguration,
+    OutputEndStrategy, OutputSpec, OutputValidated, PrincipalPropagation, ProviderIds, RawJson,
+    RecordTag, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
+    RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SchemaRef,
+    Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled, StructuredResultSource,
+    TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag, Version,
 };
 use finstack_ai_runtime::{
     CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
     EventSubscription, EventSubscriptionConfig, IdGenerationError, JsonSchemaToolValidatorCompiler,
-    LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
+    LoadRequest, LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
     ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
     ModelWarmupContext, OsRandomSource, PendingModelEffect, PortFuture, ProgressCoalescing,
@@ -57,6 +57,34 @@ const MAX_CONFIGURED_OUTPUT_RETRIES: u32 = 1_024;
 const DEFAULT_EVENT_BATCH_COUNT: usize = 32;
 const DEFAULT_EVENT_BATCH_BYTES: usize = 64 * 1_024;
 const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
+const MAX_COMPACT_CATALOG_BYTES: usize = 8 * 1_024;
+
+/// One compact model-visible capability catalog entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityCatalogEntry {
+    id: CapabilityId,
+    description: Arc<str>,
+}
+
+impl CapabilityCatalogEntry {
+    /// Borrow the stable capability identity.
+    #[must_use]
+    pub const fn id(&self) -> &CapabilityId {
+        &self.id
+    }
+
+    /// Borrow the compact non-secret description.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+#[derive(Clone)]
+struct ModelCapabilityVariant {
+    entry: CapabilityCatalogEntry,
+    agent: Agent,
+}
 
 /// Immutable native facade over one fully resolved agent.
 #[derive(Clone)]
@@ -64,6 +92,7 @@ pub struct Agent {
     resolved: Arc<ResolvedAgent>,
     tools: Arc<ResolvedToolCatalog>,
     structured_output: Option<StructuredOutputConfig>,
+    model_capabilities: Arc<[ModelCapabilityVariant]>,
 }
 
 #[derive(Clone)]
@@ -157,6 +186,7 @@ impl Agent {
             resolved,
             tools: Arc::new(tools),
             structured_output: None,
+            model_capabilities: Arc::from([]),
         })
     }
 
@@ -184,6 +214,12 @@ impl Agent {
             schema_ref,
             validator,
         });
+        let output = self.structured_output.clone();
+        let mut model_capabilities = self.model_capabilities.to_vec();
+        for variant in &mut model_capabilities {
+            variant.agent.structured_output.clone_from(&output);
+        }
+        self.model_capabilities = model_capabilities.into();
         Ok(self)
     }
 
@@ -191,6 +227,25 @@ impl Agent {
     #[must_use]
     pub fn resolved(&self) -> &Arc<ResolvedAgent> {
         &self.resolved
+    }
+
+    /// Return the bounded model-activated capability catalog in identity order.
+    #[must_use]
+    pub fn capability_catalog(&self) -> Vec<CapabilityCatalogEntry> {
+        self.model_capabilities
+            .iter()
+            .map(|variant| variant.entry.clone())
+            .collect()
+    }
+
+    /// Render the compact catalog supplied to model-facing integrations.
+    #[must_use]
+    pub fn compact_capability_catalog(&self) -> String {
+        self.model_capabilities
+            .iter()
+            .map(|variant| format!("{}: {}", variant.entry.id, variant.entry.description))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Start one bounded native run and return its detached control handle.
@@ -203,7 +258,8 @@ impl Agent {
     /// Returns a stable configuration or runtime error before the background
     /// run task is accepted.
     pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
-        let prepared = self.prepare(request)?;
+        let selected = self.select_for_input(&request.input).clone();
+        let prepared = selected.prepare(request)?;
         let locator = prepared.locator.clone();
         let cancellation_initiator = prepared.cancellation_initiator()?;
         let inner = Arc::new(AgentRunInner {
@@ -218,13 +274,32 @@ impl Agent {
             cancellation_ready: finstack_ai_runtime::native_driver::Signal::new(),
         });
         let execution = Arc::downgrade(&inner);
-        let agent = self.clone();
+        let agent = selected;
         finstack_ai_runtime::native_driver::spawn(Box::pin(async move {
             let result = Box::pin(agent.execute_started(prepared, &execution)).await;
             publish_result(&execution, result);
         }))
         .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
         Ok(AgentRun { inner })
+    }
+
+    fn select_for_input(&self, input: &str) -> &Self {
+        let input_tokens = activation_tokens(input);
+        self.model_capabilities
+            .iter()
+            .filter_map(|variant| {
+                let score = activation_tokens(variant.entry.id.as_str())
+                    .union(&activation_tokens(&variant.entry.description))
+                    .filter(|token| input_tokens.contains(*token))
+                    .count();
+                (score > 0).then_some((score, variant))
+            })
+            .max_by(|(left_score, left), (right_score, right)| {
+                left_score
+                    .cmp(right_score)
+                    .then_with(|| right.entry.id.cmp(&left.entry.id))
+            })
+            .map_or(self, |(_, variant)| &variant.agent)
     }
 
     /// Execute one bounded native run through the commit-before-effect runtime.
@@ -426,6 +501,45 @@ impl Agent {
             }),
         )
         .await?;
+        let lock = self.resolved.lock().ok_or_else(|| {
+            AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "native Agent requires an exact resolved lock",
+            )
+        })?;
+        let active = lock
+            .capabilities
+            .iter()
+            .filter(|capability| capability.active)
+            .map(|capability| ActiveCapability {
+                capability_id: capability.id.clone(),
+                source: match capability.activation {
+                    CapabilityActivation::Always => CapabilityActivationSource::Always,
+                    CapabilityActivation::Application => CapabilityActivationSource::Application,
+                    CapabilityActivation::Model => CapabilityActivationSource::Model,
+                    CapabilityActivation::Disabled => {
+                        unreachable!("a disabled capability cannot be active in a validated lock")
+                    }
+                },
+            })
+            .collect::<Vec<_>>();
+        if !active.is_empty() {
+            submit(
+                handle,
+                NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+                KernelInput::CapabilitiesActivated(CapabilitiesActivated {
+                    prior_plan_digest: None,
+                    resolved_plan_digest: lock.fingerprint().map_err(|error| {
+                        AgentRunError::configuration(
+                            AGENT_RUN_INVALID_CONFIGURATION,
+                            error.to_string(),
+                        )
+                    })?,
+                    active: active.into(),
+                }),
+            )
+            .await?;
+        }
         if let Some(output) = &self.structured_output {
             submit(
                 handle,
@@ -616,7 +730,7 @@ impl Agent {
                 StageIds::finalize(),
             )
             .await?;
-            let terminal = recover_state(store, session_id).await?;
+            let terminal = recover_state(Arc::clone(&store), session_id).await?;
             let TerminalState::Completed(completed) = terminal
                 .terminal
                 .as_ref()
@@ -632,10 +746,22 @@ impl Agent {
                 .find(|message| message.id() == &completed.result_message_id)
                 .cloned()
                 .ok_or_else(|| AgentRunError::runtime_message("result message is missing"))?;
+            let loaded = store
+                .load(LoadRequest { session_id })
+                .await
+                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+            let record_kinds = loaded
+                .committed_batches
+                .iter()
+                .flat_map(|batch| batch.records.iter())
+                .map(|record| Arc::from(record.body().kind_name()))
+                .collect::<Vec<_>>();
             return Ok(AgentRunOutput {
                 locator,
                 message,
                 retry_attempts: terminal.retry.attempts,
+                active_capabilities: terminal.active_capabilities.clone(),
+                record_kinds: record_kinds.into(),
             });
         }
     }
@@ -1045,6 +1171,8 @@ pub struct NativeAgentBuilder {
     store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     instructions: Vec<InstructionSpec>,
+    capabilities: Vec<CapabilitySpec>,
+    active_application: BTreeSet<CapabilityId>,
 }
 
 impl NativeAgentBuilder {
@@ -1061,6 +1189,8 @@ impl NativeAgentBuilder {
             store,
             toolsets: Vec::new(),
             instructions: Vec::new(),
+            capabilities: Vec::new(),
+            active_application: BTreeSet::new(),
         }
     }
 
@@ -1084,6 +1214,20 @@ impl NativeAgentBuilder {
         self
     }
 
+    /// Add one validated declarative capability to the finite catalog.
+    #[must_use]
+    pub fn capability(mut self, capability: CapabilitySpec) -> Self {
+        self.capabilities.push(capability);
+        self
+    }
+
+    /// Select one application capability for the initial immutable plan.
+    #[must_use]
+    pub fn activate_application(mut self, capability: CapabilityId) -> Self {
+        self.active_application.insert(capability);
+        self
+    }
+
     /// Resolve, warm, lock, and construct one native [`Agent`].
     ///
     /// # Errors
@@ -1091,11 +1235,7 @@ impl NativeAgentBuilder {
     /// Fails closed on non-exact or duplicate components and all ordinary
     /// registry, bundle, warmup, and tool-catalog failures.
     pub async fn build(self) -> Result<Agent, AgentRunError> {
-        validate_exact_component(&self.model.0)?;
-        validate_exact_component(&self.store.0)?;
-        for (component, _) in &self.toolsets {
-            validate_exact_component(component)?;
-        }
+        validate_builder_components(&self)?;
         let extension = NativeBuilderExtension {
             source: finstack_ai_kernel::ComponentId::parse("finstack.sdk.native-builder").map_err(
                 |error| {
@@ -1111,6 +1251,15 @@ impl NativeAgentBuilder {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;
         let mut registry = registrar.into_registry();
+        validate_compact_catalog(&self.capabilities)?;
+        let capability_refs = self
+            .capabilities
+            .iter()
+            .map(|capability| CapabilityRef {
+                id: capability.id.clone(),
+                bundle: None,
+            })
+            .collect::<Vec<_>>();
         let spec = AgentBuilder::new(
             self.agent_id.clone(),
             self.model.0.clone(),
@@ -1123,6 +1272,7 @@ impl NativeAgentBuilder {
                 .map(|(component, _)| component.clone())
                 .collect::<Vec<_>>(),
         )
+        .capabilities(capability_refs)
         .build()
         .map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
@@ -1134,7 +1284,7 @@ impl NativeAgentBuilder {
                 id: self.bundle_id.clone(),
                 version: PREVIEW_ENGINE_VERSION,
                 agents: Arc::from([spec]),
-                capabilities: Arc::from([]),
+                capabilities: self.capabilities.clone().into(),
                 requirements: Arc::from([]),
                 conflicts: Arc::from([]),
                 defaults: BundleDefaults::default(),
@@ -1162,8 +1312,119 @@ impl NativeAgentBuilder {
             .map_err(|error| {
                 AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
             })?;
-        Agent::try_from_resolved(Arc::new(composed_agent))
+        let composed_agent = if self.active_application.is_empty() {
+            composed_agent
+        } else {
+            bundle_resolver
+                .activate_application(
+                    &mut registry,
+                    &composed_agent,
+                    self.active_application,
+                    AgentConstructionContext::new(),
+                )
+                .await
+                .map_err(|error| {
+                    AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+                })?
+        };
+        let mut agent = Agent::try_from_resolved(Arc::new(composed_agent))?;
+        let variants =
+            resolve_model_variants(&self.capabilities, &bundle_resolver, &mut registry, &agent)
+                .await?;
+        agent.model_capabilities = variants.into();
+        Ok(agent)
     }
+}
+
+fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), AgentRunError> {
+    validate_exact_component(&builder.model.0)?;
+    validate_exact_component(&builder.store.0)?;
+    for (component, _) in &builder.toolsets {
+        validate_exact_component(component)?;
+    }
+    Ok(())
+}
+
+async fn resolve_model_variants(
+    capabilities: &[CapabilitySpec],
+    bundle_resolver: &BundleResolver<'_>,
+    registry: &mut Registry,
+    agent: &Agent,
+) -> Result<Vec<ModelCapabilityVariant>, AgentRunError> {
+    let mut variants = Vec::new();
+    for capability in capabilities
+        .iter()
+        .filter(|capability| capability.activation == CapabilityActivation::Model)
+    {
+        let resolved = bundle_resolver
+            .activate_model(
+                registry,
+                agent.resolved(),
+                [capability.id.clone()],
+                AgentConstructionContext::new(),
+            )
+            .await
+            .map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })?;
+        variants.push(ModelCapabilityVariant {
+            entry: CapabilityCatalogEntry {
+                id: capability.id.clone(),
+                description: Arc::clone(&capability.description),
+            },
+            agent: Agent::try_from_resolved(Arc::new(resolved))?,
+        });
+    }
+    Ok(variants)
+}
+
+fn validate_compact_catalog(capabilities: &[CapabilitySpec]) -> Result<(), AgentRunError> {
+    let mut ids = BTreeSet::new();
+    let mut bytes = 0usize;
+    for capability in capabilities {
+        capability.validate().map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        if !ids.insert(capability.id.clone()) {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                format!("duplicate capability {}", capability.id),
+            ));
+        }
+        if capability.activation == CapabilityActivation::Model {
+            bytes = bytes
+                .checked_add(capability.id.as_str().len())
+                .and_then(|value| value.checked_add(capability.description.len()))
+                .and_then(|value| value.checked_add(3))
+                .ok_or_else(|| {
+                    AgentRunError::configuration(
+                        AGENT_RUN_INVALID_CONFIGURATION,
+                        "compact capability catalog size overflow",
+                    )
+                })?;
+        }
+    }
+    if bytes > MAX_COMPACT_CATALOG_BYTES {
+        return Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            format!("compact capability catalog exceeds {MAX_COMPACT_CATALOG_BYTES} bytes"),
+        ));
+    }
+    Ok(())
+}
+
+fn activation_tokens(value: &str) -> BTreeSet<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|token| token.len() >= 4)
+        .filter(|token| {
+            !matches!(
+                token.as_str(),
+                "capability" | "model" | "with" | "from" | "that" | "this"
+            )
+        })
+        .collect()
 }
 
 const PREVIEW_ENGINE_VERSION: Version = Version {
@@ -1292,6 +1553,10 @@ pub struct AgentRunOutput {
     pub message: Message,
     /// Durable retry attempts consumed by the completed run.
     pub retry_attempts: u32,
+    /// Complete sorted active capability set committed for this run.
+    pub active_capabilities: Arc<[ActiveCapability]>,
+    /// Stable committed record-kind trace in journal order.
+    pub record_kinds: Arc<[Arc<str>]>,
 }
 
 impl AgentRunOutput {
@@ -1321,6 +1586,18 @@ impl AgentRunOutput {
     #[must_use]
     pub const fn retry_attempts(&self) -> u32 {
         self.retry_attempts
+    }
+
+    /// Borrow the complete committed active capability set.
+    #[must_use]
+    pub fn active_capabilities(&self) -> &[ActiveCapability] {
+        &self.active_capabilities
+    }
+
+    /// Borrow the stable committed record-kind trace in journal order.
+    #[must_use]
+    pub fn record_kinds(&self) -> &[Arc<str>] {
+        &self.record_kinds
     }
 }
 
@@ -2046,6 +2323,34 @@ mod tests {
             security(),
         )
         .expect("request")
+    }
+
+    #[test]
+    fn compact_model_catalog_is_bounded_and_tokenized_deterministically() {
+        let oversized = CapabilitySpec {
+            id: CapabilityId::parse("test.capability.oversized").expect("capability id"),
+            description: Arc::from("x".repeat(MAX_COMPACT_CATALOG_BYTES + 1)),
+            instructions: Arc::from([]),
+            toolsets: Arc::from([]),
+            context_providers: Arc::from([]),
+            middleware: Arc::from([]),
+            activation: CapabilityActivation::Model,
+        };
+        let error = validate_compact_catalog(&[oversized]).expect_err("catalog must be bounded");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(
+            error
+                .to_string()
+                .contains("compact capability catalog exceeds")
+        );
+        assert_eq!(
+            activation_tokens("Research this capability: financial-statements"),
+            BTreeSet::from([
+                "financial".to_owned(),
+                "research".to_owned(),
+                "statements".to_owned(),
+            ])
+        );
     }
 
     #[tokio::test]

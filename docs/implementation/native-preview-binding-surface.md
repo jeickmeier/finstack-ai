@@ -1,6 +1,6 @@
 # Native developer-preview binding surface
 
-Status: candidate at `0.0.1-dev` (PR-026)
+Status: `0.0.2-alpha-candidate`; Python half in PR-032, exact checkpoint waits for PR-038/G4
 
 The candidate Rust surface is:
 

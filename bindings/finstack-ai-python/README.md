@@ -8,10 +8,14 @@ PR-030 adds trusted coarse Python adapters for Model, Toolset,
 ContextProvider, Middleware, and batched Observer ports.
 PR-031 adds optional Pydantic tool and structured-output ergonomics while the
 Rust validator and kernel continue to own schema outcomes and retries.
+PR-032 completes the Python alpha candidate with shared golden traces,
+declarative capability activation, starter projects, API/migration references,
+and staged checksums/SBOM/attestations.
 
 ```bash
 mise run python-develop
 mise run test-pr031
+mise run test-pr032
 ```
 
 The initial distribution links the Rust-backed OpenAI-compatible provider into
@@ -103,3 +107,10 @@ registration with the exact keyword and JSON pointer. Call
 annotations have intentionally changed.
 
 See the repository [README](../../README.md) for project bootstrap and documentation routing. License texts are centralized under [`../../licenses/`](../../licenses/).
+
+The complete alpha surface is summarized in the
+[API reference](docs/api-reference.md), with
+[0.0.2 migration notes](docs/migration-0.0.2.md) and
+[benchmark evidence](docs/benchmarks.md). The two
+[Python starter projects](../../examples/python-minimal/) are checked against
+the installed wheel without a compiler.
