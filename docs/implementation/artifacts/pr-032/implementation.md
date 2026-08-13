@@ -62,8 +62,10 @@ Branch: `codex/pr-032-python-release-staging`
 - Model selection is a small deterministic token-overlap activation heuristic,
   not free-form model-authored component loading or an authorization decision.
 - The staged wheel is per-interpreter and platform-specific; hosted PR-032
-  evidence must still prove the complete approved matrix and compiler-free
-  installation.
+  evidence includes a complete approved-matrix pass at evidence head
+  `bc1403f15062e599bf6b7140ec69da28e55a9a7f`. Subsequent PR-032 through PR-038
+  hosted builds use the temporary Linux-only envelope recorded in
+  `linux-only-envelope.txt`; later-platform absence is not a passing claim.
 - No PyPI publication, Git tag, GitHub release, hosted pull request/merge,
   independent review, browser/WASM binding, WIT/plugin host, or durable restart
   claim is introduced.

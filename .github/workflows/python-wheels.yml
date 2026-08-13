@@ -1,4 +1,6 @@
 # Required PR-027 per-interpreter wheel and source-distribution matrix.
+# PR-032 through PR-038 use the user-authorized temporary Linux-only envelope;
+# the full cross-platform matrix is revisited at the end of that range.
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, pushes to main, and workflow_dispatch.
 
@@ -37,12 +39,6 @@ jobs:
           - name: manylinux-aarch64
             runner: ubuntu-24.04-arm
             target: aarch64
-          - name: macos-arm64
-            runner: macos-15
-            target: aarch64
-          - name: windows-x64
-            runner: windows-2025
-            target: x64
         python: ["3.11", "3.12", "3.13", "3.14", "3.14t"]
     steps:
       - name: Checkout
@@ -70,20 +66,6 @@ jobs:
           manylinux: 2_28
           before-script-linux: dnf install -y perl-IPC-Cmd perl-Time-Piece
           sccache: false
-
-      - name: Build native wheel
-        if: runner.os == 'macOS'
-        env:
-          PYTHON_VERSION: ${{ matrix.python }}
-          PYTHON_DIST_DIR: dist
-        run: mise run build-python-wheel-ci
-
-      - name: Build native Windows wheel
-        if: runner.os == 'Windows'
-        env:
-          PYTHON_VERSION: ${{ matrix.python }}
-          PYTHON_DIST_DIR: dist
-        run: mise run build-python-wheel-windows-ci
 
       - name: Install and smoke wheel
         env:

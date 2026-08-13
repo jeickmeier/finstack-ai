@@ -48,6 +48,16 @@ Plan baseline: documentation pack v0.20 / PLAN-0.18
    wheel/CI/security/release-staging, and post-merge checks; bind immutable
    candidate, hosted, security-review, and integration evidence.
 
+## Temporary hosted execution envelope
+
+On 2026-08-13, the user authorized Linux-only hosted builds for PR-032 through
+PR-038 and deferred restoration of macOS and Windows jobs until the end of the
+range. The exact scope, retained PR-032 full-matrix evidence, cancellation, and
+nonclaims are recorded in
+[`linux-only-envelope.txt`](linux-only-envelope.txt). This changes future hosted
+execution cost; it does not convert deferred-platform absence into passing
+evidence.
+
 ## Current documentation baseline
 
 Context7 was queried for the current Sigstore GitHub Actions contract. Sigstore

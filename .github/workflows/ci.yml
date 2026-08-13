@@ -1,4 +1,6 @@
-# Required cross-platform CI for PR-003.
+# Required CI for PR-003.
+# PR-032 through PR-038 use the user-authorized temporary Linux-only envelope;
+# the full cross-platform matrix is revisited at the end of that range.
 # Owner: me@jeickmeier.com
 # Cadence: every pull request, pushes to main, and workflow_dispatch.
 # Path filters: none for required checks (PR-003-A01).
@@ -113,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04]
         channel: [stable]
     steps:
       - name: Checkout
@@ -216,7 +218,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
