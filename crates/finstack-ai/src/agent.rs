@@ -14,12 +14,14 @@ use finstack_ai_kernel::{
     AcceptRun, AgentId, AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation,
     BundleId, CancelRequested, CancellationInitiator, CancellationPropagation,
     CancellationRequestTag, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
-    EffectOutputContract, EffectOutputKind, EventTag, KernelInput, LaneId, LaneTag, Message,
-    MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator,
-    PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome, RetrySafety,
-    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
-    Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled, TerminalState, TextBlock,
-    Timestamp, TransitionEnv, TurnTag, Version,
+    EffectOutputContract, EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneId,
+    LaneTag, Message, MessageId, MessageRole, MessageTag, Metadata, ModelRequestTag,
+    OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
+    PrincipalPropagation, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
+    RetryClassification, RetryDirective, RetrySafety, RunAccepted, RunPhase, RunPropagationPolicy,
+    RunRelation, RunSecurityContext, RunTag, SchemaRef, Sensitivity, SessionId, SessionTag, Stage,
+    StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock, Timestamp,
+    TransitionEnv, TurnTag, Version,
 };
 use finstack_ai_runtime::{
     CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
@@ -29,8 +31,9 @@ use finstack_ai_runtime::{
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
     ModelWarmupContext, OsRandomSource, PendingModelEffect, PortFuture, ProgressCoalescing,
     ReconcileContext, ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
-    SideEffectClass, SystemClock, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
-    ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration, UuidV7Generator,
+    SideEffectClass, StructuredOutputCapability, SystemClock, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, UuidV7Generator,
     resolve_model_context_profile,
 };
 use thiserror::Error;
@@ -49,6 +52,8 @@ pub const AGENT_RUN_CANCELLED: &str = "agent_run_cancelled";
 const DEFAULT_QUEUE_CAPACITY: usize = 32;
 const DEFAULT_MAX_CYCLES: u64 = 16;
 const MAX_CONFIGURED_CYCLES: u64 = 1_024;
+const DEFAULT_MAX_OUTPUT_RETRIES: u32 = 1;
+const MAX_CONFIGURED_OUTPUT_RETRIES: u32 = 1_024;
 const DEFAULT_EVENT_BATCH_COUNT: usize = 32;
 const DEFAULT_EVENT_BATCH_BYTES: usize = 64 * 1_024;
 const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
@@ -58,6 +63,13 @@ const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
 pub struct Agent {
     resolved: Arc<ResolvedAgent>,
     tools: Arc<ResolvedToolCatalog>,
+    structured_output: Option<StructuredOutputConfig>,
+}
+
+#[derive(Clone)]
+struct StructuredOutputConfig {
+    schema_ref: SchemaRef,
+    validator: Arc<dyn ToolValidator>,
 }
 
 impl Agent {
@@ -144,7 +156,35 @@ impl Agent {
         Ok(Self {
             resolved,
             tools: Arc::new(tools),
+            structured_output: None,
         })
+    }
+
+    /// Return an agent configured for one compile-once Draft 2020-12 output schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable configuration error when the schema cannot be compiled
+    /// by the canonical offline Rust validator.
+    pub fn try_with_output_schema(mut self, schema: &RawJson) -> Result<Self, AgentRunError> {
+        let validator = JsonSchemaToolValidatorCompiler
+            .compile(schema, &BTreeMap::new())
+            .map_err(|error| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    format!("structured output schema is invalid: {}", error.message()),
+                )
+            })?;
+        let schema_ref = SchemaRef {
+            draft: JsonSchemaDraft::Draft202012,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(schema.as_bytes()),
+        };
+        self.structured_output = Some(StructuredOutputConfig {
+            schema_ref,
+            validator,
+        });
+        Ok(self)
     }
 
     /// Borrow the exact resolved composition retained by this facade.
@@ -202,6 +242,14 @@ impl Agent {
         let model = Arc::clone(plan.model().handle());
         validate_model_name(model.as_ref(), &request.model)?;
         let capabilities = model.capabilities(&request.model);
+        if self.structured_output.is_some()
+            && capabilities.structured_output == StructuredOutputCapability::Unsupported
+        {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "selected model does not support structured output",
+            ));
+        }
         let profile = resolve_model_context_profile(
             capabilities.context_profile,
             None,
@@ -230,6 +278,16 @@ impl Agent {
                 .map_err(|error| {
                     AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
                 })?;
+        let mut limits = spec.limits.clone();
+        if self.structured_output.is_some() {
+            limits.max_retries = Some(
+                limits
+                    .max_retries
+                    .map_or(request.max_output_retries, |limit| {
+                        limit.min(request.max_output_retries)
+                    }),
+            );
+        }
         let accepted = RunAccepted::try_new(
             run_id,
             RunRelation::root(run_id).map_err(|error| {
@@ -237,7 +295,7 @@ impl Agent {
             })?,
             request.security.clone(),
             None,
-            spec.limits.clone(),
+            limits,
             RunPropagationPolicy {
                 cancellation: CancellationPropagation::Cascade,
                 deadline: DeadlinePropagation::MinimumOfParentAndChild,
@@ -368,6 +426,19 @@ impl Agent {
             }),
         )
         .await?;
+        if let Some(output) = &self.structured_output {
+            submit(
+                handle,
+                NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+                KernelInput::ConfigureOutput(OutputConfiguration {
+                    output: OutputSpec::JsonSchema {
+                        schema: output.schema_ref.clone(),
+                    },
+                    end_strategy: OutputEndStrategy::Early,
+                }),
+            )
+            .await?;
+        }
         submit_stage(
             handle,
             0,
@@ -403,6 +474,11 @@ impl Agent {
                     .map(|turn| Arc::clone(&turn.context.messages))
                     .ok_or_else(|| AgentRunError::runtime_message("prepared context is missing"))?,
                 self.tools.tools().map(|tool| tool.spec.clone()).collect(),
+                self.structured_output
+                    .as_ref()
+                    .map_or(OutputSpec::PlainText, |output| OutputSpec::JsonSchema {
+                        schema: output.schema_ref.clone(),
+                    }),
                 request.settings.clone(),
                 &profile,
             )?;
@@ -424,7 +500,7 @@ impl Agent {
             )
             .await?;
 
-            let after_model = wait_for_phase(
+            let mut after_model = wait_for_phase(
                 handle,
                 Arc::clone(&store),
                 session_id,
@@ -437,6 +513,29 @@ impl Agent {
             )
             .await?;
             ensure_nonterminal_failure(&after_model)?;
+            if let Some(output) = &self.structured_output
+                && after_model.phase == Some(RunPhase::AfterModel)
+            {
+                let (message_id, candidate, source) = structured_candidate(&after_model)
+                    .ok_or_else(|| {
+                        AgentRunError::runtime_message(
+                            "structured model response did not contain a JSON candidate",
+                        )
+                    })?;
+                submit(
+                    handle,
+                    NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+                    KernelInput::OutputValidated(OutputValidated {
+                        message_id,
+                        schema: output.schema_ref.clone(),
+                        candidate: candidate.clone(),
+                        source,
+                        outcome: output.validator.validate(&candidate),
+                    }),
+                )
+                .await?;
+                after_model = recover_state(Arc::clone(&store), session_id).await?;
+            }
             let next = if after_model.phase == Some(RunPhase::BeforeFinalize) {
                 after_model
             } else {
@@ -474,6 +573,41 @@ impl Agent {
                 continue;
             }
 
+            if next
+                .validation_failure
+                .as_ref()
+                .is_some_and(|failure| failure.error.retryable)
+            {
+                submit_stage(
+                    handle,
+                    next.cycle,
+                    Stage::BeforeFinalize,
+                    ReducerStageOutcome::Retry(
+                        RetryDirective::try_new(
+                            RetryClassification::Validation,
+                            finstack_ai_kernel::Duration::from_millis(1),
+                            "native-structured-output-v1",
+                        )
+                        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
+                    ),
+                    StageIds::retry(),
+                )
+                .await?;
+                let retry = wait_for_phase(
+                    handle,
+                    Arc::clone(&store),
+                    session_id,
+                    &[
+                        RunPhase::PreparingContext,
+                        RunPhase::Failed,
+                        RunPhase::Cancelled,
+                    ],
+                )
+                .await?;
+                ensure_nonterminal_failure(&retry)?;
+                continue;
+            }
+
             submit_stage(
                 handle,
                 next.cycle,
@@ -498,7 +632,11 @@ impl Agent {
                 .find(|message| message.id() == &completed.result_message_id)
                 .cloned()
                 .ok_or_else(|| AgentRunError::runtime_message("result message is missing"))?;
-            return Ok(AgentRunOutput { locator, message });
+            return Ok(AgentRunOutput {
+                locator,
+                message,
+                retry_attempts: terminal.retry.attempts,
+            });
         }
     }
 
@@ -1096,6 +1234,8 @@ pub struct AgentRunRequest {
     pub timeout: Duration,
     /// Maximum number of model cycles.
     pub max_cycles: u64,
+    /// Maximum structured-output validation retries.
+    pub max_output_retries: u32,
 }
 
 impl AgentRunRequest {
@@ -1120,6 +1260,7 @@ impl AgentRunRequest {
             },
             timeout: Duration::from_secs(30),
             max_cycles: DEFAULT_MAX_CYCLES,
+            max_output_retries: DEFAULT_MAX_OUTPUT_RETRIES,
         };
         request.validate()?;
         Ok(request)
@@ -1131,6 +1272,7 @@ impl AgentRunRequest {
             || self.timeout.is_zero()
             || self.max_cycles == 0
             || self.max_cycles > MAX_CONFIGURED_CYCLES
+            || self.max_output_retries > MAX_CONFIGURED_OUTPUT_RETRIES
         {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -1148,6 +1290,8 @@ pub struct AgentRunOutput {
     pub locator: OperationLocator,
     /// Final committed assistant message.
     pub message: Message,
+    /// Durable retry attempts consumed by the completed run.
+    pub retry_attempts: u32,
 }
 
 impl AgentRunOutput {
@@ -1162,6 +1306,21 @@ impl AgentRunOutput {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Borrow the structured JSON result when the final message contains one.
+    #[must_use]
+    pub fn structured_json(&self) -> Option<&RawJson> {
+        self.message.content().iter().find_map(|block| match block {
+            ContentBlock::Json(value) => Some(value.value()),
+            _ => None,
+        })
+    }
+
+    /// Return the durable retry-attempt count.
+    #[must_use]
+    pub const fn retry_attempts(&self) -> u32 {
+        self.retry_attempts
     }
 }
 
@@ -1354,6 +1513,10 @@ impl StageIds {
         Self::new(2, 1, 0, 0, 0, 0)
     }
 
+    const fn retry() -> Self {
+        Self::new(3, 1, 1, 0, 0, 0)
+    }
+
     const fn new(
         records: usize,
         events: usize,
@@ -1477,6 +1640,7 @@ fn model_draft(
     model: ModelName,
     messages: Arc<[Message]>,
     tools: Vec<finstack_ai_runtime::ToolSpec>,
+    output: OutputSpec,
     settings: ModelSettings,
     profile: &LockedModelContextProfile,
 ) -> Result<ModelRequestDraft, AgentRunError> {
@@ -1494,7 +1658,7 @@ fn model_draft(
         model,
         messages,
         tools: tools.into(),
-        output: finstack_ai_kernel::OutputSpec::PlainText,
+        output,
         settings,
         limits: ModelRequestLimits {
             max_input_bytes: profile.profile.hard_input_bytes,
@@ -1502,6 +1666,38 @@ fn model_draft(
             max_output_tokens: profile.profile.reserved_output_tokens,
         },
     })
+}
+
+fn structured_candidate(
+    state: &finstack_ai_kernel::KernelState,
+) -> Option<(MessageId, RawJson, StructuredResultSource)> {
+    let message = state.messages.last()?;
+    for (index, block) in message.content().iter().enumerate() {
+        match block {
+            ContentBlock::Json(value) => {
+                return Some((
+                    *message.id(),
+                    value.value().clone(),
+                    StructuredResultSource::JsonBlock {
+                        content_index: u32::try_from(index).ok()?,
+                    },
+                ));
+            }
+            ContentBlock::ToolCall(call)
+                if call.tool_name() == finstack_ai_kernel::SUBMIT_FINAL_OUTPUT_TOOL =>
+            {
+                return Some((
+                    *message.id(),
+                    call.arguments().clone(),
+                    StructuredResultSource::InternalTool {
+                        tool_call_id: *call.tool_call_id(),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn model_output_contract() -> EffectOutputContract {

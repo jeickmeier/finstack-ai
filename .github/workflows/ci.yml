@@ -175,7 +175,7 @@ jobs:
           uv run --no-project python tools/benchmark/run.py compile
 
       - name: Python package validation
-        run: mise run test-pr030
+        run: mise run test-pr031
 
   coverage:
     name: coverage

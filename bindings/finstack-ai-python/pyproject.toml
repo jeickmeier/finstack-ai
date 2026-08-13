@@ -18,6 +18,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+pydantic = ["pydantic>=2.12.5,<3"]
+
 [build-system]
 requires = ["maturin==1.14.1"]
 build-backend = "maturin"

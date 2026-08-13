@@ -684,7 +684,17 @@ run = """
 uv run --no-cache --isolated --no-project \
   --with-editable bindings/finstack-ai-python \
   --with pytest==9.1.1 \
-  pytest bindings/finstack-ai-python/tests -q
+pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.test-python-pydantic-binding]
+description = "Run the optional Pydantic adapter and retry-parity tests"
+run = """
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  --with pydantic==2.12.5 \
+  pytest bindings/finstack-ai-python/tests/test_pydantic_adapters.py -q
 """
 
 [tasks.test-python-wheel]
@@ -700,6 +710,22 @@ uv run --isolated --no-project \
   --with "$1" \
   --with pytest==9.1.1 \
   pytest bindings/finstack-ai-python/tests -q
+"""
+
+[tasks.test-python-pydantic-wheel]
+description = "Install the built wheel with the optional Pydantic extra and run adapter tests"
+run = """
+set -euo pipefail
+set -- target/python-dist/*.whl
+if [ "$#" -ne 1 ]; then
+  echo 'expected exactly one built wheel in target/python-dist' >&2
+  exit 1
+fi
+uv run --isolated --no-project \
+  --with "$1" \
+  --with pytest==9.1.1 \
+  --with pydantic==2.12.5 \
+  pytest bindings/finstack-ai-python/tests/test_pydantic_adapters.py -q
 """
 
 [tasks.build-python-wheel-ci]
@@ -767,6 +793,7 @@ esac
 uv run --python "${PYTHON_VERSION}" --isolated --no-project \
   --with "$1" \
   --with pytest==9.1.1 \
+  --with pydantic==2.12.5 \
   pytest bindings/finstack-ai-python/tests -q
 """
 
@@ -908,6 +935,20 @@ cargo check -p finstack-ai-python --features callback-fixture --locked
 cargo clippy -p finstack-ai-python --all-targets --features callback-fixture --locked -- -D warnings
 mise run test-pr029
 mise run python-callback-smoke
+mise run schema-governance
+mise run architecture
+"""
+
+[tasks.test-pr031]
+description = "Run PR-031 Pydantic schema, tool, structured-output, and parity proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai agent::tests --locked
+cargo clippy -p finstack-ai --all-targets --locked -- -D warnings
+cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings
+mise run test-pr030
+mise run test-python-pydantic-binding
+mise run test-python-pydantic-wheel
 mise run schema-governance
 mise run architecture
 """

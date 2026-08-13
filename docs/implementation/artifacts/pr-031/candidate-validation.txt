@@ -1,0 +1,100 @@
+PR-031 immutable local candidate validation
+Date: 2026-08-12
+Candidate: ee5d8c5f345917d11a08742751127a1730a6f822
+Tree: a47ffc6a48655834b4f67fc6a8830a171756222f
+Branch: codex/pr-031-pydantic-adapters
+Baseline: 73e2863cd090dd0a88b5f91c2c69987856685193
+Environment: Darwin 25.5.0 arm64; macOS 26.5.2 (25F84);
+             rustc/cargo 1.97.1; Python 3.14.3; uv 0.10.11;
+             mise 2026.8.3 macos-arm64
+
+PASS  mise run test-pr031
+      - native Agent tests and all-target Rust/PyO3 Clippy pass with warnings
+        denied on the default, benchmark-fixture, and callback-fixture graphs
+      - the base editable and installed-wheel suites each pass 24 tests with
+        two intentional optional/fixture skips; top-level package import does
+        not require or import Pydantic and creates no runtime thread/network I/O
+      - pinned Pydantic 2.12.5 editable and installed-wheel suites each pass all
+        seven focused adapter tests
+      - BaseModel structured output, dataclass, TypedDict, list and arbitrary
+        TypeAdapter-compatible shapes cross the Python boundary exactly once
+      - @tool schemas generate once and remain cached until explicit
+        refresh_schema(); input/output schemas are registered and compiled once
+      - invalid model arguments are rejected with tool_arguments_invalid before
+        Python entry; invalid Python results re-enter the Rust output validator
+        and settle with tool_output_invalid
+      - one invalid structured result produces a kernel-owned validation retry,
+        a durable timer attempt, and a typed successful result on the next cycle
+      - unsupported minLength is rejected at registration with exact pointer
+        /properties/value/minLength; non-object structured roots fail precisely
+      - Ruff lint/format, strict mypy, schema governance, and architecture pass
+      - inherited PR-027 through PR-030 package, fast-path, callback, feature,
+        release-wheel, and public port-conformance proofs pass
+      - default sdist and wheel build twice, compare byte-for-byte, and remain
+        within the 10 MiB package budget
+
+PASS  inherited native fast-path regression proof
+      workload: 512 model deltas/run, 64 runs/sample, 5 alternating samples
+      native runs median: 149,536,000 ns
+      Python runs median: 156,964,458 ns
+      binding overhead: 4.9676719987% (target <= 10%; Passed)
+      native throughput: 219,131 model deltas/s
+      Python throughput: 208,761 model deltas/s
+      FFI delivery: 21 batches / 512 model deltas / 517 logical events
+      Python callbacks in fast-path workload: 0
+      Python traced peak allocation: 5,056 bytes (Rust allocator excluded)
+      native idle-session reference: 61,952 bytes/session
+      Python idle benchmark handle pair: 96 traced Python bytes/pair
+      concurrency: 2/2 Rust streams entered before release; Passed
+
+WARN  NFR-PERF-005 idle-session target
+      The measured native reference is 61,952 bytes/session versus the future
+      32,768-byte target. This remains a warning/regression datum pending the
+      PR-063 ratification gate and is not claimed as passing by PR-031.
+
+PASS  mise run ci
+      - repository aggregate formatting, workspace Clippy/tests/rustdoc,
+        minimal graphs, native/browser-WASM checks, architecture, schemas,
+        benchmark/CI helpers, workflow checks, supply chain, secret scan/canary,
+        release smoke, and inherited Python package validation all pass
+      - existing cargo-deny duplicate and unmatched-license allow-list notices
+        remain non-failing warnings; policy returned success
+
+Reproducible default local artifacts:
+  sdist sha256 5ab15db93de2a5418e23bd27e51837e1df9f1046c47922a6edde37211043931a
+  sdist bytes 577346
+  wheel sha256 3b4817661b2fbbfe687a5410dd78fd48060fd72c9acf69009a88696b37fdb489
+  wheel bytes 3711889
+
+Durable command-log identities:
+  focused sha256 9642e571104b6a373e7d5ffed395924ca6b0f27953af8f55123e75d0cc276b78
+  focused local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786580171_mise_run_test-pr031.log
+  aggregate sha256 2d9b2f5f31437c243a6dd76a7e92d8e4fd6183d15dcfd0e870bdf7f18e6190cc
+  aggregate local path /Users/jeickmeier/Library/Application Support/rtk/tee/1786580789_mise_run_ci.log
+
+Retained local failure and correction:
+  - candidate ab04347628c47f4a83213e6502ef656199c6853b passed focused
+    default Rust/Python/Pydantic tests, but the first canonical test-pr031 run
+    reached the inherited benchmark-fixture graph and found the new request
+    argument/output-adapter field missing from that non-default fixture
+  - ee5d8c5f345917d11a08742751127a1730a6f822 adds only those two fixture
+    values; combined benchmark/callback feature check and Clippy pass, followed
+    by complete test-pr031 and aggregate CI success
+
+Review disposition:
+  - Rust remains the canonical offline Draft 2020-12 compiler/validator and the
+    kernel receives only normalized OutputValidated success/failure outcomes
+  - Pydantic TypeAdapters are cached at registration and used only when raw JSON
+    crosses into or out of trusted Python objects
+  - the normalizer has a 64-level traversal bound, closed objects, required
+    provider properties, local-only references, and exact unsupported-pointer
+    diagnostics; no ambient schema retrieval exists
+  - commit-before-effect ordering is retained for output configuration,
+    validation outcomes, retry scheduling, and durable timer execution
+  - no seventh primary port, eighth middleware stage, kernel I/O, protocol/WIT
+    policy change, native dynamic loading, or Python-owned orchestration is added
+
+No independent review or approval is claimed by this record. No actual pull
+request, hosted merge, package publication, live credentialed provider,
+browser/WASM binding ergonomics, PR-063 budget ratification, or G4 approval is
+claimed.

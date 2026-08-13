@@ -23,6 +23,7 @@ from ._finstack_ai import (
     Session,
     TimeoutError,
 )
+from ._pydantic import PydanticTool, pydantic_toolset, tool
 
 __version__ = _native.__version__
 
@@ -105,6 +106,7 @@ __all__ = [
     "PythonModel",
     "PythonObserver",
     "PythonToolset",
+    "PydanticTool",
     "Run",
     "RunResult",
     "RuntimeError",
@@ -115,4 +117,6 @@ __all__ = [
     "health",
     "linked_providers",
     "normalize_prebeta_shape",
+    "pydantic_toolset",
+    "tool",
 ]
