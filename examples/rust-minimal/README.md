@@ -9,5 +9,5 @@ surface:
 - `service` resolves once, checks component health, and handles one request.
 - `diagnostic` prints credential-free `AgentSpec` and lock fingerprints.
 
-Run all four through `mise run test-pr026`, or one directly with
+Run all four through `mise run test-native-examples`, or one directly with
 `cargo run -p finstack-ai-native-examples --bin minimal`.

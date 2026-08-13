@@ -1,13 +1,13 @@
-//! Strict PR-023 golden-scenario corpus checks.
+//! Strict public test-kit golden-scenario corpus checks.
 
 use finstack_ai_test::{
-    GoldenScenarioId, TraceError, compatibility_fixture, load_pr023_golden_scenarios,
+    GoldenScenarioId, TraceError, compatibility_fixture, load_golden_scenarios,
     validate_against_schema,
 };
 
 #[test]
 fn required_golden_scenarios_are_unique_and_contract_labelled() {
-    let suite = load_pr023_golden_scenarios().expect("scenario suite");
+    let suite = load_golden_scenarios().expect("scenario suite");
     for id in [
         GoldenScenarioId::ChildRunLineage,
         GoldenScenarioId::DeferredExternalCompletion,

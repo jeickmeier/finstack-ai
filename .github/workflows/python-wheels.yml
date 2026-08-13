@@ -1,8 +1,10 @@
 # Required PR-027 wheel and source-distribution workflow.
 # PR-032 through PR-038 use the user-authorized one-wheel envelope.
 # Full-matrix restoration and execution are explicitly user-owned.
+# Hosted PR wheels use Cargo profile `release-ci` (thin LTO); reproducible
+# staging (`mise run stage-python`) keeps `profile.release`.
 # Owner: me@jeickmeier.com
-# Cadence: every pull request, pushes to main, and workflow_dispatch.
+# Cadence: every pull request, pushes to main / codex/pr-*, and workflow_dispatch.
 
 name: python-wheels
 
@@ -40,6 +42,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
 
       - name: Build manylinux wheel
@@ -49,7 +52,7 @@ jobs:
           maturin-version: v1.14.1
           target: x86_64
           args: >-
-            --release --locked --out dist
+            --profile release-ci --locked --out dist
             --interpreter python3.14
             --manifest-path bindings/finstack-ai-python/Cargo.toml
           manylinux: 2_28
@@ -85,6 +88,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
 
       - name: Build source distribution

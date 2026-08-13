@@ -3,7 +3,7 @@
 use finstack_ai::AgentSpec;
 use finstack_ai_test::{
     ConformanceRunner, GoldenScenarioId, ReducerRustAdapter, compatibility_fixture,
-    load_pr023_golden_scenarios,
+    load_golden_scenarios,
 };
 
 #[test]
@@ -13,7 +13,7 @@ fn sdk_agent_spec_and_reducer_golden_run_without_private_internals() {
         .expect("public SDK spec ingress");
     assert!(!spec.fingerprint().expect("fingerprint").to_hex().is_empty());
 
-    let suite = load_pr023_golden_scenarios().expect("public scenario suite");
+    let suite = load_golden_scenarios().expect("public scenario suite");
     assert!(
         suite
             .scenario(GoldenScenarioId::BeforeFinalizeContinuation)

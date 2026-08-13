@@ -42,7 +42,11 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust python uv
           cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Benchmark (non-blocking)
         run: mise run benchmark

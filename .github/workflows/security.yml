@@ -39,6 +39,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: rust "github:EmbarkStudios/cargo-deny"
           cache: true
 
       - name: cargo-deny / supply-chain
@@ -59,6 +60,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: "aqua:gitleaks/gitleaks"
           cache: true
 
       - name: Repository secret scan
@@ -78,6 +80,7 @@ jobs:
         with:
           version: 2026.8.3
           install: true
+          install_args: python uv "aqua:gitleaks/gitleaks"
           cache: true
 
       - name: Temporary examples/fixtures canary negatives

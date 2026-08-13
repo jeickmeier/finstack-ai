@@ -29,6 +29,14 @@ opt-level = 3
 debug = false
 incremental = false
 
+# Hosted PR wheels keep this thinner than profile.release so the platform
+# matrix stays off the critical path. Reproducible staging
+# (`mise run stage-python`) still uses profile.release.
+[profile.release-ci]
+inherits = "release"
+codegen-units = 8
+lto = "thin"
+
 [workspace.package]
 version = "0.0.2"
 edition = "2024"

@@ -37,7 +37,7 @@ pub use fakes::{
     SequenceRandomSource,
 };
 pub use golden_scenarios::{
-    GoldenScenario, GoldenScenarioId, GoldenScenarioSuite, load_pr023_golden_scenarios,
+    GoldenScenario, GoldenScenarioId, GoldenScenarioSuite, load_golden_scenarios,
 };
 pub use paths::{compatibility_fixture, repo_root, schema_path};
 pub use port_conformance::{

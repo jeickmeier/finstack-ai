@@ -64,13 +64,14 @@ cargo check -p finstack-ai-extension-port-leaf-fixture --no-default-features --l
 [tasks.check-wasm]
 description = "Type-check kernel/runtime tests and browser WASM binding for wasm32"
 run = """
-rustup target add wasm32-unknown-unknown && \
-cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked && \
+set -euo pipefail
+rustup target add wasm32-unknown-unknown
+# cargo test --no-run is a superset of cargo check for the same package.
 RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
-  cargo test -p finstack-ai-kernel --target wasm32-unknown-unknown --no-run --locked && \
+  cargo test -p finstack-ai-kernel --target wasm32-unknown-unknown --no-run --locked
 RUSTFLAGS='--cfg getrandom_backend="unsupported"' \
-  cargo test -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host --no-run --locked && \
-cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --no-default-features --locked && \
+  cargo test -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host --no-run --locked
+cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --no-default-features --locked
 cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
 if cargo tree -p finstack-ai-runtime --target wasm32-unknown-unknown --no-default-features --features wasm-host -e normal | grep -q 'tokio '; then
   echo 'wasm-host unexpectedly resolves Tokio'
@@ -89,14 +90,28 @@ uv run --no-project --with ruff==0.12.11 ruff format .
 
 [tasks.clippy]
 description = "Lint the Cargo workspace with warnings denied"
-run = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+run = """
+set -euo pipefail
+args=(--workspace --all-targets --locked)
+if [ "${FINSTACK_CI_EXCLUDE_PYTHON:-}" = "1" ]; then
+  args+=(--exclude finstack-ai-python)
+fi
+cargo clippy "${args[@]}" -- -D warnings
+"""
 
 [tasks.test]
 description = "Run Cargo workspace tests"
-run = "cargo test --workspace --locked"
+run = """
+set -euo pipefail
+args=(--workspace --locked)
+if [ "${FINSTACK_CI_EXCLUDE_PYTHON:-}" = "1" ]; then
+  args+=(--exclude finstack-ai-python)
+fi
+cargo test "${args[@]}"
+"""
 
 [tasks.test-kernel]
-description = "Run focused kernel/runtime and public-Rust-API tests through PR-016"
+description = "Run focused kernel, runtime, and public-Rust-API tests"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-kernel --locked
@@ -105,7 +120,7 @@ cargo test -p finstack-ai-test --test public_rust_api --locked
 """
 
 [tasks.test-runtime]
-description = "Run runtime, task-owner, ingress, model, lifecycle, timer, and memory-store tests through PR-019"
+description = "Run runtime, task-owner, ingress, model, lifecycle, timer, and memory-store tests"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio --locked
@@ -114,7 +129,7 @@ cargo test -p finstack-ai-test --test model_port --locked
 """
 
 [tasks.test-events]
-description = "Run PR-017 event hub, batching, backpressure, and incremental progress proofs"
+description = "Run event hub, batching, backpressure, and incremental progress proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio event_hub::native::tests --locked
@@ -123,7 +138,7 @@ cargo test -p finstack-ai-test --test tool_port runtime_publishes_tool_progress_
 """
 
 [tasks.test-extensions]
-description = "Run PR-018 context, middleware, observer, compaction, recovery, and leaf-ABI proofs"
+description = "Run context, middleware, observer, compaction, recovery, and leaf-ABI proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio context::tests --locked
@@ -134,7 +149,7 @@ cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-u
 """
 
 [tasks.test-lifecycle]
-description = "Run PR-019 cancellation-tree, deadline, retry-timer, restart, and shutdown proofs"
+description = "Run cancellation-tree, deadline, retry-timer, restart, and shutdown proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio model::tests::cancellation_hierarchy --locked
@@ -150,7 +165,7 @@ cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_
 """
 
 [tasks.test-runtime-gate]
-description = "Run PR-020 commit-prefix, bounded scheduling, stress, and leak proofs"
+description = "Run commit-prefix, bounded scheduling, stress, and leak proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio coordinator::tests --locked
@@ -162,7 +177,7 @@ cargo test -p finstack-ai-test --test tool_port shutdown_cancels_streaming_tool_
 """
 
 [tasks.test-sdk]
-description = "Run PR-021 typed registration, factory, lifecycle, resolution, and target checks"
+description = "Run typed registration, factory, lifecycle, resolution, and target checks"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai --locked
@@ -171,76 +186,10 @@ cargo check -p finstack-ai --no-default-features --locked
 cargo check -p finstack-ai --target wasm32-unknown-unknown --no-default-features --features wasm-host --locked
 """
 
-[tasks.test-pr022]
-description = "Run PR-022 spec, bundle, lock, child, budget, artifact, and decode proofs"
+[tasks.test-native-examples]
+description = "Run native developer-preview example binaries"
 run = """
 set -euo pipefail
-cargo test -p finstack-ai-kernel --locked
-cargo test -p finstack-ai-runtime --all-features --locked
-cargo test -p finstack-ai --all-features --locked
-cargo clippy -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --all-targets --all-features --locked -- -D warnings
-"""
-
-[tasks.test-pr023]
-description = "Run PR-023 public test-kit, six-port, golden, and compaction conformance proofs"
-run = """
-set -euo pipefail
-cargo test -p finstack-ai-test --locked
-cargo test -p finstack-ai-model-port-leaf-fixture -p finstack-ai-toolset-port-leaf-fixture --locked
-cargo test -p finstack-ai --test public_test_kit --locked
-cargo clippy -p finstack-ai-test -p finstack-ai-model-port-leaf-fixture -p finstack-ai-toolset-port-leaf-fixture -p finstack-ai --all-targets --locked -- -D warnings
-cargo check -p finstack-ai-test --no-default-features --locked
-mise run schema-governance
-mise run architecture
-"""
-
-[tasks.test-pr024]
-description = "Run PR-024 OpenAI-compatible provider, isolation, fixture, and benchmark proofs"
-run = """
-set -euo pipefail
-cargo test -p finstack-ai-provider-openai-compatible --locked
-cargo clippy -p finstack-ai-provider-openai-compatible --all-targets --locked -- -D warnings
-cargo bench -p finstack-ai-provider-openai-compatible --bench request_overhead --no-run --locked
-cargo test -p finstack-ai-test --test model_port --locked
-cargo check -p finstack-ai-kernel --locked
-cargo check -p finstack-ai-runtime --no-default-features --locked
-if cargo tree -p finstack-ai-kernel -e normal --locked | grep -Eq 'finstack-ai-provider-openai-compatible|reqwest'; then
-  echo 'kernel normal dependency graph unexpectedly includes the native provider or HTTP client'
-  exit 1
-fi
-if cargo tree -p finstack-ai-runtime --no-default-features -e normal --locked | grep -Eq 'finstack-ai-provider-openai-compatible|reqwest'; then
-  echo 'runtime normal dependency graph unexpectedly includes the native provider or HTTP client'
-  exit 1
-fi
-mise run architecture
-"""
-
-[tasks.test-pr025]
-description = "Run PR-025 calculator, scoped filesystem, race, artifact, and benchmark proofs"
-run = """
-set -euo pipefail
-cargo test -p finstack-ai-tools-calculator -p finstack-ai-tools-filesystem --locked
-cargo clippy -p finstack-ai-tools-calculator -p finstack-ai-tools-filesystem --all-targets --locked -- -D warnings
-cargo bench -p finstack-ai-tools-calculator --bench calculator --no-run --locked
-cargo check -p finstack-ai-kernel --locked
-cargo check -p finstack-ai-runtime --no-default-features --locked
-if cargo tree -p finstack-ai-kernel -e normal --locked | grep -Eq 'finstack-ai-tools-(calculator|filesystem)|rustix'; then
-  echo 'kernel normal dependency graph unexpectedly includes a tool battery or filesystem syscall adapter'
-  exit 1
-fi
-if cargo tree -p finstack-ai-runtime --no-default-features -e normal --locked | grep -Eq 'finstack-ai-tools-(calculator|filesystem)|rustix'; then
-  echo 'runtime normal dependency graph unexpectedly includes a tool battery or filesystem syscall adapter'
-  exit 1
-fi
-mise run architecture
-"""
-
-[tasks.test-pr026]
-description = "Run PR-026 native facade and offline developer-preview examples"
-run = """
-set -euo pipefail
-cargo test -p finstack-ai --locked
-cargo clippy -p finstack-ai -p finstack-ai-native-examples --all-targets --locked -- -D warnings
 cargo run --quiet --manifest-path fixtures/ci/native-user/Cargo.toml --locked
 cargo run --quiet -p finstack-ai-native-examples --bin minimal --locked
 cargo run --quiet -p finstack-ai-native-examples --bin coding --locked
@@ -248,13 +197,17 @@ cargo run --quiet -p finstack-ai-native-examples --bin service --locked
 cargo run --quiet -p finstack-ai-native-examples --bin diagnostic --locked
 """
 
+[tasks.preview-evaluate]
+description = "Evaluate native preview thresholds against already-staged artifacts"
+run = "uv run --no-project python tools/preview/check.py"
+
 [tasks.preview-performance]
 description = "Generate native preview benchmark, memory, binary-size, and warning reports"
 run = """
 set -euo pipefail
 mise run benchmark-smoke
 mise run release-smoke
-uv run --no-project python tools/preview/check.py
+mise run preview-evaluate
 """
 
 [tasks.preview-stage]
@@ -262,7 +215,7 @@ description = "Reproducibly stage the current 0.0.2 alpha candidate"
 run = "uv run --no-project python tools/preview/release.py"
 
 [tasks.test-model]
-description = "Run PR-015 Model port, scripted stream, and leaf ABI proofs"
+description = "Run Model port, scripted stream, and leaf ABI proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-runtime --features native-tokio model::tests --locked
@@ -272,7 +225,7 @@ cargo check -p finstack-ai-model-port-leaf-fixture --no-default-features --targe
 """
 
 [tasks.test-tool]
-description = "Run PR-016 Toolset validation, scheduler, panic, ordering, and leaf ABI proofs"
+description = "Run Toolset validation, scheduler, panic, ordering, and leaf ABI proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-test --test tool_port --locked
@@ -282,8 +235,13 @@ cargo test --release -p finstack-ai-test --test tool_port native_panic_becomes_s
 """
 
 [tasks.conformance]
-description = "Run reducer traces and public compatibility through PR-016"
-run = "cargo test -p finstack-ai-test --locked"
+description = "Run reducer traces, public compatibility, and six-port test-kit proofs"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-test --locked
+cargo test -p finstack-ai-model-port-leaf-fixture -p finstack-ai-toolset-port-leaf-fixture --locked
+cargo test -p finstack-ai --test public_test_kit --locked
+"""
 
 [tasks.test-benchmark]
 description = "Run benchmark staging helper unit tests"
@@ -371,7 +329,14 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 [tasks.docs]
 description = "Build workspace rustdoc with warnings denied"
 env = { RUSTDOCFLAGS = "-D warnings" }
-run = "cargo doc --workspace --no-deps --locked"
+run = """
+set -euo pipefail
+args=(--workspace --no-deps --locked)
+if [ "${FINSTACK_CI_EXCLUDE_PYTHON:-}" = "1" ]; then
+  args+=(--exclude finstack-ai-python)
+fi
+cargo doc "${args[@]}"
+"""
 
 [tasks.test-architecture]
 description = "Run architecture checker unit tests"
@@ -613,6 +578,7 @@ mise run secret-scan
 mise run secret-scan-canary
 mise run release-smoke
 mise run test-pr029
+
 """
 
 # Build tasks
@@ -701,9 +667,10 @@ uv run --no-cache --isolated --no-project \
 description = "Install the built wheel without a compiler and run its smoke tests"
 run = """
 set -euo pipefail
-set -- target/python-dist/*.whl
+dist_dir="${PYTHON_DIST_DIR:-target/python-dist}"
+set -- "${dist_dir}"/*.whl
 if [ "$#" -ne 1 ]; then
-  echo 'expected exactly one built wheel in target/python-dist' >&2
+  echo "expected exactly one built wheel in ${dist_dir}" >&2
   exit 1
 fi
 uv run --isolated --no-project \
@@ -758,11 +725,11 @@ uv python install "${PYTHON_VERSION}"
 interpreter="$(uv python find "${PYTHON_VERSION}")"
 maturin_bin="$(uv tool dir --bin)"
 cargo --version
-uv tool install --force maturin==1.14.1
+uv tool install maturin==1.14.1
 "${maturin_bin}/maturin" --version
 "${maturin_bin}/maturin" build \
   --manifest-path bindings/finstack-ai-python/Cargo.toml \
-  --release \
+  --profile release-ci \
   --locked \
   --interpreter "${interpreter}" \
   --out "${PYTHON_DIST_DIR}"
@@ -780,11 +747,11 @@ uv python install $env:PYTHON_VERSION
 $interpreter = uv python find $env:PYTHON_VERSION
 $maturin = Join-Path (uv tool dir --bin) "maturin.exe"
 cargo --version
-uv tool install --force maturin==1.14.1
+uv tool install maturin==1.14.1
 & $maturin --version
 & $maturin build `
   --manifest-path bindings/finstack-ai-python/Cargo.toml `
-  --release `
+  --profile release-ci `
   --locked `
   --interpreter $interpreter `
   --out $env:PYTHON_DIST_DIR
@@ -891,8 +858,8 @@ uv run --no-project python tools/python_package/check.py --validate-only `
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
-[tasks.test-pr027]
-description = "Run PR-027 native module, package, dependency, and release proofs"
+[tasks.test-python]
+description = "Run Python binding, package, dependency, and release proofs"
 run = """
 set -euo pipefail
 cargo test -p finstack-ai-python --locked
@@ -900,9 +867,8 @@ cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings
 mise run lint-python-binding
 mise run typecheck-python-binding
 mise run test-python-binding
-mise run build-python
-mise run test-python-wheel
 mise run stage-python
+PYTHON_DIST_DIR=target/python-stage-a mise run test-python-wheel
 python_graph="$(cargo tree -p finstack-ai-python -e normal,build --locked)"
 case "${python_graph}" in
   *pyo3*) ;;
@@ -933,7 +899,7 @@ run = """
 set -euo pipefail
 cargo test -p finstack-ai agent::tests --locked
 cargo clippy -p finstack-ai --all-targets --locked -- -D warnings
-mise run test-pr027
+mise run test-python
 python_graph="$(cargo tree -p finstack-ai-python -e normal,build --locked)"
 case "${python_graph}" in
   *pyo3-async-runtimes*) ;;
