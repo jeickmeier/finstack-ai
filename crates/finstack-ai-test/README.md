@@ -33,5 +33,5 @@ item, tool-pair, checkpoint, hard-budget, and shared-projection invariants.
 Run the repository acceptance task with:
 
 ```text
-mise run test-pr023
+mise run conformance
 ```

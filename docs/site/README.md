@@ -16,7 +16,7 @@ or a stable plugin ABI. Those remain later gated work.
 ## Local verification
 
 ```text
-mise run test-pr026
+mise run test-native-examples
 mise run preview-performance
 mise run preview-stage
 ```

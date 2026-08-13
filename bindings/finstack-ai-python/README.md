@@ -7,7 +7,7 @@ linked-provider discovery; Agent and callback APIs arrive in PR-028–PR-031.
 
 ```bash
 mise run python-develop
-mise run test-pr027
+mise run test-python
 ```
 
 The initial distribution links the Rust-backed OpenAI-compatible provider into

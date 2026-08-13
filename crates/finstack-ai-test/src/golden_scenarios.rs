@@ -1,4 +1,4 @@
-//! Strict language-neutral golden scenarios published by the PR-023 test kit.
+//! Strict language-neutral golden scenarios published by the public test kit.
 
 use std::collections::BTreeSet;
 
@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::{TraceError, compatibility_fixture, validate_against_schema};
 
-/// Stable PR-023 golden-scenario identity.
+/// Stable golden-scenario identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GoldenScenarioId {
@@ -39,7 +39,7 @@ pub struct GoldenScenario {
     pub contracts: Vec<String>,
 }
 
-/// Versioned suite of the six required PR-023 scenarios.
+/// Versioned suite of the six required public test-kit scenarios.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoldenScenarioSuite {
@@ -57,12 +57,12 @@ impl GoldenScenarioSuite {
     }
 }
 
-/// Load and semantically validate the checked-in PR-023 scenario suite.
+/// Load and semantically validate the checked-in public test-kit scenario suite.
 ///
 /// # Errors
 ///
 /// Returns strict schema, parse, version, duplicate, or missing-scenario failures.
-pub fn load_pr023_golden_scenarios() -> Result<GoldenScenarioSuite, TraceError> {
+pub fn load_golden_scenarios() -> Result<GoldenScenarioSuite, TraceError> {
     let path = compatibility_fixture("golden-trace/v1/test-kit/valid--pr023-scenarios.json");
     let text = std::fs::read_to_string(&path)
         .map_err(|error| TraceError::Io(format!("{}: {error}", path.display())))?;

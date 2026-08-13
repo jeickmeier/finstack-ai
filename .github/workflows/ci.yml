@@ -21,6 +21,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
 
 defaults:
   run:
@@ -113,6 +116,8 @@ jobs:
   rust-matrix:
     name: rust (${{ matrix.os }} / ${{ matrix.channel }})
     runs-on: ${{ matrix.os }}
+    env:
+      FINSTACK_CI_EXCLUDE_PYTHON: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -129,25 +134,18 @@ jobs:
         with:
           version: 2026.8.3
           install: true
-          install_args: rust python uv
+          install_args: rust
           cache: true
-
-      - name: Export Python interpreter for PyO3
-        run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: rust-matrix-${{ matrix.os }}
 
       - name: Toolchain versions
         run: |
           rustc --version
           cargo --version
-          python --version
-          uv --version
-
-      - name: Format
-        if: runner.os == 'Linux'
-        run: mise run format
 
       - name: Clippy
         run: mise run clippy
@@ -155,34 +153,77 @@ jobs:
       - name: Test
         run: mise run test
 
-      - name: Native developer preview
-        run: mise run test-pr026
+      - name: Native developer preview examples
+        run: mise run test-native-examples
+
+  wasm:
+    name: wasm (wasm32-unknown-unknown)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          install_args: rust
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: wasm32-unknown-unknown
+
+      - name: WASM target
+        run: mise run check-wasm
+
+  linux-quality:
+    name: linux-quality
+    runs-on: ubuntu-24.04
+    env:
+      FINSTACK_CI_EXCLUDE_PYTHON: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          install_args: rust python uv
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-quality
+
+      - name: Format
+        run: mise run format
 
       - name: Docs
-        if: runner.os == 'Linux'
         run: mise run docs
 
       - name: Minimal features
-        if: runner.os == 'Linux'
         run: mise run check-minimal
 
       - name: Architecture
-        if: runner.os == 'Linux'
         run: mise run architecture
 
-      - name: WASM target
-        if: runner.os == 'Linux'
-        run: mise run check-wasm
-
       - name: CI helper tests
-        if: runner.os == 'Linux'
         run: |
           mise run lint-ci
           mise run format-ci
           mise run test-ci
 
       - name: Benchmark helpers and compile
-        if: runner.os == 'Linux'
         run: |
           mise run lint-benchmark
           mise run format-benchmark
@@ -190,7 +231,7 @@ jobs:
           uv run --no-project python tools/benchmark/run.py compile
 
   python-package:
-    name: python-package (PR-027)
+    name: python-package
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -213,7 +254,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Python package validation
-        run: mise run test-pr027
+        run: mise run test-python
 
   coverage:
     name: coverage
@@ -277,6 +318,9 @@ jobs:
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: release-smoke-${{ matrix.os }}
+          cache-directories: target/ci-release-build
 
       - name: Release smoke
         run: mise run release-smoke
@@ -288,7 +332,8 @@ jobs:
       - name: Native preview staging
         if: runner.os == 'Linux'
         run: |
-          mise run preview-performance
+          mise run benchmark-smoke
+          mise run preview-evaluate
           mise run preview-stage
 
       - name: Upload release artifacts

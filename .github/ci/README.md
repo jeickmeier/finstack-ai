@@ -9,8 +9,8 @@ All executable checks are canonical mise tasks. Workflows must call
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Cross-OS Clippy/tests/native preview; Linux-only format/docs/WASM/architecture/helpers; parallel Ubuntu `python-package` (`test-pr027`); fuzz smoke; schema governance; release-smoke on Linux/macOS/Windows; coverage on `main`/manual only |
-| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` push, manual | Trimmed PR matrix: CPython 3.14 wheels on manylinux x86_64/aarch64, macOS arm64, and Windows x64; isolated install/import/concurrency smoke; sdist staging (full 3.11–3.14/3.14t launch matrix remains ADR-018) |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Cross-OS Clippy/tests/native example bins (Python binding excluded; owned by `python-package`); parallel Ubuntu `wasm`, `linux-quality` (format/docs/minimal/architecture/helpers/bench compile), and `python-package` (`test-python`); fuzz smoke; schema governance; release-smoke on Linux/macOS/Windows; coverage on `main`/manual only |
+| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` / `codex/pr-*` push, Sundays 06:17 UTC, manual | PR/push: CPython 3.14 wheels on manylinux x86_64/aarch64, macOS arm64, and Windows x64 using `release-ci` (thin LTO); isolated install/import/concurrency smoke; sdist staging. Sunday schedule and `workflow_dispatch` (`python_matrix=full`) restore the ADR-018 CPython 3.11–3.14/3.14t matrix |
 | [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
 | [`nightly.yml`](../workflows/nightly.yml) | Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns on Sunday/manual, with 30-day corpus/crash artifact retention |
 | [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
@@ -36,11 +36,20 @@ architecture, supply-chain, secret, or release-smoke evidence on code changes.
 - Contributor/CI tools are pinned in root [`mise.toml`](../../mise.toml).
 - Update pins by changing `mise.toml` and the workflow SHA comments together;
   then run `mise run lint-workflows` and `mise run doctor`.
-- The Rust matrix uses the pinned `Swatinem/rust-cache` action to reuse dependency
-  build artifacts across runs. Its automatic key separates jobs and rustc
-  host/toolchain identities and includes the Cargo graph and compiler
-  environment; steps within one job continue to share the workspace `target/`
-  directory directly.
+- The Rust matrix, WASM, linux-quality, release-smoke, and native (macOS/Windows)
+  Python wheel jobs use the pinned `Swatinem/rust-cache` action to reuse
+  dependency build artifacts across runs. Shared keys keep each job family
+  stable; rustc host/toolchain identity and the Cargo graph still participate
+  in the cache key. Steps within one job continue to share the workspace
+  `target/` directory directly. Hosted rust/wasm jobs set
+  `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut
+  link time, especially on Windows. The rust matrix sets
+  `FINSTACK_CI_EXCLUDE_PYTHON=1` so Clippy/tests/docs skip the PyO3 crate;
+  `python-package` remains the Python binding owner. Linux wheels compile
+  inside the manylinux container and reuse `maturin-action` sccache instead of
+  a host `target/` cache. Hosted PR wheels use Cargo profile `release-ci`
+  (thin LTO); `mise run stage-python` keeps `profile.release` for the
+  size-budget and reproducibility proof.
 
 ## Release artifacts (PR-003-A03)
 
@@ -62,7 +71,7 @@ Current inventory:
 
 | Surface | Status | Regeneration | Dirty-tree policy |
 | --- | --- | --- | --- |
-| Python binding package | maturin mixed Rust/Python project with checked-in type stubs | `mise run test-pr027`; `mise run build-python` | stubs are hand-authored until later API PRs own generation; wheel/sdist artifacts are verified for contents, size, and reproducibility |
+| Python binding package | maturin mixed Rust/Python project with checked-in type stubs | `mise run test-python`; `mise run build-python` | stubs are hand-authored until later API PRs own generation; wheel/sdist artifacts are verified for contents, size, and reproducibility |
 | Browser WASM binding | hand-authored crate placeholder | `mise run check-wasm` | no wasm-bindgen glue yet |
 | WIT / schema codegen | not present | deferred to owning PRs | when generators exist, CI must regenerate and fail on dirty output |
 | Schema / ADR governance | hand-authored reserved roots + checker | `mise run schema-governance` | schema path changes without fixture updates fail GOV006 when a base SHA is available; reserved README-only dirs are not conformance evidence |

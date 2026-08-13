@@ -1,8 +1,10 @@
 # PR-path wheel and source-distribution matrix (trimmed for PR latency).
-# Full CPython 3.11–3.14/3.14t coverage remains an ADR-018 launch obligation;
-# this workflow keeps the mise-pinned CPython 3.14 interpreter only.
+# Full CPython 3.11–3.14/3.14t coverage remains an ADR-018 launch obligation
+# and runs on the Sunday schedule plus workflow_dispatch (python_matrix=full).
+# Pull requests and branch pushes keep the mise-pinned CPython 3.14 interpreter.
 # Owner: me@jeickmeier.com
-# Cadence: every pull request, pushes to main, and workflow_dispatch.
+# Cadence: every pull request, pushes to main / codex/pr-*, Sundays 06:17 UTC,
+# and workflow_dispatch.
 
 name: python-wheels
 
@@ -12,7 +14,17 @@ on:
     branches:
       - main
       - "codex/pr-*"
+  schedule:
+    - cron: "17 6 * * 0"
   workflow_dispatch:
+    inputs:
+      python_matrix:
+        description: Interpreter matrix (pinned CPython 3.14 or full ADR-018 set)
+        type: choice
+        default: pinned
+        options:
+          - pinned
+          - full
 
 permissions:
   contents: read
@@ -26,8 +38,25 @@ defaults:
     shell: bash
 
 jobs:
+  python-matrix:
+    name: resolve-python-matrix
+    runs-on: ubuntu-24.04
+    outputs:
+      python: ${{ steps.resolve.outputs.python }}
+    steps:
+      - name: Resolve interpreter matrix
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.python_matrix }}" = "full" ]; then
+            echo 'python=["3.11","3.12","3.13","3.14","3.14t"]' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'python=["3.14"]' >> "${GITHUB_OUTPUT}"
+          fi
+
   wheels:
     name: wheel (${{ matrix.platform.name }} / CPython ${{ matrix.python }})
+    needs: python-matrix
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
@@ -45,7 +74,7 @@ jobs:
           - name: windows-x64
             runner: windows-2025
             target: x64
-        python: ["3.14"]
+        python: ${{ fromJSON(needs.python-matrix.outputs.python) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +89,12 @@ jobs:
           install_args: rust python uv
           cache: true
 
+      - name: Cache Rust build artifacts
+        if: runner.os != 'Linux'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: python-wheel-${{ matrix.platform.name }}
+
       - name: Build manylinux wheel
         if: runner.os == 'Linux'
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
@@ -67,7 +102,7 @@ jobs:
           maturin-version: v1.14.1
           target: ${{ matrix.platform.target }}
           args: >-
-            --release --locked --out dist
+            --profile release-ci --locked --out dist
             --interpreter python${{ matrix.python }}
             --manifest-path bindings/finstack-ai-python/Cargo.toml
           manylinux: 2_28
@@ -90,7 +125,7 @@ jobs:
 
       - name: Install and smoke wheel
         env:
-          FINSTACK_EXPECT_FREE_THREADED: "0"
+          FINSTACK_EXPECT_FREE_THREADED: ${{ matrix.python == '3.14t' && '1' || '0' }}
           PYTHON_VERSION: ${{ matrix.python }}
           PYTHON_DIST_DIR: dist
         run: mise run smoke-python-wheel-ci
