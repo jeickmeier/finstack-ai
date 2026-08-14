@@ -29,6 +29,14 @@ export class Agent {
      */
     static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null): Promise<any>;
     /**
+     * Create a live session on this agent's journal store.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session cannot be created.
+     */
+    createSession(tenant_scope?: string | null): Promise<any>;
+    /**
      * Replay one stored session into a provisional inspect snapshot.
      *
      * This does not continue an interrupted run or retry in-flight effects.
@@ -39,6 +47,15 @@ export class Agent {
      * stored journal cannot be replayed.
      */
     static inspectSession(store: JsJournalStore, session_id: string): Promise<any>;
+    /**
+     * Open an existing session without respawning parked runs.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session id is invalid or the
+     * stored journal cannot be replayed.
+     */
+    openSession(session_id: string, tenant_scope?: string | null): Promise<any>;
     /**
      * Execute one run and await its committed result.
      *
@@ -284,6 +301,93 @@ export class JsToolset {
 }
 
 /**
+ * Live lane handle.
+ */
+export class Lane {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Inspect name, leaf, and history length.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane cannot be inspected.
+     */
+    inspect(): Promise<any>;
+    /**
+     * Point this idle lane at an existing entry without copying.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the entry is unknown or the lane
+     * is busy.
+     */
+    navigate(entry_id: string): Promise<any>;
+    /**
+     * Durable lane identity.
+     */
+    readonly laneId: string;
+    /**
+     * Session that owns this lane.
+     */
+    readonly session: Session;
+}
+
+/**
+ * Read-only operation locator.
+ */
+export class Locator {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Explicit locator snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     */
+    toDict(): any;
+    /**
+     * Lane identity.
+     */
+    readonly laneId: string;
+    /**
+     * Run identity.
+     */
+    readonly runId: string;
+    /**
+     * Session identity.
+     */
+    readonly sessionId: string;
+    /**
+     * Tenant scope captured at acceptance.
+     */
+    readonly tenantScope: string;
+}
+
+/**
+ * In-process external identity map.
+ */
+export class MemoryExternalIdentityMap {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Empty map.
+     */
+    constructor();
+    /**
+     * Resolve one previously bound key.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the key is invalid.
+     */
+    resolve(channel: string, account: string, thread: string): any;
+}
+
+/**
  * Detached run control handle. Drop detaches observation and does not cancel.
  */
 export class Run {
@@ -319,7 +423,11 @@ export class Run {
      */
     result(): Promise<any>;
     /**
-     * Immutable session locator for this run.
+     * Immutable operation locator snapshot.
+     */
+    readonly locator: Locator;
+    /**
+     * Live session handle for this run.
      */
     readonly session: Session;
 }
@@ -348,13 +456,17 @@ export class RunResult {
      */
     readonly activeCapabilities: any;
     /**
+     * Operation locator for the completed run.
+     */
+    readonly locator: Locator;
+    /**
      * Durable retry attempts consumed by this run.
      */
     readonly retryAttempts: number;
     /**
-     * Session locator for the completed run.
+     * Locator snapshot for the completed run.
      */
-    readonly session: Session;
+    readonly session: Locator;
     /**
      * Concatenated final assistant text.
      */
@@ -366,34 +478,51 @@ export class RunResult {
 }
 
 /**
- * Read-only session locator.
+ * Live session handle.
  */
 export class Session {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Explicit locator snapshot.
+     * Bind a host-owned external identity to one lane.
      *
      * # Errors
      *
-     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     * Returns a structured host error when the key is invalid, the lane is
+     * unknown, or the key is already bound to a different session lane.
      */
-    toDict(): any;
+    bindExternalIdentity(map: MemoryExternalIdentityMap, channel: string, account: string, thread: string, lane_id: string): void;
     /**
-     * Lane identity.
+     * Create a named lane, optionally forking from an existing entry.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane cannot be created.
      */
-    readonly laneId: string;
+    createLane(name: string, fork?: string | null): Promise<any>;
     /**
-     * Run identity.
+     * Look up one lane by application name.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane does not exist.
      */
-    readonly runId: string;
+    lane(name: string): Promise<any>;
+    /**
+     * List restored lanes.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session cannot be loaded.
+     */
+    listLanes(): Promise<any>;
     /**
      * Session identity.
      */
     readonly sessionId: string;
     /**
-     * Tenant scope captured at acceptance.
+     * Tenant scope captured by the host.
      */
     readonly tenantScope: string;
 }
@@ -505,13 +634,18 @@ export interface InitOutput {
     readonly __wbg_jsmodel_free: (a: number, b: number) => void;
     readonly __wbg_jsobserver_free: (a: number, b: number) => void;
     readonly __wbg_jstoolset_free: (a: number, b: number) => void;
+    readonly __wbg_lane_free: (a: number, b: number) => void;
+    readonly __wbg_locator_free: (a: number, b: number) => void;
+    readonly __wbg_memoryexternalidentitymap_free: (a: number, b: number) => void;
     readonly __wbg_run_free: (a: number, b: number) => void;
     readonly __wbg_runresult_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly agent_capabilityCatalog: (a: number, b: number) => void;
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
     readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly agent_createSession: (a: number, b: number, c: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
+    readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
@@ -541,32 +675,46 @@ export interface InitOutput {
     readonly jsrandomsource_new: (a: number, b: number) => void;
     readonly jstoolset_cloneHandle: (a: number) => number;
     readonly jstoolset_new: (a: number, b: number, c: number) => void;
+    readonly lane_inspect: (a: number) => number;
+    readonly lane_laneId: (a: number, b: number) => void;
+    readonly lane_navigate: (a: number, b: number, c: number) => number;
+    readonly lane_session: (a: number) => number;
+    readonly locator_laneId: (a: number, b: number) => void;
+    readonly locator_runId: (a: number, b: number) => void;
+    readonly locator_sessionId: (a: number, b: number) => void;
+    readonly locator_tenantScope: (a: number, b: number) => void;
+    readonly locator_toDict: (a: number, b: number) => void;
+    readonly memoryexternalidentitymap_new: () => number;
+    readonly memoryexternalidentitymap_resolve: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly normalizePrebetaShape: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly runNoopTrace: (a: number) => void;
     readonly run_cancel: (a: number, b: number, c: number) => number;
     readonly run_closeEvents: (a: number) => number;
+    readonly run_locator: (a: number) => number;
     readonly run_nextEventBatch: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
     readonly runresult_activeCapabilities: (a: number, b: number) => void;
+    readonly runresult_locator: (a: number) => number;
     readonly runresult_retryAttempts: (a: number) => number;
-    readonly runresult_session: (a: number) => number;
     readonly runresult_text: (a: number, b: number) => void;
     readonly runresult_toDict: (a: number, b: number) => void;
     readonly runresult_trace: (a: number, b: number) => void;
-    readonly session_laneId: (a: number, b: number) => void;
-    readonly session_runId: (a: number, b: number) => void;
+    readonly session_bindExternalIdentity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => void;
+    readonly session_createLane: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly session_lane: (a: number, b: number, c: number) => number;
+    readonly session_listLanes: (a: number) => number;
     readonly session_sessionId: (a: number, b: number) => void;
     readonly session_tenantScope: (a: number, b: number) => void;
-    readonly session_toDict: (a: number, b: number) => void;
     readonly wasm_start: () => void;
     readonly driveScriptedModelRequest: (a: number, b: number, c: number) => number;
     readonly driveScriptedToolCall: (a: number, b: number, c: number) => number;
+    readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1391: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1405: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_334: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1517: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1531: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_375: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

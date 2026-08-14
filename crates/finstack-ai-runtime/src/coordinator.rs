@@ -1,15 +1,17 @@
 //! Authoritative decide, append, apply, and post-commit dispatch coordination.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use finstack_ai_kernel::{
     ActiveToolCallStatus, AppendBatchId, AppendRequest, CommittedBatch, ConversationEntry,
     Decision, Diagnostic, EffectId, EffectRequested, EntryId, EventId, Kernel, KernelError,
     KernelInput, KernelState, LaneId, Metadata, ModelTextDelta, OperationLocator,
     PendingModelEffect, PostCommitAction, ProviderHeartbeat, RECORD_FORMAT_VERSION,
-    RECORD_KIND_VERSION, ReasoningDelta, RecordBody, RecordDraft, RecordId, RunEvent, RunEventBody,
-    Sensitivity, SessionId, SessionProjection, Timestamp, ToolBatchId, ToolCallId, ToolProgress,
-    TransitionEnv, ValidatedToolCall, apply_conversation_entry,
+    RECORD_KIND_VERSION, ReasoningDelta, RecordBody, RecordDraft, RecordEnvelope, RecordId,
+    RunEvent, RunEventBody, RunId, Sensitivity, SessionId, SessionProjection, Timestamp,
+    ToolBatchId, ToolCallId, ToolProgress, TransitionEnv, ValidatedToolCall,
+    apply_conversation_entry,
 };
 use thiserror::Error;
 
@@ -84,6 +86,13 @@ pub enum CommitCoordinatorError {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayScope {
+    Primary,
+    StructuralOnly,
+    Run(RunId),
+}
+
 /// One-run coordinator for the authoritative commit-before-effect path.
 pub struct CommitCoordinator {
     kernel: Kernel,
@@ -99,6 +108,7 @@ pub struct CommitCoordinator {
     manual_drive: Option<crate::manual_drive::ManualDriveGate>,
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
+    replay_scope: ReplayScope,
 }
 
 impl CommitCoordinator {
@@ -119,6 +129,7 @@ impl CommitCoordinator {
             manual_drive: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             event_publisher: None,
+            replay_scope: ReplayScope::Primary,
         }
     }
 
@@ -168,6 +179,64 @@ impl CommitCoordinator {
             manual_drive: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             event_publisher: None,
+            replay_scope: ReplayScope::Primary,
+        })
+    }
+
+    /// Reconstruct a coordinator for one run, or for structural-only mutation.
+    ///
+    /// `target_run_id = None` applies structural records only and leaves the
+    /// kernel empty at the session head so a new sibling `AcceptRun` can
+    /// proceed. `Some(run_id)` applies that run's records and structural
+    /// records. Other runs' `RunAccepted` records are not applied. The
+    /// session snapshot is used only when it already belongs to `run_id`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a boundary fault when load metadata or any committed batch is invalid.
+    pub async fn recover_run(
+        store: Arc<dyn JournalStore>,
+        session_id: finstack_ai_kernel::SessionId,
+        target_run_id: Option<RunId>,
+    ) -> Result<Self, CommitCoordinatorError> {
+        let loaded = store
+            .load(LoadRequest { session_id })
+            .await
+            .map_err(CommitCoordinatorError::Store)?;
+        let scope = match target_run_id {
+            None => ReplayScope::StructuralOnly,
+            Some(run_id) => ReplayScope::Run(run_id),
+        };
+        let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
+            replay_scoped(&loaded, scope)
+                .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        let session = project_loaded(&loaded)
+            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        Ok(Self {
+            kernel,
+            session,
+            store,
+            next_transient_sequence,
+            pending_timer_scheduled_at,
+            snapshot_schedule: SnapshotSchedule {
+                every_n_records: u64::MAX,
+                write_timeout: Duration::from_millis(50),
+            },
+            last_snapshot_sequence: used_snapshot
+                .then(|| {
+                    loaded
+                        .accelerated
+                        .as_ref()
+                        .map(|snapshot| snapshot.sequence)
+                })
+                .flatten(),
+            fault: None,
+            dispatcher: None,
+            #[cfg(feature = "native-tokio")]
+            manual_drive: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            event_publisher: None,
+            replay_scope: scope,
         })
     }
 
@@ -329,25 +398,7 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("conflict_reload_failed"))?;
-                    let (
-                        kernel,
-                        next_transient_sequence,
-                        pending_timer_scheduled_at,
-                        used_snapshot,
-                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
-                    self.kernel = kernel;
-                    self.next_transient_sequence = next_transient_sequence;
-                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
-                    self.last_snapshot_sequence = used_snapshot
-                        .then(|| {
-                            loaded
-                                .accelerated
-                                .as_ref()
-                                .map(|snapshot| snapshot.sequence)
-                        })
-                        .flatten();
-                    self.session =
-                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    self.reload_from_loaded(&loaded)?;
                     decision = self
                         .kernel
                         .decide(&env, input.clone())
@@ -420,8 +471,28 @@ impl CommitCoordinator {
         }
     }
 
+    fn reload_from_loaded(&mut self, loaded: &LoadedSession) -> Result<(), CommitCoordinatorError> {
+        let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
+            replay_scoped(loaded, self.replay_scope).map_err(|code| self.boundary_fault(code))?;
+        self.kernel = kernel;
+        self.next_transient_sequence = next_transient_sequence;
+        self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+        self.last_snapshot_sequence = used_snapshot
+            .then(|| {
+                loaded
+                    .accelerated
+                    .as_ref()
+                    .map(|snapshot| snapshot.sequence)
+            })
+            .flatten();
+        self.session = project_loaded(loaded).map_err(|code| self.boundary_fault(code))?;
+        Ok(())
+    }
+
     async fn maybe_write_snapshot(&mut self, committed: &CommittedBatch) {
-        if self.snapshot_schedule.every_n_records == 0 {
+        if !matches!(self.replay_scope, ReplayScope::Primary)
+            || self.snapshot_schedule.every_n_records == 0
+        {
             return;
         }
         let head = self.kernel.state().last_applied_sequence;
@@ -521,25 +592,7 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("composition_conflict_reload_failed"))?;
-                    let (
-                        kernel,
-                        next_transient_sequence,
-                        pending_timer_scheduled_at,
-                        used_snapshot,
-                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
-                    self.kernel = kernel;
-                    self.next_transient_sequence = next_transient_sequence;
-                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
-                    self.last_snapshot_sequence = used_snapshot
-                        .then(|| {
-                            loaded
-                                .accelerated
-                                .as_ref()
-                                .map(|snapshot| snapshot.sequence)
-                        })
-                        .flatten();
-                    self.session =
-                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    self.reload_from_loaded(&loaded)?;
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -617,25 +670,7 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("session_conflict_reload_failed"))?;
-                    let (
-                        kernel,
-                        next_transient_sequence,
-                        pending_timer_scheduled_at,
-                        used_snapshot,
-                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
-                    self.kernel = kernel;
-                    self.next_transient_sequence = next_transient_sequence;
-                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
-                    self.last_snapshot_sequence = used_snapshot
-                        .then(|| {
-                            loaded
-                                .accelerated
-                                .as_ref()
-                                .map(|snapshot| snapshot.sequence)
-                        })
-                        .flatten();
-                    self.session =
-                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    self.reload_from_loaded(&loaded)?;
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -674,7 +709,7 @@ impl CommitCoordinator {
         &mut self,
         committed: &CommittedBatch,
     ) -> Result<(), CommitCoordinatorError> {
-        if self.session.main_lane().is_none() {
+        if self.session.lanes().is_empty() {
             return Ok(());
         }
         let mut drafts = Vec::new();
@@ -990,6 +1025,101 @@ fn empty_outcome(decision: Decision) -> CommitOutcome {
     }
 }
 
+fn replay_scoped(
+    loaded: &LoadedSession,
+    scope: ReplayScope,
+) -> Result<(Kernel, u64, Option<Timestamp>, bool), &'static str> {
+    match scope {
+        ReplayScope::Primary => replay_loaded(loaded),
+        ReplayScope::StructuralOnly => {
+            replay_filtered(loaded, None).map(|(kernel, next, timer)| (kernel, next, timer, false))
+        }
+        ReplayScope::Run(run_id) => {
+            if let Some(accelerated) = loaded.accelerated.as_ref()
+                && accelerated
+                    .state
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.run_id() == run_id)
+                && let Ok((kernel, next, timer)) = replay_from_snapshot(loaded, accelerated)
+            {
+                return Ok((kernel, next, timer, true));
+            }
+            replay_filtered(loaded, Some(run_id))
+                .map(|(kernel, next, timer)| (kernel, next, timer, false))
+        }
+    }
+}
+
+fn replay_filtered(
+    loaded: &LoadedSession,
+    target: Option<RunId>,
+) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
+    let mut kernel = Kernel::default();
+    let mut next_transient_sequence = 0_u64;
+    let mut last_batch_sequence = 0_u64;
+    let mut pending_timer_scheduled_at = None;
+    for batch in loaded.committed_batches.iter() {
+        last_batch_sequence = batch.last_sequence;
+        for record in batch.records.iter() {
+            if !record_belongs_to_scope(record, target) {
+                continue;
+            }
+            let prior = record
+                .sequence()
+                .checked_sub(1)
+                .ok_or("filtered_sequence_invalid")?;
+            adopt_session_head(&mut kernel, prior)?;
+            let single = CommittedBatch::try_new(
+                batch.batch_id,
+                record.sequence(),
+                record.sequence(),
+                vec![record.clone()],
+            )
+            .map_err(|_| "filtered_batch_invalid")?;
+            let events = kernel
+                .apply(&single, next_transient_sequence)
+                .map_err(|_| "journal_replay_failed")?;
+            next_transient_sequence = next_transient_sequence
+                .checked_add(
+                    u64::try_from(events.len())
+                        .map_err(|_| "transient_event_sequence_exhausted")?,
+                )
+                .ok_or("transient_event_sequence_exhausted")?;
+            update_pending_timer_timestamp(&mut pending_timer_scheduled_at, &single);
+        }
+    }
+    if last_batch_sequence != loaded.head_sequence {
+        return Err("loaded_head_mismatch");
+    }
+    adopt_session_head(&mut kernel, loaded.head_sequence)?;
+    if kernel.state().last_applied_sequence != loaded.head_sequence {
+        return Err("loaded_head_mismatch");
+    }
+    Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
+}
+
+fn record_belongs_to_scope(record: &RecordEnvelope, target: Option<RunId>) -> bool {
+    if record.body().is_structural() || record.run_id().is_none() {
+        return true;
+    }
+    target.is_some_and(|run_id| record.run_id() == Some(run_id))
+}
+
+fn adopt_session_head(kernel: &mut Kernel, sequence: u64) -> Result<(), &'static str> {
+    let current = kernel.state().last_applied_sequence;
+    if current == sequence {
+        return Ok(());
+    }
+    if current > sequence {
+        return Err("filtered_sequence_regression");
+    }
+    let mut state = kernel.state().clone();
+    state.last_applied_sequence = sequence;
+    *kernel = Kernel::try_restore(state).map_err(|_| "filtered_head_invalid")?;
+    Ok(())
+}
+
 fn replay_loaded(
     loaded: &LoadedSession,
 ) -> Result<(Kernel, u64, Option<Timestamp>, bool), &'static str> {
@@ -1014,7 +1144,7 @@ fn replay_loaded(
     ))
 }
 
-fn project_loaded(loaded: &LoadedSession) -> Result<SessionProjection, &'static str> {
+pub(crate) fn project_loaded(loaded: &LoadedSession) -> Result<SessionProjection, &'static str> {
     let mut session = SessionProjection::new(loaded.session_id);
     for batch in loaded.committed_batches.iter() {
         apply_batch_to_session(&mut session, batch)?;
@@ -1491,7 +1621,7 @@ mod tests {
         AcceptRun, AllocatedIds, BudgetChargeReceipt, BudgetChargeRequest, BudgetPropagation,
         BudgetReleaseReceipt, BudgetReleaseRequest, CancellationPropagation, ContentBlock,
         DeadlinePropagation, Digest, EffectCompleted, EffectOutputContract, EffectOutputKind, Id,
-        IdTag, LaneTag, Message, MessageRole, Metadata, ModelSettled, ModelSettlement,
+        IdTag, LaneCreated, LaneTag, Message, MessageRole, Metadata, ModelSettled, ModelSettlement,
         PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordEnvelope,
         ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits, RunPropagationPolicy,
         RunRelation, RunSecurityContext, SessionTag, Stage, StageCursor, TextBlock, Timestamp,
@@ -1598,6 +1728,21 @@ mod tests {
             lane_id: id::<LaneTag>(2),
             accepted: acceptance(),
         })
+    }
+
+    fn create_compatible_lane(commit: &mut CommitCoordinator, lane: u64, batch: u64, record: u64) {
+        block_on(commit.commit_session_records(
+            id(batch),
+            vec![session_draft(
+                id(record),
+                id::<SessionTag>(1),
+                id(lane),
+                timestamp(1_050),
+                RecordBody::LaneCreated(LaneCreated::try_new("research").expect("lane")),
+            )
+            .expect("lane draft")],
+        ))
+        .expect("create child lane");
     }
 
     fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
@@ -2250,6 +2395,7 @@ mod tests {
             accept_input(),
         ))
         .expect("accept parent");
+        create_compatible_lane(&mut commit, 40, 190, 191);
 
         let parent = OperationLocator {
             tenant_scope: Arc::from("tenant-a"),
@@ -2498,6 +2644,9 @@ mod tests {
                 accept_input(),
             ))
             .expect("accept parent");
+            if placement == ChildPlacement::CompatibleLaneInParentSession {
+                create_compatible_lane(&mut commit, 50, 190, 191);
+            }
             let invoker = Arc::new(IdempotentChildInvoker {
                 log: Arc::new(Mutex::new(Vec::new())),
                 accepted: Mutex::new(BTreeMap::new()),
@@ -2604,6 +2753,7 @@ mod tests {
             accept_input(),
         ))
         .expect("accept parent");
+        create_compatible_lane(&mut commit, 340, 390, 391);
 
         let parent = OperationLocator {
             tenant_scope: Arc::from("tenant-a"),
@@ -2784,7 +2934,7 @@ mod tests {
         )
         .expect("completion");
         let assistant_message = Message::try_new(
-            id(104),
+            id(504),
             MessageRole::Assistant,
             vec![ContentBlock::Text(
                 TextBlock::try_new("hello").expect("text"),
@@ -2796,7 +2946,7 @@ mod tests {
         )
         .expect("assistant message");
         block_on(commit.submit(
-            env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[104], 105),
+            env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[504], 105),
             KernelInput::ModelSettled(ModelSettled {
                 turn_id: id(101),
                 model_request_id: id(102),

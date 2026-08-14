@@ -28,11 +28,12 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{
     CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
     EventSubscription, EventSubscriptionConfig, IdGenerationError, JsonSchemaToolValidatorCompiler,
-    LoadRequest, LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
-    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
-    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
-    ModelWarmupContext, PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext,
-    ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner, SideEffectClass,
+    LaneAppendIds, LoadRequest, LockedModelContextProfile, Model, ModelCapabilities,
+    ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
+    ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PendingModelEffect, PortFuture,
+    ProgressCoalescing, ReconcileContext, ResolvedToolCatalog, RunHandle, RunHandleError,
+    RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime, SideEffectClass,
     StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
     ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
     ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
@@ -301,6 +302,49 @@ impl Agent {
         Ok(AgentRun { inner })
     }
 
+    /// Start a new root run on an existing idle lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns a busy-lane or configuration/runtime failure.
+    pub fn start_on_lane(
+        &self,
+        lane: &crate::Lane,
+        request: AgentRunRequest,
+    ) -> Result<AgentRun, AgentRunError> {
+        let selected = self.select_for_input(&request.input).clone();
+        let prepared = selected.prepare_on(request, lane)?;
+        let locator = prepared.locator.clone();
+        let store = Arc::clone(&prepared.store);
+        let cancellation_initiator = prepared.cancellation_initiator()?;
+        let inner = Arc::new(AgentRunInner {
+            locator,
+            store,
+            cancellation_initiator,
+            handle: Mutex::new(None),
+            handle_ready: driver::Signal::new(),
+            result: Mutex::new(None),
+            result_ready: driver::Signal::new(),
+            events: Mutex::new(EventStreamState::Waiting),
+            cancellation: Mutex::new(CancellationState::default()),
+            cancellation_ready: driver::Signal::new(),
+        });
+        let execution = Arc::downgrade(&inner);
+        let agent = selected;
+        driver::spawn(Box::pin(async move {
+            let result = Box::pin(agent.execute_started(prepared, &execution)).await;
+            publish_result(&execution, result);
+        }))
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        Ok(AgentRun { inner })
+    }
+
+    /// Borrow the resolved journal store.
+    #[must_use]
+    pub fn journal_store(&self) -> Arc<dyn finstack_ai_runtime::JournalStore> {
+        Arc::clone(self.resolved.run_plan().store().handle())
+    }
+
     fn select_for_input(&self, input: &str) -> &Self {
         let input_tokens = activation_tokens(input);
         self.model_capabilities
@@ -413,9 +457,37 @@ impl Agent {
             accepted,
             request,
             locator,
+            bootstrap: true,
+            session: None,
         })
     }
 
+    fn prepare_on(
+        &self,
+        request: AgentRunRequest,
+        lane: &crate::Lane,
+    ) -> Result<PreparedAgentRun, AgentRunError> {
+        let mut prepared = self.prepare(request)?;
+        prepared.session_id = lane.session().session_id();
+        prepared.lane_id = lane.lane_id();
+        prepared.locator = OperationLocator::try_new(
+            prepared.request.security.tenant_scope(),
+            prepared.session_id,
+            prepared.lane_id,
+            prepared.accepted.run_id(),
+        )
+        .map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        prepared.bootstrap = false;
+        prepared.session = Some(lane.session().clone());
+        Ok(prepared)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "bootstrap and sibling-lane start share one acquire/release path"
+    )]
     async fn execute_started(
         &self,
         prepared: PreparedAgentRun,
@@ -423,28 +495,66 @@ impl Agent {
     ) -> Result<AgentRunOutput, AgentRunError> {
         let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(Arc::clone(&prepared.model)));
         let mut coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
-        if let Err(error) = bootstrap_main_lane(
-            &mut coordinator,
-            prepared.session_id,
-            prepared.lane_id,
-            &prepared.request.input,
-        )
-        .await
-        {
-            publish_start_failure(execution, &error);
-            return Err(error);
-        }
-        if coordinator
-            .session()
-            .active_on_lane(prepared.lane_id)
-            .is_some()
-        {
-            let error = AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "main lane already has an active operation",
-            );
-            publish_start_failure(execution, &error);
-            return Err(error);
+        let mut acquired_lane = None;
+        if prepared.bootstrap {
+            if let Err(error) = bootstrap_main_lane(
+                &mut coordinator,
+                prepared.session_id,
+                prepared.lane_id,
+                &prepared.request.input,
+            )
+            .await
+            {
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+            if coordinator
+                .session()
+                .active_on_lane(prepared.lane_id)
+                .is_some()
+            {
+                let error = AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "main lane already has an active operation",
+                );
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+        } else if let Some(session) = &prepared.session {
+            let runtime = match session.runtime().await {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let error = session_error(&error);
+                    publish_start_failure(execution, &error);
+                    return Err(error);
+                }
+            };
+            if let Err(error) =
+                append_lane_input(&runtime, prepared.lane_id, &prepared.request.input).await
+            {
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+            if let Err(error) = runtime
+                .try_acquire_run(prepared.lane_id, prepared.accepted.run_id())
+                .map_err(|error| session_error(&error))
+            {
+                publish_start_failure(execution, &error);
+                return Err(error);
+            }
+            acquired_lane = Some((Arc::clone(&runtime), prepared.lane_id));
+            coordinator = match runtime
+                .coordinator_for_run(Some(prepared.accepted.run_id()))
+                .await
+            {
+                Ok(coordinator) => coordinator,
+                Err(error) => {
+                    runtime.release(prepared.lane_id);
+                    let error = session_error(&error);
+                    publish_start_failure(execution, &error);
+                    return Err(error);
+                }
+            };
         }
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(
@@ -476,6 +586,9 @@ impl Agent {
         let mut owner = match owner {
             Ok(owner) => owner,
             Err(error) => {
+                if let Some((runtime, lane_id)) = &acquired_lane {
+                    runtime.release(*lane_id);
+                }
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
@@ -486,6 +599,9 @@ impl Agent {
             Err(error) => {
                 let error = AgentRunError::runtime_message(error.to_string());
                 let _shutdown = owner.shutdown().await;
+                if let Some((runtime, lane_id)) = &acquired_lane {
+                    runtime.release(*lane_id);
+                }
                 publish_start_failure(execution, &error);
                 return Err(error);
             }
@@ -507,6 +623,9 @@ impl Agent {
         )
         .await;
         let _shutdown = owner.shutdown().await;
+        if let Some((runtime, lane_id)) = acquired_lane {
+            runtime.release(lane_id);
+        }
         match result {
             Ok(value) => value,
             Err(_) => Err(AgentRunError::Timeout {
@@ -860,6 +979,8 @@ struct PreparedAgentRun {
     accepted: RunAccepted,
     request: AgentRunRequest,
     locator: OperationLocator,
+    bootstrap: bool,
+    session: Option<crate::Session>,
 }
 
 impl PreparedAgentRun {
@@ -881,13 +1002,6 @@ impl PreparedAgentRun {
 
 struct AgentRunInner {
     locator: OperationLocator,
-    #[cfg_attr(
-        not(feature = "native-tokio"),
-        expect(
-            dead_code,
-            reason = "native list/resolve reads the store; WASM list/resolve is PR-048"
-        )
-    )]
     store: Arc<dyn finstack_ai_runtime::JournalStore>,
     cancellation_initiator: CancellationInitiator,
     handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
@@ -993,6 +1107,16 @@ impl AgentRun {
     #[must_use]
     pub fn locator(&self) -> &OperationLocator {
         &self.inner.locator
+    }
+
+    /// Live session handle for this run. Does not respawn parked runs.
+    #[must_use]
+    pub fn session(&self) -> crate::Session {
+        crate::Session::pending(
+            Arc::clone(&self.inner.store),
+            self.inner.locator.session_id,
+            Arc::clone(&self.inner.locator.tenant_scope),
+        )
     }
 
     /// List the outstanding typed interaction for this run (0 or 1).
@@ -2133,6 +2257,48 @@ fn model_output_contract() -> EffectOutputContract {
         kind: EffectOutputKind::ModelResponse,
         schema_version: 1,
         schema_digest: Digest::raw_json(b"{\"kind\":\"model_response\",\"schema_version\":1}"),
+    }
+}
+
+fn session_error(error: &SessionError) -> AgentRunError {
+    AgentRunError::configuration(error.code(), error.to_string())
+}
+
+async fn append_lane_input(
+    runtime: &SessionRuntime,
+    lane_id: LaneId,
+    input: &str,
+) -> Result<(), AgentRunError> {
+    let now = NativeIds::now()?;
+    let message = text_message(
+        NativeIds::generate::<MessageTag>()?,
+        MessageRole::User,
+        input,
+        now,
+    )?;
+    runtime
+        .append_message(
+            lane_id,
+            &message,
+            LaneAppendIds {
+                entry_record_id: NativeIds::generate()?,
+                lane_moved_record_id: NativeIds::generate()?,
+                batch_id: NativeIds::generate()?,
+            },
+        )
+        .await
+        .map_err(|error| session_error(&error))?;
+    Ok(())
+}
+
+impl crate::Lane {
+    /// Start a new root run on this idle lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns a busy-lane or agent configuration/runtime failure.
+    pub fn run(&self, agent: &Agent, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
+        agent.start_on_lane(self, request)
     }
 }
 

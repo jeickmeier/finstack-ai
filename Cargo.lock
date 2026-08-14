@@ -518,6 +518,7 @@ dependencies = [
  "finstack-ai-protocol",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
  "futures-core",
  "jsonschema",
  "serde",

@@ -54,6 +54,7 @@ mod coordinator;
 mod error;
 mod event_hub;
 mod id_generation;
+mod identity_map;
 mod interaction;
 mod journal;
 #[cfg(feature = "native-tokio")]
@@ -62,6 +63,7 @@ mod middleware;
 mod model;
 mod observer;
 mod ports;
+mod session;
 mod tool;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -117,7 +119,14 @@ pub use composition::{
 };
 
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
+pub use identity_map::{
+    ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
+};
 pub use interaction::{InteractionResumeAction, interaction_resume_action};
+pub use session::{
+    LaneAppendIds, LaneCreateIds, LaneInspect, LaneOwner, SessionCreateIds, SessionError,
+    SessionRuntime,
+};
 
 pub use context::{
     AssembledContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED,

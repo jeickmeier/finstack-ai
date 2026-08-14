@@ -661,6 +661,18 @@ async fn compatible_lane_child_mapping_survives_recover_and_rejects_remap() {
     let mut parent = CommitCoordinator::new(store.clone());
     bootstrap(&mut parent, 1, 2, 10).await;
     accept_parent(&mut parent).await;
+    parent
+        .commit_session_records(
+            id(205),
+            vec![session_draft(
+                206,
+                1,
+                50,
+                RecordBody::LaneCreated(LaneCreated::try_new("research").expect("lane")),
+            )],
+        )
+        .await
+        .expect("research lane");
     let children = ChildRunCoordinator::new(Arc::new(RecordingInvoker {
         starts: Mutex::new(0),
     }));

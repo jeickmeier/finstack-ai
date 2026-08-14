@@ -411,10 +411,22 @@ impl SessionProjection {
     /// Mandatory `main` lane, when created.
     #[must_use]
     pub fn main_lane(&self) -> Option<(LaneId, &LaneProjection)> {
+        self.lane("main")
+    }
+
+    /// Lane projection for a stable application name.
+    #[must_use]
+    pub fn lane(&self, name: &str) -> Option<(LaneId, &LaneProjection)> {
         self.lanes
             .iter()
-            .find(|(_, lane)| lane.name.as_ref() == "main")
+            .find(|(_, lane)| lane.name.as_ref() == name)
             .map(|(id, lane)| (*id, lane))
+    }
+
+    /// Lane projection for a durable lane identity.
+    #[must_use]
+    pub fn lane_by_id(&self, lane_id: LaneId) -> Option<&LaneProjection> {
+        self.lanes.get(&lane_id)
     }
 
     /// Non-terminal operation on `lane_id`, when the lane is busy.
@@ -788,5 +800,11 @@ mod tests {
             projection.main_lane().expect("main").1.leaf_id,
             Some(user.id())
         );
+        assert_eq!(
+            projection.lane("main").expect("named").0,
+            projection.main_lane().expect("main").0
+        );
+        assert!(projection.lane("research").is_none());
+        assert!(projection.lane_by_id(id(2)).is_some());
     }
 }

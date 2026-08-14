@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "subject": "pr047-identity",
+  "operation": "parse",
+  "input": {
+    "channel": "",
+    "account": "acct-a",
+    "thread": "thread-1"
+  },
+  "expect": {
+    "ok": false,
+    "error_code": "strict_decode"
+  }
+}

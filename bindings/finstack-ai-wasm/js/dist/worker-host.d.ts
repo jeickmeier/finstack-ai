@@ -10,7 +10,7 @@ export interface WorkerHostAgent {
 }
 /** Structural run handle used inside the worker. */
 export interface WorkerHostRun {
-    readonly session: {
+    readonly locator: {
         toDict(): SessionSnapshot;
     };
     events(options?: EventOptions): AsyncIterable<WorkerHostEventBatch>;

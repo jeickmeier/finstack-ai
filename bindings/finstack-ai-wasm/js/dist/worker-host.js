@@ -80,7 +80,7 @@ export function exposeWorkerHost(factory) {
                     });
                 }
                 const run = agent.start(message.input, message.options);
-                const session = run.session.toDict();
+                const session = run.locator.toDict();
                 const slot = {
                     agentId: message.agentId,
                     runId: session.runId,

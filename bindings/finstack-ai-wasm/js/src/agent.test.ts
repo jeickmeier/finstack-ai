@@ -156,8 +156,8 @@ test("keeps durable state in WASM until explicit snapshots", async ({ page }) =>
     }
     const runResult = await run.result();
     return {
-      session: run.session.toDict(),
-      sessionAgain: run.session.toDict(),
+      session: run.locator.toDict(),
+      sessionAgain: run.locator.toDict(),
       result: runResult.toDict(),
       batches,
     };
@@ -291,7 +291,7 @@ test("double cancel is idempotent and drop does not cancel", async ({ page }) =>
     );
     const cancelAgent = await window.finstackTest.Agent.create({ model: hanging });
     const run = cancelAgent.start("wait");
-    const session = run.session.toDict();
+    const session = run.locator.toDict();
     const started = Date.now();
     while (pending === 0 && Date.now() - started < 2000) {
       await new Promise((resolve) => setTimeout(resolve, 0));

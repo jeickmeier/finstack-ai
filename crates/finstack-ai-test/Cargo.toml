@@ -26,6 +26,7 @@ thiserror = { workspace = true }
 criterion = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-memory = { workspace = true }
+finstack-ai-store-sqlite = { workspace = true }
 tokio = { workspace = true }
 
 [[bench]]

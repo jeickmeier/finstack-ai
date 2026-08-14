@@ -131,8 +131,9 @@ def test_rust_backed_run_batches_events_and_retains_result() -> None:
         assert first.text == "hello world"
         assert second.text == first.text
         assert (
-            first.session.to_dict() == second.session.to_dict() == run.session.to_dict()
+            first.locator.to_dict() == second.locator.to_dict() == run.locator.to_dict()
         )
+        assert first.session.session_id == run.session.session_id
         return run, batches
 
     with _server(_text_sse(["hello", " ", "w", "o", "r", "l", "d"])) as server:
@@ -189,7 +190,7 @@ def test_explicit_cancellation_is_idempotent_and_contextual() -> None:
             await run.result()
         assert caught.value.code == "agent_run_cancelled"
         assert caught.value.retryable is False
-        assert caught.value.context == run.session.to_dict()
+        assert caught.value.context == run.locator.to_dict()
         await run.close_events()
 
     with _server(_text_sse(["late"]), hold_response=True) as server:

@@ -2,6 +2,9 @@ import {
   Agent as WasmAgent,
   Event as WasmEvent,
   EventBatch as WasmEventBatch,
+  Lane as WasmLane,
+  Locator as WasmLocator,
+  MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap,
   Run as WasmRun,
   RunResult as WasmRunResult,
   Session as WasmSession,
@@ -249,6 +252,47 @@ export class Agent {
   }
 
   /**
+   * Create a live session on this agent's journal store.
+   *
+   * @param tenantScope - Tenant scope captured by the host.
+   * @returns A live session handle with a bootstrapped `main` lane.
+   * @throws {FinstackError} When the session cannot be created.
+   * @example
+   * ```ts
+   * const session = await agent.createSession("tenant-a");
+   * ```
+   */
+  async createSession(tenantScope = "default"): Promise<Session> {
+    requireWasm();
+    try {
+      return new Session(await this.#handle.createSession(tenantScope));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Open an existing session without respawning parked runs.
+   *
+   * @param sessionId - Durable session identity.
+   * @param tenantScope - Tenant scope captured by the host.
+   * @returns A live session handle rebuilt from the journal.
+   * @throws {FinstackError} When the session cannot be opened.
+   * @example
+   * ```ts
+   * const opened = await agent.openSession(session.sessionId, "tenant-a");
+   * ```
+   */
+  async openSession(sessionId: string, tenantScope = "default"): Promise<Session> {
+    requireWasm();
+    try {
+      return new Session(await this.#handle.openSession(sessionId, tenantScope));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
    * Start one run and return its detached control handle immediately.
    *
    * Dropping the returned {@link Run} detaches observation and does not cancel
@@ -321,10 +365,17 @@ export class Run {
   }
 
   /**
-   * Immutable session locator for this run.
+   * Live session handle for this run.
    */
   get session(): Session {
     return new Session(this.#handle.session);
+  }
+
+  /**
+   * Immutable operation locator snapshot.
+   */
+  get locator(): Locator {
+    return new Locator(this.#handle.locator);
   }
 
   /**
@@ -436,10 +487,10 @@ export class Run {
 /**
  * Immutable identifiers for one accepted operation.
  */
-export class Session {
-  readonly #handle: WasmSession;
+export class Locator {
+  readonly #handle: WasmLocator;
 
-  constructor(handle: WasmSession) {
+  constructor(handle: WasmLocator) {
     this.#handle = handle;
   }
 
@@ -467,13 +518,245 @@ export class Session {
    * Serialize the identifier snapshot explicitly.
    *
    * @returns A plain locator object.
-   * @example
-   * ```ts
-   * const snapshot = run.session.toDict();
-   * ```
    */
   toDict(): SessionSnapshot {
     return this.#handle.toDict() as SessionSnapshot;
+  }
+}
+
+/**
+ * Inspect snapshot for one live lane.
+ */
+export interface LaneInspectSnapshot {
+  /** Durable lane identity. */
+  laneId: string;
+  /** Stable application name. */
+  name: string;
+  /** History length ending at the current leaf. */
+  historyLen: number;
+}
+
+/**
+ * Host-owned `(channel, account, thread)` resolution.
+ */
+export interface ExternalIdentitySnapshot {
+  /** Bound session identity. */
+  sessionId: string;
+  /** Bound lane identity. */
+  laneId: string;
+}
+
+/**
+ * Live handle for one journaled session.
+ */
+export class Session {
+  readonly #handle: WasmSession;
+
+  constructor(handle: WasmSession) {
+    this.#handle = handle;
+  }
+
+  /** Tenant scope captured by the host. */
+  get tenantScope(): string {
+    return this.#handle.tenantScope;
+  }
+
+  /** Session identity. */
+  get sessionId(): string {
+    return this.#handle.sessionId;
+  }
+
+  /**
+   * Create a named lane, optionally forking from an existing entry.
+   *
+   * @param name - Application lane name. `main` is reserved for bootstrap.
+   * @param fork - Optional existing entry identity to share without copying.
+   * @returns The new live lane handle.
+   * @throws {FinstackError} When the name is invalid or the fork is unknown.
+   * @example
+   * ```ts
+   * const research = await session.createLane("research", leafId);
+   * ```
+   */
+  async createLane(name: string, fork?: string): Promise<Lane> {
+    try {
+      return new Lane(await this.#handle.createLane(name, fork));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * List restored lanes.
+   *
+   * @returns Live handles for every lane in the session.
+   * @throws {FinstackError} When the session cannot be loaded.
+   * @example
+   * ```ts
+   * const lanes = await session.listLanes();
+   * ```
+   */
+  async listLanes(): Promise<Lane[]> {
+    try {
+      const lanes = (await this.#handle.listLanes()) as WasmLane[];
+      return lanes.map((lane) => new Lane(lane));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Look up one lane by application name.
+   *
+   * @param name - Application lane name.
+   * @returns The live lane handle.
+   * @throws {FinstackError} When the lane does not exist.
+   * @example
+   * ```ts
+   * const main = await session.lane("main");
+   * ```
+   */
+  async lane(name: string): Promise<Lane> {
+    try {
+      return new Lane(await this.#handle.lane(name));
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Bind a host-owned external identity to one lane.
+   *
+   * @param map - In-process identity map owned by the host.
+   * @param channel - Channel or adapter name.
+   * @param account - Account identity on that channel.
+   * @param thread - Conversation or thread identity.
+   * @param laneId - Durable lane identity in this session.
+   * @throws {FinstackError} When the key conflicts or the lane is unknown.
+   * @example
+   * ```ts
+   * const map = new MemoryExternalIdentityMap();
+   * session.bindExternalIdentity(map, "slack", "acct", "thread-1", main.laneId);
+   * ```
+   */
+  bindExternalIdentity(
+    map: MemoryExternalIdentityMap,
+    channel: string,
+    account: string,
+    thread: string,
+    laneId: string,
+  ): void {
+    try {
+      const identityMap = identityMapHandles.get(map);
+      if (identityMap === undefined) {
+        throw new FinstackError("identity map is not initialized", {
+          code: "invalid_identity_key",
+          retryable: false,
+        });
+      }
+      this.#handle.bindExternalIdentity(identityMap, channel, account, thread, laneId);
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+}
+
+/**
+ * Live handle for one lane in a session.
+ */
+export class Lane {
+  readonly #handle: WasmLane;
+
+  constructor(handle: WasmLane) {
+    this.#handle = handle;
+  }
+
+  /** Durable lane identity. */
+  get laneId(): string {
+    return this.#handle.laneId;
+  }
+
+  /** Session that owns this lane. */
+  get session(): Session {
+    return new Session(this.#handle.session);
+  }
+
+  /**
+   * Point this idle lane at an existing entry without copying.
+   *
+   * @param entryId - Existing conversation entry identity.
+   * @throws {FinstackError} When the entry is unknown or the lane is busy.
+   * @example
+   * ```ts
+   * await research.navigate(leafId);
+   * ```
+   */
+  async navigate(entryId: string): Promise<void> {
+    try {
+      await this.#handle.navigate(entryId);
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Inspect name, leaf, and history length.
+   *
+   * @returns A snapshot of the restored lane.
+   * @throws {FinstackError} When the lane cannot be inspected.
+   * @example
+   * ```ts
+   * const inspect = await research.inspect();
+   * ```
+   */
+  async inspect(): Promise<LaneInspectSnapshot> {
+    try {
+      return (await this.#handle.inspect()) as LaneInspectSnapshot;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+}
+
+const identityMapHandles = new WeakMap<
+  MemoryExternalIdentityMap,
+  WasmMemoryExternalIdentityMap
+>();
+
+/**
+ * In-process external identity map.
+ */
+export class MemoryExternalIdentityMap {
+  constructor(handle?: WasmMemoryExternalIdentityMap) {
+    identityMapHandles.set(this, handle ?? new WasmMemoryExternalIdentityMap());
+  }
+
+  /**
+   * Resolve one previously bound key.
+   *
+   * @param channel - Channel or adapter name.
+   * @param account - Account identity on that channel.
+   * @param thread - Conversation or thread identity.
+   * @returns The bound session and lane, or `undefined`.
+   * @throws {FinstackError} When the key is invalid.
+   * @example
+   * ```ts
+   * const bound = map.resolve("slack", "acct", "thread-1");
+   * ```
+   */
+  resolve(
+    channel: string,
+    account: string,
+    thread: string,
+  ): ExternalIdentitySnapshot | undefined {
+    try {
+      const bound = identityMapHandles.get(this)?.resolve(channel, account, thread) as
+        | ExternalIdentitySnapshot
+        | undefined;
+      return bound;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
   }
 }
 
@@ -511,9 +794,14 @@ export class RunResult {
     return this.#handle.activeCapabilities as ActiveCapability[];
   }
 
-  /** Session locator for the completed run. */
-  get session(): Session {
-    return new Session(this.#handle.session);
+  /** Locator snapshot for the completed run. */
+  get locator(): Locator {
+    return new Locator(this.#handle.locator);
+  }
+
+  /** Locator snapshot for the completed run. */
+  get session(): Locator {
+    return new Locator(this.#handle.session);
   }
 
   /**

@@ -11,8 +11,9 @@ use finstack_ai::runtime::{
 };
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
-    AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, InstructionSpec,
-    InteractionResolution, PrincipalRef, RunSecurityContext,
+    AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, ExternalIdentityKey,
+    ExternalIdentityMap, InstructionSpec, InteractionResolution, Lane, MemoryExternalIdentityMap,
+    PrincipalRef, RunSecurityContext, Session, SessionError,
 };
 use finstack_ai_provider_openai_compatible::{
     EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
@@ -351,6 +352,41 @@ impl PyAgent {
         self.inner.compact_capability_catalog()
     }
 
+    /// Create a live session on this agent's journal store.
+    #[pyo3(signature = (tenant_scope = "default"))]
+    fn create_session<'py>(
+        &self,
+        py: Python<'py>,
+        tenant_scope: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let store = self.inner.journal_store();
+        let tenant_scope = tenant_scope.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            match Session::create(store, tenant_scope).await {
+                Ok(inner) => Python::attach(|py| Py::new(py, PySession { inner })),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
+    /// Open an existing session without respawning parked runs.
+    fn open_session<'py>(
+        &self,
+        py: Python<'py>,
+        session_id: String,
+        tenant_scope: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let store = self.inner.journal_store();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let session_id = finstack_ai::runtime::SessionId::parse(&session_id)
+                .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+            match Session::open(store, session_id, tenant_scope).await {
+                Ok(inner) => Python::attach(|py| Py::new(py, PySession { inner })),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
     /// Start a run and return its shared control handle immediately.
     #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1))]
     fn start(
@@ -434,10 +470,18 @@ struct PyRun {
 
 #[pymethods]
 impl PyRun {
-    /// Immutable session/lane/run snapshot.
+    /// Live session handle for this run.
     #[getter]
     fn session(&self) -> PySession {
         PySession {
+            inner: self.inner.session(),
+        }
+    }
+
+    /// Immutable operation locator snapshot.
+    #[getter]
+    fn locator(&self) -> PyLocator {
+        PyLocator {
             locator: Arc::new(self.inner.locator().clone()),
         }
     }
@@ -570,13 +614,13 @@ impl PyEventIterator {
 }
 
 /// Immutable operation identity snapshot.
-#[pyclass(module = "finstack_ai._finstack_ai", name = "Session", frozen)]
-struct PySession {
+#[pyclass(module = "finstack_ai._finstack_ai", name = "Locator", frozen)]
+struct PyLocator {
     locator: Arc<OperationLocator>,
 }
 
 #[pymethods]
-impl PySession {
+impl PyLocator {
     #[getter]
     fn tenant_scope(&self) -> &str {
         &self.locator.tenant_scope
@@ -600,6 +644,198 @@ impl PySession {
     /// Serialize the immutable snapshot on explicit request.
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         locator_dict(py, &self.locator)
+    }
+}
+
+/// Live session handle over one journaled session.
+#[pyclass(module = "finstack_ai._finstack_ai", name = "Session", frozen)]
+struct PySession {
+    inner: Session,
+}
+
+#[pymethods]
+impl PySession {
+    #[getter]
+    fn tenant_scope(&self) -> &str {
+        self.inner.tenant_scope()
+    }
+
+    #[getter]
+    fn session_id(&self) -> String {
+        self.inner.session_id().to_string()
+    }
+
+    /// Create a named lane, optionally forking from an existing entry.
+    #[pyo3(signature = (name, fork = None))]
+    fn create_lane<'py>(
+        &self,
+        py: Python<'py>,
+        name: String,
+        fork: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let session = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let fork = fork
+                .map(|value| finstack_ai::runtime::EntryId::parse(&value))
+                .transpose()
+                .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+            match session.create_lane(name, fork).await {
+                Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
+    /// List restored lanes.
+    fn list_lanes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let session = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            match session.list_lanes().await {
+                Ok(lanes) => Python::attach(|py| {
+                    lanes
+                        .into_iter()
+                        .map(|inner| Py::new(py, PyLane { inner }))
+                        .collect::<PyResult<Vec<_>>>()
+                }),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
+    /// Look up one lane by application name.
+    fn lane<'py>(&self, py: Python<'py>, name: String) -> PyResult<Bound<'py, PyAny>> {
+        let session = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            match session.lane(&name).await {
+                Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
+    /// Bind a host-owned external identity to one lane.
+    fn bind_external_identity(
+        &self,
+        map: &Bound<'_, PyMemoryExternalIdentityMap>,
+        channel: String,
+        account: String,
+        thread: String,
+        lane_id: &str,
+    ) -> PyResult<()> {
+        let key = ExternalIdentityKey::try_new(channel, account, thread)
+            .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+        let lane_id = finstack_ai::runtime::LaneId::parse(lane_id)
+            .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+        self.inner
+            .bind_external_identity(&map.borrow().inner, key, lane_id)
+            .map_err(|error| ConfigurationError::new_err(error.to_string()))
+    }
+
+    /// Resolve a host-owned external identity key.
+    #[staticmethod]
+    fn resolve_external_identity(
+        map: &Bound<'_, PyMemoryExternalIdentityMap>,
+        channel: String,
+        account: String,
+        thread: String,
+    ) -> PyResult<Option<(String, String)>> {
+        let key = ExternalIdentityKey::try_new(channel, account, thread)
+            .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+        Ok(
+            Session::resolve_external_identity(&map.borrow().inner, &key)
+                .map(|(session_id, lane_id)| (session_id.to_string(), lane_id.to_string())),
+        )
+    }
+}
+
+/// Live lane handle.
+#[pyclass(module = "finstack_ai._finstack_ai", name = "Lane", frozen)]
+struct PyLane {
+    inner: Lane,
+}
+
+#[pymethods]
+impl PyLane {
+    #[getter]
+    fn lane_id(&self) -> String {
+        self.inner.lane_id().to_string()
+    }
+
+    #[getter]
+    fn session(&self) -> PySession {
+        PySession {
+            inner: self.inner.session().clone(),
+        }
+    }
+
+    /// Point this idle lane at an existing entry without copying.
+    fn navigate<'py>(&self, py: Python<'py>, entry_id: String) -> PyResult<Bound<'py, PyAny>> {
+        let lane = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let entry_id = finstack_ai::runtime::EntryId::parse(&entry_id)
+                .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+            match lane.navigate(entry_id).await {
+                Ok(()) => Ok(()),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+
+    /// Inspect name, leaf, active run, and history length.
+    fn inspect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let lane = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            match lane.inspect().await {
+                Ok(inspect) => Python::attach(|py| {
+                    let value = PyDict::new(py);
+                    value.set_item("lane_id", inspect.lane_id.to_string())?;
+                    value.set_item("name", inspect.name.as_ref())?;
+                    value.set_item("leaf_id", inspect.leaf_id.map(|id| id.to_string()))?;
+                    value.set_item(
+                        "active_run_id",
+                        inspect.active_run_id.map(|id| id.to_string()),
+                    )?;
+                    value.set_item("history_len", inspect.history.len())?;
+                    Ok(value.unbind())
+                }),
+                Err(error) => Python::attach(|py| Err(session_py_error(py, &error))),
+            }
+        })
+    }
+}
+
+/// In-process external identity map.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "MemoryExternalIdentityMap",
+    frozen
+)]
+struct PyMemoryExternalIdentityMap {
+    inner: MemoryExternalIdentityMap,
+}
+
+#[pymethods]
+impl PyMemoryExternalIdentityMap {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: MemoryExternalIdentityMap::new(),
+        }
+    }
+
+    /// Resolve one previously bound key.
+    fn resolve(
+        &self,
+        channel: String,
+        account: String,
+        thread: String,
+    ) -> PyResult<Option<(String, String)>> {
+        let key = ExternalIdentityKey::try_new(channel, account, thread)
+            .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
+        Ok(self
+            .inner
+            .resolve(&key)
+            .map(|(session_id, lane_id)| (session_id.to_string(), lane_id.to_string())))
     }
 }
 
@@ -703,8 +939,15 @@ impl PyRunResult {
     }
 
     #[getter]
-    fn session(&self) -> PySession {
-        PySession {
+    fn locator(&self) -> PyLocator {
+        PyLocator {
+            locator: Arc::new(self.inner.locator.clone()),
+        }
+    }
+
+    #[getter]
+    fn session(&self) -> PyLocator {
+        PyLocator {
             locator: Arc::new(self.inner.locator.clone()),
         }
     }
@@ -1055,6 +1298,21 @@ fn agent_error(py: Python<'_>, error: &AgentRunError, locator: Option<&Operation
     }
 }
 
+fn session_py_error(py: Python<'_>, error: &SessionError) -> PyErr {
+    let value = py
+        .get_type::<ConfigurationError>()
+        .call1((error.to_string(),));
+    match value {
+        Ok(value) => {
+            let _ = value.setattr("code", error.code());
+            let _ = value.setattr("retryable", false);
+            let _ = value.setattr("context", py.None());
+            PyErr::from_value(value)
+        }
+        Err(construction_error) => construction_error,
+    }
+}
+
 fn locator_dict(py: Python<'_>, locator: &OperationLocator) -> PyResult<Py<PyDict>> {
     let context = PyDict::new(py);
     context.set_item("tenant_scope", locator.tenant_scope.as_ref())?;
@@ -1084,7 +1342,10 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyCapability>()?;
     module.add_class::<PyRun>()?;
     module.add_class::<PyEventIterator>()?;
+    module.add_class::<PyLocator>()?;
     module.add_class::<PySession>()?;
+    module.add_class::<PyLane>()?;
+    module.add_class::<PyMemoryExternalIdentityMap>()?;
     module.add_class::<PyRunResult>()?;
     module.add_class::<PyEvent>()?;
     module.add_class::<PyEventBatch>()?;

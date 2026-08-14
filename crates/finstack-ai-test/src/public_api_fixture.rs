@@ -215,6 +215,12 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
             run_strict_runtime_subject::<finstack_ai_runtime::ModelContextProfile>(fixture)
         }
         "tool-spec" => run_strict_runtime_subject::<finstack_ai_runtime::ToolSpec>(fixture),
+        "pr047-identity" => {
+            run_strict_runtime_subject::<finstack_ai_runtime::ExternalIdentityKey>(fixture)
+        }
+        "pr047-lane-inspect" => {
+            run_strict_runtime_subject::<finstack_ai_runtime::LaneInspect>(fixture)
+        }
         other => Err(PublicApiFixtureError::Failed(format!(
             "unknown subject {other}"
         ))),
