@@ -1,3 +1,7 @@
+import type { PrebetaKind } from "./host.js";
+export type { HostArtifactStore, HostCallOptions, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostModelCompletion, HostModelResult, HostObserver, HostRandomSource, HostToolResult, HostToolset, PrebetaKind, } from "./host.js";
+export { JsArtifactStore, JsClock, JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsRandomSource, JsToolset, createHostClock, createHostRandomSource, createMemoryArtifactStore, createMemoryJournalStore, } from "./adapters.js";
+export type { JsContextProviderOptions, JsJournalStoreOptions, JsMiddlewareOptions, JsModelOptions, JsObserverOptions, JsToolsetOptions, } from "./adapters.js";
 /**
  * Lockstep version metadata for the published `@finstack/ai` package.
  */
@@ -51,4 +55,20 @@ export declare function health(): string;
  * ```
  */
 export declare function buildMetadata(): BuildMetadata;
+/**
+ * Normalize a pre-beta lineage or authenticated external-command shape.
+ *
+ * Durability-dependent store APIs remain pre-beta. This function only runs
+ * Rust DTO validation and does not submit a live Agent.
+ *
+ * @param kind - One of the three supported command kinds.
+ * @param value - Candidate JSON object.
+ * @returns The Rust-normalized object.
+ * @throws {TypeError} When `kind` is unsupported or `value` fails validation.
+ * @example
+ * ```ts
+ * const normalized = normalizePrebetaShape("child_run_prepared", value);
+ * ```
+ */
+export declare function normalizePrebetaShape(kind: PrebetaKind, value: unknown): unknown;
 //# sourceMappingURL=index.d.ts.map

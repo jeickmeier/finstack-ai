@@ -1,7 +1,51 @@
 import initWasm, {
   buildMetadata as wasmBuildMetadata,
   health as wasmHealth,
+  normalizePrebetaShape as wasmNormalizePrebetaShape,
 } from "../generated/finstack_ai_wasm.js";
+
+import { setAdaptersInitialized } from "./adapters.js";
+import type { PrebetaKind } from "./host.js";
+
+export type {
+  HostArtifactStore,
+  HostCallOptions,
+  HostClock,
+  HostContextProvider,
+  HostJournalStore,
+  HostMiddleware,
+  HostModel,
+  HostModelCompletion,
+  HostModelResult,
+  HostObserver,
+  HostRandomSource,
+  HostToolResult,
+  HostToolset,
+  PrebetaKind,
+} from "./host.js";
+export {
+  JsArtifactStore,
+  JsClock,
+  JsContextProvider,
+  JsJournalStore,
+  JsMiddleware,
+  JsModel,
+  JsObserver,
+  JsRandomSource,
+  JsToolset,
+  createHostClock,
+  createHostRandomSource,
+  createMemoryArtifactStore,
+  createMemoryJournalStore,
+} from "./adapters.js";
+export type {
+  JsContextProviderOptions,
+  JsJournalStoreOptions,
+  JsMiddlewareOptions,
+  JsModelOptions,
+  JsObserverOptions,
+  JsToolsetOptions,
+} from "./adapters.js";
 
 /**
  * Lockstep version metadata for the published `@finstack/ai` package.
@@ -42,6 +86,7 @@ export async function init(
   }
   await initWasm(moduleOrPath);
   initialized = true;
+  setAdaptersInitialized(true);
 }
 
 /**
@@ -93,6 +138,37 @@ export function buildMetadata(): BuildMetadata {
     implementation: "wasm",
     target: "wasm32-unknown-unknown",
   };
+}
+
+/**
+ * Normalize a pre-beta lineage or authenticated external-command shape.
+ *
+ * Durability-dependent store APIs remain pre-beta. This function only runs
+ * Rust DTO validation and does not submit a live Agent.
+ *
+ * @param kind - One of the three supported command kinds.
+ * @param value - Candidate JSON object.
+ * @returns The Rust-normalized object.
+ * @throws {TypeError} When `kind` is unsupported or `value` fails validation.
+ * @example
+ * ```ts
+ * const normalized = normalizePrebetaShape("child_run_prepared", value);
+ * ```
+ */
+export function normalizePrebetaShape(kind: PrebetaKind, value: unknown): unknown {
+  assertInitialized();
+  switch (kind) {
+    case "child_run_prepared":
+    case "interaction_resolution":
+    case "external_effect_completion":
+      break;
+    default: {
+      const _exhaustive: never = kind;
+      throw new TypeError(`unsupported pre-beta shape: ${String(_exhaustive)}`);
+    }
+  }
+  const encoded = wasmNormalizePrebetaShape(kind, JSON.stringify(value));
+  return JSON.parse(encoded) as unknown;
 }
 
 function assertInitialized(): void {

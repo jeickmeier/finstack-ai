@@ -376,6 +376,7 @@ pub fn compile_native_port_proxies() {
     let _: Arc<dyn Middleware> = Arc::new(NativeMiddlewareProxy);
     let _: Arc<dyn JournalStore> = Arc::new(NativeJournalStoreProxy::default());
     let _: Arc<dyn Observer> = Arc::new(NativeObserverProxy);
+    crate::compile_native_host_adapters();
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -17,8 +17,70 @@ const types = new Map([
   [".map", "application/json; charset=utf-8"],
 ]);
 
+function readBody(request) {
+  return new Promise((resolveBody, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      resolveBody(Buffer.concat(chunks));
+    });
+    request.on("error", reject);
+  });
+}
+
+function writeSseFrame(response, payload) {
+  response.write(`data: ${payload}\n\n`);
+}
+
+async function handleOpenAICompatible(request, response, url) {
+  await readBody(request);
+  const delayMs = Number(url.searchParams.get("delay") ?? 0);
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+  });
+  const frames = [
+    JSON.stringify({
+      id: "chatcmpl-scripted",
+      choices: [{ delta: { content: "hel" } }],
+    }),
+    JSON.stringify({
+      id: "chatcmpl-scripted",
+      choices: [{ delta: { content: "lo" } }],
+    }),
+    "[DONE]",
+  ];
+  for (const frame of frames) {
+    if (delayMs > 0) {
+      await new Promise((resolveDelay) => {
+        setTimeout(resolveDelay, delayMs);
+      });
+    }
+    if (request.aborted) {
+      response.end();
+      return;
+    }
+    writeSseFrame(response, frame);
+  }
+  response.end();
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+  if (request.method === "POST" && url.pathname === "/finstack/openai") {
+    try {
+      await handleOpenAICompatible(request, response, url);
+    } catch {
+      if (!response.headersSent) {
+        response.writeHead(500);
+      }
+      response.end();
+    }
+    return;
+  }
   const relative = url.pathname === "/" ? "/harness.html" : url.pathname;
   const resolved = resolve(join(root, normalize(relative)));
   if (!resolved.startsWith(root)) {
