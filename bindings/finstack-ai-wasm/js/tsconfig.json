@@ -18,6 +18,7 @@
   "include": [
     "src/index.ts",
     "src/adapters/openai-compatible.ts",
+    "src/adapters/indexeddb.ts",
     "src/worker.ts",
     "src/worker-fixture.ts"
   ],

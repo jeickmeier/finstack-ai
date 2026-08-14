@@ -1,4 +1,5 @@
-import { Agent, JsModel, JsToolset, init } from "./index.js";
+import { Agent, JsJournalStore, JsModel, JsToolset, init } from "./index.js";
+import { createIndexedDbJournalStore } from "./adapters/indexeddb.js";
 import { createOpenAICompatibleModel } from "./adapters/openai-compatible.js";
 import { exposeWorkerHost } from "./worker-host.js";
 
@@ -48,11 +49,25 @@ type Scenario =
   | "tool-cycle"
   | "thousand-chunk"
   | "hanging-model"
-  | "hanging-fetch";
+  | "hanging-fetch"
+  | "persist"
+  | "hanging-persist";
 
 const wasmReady = init();
+let persistStore: JsJournalStore | undefined;
+let persistDbName = "finstack-ai-experimental";
 
 exposeWorkerHost({
+  async inspectSession(sessionId) {
+    await wasmReady;
+    const store =
+      persistStore ??
+      new JsJournalStore(createIndexedDbJournalStore({ dbName: persistDbName }), {
+        detail: "js_indexeddb_experimental",
+      });
+    persistStore = store;
+    return Agent.inspectSession(store, sessionId);
+  },
   async create(options) {
     await wasmReady;
     const scenario = readScenario(options);
@@ -142,6 +157,38 @@ exposeWorkerHost({
             MODEL_OPTIONS,
           ),
         });
+      case "persist":
+        return Agent.create({
+          model: new JsModel(
+            {
+              request: async () => ({
+                text: "hello from persisted Agent",
+                completion_id: "js-persist-1",
+              }),
+            },
+            MODEL_OPTIONS,
+          ),
+          store: persistJournal(options),
+        });
+      case "hanging-persist":
+        return Agent.create({
+          model: new JsModel(
+            {
+              request: (_draft, requestOptions) =>
+                new Promise((_resolve, reject) => {
+                  requestOptions?.signal?.addEventListener(
+                    "abort",
+                    () => {
+                      reject(requestOptions.signal?.reason ?? new Error("aborted"));
+                    },
+                    { once: true },
+                  );
+                }),
+            },
+            MODEL_OPTIONS,
+          ),
+          store: persistJournal(options),
+        });
       default: {
         const _exhaustive: never = scenario;
         throw new Error(`unsupported worker fixture: ${String(_exhaustive)}`);
@@ -162,8 +209,28 @@ function readScenario(options: unknown): Scenario {
     case "thousand-chunk":
     case "hanging-model":
     case "hanging-fetch":
+    case "persist":
+    case "hanging-persist":
       return scenario ?? "model-only";
     default:
       throw new Error(`unsupported worker fixture: ${String(scenario)}`);
   }
+}
+
+function persistJournal(options: unknown): JsJournalStore {
+  persistDbName = readDbName(options);
+  persistStore = new JsJournalStore(createIndexedDbJournalStore({ dbName: persistDbName }), {
+    detail: "js_indexeddb_experimental",
+  });
+  return persistStore;
+}
+
+function readDbName(options: unknown): string {
+  if (options === null || typeof options !== "object") {
+    return "finstack-ai-experimental";
+  }
+  const dbName = (options as { dbName?: unknown }).dbName;
+  return typeof dbName === "string" && dbName.length > 0
+    ? dbName
+    : "finstack-ai-experimental";
 }

@@ -1,7 +1,7 @@
 {
   "name": "@finstack/ai",
   "version": "0.0.2",
-  "description": "Browser WASM bindings for the finstack-ai engine",
+  "description": "Browser WASM bindings for the finstack-ai engine. IndexedDB persistence is experimental until PR-048.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "private": true,
@@ -21,13 +21,17 @@
       "types": "./dist/adapters/openai-compatible.d.ts",
       "import": "./dist/adapters/openai-compatible.js"
     },
+    "./adapters/indexeddb": {
+      "types": "./dist/adapters/indexeddb.d.ts",
+      "import": "./dist/adapters/indexeddb.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p ../../../examples/browser-minimal/tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "playwright test"
   },

@@ -275,6 +275,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-036-A02 | PR-036 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-036-E-browser-9ecaa1e1c4e5; PR-036-E-security-9ecaa1e1c4e5 | Terminate/unload/cancel-fetch leave cancelled or dropped waiters | me@jeickmeier.com | 2026-08-13 |
 | PR-036-A03 | PR-036 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-036-E-browser-9ecaa1e1c4e5; PR-036-E-candidate-9ecaa1e1c4e5 | Bounded drop-progress backpressure is observable | me@jeickmeier.com | 2026-08-13 |
 | PR-036-A04 | PR-036 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-036-E-browser-9ecaa1e1c4e5; PR-036-E-candidate-9ecaa1e1c4e5 | Main-thread and worker scripted traces match | me@jeickmeier.com | 2026-08-13 |
+| PR-037-A01 | PR-037 | PLAN-0.18 / [PR-037](../planning/04-finstack-ai-implementation-plan.md#pr-037---implement-indexeddb-reference-storage-and-browser-demo) | In progress | me@jeickmeier.com | — | Worker-hosted completed session survives reload as inspect | — | — |
+| PR-037-A02 | PR-037 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Interrupted run restores a provisional inspect snapshot | — | — |
+| PR-037-A03 | PR-037 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | CAS, idempotency, integrity, ordered load, and artifact ceilings | — | — |
+| PR-037-A04 | PR-037 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | browser-minimal uses public package imports only | — | — |
+| PR-037-A05 | PR-037 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Experimental persistence wording and clean secret scan | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

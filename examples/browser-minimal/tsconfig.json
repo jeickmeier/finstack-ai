@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "declaration": false,
+    "sourceMap": false,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "paths": {
+      "@finstack/ai": ["../../bindings/finstack-ai-wasm/js/dist/index.d.ts"],
+      "@finstack/ai/worker": ["../../bindings/finstack-ai-wasm/js/dist/worker.d.ts"],
+      "@finstack/ai/adapters/indexeddb": [
+        "../../bindings/finstack-ai-wasm/js/dist/adapters/indexeddb.d.ts"
+      ],
+      "@finstack/ai/adapters/openai-compatible": [
+        "../../bindings/finstack-ai-wasm/js/dist/adapters/openai-compatible.d.ts"
+      ]
+    }
+  },
+  "include": ["main.ts", "worker.ts"]
+}

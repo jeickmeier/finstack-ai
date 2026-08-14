@@ -1,5 +1,5 @@
 import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession, } from "../generated/finstack_ai_wasm.js";
-import { requireWasm, wasmModelHandle, wasmToolsetHandle, } from "./adapters.js";
+import { requireWasm, wasmJournalStoreHandle, wasmModelHandle, wasmToolsetHandle, } from "./adapters.js";
 import { FinstackError } from "./errors.js";
 export { FinstackError } from "./errors.js";
 /**
@@ -13,10 +13,11 @@ export class Agent {
     /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
      *
-     * The default journal is the Rust in-memory store. This method does not take
-     * a JavaScript journal. State remains in WASM until an explicit snapshot.
+     * The default journal is the Rust in-memory store. Pass {@link AgentOptions.store}
+     * to opt into a host journal. State remains in WASM until an explicit snapshot
+     * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, and optional instruction.
+     * @param options - Model, optional toolsets, optional instruction, and optional store.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -34,8 +35,37 @@ export class Agent {
     static async create(options) {
         requireWasm();
         try {
-            const handle = await WasmAgent.create(wasmModelHandle(options.model), (options.toolsets ?? []).map((toolset) => wasmToolsetHandle(toolset).cloneHandle()), options.instruction);
+            const handle = await WasmAgent.create(wasmModelHandle(options.model), (options.toolsets ?? []).map((toolset) => wasmToolsetHandle(toolset).cloneHandle()), options.instruction, options.store === undefined
+                ? undefined
+                : wasmJournalStoreHandle(options.store).cloneHandle());
             return new Agent(handle);
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
+     * Replay one stored session into a provisional inspect snapshot.
+     *
+     * This does not continue an interrupted run or retry in-flight effects.
+     *
+     * @param store - Host journal that holds the session.
+     * @param sessionId - Session identity to inspect.
+     * @returns A JSON inspect snapshot.
+     * @throws {FinstackError} When the session cannot be loaded or replayed.
+     * @example
+     * ```ts
+     * const snapshot = await Agent.inspectSession(store, sessionId);
+     * ```
+     */
+    static async inspectSession(store, sessionId) {
+        requireWasm();
+        try {
+            const snapshot = (await WasmAgent.inspectSession(wasmJournalStoreHandle(store), sessionId));
+            return {
+                ...snapshot,
+                headSequence: Number(snapshot.headSequence),
+            };
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);

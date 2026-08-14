@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>finstack-ai browser-minimal</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 1.5rem;
+        max-width: 52rem;
+      }
+      button {
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      pre {
+        background: #f4f4f4;
+        padding: 0.75rem;
+        overflow: auto;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "@finstack/ai": "/dist/index.js",
+          "@finstack/ai/worker": "/dist/worker.js",
+          "@finstack/ai/adapters/indexeddb": "/dist/adapters/indexeddb.js",
+          "@finstack/ai/adapters/openai-compatible": "/dist/adapters/openai-compatible.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Experimental browser persistence</h1>
+    <p>
+      Same-origin IndexedDB is experimental until PR-048 revalidation. Reload
+      restore is inspect, not continue. This is not crash durability.
+    </p>
+    <p>
+      <button id="run" type="button">Run scripted session</button>
+      <button id="inspect" type="button">Inspect last session</button>
+      <button id="clear" type="button">Clear local data</button>
+    </p>
+    <h2>Last result</h2>
+    <pre id="result">none</pre>
+    <h2>Inspect</h2>
+    <pre id="inspect-panel">none</pre>
+    <h2>Events</h2>
+    <pre id="events"></pre>
+    <script type="module" src="./dist/main.js"></script>
+  </body>
+</html>

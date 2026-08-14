@@ -1,3 +1,4 @@
+import type { SessionInspectSnapshot } from "./agent.js";
 import { FinstackError } from "./errors.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 import { type LagPolicy, type MainToWorker, type WorkerToMain } from "./worker-protocol.js";
@@ -238,6 +239,20 @@ export declare class WorkerClient {
      * const agent = await client.create({ scenario: "model-only" });
      * ```
      */
+    /**
+     * Inspect one stored session inside the worker.
+     *
+     * The store stays in the worker. This does not continue an interrupted run.
+     *
+     * @param sessionId - Session identity to inspect.
+     * @returns A provisional inspect snapshot.
+     * @throws {FinstackError} When the worker rejects inspect.
+     * @example
+     * ```ts
+     * const snapshot = await client.inspectSession(sessionId);
+     * ```
+     */
+    inspectSession(sessionId: string): Promise<SessionInspectSnapshot>;
     create(options?: unknown): Promise<WorkerAgent>;
     /**
      * Cancel in-flight runs and terminate the Dedicated Worker.

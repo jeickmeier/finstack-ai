@@ -29,15 +29,41 @@ export class Agent {
      * @param {JsModel} model
      * @param {JsToolset[]} toolsets
      * @param {string | null} [instruction]
+     * @param {JsJournalStore | null} [store]
      * @returns {Promise<any>}
      */
-    static create(model, toolsets, instruction) {
+    static create(model, toolsets, instruction, store) {
         _assertClass(model, JsModel);
         const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
         var ptr1 = isLikeNone(instruction) ? 0 : passStringToWasm0(instruction, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len1 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1);
+        let ptr2 = 0;
+        if (!isLikeNone(store)) {
+            _assertClass(store, JsJournalStore);
+            ptr2 = store.__destroy_into_raw();
+        }
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2);
+        return takeObject(ret);
+    }
+    /**
+     * Replay one stored session into a provisional inspect snapshot.
+     *
+     * This does not continue an interrupted run or retry in-flight effects.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session id is invalid or the
+     * stored journal cannot be replayed.
+     * @param {JsJournalStore} store
+     * @param {string} session_id
+     * @returns {Promise<any>}
+     */
+    static inspectSession(store, session_id) {
+        _assertClass(store, JsJournalStore);
+        const ptr0 = passStringToWasm0(session_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_inspectSession(store.__wbg_ptr, ptr0, len0);
         return takeObject(ret);
     }
     /**
@@ -455,9 +481,15 @@ export class JsContextProvider {
 if (Symbol.dispose) JsContextProvider.prototype[Symbol.dispose] = JsContextProvider.prototype.free;
 
 /**
- * Pre-beta in-memory JS journal-store wrapper. Not crash-durable.
+ * Trusted JS journal-store wrapper. Not crash-durable.
  */
 export class JsJournalStore {
+    static __wrap(ptr) {
+        const obj = Object.create(JsJournalStore.prototype);
+        obj.__wbg_ptr = ptr;
+        JsJournalStoreFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -469,7 +501,15 @@ export class JsJournalStore {
         wasm.__wbg_jsjournalstore_free(ptr, 0);
     }
     /**
-     * Construct a scripted journal-store wrapper.
+     * Clone the wrapper without moving the caller's handle.
+     * @returns {JsJournalStore}
+     */
+    cloneHandle() {
+        const ret = wasm.jsjournalstore_cloneHandle(this.__wbg_ptr);
+        return JsJournalStore.__wrap(ret);
+    }
+    /**
+     * Construct a journal-store wrapper around a trusted host adapter.
      *
      * # Errors
      *
@@ -1255,6 +1295,12 @@ function __wbg_get_imports() {
             const ret = getObject(arg0) === undefined;
             return ret;
         },
+        __wbg___wbindgen_number_get_136b9679cab35cfb: function(arg0, arg1) {
+            const obj = getObject(arg1);
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
         __wbg___wbindgen_string_get_d154f1e671052120: function(arg0, arg1) {
             const obj = getObject(arg1);
             const ret = typeof(obj) === 'string' ? obj : undefined;
@@ -1361,7 +1407,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_940(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1378(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1439,13 +1485,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 270, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_926);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 424, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1364);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_288);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_331);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1456,6 +1502,11 @@ function __wbg_get_imports() {
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000005: function(arg0) {
+            // Cast intrinsic for `U64 -> Externref`.
+            const ret = BigInt.asUintN(64, arg0);
             return addHeapObject(ret);
         },
         __wbindgen_object_clone_ref: function(arg0) {
@@ -1472,14 +1523,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_288(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_288(arg0, arg1);
+function __wasm_bindgen_func_elem_331(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_331(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_926(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1364(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_926(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1364(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1490,8 +1541,8 @@ function __wasm_bindgen_func_elem_926(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_940(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_940(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1378(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1378(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

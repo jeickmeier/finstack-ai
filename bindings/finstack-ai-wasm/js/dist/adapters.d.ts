@@ -1,4 +1,4 @@
-import { JsModel as WasmJsModel, JsToolset as WasmJsToolset } from "../generated/finstack_ai_wasm.js";
+import { JsJournalStore as WasmJsJournalStore, JsModel as WasmJsModel, JsToolset as WasmJsToolset } from "../generated/finstack_ai_wasm.js";
 import type { HostArtifactStore, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostObserver, HostRandomSource, HostToolset } from "./host.js";
 /**
  * Constructor options for {@link JsModel}.
@@ -86,6 +86,14 @@ export declare function wasmModelHandle(model: JsModel): WasmJsModel;
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export declare function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset;
+/**
+ * Return the crate-private wasm-bindgen journal-store handle.
+ *
+ * @param store - Public {@link JsJournalStore} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmJournalStoreHandle(store: JsJournalStore): WasmJsJournalStore;
 /**
  * Record that {@link init} has completed so wrappers may construct wasm handles.
  *
@@ -178,15 +186,15 @@ export declare class JsObserver {
     constructor(adapter: HostObserver, options: JsObserverOptions);
 }
 /**
- * Pre-beta in-memory journal-store wrapper. Not crash-durable.
+ * Trusted JS journal-store wrapper. Not crash-durable.
  */
 export declare class JsJournalStore {
     #private;
     /**
      * Wrap a trusted {@link HostJournalStore}.
      *
-     * IndexedDB and crash durability are later pull requests. This wrapper is
-     * scripted / in-memory only.
+     * Persistence is opt-in through a host that implements `append` / `load` /
+     * `writeSnapshot`. The default memory helper remains health-only.
      *
      * @param adapter - Host object that reports non-durable health.
      * @param options - Optional detail label.

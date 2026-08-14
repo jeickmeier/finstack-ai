@@ -1,3 +1,4 @@
+import type { SessionInspectSnapshot } from "./agent.js";
 import { FinstackError, sessionSnapshot } from "./errors.js";
 import type { RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 
@@ -43,6 +44,7 @@ export type MainToWorker =
     }
   | { v: 1; type: "closeEvents"; id: string; agentId: string; runId: string }
   | { v: 1; type: "ack"; agentId: string; runId: string; lastSequence: number }
+  | { v: 1; type: "inspect"; id: string; sessionId: string }
   | { v: 1; type: "shutdown"; id: string };
 
 /** Worker to main-thread notifications. */
@@ -95,7 +97,8 @@ export type WorkerToMain =
       droppedProgress: number;
       policy: LagPolicy;
     }
-  | { v: 1; type: "terminated"; reason: string };
+  | { v: 1; type: "terminated"; reason: string }
+  | { v: 1; type: "inspected"; id: string; snapshot: SessionInspectSnapshot };
 
 /**
  * Encode a control envelope and reject oversized payloads.
@@ -197,6 +200,13 @@ export function decodeMainToWorker(data: unknown): MainToWorker {
         runId: requiredString(record, "runId"),
         lastSequence: requiredNumber(record, "lastSequence"),
       };
+    case "inspect":
+      return {
+        v: 1,
+        type,
+        id: requiredString(record, "id"),
+        sessionId: requiredString(record, "sessionId"),
+      };
     default: {
       const _exhaustive: never = type as never;
       throw new FinstackError(`unsupported worker command: ${String(_exhaustive)}`, {
@@ -295,6 +305,13 @@ export function decodeWorkerToMain(data: unknown): WorkerToMain {
       };
     case "terminated":
       return { v: 1, type, reason: requiredString(record, "reason") };
+    case "inspected":
+      return {
+        v: 1,
+        type,
+        id: requiredString(record, "id"),
+        snapshot: requiredInspect(record.snapshot),
+      };
     default: {
       const _exhaustive: never = type as never;
       throw new FinstackError(`unsupported worker event: ${String(_exhaustive)}`, {
@@ -402,6 +419,44 @@ function requiredResult(value: unknown): RunResultSnapshot {
     });
   }
   return { ...session, text };
+}
+
+function requiredInspect(value: unknown): SessionInspectSnapshot {
+  if (value === null || typeof value !== "object") {
+    throw new FinstackError("worker message missing inspect snapshot", {
+      code: "agent_run_invalid_configuration",
+      retryable: false,
+    });
+  }
+  const record = value as Record<string, unknown>;
+  const phase = record.phase;
+  const headSequence = Number(record.headSequence);
+  if (
+    typeof record.sessionId !== "string" ||
+    !Number.isFinite(headSequence) ||
+    (phase !== "empty" &&
+      phase !== "in_progress" &&
+      phase !== "completed" &&
+      phase !== "failed" &&
+      phase !== "cancelled")
+  ) {
+    throw new FinstackError("worker message missing inspect snapshot", {
+      code: "agent_run_invalid_configuration",
+      retryable: false,
+    });
+  }
+  const snapshot: SessionInspectSnapshot = {
+    sessionId: record.sessionId,
+    headSequence,
+    phase,
+  };
+  if (typeof record.resultText === "string") {
+    snapshot.resultText = record.resultText;
+  }
+  if (typeof record.lastRecordKind === "string") {
+    snapshot.lastRecordKind = record.lastRecordKind;
+  }
+  return snapshot;
 }
 
 function requiredPolicy(value: unknown): LagPolicy {

@@ -1,3 +1,4 @@
+import type { SessionInspectSnapshot } from "./agent.js";
 import type { RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 /** Protocol version carried on every worker message. */
 export declare const PROTOCOL_VERSION = 1;
@@ -47,6 +48,11 @@ export type MainToWorker = {
     agentId: string;
     runId: string;
     lastSequence: number;
+} | {
+    v: 1;
+    type: "inspect";
+    id: string;
+    sessionId: string;
 } | {
     v: 1;
     type: "shutdown";
@@ -107,6 +113,11 @@ export type WorkerToMain = {
     v: 1;
     type: "terminated";
     reason: string;
+} | {
+    v: 1;
+    type: "inspected";
+    id: string;
+    snapshot: SessionInspectSnapshot;
 };
 /**
  * Encode a control envelope and reject oversized payloads.
