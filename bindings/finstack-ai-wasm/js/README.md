@@ -153,7 +153,10 @@ mise run generate-wasm
 ```
 
 That command is the only supported regeneration path. It writes `generated/`
-and `dist/`. CI regenerates and fails on a dirty tree.
+and `dist/`. Same-host `python tools/wasm_package/check.py dirty` fails when
+regeneration drifts from the committed tree. Hosted Ubuntu regenerates for
+consecutive identity and browser tests; rustc/wasm-bindgen output is not
+cross-OS identical.
 
 ## License
 

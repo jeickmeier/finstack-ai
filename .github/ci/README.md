@@ -25,7 +25,7 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (dirty-tree + optional byte-identical rebuild), and `test-browser` |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (consecutive byte-identical rebuild), and `test-browser`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
 | [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` 0.0.2 artifacts. Does not publish. |
 
 Required checks intentionally have **no** `paths` / `paths-ignore` filters.
