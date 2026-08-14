@@ -21,7 +21,7 @@ use crate::run_types::{
 use crate::settlement::{
     SettlementSources, model_handle_error, prepare_tool_batch_if_ready, process_model_progress,
     process_model_result, process_tool_progress, process_tool_result, resume_pending_model_effect,
-    validate_model_binding,
+    resume_pending_tool_effects, validate_model_binding,
 };
 use crate::timer_runtime::{
     TimerDispatcher, TimerDriverMessage, TimerDriverResult, run_timer_jobs,
@@ -34,7 +34,8 @@ use crate::{
     CancellationSignal, Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome,
     DeadlineDiagnostic, EventSubscription, EventSubscriptionConfig, EventSubscriptionError,
     LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction,
-    ModelWarmupContext, RandomSource, ResolvedToolCatalog, ToolStreamAssembler,
+    ModelWarmupContext, RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
+    ToolResumeAction, ToolStreamAssembler,
 };
 
 /// Cloneable bounded command/status/shutdown handle.
@@ -180,6 +181,40 @@ where
         | ModelResumeAction::UseRecorded
         | ModelResumeAction::Reconcile
         | ModelResumeAction::WaitExternal => Ok(()),
+    }
+}
+
+async fn resume_tool_effects<C, R>(
+    coordinator: &mut CommitCoordinator,
+    catalog: &ResolvedToolCatalog,
+    dispatcher: &ToolDispatcher,
+    sources: &SettlementSources<C, R>,
+    cancellation: &CancellationSignal,
+) -> Result<(), RunHandleError>
+where
+    C: Clock + Send + Sync + 'static,
+    R: RandomSource + Send + Sync + 'static,
+{
+    let action = resume_pending_tool_effects(coordinator, catalog, sources, cancellation).await?;
+    match action {
+        ToolResumeAction::Retry => {
+            for seed in coordinator.pending_tool_seeds() {
+                dispatcher
+                    .resume_call(seed)
+                    .await
+                    .map_err(|error| RunHandleError::Tool {
+                        code: Arc::from(error.code),
+                    })?;
+            }
+            Ok(())
+        }
+        ToolResumeAction::SuspendUncertain => Err(RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }),
+        ToolResumeAction::NoOutstanding
+        | ToolResumeAction::UseRecorded
+        | ToolResumeAction::Reconcile
+        | ToolResumeAction::WaitExternal => Ok(()),
     }
 }
 
@@ -500,7 +535,7 @@ impl RunTaskOwner {
         let tool_dispatcher = Arc::new(ToolDispatcher::new(
             Arc::clone(&catalog),
             tool_job_sender,
-            tool_batch_cancellation,
+            tool_batch_cancellation.clone(),
         ));
         let tool_active = tool_dispatcher.active();
         let tool_semaphores = tool_dispatcher.semaphores();
@@ -528,9 +563,17 @@ impl RunTaskOwner {
         .await?;
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::with_tools(
             Arc::clone(&model_dispatcher),
-            tool_dispatcher,
+            Arc::clone(&tool_dispatcher),
             timer_dispatcher,
         )));
+        resume_tool_effects(
+            &mut coordinator,
+            catalog.as_ref(),
+            &tool_dispatcher,
+            &sources,
+            &tool_batch_cancellation,
+        )
+        .await?;
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {

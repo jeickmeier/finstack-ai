@@ -6,17 +6,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentInvocation, ContentBlock, Digest, EffectOutputContract, EffectOutputKind,
-    ErrorCategory, ErrorCode, ErrorDescriptor, ExternalHandleRef, JsonBlock, Metadata, RawJson,
-    ReconciliationPolicy, SyntheticToolClosure, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
-    ToolCallPlan, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage,
+    ActiveToolCallStatus, ComponentInvocation, ContentBlock, Digest, EffectId,
+    EffectOutputContract, EffectOutputKind, EffectRequested, ErrorCategory, ErrorCode,
+    ErrorDescriptor, ExternalHandleRef, JsonBlock, KernelState, Metadata, RawJson,
+    ReconciliationPolicy, RetrySafety, SyntheticToolClosure, Timestamp, ToolBatchId, ToolCallBlock,
+    ToolCallId, ToolCallPlan, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage,
     ValidatedToolCall, ValidationIssue, ValidationOutcome,
 };
 use jsonschema::{Draft, Resource, Retrieve, Uri};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{PortFuture, PortObject, PortStream, RunCallContext, ToolSpec, UsageDelta};
+use crate::{
+    PortFuture, PortObject, PortStream, RunCallContext, SideEffectClass, ToolSpec, UsageDelta,
+};
 
 const TOOL_TEXT_MAX_BYTES: usize = 1_048_576;
 const VALIDATION_ISSUE_MAX: usize = 64;
@@ -45,6 +48,8 @@ pub const TOOL_DEADLINE_EXCEEDED: &str = "tool_deadline_exceeded";
 pub const TOOL_PANICKED: &str = "tool_panicked";
 /// Stable registration or schema-resolution code.
 pub const TOOL_REGISTRATION_INVALID: &str = "tool_registration_invalid";
+/// Stable uncertainty code when a tool effect cannot be retried or classified.
+pub const TOOL_RECONCILIATION_UNSUPPORTED: &str = "tool_reconciliation_unsupported";
 
 /// Immutable Toolset descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +63,10 @@ pub struct ToolsetDescriptor {
 }
 
 /// Committed context for one direct tool call.
+///
+/// `run.effect_id` is the application-level idempotency key (FR-TLS-004).
+/// [`Toolset::call`], [`Toolset::reconcile`], and same-identity retry all
+/// receive this frozen identity.
 #[derive(Debug, Clone)]
 pub struct ToolCallContext {
     /// Shared identity, authority, deadline, budget, and cancellation context.
@@ -131,6 +140,136 @@ pub enum ToolReconcileResult {
     Unknown,
     /// Tool reports non-repeatable uncertainty.
     NonRepeatable,
+}
+
+/// Journal-first recovery action for one outstanding tool effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolResumeAction {
+    /// No matching outstanding tool effect remains.
+    NoOutstanding,
+    /// A recorded settlement already covers the effect.
+    UseRecorded,
+    /// Call the Toolset reconcile hook before dispatch.
+    Reconcile,
+    /// Re-dispatch the original committed call. First-pass never returns this.
+    Retry,
+    /// Wait for an external completion or later poll.
+    WaitExternal,
+    /// Do not call or fabricate a completion.
+    SuspendUncertain,
+}
+
+/// Classify recovery for one tool effect from committed journal state only.
+///
+/// First-pass never returns [`ToolResumeAction::Retry`]. Unstarted, in-flight,
+/// and completed-but-uncommitted journals are identical for one call
+/// (`Requested` without deferral, no settlement) and classify as
+/// [`ToolResumeAction::Reconcile`].
+#[must_use]
+pub fn tool_resume_action(state: &KernelState, effect_id: EffectId) -> ToolResumeAction {
+    let Some(batch) = state.active_tool_batch.as_ref() else {
+        return ToolResumeAction::NoOutstanding;
+    };
+    let Some(call) = batch
+        .calls
+        .iter()
+        .find(|call| call.assigned.effect_id == effect_id)
+    else {
+        return ToolResumeAction::NoOutstanding;
+    };
+    if state.tool_settlements.contains_key(&effect_id)
+        || matches!(
+            call.status,
+            ActiveToolCallStatus::Settled { .. } | ActiveToolCallStatus::Buffered { .. }
+        )
+        || matches!(call.assigned.plan, ToolCallPlan::SyntheticClosure(_))
+    {
+        return ToolResumeAction::UseRecorded;
+    }
+    match &call.status {
+        ActiveToolCallStatus::Undispatched => ToolResumeAction::NoOutstanding,
+        ActiveToolCallStatus::Requested { deferred: None, .. } => ToolResumeAction::Reconcile,
+        ActiveToolCallStatus::Requested {
+            deferred: Some(deferred),
+            ..
+        } => match deferred.reconciliation {
+            ReconciliationPolicy::CallbackOnly | ReconciliationPolicy::ExternalWorkflow => {
+                ToolResumeAction::WaitExternal
+            }
+            ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll => {
+                ToolResumeAction::Reconcile
+            }
+        },
+        ActiveToolCallStatus::Buffered { .. } | ActiveToolCallStatus::Settled { .. } => {
+            ToolResumeAction::UseRecorded
+        }
+    }
+}
+
+/// Whether the committed request plus tool side-effect class allow a same-identity retry.
+#[must_use]
+pub fn tool_retry_allowed(requested: &EffectRequested, spec: &ToolSpec) -> bool {
+    matches!(
+        requested.retry_safety(),
+        RetrySafety::SafeToRetry | RetrySafety::IdempotentWithKey
+    ) && matches!(
+        spec.side_effect,
+        SideEffectClass::ReadOnly | SideEffectClass::IdempotentWrite
+    )
+}
+
+/// Map one tool reconcile result onto the documented post-reconcile action.
+///
+/// `awaiting_external` is that call's `deferred.is_some()`, not the run phase.
+#[must_use]
+pub fn map_tool_reconcile_result(
+    state: &KernelState,
+    effect_id: EffectId,
+    result: &ToolReconcileResult,
+    retry_allowed: bool,
+) -> ToolResumeAction {
+    match tool_resume_action(state, effect_id) {
+        recorded @ (ToolResumeAction::NoOutstanding | ToolResumeAction::UseRecorded) => {
+            return recorded;
+        }
+        ToolResumeAction::Reconcile
+        | ToolResumeAction::Retry
+        | ToolResumeAction::WaitExternal
+        | ToolResumeAction::SuspendUncertain => {}
+    }
+    let awaiting_external = state.active_tool_batch.as_ref().is_some_and(|batch| {
+        batch.calls.iter().any(|call| {
+            call.assigned.effect_id == effect_id
+                && matches!(
+                    call.status,
+                    ActiveToolCallStatus::Requested {
+                        deferred: Some(_),
+                        ..
+                    }
+                )
+        })
+    });
+    match result {
+        ToolReconcileResult::Completed(_) => ToolResumeAction::UseRecorded,
+        ToolReconcileResult::Deferred(_) | ToolReconcileResult::StillRunning(_) => {
+            ToolResumeAction::WaitExternal
+        }
+        ToolReconcileResult::NonRepeatable => ToolResumeAction::SuspendUncertain,
+        ToolReconcileResult::NotStarted | ToolReconcileResult::RetrySafe => {
+            if awaiting_external {
+                ToolResumeAction::SuspendUncertain
+            } else {
+                ToolResumeAction::Retry
+            }
+        }
+        ToolReconcileResult::Unknown => {
+            if awaiting_external || !retry_allowed {
+                ToolResumeAction::SuspendUncertain
+            } else {
+                ToolResumeAction::Retry
+            }
+        }
+    }
 }
 
 /// Object-safe executable Toolset port.
@@ -1019,4 +1158,428 @@ fn stream_limit() -> ToolError {
 
 fn stream_invalid() -> ToolError {
     ToolError::stable(TOOL_STREAM_INVALID, "tool stream is malformed")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use finstack_ai_kernel::{
+        ActiveToolBatch, ActiveToolCall, AssignedToolCall, ComponentId, Digest, EffectDeferred,
+        EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, ErrorCategory,
+        ErrorDescriptor, ExternalHandleRef, Id, IdTag, KernelState, ToolBatchContinuation,
+        ToolBatchOpened, ToolCallBlock, ToolExecutionMode, ToolSettlementFingerprint,
+        ToolSettlementKind,
+    };
+
+    use crate::{ApprovalMetadata, ApprovalRequirement};
+
+    use super::*;
+
+    fn id<T: IdTag>(ordinal: u64) -> Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        Id::from_bytes(bytes)
+    }
+
+    fn tool_call() -> ToolCallBlock {
+        ToolCallBlock::try_new(
+            id(10),
+            "echo",
+            RawJson::parse(br#"{"value":1}"#).expect("arguments"),
+        )
+        .expect("tool call")
+    }
+
+    fn validated(retry_safety: RetrySafety) -> ValidatedToolCall {
+        ValidatedToolCall {
+            call: tool_call(),
+            tool_id: ToolId::parse("finstack.tools.echo").expect("tool id"),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"tool-result"),
+            },
+            retry_safety,
+            deadline: None,
+            execution: ToolExecutionMode::Parallel,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        }
+    }
+
+    fn requested(effect_ordinal: u64, retry_safety: RetrySafety) -> EffectRequested {
+        let call = validated(retry_safety);
+        EffectRequested::try_new(
+            id(effect_ordinal),
+            EffectKind::Tool,
+            None,
+            None,
+            None,
+            call.output_contract.clone(),
+            EffectInput::Tool { call: call.call },
+            retry_safety,
+            None,
+        )
+        .expect("requested")
+    }
+
+    fn deferred(effect_ordinal: u64, policy: ReconciliationPolicy) -> EffectDeferred {
+        EffectDeferred {
+            effect_id: id(effect_ordinal),
+            handle: ExternalHandleRef::try_new(
+                ComponentId::parse("finstack.tools.scripted").expect("component"),
+                "handle-1",
+                RawJson::parse(b"{}").expect("metadata"),
+            )
+            .expect("handle"),
+            reconciliation: policy,
+            next_poll_at: None,
+            expires_at: None,
+            output_contract: requested(effect_ordinal, RetrySafety::SafeToRetry)
+                .output_contract()
+                .clone(),
+        }
+    }
+
+    fn execute_call(
+        source_index: u32,
+        effect_ordinal: u64,
+        status: ActiveToolCallStatus,
+    ) -> ActiveToolCall {
+        let validated = validated(RetrySafety::SafeToRetry);
+        ActiveToolCall {
+            assigned: AssignedToolCall {
+                source_index,
+                group_index: 0,
+                effect_id: id(effect_ordinal),
+                plan: ToolCallPlan::Execute(validated),
+            },
+            status,
+        }
+    }
+
+    fn state_with(calls: Vec<ActiveToolCall>, settled: &[u64]) -> KernelState {
+        let assigned = calls
+            .iter()
+            .map(|call| call.assigned.clone())
+            .collect::<Vec<_>>();
+        let mut state = KernelState {
+            active_tool_batch: Some(ActiveToolBatch {
+                opened: ToolBatchOpened {
+                    cycle: 0,
+                    turn_id: id(7),
+                    tool_batch_id: id(8),
+                    source_message_id: id(9),
+                    calls: assigned.into(),
+                    continuation: ToolBatchContinuation::ContinueModel,
+                    plan_digest: Digest::raw_json(b"tool-batch-plan"),
+                },
+                calls: calls.into(),
+                current_group: 0,
+                next_source_index: 0,
+                result_message_ids: Arc::from([]),
+                fatal_error: None,
+            }),
+            ..KernelState::default()
+        };
+        for ordinal in settled {
+            state.tool_settlements.insert(
+                id(*ordinal),
+                ToolSettlementFingerprint {
+                    kind: ToolSettlementKind::Completed,
+                    digest: Digest::raw_json(b"settled"),
+                },
+            );
+        }
+        state
+    }
+
+    fn spec(side_effect: SideEffectClass, retry_safety: RetrySafety) -> ToolSpec {
+        ToolSpec {
+            id: ToolId::parse("finstack.tools.echo").expect("tool id"),
+            model_name: Arc::from("echo"),
+            title: Arc::from("echo"),
+            description: Arc::from("scripted"),
+            input_schema: RawJson::parse(b"{}").expect("schema"),
+            output_schema: None,
+            execution: ToolExecutionMode::Parallel,
+            side_effect,
+            retry_safety,
+            approval: ApprovalMetadata {
+                requirement: ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+            max_result_bytes: 1_024,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    #[test]
+    fn tool_resume_action_classifies_journal_only_states() {
+        let effect = id(4);
+        assert_eq!(
+            tool_resume_action(&KernelState::default(), effect),
+            ToolResumeAction::NoOutstanding
+        );
+        assert_eq!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(
+                        0,
+                        4,
+                        ActiveToolCallStatus::Requested {
+                            requested: requested(4, RetrySafety::SafeToRetry),
+                            deferred: None,
+                        },
+                    )],
+                    &[],
+                ),
+                effect,
+            ),
+            ToolResumeAction::Reconcile
+        );
+        assert_eq!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(
+                        0,
+                        4,
+                        ActiveToolCallStatus::Requested {
+                            requested: requested(4, RetrySafety::SafeToRetry),
+                            deferred: None,
+                        },
+                    )],
+                    &[4],
+                ),
+                effect,
+            ),
+            ToolResumeAction::UseRecorded
+        );
+        assert_eq!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(
+                        0,
+                        4,
+                        ActiveToolCallStatus::Requested {
+                            requested: requested(4, RetrySafety::SafeToRetry),
+                            deferred: Some(deferred(4, ReconciliationPolicy::CallbackOnly)),
+                        },
+                    )],
+                    &[],
+                ),
+                effect,
+            ),
+            ToolResumeAction::WaitExternal
+        );
+        assert_eq!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(
+                        0,
+                        4,
+                        ActiveToolCallStatus::Requested {
+                            requested: requested(4, RetrySafety::SafeToRetry),
+                            deferred: Some(deferred(4, ReconciliationPolicy::Poll)),
+                        },
+                    )],
+                    &[],
+                ),
+                effect,
+            ),
+            ToolResumeAction::Reconcile
+        );
+        assert_eq!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(0, 4, ActiveToolCallStatus::Undispatched)],
+                    &[],
+                ),
+                effect,
+            ),
+            ToolResumeAction::NoOutstanding
+        );
+        assert_ne!(
+            tool_resume_action(
+                &state_with(
+                    vec![execute_call(
+                        0,
+                        4,
+                        ActiveToolCallStatus::Requested {
+                            requested: requested(4, RetrySafety::SafeToRetry),
+                            deferred: None,
+                        },
+                    )],
+                    &[],
+                ),
+                effect,
+            ),
+            ToolResumeAction::Retry
+        );
+    }
+
+    #[test]
+    fn tool_resume_action_keeps_completed_subset_and_deferred_sibling_independent() {
+        let state = state_with(
+            vec![
+                execute_call(
+                    0,
+                    4,
+                    ActiveToolCallStatus::Settled {
+                        result_message_id: id(20),
+                        settlement_digest: Digest::raw_json(b"settled"),
+                    },
+                ),
+                execute_call(
+                    1,
+                    5,
+                    ActiveToolCallStatus::Requested {
+                        requested: requested(5, RetrySafety::SafeToRetry),
+                        deferred: None,
+                    },
+                ),
+                execute_call(
+                    2,
+                    6,
+                    ActiveToolCallStatus::Requested {
+                        requested: requested(6, RetrySafety::SafeToRetry),
+                        deferred: Some(deferred(6, ReconciliationPolicy::CallbackOnly)),
+                    },
+                ),
+            ],
+            &[4],
+        );
+        assert_eq!(
+            tool_resume_action(&state, id(4)),
+            ToolResumeAction::UseRecorded
+        );
+        assert_eq!(
+            tool_resume_action(&state, id(5)),
+            ToolResumeAction::Reconcile
+        );
+        assert_eq!(
+            tool_resume_action(&state, id(6)),
+            ToolResumeAction::WaitExternal
+        );
+    }
+
+    #[test]
+    fn tool_resume_maps_reconcile_results_to_documented_actions() {
+        let direct = state_with(
+            vec![execute_call(
+                0,
+                4,
+                ActiveToolCallStatus::Requested {
+                    requested: requested(4, RetrySafety::SafeToRetry),
+                    deferred: None,
+                },
+            )],
+            &[],
+        );
+        let deferred_state = state_with(
+            vec![execute_call(
+                0,
+                4,
+                ActiveToolCallStatus::Requested {
+                    requested: requested(4, RetrySafety::SafeToRetry),
+                    deferred: Some(deferred(4, ReconciliationPolicy::CallbackOrPoll)),
+                },
+            )],
+            &[],
+        );
+        let completed = ToolReconcileResult::Completed(ToolResult {
+            output: RawJson::parse(br#"{"ok":true}"#).expect("output"),
+            is_error: false,
+        });
+        assert_eq!(
+            map_tool_reconcile_result(&direct, id(4), &completed, true),
+            ToolResumeAction::UseRecorded
+        );
+        assert_eq!(
+            map_tool_reconcile_result(
+                &direct,
+                id(4),
+                &ToolReconcileResult::StillRunning(ToolDeferral {
+                    handle: deferred(4, ReconciliationPolicy::CallbackOrPoll).handle,
+                    reconciliation: ReconciliationPolicy::CallbackOrPoll,
+                    next_poll_at: None,
+                    expires_at: None,
+                }),
+                true,
+            ),
+            ToolResumeAction::WaitExternal
+        );
+        assert_eq!(
+            map_tool_reconcile_result(&direct, id(4), &ToolReconcileResult::NotStarted, true),
+            ToolResumeAction::Retry
+        );
+        assert_eq!(
+            map_tool_reconcile_result(&direct, id(4), &ToolReconcileResult::Unknown, true),
+            ToolResumeAction::Retry
+        );
+        assert_eq!(
+            map_tool_reconcile_result(&direct, id(4), &ToolReconcileResult::Unknown, false),
+            ToolResumeAction::SuspendUncertain
+        );
+        assert_eq!(
+            map_tool_reconcile_result(&direct, id(4), &ToolReconcileResult::NonRepeatable, true),
+            ToolResumeAction::SuspendUncertain
+        );
+        assert_eq!(
+            map_tool_reconcile_result(
+                &deferred_state,
+                id(4),
+                &ToolReconcileResult::NotStarted,
+                true
+            ),
+            ToolResumeAction::SuspendUncertain
+        );
+        assert!(!tool_retry_allowed(
+            &requested(4, RetrySafety::AtMostOnce),
+            &spec(SideEffectClass::ReadOnly, RetrySafety::AtMostOnce),
+        ));
+        assert!(!tool_retry_allowed(
+            &requested(4, RetrySafety::SafeToRetry),
+            &spec(
+                SideEffectClass::NonIdempotentWrite,
+                RetrySafety::SafeToRetry
+            ),
+        ));
+        assert!(tool_retry_allowed(
+            &requested(4, RetrySafety::IdempotentWithKey),
+            &spec(
+                SideEffectClass::IdempotentWrite,
+                RetrySafety::IdempotentWithKey
+            ),
+        ));
+    }
+
+    #[test]
+    fn synthetic_closure_is_recorded_and_never_reconciled() {
+        let error =
+            ErrorDescriptor::new("unknown_tool", "unknown", ErrorCategory::Validation, false)
+                .expect("error");
+        let call = ActiveToolCall {
+            assigned: AssignedToolCall {
+                source_index: 0,
+                group_index: 0,
+                effect_id: id(4),
+                plan: ToolCallPlan::SyntheticClosure(SyntheticToolClosure {
+                    call: tool_call(),
+                    execution: ToolExecutionMode::Parallel,
+                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                    error,
+                }),
+            },
+            status: ActiveToolCallStatus::Undispatched,
+        };
+        assert_eq!(
+            tool_resume_action(&state_with(vec![call], &[]), id(4)),
+            ToolResumeAction::UseRecorded
+        );
+    }
 }

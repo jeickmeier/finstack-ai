@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use finstack_ai_runtime::{
     ArtifactError, ArtifactId, ArtifactRef, ArtifactScope, ArtifactStore, AuthorizationContext,
     BlobRef, CancellationSignal, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId,
-    OperationLocator, PortFuture, PrincipalRef, RunCallContext, RunId, SessionId, ToolBatchId,
-    ToolCallBlock, ToolCallId, ToolFailurePolicy, ToolStreamItem,
+    OperationLocator, PendingToolEffect, PortFuture, PrincipalRef, ReconcileContext, RetrySafety,
+    RunCallContext, RunId, SessionId, SideEffectClass, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolFailurePolicy, ToolReconcileResult, ToolStreamItem, Toolset,
 };
 use futures_util::StreamExt;
 use tempfile::TempDir;
@@ -125,6 +126,43 @@ fn specifications_are_generated_once_and_reused() {
     let second = toolset.tools();
     assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(first.len(), 6);
+}
+
+#[tokio::test]
+async fn reconcile_stays_unknown_and_write_edit_retry_policies_differ() {
+    let root = TempDir::new().expect("root");
+    let toolset = FileSystemToolset::try_new(root.path()).expect("filesystem");
+    let tools = toolset.tools();
+    let write = tools
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "filesystem_write")
+        .expect("write");
+    let edit = tools
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "filesystem_edit")
+        .expect("edit");
+    assert_eq!(write.side_effect, SideEffectClass::IdempotentWrite);
+    assert_eq!(write.retry_safety, RetrySafety::IdempotentWithKey);
+    assert_eq!(edit.side_effect, SideEffectClass::NonIdempotentWrite);
+    assert_eq!(edit.retry_safety, RetrySafety::AtMostOnce);
+    let ctx = context();
+    let result = Toolset::reconcile(
+        &toolset,
+        ReconcileContext {
+            run: ctx.run,
+            original_input_digest: Digest::raw_json(b"{}"),
+        },
+        PendingToolEffect {
+            call: call(
+                &toolset,
+                1,
+                &serde_json::json!({"path":"a.txt","content":"x"}),
+            ),
+        },
+    )
+    .await
+    .expect("reconcile");
+    assert_eq!(result, ToolReconcileResult::Unknown);
 }
 
 #[tokio::test]

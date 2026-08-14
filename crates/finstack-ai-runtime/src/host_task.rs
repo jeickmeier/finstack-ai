@@ -29,7 +29,7 @@ use crate::settlement::{
     ModelDriverResult, SettlementSources, ToolDriverResult, model_handle_error,
     prepare_tool_batch_if_ready, process_model_progress, process_model_result,
     process_tool_progress, process_tool_result, resume_pending_model_effect,
-    validate_model_binding,
+    resume_pending_tool_effects, validate_model_binding,
 };
 use crate::tool::AssembledToolTerminal;
 use crate::{
@@ -37,8 +37,9 @@ use crate::{
     EventSubscriptionConfig, EventSubscriptionError, LockedModelContextProfile,
     MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelCallContext, ModelError, ModelRequest,
     ModelRequestDraft, ModelResumeAction, ModelStreamAssembler, ModelTerminal, ModelWarmupContext,
-    PortFuture, RandomSource, ResolvedTool, ResolvedToolCatalog, RunCallContext, ToolCallContext,
-    ToolError, ToolStreamAssembler, validate_model_request,
+    PortFuture, RandomSource, ResolvedTool, ResolvedToolCatalog, RunCallContext,
+    TOOL_RECONCILIATION_UNSUPPORTED, ToolCallContext, ToolError, ToolResumeAction,
+    ToolStreamAssembler, validate_model_request,
 };
 
 /// Cloneable bounded command/status/shutdown handle.
@@ -353,7 +354,31 @@ impl RunTaskOwner {
             | ModelResumeAction::Reconcile
             | ModelResumeAction::WaitExternal => {}
         }
-        coordinator.install_dispatcher(dispatcher);
+        coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);
+        if let Some(catalog) = catalog.as_ref() {
+            let action =
+                resume_pending_tool_effects(&mut coordinator, catalog, &sources, &parent).await?;
+            match action {
+                ToolResumeAction::Retry => {
+                    for seed in coordinator.pending_tool_seeds() {
+                        dispatcher
+                            .resume_call(seed)
+                            .map_err(|error| RunHandleError::Tool {
+                                code: Arc::from(error.code),
+                            })?;
+                    }
+                }
+                ToolResumeAction::SuspendUncertain => {
+                    return Err(RunHandleError::Tool {
+                        code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+                    });
+                }
+                ToolResumeAction::NoOutstanding
+                | ToolResumeAction::UseRecorded
+                | ToolResumeAction::Reconcile
+                | ToolResumeAction::WaitExternal => {}
+            }
+        }
 
         let shared = Shared::new(event_handle, run_config.command_capacity);
         let handle = RunHandle {
@@ -685,6 +710,10 @@ impl HostDispatcher {
         self.enqueue(HostWork::Model { seed, request })
     }
 
+    fn resume_call(&self, seed: ToolDispatchSeed) -> Result<(), DispatchError> {
+        self.enqueue_tool(seed.requested.effect_id(), seed)
+    }
+
     fn dispatch_model(
         &self,
         effect_id: EffectId,
@@ -694,29 +723,22 @@ impl HostDispatcher {
         Box::pin(async move { result })
     }
 
-    fn dispatch_tool(
+    fn enqueue_tool(
         &self,
         effect_id: EffectId,
         seed: ToolDispatchSeed,
-    ) -> PortFuture<Result<(), DispatchError>> {
-        let resolved = match self.resolved_for_seed(&seed) {
-            Ok(value) => value,
-            Err(error) => return Box::pin(async move { Err(error) }),
-        };
+    ) -> Result<(), DispatchError> {
+        let resolved = self.resolved_for_seed(&seed)?;
         let cancellation = self.parent.child();
         {
             let Ok(mut active) = self.active.lock() else {
-                return Box::pin(async {
-                    Err(DispatchError {
-                        code: "tool_effect_registry_unavailable",
-                    })
+                return Err(DispatchError {
+                    code: "tool_effect_registry_unavailable",
                 });
             };
             if active.insert(effect_id, cancellation.clone()).is_some() {
-                return Box::pin(async {
-                    Err(DispatchError {
-                        code: "tool_effect_already_active",
-                    })
+                return Err(DispatchError {
+                    code: "tool_effect_already_active",
                 });
             }
         }
@@ -733,11 +755,19 @@ impl HostDispatcher {
             tool_batch_id: seed.tool_batch_id,
             tool_call_id: seed.tool_call_id,
         };
-        let result = self.enqueue(HostWork::Tool {
+        self.enqueue(HostWork::Tool {
             seed,
             context,
             resolved,
-        });
+        })
+    }
+
+    fn dispatch_tool(
+        &self,
+        effect_id: EffectId,
+        seed: ToolDispatchSeed,
+    ) -> PortFuture<Result<(), DispatchError>> {
+        let result = self.enqueue_tool(effect_id, seed);
         Box::pin(async move { result })
     }
 }

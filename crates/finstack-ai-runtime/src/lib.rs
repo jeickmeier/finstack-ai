@@ -190,11 +190,12 @@ pub use tool::{
     AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
     ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
     TOOL_DEADLINE_EXCEEDED, TOOL_OUTPUT_INVALID, TOOL_PANICKED, TOOL_POLICY_DENIED,
-    TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID,
-    TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolDeferral, ToolError, ToolEventStream,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolStreamAssembler,
-    ToolStreamItem, ToolStreamLimits, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL, normalize_tool_result,
+    TOOL_RECONCILIATION_UNSUPPORTED, TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED,
+    TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolDeferral, ToolError,
+    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult,
+    ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL,
+    map_tool_reconcile_result, normalize_tool_result, tool_resume_action, tool_retry_allowed,
 };
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

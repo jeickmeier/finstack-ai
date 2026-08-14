@@ -200,6 +200,49 @@ impl CommitCoordinator {
     }
 
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn pending_tool_seeds(&self) -> Vec<ToolDispatchSeed> {
+        let state = self.kernel.state();
+        let Some(batch) = state.active_tool_batch.as_ref() else {
+            return Vec::new();
+        };
+        let Some((locator, authorization, budget_scope_id)) = dispatch_security_context(state)
+        else {
+            return Vec::new();
+        };
+        let Some(requested_at) = state.accepted_at else {
+            return Vec::new();
+        };
+        batch
+            .calls
+            .iter()
+            .filter_map(|call| {
+                let ActiveToolCallStatus::Requested {
+                    requested,
+                    deferred: None,
+                } = &call.status
+                else {
+                    return None;
+                };
+                let finstack_ai_kernel::ToolCallPlan::Execute(validated) = &call.assigned.plan
+                else {
+                    return None;
+                };
+                Some(ToolDispatchSeed {
+                    requested: requested.clone(),
+                    tool_batch_id: batch.opened.tool_batch_id,
+                    tool_call_id: *validated.call.tool_call_id(),
+                    call: validated.clone(),
+                    locator: locator.clone(),
+                    authorization: authorization.clone(),
+                    budget_scope_id,
+                    attempt: 1,
+                    requested_at,
+                })
+            })
+            .collect()
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn classify(
         &self,
         env: &TransitionEnv,
