@@ -71,5 +71,8 @@ May change only through a new superseding ADR and reconciliation of every affect
   and routes deferred external completion under the original `EffectId`
   (PR-014-E-runtime-f7d0f0ecede0; PR-014-E-security-a8a835efcf19;
   PR-014-E-integration-e7ec699722ab).
-  Provider-neutral successful model decoding, successful interaction resolution,
-  and later persistent completion paths remain mapped work.
+  PR-042 candidate `d69e4a140a8584f2e561521b3b3eaebc0bfe69a5` adds model-effect
+  runtime lifecycle, same-identity retry, and fail-closed conflict under that
+  `EffectId` (PR-042-E-resume-d69e4a140a85; PR-042-E-security-d69e4a140a85).
+  Tool-effect reconciliation, interaction resolution, and later persistent
+  completion paths remain mapped work.
