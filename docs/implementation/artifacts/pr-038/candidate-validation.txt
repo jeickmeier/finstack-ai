@@ -1,0 +1,68 @@
+PR-038 candidate validation
+Date: 2026-08-14
+Candidate: f1ff388563dfce92169c9fe6ae8c845fec86794b
+Host: Darwin 25.5.0 arm64
+Toolchain: rustc/cargo 1.97.1; Node 22.22.3; wasm-bindgen-cli 0.2.127
+Result: PASS (local)
+
+Commands and outcomes
+
+1. cargo test -p finstack-ai-wasm --locked --features scripted-trace
+   PASS. 22 tests.
+
+2. cargo test -p finstack-ai-test --locked conformance
+   PASS. DeferredBindingAdapter::wasm() remains Unavailable. The WASM
+   placeholder message names the Playwright harness.
+
+3. mise run check-wasm
+   PASS. Type-checked kernel, runtime wasm-host, facade wasm-host, wasm
+   crate (default and scripted-trace), and the three leaf fixtures for
+   wasm32-unknown-unknown. Selected graphs contain no Tokio, reqwest,
+   rusqlite, pyo3, wasmtime, hyper, native-tls, or
+   finstack-ai-provider-openai-compatible. Kernel graph contains no
+   wasm-bindgen. Secret scan of js/src, READMEs, harness HTML, generated
+   glue, browser-minimal, ts-alpha-install, and browser-security.md found
+   no credential field or provider-secret pattern.
+
+4. mise run generate-wasm
+   PASS. SOURCE_DATE_EPOCH=0. tools/wasm_package/check.py dirty is clean
+   on this candidate after regenerate.
+
+5. Playwright three-browser harness
+   PASS. 94 passed, 2 skipped (Chromium-owned crossing report). Chromium,
+   Firefox, and WebKit ran the existing 27 package proofs plus capability
+   goldens, fail-closed model activation, the PR-010 tool-batch slice,
+   cache-stable prefix, and the ts-alpha-install public-import check.
+
+6. mise run ci
+   PASS. format/clippy/ruff/mypy, cargo test --workspace --locked, Python
+   pytest, and check-wasm.
+
+7. mise run stage-wasm
+   PASS. Consecutive npm pack outputs were byte-identical. The private
+   tarball installed into examples/ts-alpha-install and tsc --noEmit
+   succeeded. staged-manifest.json records staged_not_published and
+   cross_binding_checkpoint_not_cut. source_revision is this candidate.
+
+8. DeferredBindingAdapter::wasm()
+   Unchanged. Capability remains Unavailable. Not G4.
+
+9. health().durable
+   Stays false. IndexedDB remains experimental until PR-048.
+
+Limits
+
+- Validation ran on Darwin arm64. Hosted Ubuntu CI and npm signing are
+  defined under the PR-032 Linux-only envelope and remain authorized to
+  dispatch; they are not claimed as a local pass.
+- Bundle-size.json and wasm-js-crossing.json are warning reports only.
+  PR-063 owns budget ratification. host_callback_median can be 0 on the
+  instant scripted fixture.
+- Hosted WebKit is “where practical”; local Darwin WebKit passed.
+- No npm publish, tag, GitHub release, hosted pull request or merge,
+  JournalStore v1, crash-prefix / durable-beta, Service Worker,
+  SharedArrayBuffer, COOP/COEP, JS JSON-Schema peer, exact 0.0.2
+  checkpoint cut, or G4 decision is claimed.
+- ADR-007 remains Accepted / In progress / Partial until a named G4-D.
+- ADR-008 and ADR-020 remain Partial; PR-048 remains.
+- ADR-022 remains Partial; no JS schema validator is shipped.
