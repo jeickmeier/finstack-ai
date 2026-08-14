@@ -1,0 +1,12 @@
+{
+  "staged_not_published": true,
+  "package": "@finstack/ai",
+  "version": "0.0.3",
+  "tarball": "finstack-ai-0.0.3.tgz",
+  "tarball_sha256": "4f88483c70f76fd5003afe0b4b4b81bc1143faefc11c5e39df4f10a495efb6f3",
+  "candidate": "8342a6b56fc7832f9e861c6c034c0c1601e58f7a",
+  "python_half": "workspace and pyproject metadata advanced to 0.0.3; no wheel matrix rebuilt",
+  "dist_note": "tarball packed after local tsc rebuild; tracked dist/ stayed at the candidate",
+  "checkpoint": "available and not cut",
+  "publication": "none"
+}

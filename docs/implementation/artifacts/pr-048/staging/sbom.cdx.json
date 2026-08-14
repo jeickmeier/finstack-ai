@@ -1,0 +1,21 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "library",
+      "name": "@finstack/ai",
+      "version": "0.0.3",
+      "bom-ref": "pkg:npm/@finstack/ai@0.0.3"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "@finstack/ai",
+      "version": "0.0.3",
+      "bom-ref": "pkg:npm/@finstack/ai@0.0.3"
+    }
+  ]
+}
