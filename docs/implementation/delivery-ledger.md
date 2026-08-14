@@ -50,13 +50,13 @@ PR-037 is `Done` at local `main` merge `6aafae740847c652f874f3448cb9710f24fd6393
 
 PR-038 is `Done` at local `main` merge `04407192289c24cbfb087357b1e2ca928a8f3b55` (A01–A06 Passed; no issue or actual pull request). Its Chromium/Firefox/WebKit Agent-run goldens, JS capability UX, crossing-cost reports, staged unpublished npm 0.0.2, hosted Ubuntu CI, Phase 5 exits, and G4 readiness pack are bound under the PR-038 evidence set. G4 passed via `G4-D-binding-parity-101224c5eb60`. No npm publication, hosted pull request or merge, tag, SharedArrayBuffer, or exact 0.0.2 checkpoint cut occurred. Phase 5 is `Done`.
 
-PR-039 is `Done` at local `main` merge `64c54e767f53faac240ab92c19a8447264e82ff8` (A01–A09 Passed; no issue or actual pull request). Its ADR-015 canonical-CBOR wrapper, payload/envelope checksums, remaining session/lane/snapshot variants, MemoryJournalStore v1, journal v1 fixtures, Python/JS known-answers, and TM-12 review are bound under the PR-039 evidence set. Hosted Ubuntu CI was dispatched on the feature branch and is not a local pass. No hosted pull request or merge, npm publication, SQLite, crash durability, or G5 approval occurred.
+PR-039 is `Done` at local `main` merge `64c54e767f53faac240ab92c19a8447264e82ff8` (A01–A09 Passed; no issue or actual pull request). Its ADR-015 canonical-CBOR wrapper, payload/envelope checksums, remaining session/lane/snapshot variants, MemoryJournalStore v1, journal v1 fixtures, Python/JS known-answers, and TM-12 review are bound under the PR-039 evidence set. Hosted Ubuntu CI passed as run 31803471756 on `0f1e80b8a760f1f3ec6a8198193888529fe09430`. No hosted pull request or merge, npm publication, SQLite, crash durability, or G5 approval occurred.
 
 Phase 6 entrance is `Passed` via `PH6-E-entrance-commit-loop-3728650e8935`, `PH6-E-entrance-journal-schema-b5a63427108e`, and `PH6-E-entrance-handles-7618a4f500cb`. G5 remains `Not ready`.
 
 ## Active execution envelope
 
-PR-039 completed its `integrated` envelope against target `main`. Local merge is `64c54e767f53faac240ab92c19a8447264e82ff8`. Feature-branch push and hosted Linux `ci.yml` dispatch `31803471756` are the authorized external actions. Hosted pull-request creation/merge, package publication, tags, and G5 inference remain prohibited. No successor logical PR is authorized by this envelope. Plan baseline: documentation pack v0.20 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
+PR-039 completed its `integrated` envelope against target `main`. Local merge is `64c54e767f53faac240ab92c19a8447264e82ff8`. Feature-branch push and hosted Linux `ci.yml` run 31803471756 passed on `0f1e80b8a760f1f3ec6a8198193888529fe09430`. Hosted pull-request creation/merge, package publication, tags, and G5 inference remain prohibited. No successor logical PR is authorized by this envelope. Plan baseline: documentation pack v0.20 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
 
 The completed PR-018 through PR-026 envelope used `integrated` mode against `main`; its local integration, final authorized `main` push, hosted CI/security, and separately delegated G2/G3 decisions remain recorded in their immutable evidence and gate rows.
 
@@ -220,7 +220,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-039 | Done | me@jeickmeier.com | local `main` merge `64c54e767f53faac240ab92c19a8447264e82ff8` of `codex/pr-039-journalstore-v1` (no issue or actual PR) | 7 | 9/9 | PH6-E-entrance-commit-loop-3728650e8935; PH6-E-entrance-journal-schema-b5a63427108e; PH6-E-entrance-handles-7618a4f500cb; PR-039-E-candidate-40c837e54fb9; PR-039-E-security-40c837e54fb9; PR-039-E-integration-64c54e767f53 | — | `64c54e767f53faac240ab92c19a8447264e82ff8` / 2026-08-14 | 2026-08-14 |
+| PR-039 | Done | me@jeickmeier.com | local `main` merge `64c54e767f53faac240ab92c19a8447264e82ff8` of `codex/pr-039-journalstore-v1` (no issue or actual PR) | 7 | 9/9 | PH6-E-entrance-commit-loop-3728650e8935; PH6-E-entrance-journal-schema-b5a63427108e; PH6-E-entrance-handles-7618a4f500cb; PR-039-E-candidate-40c837e54fb9; PR-039-E-security-40c837e54fb9; PR-039-E-hosted-0f1e80b8a760; PR-039-E-integration-64c54e767f53 | — | `64c54e767f53faac240ab92c19a8447264e82ff8` / 2026-08-14 | 2026-08-14 |
 | PR-040 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-041 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-042 | Todo | — | — | 0 | 0/5 | — | — | — | — |
