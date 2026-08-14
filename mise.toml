@@ -1,7 +1,9 @@
 [tools]
-rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy" }
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
+node = "22.18.0"
+"cargo:wasm-bindgen-cli" = "0.2.127"
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
 # Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
@@ -22,6 +24,7 @@ run = """
 set -euo pipefail
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy -p finstack-ai-wasm --all-targets --locked --features scripted-trace -- -D warnings
 uv run --no-project --with ruff==0.12.11 ruff format --check .
 uv run --no-project --with ruff==0.12.11 ruff check .
 uv run --isolated --no-project --with mypy==2.3.0 \
@@ -40,10 +43,66 @@ uv run --no-cache --isolated --no-project \
   pytest -q
 """
 
+[tasks.check-wasm]
+description = "Type-check the wasm-host graph and reject Tokio in browser builds"
+run = """
+set -euo pipefail
+cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked
+cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --features wasm-host
+cargo check -p finstack-ai --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked --features scripted-trace
+cargo check -p finstack-ai-model-port-leaf-fixture --target wasm32-unknown-unknown --locked
+cargo check -p finstack-ai-toolset-port-leaf-fixture --target wasm32-unknown-unknown --locked
+cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --locked
+uv run --no-project python tools/wasm_package/check.py graph
+"""
+
+[tasks.generate-wasm]
+description = "Regenerate wasm-bindgen glue and TypeScript declarations"
+run = """
+set -euo pipefail
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
+build_glue() {
+  cargo build -p finstack-ai-wasm --target wasm32-unknown-unknown --release --locked --features scripted-trace
+  mkdir -p bindings/finstack-ai-wasm/js/generated
+  wasm-bindgen \\
+    --target web \\
+    --out-dir bindings/finstack-ai-wasm/js/generated \\
+    --out-name finstack_ai_wasm \\
+    target/wasm32-unknown-unknown/release/finstack_ai_wasm.wasm
+}
+build_glue
+if [ "${FINSTACK_WASM_REPRO:-0}" = "1" ]; then
+  snapshot="$(mktemp)"
+  uv run --no-project python tools/wasm_package/check.py snapshot "${snapshot}"
+  build_glue
+  uv run --no-project python tools/wasm_package/check.py compare "${snapshot}"
+  rm -f "${snapshot}"
+fi
+if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
+  npm --prefix bindings/finstack-ai-wasm/js ci
+fi
+npm --prefix bindings/finstack-ai-wasm/js run build
+"""
+
+[tasks.test-browser]
+description = "Type-check and run the headless Chromium wasm package harness"
+run = """
+set -euo pipefail
+mise run generate-wasm
+uv run --no-project python tools/wasm_package/check.py generated
+npm --prefix bindings/finstack-ai-wasm/js run typecheck
+npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium
+npm --prefix bindings/finstack-ai-wasm/js test
+uv run --no-project python tools/wasm_package/check.py size
+"""
+
 [tasks.ci]
 description = "Run every required check"
 run = """
 set -euo pipefail
 mise run check
 mise run test
+mise run check-wasm
 """

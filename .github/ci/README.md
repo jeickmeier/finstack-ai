@@ -7,20 +7,23 @@ All executable checks are canonical mise tasks. Workflows must call
 
 ## Tasks
 
-Root [`mise.toml`](../../mise.toml) defines exactly four tasks:
+Root [`mise.toml`](../../mise.toml) defines the required tasks:
 
 | Task | Purpose |
 | --- | --- |
 | `format` | Write-mode `cargo fmt` and `ruff format` |
 | `check` | `cargo fmt --check`, Clippy with warnings denied, `ruff format --check`, `ruff check`, and `mypy --strict` |
 | `test` | `cargo test --workspace` and the Python test suite against an editable binding install |
-| `ci` | `check` followed by `test` |
+| `check-wasm` | Type-check the selected wasm-host graph and reject Tokio/native I/O |
+| `generate-wasm` | Regenerate wasm-bindgen glue and the `@finstack/ai` TypeScript facade |
+| `test-browser` | Type-check and run the headless Chromium package harness |
+| `ci` | `check`, `test`, and `check-wasm` |
 
 ## Workflows
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `mise run check` then `mise run test` |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (dirty-tree + optional byte-identical rebuild), and `test-browser` |
 
 Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
@@ -28,8 +31,9 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
 | Channel | Pin | Cadence | Owner |
 | --- | --- | --- | --- |
-| stable | mise Rust `1.97.1` | every PR | `me@jeickmeier.com` |
+| stable | mise Rust `1.97.1` plus `wasm32-unknown-unknown` | every PR | `me@jeickmeier.com` |
 | MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (intentionally coincides with stable) | `me@jeickmeier.com` |
+| Node | mise Node `22.18.0` and `wasm-bindgen-cli` `0.2.127` | every PR | `me@jeickmeier.com` |
 
 ## Action and tool pins
 

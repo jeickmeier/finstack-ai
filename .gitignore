@@ -22,3 +22,14 @@ wheels/
 
 # Local agent working directory (not docs/superpowers/)
 /superpowers/
+
+# Browser package
+/bindings/finstack-ai-wasm/js/node_modules/
+/bindings/finstack-ai-wasm/js/test-results/
+/bindings/finstack-ai-wasm/js/playwright-report/
+/bindings/finstack-ai-wasm/js/blob-report/
+/bindings/finstack-ai-wasm/js/playwright/.cache/
+
+# Keep the checked-in wasm package build artifacts.
+!/bindings/finstack-ai-wasm/js/dist/
+!/bindings/finstack-ai-wasm/js/dist/**
