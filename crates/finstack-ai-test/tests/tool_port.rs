@@ -743,25 +743,55 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
     .expect("catalog");
     assert_eq!(compilation_counter.load(Ordering::Acquire), 6);
 
-    let planned = catalog.plan_call(
+    let planned = catalog.decide_plan(
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
+        false,
+        false,
     );
     assert_eq!(validations.load(Ordering::Acquire), 1);
-    let ToolCallPlan::SyntheticClosure(closure) = planned else {
-        panic!("required approval must remain undispatched");
-    };
-    assert_eq!(closure.error.code.as_str(), "tool_approval_required");
+    assert_eq!(
+        planned,
+        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+    );
 
-    let planned = catalog.plan_call(
+    let planned = catalog.decide_plan(
         tool_call(78, "catalog-host-guard", br#"{"value":1}"#),
         None,
         None,
+        false,
+        false,
     );
     assert_eq!(validations.load(Ordering::Acquire), 2);
-    let ToolCallPlan::SyntheticClosure(closure) = planned else {
-        panic!("host approval policy must override non-authoritative metadata");
+    assert_eq!(
+        planned,
+        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+    );
+
+    let granted = catalog.decide_plan(
+        tool_call(77, "catalog-required", br#"{"value":1}"#),
+        None,
+        None,
+        true,
+        false,
+    );
+    assert!(matches!(
+        granted,
+        finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
+    ));
+
+    let refused = catalog.decide_plan(
+        tool_call(77, "catalog-required", br#"{"value":1}"#),
+        None,
+        None,
+        false,
+        true,
+    );
+    let finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::SyntheticClosure(closure)) =
+        refused
+    else {
+        panic!("refused approval must close diagnostically without execute");
     };
     assert_eq!(closure.error.code.as_str(), "tool_approval_required");
 
@@ -770,7 +800,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         None,
         Some(ToolPolicyDecision::Deny),
     );
-    assert_eq!(validations.load(Ordering::Acquire), 3);
+    assert_eq!(validations.load(Ordering::Acquire), 5);
     let ToolCallPlan::SyntheticClosure(closure) = planned else {
         panic!("stricter middleware denial must remain undispatched");
     };
@@ -781,7 +811,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         None,
         None,
     );
-    assert_eq!(validations.load(Ordering::Acquire), 4);
+    assert_eq!(validations.load(Ordering::Acquire), 6);
     let ToolCallPlan::SyntheticClosure(closure) = planned else {
         panic!("invalid arguments must close synthetically");
     };
@@ -796,7 +826,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         panic!("unknown tools must close synthetically");
     };
     assert_eq!(closure.error.code.as_str(), "unknown_tool");
-    assert_eq!(validations.load(Ordering::Acquire), 4);
+    assert_eq!(validations.load(Ordering::Acquire), 6);
 
     let planned = catalog.plan_call(
         tool_call(82, "catalog-deadline", br#"{"value":1}"#),
@@ -807,7 +837,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         panic!("allowed call must remain executable");
     };
     assert_eq!(call.deadline, Some(timestamp(9_000)));
-    assert_eq!(validations.load(Ordering::Acquire), 5);
+    assert_eq!(validations.load(Ordering::Acquire), 7);
     assert_eq!(compilation_counter.load(Ordering::Acquire), 6);
 }
 

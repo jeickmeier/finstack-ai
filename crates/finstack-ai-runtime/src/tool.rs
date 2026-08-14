@@ -595,6 +595,19 @@ pub enum ToolPolicyDecision {
     Deny,
 }
 
+/// Single-boundary catalog planning outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Ready carries the frozen ToolCallPlan; boxing would add a heap hop on every catalog decision"
+)]
+pub enum ToolCatalogPlan {
+    /// Validated execute plan or a non-approval synthetic closure.
+    Ready(ToolCallPlan),
+    /// Durable approval must be requested before this call may execute.
+    RequireApproval,
+}
+
 /// Explicit host-owned execution policy for one resolved tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -787,26 +800,32 @@ impl ResolvedToolCatalog {
     }
 
     /// Produce the sole validated/synthetic planning outcome for one source call.
+    ///
+    /// Approval-required tools return [`ToolCatalogPlan::RequireApproval`] until
+    /// a granting terminal for the current cursor is supplied. Denied or expired
+    /// approvals close with a diagnostic synthetic and never become `Execute`.
     #[must_use]
-    pub fn plan_call(
+    pub fn decide_plan(
         &self,
         call: ToolCallBlock,
         deadline: Option<Timestamp>,
         middleware: Option<ToolPolicyDecision>,
-    ) -> ToolCallPlan {
+        approval_granted: bool,
+        approval_refused: bool,
+    ) -> ToolCatalogPlan {
         let Some(tool) = self.by_name(call.tool_name()) else {
-            return synthetic(
+            return ToolCatalogPlan::Ready(synthetic(
                 call,
                 finstack_ai_kernel::ToolExecutionMode::Sequential,
                 ToolFailurePolicy::ReturnToModel,
                 &ToolError::stable(UNKNOWN_TOOL, "requested tool is not registered"),
-            );
+            ));
         };
         if matches!(
             tool.input_validator.validate(call.arguments()),
             ValidationOutcome::Invalid { .. }
         ) {
-            return synthetic(
+            return ToolCatalogPlan::Ready(synthetic(
                 call,
                 tool.spec.execution,
                 tool.policy.failure_policy,
@@ -814,7 +833,7 @@ impl ResolvedToolCatalog {
                     TOOL_ARGUMENTS_INVALID,
                     "tool arguments do not satisfy the registered schema",
                 ),
-            );
+            ));
         }
         let declared_floor = match tool.spec.approval.requirement {
             crate::ApprovalRequirement::Required => ToolPolicyDecision::RequireApproval,
@@ -828,31 +847,70 @@ impl ResolvedToolCatalog {
             .max(declared_floor)
             .max(middleware.unwrap_or(ToolPolicyDecision::Allow));
         match effective {
-            ToolPolicyDecision::Deny => synthetic(
+            ToolPolicyDecision::Deny => ToolCatalogPlan::Ready(synthetic(
                 call,
                 tool.spec.execution,
                 tool.policy.failure_policy,
                 &ToolError::stable(TOOL_POLICY_DENIED, "tool execution was denied by policy"),
-            ),
-            ToolPolicyDecision::RequireApproval => synthetic(
+            )),
+            ToolPolicyDecision::RequireApproval if approval_granted => {
+                ToolCatalogPlan::Ready(ToolCallPlan::Execute(ValidatedToolCall {
+                    call,
+                    tool_id: tool.spec.id.clone(),
+                    component: tool.component.clone(),
+                    output_contract: tool.output_contract.clone(),
+                    retry_safety: tool.spec.retry_safety,
+                    deadline,
+                    execution: tool.spec.execution,
+                    failure_policy: tool.policy.failure_policy,
+                }))
+            }
+            ToolPolicyDecision::RequireApproval if approval_refused => {
+                ToolCatalogPlan::Ready(synthetic(
+                    call,
+                    tool.spec.execution,
+                    tool.policy.failure_policy,
+                    &ToolError::stable(
+                        TOOL_APPROVAL_REQUIRED,
+                        "tool execution was not granted durable approval",
+                    ),
+                ))
+            }
+            ToolPolicyDecision::RequireApproval => ToolCatalogPlan::RequireApproval,
+            ToolPolicyDecision::Allow => {
+                ToolCatalogPlan::Ready(ToolCallPlan::Execute(ValidatedToolCall {
+                    call,
+                    tool_id: tool.spec.id.clone(),
+                    component: tool.component.clone(),
+                    output_contract: tool.output_contract.clone(),
+                    retry_safety: tool.spec.retry_safety,
+                    deadline,
+                    execution: tool.spec.execution,
+                    failure_policy: tool.policy.failure_policy,
+                }))
+            }
+        }
+    }
+
+    /// Produce the sole validated/synthetic planning outcome for one source call.
+    #[must_use]
+    pub fn plan_call(
+        &self,
+        call: ToolCallBlock,
+        deadline: Option<Timestamp>,
+        middleware: Option<ToolPolicyDecision>,
+    ) -> ToolCallPlan {
+        match self.decide_plan(call.clone(), deadline, middleware, false, false) {
+            ToolCatalogPlan::Ready(plan) => plan,
+            ToolCatalogPlan::RequireApproval => synthetic(
                 call,
-                tool.spec.execution,
-                tool.policy.failure_policy,
+                finstack_ai_kernel::ToolExecutionMode::Sequential,
+                ToolFailurePolicy::ReturnToModel,
                 &ToolError::stable(
                     TOOL_APPROVAL_REQUIRED,
                     "tool execution requires durable approval evidence",
                 ),
             ),
-            ToolPolicyDecision::Allow => ToolCallPlan::Execute(ValidatedToolCall {
-                call,
-                tool_id: tool.spec.id.clone(),
-                component: tool.component.clone(),
-                output_contract: tool.output_contract.clone(),
-                retry_safety: tool.spec.retry_safety,
-                deadline,
-                execution: tool.spec.execution,
-                failure_policy: tool.policy.failure_policy,
-            }),
         }
     }
 }

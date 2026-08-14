@@ -37,6 +37,10 @@ use finstack_ai_runtime::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "native-tokio")]
+use finstack_ai_kernel::{InteractionRequest, InteractionResolution, InteractionSettled};
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::InteractionRouter;
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -271,9 +275,11 @@ impl Agent {
         let selected = self.select_for_input(&request.input).clone();
         let prepared = selected.prepare(request)?;
         let locator = prepared.locator.clone();
+        let store = Arc::clone(&prepared.store);
         let cancellation_initiator = prepared.cancellation_initiator()?;
         let inner = Arc::new(AgentRunInner {
             locator,
+            store,
             cancellation_initiator,
             handle: Mutex::new(None),
             handle_ready: driver::Signal::new(),
@@ -850,6 +856,14 @@ impl PreparedAgentRun {
 
 struct AgentRunInner {
     locator: OperationLocator,
+    #[cfg_attr(
+        not(feature = "native-tokio"),
+        expect(
+            dead_code,
+            reason = "native list/resolve reads the store; WASM list/resolve is PR-048"
+        )
+    )]
+    store: Arc<dyn finstack_ai_runtime::JournalStore>,
     cancellation_initiator: CancellationInitiator,
     handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
     handle_ready: driver::Signal,
@@ -954,6 +968,75 @@ impl AgentRun {
     #[must_use]
     pub fn locator(&self) -> &OperationLocator {
         &self.inner.locator
+    }
+
+    /// List the outstanding typed interaction for this run (0 or 1).
+    ///
+    /// Native-only. Browser WASM list/resolve remains PR-048.
+    ///
+    /// The owned handle treats an unpublished or not-yet-accepted journal as
+    /// empty. After accept, listing goes through [`InteractionRouter`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable runtime failure when the authenticated locator cannot
+    /// be listed through [`InteractionRouter`].
+    #[cfg(feature = "native-tokio")]
+    pub async fn list_interactions(&self) -> Result<Vec<InteractionRequest>, AgentRunError> {
+        let CancellationInitiator::Principal {
+            principal,
+            authorization,
+        } = &self.inner.cancellation_initiator
+        else {
+            return Err(AgentRunError::runtime_message(
+                "interaction list requires a principal-authored run",
+            ));
+        };
+        let Ok(recovered) = CommitCoordinator::recover(
+            Arc::clone(&self.inner.store),
+            self.inner.locator.session_id,
+        )
+        .await
+        else {
+            return Ok(Vec::new());
+        };
+        if recovered.state().accepted.is_none() {
+            return Ok(Vec::new());
+        }
+        let router = InteractionRouter::trusted(Arc::clone(&self.inner.store))
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        router
+            .list(
+                &self.inner.locator,
+                principal,
+                authorization,
+                NativeIds::now()?,
+            )
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
+    }
+
+    /// Resolve the outstanding interaction through the live run handle.
+    ///
+    /// Native-only. Browser WASM list/resolve remains PR-048.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable runtime failure when the handle is unavailable or the
+    /// settlement is rejected.
+    #[cfg(feature = "native-tokio")]
+    pub async fn resolve_interaction(
+        &self,
+        resolution: InteractionResolution,
+    ) -> Result<(), AgentRunError> {
+        let handle = self.runtime_handle().await?;
+        submit(
+            &handle,
+            NativeIds::interaction_resolve_environment()?,
+            KernelInput::InteractionSettled(InteractionSettled::Resolved(resolution)),
+        )
+        .await
     }
 
     /// Wait for the final committed result.
@@ -1749,6 +1832,27 @@ impl NativeIds {
                 generate_many::<MessageTag>(messages)?,
                 generate_many::<TurnTag>(turns)?,
                 generate_many::<ModelRequestTag>(model_requests)?,
+                Vec::new(),
+                Vec::new(),
+                generate_many::<AppendBatchTag>(1)?,
+                Vec::new(),
+            )
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?,
+        })
+    }
+
+    #[cfg(feature = "native-tokio")]
+    fn interaction_resolve_environment() -> Result<TransitionEnv, AgentRunError> {
+        Ok(TransitionEnv {
+            now: Self::now()?,
+            ids: AllocatedIds::try_new(
+                generate_many::<RecordTag>(2)?,
+                generate_many::<EventTag>(2)?,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 generate_many::<AppendBatchTag>(1)?,

@@ -12,7 +12,7 @@ use finstack_ai::runtime::{
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
     AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, InstructionSpec,
-    PrincipalRef, RunSecurityContext,
+    InteractionResolution, PrincipalRef, RunSecurityContext,
 };
 use finstack_ai_provider_openai_compatible::{
     EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
@@ -455,6 +455,51 @@ impl PyRun {
             Python::attach(|py| {
                 result_to_python_with_locator(py, result, Some(&locator), output_adapter)
             })
+        })
+    }
+
+    /// List the outstanding typed interaction for this run (0 or 1).
+    #[pyo3(text_signature = "($self)")]
+    fn list_interactions<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match run.list_interactions().await {
+                Ok(requests) => Python::attach(|py| {
+                    let encoded = serde_json::to_string(&requests).map_err(|_| {
+                        PyException::new_err("interaction list serialization failed")
+                    })?;
+                    py.import("json")?
+                        .getattr("loads")?
+                        .call1((encoded,))
+                        .map(pyo3::Bound::unbind)
+                }),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
+        })
+    }
+
+    /// Resolve the outstanding interaction through the live Rust-owned run.
+    #[pyo3(text_signature = "($self, resolution)")]
+    fn resolve_interaction<'py>(
+        &self,
+        py: Python<'py>,
+        resolution: Py<PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let encoded = py
+            .import("json")?
+            .getattr("dumps")?
+            .call1((resolution,))?
+            .extract::<String>()?;
+        let resolution = serde_json::from_str::<InteractionResolution>(&encoded)
+            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match run.resolve_interaction(resolution).await {
+                Ok(()) => Ok(()),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
         })
     }
 

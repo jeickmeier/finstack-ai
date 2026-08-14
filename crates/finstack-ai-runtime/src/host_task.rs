@@ -26,8 +26,8 @@ use crate::run_types::{
     TimerDiagnostics, ToolTaskConfig,
 };
 use crate::settlement::{
-    ModelDriverResult, SettlementSources, ToolDriverResult, model_handle_error,
-    prepare_tool_batch_if_ready, process_model_progress, process_model_result,
+    ModelDriverResult, SettlementSources, ToolDriverResult, apply_interaction_resume,
+    model_handle_error, prepare_tool_batch_if_ready, process_model_progress, process_model_result,
     process_tool_progress, process_tool_result, resume_pending_model_effect,
     resume_pending_tool_effects, validate_model_binding,
 };
@@ -274,7 +274,8 @@ impl RunTaskOwner {
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "internal constructor keeps model and optional tool wiring contiguous"
+        clippy::too_many_lines,
+        reason = "internal constructor keeps model, tool, and interaction resume wiring contiguous"
     )]
     async fn spawn_inner<C, R>(
         mut coordinator: CommitCoordinator,
@@ -355,9 +356,15 @@ impl RunTaskOwner {
             | ModelResumeAction::WaitExternal => {}
         }
         coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);
+        apply_interaction_resume(&mut coordinator, &sources).await?;
         if let Some(catalog) = catalog.as_ref() {
-            let action =
-                resume_pending_tool_effects(&mut coordinator, catalog, &sources, &parent).await?;
+            let opened_tool_batch =
+                prepare_tool_batch_if_ready(&mut coordinator, catalog, &sources).await?;
+            let action = if opened_tool_batch {
+                ToolResumeAction::NoOutstanding
+            } else {
+                resume_pending_tool_effects(&mut coordinator, catalog, &sources, &parent).await?
+            };
             match action {
                 ToolResumeAction::Retry => {
                     for seed in coordinator.pending_tool_seeds() {
@@ -918,6 +925,7 @@ async fn run_worker_with_effects<C, R>(
                 match error {
                     RunHandleError::ModelSettlement { code }
                     | RunHandleError::ToolSettlement { code }
+                    | RunHandleError::InteractionSettlement { code }
                     | RunHandleError::Faulted { code }
                     | RunHandleError::EventDelivery { code } => code,
                     _ => "host_effect_drain_failed",
@@ -1279,6 +1287,7 @@ fn result_fault_code(result: &Result<CommitOutcome, RunHandleError>) -> Option<&
             RunHandleError::Faulted { code }
             | RunHandleError::ModelSettlement { code }
             | RunHandleError::ToolSettlement { code }
+            | RunHandleError::InteractionSettlement { code }
             | RunHandleError::EventDelivery { code }
             | RunHandleError::Coordinator(
                 CommitCoordinatorError::BoundaryFault { code }

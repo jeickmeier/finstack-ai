@@ -19,9 +19,9 @@ use crate::run_types::{
     TimerDiagnostics,
 };
 use crate::settlement::{
-    SettlementSources, model_handle_error, prepare_tool_batch_if_ready, process_model_progress,
-    process_model_result, process_tool_progress, process_tool_result, resume_pending_model_effect,
-    resume_pending_tool_effects, validate_model_binding,
+    SettlementSources, apply_interaction_resume, model_handle_error, prepare_tool_batch_if_ready,
+    process_model_progress, process_model_result, process_tool_progress, process_tool_result,
+    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
 use crate::timer_runtime::{
     TimerDispatcher, TimerDriverMessage, TimerDriverResult, run_timer_jobs,
@@ -380,6 +380,7 @@ impl RunTaskOwner {
             model_dispatcher,
             timer_dispatcher,
         )));
+        apply_interaction_resume(&mut coordinator, &sources).await?;
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {
@@ -566,14 +567,19 @@ impl RunTaskOwner {
             Arc::clone(&tool_dispatcher),
             timer_dispatcher,
         )));
-        resume_tool_effects(
-            &mut coordinator,
-            catalog.as_ref(),
-            &tool_dispatcher,
-            &sources,
-            &tool_batch_cancellation,
-        )
-        .await?;
+        apply_interaction_resume(&mut coordinator, &sources).await?;
+        let opened_tool_batch =
+            prepare_tool_batch_if_ready(&mut coordinator, catalog.as_ref(), &sources).await?;
+        if !opened_tool_batch {
+            resume_tool_effects(
+                &mut coordinator,
+                catalog.as_ref(),
+                &tool_dispatcher,
+                &sources,
+                &tool_batch_cancellation,
+            )
+            .await?;
+        }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {
@@ -1062,6 +1068,7 @@ fn result_fault_code(result: &Result<CommitOutcome, RunHandleError>) -> Option<&
             RunHandleError::Faulted { code }
             | RunHandleError::ModelSettlement { code }
             | RunHandleError::ToolSettlement { code }
+            | RunHandleError::InteractionSettlement { code }
             | RunHandleError::EventDelivery { code }
             | RunHandleError::Coordinator(
                 CommitCoordinatorError::BoundaryFault { code }
@@ -1101,7 +1108,8 @@ fn model_runtime_fault(error: &RunHandleError) -> &'static str {
 
 fn runtime_fault(error: &RunHandleError) -> &'static str {
     match error {
-        RunHandleError::ToolSettlement { code } => code,
+        RunHandleError::ToolSettlement { code }
+        | RunHandleError::InteractionSettlement { code } => code,
         _ => model_runtime_fault(error),
     }
 }

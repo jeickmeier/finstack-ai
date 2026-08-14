@@ -12,6 +12,7 @@ use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::effects::{
     ComponentInvocation, EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract,
+    InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
     RetrySafety,
 };
 use crate::error::ErrorDescriptor;
@@ -54,6 +55,30 @@ pub enum KernelInput {
     OutputValidated(OutputValidated),
     /// Record a known authorized external command rejected by semantic validation.
     RecordExternalCommandRejected(RecordExternalCommandRejected),
+    /// Request one typed interaction without consuming the current stage cursor.
+    RequestInteraction(RequestInteraction),
+    /// Settle the outstanding interaction by resolution, expiry, or cancellation.
+    InteractionSettled(InteractionSettled),
+}
+
+/// Normalized interaction request submitted at a live middleware stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestInteraction {
+    /// Versioned interaction request already allocated by the runtime.
+    pub request: InteractionRequest,
+}
+
+/// Terminal settlement for the outstanding interaction effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum InteractionSettled {
+    /// Schema-valid resolution, including approval denial.
+    Resolved(InteractionResolution),
+    /// Deadline expiry of the outstanding request.
+    Expired(InteractionExpired),
+    /// Principal- or framework-authored cancellation while waiting.
+    Cancelled(InteractionCancelled),
 }
 
 /// Normalized cancellation request; the request ID is allocated by `TransitionEnv`.

@@ -29,8 +29,8 @@ pub use bundle::{
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_kernel::{
-    ActiveCapability, CapabilityActivationSource, OperationLocator, PrincipalRef,
-    RunSecurityContext, SessionId,
+    ActiveCapability, CapabilityActivationSource, InteractionRequest, InteractionResolution,
+    OperationLocator, PrincipalRef, RunSecurityContext, SessionId,
 };
 pub use finstack_ai_runtime as runtime;
 pub use registry::{

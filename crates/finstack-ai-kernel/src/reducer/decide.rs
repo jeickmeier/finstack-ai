@@ -93,6 +93,12 @@ pub(super) fn decide(
         KernelInput::RecordExternalCommandRejected(_) => {
             unreachable!("external rejection returns before limit processing")
         }
+        KernelInput::RequestInteraction(input) => {
+            super::interaction::decide_request(state, env, &input)
+        }
+        KernelInput::InteractionSettled(input) => {
+            super::interaction::decide_settled(state, env, &input)
+        }
     }
 }
 
@@ -116,10 +122,26 @@ fn decide_external_command_rejected(
     {
         return Err(KernelError::InvalidRunAcceptance);
     }
-    if let crate::ExternalCommandTarget::Effect(effect_id) = input.rejection.target
-        && !known_effect(state, effect_id)
-    {
-        return Err(KernelError::EffectNotPending { effect_id });
+    match input.rejection.target {
+        crate::ExternalCommandTarget::Effect(effect_id) if !known_effect(state, effect_id) => {
+            return Err(KernelError::EffectNotPending { effect_id });
+        }
+        crate::ExternalCommandTarget::Interaction(interaction_id)
+            if state
+                .pending_interaction
+                .as_ref()
+                .is_none_or(|pending| pending.request.interaction_id() != interaction_id)
+                && state
+                    .last_interaction_terminal
+                    .as_ref()
+                    .is_none_or(|terminal| terminal.interaction_id != interaction_id) =>
+        {
+            return Err(KernelError::InvalidPhaseInput {
+                phase: state.phase,
+                input: "record_external_command_rejected",
+            });
+        }
+        _ => {}
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
     Ok(Decision {
@@ -149,6 +171,10 @@ fn known_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
             .completion_identities
             .values()
             .any(|identity| identity.effect_id == effect_id)
+        || state
+            .pending_interaction
+            .as_ref()
+            .is_some_and(|pending| pending.request.effect_id() == effect_id)
 }
 
 fn decide_configure_output(
@@ -446,13 +472,25 @@ fn decide_limit(
     input: &KernelInput,
     context_canonical: Option<(Digest, usize)>,
 ) -> Result<Option<Decision>, KernelError> {
-    if matches!(input, KernelInput::AcceptRun(_))
-        || state.accepted.is_none()
+    // Close an outstanding interaction before converting the command into a
+    // run-limit failure. Approval `expires_at` is copied from the run
+    // deadline, so expire-if-due would otherwise emit LimitReached+RunFailed
+    // and fail apply with `pending_interaction` still set.
+    if matches!(
+        input,
+        KernelInput::AcceptRun(_) | KernelInput::InteractionSettled(_)
+    ) || state.accepted.is_none()
         || state.cancellation.is_some()
         || state.terminal.is_some()
+        || state.pending_interaction.is_some()
         || matches!(
             state.phase,
-            Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
+            Some(
+                RunPhase::AwaitingInteraction
+                    | RunPhase::Completed
+                    | RunPhase::Failed
+                    | RunPhase::Cancelled
+            )
         )
     {
         return Ok(None);
@@ -2321,7 +2359,7 @@ fn terminal_body_from_candidate(state: &KernelState) -> Result<RecordBody, Kerne
     }
 }
 
-fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
+pub(super) fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
     let expected_stage = match state.phase? {
         RunPhase::BeforeRun => Stage::BeforeRun,
         RunPhase::PreparingContext => Stage::PrepareContext,

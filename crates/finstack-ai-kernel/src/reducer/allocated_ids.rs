@@ -15,6 +15,7 @@ pub(super) struct IdRequirements {
     tool_batches: usize,
     tool_calls: usize,
     cancellations: usize,
+    interactions: usize,
 }
 
 impl IdRequirements {
@@ -36,6 +37,7 @@ impl IdRequirements {
             tool_batches: 0,
             tool_calls: 0,
             cancellations: 0,
+            interactions: 0,
         }
     }
 
@@ -47,6 +49,11 @@ impl IdRequirements {
     pub(super) const fn with_tools(mut self, tool_batches: usize, tool_calls: usize) -> Self {
         self.tool_batches = tool_batches;
         self.tool_calls = tool_calls;
+        self
+    }
+
+    pub(super) const fn with_interactions(mut self, interactions: usize) -> Self {
+        self.interactions = interactions;
         self
     }
 }
@@ -66,7 +73,11 @@ pub(super) fn validate_allocated_ids(
             required.model_requests,
         ),
         ("message_ids", ids.message_ids().len(), required.messages),
-        ("interaction_ids", ids.interaction_ids().len(), 0),
+        (
+            "interaction_ids",
+            ids.interaction_ids().len(),
+            required.interactions,
+        ),
         (
             "tool_batch_ids",
             ids.tool_batch_ids().len(),

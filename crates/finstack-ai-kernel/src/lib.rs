@@ -206,9 +206,10 @@ pub use records::{
 };
 pub use reducer::{
     AcceptRun, CancelRequested, CancellationReconciledInput, CommittedBatch, Decision,
-    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Kernel,
-    KernelError, KernelInput, ModelSettled, ModelSettlement, PostCommitAction, ReducerStageOutcome,
-    StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
+    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
+    InteractionSettled, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
+    PostCommitAction, ReducerStageOutcome, RequestInteraction, StageSettled, TimerFiredInput,
+    ToolBatchSettled, ToolSettlement,
 };
 pub use refs::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
@@ -224,10 +225,11 @@ pub use run::{
 pub use session::{LaneCreated, LaneMoved, SessionCreated, SessionRecordError, SnapshotWritten};
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
-    CurrentTurn, KernelState, ModelSettlementFingerprint, ModelSettlementHashEntryV1,
-    ModelSettlementKind, PendingModelEffect, RetryState, RunPhase, StageSettlementHashEntryV1,
-    TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
-    TransitionEnv,
+    CurrentTurn, InteractionTerminal, InteractionTerminalOutcome, KernelState,
+    ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
+    PendingInteraction, PendingModelEffect, ResolutionIdentity, ResolutionIdentityHashEntryV6,
+    RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
+    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,

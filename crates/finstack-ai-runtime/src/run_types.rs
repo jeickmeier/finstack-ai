@@ -183,6 +183,12 @@ pub enum RunHandleError {
         /// Stable runtime code.
         code: &'static str,
     },
+    /// Runtime could not construct a valid interaction request or settlement.
+    #[error("interaction settlement construction failed: {code}")]
+    InteractionSettlement {
+        /// Stable runtime code.
+        code: &'static str,
+    },
     /// Durable timer adapter failed before a firing could be committed.
     #[error("timer adapter failed: {code}")]
     Timer {

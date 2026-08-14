@@ -26,10 +26,10 @@ pub use finstack_ai_kernel::{
     ComponentRef, ContentBlock, CostLimit, DOMAIN_AGENT_SPEC, Digest, EffectCompleted, EffectId,
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation,
     EntryId, ErrorCategory, ErrorCode, ExternalEffectCompletionCommand, ExternalHandleRef,
-    FinalResultRecorded, InteractionKind, InteractionRequest, InteractionResolutionCommand,
-    InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message, MessageId,
-    MessageRole, Metadata, MiddlewareRef, ModelRequestId, OperationLocator, OutputEndStrategy,
-    OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
+    FinalResultRecorded, InteractionKind, InteractionRequest, InteractionResolution,
+    InteractionResolutionCommand, InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey,
+    Message, MessageId, MessageRole, Metadata, MiddlewareRef, ModelRequestId, OperationLocator,
+    OutputEndStrategy, OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody,
     RecordDraft, RecordEnvelope, RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent,
     RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL,
@@ -53,6 +53,7 @@ mod coordinator;
 mod error;
 mod event_hub;
 mod id_generation;
+mod interaction;
 mod journal;
 #[cfg(feature = "native-tokio")]
 mod manual_drive;
@@ -115,6 +116,7 @@ pub use composition::{
 };
 
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
+pub use interaction::{InteractionResumeAction, interaction_resume_action};
 
 pub use context::{
     AssembledContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED,
@@ -191,11 +193,12 @@ pub use tool::{
     ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
     TOOL_DEADLINE_EXCEEDED, TOOL_OUTPUT_INVALID, TOOL_PANICKED, TOOL_POLICY_DENIED,
     TOOL_RECONCILIATION_UNSUPPORTED, TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED,
-    TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolDeferral, ToolError,
-    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult,
-    ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolValidator,
-    ToolValidatorCompiler, Toolset, ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL,
-    map_tool_reconcile_result, normalize_tool_result, tool_resume_action, tool_retry_allowed,
+    TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolCatalogPlan,
+    ToolDeferral, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem,
+    ToolStreamLimits, ToolValidator, ToolValidatorCompiler, Toolset, ToolsetDescriptor,
+    ToolsetRegistration, UNKNOWN_TOOL, map_tool_reconcile_result, normalize_tool_result,
+    tool_resume_action, tool_retry_allowed,
 };
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

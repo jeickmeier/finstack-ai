@@ -284,6 +284,36 @@ class Run:
     def session(self) -> Session: ...
     async def result(self) -> RunResult:
         """Wait for the retained terminal result."""
+    async def list_interactions(self) -> list[dict[str, object]]:
+        """List the outstanding typed interaction for this run.
+
+        Rust owns routing. The result is the persisted request envelope
+        (0 or 1 item), not a Python-owned queue.
+
+        Returns:
+            Zero or one interaction-request dictionaries for this run's
+            locator.
+
+        Raises:
+            FinstackError: The authenticated locator cannot be listed.
+        """
+    async def resolve_interaction(self, resolution: dict[str, object]) -> None:
+        """Resolve the outstanding interaction through the live run.
+
+        A schema-valid approval denial is ``{"approved": false}``. The
+        live worker coordinator stays authoritative; do not route a
+        second coordinator against a live journal.
+
+        Args:
+            resolution: Binding-neutral resolution dictionary with
+                ``interaction_id``, ``resolution_id``, ``principal``,
+                ``authorization``, and ``response``.
+
+        Raises:
+            FinstackError: The handle is unavailable or the settlement
+                is rejected as conflicting, expired, or unauthorized.
+            TypeError: ``resolution`` is not a valid resolution shape.
+        """
     async def cancel(self) -> None:
         """Submit idempotent durable cancellation."""
     def events(self) -> EventBatchIterator:
