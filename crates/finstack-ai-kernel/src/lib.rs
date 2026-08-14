@@ -118,6 +118,7 @@ mod records;
 mod reducer;
 mod refs;
 mod run;
+mod session;
 mod state;
 mod time;
 mod tools;
@@ -144,10 +145,11 @@ pub use content::{
 pub use digest::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, DOMAIN_AGENT_SPEC,
     DOMAIN_BLOB_CONTENT, DOMAIN_EFFECT_INPUT, DOMAIN_EFFECT_OUTPUT, DOMAIN_MIDDLEWARE_CHAIN,
-    DOMAIN_RAW_JSON, DOMAIN_RECORD_PAYLOAD, DOMAIN_SNAPSHOT_STATE, Digest, DigestError,
-    EFFECT_INPUT_DIGEST_SCHEMA_VERSION, EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION,
+    DOMAIN_RAW_JSON, DOMAIN_RECORD_ENVELOPE, DOMAIN_RECORD_PAYLOAD, DOMAIN_SNAPSHOT_STATE, Digest,
+    DigestError, EFFECT_INPUT_DIGEST_SCHEMA_VERSION, EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION,
     MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION, RAW_JSON_DIGEST_SCHEMA_VERSION,
-    RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
+    RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION, RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION,
+    SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
 };
 pub use effects::{
     ComponentInvocation, EffectCancelled, EffectCompleted, EffectDeferred, EffectError,
@@ -219,6 +221,7 @@ pub use run::{
     DeadlinePropagation, MAX_RUN_RELATION_DEPTH, PrincipalPropagation, RemoteRouteRef, RunAccepted,
     RunError, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
+pub use session::{LaneCreated, LaneMoved, SessionCreated, SessionRecordError, SnapshotWritten};
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
     CurrentTurn, KernelState, ModelSettlementFingerprint, ModelSettlementHashEntryV1,

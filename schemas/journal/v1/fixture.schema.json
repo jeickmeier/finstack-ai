@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/journal/v1/fixture.schema.json",
+  "title": "JournalV1Fixture",
+  "description": "Diagnostic sidecar for journal v1 canonical-CBOR known-answers (PR-039). JSON is not the journal encoding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "subject", "case", "expect"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "subject": {
+      "type": "string",
+      "enum": ["cbor-profile", "record-payload", "envelope", "limits", "tamper"]
+    },
+    "case": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "cbor_hex": { "type": "string", "pattern": "^[0-9a-f]*$" },
+    "payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "checksum": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "diagnostic_json": true,
+    "recipe": { "type": "object" },
+    "envelopes": { "type": "array", "maxItems": 256 },
+    "claimed_head_checksum": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    }
+  }
+}

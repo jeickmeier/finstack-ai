@@ -1,0 +1,15 @@
+{
+  "case": "interaction_cancelled",
+  "cbor_hex": "a175696e746572616374696f6e5f63616e63656c6c6564a16e696e746572616374696f6e5f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303239",
+  "diagnostic_json": {
+    "interaction_cancelled": {
+      "interaction_id": "00000000-0000-7000-8000-000000000029"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "e0018fe892d93d1bfb2b0dc4e36c32bbe9fd360e1c5f9cf2ab14e671610fd95b",
+  "subject": "record-payload"
+}

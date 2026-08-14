@@ -1,0 +1,12 @@
+{
+  "case": "array-items-exact",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "count": 4096,
+    "kind": "array_items"
+  },
+  "subject": "limits"
+}

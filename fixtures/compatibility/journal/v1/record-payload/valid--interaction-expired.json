@@ -1,0 +1,16 @@
+{
+  "case": "interaction_expired",
+  "cbor_hex": "a173696e746572616374696f6e5f65787069726564a26a657870697265645f6174006e696e746572616374696f6e5f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303238",
+  "diagnostic_json": {
+    "interaction_expired": {
+      "expired_at": "1970-01-01T00:00:00.000Z",
+      "interaction_id": "00000000-0000-7000-8000-000000000028"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "b5213c8b5db3d4d6b114f2e467a157f8c6bde37bd2c08f72e7d04d6fc0271c24",
+  "subject": "record-payload"
+}

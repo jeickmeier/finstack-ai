@@ -1,0 +1,12 @@
+{
+  "case": "nesting-exact",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "depth": 32,
+    "kind": "nested_array"
+  },
+  "subject": "limits"
+}

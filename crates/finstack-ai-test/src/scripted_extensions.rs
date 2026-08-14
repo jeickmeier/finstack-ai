@@ -1,7 +1,7 @@
 //! Deterministic scripted `ContextProvider`, `Middleware`, `Observer`, and store faults.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, ErrorCategory, Metadata, RunEvent};
@@ -269,6 +269,10 @@ pub enum StoreOperation {
     WriteSnapshot,
     /// Readiness health query.
     Health,
+    /// Session-local scan.
+    Scan,
+    /// Metadata compare-and-swap.
+    WriteMetadata,
 }
 
 /// Public `JournalStore` wrapper with deterministic one-shot operation faults.
@@ -332,6 +336,75 @@ impl JournalStore for FaultJournalStore {
         if let Some(error) = self.take_fault(StoreOperation::Health) {
             return Box::pin(async move { Err(error) });
         }
+        self.inner.health()
+    }
+
+    fn scan(
+        &self,
+        request: finstack_ai_runtime::ScanRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::ScanPage, StoreError>> {
+        if let Some(error) = self.take_fault(StoreOperation::Scan) {
+            return Box::pin(async move { Err(error) });
+        }
+        self.inner.scan(request)
+    }
+
+    fn write_metadata(
+        &self,
+        request: finstack_ai_runtime::WriteMetadataRequest,
+    ) -> PortFuture<Result<finstack_ai_runtime::MetadataReceipt, StoreError>> {
+        if let Some(error) = self.take_fault(StoreOperation::WriteMetadata) {
+            return Box::pin(async move { Err(error) });
+        }
+        self.inner.write_metadata(request)
+    }
+}
+
+/// Store wrapper that commits, then returns [`StoreError::AmbiguousAcknowledgement`] once.
+pub struct AmbiguousAckAfterCommitStore {
+    inner: Arc<dyn JournalStore>,
+    remaining: Arc<AtomicU32>,
+}
+
+impl AmbiguousAckAfterCommitStore {
+    /// Fail the first successful append acknowledgement.
+    #[must_use]
+    pub fn once(inner: Arc<dyn JournalStore>) -> Self {
+        Self {
+            inner,
+            remaining: Arc::new(AtomicU32::new(1)),
+        }
+    }
+}
+
+impl JournalStore for AmbiguousAckAfterCommitStore {
+    fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
+        let inner = Arc::clone(&self.inner);
+        let remaining = Arc::clone(&self.remaining);
+        Box::pin(async move {
+            let result = inner.append(request).await;
+            if result.is_ok()
+                && remaining.load(Ordering::SeqCst) > 0
+                && remaining.fetch_sub(1, Ordering::SeqCst) == 1
+            {
+                return Err(StoreError::AmbiguousAcknowledgement);
+            }
+            result
+        })
+    }
+
+    fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
+        self.inner.load(request)
+    }
+
+    fn write_snapshot(
+        &self,
+        request: SnapshotRequest,
+    ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+        self.inner.write_snapshot(request)
+    }
+
+    fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
         self.inner.health()
     }
 }

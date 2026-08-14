@@ -1,0 +1,36 @@
+{
+  "case": "limit_reached",
+  "cbor_hex": "a16d6c696d69745f72656163686564a5657573616765aa657475726e73006772657472696573006977616c6c5f74696d65006a746f6f6c5f63616c6c73006c696e7075745f746f6b656e73006c6f75747075745f6279746573006d636f6e746578745f6279746573006d6f75747075745f746f6b656e73006e6d6f64656c5f726571756573747302726d61785f706172616c6c656c5f746f6f6c7300676d6178696d756da165636f756e7401686f62736572766564a165636f756e74026964696d656e73696f6ea1646b696e646e6d6f64656c5f72657175657374736c75736167655f646967657374784039303939386638636638353566303430363039396532316537363131643834383736383330623234363132363735313164613761646538643635393733313864",
+  "diagnostic_json": {
+    "limit_reached": {
+      "dimension": {
+        "kind": "model_requests"
+      },
+      "maximum": {
+        "count": 1
+      },
+      "observed": {
+        "count": 2
+      },
+      "usage": {
+        "context_bytes": 0,
+        "input_tokens": 0,
+        "max_parallel_tools": 0,
+        "model_requests": 2,
+        "output_bytes": 0,
+        "output_tokens": 0,
+        "retries": 0,
+        "tool_calls": 0,
+        "turns": 0,
+        "wall_time": 0
+      },
+      "usage_digest": "90998f8cf855f0406099e21e7611d84876830b2461267511da7ade8d6597318d"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "4cb9410e69528d20e03e48d9273b024bac0ef940e7c1088187070aa4b8ac4e2a",
+  "subject": "record-payload"
+}

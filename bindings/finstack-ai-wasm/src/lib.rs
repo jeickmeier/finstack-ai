@@ -92,6 +92,19 @@ pub fn run_noop_trace() -> Result<String, JsValue> {
     noop_trace::run_noop_trace_json().map_err(JsValue::from_str)
 }
 
+/// Compute journal known-answer hex through the one Rust engine.
+///
+/// # Errors
+///
+/// Returns a TypeError-equivalent when `kind` or the diagnostic JSON is invalid.
+#[wasm_bindgen(js_name = journalKnownAnswer)]
+pub fn journal_known_answer(kind: &str, encoded: &str) -> Result<String, JsValue> {
+    let answer = finstack_ai_protocol::journal_known_answer(kind, encoded)
+        .map_err(|error| js_sys::TypeError::new(&error.to_string()))?;
+    serde_json::to_string(&answer)
+        .map_err(|_| js_sys::TypeError::new("journal known-answer serialization failed").into())
+}
+
 /// Normalize a pre-beta lineage or authenticated external-command shape.
 ///
 /// # Errors

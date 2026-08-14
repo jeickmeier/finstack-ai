@@ -1,0 +1,15 @@
+{
+  "case": "session_created",
+  "cbor_hex": "a16f73657373696f6e5f63726561746564a1686d65746164617461427b7d",
+  "diagnostic_json": {
+    "session_created": {
+      "metadata": {}
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "d839b9b6d4e236b41e42db811c6c944c9ced3a229479a33f796320a92427a041",
+  "subject": "record-payload"
+}

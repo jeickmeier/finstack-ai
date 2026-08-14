@@ -18,6 +18,10 @@ pub const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
 pub const DOMAIN_RECORD_PAYLOAD: &str = "record-payload";
 /// Schema version for the `record-payload` digest domain.
 pub const RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION: u32 = 1;
+/// Fixed domain name for record-envelope checksums (TDD §12.1; PR-039).
+pub const DOMAIN_RECORD_ENVELOPE: &str = "record-envelope";
+/// Schema version for the `record-envelope` digest domain.
+pub const RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for effect-input digests (TDD §6.4 / §12.3).
 pub const DOMAIN_EFFECT_INPUT: &str = "effect-input";
 /// Schema version for the `effect-input` digest domain.

@@ -47,6 +47,10 @@ raises `RuntimeError` with code `python_callback_context_settled`. Do not call
 blocking `Agent` or `Run` operations recursively from a callback. Schedule
 independent work and return the normalized callback result instead.
 
+`journal_known_answer()` returns payload digest, envelope checksum, and
+canonical-CBOR hex from the one Rust engine. It does not implement CBOR in
+Python.
+
 `normalize_prebeta_shape()` exposes data-only Rust validation for child-lineage,
 interaction-resolution, and authenticated external-completion shapes. It does
 not route those commands or claim durable restart, pruning, or duplicate

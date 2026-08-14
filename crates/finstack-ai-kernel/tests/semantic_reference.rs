@@ -181,6 +181,10 @@ fn record_name(value: &RecordBody) -> &'static str {
         RecordBody::BudgetReservationSettled(_) => "BudgetReservationSettled",
         RecordBody::BudgetChargeRecorded(_) => "BudgetChargeRecorded",
         RecordBody::BudgetReservationReleased(_) => "BudgetReservationReleased",
+        RecordBody::SessionCreated(_) => "SessionCreated",
+        RecordBody::LaneCreated(_) => "LaneCreated",
+        RecordBody::LaneMoved(_) => "LaneMoved",
+        RecordBody::SnapshotWritten(_) => "SnapshotWritten",
     }
 }
 

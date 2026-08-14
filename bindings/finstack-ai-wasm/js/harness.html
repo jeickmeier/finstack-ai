@@ -26,6 +26,7 @@
         createMemoryJournalStore,
         health,
         init,
+        journalKnownAnswer,
         normalizePrebetaShape,
       } from "./dist/index.js";
       import {
@@ -87,6 +88,7 @@
           createHostRandomSource,
           createOpenAICompatibleModel,
           openaiCompatibleDefaultBaseUrl: OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
+          journalKnownAnswer,
           normalizePrebetaShape,
           applyScriptedCoordinatorCommands: (commands) =>
             JSON.parse(applyScriptedCoordinatorCommands(JSON.stringify(commands))),

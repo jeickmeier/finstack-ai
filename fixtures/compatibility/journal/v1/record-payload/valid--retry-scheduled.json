@@ -1,0 +1,28 @@
+{
+  "case": "retry_scheduled",
+  "cbor_hex": "a16f72657472795f7363686564756c6564a7656379636c6500666475655f61740067617474656d7074016b7072696f725f6572726f72a664636f64656c6d6f64656c5f6661696c6564676d657373616765666661696c65646863617465676f7279656d6f64656c69726574727961626c65f56b6964656e74696669657273a06c736166655f64657461696c73427b7d6e636c617373696669636174696f6e656d6f64656c6e706f6c6963795f76657273696f6e69706f6c6963792d76316f74696d65725f6566666563745f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303363",
+  "diagnostic_json": {
+    "retry_scheduled": {
+      "attempt": 1,
+      "classification": "model",
+      "cycle": 0,
+      "due_at": "1970-01-01T00:00:00.000Z",
+      "policy_version": "policy-v1",
+      "prior_error": {
+        "category": "model",
+        "code": "model_failed",
+        "identifiers": {},
+        "message": "failed",
+        "retryable": true,
+        "safe_details": {}
+      },
+      "timer_effect_id": "00000000-0000-7000-8000-00000000003c"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "496a6d7a3690775bd3a880a86fb45eebb7b4abc4f41817f3b9e772c033668b70",
+  "subject": "record-payload"
+}

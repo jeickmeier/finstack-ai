@@ -1,0 +1,26 @@
+{
+  "case": "interaction_resolved",
+  "cbor_hex": "a174696e746572616374696f6e5f7265736f6c766564a568726573706f6e7365427b7d697072696e636970616ca36669737375657263697373677375626a656374637375626c74656e616e745f73636f70656874656e616e742d616d617574686f72697a6174696f6ea26b6465636973696f6e5f69646b6465636973696f6e2d76316e706f6c6963795f76657273696f6e69706f6c6963792d76316d7265736f6c7574696f6e5f6964657265732d316e696e746572616374696f6e5f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303134",
+  "diagnostic_json": {
+    "interaction_resolved": {
+      "authorization": {
+        "decision_id": "decision-v1",
+        "policy_version": "policy-v1"
+      },
+      "interaction_id": "00000000-0000-7000-8000-000000000014",
+      "principal": {
+        "issuer": "iss",
+        "subject": "sub",
+        "tenant_scope": "tenant-a"
+      },
+      "resolution_id": "res-1",
+      "response": {}
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "94fbded7dff1cd692e4bf7d350085436306422fcb893c3e4847a4f240f89200d",
+  "subject": "record-payload"
+}

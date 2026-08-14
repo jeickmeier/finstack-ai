@@ -136,8 +136,9 @@ pub use event_hub::{
 };
 pub use id_generation::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
 pub use journal::{
-    JournalStore, LoadRequest, LoadedSession, OpaqueSnapshot, SnapshotReceipt, SnapshotRequest,
-    StoreCommitTimestamp, StoreError, StoreHealth,
+    JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
+    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    StoreCommitTimestamp, StoreError, StoreHealth, WriteMetadataRequest,
 };
 #[cfg(feature = "native-tokio")]
 pub use manual_drive::{

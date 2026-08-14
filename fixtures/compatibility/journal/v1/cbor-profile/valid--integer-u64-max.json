@@ -1,0 +1,13 @@
+{
+  "case": "integer-u64-max",
+  "cbor_hex": "1bffffffffffffffff",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "u64",
+    "value": "18446744073709551615"
+  },
+  "subject": "cbor-profile"
+}

@@ -1,0 +1,15 @@
+PH6-E-entrance-commit-loop-3728650e8935
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Baseline: 15aa94f54336336d6897b8efbf4371df0d21070c
+
+Phase 6 entrance criterion 1: Phase 2 commit loop stable.
+
+Evidence:
+- G2-D-native-runtime-7c2e9a4d1b65 Passed
+- PR-014 Done at merge 399f3a7d9d987268f4d79ab90f31b93f854084f8
+- CommitCoordinator retries one AmbiguousAcknowledgement and applies
+  only after a matching frozen-batch receipt
+
+Result: Pass
+Implementation of JournalStore v1 checksums remains PR-039.

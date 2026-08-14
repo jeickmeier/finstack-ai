@@ -1,0 +1,16 @@
+{
+  "case": "snapshot_written",
+  "cbor_hex": "a170736e617073686f745f7772697474656ea2666469676573747840326262373662663034323733616530666462613930613832623861303931643035626338353237346163316630616432616663633165313465313433323966366873657175656e636501",
+  "diagnostic_json": {
+    "snapshot_written": {
+      "digest": "2bb76bf04273ae0fdba90a82b8a091d05bc85274ac1f0ad2afcc1e14e14329f6",
+      "sequence": 1
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "a2e89e2b260990b93a7fe02604ec684bce5334b1030874fbc167c7b6f4d6cadf",
+  "subject": "record-payload"
+}

@@ -1,0 +1,15 @@
+{
+  "case": "lane_moved",
+  "cbor_hex": "a16a6c616e655f6d6f766564a1676c6561665f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303530",
+  "diagnostic_json": {
+    "lane_moved": {
+      "leaf_id": "00000000-0000-7000-8000-000000000050"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "13cb99ae74450b007218c501ea9c8ba2a556f9b15c4c714139eee9f477f0c505",
+  "subject": "record-payload"
+}

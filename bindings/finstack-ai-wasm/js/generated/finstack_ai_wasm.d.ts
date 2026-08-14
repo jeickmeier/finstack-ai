@@ -456,6 +456,15 @@ export function driveScriptedToolCall(adapter: any, options: any, signal: any): 
 export function health(): string;
 
 /**
+ * Compute journal known-answer hex through the one Rust engine.
+ *
+ * # Errors
+ *
+ * Returns a TypeError-equivalent when `kind` or the diagnostic JSON is invalid.
+ */
+export function journalKnownAnswer(kind: string, encoded: string): string;
+
+/**
  * Normalize a pre-beta lineage or authenticated external-command shape.
  *
  * # Errors
@@ -520,6 +529,7 @@ export interface InitOutput {
     readonly eventbatch_toJson: (a: number, b: number) => void;
     readonly eventbatch_toJsonBytes: (a: number, b: number) => void;
     readonly health: (a: number) => void;
+    readonly journalKnownAnswer: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly jsartifactstore_new: (a: number, b: number) => void;
     readonly jsclock_new: (a: number, b: number) => void;
     readonly jscontextprovider_new: (a: number, b: number, c: number) => void;
@@ -554,9 +564,9 @@ export interface InitOutput {
     readonly driveScriptedToolCall: (a: number, b: number, c: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1377: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_1391: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_333: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1405: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_334: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

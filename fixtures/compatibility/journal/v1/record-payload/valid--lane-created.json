@@ -1,0 +1,15 @@
+{
+  "case": "lane_created",
+  "cbor_hex": "a16c6c616e655f63726561746564a1646e616d65646d61696e",
+  "diagnostic_json": {
+    "lane_created": {
+      "name": "main"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "2f88ce9c6a4e1ba08a368894387dab5b61faa3b28a3bc31647243888bf02e31b",
+  "subject": "record-payload"
+}

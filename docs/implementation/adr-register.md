@@ -39,7 +39,7 @@ Index last reconciled: 2026-08-14 (G4-D-binding-parity-101224c5eb60; Phase 5 `Do
 | ADR-012 | `immutable-lanes` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-013 | `at-least-once-effects` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-043, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Standalone | Not started | Missing |
-| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Not started | Missing |
+| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | In progress | Partial (PR-039 codec implementation in progress) |
 | ADR-016 | `sqlite-before-multilane` | Durability/ecosystem lead | PR-040 before PR-047 | Accepted | Standalone | Not started | Missing |
 | ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | Implemented | Verified ([PR-032 single-extension wheel, staged 0.0.2 artifacts, and Phase 4 wheel exit](artifacts/pr-032/phase4-exit-review.txt)) |
 | ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | Implemented | Verified ([PR-032 effective 21/21 hosted non-abi3 CPython/target matrix and Phase 4 wheel exit](artifacts/pr-032/phase4-exit-review.txt)) |

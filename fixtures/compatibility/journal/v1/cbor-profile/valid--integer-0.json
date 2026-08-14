@@ -1,0 +1,13 @@
+{
+  "case": "integer-0",
+  "cbor_hex": "00",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "u64",
+    "value": "0"
+  },
+  "subject": "cbor-profile"
+}

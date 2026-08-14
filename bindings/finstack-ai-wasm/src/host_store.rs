@@ -11,7 +11,7 @@ use finstack_ai::runtime::{
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 #[cfg(target_arch = "wasm32")]
-use finstack_ai_kernel::{Digest, SessionId};
+use finstack_ai_kernel::{Digest, Metadata, SessionId};
 use serde::Deserialize;
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
@@ -159,26 +159,12 @@ impl JournalStore for HostJournalStore {
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            Box::pin(async move {
-                Ok(LoadedSession {
-                    session_id: request.session_id,
-                    head_sequence: 0,
-                    committed_batches: Arc::from([]),
-                    snapshot: None,
-                })
-            })
+            Box::pin(async move { Ok(LoadedSession::empty(request.session_id)) })
         }
         #[cfg(target_arch = "wasm32")]
         {
             let Some(method) = self.load.as_ref().map(|method| method.borrow().clone()) else {
-                return Box::pin(async move {
-                    Ok(LoadedSession {
-                        session_id: request.session_id,
-                        head_sequence: 0,
-                        committed_batches: Arc::from([]),
-                        snapshot: None,
-                    })
-                });
+                return Box::pin(async move { Ok(LoadedSession::empty(request.session_id)) });
             };
             let adapter = self.adapter.clone();
             Box::pin(async move {
@@ -330,6 +316,10 @@ struct LoadRequestWire {
 struct LoadedSessionWire {
     session_id: SessionId,
     head_sequence: u64,
+    #[serde(default)]
+    head_checksum: Option<Digest>,
+    #[serde(default)]
+    metadata: Metadata,
     committed_batches: Vec<CommittedBatch>,
     #[serde(default)]
     snapshot: Option<OpaqueSnapshotWire>,
@@ -345,6 +335,8 @@ impl LoadedSessionWire {
         Ok(LoadedSession {
             session_id: self.session_id,
             head_sequence: self.head_sequence,
+            head_checksum: self.head_checksum,
+            metadata: self.metadata,
             committed_batches: self.committed_batches.into(),
             snapshot,
         })

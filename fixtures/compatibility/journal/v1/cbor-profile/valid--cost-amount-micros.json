@@ -1,0 +1,14 @@
+{
+  "case": "cost-amount-micros",
+  "cbor_hex": "a364756e697463555344666d6963726f737431383434363734343037333730393535313631357670726963696e675f706f6c6963795f76657273696f6e6870726963652d7631",
+  "diagnostic_json": {
+    "micros": "18446744073709551615",
+    "pricing_policy_version": "price-v1",
+    "unit": "USD"
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "subject": "cbor-profile"
+}

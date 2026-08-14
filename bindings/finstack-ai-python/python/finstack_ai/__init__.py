@@ -71,6 +71,27 @@ def linked_providers() -> tuple[str, ...]:
     return _native.linked_providers()
 
 
+def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:
+    """Return payload digest, checksum, and canonical-CBOR hex from Rust.
+
+    ``kind`` is ``record_body`` or ``record_envelope``. This helper does not
+    implement CBOR in Python; it calls the one Rust engine.
+
+    Args:
+        kind: Known-answer family.
+        value: Diagnostic JSON mapping of the body or envelope.
+
+    Returns:
+        A mapping with ``payload_digest``, optional ``checksum``, and
+        ``cbor_hex``.
+
+    Raises:
+        TypeError: If ``kind`` or ``value`` is invalid.
+    """
+
+    return _native.journal_known_answer(kind, value)
+
+
 def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
     """Validate a pre-beta Rust-owned lineage or external-command shape.
 
@@ -117,6 +138,7 @@ __all__ = [
     "__version__",
     "build_metadata",
     "health",
+    "journal_known_answer",
     "linked_providers",
     "normalize_prebeta_shape",
     "pydantic_toolset",

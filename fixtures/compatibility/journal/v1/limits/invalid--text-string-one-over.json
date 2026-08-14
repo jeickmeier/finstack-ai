@@ -1,0 +1,13 @@
+{
+  "case": "text-string-one-over",
+  "expect": {
+    "code": "canonical_limit_exceeded",
+    "ok": false
+  },
+  "format_version": 1,
+  "recipe": {
+    "bytes": 4194305,
+    "kind": "text_string"
+  },
+  "subject": "limits"
+}

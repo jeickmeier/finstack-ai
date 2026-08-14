@@ -1,0 +1,23 @@
+{
+  "case": "run_failed",
+  "cbor_hex": "a16a72756e5f6661696c6564a2656379636c6500656572726f72a664636f64656a72756e5f6661696c6564676d657373616765666661696c65646863617465676f72796d636f6e66696775726174696f6e69726574727961626c65f46b6964656e74696669657273a06c736166655f64657461696c73427b7d",
+  "diagnostic_json": {
+    "run_failed": {
+      "cycle": 0,
+      "error": {
+        "category": "configuration",
+        "code": "run_failed",
+        "identifiers": {},
+        "message": "failed",
+        "retryable": false,
+        "safe_details": {}
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "bba6c155f792b1d5130614e7854dd7f08942795e7791f12b6fa0a6111a12c511",
+  "subject": "record-payload"
+}

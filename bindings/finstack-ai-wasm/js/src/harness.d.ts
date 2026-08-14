@@ -96,6 +96,10 @@ declare global {
       createHostRandomSource: () => HostRandomSource;
       createOpenAICompatibleModel: (options?: OpenAICompatibleOptions) => HostModel;
       openaiCompatibleDefaultBaseUrl: string;
+      journalKnownAnswer: (
+        kind: "record_body" | "record_envelope",
+        value: unknown,
+      ) => { payload_digest: string; checksum?: string; cbor_hex: string };
       normalizePrebetaShape: (kind: PrebetaKind, value: unknown) => unknown;
       applyScriptedCoordinatorCommands: (
         commands: ReadonlyArray<{ kind: PrebetaKind; value: unknown }>,

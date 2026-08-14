@@ -135,6 +135,7 @@ proxy. Optional application `headers` are not a credential helper.
 - Host interfaces and `Js*` wrappers for model, toolset, context, middleware,
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
+- `journalKnownAnswer(kind, value)`
 - `@finstack/ai/adapters/openai-compatible`
 - `@finstack/ai/adapters/indexeddb`
 - `@finstack/ai/worker` (`connectWorker`, `exposeWorkerHost`, `WorkerRun`,

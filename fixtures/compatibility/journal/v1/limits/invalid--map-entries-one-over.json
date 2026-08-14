@@ -1,0 +1,13 @@
+{
+  "case": "map-entries-one-over",
+  "expect": {
+    "code": "canonical_limit_exceeded",
+    "ok": false
+  },
+  "format_version": 1,
+  "recipe": {
+    "count": 257,
+    "kind": "map_entries"
+  },
+  "subject": "limits"
+}
