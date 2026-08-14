@@ -536,6 +536,13 @@ name = "finstack-ai-wasm"
 version = "0.0.2"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-kernel",
+ "finstack-ai-store-memory",
+ "futures-core",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

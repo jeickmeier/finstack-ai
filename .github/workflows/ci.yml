@@ -56,3 +56,16 @@ jobs:
 
       - name: Test
         run: mise run test
+
+      - name: Check wasm graph
+        run: mise run check-wasm
+
+      - name: Generate wasm package
+        env:
+          FINSTACK_WASM_REPRO: "1"
+        run: |
+          mise run generate-wasm
+          uv run --no-project python tools/wasm_package/check.py dirty
+
+      - name: Browser package tests
+        run: mise run test-browser

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>@finstack/ai harness</title>
+  </head>
+  <body>
+    <script type="module">
+      import { buildMetadata, health, init } from "./dist/index.js";
+      import {
+        compilePortProxies,
+        runNoopTrace,
+      } from "./generated/finstack_ai_wasm.js";
+
+      window.finstackReady = init().then(() => {
+        window.finstackTest = {
+          health,
+          buildMetadata,
+          compilePortProxies,
+          runNoopTrace,
+        };
+      });
+    </script>
+  </body>
+</html>

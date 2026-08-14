@@ -1,0 +1,36 @@
+{
+  "name": "@finstack/ai",
+  "version": "0.0.2",
+  "description": "Browser WASM bindings for the finstack-ai engine",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "private": true,
+  "files": [
+    "dist",
+    "generated",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "playwright test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "typescript": "5.9.2"
+  }
+}

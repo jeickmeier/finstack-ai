@@ -2,6 +2,9 @@
 //!
 //! Owns the six primary port contracts and effect execution. Target drivers
 //! are selected by the non-default `native-tokio` and `wasm-host` features.
+//! `wasm-host` selects the local `PortObject`, `PortFuture`, and `PortStream`
+//! aliases. The browser executor and wasm-bindgen surface live in the
+//! `finstack-ai-wasm` binding crate.
 //!
 //! PR-014 adds the journal-store boundary and the authoritative commit loop.
 //! PR-015 adds the provider-neutral model port and deterministic stream driver.
