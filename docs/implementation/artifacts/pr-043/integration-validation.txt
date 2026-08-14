@@ -1,0 +1,15 @@
+PR-043 local integration validation
+Date: 2026-08-14
+Merge: b0641b0be338918c1951339657ce8c04c4ccff59
+Parents: a3c542446dd16a9177772097cf51803ec06081d8 (main) and
+         13dc4a8ae6faac052b946f0d8076cb6e0ddb9d3f (stacked tip evidence head)
+Candidate: 86f71c8fd47c0c6d721f9ae36df5c0ba90b22025
+Result: PASS (local merge of the Phase 6 stacked tip)
+
+The merge tree on main contains ToolResumeAction classification,
+Toolset::reconcile on spawn_with_model_and_tools, same-identity
+retry, SuspendUncertain for non-resumable tools, and fail-closed
+conflicting completions. A01–A05 remain Passed at the candidate.
+
+No hosted pull request or merge, npm publish, tag, or G5 decision
+occurred.

@@ -1,0 +1,15 @@
+PR-047 local integration validation
+Date: 2026-08-14
+Merge: b0641b0be338918c1951339657ce8c04c4ccff59
+Parents: a3c542446dd16a9177772097cf51803ec06081d8 (main) and
+         13dc4a8ae6faac052b946f0d8076cb6e0ddb9d3f (stacked tip evidence head)
+Candidate: 14af719a078f1cdf52382e89e0a44837ab207237
+Result: PASS (local merge of the Phase 6 stacked tip)
+
+The merge tree on main contains public multi-lane Session/Lane APIs,
+in-process lane guards, concurrent sibling runs, lineage-aware
+cancel fan-out, and binding Session/Lane handles. A01–A05 remain
+Passed at the candidate.
+
+No hosted pull request or merge, npm publish, tag, or G5 decision
+occurred.
