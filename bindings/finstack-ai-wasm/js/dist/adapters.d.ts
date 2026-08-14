@@ -1,3 +1,4 @@
+import { JsModel as WasmJsModel, JsToolset as WasmJsToolset } from "../generated/finstack_ai_wasm.js";
 import type { HostArtifactStore, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostObserver, HostRandomSource, HostToolset } from "./host.js";
 /**
  * Constructor options for {@link JsModel}.
@@ -63,6 +64,28 @@ export interface JsJournalStoreOptions {
     /** Stable non-secret operating-mode description. */
     detail?: string;
 }
+/**
+ * Throw when the generated wasm module has not been initialized.
+ *
+ * @throws When {@link init} has not completed.
+ */
+export declare function requireWasm(): void;
+/**
+ * Return the crate-private wasm-bindgen model handle.
+ *
+ * @param model - Public {@link JsModel} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmModelHandle(model: JsModel): WasmJsModel;
+/**
+ * Return the crate-private wasm-bindgen toolset handle.
+ *
+ * @param toolset - Public {@link JsToolset} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset;
 /**
  * Record that {@link init} has completed so wrappers may construct wasm handles.
  *

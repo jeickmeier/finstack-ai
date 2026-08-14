@@ -42,6 +42,7 @@ SECRET_PATTERNS = (
 FORBIDDEN_KERNEL = FORBIDDEN_WASM | frozenset(
     {"wasm-bindgen", "wasm-bindgen-futures", "js-sys"}
 )
+REQUIRED_WASM = frozenset({"finstack-ai-store-memory"})
 
 
 def run_cargo_tree(package: str, extra_args: list[str]) -> set[str]:
@@ -125,6 +126,14 @@ def check_graph() -> int:
                 file=sys.stderr,
             )
             return 1
+        if name == "finstack-ai-wasm":
+            missing = sorted(REQUIRED_WASM - graph)
+            if missing:
+                print(
+                    f"error: {name} wasm-host graph is missing required crates: {missing}",
+                    file=sys.stderr,
+                )
+                return 1
     kernel_hits = sorted(kernel_names & FORBIDDEN_KERNEL)
     if kernel_hits:
         print(
@@ -204,7 +213,7 @@ def check_size() -> int:
         / "docs"
         / "implementation"
         / "artifacts"
-        / "pr-034"
+        / "pr-035"
         / "bundle-size.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)

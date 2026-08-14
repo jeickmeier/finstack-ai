@@ -1,12 +1,14 @@
 import initWasm, { buildMetadata as wasmBuildMetadata, health as wasmHealth, normalizePrebetaShape as wasmNormalizePrebetaShape, } from "../generated/finstack_ai_wasm.js";
 import { setAdaptersInitialized } from "./adapters.js";
+export { Agent, Event, EventBatch, FinstackError, Run, RunResult, Session, } from "./agent.js";
 export { JsArtifactStore, JsClock, JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsRandomSource, JsToolset, createHostClock, createHostRandomSource, createMemoryArtifactStore, createMemoryJournalStore, } from "./adapters.js";
 let initialized = false;
 /**
  * Load the generated wasm-bindgen module.
  *
- * Call this once before {@link health} or {@link buildMetadata}. The function
- * does not create a Tokio runtime, open a store, or spawn host work.
+ * Call this once before {@link health}, {@link buildMetadata}, or
+ * {@link Agent.create}. The function does not create a Tokio runtime or open a
+ * durable store. The host driver is installed when the generated module loads.
  *
  * @param moduleOrPath - Optional wasm module, URL, or bytes. Defaults to the
  * generated `finstack_ai_wasm_bg.wasm` next to the glue.

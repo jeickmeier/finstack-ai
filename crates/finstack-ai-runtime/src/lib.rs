@@ -62,8 +62,19 @@ mod observer;
 mod ports;
 mod tool;
 
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+mod run_types;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+mod settlement;
+
 #[cfg(feature = "native-tokio")]
 mod task;
+
+#[cfg(feature = "wasm-host")]
+pub mod host_driver;
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+mod host_task;
 
 #[cfg(feature = "native-tokio")]
 mod model_runtime;
@@ -182,17 +193,20 @@ pub use tool::{
     ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL, normalize_tool_result,
 };
 
-#[cfg(feature = "native-tokio")]
-pub use task::{
-    ModelTaskConfig, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
-    ShutdownOutcome, ShutdownReport, TimerDiagnostics,
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub use run_types::{
+    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
+    TimerDiagnostics, ToolTaskConfig,
 };
 
 #[cfg(feature = "native-tokio")]
-pub use event_hub::EventSubscription;
+pub use task::{RunHandle, RunTaskOwner};
 
-#[cfg(feature = "native-tokio")]
-pub use tool_runtime::ToolTaskConfig;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+pub use host_task::{RunHandle, RunTaskOwner};
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub use event_hub::EventSubscription;
 
 #[cfg(feature = "native-tokio")]
 pub use time::{

@@ -92,7 +92,7 @@ pub struct CommitCoordinator {
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
     #[cfg(feature = "native-tokio")]
     manual_drive: Option<crate::manual_drive::ManualDriveGate>,
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
 }
 
@@ -109,7 +109,7 @@ impl CommitCoordinator {
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
             manual_drive: None,
-            #[cfg(feature = "native-tokio")]
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             event_publisher: None,
         }
     }
@@ -138,7 +138,7 @@ impl CommitCoordinator {
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
             manual_drive: None,
-            #[cfg(feature = "native-tokio")]
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             event_publisher: None,
         })
     }
@@ -163,7 +163,7 @@ impl CommitCoordinator {
         })
     }
 
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn classify(
         &self,
         env: &TransitionEnv,
@@ -279,7 +279,7 @@ impl CommitCoordinator {
                 )
                 .ok_or_else(|| self.boundary_fault("transient_event_sequence_exhausted"))?;
 
-            #[cfg(feature = "native-tokio")]
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             self.publish_events(Arc::clone(&events)).await?;
 
             let diagnostics: Arc<[Diagnostic]> = decision.diagnostics.into();
@@ -472,7 +472,7 @@ impl CommitCoordinator {
         Ok(controller)
     }
 
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn install_event_publisher(
         &mut self,
         publisher: Arc<dyn crate::event_hub::RuntimeEventPublisher>,
@@ -480,7 +480,7 @@ impl CommitCoordinator {
         self.event_publisher = Some(publisher);
     }
 
-    #[cfg(feature = "native-tokio")]
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) async fn publish_events(
         &mut self,
         events: Arc<[RunEvent]>,

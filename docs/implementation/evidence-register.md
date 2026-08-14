@@ -267,6 +267,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-034-A05 | PR-034 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-034-E-openai-952f2d81890a; PR-034-E-check-wasm-952f2d81890a | Same-origin OpenAI-compatible fetch/SSE battery with mock SSE and secret scan | me@jeickmeier.com | 2026-08-13 |
 | PR-034-A06 | PR-034 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-034-E-prebeta-952f2d81890a; PR-034-E-browser-952f2d81890a | `normalizePrebetaShape` plus scripted coordinator command traces | me@jeickmeier.com | 2026-08-13 |
 | PR-034-A07 | PR-034 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-034-E-ports-952f2d81890a; PR-034-E-browser-952f2d81890a | JS journal store is in-memory/scripted only; no IndexedDB or SQLite durability claim | me@jeickmeier.com | 2026-08-13 |
+| PR-035-A01 | PR-035 | PLAN-0.18 / [PR-035](../planning/04-finstack-ai-implementation-plan.md#pr-035---expose-agent-run-result-and-event-batch-javascript-handles) | In progress | me@jeickmeier.com | — | Model-only and tool-using scripted Agent runs from TypeScript | — | 2026-08-13 |
+| PR-035-A02 | PR-035 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | State remains in WASM until explicit serialization | — | 2026-08-13 |
+| PR-035-A03 | PR-035 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Event batching preserves sequence and terminal events | — | 2026-08-13 |
+| PR-035-A04 | PR-035 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Dropped handles release observation resources; cancel is explicit | — | 2026-08-13 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

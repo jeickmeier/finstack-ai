@@ -29,14 +29,24 @@ use finstack_ai_runtime::{
     LoadRequest, LockedModelContextProfile, Model, ModelCapabilities, ModelContextProfileOverride,
     ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
     ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate,
-    ModelWarmupContext, OsRandomSource, PendingModelEffect, PortFuture, ProgressCoalescing,
-    ReconcileContext, ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
-    SideEffectClass, StructuredOutputCapability, SystemClock, ToolExecutionPolicy,
-    ToolFailurePolicy, ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator,
-    ToolValidatorCompiler, Toolset, ToolsetRegistration, UuidV7Generator,
-    resolve_model_context_profile,
+    ModelWarmupContext, PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext,
+    ResolvedToolCatalog, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner, SideEffectClass,
+    StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
+    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
 };
 use thiserror::Error;
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+use finstack_ai_runtime::host_driver as driver;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+use finstack_ai_runtime::host_driver::{
+    InstalledClock as AgentClock, InstalledRandom as AgentRandom,
+};
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::native_driver as driver;
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 
 /// Invalid public run configuration.
 pub const AGENT_RUN_INVALID_CONFIGURATION: &str = "agent_run_invalid_configuration";
@@ -250,7 +260,7 @@ impl Agent {
 
     /// Start one bounded native run and return its detached control handle.
     ///
-    /// The caller must already be inside a Tokio runtime. Dropping the returned
+    /// The caller must already be inside the selected runtime driver. Dropping the returned
     /// handle detaches frontend observation; it does not cancel the durable run.
     ///
     /// # Errors
@@ -266,16 +276,16 @@ impl Agent {
             locator,
             cancellation_initiator,
             handle: Mutex::new(None),
-            handle_ready: finstack_ai_runtime::native_driver::Signal::new(),
+            handle_ready: driver::Signal::new(),
             result: Mutex::new(None),
-            result_ready: finstack_ai_runtime::native_driver::Signal::new(),
+            result_ready: driver::Signal::new(),
             events: Mutex::new(EventStreamState::Waiting),
             cancellation: Mutex::new(CancellationState::default()),
-            cancellation_ready: finstack_ai_runtime::native_driver::Signal::new(),
+            cancellation_ready: driver::Signal::new(),
         });
         let execution = Arc::downgrade(&inner);
         let agent = selected;
-        finstack_ai_runtime::native_driver::spawn(Box::pin(async move {
+        driver::spawn(Box::pin(async move {
             let result = Box::pin(agent.execute_started(prepared, &execution)).await;
             publish_result(&execution, result);
         }))
@@ -406,19 +416,19 @@ impl Agent {
         let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(Arc::clone(&prepared.model)));
         let coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
         let owner = if self.tools.is_empty() {
-            RunTaskOwner::spawn_with_model(
+            Box::pin(RunTaskOwner::spawn_with_model(
                 coordinator,
                 run_task_config(),
                 model_task_config(),
                 ready_model,
                 prepared.profile.clone(),
-                SystemClock,
-                OsRandomSource,
-            )
+                AgentClock,
+                AgentRandom,
+            ))
             .await
             .map_err(AgentRunError::runtime)
         } else {
-            RunTaskOwner::spawn_with_model_and_tools(
+            Box::pin(RunTaskOwner::spawn_with_model_and_tools(
                 coordinator,
                 run_task_config(),
                 model_task_config(),
@@ -426,9 +436,9 @@ impl Agent {
                 ready_model,
                 prepared.profile.clone(),
                 Arc::clone(&self.tools),
-                SystemClock,
-                OsRandomSource,
-            )
+                AgentClock,
+                AgentRandom,
+            ))
             .await
             .map_err(AgentRunError::runtime)
         };
@@ -451,7 +461,7 @@ impl Agent {
         };
         publish_started(execution, handle.clone(), subscription);
         let timeout = prepared.request.timeout;
-        let result = finstack_ai_runtime::native_driver::timeout(
+        let result = driver::timeout(
             timeout,
             Box::pin(self.drive(
                 &handle,
@@ -620,6 +630,7 @@ impl Agent {
                 session_id,
                 &[
                     RunPhase::AfterModel,
+                    RunPhase::AfterToolBatch,
                     RunPhase::BeforeFinalize,
                     RunPhase::Failed,
                     RunPhase::Cancelled,
@@ -627,6 +638,17 @@ impl Agent {
             )
             .await?;
             ensure_nonterminal_failure(&after_model)?;
+            if after_model.phase == Some(RunPhase::AfterToolBatch) {
+                submit_stage(
+                    handle,
+                    after_model.cycle,
+                    Stage::AfterToolBatch,
+                    ReducerStageOutcome::Continue,
+                    StageIds::continued(),
+                )
+                .await?;
+                continue;
+            }
             if let Some(output) = &self.structured_output
                 && after_model.phase == Some(RunPhase::AfterModel)
             {
@@ -830,12 +852,12 @@ struct AgentRunInner {
     locator: OperationLocator,
     cancellation_initiator: CancellationInitiator,
     handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
-    handle_ready: finstack_ai_runtime::native_driver::Signal,
+    handle_ready: driver::Signal,
     result: Mutex<Option<Result<AgentRunOutput, AgentRunError>>>,
-    result_ready: finstack_ai_runtime::native_driver::Signal,
+    result_ready: driver::Signal,
     events: Mutex<EventStreamState>,
     cancellation: Mutex<CancellationState>,
-    cancellation_ready: finstack_ai_runtime::native_driver::Signal,
+    cancellation_ready: driver::Signal,
 }
 
 enum EventStreamState {
@@ -986,7 +1008,7 @@ impl AgentRun {
         };
         if should_start {
             let run = self.clone();
-            if let Err(error) = finstack_ai_runtime::native_driver::spawn(Box::pin(async move {
+            if let Err(error) = driver::spawn(Box::pin(async move {
                 let result = run.submit_cancellation().await;
                 if let Ok(mut cancellation) = run.inner.cancellation.lock() {
                     cancellation.result = Some(result);
@@ -1050,7 +1072,7 @@ impl AgentRun {
                 }
             };
             let Some(subscription) = subscription else {
-                finstack_ai_runtime::native_driver::yield_now().await;
+                driver::yield_now().await;
                 continue;
             };
             let mut guard = EventConsumerGuard {
@@ -1699,12 +1721,12 @@ struct NativeIds;
 
 impl NativeIds {
     fn now() -> Result<Timestamp, AgentRunError> {
-        finstack_ai_runtime::Clock::now(&SystemClock).map_err(AgentRunError::from)
+        finstack_ai_runtime::Clock::now(&AgentClock).map_err(AgentRunError::from)
     }
 
     fn generate<T: finstack_ai_kernel::IdTag>() -> Result<finstack_ai_kernel::Id<T>, AgentRunError>
     {
-        UuidV7Generator::new(SystemClock, OsRandomSource)
+        UuidV7Generator::new(AgentClock, AgentRandom)
             .generate()
             .map_err(AgentRunError::from)
     }
@@ -1873,16 +1895,16 @@ async fn wait_for_phase(
     phases: &[RunPhase],
 ) -> Result<finstack_ai_kernel::KernelState, AgentRunError> {
     loop {
+        let state = recover_state(Arc::clone(&store), session_id).await?;
+        if state.phase.is_some_and(|phase| phases.contains(&phase)) {
+            return Ok(state);
+        }
         if let finstack_ai_runtime::RunStatus::Faulted { code } = handle.status() {
             return Err(AgentRunError::runtime_message(format!(
                 "runtime task faulted: {code}"
             )));
         }
-        let state = recover_state(Arc::clone(&store), session_id).await?;
-        if state.phase.is_some_and(|phase| phases.contains(&phase)) {
-            return Ok(state);
-        }
-        finstack_ai_runtime::native_driver::yield_now().await;
+        driver::yield_now().await;
     }
 }
 
@@ -2096,7 +2118,7 @@ impl Model for ReadyModel {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native-tokio"))]
 mod tests {
     use std::collections::BTreeSet;
 

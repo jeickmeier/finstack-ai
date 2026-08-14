@@ -11,6 +11,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(target_arch = "wasm32")]
+mod agent;
 mod executor;
 #[cfg(any(not(target_arch = "wasm32"), feature = "scripted-trace"))]
 mod fixture;
@@ -31,7 +33,17 @@ mod prebeta;
 #[cfg(all(target_arch = "wasm32", feature = "scripted-trace"))]
 mod scripted;
 
+#[cfg(target_arch = "wasm32")]
+use std::sync::Arc;
+
 use wasm_bindgen::prelude::*;
+
+/// Install the host driver when the generated module loads.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(start)]
+pub fn wasm_start() {
+    crate::agent::install_host_driver();
+}
 
 /// Process-local health token. Does not create a runtime, open a store, or spawn work.
 #[must_use]
@@ -124,7 +136,7 @@ struct ScriptedCommand {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsModel)]
 pub struct JsModel {
-    _inner: host_model::HostModel,
+    inner: Arc<host_model::HostModel>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -139,9 +151,30 @@ impl JsModel {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsModel, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_model::HostModel::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: Arc::new(
+                host_model::HostModel::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsModel {
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Model> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Model>
+    }
+
+    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+        self.inner.component().clone()
+    }
+
+    pub(crate) fn model_name(&self) -> Result<finstack_ai::runtime::ModelName, JsValue> {
+        finstack_ai::runtime::Model::descriptor(self.inner.as_ref())
+            .models
+            .first()
+            .cloned()
+            .ok_or_else(|| js_sys::TypeError::new("model descriptor is empty").into())
     }
 }
 
@@ -149,7 +182,7 @@ impl JsModel {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsToolset)]
 pub struct JsToolset {
-    _inner: host_toolset::HostToolset,
+    inner: Arc<host_toolset::HostToolset>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -164,9 +197,30 @@ impl JsToolset {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsToolset, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_toolset::HostToolset::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: Arc::new(
+                host_toolset::HostToolset::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+
+    /// Clone the wrapper without moving the caller's handle.
+    #[wasm_bindgen(js_name = cloneHandle)]
+    pub fn clone_handle(&self) -> JsToolset {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsToolset {
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Toolset> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Toolset>
+    }
+
+    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+        self.inner.component().clone()
     }
 }
 

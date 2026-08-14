@@ -12,6 +12,7 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, ModelDispatchSeed, PostCommitDispatcher, RuntimeDispatch};
+use crate::settlement::ModelDriverResult;
 use crate::{
     CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
     ModelError, ModelProgress, ModelRequest, ModelRequestDraft, ModelStreamAssembler,
@@ -21,13 +22,6 @@ use crate::{
 pub(crate) struct ModelJob {
     pub(crate) seed: ModelDispatchSeed,
     pub(crate) request: ModelRequest,
-}
-
-pub(crate) struct ModelDriverResult {
-    pub(crate) seed: ModelDispatchSeed,
-    pub(crate) draft: ModelRequestDraft,
-    pub(crate) provider: Arc<str>,
-    pub(crate) result: Result<ModelTerminal, ModelError>,
 }
 
 pub(crate) enum ModelDriverMessage {

@@ -159,8 +159,7 @@ pub struct EventBatch {
 }
 
 impl EventBatch {
-    #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
-    fn new(events: Vec<RunEvent>, dropped_progress: u64) -> Option<Self> {
+    pub(crate) fn new(events: Vec<RunEvent>, dropped_progress: u64) -> Option<Self> {
         let first_sequence = events.first()?.transient_sequence();
         let last_sequence = events.last()?.transient_sequence();
         Some(Self {
@@ -277,14 +276,7 @@ mod native {
     };
     use crate::PortFuture;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub(crate) struct EventPublishError {
-        pub(crate) code: &'static str,
-    }
-
-    pub(crate) trait RuntimeEventPublisher: Send + Sync {
-        fn publish(&self, events: Arc<[RunEvent]>) -> PortFuture<Result<(), EventPublishError>>;
-    }
+    use super::{EventPublishError, RuntimeEventPublisher};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum SubscriberAudience {
@@ -1451,8 +1443,417 @@ mod native {
     }
 }
 
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EventPublishError {
+    pub(crate) code: &'static str,
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) trait RuntimeEventPublisher: crate::PortObject {
+    fn publish(&self, events: Arc<[RunEvent]>) -> crate::PortFuture<Result<(), EventPublishError>>;
+}
+
 #[cfg(feature = "native-tokio")]
 pub use native::EventSubscription;
 
 #[cfg(feature = "native-tokio")]
-pub(crate) use native::{EventHubHandle, RuntimeEventPublisher, event_hub};
+pub(crate) use native::{EventHubHandle, event_hub};
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+pub use host::EventSubscription;
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+pub(crate) use host::{EventHubHandle, event_hub};
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+mod host {
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use finstack_ai_kernel::{RunEvent, RunEventClass, RunEventKind};
+
+    use super::{
+        EventBatch, EventDeliveryStats, EventHubConfig, EventLagPolicy, EventPublishError,
+        EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
+        EventSubscriptionStatus, ProgressCoalescing, RuntimeEventPublisher,
+    };
+    use crate::PortFuture;
+    use crate::host_driver::Signal;
+
+    #[derive(Debug, Clone)]
+    struct SizedEvent {
+        event: RunEvent,
+        bytes: usize,
+    }
+
+    #[derive(Debug, Default)]
+    struct SubscriptionState {
+        public: EventSubscriptionStatus,
+        unreported_dropped: u64,
+    }
+
+    struct PendingBatch {
+        events: Vec<SizedEvent>,
+        bytes: usize,
+        flush_after: Option<Duration>,
+    }
+
+    struct SubscriberInner {
+        config: EventSubscriptionConfig,
+        pending: PendingBatch,
+        delivered: VecDeque<EventBatch>,
+        status: SubscriptionState,
+        closed: bool,
+    }
+
+    struct Subscriber {
+        inner: Mutex<SubscriberInner>,
+        ready: Signal,
+        closed: AtomicBool,
+    }
+
+    /// Host-local bounded event-batch receiver for one run subscription.
+    pub struct EventSubscription {
+        subscriber: Arc<Subscriber>,
+    }
+
+    impl EventSubscription {
+        /// Receive the next transport batch, or `None` after explicit closure.
+        pub async fn next_batch(&mut self) -> Option<EventBatch> {
+            loop {
+                if let Some(batch) = self.take_ready_batch() {
+                    return Some(batch);
+                }
+                if self.subscriber.closed.load(Ordering::Acquire) {
+                    return self.take_ready_batch();
+                }
+                let wait = self.subscriber.ready.notified();
+                let flush_after = self.flush_wait();
+                if let Some(duration) = flush_after {
+                    if crate::host_driver::timeout(duration, wait).await.is_err() {
+                        self.flush_due();
+                    }
+                } else {
+                    wait.await;
+                }
+            }
+        }
+
+        /// Snapshot the current lifecycle and cumulative delivery statistics.
+        #[must_use]
+        pub fn status(&self) -> EventSubscriptionStatus {
+            self.subscriber.inner.lock().map_or_else(
+                |_| EventSubscriptionStatus {
+                    close_reason: Some(EventSubscriptionCloseReason::ReceiverDropped),
+                    stats: EventDeliveryStats::default(),
+                },
+                |inner| inner.status.public,
+            )
+        }
+
+        /// Close this receiver without affecting the owning run.
+        pub fn close(&mut self) {
+            self.close_with(EventSubscriptionCloseReason::SubscriberClosed);
+        }
+
+        fn take_ready_batch(&self) -> Option<EventBatch> {
+            let mut inner = self.subscriber.inner.lock().ok()?;
+            inner.delivered.pop_front()
+        }
+
+        fn flush_wait(&self) -> Option<Duration> {
+            self.subscriber
+                .inner
+                .lock()
+                .ok()
+                .and_then(|inner| inner.pending.flush_after)
+        }
+
+        fn flush_due(&self) {
+            if let Ok(mut inner) = self.subscriber.inner.lock() {
+                let _ = flush_pending(&mut inner);
+            }
+            self.subscriber.ready.notify_waiters();
+        }
+
+        fn close_with(&self, reason: EventSubscriptionCloseReason) {
+            if let Ok(mut inner) = self.subscriber.inner.lock() {
+                let _ = flush_pending(&mut inner);
+                if inner.status.public.close_reason.is_none() {
+                    inner.status.public.close_reason = Some(reason);
+                }
+                inner.closed = true;
+            }
+            self.subscriber.closed.store(true, Ordering::Release);
+            self.subscriber.ready.notify_waiters();
+        }
+    }
+
+    impl Drop for EventSubscription {
+        fn drop(&mut self) {
+            self.close_with(EventSubscriptionCloseReason::ReceiverDropped);
+        }
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct EventHubHandle {
+        shared: Arc<HubShared>,
+    }
+
+    struct HubShared {
+        config: EventHubConfig,
+        subscribers: Mutex<Vec<Arc<Subscriber>>>,
+        closed: AtomicBool,
+        next_sequence: Mutex<Option<u64>>,
+    }
+
+    impl EventHubHandle {
+        pub(crate) fn subscribe_interactive(
+            &self,
+            config: EventSubscriptionConfig,
+        ) -> Result<EventSubscription, EventSubscriptionError> {
+            config.validate()?;
+            if self.shared.closed.load(Ordering::Acquire) {
+                return Err(EventSubscriptionError::HubClosed);
+            }
+            let mut subscribers = self
+                .shared
+                .subscribers
+                .lock()
+                .map_err(|_| EventSubscriptionError::HubClosed)?;
+            subscribers.retain(|subscriber| !subscriber.closed.load(Ordering::Acquire));
+            if subscribers.len() >= self.shared.config.max_subscribers {
+                return Err(EventSubscriptionError::CapacityExhausted);
+            }
+            let subscriber = Arc::new(Subscriber {
+                inner: Mutex::new(SubscriberInner {
+                    config,
+                    pending: PendingBatch {
+                        events: Vec::new(),
+                        bytes: 0,
+                        flush_after: None,
+                    },
+                    delivered: VecDeque::new(),
+                    status: SubscriptionState::default(),
+                    closed: false,
+                }),
+                ready: Signal::new(),
+                closed: AtomicBool::new(false),
+            });
+            subscribers.push(Arc::clone(&subscriber));
+            Ok(EventSubscription { subscriber })
+        }
+
+        pub(crate) fn close(&self) {
+            self.shared.closed.store(true, Ordering::Release);
+            let subscribers = self
+                .shared
+                .subscribers
+                .lock()
+                .map(|mut subscribers| std::mem::take(&mut *subscribers))
+                .unwrap_or_default();
+            for subscriber in subscribers {
+                if let Ok(mut inner) = subscriber.inner.lock() {
+                    let _ = flush_pending(&mut inner);
+                    if inner.status.public.close_reason.is_none() {
+                        inner.status.public.close_reason =
+                            Some(EventSubscriptionCloseReason::HubClosed);
+                    }
+                    inner.closed = true;
+                }
+                subscriber.closed.store(true, Ordering::Release);
+                subscriber.ready.notify_waiters();
+            }
+        }
+    }
+
+    impl RuntimeEventPublisher for EventHubHandle {
+        fn publish(&self, events: Arc<[RunEvent]>) -> PortFuture<Result<(), EventPublishError>> {
+            let shared = Arc::clone(&self.shared);
+            Box::pin(async move {
+                if events.is_empty() {
+                    return Ok(());
+                }
+                let mut sized = Vec::with_capacity(events.len());
+                for event in events.iter() {
+                    let bytes = serde_json::to_vec(event)
+                        .map_err(|_| EventPublishError {
+                            code: "event_serialization_failed",
+                        })?
+                        .len();
+                    sized.push(SizedEvent {
+                        event: event.clone(),
+                        bytes,
+                    });
+                }
+                {
+                    let mut next_sequence =
+                        shared.next_sequence.lock().map_err(|_| EventPublishError {
+                            code: "event_hub_closed",
+                        })?;
+                    validate_source_order(&sized, &mut next_sequence)?;
+                }
+                let subscribers = shared
+                    .subscribers
+                    .lock()
+                    .map_err(|_| EventPublishError {
+                        code: "event_hub_closed",
+                    })?
+                    .clone();
+                for subscriber in subscribers {
+                    ingest(&subscriber, &sized);
+                }
+                Ok(())
+            })
+        }
+    }
+
+    pub(crate) fn event_hub(
+        config: EventHubConfig,
+    ) -> Result<(EventHubHandle, ()), EventSubscriptionError> {
+        let config = config.validate()?;
+        Ok((
+            EventHubHandle {
+                shared: Arc::new(HubShared {
+                    config,
+                    subscribers: Mutex::new(Vec::new()),
+                    closed: AtomicBool::new(false),
+                    next_sequence: Mutex::new(None),
+                }),
+            },
+            (),
+        ))
+    }
+
+    fn ingest(subscriber: &Subscriber, events: &[SizedEvent]) {
+        let Ok(mut inner) = subscriber.inner.lock() else {
+            return;
+        };
+        if inner.closed {
+            return;
+        }
+        for item in events.iter().cloned() {
+            if !inner.config.filter.matches(&item.event) {
+                continue;
+            }
+            let durable = item.event.class() == RunEventClass::DurableDerived;
+            let oversized = item.bytes > inner.config.batching.flush_bytes;
+            if (durable || oversized) && !inner.pending.events.is_empty() {
+                let _ = flush_pending(&mut inner);
+            }
+            if inner.pending.events.is_empty() {
+                inner.pending.flush_after = Some(inner.config.batching.flush_interval);
+            }
+            inner.pending.bytes = inner.pending.bytes.saturating_add(item.bytes);
+            let terminal = is_terminal(item.event.kind());
+            inner.pending.events.push(item);
+            let immediate_progress =
+                inner.config.progress_coalescing == ProgressCoalescing::Disabled && !durable;
+            let should_flush = immediate_progress
+                || durable
+                || oversized
+                || terminal
+                || inner.pending.events.len() >= inner.config.batching.flush_count
+                || inner.pending.bytes >= inner.config.batching.flush_bytes;
+            if should_flush {
+                let _ = flush_pending(&mut inner);
+            }
+        }
+        drop(inner);
+        subscriber.ready.notify_waiters();
+    }
+
+    fn flush_pending(inner: &mut SubscriberInner) -> Result<(), EventSubscriptionCloseReason> {
+        inner.pending.flush_after = None;
+        if inner.pending.events.is_empty() {
+            return Ok(());
+        }
+        let events = inner
+            .pending
+            .events
+            .drain(..)
+            .map(|item| item.event)
+            .collect::<Vec<_>>();
+        inner.pending.bytes = 0;
+        let durable = events
+            .iter()
+            .any(|event| event.class() == RunEventClass::DurableDerived);
+        let dropped = inner.status.unreported_dropped;
+        let count = events.len();
+        let last_sequence = events.last().map(RunEvent::transient_sequence);
+        let Some(batch) = EventBatch::new(events, dropped) else {
+            return Ok(());
+        };
+        if inner.delivered.len() >= inner.config.queue_capacity {
+            return match inner.config.lag_policy {
+                EventLagPolicy::DropProgress { .. } if !durable => {
+                    let dropped = u64::try_from(count).unwrap_or(u64::MAX);
+                    inner.status.public.stats.dropped_progress = inner
+                        .status
+                        .public
+                        .stats
+                        .dropped_progress
+                        .saturating_add(dropped);
+                    inner.status.unreported_dropped =
+                        inner.status.unreported_dropped.saturating_add(dropped);
+                    Ok(())
+                }
+                EventLagPolicy::DropProgress { .. }
+                | EventLagPolicy::BlockBounded { .. }
+                | EventLagPolicy::Disconnect
+                    if durable =>
+                {
+                    Err(EventSubscriptionCloseReason::MissedDurable)
+                }
+                _ => Err(EventSubscriptionCloseReason::Lagged),
+            };
+        }
+        inner.delivered.push_back(batch);
+        inner.status.public.stats.delivered_batches = inner
+            .status
+            .public
+            .stats
+            .delivered_batches
+            .saturating_add(1);
+        inner.status.public.stats.delivered_events = inner
+            .status
+            .public
+            .stats
+            .delivered_events
+            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
+        inner.status.public.stats.last_delivered_sequence = last_sequence;
+        inner.status.unreported_dropped = inner.status.unreported_dropped.saturating_sub(dropped);
+        Ok(())
+    }
+
+    fn validate_source_order(
+        events: &[SizedEvent],
+        next_sequence: &mut Option<u64>,
+    ) -> Result<(), EventPublishError> {
+        for item in events {
+            let sequence = item.event.transient_sequence();
+            match *next_sequence {
+                None => *next_sequence = Some(sequence.saturating_add(1)),
+                Some(expected) if sequence == expected => {
+                    *next_sequence = Some(expected.saturating_add(1));
+                }
+                Some(_) => {
+                    return Err(EventPublishError {
+                        code: "event_source_sequence_gap",
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    const fn is_terminal(kind: RunEventKind) -> bool {
+        matches!(
+            kind,
+            RunEventKind::RunCompleted | RunEventKind::RunFailed | RunEventKind::RunCancelled
+        )
+    }
+}

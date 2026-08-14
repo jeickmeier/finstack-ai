@@ -1,6 +1,333 @@
 /* @ts-self-types="./finstack_ai_wasm.d.ts" */
 
 /**
+ * Rust-owned Agent handle.
+ */
+export class Agent {
+    static __wrap(ptr) {
+        const obj = Object.create(Agent.prototype);
+        obj.__wbg_ptr = ptr;
+        AgentFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        AgentFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_agent_free(ptr, 0);
+    }
+    /**
+     * Construct an Agent over a trusted JS model and optional toolsets.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when configuration is invalid.
+     * @param {JsModel} model
+     * @param {JsToolset[]} toolsets
+     * @param {string | null} [instruction]
+     * @returns {Promise<any>}
+     */
+    static create(model, toolsets, instruction) {
+        _assertClass(model, JsModel);
+        const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(instruction) ? 0 : passStringToWasm0(instruction, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return takeObject(ret);
+    }
+    /**
+     * Execute one run and await its committed result.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the run fails.
+     * @param {string} input
+     * @param {number | null} [timeout_seconds]
+     * @param {number | null} [max_cycles]
+     * @param {number | null} [max_output_retries]
+     * @returns {Promise<any>}
+     */
+    run(input, timeout_seconds, max_cycles, max_output_retries) {
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_run(this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries);
+        return takeObject(ret);
+    }
+    /**
+     * Start one run and return its detached control handle.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the request is invalid.
+     * @param {string} input
+     * @param {number | null} [timeout_seconds]
+     * @param {number | null} [max_cycles]
+     * @param {number | null} [max_output_retries]
+     * @returns {Run}
+     */
+    start(input, timeout_seconds, max_cycles, max_output_retries) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.agent_start(retptr, this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return Run.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) Agent.prototype[Symbol.dispose] = Agent.prototype.free;
+
+/**
+ * Immutable runtime event handle.
+ */
+export class Event {
+    static __wrap(ptr) {
+        const obj = Object.create(Event.prototype);
+        obj.__wbg_ptr = ptr;
+        EventFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EventFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_event_free(ptr, 0);
+    }
+    /**
+     * Durable sequence, when the event is durable-derived.
+     * @returns {bigint | undefined}
+     */
+    get durableSequence() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.event_durableSequence(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r2 = getDataViewMemory0().getBigInt64(retptr + 8 * 1, true);
+            return r0 === 0 ? undefined : BigInt.asUintN(64, r2);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Durable or transient class.
+     * @returns {string}
+     */
+    get eventClass() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.event_eventClass(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Event kind name.
+     * @returns {string}
+     */
+    get kind() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.event_kind(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Explicit JSON snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the event cannot be serialized.
+     * @returns {string}
+     */
+    toJson() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.event_toJson(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeObject(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Transient sequence.
+     * @returns {bigint}
+     */
+    get transientSequence() {
+        const ret = wasm.event_transientSequence(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+}
+if (Symbol.dispose) Event.prototype[Symbol.dispose] = Event.prototype.free;
+
+/**
+ * Bounded transport batch. Expand events only on request.
+ */
+export class EventBatch {
+    static __wrap(ptr) {
+        const obj = Object.create(EventBatch.prototype);
+        obj.__wbg_ptr = ptr;
+        EventBatchFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EventBatchFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_eventbatch_free(ptr, 0);
+    }
+    /**
+     * Lag-dropped transient events since the previous batch.
+     * @returns {bigint}
+     */
+    get droppedProgress() {
+        const ret = wasm.eventbatch_droppedProgress(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * Expand contained events. This is the per-event FFI boundary.
+     * @returns {Event[]}
+     */
+    events() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.eventbatch_events(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export5(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * First contained sequence.
+     * @returns {bigint}
+     */
+    get firstSequence() {
+        const ret = wasm.eventbatch_firstSequence(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * Last contained sequence.
+     * @returns {bigint}
+     */
+    get lastSequence() {
+        const ret = wasm.eventbatch_lastSequence(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * Explicit JSON snapshot of the contained events.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the batch cannot be serialized.
+     * @returns {string}
+     */
+    toJson() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.eventbatch_toJson(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+            var ptr1 = r0;
+            var len1 = r1;
+            if (r3) {
+                ptr1 = 0; len1 = 0;
+                throw takeObject(r2);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Explicit UTF-8 JSON bytes of the contained events.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the batch cannot be serialized.
+     * @returns {Uint8Array}
+     */
+    toJsonBytes() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.eventbatch_toJsonBytes(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) EventBatch.prototype[Symbol.dispose] = EventBatch.prototype.free;
+
+/**
  * Host artifact-store wrapper over `Uint8Array` payloads.
  */
 export class JsArtifactStore {
@@ -345,6 +672,18 @@ if (Symbol.dispose) JsRandomSource.prototype[Symbol.dispose] = JsRandomSource.pr
  * Trusted JS toolset wrapper. Not an Agent handle.
  */
 export class JsToolset {
+    static __wrap(ptr) {
+        const obj = Object.create(JsToolset.prototype);
+        obj.__wbg_ptr = ptr;
+        JsToolsetFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    static __unwrap(jsValue) {
+        if (!(jsValue instanceof JsToolset)) {
+            return 0;
+        }
+        return jsValue.__destroy_into_raw();
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -354,6 +693,14 @@ export class JsToolset {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_jstoolset_free(ptr, 0);
+    }
+    /**
+     * Clone the wrapper without moving the caller's handle.
+     * @returns {JsToolset}
+     */
+    cloneHandle() {
+        const ret = wasm.jstoolset_cloneHandle(this.__wbg_ptr);
+        return JsToolset.__wrap(ret);
     }
     /**
      * Construct a toolset wrapper around a trusted host adapter.
@@ -383,6 +730,292 @@ export class JsToolset {
     }
 }
 if (Symbol.dispose) JsToolset.prototype[Symbol.dispose] = JsToolset.prototype.free;
+
+/**
+ * Detached run control handle. Drop detaches observation and does not cancel.
+ */
+export class Run {
+    static __wrap(ptr) {
+        const obj = Object.create(Run.prototype);
+        obj.__wbg_ptr = ptr;
+        RunFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RunFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_run_free(ptr, 0);
+    }
+    /**
+     * Submit idempotent durable cancellation.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when cancellation cannot be committed.
+     * @param {string | null} [_reason]
+     * @returns {Promise<any>}
+     */
+    cancel(_reason) {
+        var ptr0 = isLikeNone(_reason) ? 0 : passStringToWasm0(_reason, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.run_cancel(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
+     * Close event delivery without cancelling the run.
+     * @returns {Promise<any>}
+     */
+    closeEvents() {
+        const ret = wasm.run_closeEvents(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Receive the next transport batch, or `undefined` after close/terminal.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when event delivery fails to start.
+     * @returns {Promise<any>}
+     */
+    nextEventBatch() {
+        const ret = wasm.run_nextEventBatch(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Wait for the retained terminal result.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the run fails, times out, or is cancelled.
+     * @returns {Promise<any>}
+     */
+    result() {
+        const ret = wasm.run_result(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Immutable session locator for this run.
+     * @returns {Session}
+     */
+    get session() {
+        const ret = wasm.run_session(this.__wbg_ptr);
+        return Session.__wrap(ret);
+    }
+}
+if (Symbol.dispose) Run.prototype[Symbol.dispose] = Run.prototype.free;
+
+/**
+ * Successful terminal result handle.
+ */
+export class RunResult {
+    static __wrap(ptr) {
+        const obj = Object.create(RunResult.prototype);
+        obj.__wbg_ptr = ptr;
+        RunResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        RunResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_runresult_free(ptr, 0);
+    }
+    /**
+     * Durable retry attempts consumed by this run.
+     * @returns {number}
+     */
+    get retryAttempts() {
+        const ret = wasm.runresult_retryAttempts(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Session locator for the completed run.
+     * @returns {Session}
+     */
+    get session() {
+        const ret = wasm.runresult_session(this.__wbg_ptr);
+        return Session.__wrap(ret);
+    }
+    /**
+     * Concatenated final assistant text.
+     * @returns {string}
+     */
+    get text() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.runresult_text(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Explicit result snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     * @returns {any}
+     */
+    toDict() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.runresult_toDict(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) RunResult.prototype[Symbol.dispose] = RunResult.prototype.free;
+
+/**
+ * Read-only session locator.
+ */
+export class Session {
+    static __wrap(ptr) {
+        const obj = Object.create(Session.prototype);
+        obj.__wbg_ptr = ptr;
+        SessionFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SessionFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_session_free(ptr, 0);
+    }
+    /**
+     * Lane identity.
+     * @returns {string}
+     */
+    get laneId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.session_laneId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Run identity.
+     * @returns {string}
+     */
+    get runId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.session_runId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Session identity.
+     * @returns {string}
+     */
+    get sessionId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.session_sessionId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Tenant scope captured at acceptance.
+     * @returns {string}
+     */
+    get tenantScope() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.session_tenantScope(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Explicit locator snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     * @returns {any}
+     */
+    toDict() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.session_toDict(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) Session.prototype[Symbol.dispose] = Session.prototype.free;
 
 /**
  * Apply normalized coordinator commands and return identity traces.
@@ -595,6 +1228,13 @@ export function runNoopTrace() {
         wasm.__wbindgen_export5(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * Install the host driver when the generated module loads.
+ */
+export function wasm_start() {
+    wasm.wasm_start();
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -629,6 +1269,10 @@ function __wbg_get_imports() {
         __wbg__wbg_cb_unref_be22cc64ae6946a0: function(arg0) {
             getObject(arg0)._wbg_cb_unref();
         },
+        __wbg_agent_new: function(arg0) {
+            const ret = Agent.__wrap(arg0);
+            return addHeapObject(ret);
+        },
         __wbg_apply_cb180996ed7fdae9: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = getObject(arg0).apply(getObject(arg1), getObject(arg2));
             return addHeapObject(ret);
@@ -649,6 +1293,21 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).call(getObject(arg1), getObject(arg2));
             return addHeapObject(ret);
         }, arguments); },
+        __wbg_construct_a5c4a12c650f2c30: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.construct(getObject(arg0), getObject(arg1));
+            return addHeapObject(ret);
+        }, arguments); },
+        __wbg_event_new: function(arg0) {
+            const ret = Event.__wrap(arg0);
+            return addHeapObject(ret);
+        },
+        __wbg_eventbatch_new: function(arg0) {
+            const ret = EventBatch.__wrap(arg0);
+            return addHeapObject(ret);
+        },
+        __wbg_getRandomValues_a608c4436c19407a: function() { return handleError(function (arg0, arg1) {
+            globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
+        }, arguments); },
         __wbg_get_971a0c45d172643f: function() { return handleError(function (arg0, arg1) {
             const ret = Reflect.get(getObject(arg0), getObject(arg1));
             return addHeapObject(ret);
@@ -663,6 +1322,14 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+        __wbg_jstoolset_unwrap: function(arg0) {
+            const ret = JsToolset.__unwrap(getObject(arg0));
+            return ret;
+        },
+        __wbg_length_36bd29c6848c2144: function(arg0) {
+            const ret = getObject(arg0).length;
+            return ret;
+        },
         __wbg_new_116be93542d39019: function() {
             const ret = new Array();
             return addHeapObject(ret);
@@ -671,8 +1338,16 @@ function __wbg_get_imports() {
             const ret = new TypeError(getStringFromWasm0(arg0, arg1));
             return addHeapObject(ret);
         },
+        __wbg_new_358857d90afd5a2d: function(arg0, arg1) {
+            const ret = new Error(getStringFromWasm0(arg0, arg1));
+            return addHeapObject(ret);
+        },
         __wbg_new_ebe3e0f6837f0879: function() {
             const ret = new Object();
+            return addHeapObject(ret);
+        },
+        __wbg_new_from_slice_3eea173078478cfe: function(arg0, arg1) {
+            const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
             return addHeapObject(ret);
         },
         __wbg_new_no_args_51d9cfd7bb73258c: function(arg0, arg1) {
@@ -686,7 +1361,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_874(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_940(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -696,6 +1371,17 @@ function __wbg_get_imports() {
             } finally {
                 state0.a = 0;
             }
+        },
+        __wbg_new_with_length_3ffc1c56427c525c: function(arg0) {
+            const ret = new Uint8Array(arg0 >>> 0);
+            return addHeapObject(ret);
+        },
+        __wbg_now_8b265300afd5f2b9: function() {
+            const ret = Date.now();
+            return ret;
+        },
+        __wbg_prototypesetcall_de8e0d9553586985: function(arg0, arg1, arg2) {
+            Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), getObject(arg2));
         },
         __wbg_push_adb0107829f02d75: function(arg0, arg1) {
             const ret = getObject(arg0).push(getObject(arg1));
@@ -708,8 +1394,16 @@ function __wbg_get_imports() {
             const ret = getObject(arg0).queueMicrotask;
             return addHeapObject(ret);
         },
+        __wbg_reject_671a1c459689d0e0: function(arg0) {
+            const ret = Promise.reject(getObject(arg0));
+            return addHeapObject(ret);
+        },
         __wbg_resolve_020f95d838c6ef25: function(arg0) {
             const ret = Promise.resolve(getObject(arg0));
+            return addHeapObject(ret);
+        },
+        __wbg_runresult_new: function(arg0) {
+            const ret = RunResult.__wrap(arg0);
             return addHeapObject(ret);
         },
         __wbg_set_8155bb79a948541b: function() { return handleError(function (arg0, arg1, arg2) {
@@ -745,16 +1439,21 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 222, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_861);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 270, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_926);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_193);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_288);
             return addHeapObject(ret);
         },
-        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000003: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return addHeapObject(ret);
@@ -773,14 +1472,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_193(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_193(arg0, arg1);
+function __wasm_bindgen_func_elem_288(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_288(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_861(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_926(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_861(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_926(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -791,10 +1490,19 @@ function __wasm_bindgen_func_elem_861(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_874(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_874(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_940(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_940(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
+const AgentFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_agent_free(ptr, 1));
+const EventFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_event_free(ptr, 1));
+const EventBatchFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_eventbatch_free(ptr, 1));
 const JsArtifactStoreFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jsartifactstore_free(ptr, 1));
@@ -822,6 +1530,15 @@ const JsRandomSourceFinalization = (typeof FinalizationRegistry === 'undefined')
 const JsToolsetFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jstoolset_free(ptr, 1));
+const RunFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_run_free(ptr, 1));
+const RunResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_runresult_free(ptr, 1));
+const SessionFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_session_free(ptr, 1));
 
 function addHeapObject(obj) {
     if (heap_next === heap.length) heap.push(heap.length + 1);
@@ -832,6 +1549,12 @@ function addHeapObject(obj) {
     return idx;
 }
 
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
 const CLOSURE_DTORS = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(state => wasm.__wbindgen_export4(state.a, state.b));
@@ -840,6 +1563,21 @@ function dropObject(idx) {
     if (idx < 1028) return;
     heap[idx] = heap_next;
     heap_next = idx;
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(takeObject(mem.getUint32(i, true)));
+    }
+    return result;
+}
+
+function getArrayU8FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
 let cachedDataViewMemory0 = null;
@@ -907,6 +1645,16 @@ function makeMutClosure(arg0, arg1, f) {
     };
     CLOSURE_DTORS.register(real, state, state);
     return real;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    const mem = getDataViewMemory0();
+    for (let i = 0; i < array.length; i++) {
+        mem.setUint32(ptr + 4 * i, addHeapObject(array[i]), true);
+    }
+    WASM_VECTOR_LEN = array.length;
+    return ptr;
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
@@ -988,6 +1736,7 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedUint8ArrayMemory0 = null;
+    wasm.__wbindgen_start();
     return wasm;
 }
 
