@@ -1,0 +1,67 @@
+PR-033 npm identity and generated-artifact security review
+Date: 2026-08-13
+Candidate: dd674e7dff7cdb126d184a1cbd33dd5cb7df8053
+Reviewer: me@jeickmeier.com
+Decision: Pass; no new trust class, listener, persistence surface, or
+secret-bearing adapter. npm publication remains excluded.
+
+Scope reviewed:
+  bindings/finstack-ai-wasm and js/@finstack/ai package identity
+  tools/wasm_package/check.py selected wasm-host graph gate
+  mise.toml Node 22.18.0 and cargo:wasm-bindgen-cli 0.2.127 pins
+  .github/workflows/ci.yml Ubuntu steps and action pins
+  generated wasm-bindgen glue and checked-in dist/ facade
+  health/buildMetadata, scripted-trace, and six-port compile fixtures
+
+PASS  TM-18 build/release identity
+      The new npm identity is @finstack/ai@0.0.2, private, MIT OR Apache-2.0,
+      with unused restricted publishConfig. No registry token, npm publish
+      command, or package-registry environment is introduced. License texts
+      are copied from licenses/.
+
+PASS  Immutable toolchain and CI pins
+      wasm-bindgen 0.2.127 matches wasm-bindgen-cli 0.2.127, wasm-bindgen-futures
+      0.4.77, and js-sys 0.3.104. Node is mise-pinned at 22.18.0. Existing
+      checkout, mise-action, and rust-cache steps remain digest-pinned.
+      persist-credentials stays false.
+
+PASS  Selected wasm production graph
+      check-wasm cargo-tree of finstack-ai-wasm --features scripted-trace,
+      facade wasm-host, and runtime wasm-host on wasm32-unknown-unknown rejects
+      Tokio and native I/O crates. The kernel graph rejects wasm-bindgen.
+      finstack-ai-test is not a wasm production dependency.
+
+PASS  Generated-artifact ownership
+      mise run generate-wasm is the only regen path. Glue lives in
+      js/generated/ with an ownership note. CI regenerates under
+      SOURCE_DATE_EPOCH=0, compares consecutive bytes, and fails on a dirty
+      generated/dist tree.
+
+PASS  Credential-free browser surface
+      Public TS is init/health/buildMetadata only. health and buildMetadata
+      create no runtime, store, or spawn. README forbids embedding provider
+      credentials. scripted-trace uses MemoryJournalStore with explicit small
+      limits and performs no submit. No JS model/tool/store adapter or
+      IndexedDB surface is added.
+
+PASS  Generated-glue secret scan
+      rg over generated glue and the hand-authored facade found only the
+      documented "health token" phrase. No provider keys, PEM material, or
+      credential helpers are present.
+
+PASS  Target-correct port bounds
+      Native fixtures remain Send + Sync. wasm32 proxies store JS promise
+      factories in Rc<RefCell<_>> and are not marked Send. No unsafe Send
+      assertions were added.
+
+Residual conditions:
+  - Hosted Ubuntu proof of the new mise tasks is defined but not dispatched
+    in this local-integrate envelope.
+  - TM-05 full provider-key fixtures remain PR-034/PR-038.
+  - Worker topology and SharedArrayBuffer evidence remain PR-036/PR-038.
+  - ADR-031 stays Accepted with Partial implementation evidence.
+  - Bundle-size reporting has no fail budget until PR-038.
+  - Trusted in-process JS remains T2; isolated plugins remain later.
+
+No independent review, npm publication, hosted pull request or merge, tag,
+G4 decision, or WASM conformance-adapter activation is claimed.
