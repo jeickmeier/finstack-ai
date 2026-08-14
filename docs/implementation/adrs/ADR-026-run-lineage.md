@@ -72,5 +72,8 @@ May change only through a new superseding ADR and reconciliation of every affect
   candidate `dc16907e4e8d2c8a303788dbb9fc04febb1a0572` persists and restores
   the parent-effect → child-UUIDv7 mapping and `RunRelation` inspect for
   CompatibleLane and IsolatedChildSession (PR-046-E-tree-dc16907e4e8d;
-  PR-046-E-security-dc16907e4e8d). Lineage-aware cancel fan-out remains
-  PR-047; crash-prefix remains PR-048. Do not mark Implemented.
+  PR-046-E-security-dc16907e4e8d). PR-047 candidate
+  `14af719a078f1cdf52382e89e0a44837ab207237` adds lineage-aware cancel /
+  deadline fan-out; detach-preauthorized children stay up
+  (PR-047-E-lanes-14af719a078f; PR-047-E-security-14af719a078f).
+  Crash-prefix remains PR-048. Do not mark Implemented.

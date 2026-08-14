@@ -74,5 +74,8 @@ May change only through a new superseding ADR and reconciliation of every affect
   `dc16907e4e8d2c8a303788dbb9fc04febb1a0572` adds the immutable conversation
   tree, mandatory `main` lane bootstrap, and sibling `ConversationEntry` /
   `LaneMoved` persist/recover (PR-046-E-tree-dc16907e4e8d;
-  PR-046-E-security-dc16907e4e8d). Public concurrent multi-lane APIs remain
-  PR-047; crash-prefix remains PR-048. Do not mark Implemented.
+  PR-046-E-security-dc16907e4e8d). PR-047 candidate
+  `14af719a078f1cdf52382e89e0a44837ab207237` adds public concurrent
+  multi-lane Session/Lane APIs and in-process `(session_id, lane_id)`
+  guards (PR-047-E-lanes-14af719a078f; PR-047-E-security-14af719a078f).
+  Crash-prefix remains PR-048. Do not mark Implemented.
