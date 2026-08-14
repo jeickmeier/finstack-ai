@@ -72,4 +72,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial — PR-034 host ABI and same-origin fetch/SSE battery at local merge `6bd1979c7ae01bd0cf497ba434abca3c9f72dea2`; publish, multi-browser, and G4 remain PR-038
+- Implementation evidence: Partial — PR-034 host ABI and same-origin fetch/SSE battery at local merge `6bd1979c7ae01bd0cf497ba434abca3c9f72dea2`; PR-035 Agent/Run handles at candidate `09631ecc6a15ff8b0be7e343dd14b745ecfb9365`; publish, multi-browser, and G4 remain PR-038
