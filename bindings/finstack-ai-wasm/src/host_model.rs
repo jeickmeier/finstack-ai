@@ -284,7 +284,7 @@ fn items_from_encoded(items: &[String]) -> Result<ModelEventStream, ModelError> 
         if item_has_completion(&item) {
             let mut output = completed_from_stream_item(item).map_err(model_failure)?;
             if output.text.is_empty() {
-                output.text = streamed_text.clone();
+                output.text.clone_from(&streamed_text);
             }
             completed = Some(model_response(output).map_err(model_failure)?);
         } else if let Some(text) = item_text(&item) {
