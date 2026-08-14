@@ -1,0 +1,20 @@
+PR-036 local integration validation
+Date: 2026-08-13
+Merge: ecf6d22962676ba0159ab6f31ba5040d0d4cd7f4
+Parents: b8ed9fc31e88e323a3192322f753059ca1069074 (main) and
+         1fb453c5f1655fe2aad5008488685f1b5dd47a69 (codex/pr-036-js-workers evidence head)
+Candidate: 9ecaa1e1c4e50cf78a3bb5d9478b9e923f2a0f23
+Result: PASS (local merge)
+
+The merge tree on main contains the Dedicated Worker protocol, exposeWorkerHost,
+connectWorker snapshot facades, fixture worker, Chromium A01–A04 tests,
+generated TypeScript, and candidate evidence. No hosted pull request or merge,
+npm publish, tag, G4, SharedArrayBuffer, or DeferredBindingAdapter::wasm()
+flip occurred.
+
+Post-merge checks:
+- git merge --no-ff completed with a clean worktree
+- tools/wasm_package/check.py dirty remains clean
+- DeferredBindingAdapter::wasm() remains unavailable
+- ADR-031 remains Accepted with Partial implementation evidence
+- ADR-019 remains Accepted with Partial implementation evidence
