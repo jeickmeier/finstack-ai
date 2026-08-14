@@ -1,0 +1,18 @@
+PR-035 local integration validation
+Date: 2026-08-13
+Merge: a7d47fad5cc0757f03f6d56d9faebde97c693244
+Parents: 2d570bd22d59b631b9a8b65c119c9a6ac20a659b (main) and
+         aad71f080fddda4775a8d26d000895969d841deb (codex/pr-035-js-handles evidence head)
+Candidate: 09631ecc6a15ff8b0be7e343dd14b745ecfb9365
+Result: PASS (local merge)
+
+The merge tree on main contains the wasm-host sequential run owner, facade
+Agent compile path, TypeScript Agent/Run handles, Chromium Agent-run tests,
+generated glue, and candidate evidence. No hosted pull request or merge, npm
+publish, tag, G4, or DeferredBindingAdapter::wasm() flip occurred.
+
+Post-merge checks:
+- git merge --no-ff completed with a clean worktree
+- tools/wasm_package/check.py dirty remains clean
+- DeferredBindingAdapter::wasm() remains unavailable
+- ADR-019 remains Accepted with Partial implementation evidence
