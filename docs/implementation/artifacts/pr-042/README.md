@@ -7,5 +7,6 @@ Model-effect reconciliation evidence.
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
 | `candidate-validation.txt` | Local workspace, A01–A05, and graph proofs at `d69e4a140a8584f2e561521b3b3eaebc0bfe69a5` |
 | `security-review.txt` | TM-10 / TM-14 / Threat Model §18 review at the same candidate |
+| `integration-validation.txt` | Local `main` merge `4d627711632c771d733b689e1325b2d9679ee317` |
 
 No G5 decision, hosted pull request, npm publish, tool-effect reconciliation, or crash-prefix claim is stored here.
