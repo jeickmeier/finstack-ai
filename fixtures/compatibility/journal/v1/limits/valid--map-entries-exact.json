@@ -1,0 +1,12 @@
+{
+  "case": "map-entries-exact",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "count": 256,
+    "kind": "map_entries"
+  },
+  "subject": "limits"
+}

@@ -1,8 +1,14 @@
-# journal (reserved)
+# journal
 
 Owner: `me@jeickmeier.com`  
 Compatibility profile: durable ignorable optionals / fatal state-bearing unknowns  
 Fixtures: `fixtures/compatibility/journal/`
 
-Future journal envelope/body/snapshot schemas land here. Canonical encoding
-profile is frozen by ADR-015; codec implementation is PR-039.
+PR-039 activates the family with the ADR-015 canonical-CBOR profile and
+JournalStore v1 identity/load rules. Diagnostic JSON/JSONL is a lossless
+projection only; it is not the journal encoding. Typed `CostAmount.micros`
+stay canonical decimal strings.
+
+```text
+schemas/journal/v1/fixture.schema.json
+```

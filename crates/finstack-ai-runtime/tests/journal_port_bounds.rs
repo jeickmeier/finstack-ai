@@ -23,14 +23,7 @@ impl JournalStore for NativeStore {
     }
 
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
-        Box::pin(async move {
-            Ok(LoadedSession {
-                session_id: request.session_id,
-                head_sequence: 0,
-                committed_batches: Arc::from([]),
-                snapshot: None,
-            })
-        })
+        Box::pin(async move { Ok(LoadedSession::empty(request.session_id)) })
     }
 
     fn write_snapshot(
@@ -78,14 +71,7 @@ impl JournalStore for LocalStore {
     }
 
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
-        Box::pin(async move {
-            Ok(LoadedSession {
-                session_id: request.session_id,
-                head_sequence: 0,
-                committed_batches: Arc::from([]),
-                snapshot: None,
-            })
-        })
+        Box::pin(async move { Ok(LoadedSession::empty(request.session_id)) })
     }
 
     fn write_snapshot(

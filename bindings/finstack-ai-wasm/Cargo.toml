@@ -22,6 +22,7 @@ scripted-trace = []
 [dependencies]
 finstack-ai = { workspace = true, default-features = false, features = ["wasm-host"] }
 finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }

@@ -1,0 +1,16 @@
+PH6-E-entrance-handles-7618a4f500cb
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Baseline: 15aa94f54336336d6897b8efbf4371df0d21070c
+
+Phase 6 entrance criterion 3: binding teams consume state only through
+public handles.
+
+Evidence:
+- PR-028 Python Agent/Run/Session/Result handles
+- PR-035 JavaScript Agent/Run handles
+- Bindings retain Rust/WASM handles and do not reconstruct kernel
+  state from journal bytes
+
+Result: Pass
+JournalStore v1 and durable restore remain PR-039 through PR-048.

@@ -1,0 +1,29 @@
+{
+  "case": "truncated",
+  "claimed_head_checksum": "2b6071eab8e196ae8668e101b1233c888b57332cf675afac69e3c8fe82caa6b7",
+  "envelopes": [
+    {
+      "body": {
+        "session_created": {
+          "metadata": {}
+        }
+      },
+      "checksum": "41c04d0a37eef43c0a785dfc424551002dc4ceaf9bd0943da529c211c2147e25",
+      "derived_event_ids": [],
+      "format_version": 1,
+      "kind_version": 1,
+      "lane_id": "00000000-0000-7000-8000-000000000002",
+      "payload_digest": "d839b9b6d4e236b41e42db811c6c944c9ced3a229479a33f796320a92427a041",
+      "record_id": "00000000-0000-7000-8000-000000000065",
+      "sequence": 1,
+      "session_id": "00000000-0000-7000-8000-000000000001",
+      "timestamp": "1970-01-01T00:00:00.000Z"
+    }
+  ],
+  "expect": {
+    "code": "head_checksum_mismatch",
+    "ok": false
+  },
+  "format_version": 1,
+  "subject": "tamper"
+}

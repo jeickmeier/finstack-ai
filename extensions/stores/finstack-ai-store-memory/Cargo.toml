@@ -12,8 +12,8 @@ publish = false
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

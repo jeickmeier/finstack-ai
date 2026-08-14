@@ -1,0 +1,13 @@
+{
+  "case": "map-order",
+  "cbor_hex": "a2616102616201",
+  "diagnostic_json": {
+    "a": 2,
+    "b": 1
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "subject": "cbor-profile"
+}

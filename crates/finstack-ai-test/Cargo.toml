@@ -13,6 +13,7 @@ readme = "README.md"
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
 futures-core = { workspace = true }
 jsonschema = { workspace = true }

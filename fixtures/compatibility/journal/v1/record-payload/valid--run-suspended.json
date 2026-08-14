@@ -1,0 +1,15 @@
+{
+  "case": "run_suspended",
+  "cbor_hex": "a16d72756e5f73757370656e646564a16b726561736f6e5f636f64656973757370656e646564",
+  "diagnostic_json": {
+    "run_suspended": {
+      "reason_code": "suspended"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "606eb6d04e97954e130e7ebd3c9d98d1825ee2881a20ec2b63a134a01f3afb2f",
+  "subject": "record-payload"
+}

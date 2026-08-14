@@ -1,0 +1,13 @@
+{
+  "case": "bignum-tag-3",
+  "expect": {
+    "code": "bignum_tag",
+    "ok": false
+  },
+  "format_version": 1,
+  "recipe": {
+    "bytes": "c34101",
+    "kind": "cbor_hex"
+  },
+  "subject": "cbor-profile"
+}

@@ -1,0 +1,13 @@
+{
+  "case": "envelope-bytes-one-over",
+  "expect": {
+    "code": "canonical_limit_exceeded",
+    "ok": false
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "envelope_bytes",
+    "total_bytes": 8388609
+  },
+  "subject": "limits"
+}

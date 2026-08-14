@@ -345,6 +345,9 @@ def build_metadata() -> dict[str, str | bool | int]:
 def linked_providers() -> tuple[str, ...]:
     """Return curated Rust-backed providers linked into this extension."""
 
+def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:
+    """Return payload digest, checksum, and canonical-CBOR hex from Rust."""
+
 def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
     """Validate one Rust-owned pre-beta lineage or external-command shape."""
 

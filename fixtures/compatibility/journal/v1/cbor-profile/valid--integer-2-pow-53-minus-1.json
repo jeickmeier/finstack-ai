@@ -1,0 +1,13 @@
+{
+  "case": "integer-2-pow-53-minus-1",
+  "cbor_hex": "1b001fffffffffffff",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "u64",
+    "value": "9007199254740991"
+  },
+  "subject": "cbor-profile"
+}

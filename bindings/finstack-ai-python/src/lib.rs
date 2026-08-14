@@ -89,6 +89,22 @@ fn linked_providers() -> (&'static str,) {
     (OPENAI_COMPATIBLE_PROVIDER,)
 }
 
+/// Compute journal known-answer hex through the one Rust engine.
+#[pyfunction]
+#[pyo3(text_signature = "(kind, value)")]
+fn journal_known_answer(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let json = py.import("json")?;
+    let encoded = json
+        .getattr("dumps")?
+        .call1((value,))?
+        .extract::<String>()?;
+    let answer = finstack_ai_protocol::journal_known_answer(kind, &encoded)
+        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+    let encoded = serde_json::to_string(&answer)
+        .map_err(|_| PyException::new_err("journal known-answer serialization failed"))?;
+    Ok(json.getattr("loads")?.call1((encoded,))?.unbind())
+}
+
 /// Normalize a pre-beta lineage or authenticated external-command shape.
 #[pyfunction]
 fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
@@ -1036,6 +1052,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(health, module)?)?;
     module.add_function(wrap_pyfunction!(build_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(linked_providers, module)?)?;
+    module.add_function(wrap_pyfunction!(journal_known_answer, module)?)?;
     module.add_function(wrap_pyfunction!(normalize_prebeta_shape, module)?)?;
     module.add_function(wrap_pyfunction!(_normalize_pydantic_schema, module)?)?;
     #[cfg(feature = "benchmark-fixture")]

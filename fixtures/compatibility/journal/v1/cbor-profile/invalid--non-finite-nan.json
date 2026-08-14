@@ -1,0 +1,13 @@
+{
+  "case": "non-finite-nan",
+  "expect": {
+    "code": "non_finite_float",
+    "ok": false
+  },
+  "format_version": 1,
+  "recipe": {
+    "bytes": "f97e00",
+    "kind": "cbor_hex"
+  },
+  "subject": "cbor-profile"
+}

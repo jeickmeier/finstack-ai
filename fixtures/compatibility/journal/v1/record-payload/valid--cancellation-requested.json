@@ -1,0 +1,18 @@
+{
+  "case": "cancellation_requested",
+  "cbor_hex": "a17663616e63656c6c6174696f6e5f726571756573746564a16772657175657374a269696e69746961746f7268646561646c696e656a726571756573745f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303332",
+  "diagnostic_json": {
+    "cancellation_requested": {
+      "request": {
+        "initiator": "deadline",
+        "request_id": "00000000-0000-7000-8000-000000000032"
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "bd6da8ac0cd3463b8815b091e3fbd311f490c3c689d01655275f74c325d73639",
+  "subject": "record-payload"
+}

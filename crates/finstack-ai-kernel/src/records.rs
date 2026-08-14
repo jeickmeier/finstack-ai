@@ -30,6 +30,7 @@ use crate::run::{
     CancellationReconciled, CancellationRequested, ChildRunPrepared, RunAccepted, RunError,
     RunRelationKind,
 };
+use crate::session::{LaneCreated, LaneMoved, SessionCreated, SessionRecordError, SnapshotWritten};
 use crate::time::Timestamp;
 use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolBatchOutcome, ToolCallSettled};
 use crate::validation::OutputValidationFailed;
@@ -525,6 +526,14 @@ pub enum RecordBody {
     BudgetChargeRecorded(BudgetChargeRecorded),
     /// Shared-budget release receipt committed after terminal release intent.
     BudgetReservationReleased(BudgetReservationReleased),
+    /// Session created.
+    SessionCreated(SessionCreated),
+    /// Lane created.
+    LaneCreated(LaneCreated),
+    /// Lane leaf moved.
+    LaneMoved(LaneMoved),
+    /// Disposable snapshot written.
+    SnapshotWritten(SnapshotWritten),
 }
 
 impl RecordBody {
@@ -555,7 +564,11 @@ impl RecordBody {
             | Self::BudgetReservationRequested(_)
             | Self::BudgetReservationSettled(_)
             | Self::BudgetChargeRecorded(_)
-            | Self::BudgetReservationReleased(_) => 0,
+            | Self::BudgetReservationReleased(_)
+            | Self::SessionCreated(_)
+            | Self::LaneCreated(_)
+            | Self::LaneMoved(_)
+            | Self::SnapshotWritten(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -600,7 +613,23 @@ impl RecordBody {
             Self::BudgetReservationSettled(_) => "budget_reservation_settled",
             Self::BudgetChargeRecorded(_) => "budget_charge_recorded",
             Self::BudgetReservationReleased(_) => "budget_reservation_released",
+            Self::SessionCreated(_) => "session_created",
+            Self::LaneCreated(_) => "lane_created",
+            Self::LaneMoved(_) => "lane_moved",
+            Self::SnapshotWritten(_) => "snapshot_written",
         }
+    }
+
+    /// Session, lane, and snapshot bodies that omit `run_id` and do not mutate run state.
+    #[must_use]
+    pub const fn is_structural(&self) -> bool {
+        matches!(
+            self,
+            Self::SessionCreated(_)
+                | Self::LaneCreated(_)
+                | Self::LaneMoved(_)
+                | Self::SnapshotWritten(_)
+        )
     }
 }
 
@@ -851,6 +880,18 @@ fn validate_record_run_id(run_id: Option<RunId>, body: &RecordBody) -> Result<()
     {
         return Err(RecordError::RecordRunMismatch);
     }
+    if matches!(
+        body,
+        RecordBody::SessionCreated(_)
+            | RecordBody::LaneCreated(_)
+            | RecordBody::LaneMoved(_)
+            | RecordBody::SnapshotWritten(_)
+    ) && run_id.is_some()
+    {
+        return Err(RecordError::Session(
+            SessionRecordError::StructuralRunIdPresent,
+        ));
+    }
     Ok(())
 }
 
@@ -906,6 +947,9 @@ pub enum RecordError {
     /// Child run lineage or attenuation validation failed.
     #[error(transparent)]
     Run(#[from] RunError),
+    /// Session, lane, or snapshot body is invalid.
+    #[error(transparent)]
+    Session(#[from] SessionRecordError),
 }
 
 impl RecordError {
@@ -924,6 +968,7 @@ impl RecordError {
             Self::RecordRunMismatch => "record_run_mismatch",
             Self::InvalidErrorDescriptor(_) => "invalid_error_descriptor",
             Self::Run(inner) => inner.code(),
+            Self::Session(inner) => inner.code(),
         }
     }
 }

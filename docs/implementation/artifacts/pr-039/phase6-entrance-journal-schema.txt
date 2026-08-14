@@ -1,0 +1,17 @@
+PH6-E-entrance-journal-schema-b5a63427108e
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Baseline: 15aa94f54336336d6897b8efbf4371df0d21070c
+
+Phase 6 entrance criterion 2: journal schema candidate approved.
+
+The approved candidate is:
+- ADR-015 canonical CBOR profile (Accepted; implementation Missing)
+- PR-008 freeze of RecordDraft / RecordEnvelope field shapes and
+  record-payload digest domain names
+- TDD §12.2 remaining store/session/lane/snapshot variant names:
+  SessionCreated, LaneCreated, LaneMoved, SnapshotWritten
+
+Result: Pass
+Codec bytes, checksum calculation, and variant field materialization
+remain PR-039. This record does not claim JournalStore v1 complete.

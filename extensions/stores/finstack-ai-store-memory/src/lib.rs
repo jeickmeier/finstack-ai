@@ -1,7 +1,7 @@
 //! Bounded, explicitly non-durable in-memory [`JournalStore`] implementation.
 //!
-//! This leaf uses transitional in-process JSON envelope bytes. It deliberately
-//! does not claim the canonical-CBOR or checksum guarantees owned by PR-039.
+//! Envelopes are encoded and verified through `finstack-ai-protocol`. Health
+//! remains non-durable (`durable = false`).
 
 #![warn(missing_docs)]
 
@@ -9,16 +9,15 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use finstack_ai_kernel::{
-    AppendBatchId, AppendRequest, CommittedBatch, DOMAIN_RECORD_PAYLOAD, Digest,
-    RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, RecordDraft, RecordEnvelope, RecordId, SessionId,
+    AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordDraft, RecordEnvelope,
+    RecordId, SessionId,
 };
+use finstack_ai_protocol::{ProtocolError, commit_records, verify_chain};
 use finstack_ai_runtime::{
-    JournalStore, LoadRequest, LoadedSession, OpaqueSnapshot, PortFuture, SnapshotReceipt,
-    SnapshotRequest, StoreError, StoreHealth,
+    JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot, PortFuture,
+    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth, WriteMetadataRequest,
 };
-
-const TRANSITIONAL_CHECKSUM_DOMAIN: &str = "record-envelope-transitional";
-const TRANSITIONAL_CHECKSUM_VERSION: u32 = 1;
 
 /// Required resource ceilings for [`MemoryJournalStore`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,8 +179,13 @@ impl MemoryJournalStore {
             });
         }
 
-        let committed = build_committed_batch(&request, current_head)?;
+        let previous_checksum = inner
+            .sessions
+            .get(&request.session_id())
+            .and_then(|session| session.head_checksum);
+        let committed = build_committed_batch(&request, previous_checksum)?;
         let last_sequence = committed.last_sequence;
+        let head_checksum = committed.records.last().map(RecordEnvelope::checksum);
         let batch_id = request.batch_id();
         let session_id = request.session_id();
         let record_entries = request
@@ -200,6 +204,7 @@ impl MemoryJournalStore {
 
         let session = inner.sessions.entry(session_id).or_default();
         session.head_sequence = last_sequence;
+        session.head_checksum = head_checksum;
         session.records += request.records().len();
         session.batches.push(committed.clone());
         for (record_id, entry) in record_entries {
@@ -218,18 +223,88 @@ impl MemoryJournalStore {
     fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
         let inner = self.lock()?;
         let Some(session) = inner.sessions.get(&request.session_id) else {
-            return Ok(LoadedSession {
-                session_id: request.session_id,
-                head_sequence: 0,
-                committed_batches: Arc::from([]),
-                snapshot: None,
-            });
+            return Ok(LoadedSession::empty(request.session_id));
         };
+        verify_session(session)?;
         Ok(LoadedSession {
             session_id: request.session_id,
             head_sequence: session.head_sequence,
+            head_checksum: session.head_checksum,
+            metadata: session.metadata.clone(),
             committed_batches: session.batches.clone().into(),
             snapshot: session.snapshot.clone(),
+        })
+    }
+
+    fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
+        if request.limit == 0 {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "scan_limit_zero",
+            });
+        }
+        if request.limit > SCAN_PAGE_MAX_RECORDS {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "scan_limit_exceeded",
+            });
+        }
+        let inner = self.lock()?;
+        let Some(session) = inner.sessions.get(&request.session_id) else {
+            return Ok(ScanPage {
+                session_id: request.session_id,
+                records: Arc::from([]),
+                next_sequence: None,
+            });
+        };
+        verify_session(session)?;
+        let start = if request.from_sequence == 0 {
+            1
+        } else {
+            request.from_sequence
+        };
+        let all = flatten_records(session);
+        let matched = all
+            .iter()
+            .filter(|record| record.sequence() >= start)
+            .cloned()
+            .collect::<Vec<_>>();
+        let limit = usize::try_from(request.limit).expect("u32 fits usize");
+        let records = matched.iter().take(limit).cloned().collect::<Vec<_>>();
+        let next_sequence = if matched.len() > records.len() {
+            records
+                .last()
+                .and_then(|record| record.sequence().checked_add(1))
+        } else {
+            None
+        };
+        Ok(ScanPage {
+            session_id: request.session_id,
+            records: records.into(),
+            next_sequence,
+        })
+    }
+
+    fn write_metadata_sync(
+        &self,
+        request: WriteMetadataRequest,
+    ) -> Result<MetadataReceipt, StoreError> {
+        let mut inner = self.lock()?;
+        let session =
+            inner
+                .sessions
+                .get_mut(&request.session_id)
+                .ok_or(StoreError::InvalidRequest {
+                    reason_code: "metadata_session_not_found",
+                })?;
+        if session.head_checksum != request.expected_head_checksum {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "metadata_cas_mismatch",
+            });
+        }
+        session.metadata = request.metadata.clone();
+        Ok(MetadataReceipt {
+            session_id: request.session_id,
+            head_checksum: session.head_checksum,
+            metadata: request.metadata,
         })
     }
 
@@ -301,6 +376,19 @@ impl JournalStore for MemoryJournalStore {
             })
         })
     }
+
+    fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
+        let result = self.scan_sync(request);
+        Box::pin(async move { result })
+    }
+
+    fn write_metadata(
+        &self,
+        request: WriteMetadataRequest,
+    ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
+        let result = self.write_metadata_sync(request);
+        Box::pin(async move { result })
+    }
 }
 
 #[derive(Default)]
@@ -313,6 +401,8 @@ struct Inner {
 #[derive(Default)]
 struct SessionData {
     head_sequence: u64,
+    head_checksum: Option<Digest>,
+    metadata: Metadata,
     records: usize,
     batches: Vec<CommittedBatch>,
     snapshot: Option<OpaqueSnapshot>,
@@ -331,73 +421,15 @@ struct RecordIndexEntry {
 
 fn build_committed_batch(
     request: &AppendRequest,
-    previous_sequence: u64,
+    previous_checksum: Option<Digest>,
 ) -> Result<CommittedBatch, StoreError> {
-    let mut previous_checksum = None;
-    let mut records = Vec::with_capacity(request.records().len());
-    for (offset, draft) in request.records().iter().enumerate() {
-        let offset = u64::try_from(offset).map_err(|_| StoreError::Integrity {
-            reason_code: "record_offset_overflow",
-        })?;
-        let sequence =
-            request
-                .expected_sequence()
-                .checked_add(offset)
-                .ok_or(StoreError::Integrity {
-                    reason_code: "sequence_exhausted",
-                })?;
-        let payload_bytes =
-            serde_json::to_vec(draft.body()).map_err(|_| StoreError::Integrity {
-                reason_code: "transitional_payload_encode_failed",
-            })?;
-        let payload_digest = Digest::domain_separated(
-            DOMAIN_RECORD_PAYLOAD,
-            RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION,
-            &payload_bytes,
-        )
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "record_payload_digest_failed",
-        })?;
-        let checksum_bytes = serde_json::to_vec(&(
-            request.batch_id(),
-            sequence,
-            draft,
-            previous_checksum,
-            previous_sequence,
-        ))
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "transitional_envelope_encode_failed",
-        })?;
-        let checksum = Digest::domain_separated(
-            TRANSITIONAL_CHECKSUM_DOMAIN,
-            TRANSITIONAL_CHECKSUM_VERSION,
-            &checksum_bytes,
-        )
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "transitional_checksum_failed",
-        })?;
-        let envelope = RecordEnvelope::try_new(
-            draft.format_version(),
-            draft.kind_version(),
-            draft.record_id(),
-            draft.session_id(),
-            draft.lane_id(),
-            draft.run_id(),
-            sequence,
-            draft.timestamp(),
-            None,
-            payload_digest,
-            previous_checksum,
-            checksum,
-            draft.derived_event_ids().to_vec(),
-            draft.body().clone(),
-        )
-        .map_err(|_| StoreError::Integrity {
-            reason_code: "committed_envelope_invalid",
-        })?;
-        previous_checksum = Some(checksum);
-        records.push(envelope);
-    }
+    let records = commit_records(
+        request.records(),
+        request.expected_sequence(),
+        previous_checksum,
+        None,
+    )
+    .map_err(|error| protocol_error(&error))?;
     let last_sequence = request
         .expected_sequence()
         .checked_add(
@@ -419,6 +451,40 @@ fn build_committed_batch(
     })
 }
 
+fn verify_session(session: &SessionData) -> Result<(), StoreError> {
+    let records = flatten_records(session);
+    let head = verify_chain(&records).map_err(|error| protocol_error(&error))?;
+    if head != session.head_checksum {
+        return Err(StoreError::Integrity {
+            reason_code: "head_checksum_mismatch",
+        });
+    }
+    Ok(())
+}
+
+fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {
+    session
+        .batches
+        .iter()
+        .flat_map(|batch| batch.records.iter().cloned())
+        .collect()
+}
+
+fn protocol_error(error: &ProtocolError) -> StoreError {
+    match error {
+        ProtocolError::LimitExceeded { resource, limit } => StoreError::LimitExceeded {
+            resource,
+            limit: *limit,
+        },
+        ProtocolError::Integrity { reason_code } | ProtocolError::InvalidCbor { reason_code } => {
+            StoreError::Integrity { reason_code }
+        }
+        ProtocolError::Codec { .. } => StoreError::Integrity {
+            reason_code: "canonical_codec",
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;
@@ -428,9 +494,10 @@ mod tests {
 
     use finstack_ai_kernel::{
         AuthorizationEvidence, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
-        Id, IdTag, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
-        RecordDraft, RecordTag, RunTag, SessionTag, Timestamp,
+        Id, IdTag, LaneCreated, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+        RecordBody, RecordDraft, RecordTag, RunTag, SessionCreated, SessionTag, Timestamp,
     };
+    use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
 
     use super::*;
 
@@ -516,12 +583,28 @@ mod tests {
             .expect("append");
         assert_eq!((first.first_sequence, first.last_sequence), (1, 1));
         assert_eq!((second.first_sequence, second.last_sequence), (2, 3));
+        verify_envelope(&first.records[0]).expect("first envelope");
+        verify_envelope(&second.records[0]).expect("second envelope");
+        assert_eq!(
+            second.records[0].previous_checksum(),
+            Some(first.records[0].checksum())
+        );
+        assert_eq!(
+            first.records[0].payload_digest(),
+            payload_digest(first.records[0].body()).expect("payload")
+        );
+        assert_eq!(
+            first.records[0].checksum(),
+            envelope_checksum(&first.records[0]).expect("checksum")
+        );
 
         let loaded = block_on(store.load(LoadRequest {
             session_id: id::<SessionTag>(1),
         }))
         .expect("load");
         assert_eq!(loaded.head_sequence, 3);
+        assert_eq!(loaded.head_checksum, Some(second.records[1].checksum()));
+        assert_eq!(loaded.metadata, Metadata::empty());
         assert_eq!(loaded.committed_batches.as_ref(), &[first, second]);
         assert!(loaded.snapshot.is_none());
 
@@ -529,6 +612,90 @@ mod tests {
         assert!(health.ready);
         assert!(!health.durable);
         assert_eq!(health.detail.as_ref(), "memory_non_durable");
+    }
+
+    #[test]
+    fn scan_and_metadata_cas_are_session_local() {
+        let store = MemoryJournalStore::try_new(limits()).expect("store");
+        block_on(store.append(request(1, 1, 1, vec![draft(1, 1)]))).expect("append");
+        let second = block_on(store.append(request(2, 1, 2, vec![draft(2, 1), draft(3, 1)])))
+            .expect("append");
+        let page = block_on(store.scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 0,
+            limit: 2,
+        }))
+        .expect("scan");
+        assert_eq!(page.records.len(), 2);
+        assert_eq!(page.next_sequence, Some(3));
+        assert!(matches!(
+            block_on(store.scan(ScanRequest {
+                session_id: id::<SessionTag>(1),
+                from_sequence: 1,
+                limit: 0,
+            })),
+            Err(StoreError::InvalidRequest {
+                reason_code: "scan_limit_zero"
+            })
+        ));
+
+        let metadata = Metadata::parse(br#"{"label":"demo"}"#).expect("metadata");
+        assert!(matches!(
+            block_on(store.write_metadata(WriteMetadataRequest {
+                session_id: id::<SessionTag>(1),
+                expected_head_checksum: None,
+                metadata: metadata.clone(),
+            })),
+            Err(StoreError::InvalidRequest {
+                reason_code: "metadata_cas_mismatch"
+            })
+        ));
+        let receipt = block_on(store.write_metadata(WriteMetadataRequest {
+            session_id: id::<SessionTag>(1),
+            expected_head_checksum: Some(second.records[1].checksum()),
+            metadata: metadata.clone(),
+        }))
+        .expect("cas");
+        assert_eq!(receipt.metadata, metadata);
+        let loaded = block_on(store.load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        }))
+        .expect("load");
+        assert_eq!(loaded.metadata, metadata);
+    }
+
+    #[test]
+    fn structural_session_and_lane_records_commit_without_run_id() {
+        let store = MemoryJournalStore::try_new(limits()).expect("store");
+        let session = RecordDraft::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            id::<RecordTag>(90),
+            id::<SessionTag>(9),
+            id::<LaneTag>(91),
+            None,
+            Timestamp::from_unix_ms(1).expect("ts"),
+            Vec::new(),
+            RecordBody::SessionCreated(SessionCreated::new(Metadata::empty())),
+        )
+        .expect("session");
+        let lane = RecordDraft::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            id::<RecordTag>(91),
+            id::<SessionTag>(9),
+            id::<LaneTag>(91),
+            None,
+            Timestamp::from_unix_ms(1).expect("ts"),
+            Vec::new(),
+            RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+        )
+        .expect("lane");
+        let committed =
+            block_on(store.append(request(90, 9, 1, vec![session, lane]))).expect("append");
+        assert_eq!(committed.records.len(), 2);
+        verify_envelope(&committed.records[0]).expect("session envelope");
+        verify_envelope(&committed.records[1]).expect("lane envelope");
     }
 
     #[test]

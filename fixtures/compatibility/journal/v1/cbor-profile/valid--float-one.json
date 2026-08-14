@@ -1,0 +1,12 @@
+{
+  "case": "float-one",
+  "cbor_hex": "f93c00",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "float_one"
+  },
+  "subject": "cbor-profile"
+}

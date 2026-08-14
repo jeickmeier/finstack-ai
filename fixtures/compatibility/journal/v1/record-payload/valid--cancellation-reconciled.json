@@ -1,0 +1,18 @@
+{
+  "case": "cancellation_reconciled",
+  "cbor_hex": "a17763616e63656c6c6174696f6e5f7265636f6e63696c6564a46a726571756573745f6964782430303030303030302d303030302d373030302d383030302d3030303030303030303033327163616e63656c6c65645f656666656374738071636f6d706c657465645f656666656374738071756e6365727461696e5f6566666563747380",
+  "diagnostic_json": {
+    "cancellation_reconciled": {
+      "cancelled_effects": [],
+      "completed_effects": [],
+      "request_id": "00000000-0000-7000-8000-000000000032",
+      "uncertain_effects": []
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "becadd1771e051052620c9be3bb972a5e69beb989b229310414ccf2494c897fe",
+  "subject": "record-payload"
+}

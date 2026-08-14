@@ -1,0 +1,12 @@
+{
+  "case": "neg-zero",
+  "cbor_hex": "f98000",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "kind": "neg_zero"
+  },
+  "subject": "cbor-profile"
+}

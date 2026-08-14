@@ -2,10 +2,15 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{AppendRequest, CommittedBatch, Digest, SessionId, Timestamp};
+use finstack_ai_kernel::{
+    AppendRequest, CommittedBatch, Digest, Metadata, RecordEnvelope, SessionId, Timestamp,
+};
 use thiserror::Error;
 
 use crate::{PortFuture, PortObject};
+
+/// Maximum envelopes returned by one [`JournalStore::scan`] call.
+pub const SCAN_PAGE_MAX_RECORDS: u32 = 256;
 
 /// Object-safe append/load/snapshot contract owned by the runtime.
 pub trait JournalStore: PortObject {
@@ -23,6 +28,33 @@ pub trait JournalStore: PortObject {
 
     /// Report current store readiness and durability.
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>>;
+
+    /// Scan committed envelopes in one session, starting at `from_sequence`.
+    ///
+    /// `from_sequence == 0` means the first committed record. `limit == 0` is
+    /// invalid. Default implementations return `scan_unsupported`.
+    fn scan(&self, _request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
+        Box::pin(async {
+            Err(StoreError::InvalidRequest {
+                reason_code: "scan_unsupported",
+            })
+        })
+    }
+
+    /// Compare-and-swap session metadata against the expected head checksum.
+    ///
+    /// Metadata never grants authority. Default implementations return
+    /// `write_metadata_unsupported`.
+    fn write_metadata(
+        &self,
+        _request: WriteMetadataRequest,
+    ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
+        Box::pin(async {
+            Err(StoreError::InvalidRequest {
+                reason_code: "write_metadata_unsupported",
+            })
+        })
+    }
 }
 
 /// Session-scoped journal load request.
@@ -39,10 +71,73 @@ pub struct LoadedSession {
     pub session_id: SessionId,
     /// Current committed head; zero denotes an empty journal.
     pub head_sequence: u64,
+    /// Last committed envelope checksum; `None` for an empty journal.
+    pub head_checksum: Option<Digest>,
+    /// Session metadata. Never grants authority.
+    pub metadata: Metadata,
     /// Ordered atomic commit boundaries.
     pub committed_batches: Arc<[CommittedBatch]>,
     /// Optional bounded opaque replay cache.
     pub snapshot: Option<OpaqueSnapshot>,
+}
+
+impl LoadedSession {
+    /// Empty session with no records, checksum, or metadata.
+    #[must_use]
+    pub fn empty(session_id: SessionId) -> Self {
+        Self {
+            session_id,
+            head_sequence: 0,
+            head_checksum: None,
+            metadata: Metadata::empty(),
+            committed_batches: Arc::from([]),
+            snapshot: None,
+        }
+    }
+}
+
+/// Session-local scan request. There is no global target-ID scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScanRequest {
+    /// Session to scan.
+    pub session_id: SessionId,
+    /// Inclusive start sequence; `0` means the first committed record.
+    pub from_sequence: u64,
+    /// Maximum envelopes to return. `0` is invalid.
+    pub limit: u32,
+}
+
+/// Page of committed envelopes from [`JournalStore::scan`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanPage {
+    /// Scanned session.
+    pub session_id: SessionId,
+    /// Envelopes in sequence order.
+    pub records: Arc<[RecordEnvelope]>,
+    /// Next sequence to request, or `None` at the end of the session.
+    pub next_sequence: Option<u64>,
+}
+
+/// Compare-and-swap metadata write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteMetadataRequest {
+    /// Session whose metadata is replaced.
+    pub session_id: SessionId,
+    /// Expected current head checksum.
+    pub expected_head_checksum: Option<Digest>,
+    /// Replacement metadata. Never grants authority.
+    pub metadata: Metadata,
+}
+
+/// Receipt for an accepted metadata compare-and-swap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataReceipt {
+    /// Session whose metadata was written.
+    pub session_id: SessionId,
+    /// Head checksum the write was conditioned on.
+    pub head_checksum: Option<Digest>,
+    /// Stored metadata.
+    pub metadata: Metadata,
 }
 
 /// Bounded opaque snapshot returned by a store.

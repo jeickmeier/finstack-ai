@@ -1,0 +1,17 @@
+{
+  "case": "timer_fired",
+  "cbor_hex": "a16b74696d65725f6669726564a3666475655f6174006866697265645f617400696566666563745f6964782430303030303030302d303030302d373030302d383030302d303030303030303030303364",
+  "diagnostic_json": {
+    "timer_fired": {
+      "due_at": "1970-01-01T00:00:00.000Z",
+      "effect_id": "00000000-0000-7000-8000-00000000003d",
+      "fired_at": "1970-01-01T00:00:00.000Z"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "b185c1391a8dfa937dfbe0ea0b28f3ddbe2c1fd26033cf4ad63b5da9ddda0dba",
+  "subject": "record-payload"
+}

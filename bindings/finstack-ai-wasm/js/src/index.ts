@@ -1,6 +1,7 @@
 import initWasm, {
   buildMetadata as wasmBuildMetadata,
   health as wasmHealth,
+  journalKnownAnswer as wasmJournalKnownAnswer,
   normalizePrebetaShape as wasmNormalizePrebetaShape,
 } from "../generated/finstack_ai_wasm.js";
 
@@ -161,6 +162,42 @@ export function buildMetadata(): BuildMetadata {
     engineVersion: raw.engineVersion,
     implementation: "wasm",
     target: "wasm32-unknown-unknown",
+  };
+}
+
+/**
+ * Return payload digest, checksum, and canonical-CBOR hex from Rust.
+ *
+ * `kind` is `record_body` or `record_envelope`. JavaScript does not implement
+ * a second CBOR codec.
+ *
+ * @param kind - Known-answer family.
+ * @param value - Diagnostic JSON object of the body or envelope.
+ * @returns Hex digests and canonical-CBOR text.
+ * @throws {TypeError} When `kind` or `value` is invalid.
+ * @example
+ * ```ts
+ * const answer = journalKnownAnswer("record_body", body);
+ * ```
+ */
+export function journalKnownAnswer(
+  kind: "record_body" | "record_envelope",
+  value: unknown,
+): { payload_digest: string; checksum?: string; cbor_hex: string } {
+  assertInitialized();
+  switch (kind) {
+    case "record_body":
+    case "record_envelope":
+      break;
+    default: {
+      const _exhaustive: never = kind;
+      throw new TypeError(`unsupported known-answer kind: ${String(_exhaustive)}`);
+    }
+  }
+  return JSON.parse(wasmJournalKnownAnswer(kind, JSON.stringify(value))) as {
+    payload_digest: string;
+    checksum?: string;
+    cbor_hex: string;
   };
 }
 

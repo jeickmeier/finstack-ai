@@ -1,0 +1,16 @@
+{
+  "case": "output_configured",
+  "cbor_hex": "a1716f75747075745f636f6e66696775726564a2666f75747075746a706c61696e5f746578746c656e645f73747261746567796a65786861757374697665",
+  "diagnostic_json": {
+    "output_configured": {
+      "end_strategy": "exhaustive",
+      "output": "plain_text"
+    }
+  },
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "payload_digest": "1932e4161a49fd523b82c4ae6a87a29eadcea04fd9a531ed3ab84d52131b2e27",
+  "subject": "record-payload"
+}

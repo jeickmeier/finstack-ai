@@ -48,11 +48,17 @@ pub(super) fn apply(
         committed.records.as_ref(),
         [record] if matches!(record.body(), RecordBody::ExternalCommandRejected(_))
     );
+    let structural_only = !committed.records.is_empty()
+        && committed
+            .records
+            .iter()
+            .all(|record| record.body().is_structural());
     let post_terminal_budget_release = committed
         .records
         .iter()
         .all(|record| matches!(record.body(), RecordBody::BudgetReservationReleased(_)));
     if !external_rejection_only
+        && !structural_only
         && !post_terminal_budget_release
         && (original.terminal.is_some()
             || matches!(
@@ -270,6 +276,14 @@ fn validate_identities(state: &KernelState, records: &[RecordEnvelope]) -> Resul
         {
             return Err(KernelError::RecordIdentityMismatch);
         }
+        if record.body().is_structural() {
+            if let Some(session_id) = state.session_id
+                && record.session_id() != session_id
+            {
+                return Err(KernelError::RecordIdentityMismatch);
+            }
+            continue;
+        }
         if let (Some(session_id), Some(lane_id), Some(accepted)) =
             (state.session_id, state.lane_id, state.accepted.as_ref())
             && (record.session_id() != session_id
@@ -290,7 +304,7 @@ fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
-    if composition_record_shape(state, records) {
+    if composition_record_shape(state, records) || structural_record_shape(records) {
         return Ok(());
     }
     if state.accepted.is_some()
@@ -391,6 +405,10 @@ fn validate_batch_shape(
     } else {
         Err(KernelError::InvalidRecordOrder)
     }
+}
+
+fn structural_record_shape(records: &[RecordEnvelope]) -> bool {
+    !records.is_empty() && records.iter().all(|record| record.body().is_structural())
 }
 
 fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
@@ -993,7 +1011,14 @@ fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
-    if !matches!(record.body(), RecordBody::ExternalCommandRejected(_)) {
+    if !matches!(
+        record.body(),
+        RecordBody::ExternalCommandRejected(_)
+            | RecordBody::SessionCreated(_)
+            | RecordBody::LaneCreated(_)
+            | RecordBody::LaneMoved(_)
+            | RecordBody::SnapshotWritten(_)
+    ) {
         update_wall_usage(state, record.timestamp())?;
     }
     match record.body() {
@@ -1257,7 +1282,11 @@ fn apply_record(
         RecordBody::OutputValidationFailed(failure) => {
             apply_validation_failure(state, failure)?;
         }
-        RecordBody::ExternalCommandRejected(_) => {}
+        RecordBody::ExternalCommandRejected(_)
+        | RecordBody::SessionCreated(_)
+        | RecordBody::LaneCreated(_)
+        | RecordBody::LaneMoved(_)
+        | RecordBody::SnapshotWritten(_) => {}
         RecordBody::ChildRunPrepared(prepared) => {
             let accepted = state
                 .accepted

@@ -1436,6 +1436,10 @@ mod tests {
                 Ok(LoadedSession {
                     session_id: request.session_id,
                     head_sequence,
+                    head_checksum: batches
+                        .last()
+                        .and_then(|batch| batch.records.last().map(|record| record.checksum())),
+                    metadata: finstack_ai_kernel::Metadata::empty(),
                     committed_batches: batches.into(),
                     snapshot: None,
                 })

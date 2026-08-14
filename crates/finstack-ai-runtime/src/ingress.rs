@@ -571,8 +571,9 @@ mod tests {
 
     use finstack_ai_kernel::{
         AcceptRun, AllocatedIds, BudgetPropagation, CancellationPropagation, ErrorCategory,
-        ErrorDescriptor, Id, IdTag, Kernel, PrincipalPropagation, RawJson, RecordEnvelope,
-        RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
+        ErrorDescriptor, Id, IdTag, Kernel, Metadata, PrincipalPropagation, RawJson,
+        RecordEnvelope, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
+        RunSecurityContext,
     };
 
     use super::*;
@@ -694,6 +695,11 @@ mod tests {
         LoadedSession {
             session_id: id(1),
             head_sequence: batch.last_sequence,
+            head_checksum: batch
+                .records
+                .last()
+                .map(finstack_ai_kernel::RecordEnvelope::checksum),
+            metadata: Metadata::empty(),
             committed_batches: Arc::from([batch]),
             snapshot: None,
         }
@@ -717,12 +723,7 @@ mod tests {
             let loaded = if request.session_id == self.0.session_id {
                 self.0.clone()
             } else {
-                LoadedSession {
-                    session_id: request.session_id,
-                    head_sequence: 0,
-                    committed_batches: Arc::from([]),
-                    snapshot: None,
-                }
+                LoadedSession::empty(request.session_id)
             };
             Box::pin(async move { Ok(loaded) })
         }

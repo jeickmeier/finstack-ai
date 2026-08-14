@@ -1082,6 +1082,10 @@ fn run_event_body_from_record(
         | RecordBody::BudgetReservationSettled(_)
         | RecordBody::BudgetChargeRecorded(_)
         | RecordBody::BudgetReservationReleased(_)
+        | RecordBody::SessionCreated(_)
+        | RecordBody::LaneCreated(_)
+        | RecordBody::LaneMoved(_)
+        | RecordBody::SnapshotWritten(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1364,7 +1368,11 @@ pub fn derived_event_kind(
         | RecordBody::BudgetReservationRequested(_)
         | RecordBody::BudgetReservationSettled(_)
         | RecordBody::BudgetChargeRecorded(_)
-        | RecordBody::BudgetReservationReleased(_) => {
+        | RecordBody::BudgetReservationReleased(_)
+        | RecordBody::SessionCreated(_)
+        | RecordBody::LaneCreated(_)
+        | RecordBody::LaneMoved(_)
+        | RecordBody::SnapshotWritten(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

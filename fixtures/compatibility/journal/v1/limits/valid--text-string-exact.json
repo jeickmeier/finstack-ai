@@ -1,0 +1,12 @@
+{
+  "case": "text-string-exact",
+  "expect": {
+    "ok": true
+  },
+  "format_version": 1,
+  "recipe": {
+    "bytes": 4194304,
+    "kind": "text_string"
+  },
+  "subject": "limits"
+}

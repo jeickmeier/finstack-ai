@@ -31,7 +31,8 @@ format = "json-schema-2020-12"
 stability = "candidate-v1"
 compatibility_profile = "durable-ignorable-optional-or-fatal-state"
 fixture_root = "fixtures/compatibility/journal/"
-status = "reserved"
+status = "active"
+notes_root = "schemas/journal/"
 
 [families."runtime-events"]
 owner = "me@jeickmeier.com"

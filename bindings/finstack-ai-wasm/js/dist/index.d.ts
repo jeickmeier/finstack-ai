@@ -59,6 +59,26 @@ export declare function health(): string;
  */
 export declare function buildMetadata(): BuildMetadata;
 /**
+ * Return payload digest, checksum, and canonical-CBOR hex from Rust.
+ *
+ * `kind` is `record_body` or `record_envelope`. JavaScript does not implement
+ * a second CBOR codec.
+ *
+ * @param kind - Known-answer family.
+ * @param value - Diagnostic JSON object of the body or envelope.
+ * @returns Hex digests and canonical-CBOR text.
+ * @throws {TypeError} When `kind` or `value` is invalid.
+ * @example
+ * ```ts
+ * const answer = journalKnownAnswer("record_body", body);
+ * ```
+ */
+export declare function journalKnownAnswer(kind: "record_body" | "record_envelope", value: unknown): {
+    payload_digest: string;
+    checksum?: string;
+    cbor_hex: string;
+};
+/**
  * Normalize a pre-beta lineage or authenticated external-command shape.
  *
  * Durability-dependent store APIs remain pre-beta. This function only runs
