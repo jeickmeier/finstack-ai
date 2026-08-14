@@ -3,11 +3,13 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, AppendBatchId, AppendRequest, CommittedBatch, Decision, Diagnostic,
-    EffectId, EffectRequested, EventId, Kernel, KernelError, KernelInput, KernelState, Metadata,
-    ModelTextDelta, OperationLocator, PendingModelEffect, PostCommitAction, ProviderHeartbeat,
-    ReasoningDelta, RecordBody, RecordDraft, RunEvent, RunEventBody, Sensitivity, Timestamp,
-    ToolBatchId, ToolCallId, ToolProgress, TransitionEnv, ValidatedToolCall,
+    ActiveToolCallStatus, AppendBatchId, AppendRequest, CommittedBatch, ConversationEntry,
+    Decision, Diagnostic, EffectId, EffectRequested, EntryId, EventId, Kernel, KernelError,
+    KernelInput, KernelState, LaneId, Metadata, ModelTextDelta, OperationLocator,
+    PendingModelEffect, PostCommitAction, ProviderHeartbeat, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, ReasoningDelta, RecordBody, RecordDraft, RecordId, RunEvent, RunEventBody,
+    Sensitivity, SessionId, SessionProjection, Timestamp, ToolBatchId, ToolCallId, ToolProgress,
+    TransitionEnv, ValidatedToolCall, apply_conversation_entry,
 };
 use thiserror::Error;
 
@@ -85,6 +87,7 @@ pub enum CommitCoordinatorError {
 /// One-run coordinator for the authoritative commit-before-effect path.
 pub struct CommitCoordinator {
     kernel: Kernel,
+    session: SessionProjection,
     store: Arc<dyn JournalStore>,
     next_transient_sequence: u64,
     pending_timer_scheduled_at: Option<Timestamp>,
@@ -104,6 +107,7 @@ impl CommitCoordinator {
     pub fn new(store: Arc<dyn JournalStore>) -> Self {
         Self {
             kernel: Kernel::default(),
+            session: SessionProjection::default(),
             store,
             next_transient_sequence: 0,
             pending_timer_scheduled_at: None,
@@ -141,8 +145,11 @@ impl CommitCoordinator {
         let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
             replay_loaded(&loaded)
                 .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        let session = project_loaded(&loaded)
+            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         Ok(Self {
             kernel,
+            session,
             store,
             next_transient_sequence,
             pending_timer_scheduled_at,
@@ -168,6 +175,12 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn state(&self) -> &KernelState {
         self.kernel.state()
+    }
+
+    /// Borrow the rebuilt session projection. Not part of `kernel-state`.
+    #[must_use]
+    pub const fn session(&self) -> &SessionProjection {
+        &self.session
     }
 
     /// Current run-local runtime fault.
@@ -333,6 +346,8 @@ impl CommitCoordinator {
                                 .map(|snapshot| snapshot.sequence)
                         })
                         .flatten();
+                    self.session =
+                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
                     decision = self
                         .kernel
                         .decide(&env, input.clone())
@@ -369,6 +384,8 @@ impl CommitCoordinator {
                         .map_err(|_| self.boundary_fault("transient_event_sequence_exhausted"))?,
                 )
                 .ok_or_else(|| self.boundary_fault("transient_event_sequence_exhausted"))?;
+            self.apply_committed_session(&committed)?;
+            self.maybe_commit_conversation_siblings(&committed).await?;
 
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             self.publish_events(Arc::clone(&events)).await?;
@@ -521,6 +538,8 @@ impl CommitCoordinator {
                                 .map(|snapshot| snapshot.sequence)
                         })
                         .flatten();
+                    self.session =
+                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -542,8 +561,160 @@ impl CommitCoordinator {
             if !events.is_empty() {
                 return Err(self.boundary_fault("composition_emitted_events"));
             }
+            self.apply_committed_session(&committed)?;
             return Ok(Some(committed));
         }
+    }
+
+    /// Commit zero-event session and conversation records through the append/apply boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a store/boundary failure when the batch is invalid or cannot be applied.
+    pub async fn commit_session_records(
+        &mut self,
+        batch_id: AppendBatchId,
+        records: Vec<RecordDraft>,
+    ) -> Result<Option<CommittedBatch>, CommitCoordinatorError> {
+        if records.is_empty()
+            || records.iter().any(|record| {
+                !record.derived_event_ids().is_empty()
+                    || !matches!(
+                        record.body(),
+                        RecordBody::SessionCreated(_)
+                            | RecordBody::LaneCreated(_)
+                            | RecordBody::LaneMoved(_)
+                            | RecordBody::ConversationEntry(_)
+                            | RecordBody::SnapshotWritten(_)
+                    )
+            })
+        {
+            return Err(CommitCoordinatorError::BoundaryFault {
+                code: "session_records_invalid",
+            });
+        }
+        let session_id = records[0].session_id();
+        let mut conflicts = 0_u8;
+        loop {
+            let expected_sequence = self
+                .kernel
+                .state()
+                .last_applied_sequence
+                .checked_add(1)
+                .ok_or_else(|| self.boundary_fault("session_sequence_overflow"))?;
+            let records = align_conversation_sequences(records.clone(), expected_sequence)?;
+            preview_session_records(&self.session, &records)?;
+            let request = AppendRequest::try_new(batch_id, session_id, expected_sequence, records)
+                .map_err(|_| CommitCoordinatorError::BoundaryFault {
+                    code: "session_append_request_invalid",
+                })?;
+            let committed = match self.append_frozen(request).await {
+                Ok(committed) => committed,
+                Err(StoreError::Conflict { .. }) if conflicts == 0 => {
+                    conflicts = 1;
+                    let loaded = self
+                        .store
+                        .load(LoadRequest { session_id })
+                        .await
+                        .map_err(|_| self.boundary_fault("session_conflict_reload_failed"))?;
+                    let (
+                        kernel,
+                        next_transient_sequence,
+                        pending_timer_scheduled_at,
+                        used_snapshot,
+                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    self.kernel = kernel;
+                    self.next_transient_sequence = next_transient_sequence;
+                    self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+                    self.last_snapshot_sequence = used_snapshot
+                        .then(|| {
+                            loaded
+                                .accelerated
+                                .as_ref()
+                                .map(|snapshot| snapshot.sequence)
+                        })
+                        .flatten();
+                    self.session =
+                        project_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    continue;
+                }
+                Err(StoreError::Conflict { .. }) => {
+                    return Err(CommitCoordinatorError::Store(StoreError::Conflict {
+                        expected_sequence,
+                        actual_next_sequence: self
+                            .kernel
+                            .state()
+                            .last_applied_sequence
+                            .saturating_add(1),
+                    }));
+                }
+                Err(error) => return Err(CommitCoordinatorError::Store(error)),
+            };
+            let events = self
+                .kernel
+                .apply(&committed, self.next_transient_sequence)
+                .map_err(|_| self.boundary_fault("session_apply_failed"))?;
+            if !events.is_empty() {
+                return Err(self.boundary_fault("session_emitted_events"));
+            }
+            self.apply_committed_session(&committed)?;
+            return Ok(Some(committed));
+        }
+    }
+
+    fn apply_committed_session(
+        &mut self,
+        committed: &CommittedBatch,
+    ) -> Result<(), CommitCoordinatorError> {
+        apply_batch_to_session(&mut self.session, committed)
+            .map_err(|code| self.boundary_fault(code))
+    }
+
+    async fn maybe_commit_conversation_siblings(
+        &mut self,
+        committed: &CommittedBatch,
+    ) -> Result<(), CommitCoordinatorError> {
+        if self.session.main_lane().is_none() {
+            return Ok(());
+        }
+        let mut drafts = Vec::new();
+        for record in committed.records.iter() {
+            let message = match record.body() {
+                RecordBody::EntryAppended(entry) => &entry.message,
+                RecordBody::ToolCallSettled(settled) => &settled.message,
+                _ => continue,
+            };
+            let entry_id = EntryId::from_bytes(message.id().to_bytes());
+            let parent_id = self
+                .session
+                .entries()
+                .get(&entry_id)
+                .and_then(ConversationEntry::parent_id);
+            let entry = ConversationEntry::from_message(message, parent_id, record.lane_id(), 0)
+                .map_err(|_| CommitCoordinatorError::BoundaryFault {
+                    code: "session_records_invalid",
+                })?;
+            drafts.push(session_draft(
+                RecordId::from_bytes(entry.id().to_bytes()),
+                record.session_id(),
+                record.lane_id(),
+                record.timestamp(),
+                RecordBody::ConversationEntry(entry.clone()),
+            )?);
+            drafts.push(session_draft(
+                lane_moved_record_id(entry.id()),
+                record.session_id(),
+                record.lane_id(),
+                record.timestamp(),
+                RecordBody::LaneMoved(finstack_ai_kernel::LaneMoved::new(entry.id())),
+            )?);
+        }
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let batch_id = AppendBatchId::from_bytes(drafts[0].record_id().to_bytes());
+        self.commit_session_records(batch_id, drafts).await?;
+        Ok(())
     }
 
     async fn dispatch_after_recheck(
@@ -841,6 +1012,123 @@ fn replay_loaded(
         pending_timer_scheduled_at,
         false,
     ))
+}
+
+fn project_loaded(loaded: &LoadedSession) -> Result<SessionProjection, &'static str> {
+    let mut session = SessionProjection::new(loaded.session_id);
+    for batch in loaded.committed_batches.iter() {
+        apply_batch_to_session(&mut session, batch)?;
+    }
+    Ok(session)
+}
+
+fn apply_batch_to_session(
+    session: &mut SessionProjection,
+    batch: &CommittedBatch,
+) -> Result<(), &'static str> {
+    for record in batch.records.iter() {
+        session
+            .apply_envelope(record)
+            .map_err(|_| "session_projection_failed")?;
+    }
+    Ok(())
+}
+
+fn align_conversation_sequences(
+    records: Vec<RecordDraft>,
+    first_sequence: u64,
+) -> Result<Vec<RecordDraft>, CommitCoordinatorError> {
+    records
+        .into_iter()
+        .enumerate()
+        .map(|(offset, draft)| {
+            let sequence = first_sequence
+                .checked_add(u64::try_from(offset).map_err(|_| {
+                    CommitCoordinatorError::BoundaryFault {
+                        code: "session_sequence_overflow",
+                    }
+                })?)
+                .ok_or(CommitCoordinatorError::BoundaryFault {
+                    code: "session_sequence_overflow",
+                })?;
+            let RecordBody::ConversationEntry(entry) = draft.body() else {
+                return Ok(draft);
+            };
+            if entry.sequence() == sequence {
+                return Ok(draft);
+            }
+            let aligned = ConversationEntry::try_new(
+                entry.id(),
+                entry.parent_id(),
+                entry.lane_id(),
+                sequence,
+                entry.body().clone(),
+            )
+            .map_err(|_| CommitCoordinatorError::BoundaryFault {
+                code: "session_records_invalid",
+            })?;
+            RecordDraft::try_new(
+                draft.format_version(),
+                draft.kind_version(),
+                draft.record_id(),
+                draft.session_id(),
+                draft.lane_id(),
+                draft.run_id(),
+                draft.timestamp(),
+                draft.derived_event_ids().to_vec(),
+                RecordBody::ConversationEntry(aligned),
+            )
+            .map_err(|_| CommitCoordinatorError::BoundaryFault {
+                code: "session_records_invalid",
+            })
+        })
+        .collect()
+}
+
+fn session_draft(
+    record_id: RecordId,
+    session_id: SessionId,
+    lane_id: LaneId,
+    timestamp: Timestamp,
+    body: RecordBody,
+) -> Result<RecordDraft, CommitCoordinatorError> {
+    RecordDraft::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        record_id,
+        session_id,
+        lane_id,
+        None,
+        timestamp,
+        Vec::new(),
+        body,
+    )
+    .map_err(|_| CommitCoordinatorError::BoundaryFault {
+        code: "session_records_invalid",
+    })
+}
+
+fn preview_session_records(
+    session: &SessionProjection,
+    records: &[RecordDraft],
+) -> Result<(), CommitCoordinatorError> {
+    let mut entries = session.entries().clone();
+    for record in records {
+        if let RecordBody::ConversationEntry(entry) = record.body() {
+            apply_conversation_entry(&mut entries, entry.clone()).map_err(|_| {
+                CommitCoordinatorError::BoundaryFault {
+                    code: "session_records_invalid",
+                }
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn lane_moved_record_id(entry_id: EntryId) -> RecordId {
+    let mut bytes = entry_id.to_bytes();
+    bytes[15] ^= 0xA5;
+    RecordId::from_bytes(bytes)
 }
 
 fn replay_from_snapshot(

@@ -206,6 +206,7 @@ pub fn run_public_api_fixture(fixture: &PublicApiFixture) -> Result<(), PublicAp
         | "pr011-record"
         | "pr012-record"
         | "pr014-record"
+        | "pr046-record"
         | "corrupt-replay" => crate::pr009_fixture::run_pr009_subject(fixture),
         "model-request-draft" => {
             run_strict_runtime_subject::<finstack_ai_runtime::ModelRequestDraft>(fixture)

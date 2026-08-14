@@ -14,14 +14,16 @@ use finstack_ai_kernel::{
     AcceptRun, ActiveCapability, AgentId, AllocatedIds, AppendBatchTag, AuthorizationEvidence,
     BudgetPropagation, BundleId, CancelRequested, CancellationInitiator, CancellationPropagation,
     CancellationRequestTag, CapabilitiesActivated, CapabilityActivationSource, CapabilityId,
-    ComponentRef, ContentBlock, DeadlinePropagation, Digest, EffectOutputContract,
-    EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneId, LaneTag, Message, MessageId,
-    MessageRole, MessageTag, Metadata, ModelRequestTag, OperationLocator, OutputConfiguration,
-    OutputEndStrategy, OutputSpec, OutputValidated, PrincipalPropagation, ProviderIds, RawJson,
-    RecordTag, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
-    RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SchemaRef,
-    Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled, StructuredResultSource,
-    TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag, Version,
+    ComponentRef, ContentBlock, ConversationEntry, DeadlinePropagation, Digest,
+    EffectOutputContract, EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneCreated,
+    LaneId, LaneMoved, LaneTag, Message, MessageId, MessageRole, MessageTag, Metadata,
+    ModelRequestTag, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec,
+    OutputValidated, PrincipalPropagation, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+    RawJson, RecordBody, RecordDraft, RecordTag, ReducerStageOutcome, RetryClassification,
+    RetryDirective, RetrySafety, RunAccepted, RunPhase, RunPropagationPolicy, RunRelation,
+    RunSecurityContext, RunTag, SchemaRef, Sensitivity, SessionCreated, SessionId, SessionTag,
+    Stage, StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock, Timestamp,
+    TransitionEnv, TurnTag, Version,
 };
 use finstack_ai_runtime::{
     CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
@@ -420,7 +422,30 @@ impl Agent {
         execution: &Weak<AgentRunInner>,
     ) -> Result<AgentRunOutput, AgentRunError> {
         let ready_model: Arc<dyn Model> = Arc::new(ReadyModel(Arc::clone(&prepared.model)));
-        let coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
+        let mut coordinator = CommitCoordinator::new(Arc::clone(&prepared.store));
+        if let Err(error) = bootstrap_main_lane(
+            &mut coordinator,
+            prepared.session_id,
+            prepared.lane_id,
+            &prepared.request.input,
+        )
+        .await
+        {
+            publish_start_failure(execution, &error);
+            return Err(error);
+        }
+        if coordinator
+            .session()
+            .active_on_lane(prepared.lane_id)
+            .is_some()
+        {
+            let error = AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "main lane already has an active operation",
+            );
+            publish_start_failure(execution, &error);
+            return Err(error);
+        }
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(
                 coordinator,
@@ -2109,6 +2134,85 @@ fn model_output_contract() -> EffectOutputContract {
         schema_version: 1,
         schema_digest: Digest::raw_json(b"{\"kind\":\"model_response\",\"schema_version\":1}"),
     }
+}
+
+async fn bootstrap_main_lane(
+    coordinator: &mut CommitCoordinator,
+    session_id: SessionId,
+    lane_id: LaneId,
+    input: &str,
+) -> Result<(), AgentRunError> {
+    let now = NativeIds::now()?;
+    let message = text_message(
+        NativeIds::generate::<MessageTag>()?,
+        MessageRole::User,
+        input,
+        now,
+    )?;
+    let entry = ConversationEntry::from_message(&message, None, lane_id, 0).map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let leaf = entry.id();
+    let records = vec![
+        session_record_draft(
+            NativeIds::generate()?,
+            session_id,
+            lane_id,
+            now,
+            RecordBody::SessionCreated(SessionCreated::new(Metadata::empty())),
+        )?,
+        session_record_draft(
+            NativeIds::generate()?,
+            session_id,
+            lane_id,
+            now,
+            RecordBody::LaneCreated(LaneCreated::try_new("main").map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })?),
+        )?,
+        session_record_draft(
+            NativeIds::generate()?,
+            session_id,
+            lane_id,
+            now,
+            RecordBody::ConversationEntry(entry),
+        )?,
+        session_record_draft(
+            NativeIds::generate()?,
+            session_id,
+            lane_id,
+            now,
+            RecordBody::LaneMoved(LaneMoved::new(leaf)),
+        )?,
+    ];
+    coordinator
+        .commit_session_records(NativeIds::generate()?, records)
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+    Ok(())
+}
+
+fn session_record_draft(
+    record_id: finstack_ai_kernel::RecordId,
+    session_id: SessionId,
+    lane_id: LaneId,
+    timestamp: Timestamp,
+    body: RecordBody,
+) -> Result<RecordDraft, AgentRunError> {
+    RecordDraft::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        record_id,
+        session_id,
+        lane_id,
+        None,
+        timestamp,
+        Vec::new(),
+        body,
+    )
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })
 }
 
 fn text_message(

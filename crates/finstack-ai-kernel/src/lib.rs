@@ -103,6 +103,7 @@ mod bounds;
 mod budget;
 mod capabilities;
 mod content;
+mod conversation;
 mod digest;
 mod effects;
 mod entries;
@@ -141,6 +142,10 @@ pub use capabilities::{ActiveCapability, CapabilitiesActivated, CapabilityActiva
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,
+};
+pub use conversation::{
+    ConversationEntry, ConversationError, EntryBody, LaneProjection, OperationSummary,
+    SessionProjection, apply_conversation_entry, extract_history,
 };
 pub use digest::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, DOMAIN_AGENT_SPEC,

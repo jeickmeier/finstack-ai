@@ -58,8 +58,10 @@ pub(super) fn apply(
         .records
         .iter()
         .all(|record| matches!(record.body(), RecordBody::BudgetReservationReleased(_)));
+    let foreign_only = foreign_run_shape(original, &committed.records);
     if !external_rejection_only
         && !structural_only
+        && !foreign_only
         && !post_terminal_budget_release
         && (original.terminal.is_some()
             || matches!(
@@ -285,11 +287,16 @@ fn validate_identities(state: &KernelState, records: &[RecordEnvelope]) -> Resul
             }
             continue;
         }
-        if let (Some(session_id), Some(lane_id), Some(accepted)) =
-            (state.session_id, state.lane_id, state.accepted.as_ref())
-            && (record.session_id() != session_id
-                || record.lane_id() != lane_id
-                || record.run_id() != Some(accepted.run_id()))
+        if let Some(session_id) = state.session_id
+            && record.session_id() != session_id
+        {
+            return Err(KernelError::RecordIdentityMismatch);
+        }
+        if is_foreign_run(state, record) {
+            continue;
+        }
+        if let (Some(lane_id), Some(accepted)) = (state.lane_id, state.accepted.as_ref())
+            && (record.lane_id() != lane_id || record.run_id() != Some(accepted.run_id()))
         {
             return Err(KernelError::RecordIdentityMismatch);
         }
@@ -305,7 +312,10 @@ fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
-    if composition_record_shape(state, records) || structural_record_shape(records) {
+    if composition_record_shape(state, records)
+        || structural_record_shape(records)
+        || foreign_run_shape(state, records)
+    {
         return Ok(());
     }
     if state.accepted.is_some()
@@ -416,6 +426,27 @@ fn validate_batch_shape(
 
 fn structural_record_shape(records: &[RecordEnvelope]) -> bool {
     !records.is_empty() && records.iter().all(|record| record.body().is_structural())
+}
+
+fn is_foreign_run(state: &KernelState, record: &RecordEnvelope) -> bool {
+    match (state.accepted.as_ref(), record.run_id()) {
+        (Some(accepted), Some(run_id)) if run_id != accepted.run_id() => {
+            matches!(record.body(), RecordBody::RunAccepted(_))
+                || state
+                    .child_preparations
+                    .values()
+                    .any(|prepared| prepared.child.operation.run_id == run_id)
+        }
+        _ => false,
+    }
+}
+
+fn foreign_run_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    !records.is_empty()
+        && state.accepted.is_some()
+        && records
+            .iter()
+            .all(|record| record.body().is_structural() || is_foreign_run(state, record))
 }
 
 fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
@@ -1021,6 +1052,9 @@ fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if is_foreign_run(state, record) {
+        return Ok(());
+    }
     if !matches!(
         record.body(),
         RecordBody::ExternalCommandRejected(_)
@@ -1028,6 +1062,7 @@ fn apply_record(
             | RecordBody::LaneCreated(_)
             | RecordBody::LaneMoved(_)
             | RecordBody::SnapshotWritten(_)
+            | RecordBody::ConversationEntry(_)
     ) {
         update_wall_usage(state, record.timestamp())?;
     }
@@ -1285,7 +1320,8 @@ fn apply_record(
         | RecordBody::SessionCreated(_)
         | RecordBody::LaneCreated(_)
         | RecordBody::LaneMoved(_)
-        | RecordBody::SnapshotWritten(_) => {}
+        | RecordBody::SnapshotWritten(_)
+        | RecordBody::ConversationEntry(_) => {}
         RecordBody::ChildRunPrepared(prepared) => {
             let accepted = state
                 .accepted

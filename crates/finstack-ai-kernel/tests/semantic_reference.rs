@@ -187,6 +187,7 @@ fn record_name(value: &RecordBody) -> &'static str {
         RecordBody::LaneCreated(_) => "LaneCreated",
         RecordBody::LaneMoved(_) => "LaneMoved",
         RecordBody::SnapshotWritten(_) => "SnapshotWritten",
+        RecordBody::ConversationEntry(_) => "ConversationEntry",
     }
 }
 
