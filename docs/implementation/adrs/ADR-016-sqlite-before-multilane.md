@@ -72,4 +72,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: In progress on PR-040 (`codex/pr-040-sqlite-journalstore`); public multi-lane APIs remain PR-047
+- Implementation evidence: Partial after PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`; public multi-lane APIs remain PR-047
