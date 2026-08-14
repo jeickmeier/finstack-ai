@@ -1,0 +1,65 @@
+PR-042 local candidate validation
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Branch: codex/pr-042-model-reconciliation
+Candidate: d69e4a140a8584f2e561521b3b3eaebc0bfe69a5
+Host: Darwin 25.5.0 arm64; rustc 1.97.1
+
+Commands and results:
+
+  cargo fmt --all --check
+    Pass.
+
+  cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    Pass.
+
+  cargo test --workspace --offline --locked
+    Pass: 467 passed, 1 ignored.
+
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked model_resume
+    Pass: 2 classifier/mapping tests.
+
+  cargo test -p finstack-ai-test --test model_port --offline --locked
+    Pass: 25 tests, including A01–A05 crash-matrix rows.
+
+  cargo test -p finstack-ai-provider-openai-compatible --offline --locked
+    Pass: 8 lib + 6 ignored live; includes
+    openai_compatible_reconcile_is_unknown_without_retrieve.
+
+  cargo test -p finstack-ai-kernel --test model_only_reducer --offline --locked settlements
+    Pass: 12 settlement tests; kernel reducer unchanged.
+
+  cargo test -p finstack-ai-test --test journal_v1 --offline --locked
+    Pass: 4 tests; runtime and SDK stay protocol-free.
+
+  cargo tree -e normal --locked --offline for finstack-ai-runtime,
+  finstack-ai, and finstack-ai-kernel
+    Pass: no finstack-ai-protocol (runtime/SDK), no
+    finstack-ai-store-sqlite, no rusqlite.
+
+  uv run --no-project python tools/wasm_package/check.py graph
+    Pass: wasm graph: no Tokio, sockets, filesystem drivers, or kernel
+    wasm-bindgen. rusqlite remains forbidden.
+
+Acceptance:
+  PR-042-A01 in-process crash fixtures restore to a documented
+             ModelResumeAction
+  PR-042-A02 after committed EffectCompleted / settlement hit, spawn
+             never calls Model::request again for that EffectId
+  PR-042-A03 NotStarted / RetrySafe / Unknown+retry-allowed re-dispatch
+             uses the original EffectId, ModelRequestId, canonical
+             draft bytes, and input_digest
+  PR-042-A04 Unknown or NonRepeatable when retry is not allowed
+             suspends with model_reconciliation_unsupported and does
+             not request() or fabricate EffectCompleted
+  PR-042-A05 equal external completion is idempotent; a conflicting
+             completion fails closed and appends
+             RecordExternalCommandRejected
+
+Limits:
+  No seventh port. No exactly-once claim. No G5 inference.
+  No hosted PR/merge, npm publish, or tag.
+  Python pytest, mise run ci, sqlite kill, and browser tests were
+  not required to prove A01–A05. Rust workspace tests, clippy,
+  journal_v1, and graph checks were run.
+  Tool-effect reconciliation remains PR-043.

@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex, Weak};
 
 use finstack_ai_kernel::{
     BudgetScopeId, ContentBlock, Digest, EffectId, ErrorCategory, ErrorCode, ErrorDescriptor,
-    ExternalHandleRef, Message, Metadata, ModelRequestId, OperationLocator, OutputSpec,
-    PendingModelEffect, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy, RetrySafety,
-    Timestamp, ToolExecutionMode, ToolId, Usage,
+    ExternalHandleRef, KernelState, Message, Metadata, ModelRequestId, OperationLocator,
+    OutputSpec, PendingModelEffect, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
+    RetrySafety, RunPhase, Timestamp, ToolExecutionMode, ToolId, Usage,
 };
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -55,6 +55,8 @@ pub const MODEL_TOOL_CALL_ARGUMENTS_INVALID: &str = "model_tool_call_arguments_i
 pub const MODEL_USAGE_INVALID: &str = "model_usage_invalid";
 /// Stable response/stream mismatch adapter code.
 pub const MODEL_RESPONSE_MISMATCH: &str = "model_response_mismatch";
+/// Stable non-resumable model-reconciliation adapter code.
+pub const MODEL_RECONCILIATION_UNSUPPORTED: &str = "model_reconciliation_unsupported";
 
 /// Validated provider model name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -695,6 +697,68 @@ pub struct ModelDeferral {
     pub expires_at: Option<Timestamp>,
 }
 
+/// Journal-first recovery action for one outstanding model effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelResumeAction {
+    /// No outstanding model effect remains.
+    NoOutstanding,
+    /// A recorded settlement already covers the effect.
+    UseRecorded,
+    /// Call the provider reconcile hook before dispatch.
+    Reconcile,
+    /// Re-dispatch the original committed request. First-pass never returns this.
+    Retry,
+    /// Wait for an external completion or later poll.
+    WaitExternal,
+    /// Do not request or fabricate a completion.
+    SuspendUncertain,
+}
+
+/// Classify recovery from committed journal state only.
+///
+/// First-pass never returns [`ModelResumeAction::Retry`]. Unstarted, in-flight,
+/// and completed-but-uncommitted journals are identical (`AwaitingModel` plus
+/// pending, no settlement) and classify as [`ModelResumeAction::Reconcile`].
+#[must_use]
+pub fn model_resume_action(state: &KernelState) -> ModelResumeAction {
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return ModelResumeAction::NoOutstanding;
+    };
+    if state
+        .model_settlements
+        .contains_key(&pending.requested.effect_id())
+    {
+        return ModelResumeAction::UseRecorded;
+    }
+    match state.phase {
+        Some(RunPhase::AwaitingExternal) => match pending
+            .deferred
+            .as_ref()
+            .map(|deferred| deferred.reconciliation)
+        {
+            Some(ReconciliationPolicy::CallbackOnly | ReconciliationPolicy::ExternalWorkflow) => {
+                ModelResumeAction::WaitExternal
+            }
+            Some(ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll) | None => {
+                ModelResumeAction::Reconcile
+            }
+        },
+        _ => ModelResumeAction::Reconcile,
+    }
+}
+
+/// Whether the committed request plus provider capabilities allow a same-identity retry.
+#[must_use]
+pub fn model_retry_allowed(
+    requested: &finstack_ai_kernel::EffectRequested,
+    capabilities: &ModelCapabilities,
+) -> bool {
+    matches!(
+        requested.retry_safety(),
+        RetrySafety::SafeToRetry | RetrySafety::IdempotentWithKey
+    ) && capabilities.idempotent_requests
+}
+
 /// Model reconciliation outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelReconcileResult {
@@ -712,6 +776,47 @@ pub enum ModelReconcileResult {
     Unknown,
     /// Provider reports non-repeatable uncertainty.
     NonRepeatable,
+}
+
+/// Map one provider reconcile result onto the documented post-reconcile action.
+#[must_use]
+pub fn map_model_reconcile_result(
+    state: &KernelState,
+    result: &ModelReconcileResult,
+    retry_allowed: bool,
+) -> ModelResumeAction {
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return ModelResumeAction::NoOutstanding;
+    };
+    if state
+        .model_settlements
+        .contains_key(&pending.requested.effect_id())
+    {
+        return ModelResumeAction::UseRecorded;
+    }
+    let awaiting_external =
+        state.phase == Some(RunPhase::AwaitingExternal) || pending.deferred.is_some();
+    match result {
+        ModelReconcileResult::Completed(_) => ModelResumeAction::UseRecorded,
+        ModelReconcileResult::Deferred(_) | ModelReconcileResult::StillRunning(_) => {
+            ModelResumeAction::WaitExternal
+        }
+        ModelReconcileResult::NonRepeatable => ModelResumeAction::SuspendUncertain,
+        ModelReconcileResult::NotStarted | ModelReconcileResult::RetrySafe => {
+            if awaiting_external {
+                ModelResumeAction::SuspendUncertain
+            } else {
+                ModelResumeAction::Retry
+            }
+        }
+        ModelReconcileResult::Unknown => {
+            if awaiting_external || !retry_allowed {
+                ModelResumeAction::SuspendUncertain
+            } else {
+                ModelResumeAction::Retry
+            }
+        }
+    }
 }
 
 /// Object-safe provider-neutral model port.
@@ -962,7 +1067,8 @@ fn reserved_adapter_category(code: &str) -> Option<ErrorCategory> {
         | MODEL_TOOL_CALL_INCOMPLETE
         | MODEL_TOOL_CALL_ARGUMENTS_INVALID
         | MODEL_USAGE_INVALID
-        | MODEL_RESPONSE_MISMATCH => Some(ErrorCategory::Validation),
+        | MODEL_RESPONSE_MISMATCH
+        | MODEL_RECONCILIATION_UNSUPPORTED => Some(ErrorCategory::Validation),
         _ => None,
     }
 }
@@ -1927,5 +2033,241 @@ mod tests {
         .expect("reserved classification");
         assert_eq!(exact.category(), ErrorCategory::Limit);
         assert!(!exact.retryable());
+    }
+
+    fn id<T: finstack_ai_kernel::IdTag>(ordinal: u64) -> finstack_ai_kernel::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        finstack_ai_kernel::Id::from_bytes(bytes)
+    }
+
+    fn requested(retry_safety: RetrySafety) -> finstack_ai_kernel::EffectRequested {
+        finstack_ai_kernel::EffectRequested::try_new(
+            id(4),
+            finstack_ai_kernel::EffectKind::Model,
+            None,
+            None,
+            None,
+            finstack_ai_kernel::EffectOutputContract {
+                kind: finstack_ai_kernel::EffectOutputKind::ModelResponse,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"model-response"),
+            },
+            finstack_ai_kernel::EffectInput::Model {
+                request: RawJson::parse(b"{}").expect("request"),
+            },
+            retry_safety,
+            None,
+        )
+        .expect("requested")
+    }
+
+    fn pending(
+        deferred: Option<finstack_ai_kernel::EffectDeferred>,
+    ) -> finstack_ai_kernel::PendingModelEffect {
+        finstack_ai_kernel::PendingModelEffect {
+            cycle: 0,
+            turn_id: id(7),
+            model_request_id: id(5),
+            requested: requested(RetrySafety::SafeToRetry),
+            deferred,
+        }
+    }
+
+    fn deferred(policy: ReconciliationPolicy) -> finstack_ai_kernel::EffectDeferred {
+        finstack_ai_kernel::EffectDeferred {
+            effect_id: id(4),
+            handle: ExternalHandleRef::try_new(
+                finstack_ai_kernel::ComponentId::parse("finstack.model.scripted")
+                    .expect("component"),
+                "handle-1",
+                RawJson::parse(b"{}").expect("metadata"),
+            )
+            .expect("handle"),
+            reconciliation: policy,
+            next_poll_at: None,
+            expires_at: None,
+            output_contract: requested(RetrySafety::SafeToRetry)
+                .output_contract()
+                .clone(),
+        }
+    }
+
+    fn state_with(
+        phase: Option<RunPhase>,
+        pending_effect: Option<finstack_ai_kernel::PendingModelEffect>,
+        settled: bool,
+    ) -> KernelState {
+        let mut state = KernelState {
+            phase,
+            pending_model_effect: pending_effect,
+            ..KernelState::default()
+        };
+        if settled && let Some(pending) = state.pending_model_effect.as_ref() {
+            let effect_id = pending.requested.effect_id();
+            state.model_settlements.insert(
+                effect_id,
+                finstack_ai_kernel::ModelSettlementFingerprint {
+                    kind: finstack_ai_kernel::ModelSettlementKind::Completed,
+                    digest: Digest::raw_json(b"settled"),
+                },
+            );
+        }
+        state
+    }
+
+    #[test]
+    fn model_resume_action_classifies_journal_only_states() {
+        assert_eq!(
+            model_resume_action(&KernelState::default()),
+            ModelResumeAction::NoOutstanding
+        );
+        assert_eq!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingModel),
+                Some(pending(None)),
+                false
+            )),
+            ModelResumeAction::Reconcile
+        );
+        assert_eq!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingModel),
+                Some(pending(None)),
+                true
+            )),
+            ModelResumeAction::UseRecorded
+        );
+        assert_eq!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingExternal),
+                Some(pending(Some(deferred(ReconciliationPolicy::CallbackOnly)))),
+                false
+            )),
+            ModelResumeAction::WaitExternal
+        );
+        assert_eq!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingExternal),
+                Some(pending(Some(deferred(ReconciliationPolicy::Poll)))),
+                false
+            )),
+            ModelResumeAction::Reconcile
+        );
+        assert_eq!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingExternal),
+                Some(pending(Some(deferred(
+                    ReconciliationPolicy::CallbackOrPoll
+                )))),
+                false
+            )),
+            ModelResumeAction::Reconcile
+        );
+        let settled = state_with(Some(RunPhase::BeforeFinalize), None, false);
+        assert_eq!(
+            model_resume_action(&settled),
+            ModelResumeAction::NoOutstanding
+        );
+        assert_ne!(
+            model_resume_action(&state_with(
+                Some(RunPhase::AwaitingModel),
+                Some(pending(None)),
+                false
+            )),
+            ModelResumeAction::Retry
+        );
+    }
+
+    #[test]
+    fn model_resume_maps_reconcile_results_to_documented_actions() {
+        let awaiting = state_with(Some(RunPhase::AwaitingModel), Some(pending(None)), false);
+        let deferred_state = state_with(
+            Some(RunPhase::AwaitingExternal),
+            Some(pending(Some(deferred(
+                ReconciliationPolicy::CallbackOrPoll,
+            )))),
+            false,
+        );
+        let response = ModelResponse {
+            assistant_content: Arc::from([]),
+            tool_calls: Arc::from([]),
+            usage: Usage::empty(),
+            provider_ids: ProviderIds::empty(),
+            completion_id: Arc::from("completion-1"),
+            continuation_state: None,
+        };
+        assert_eq!(
+            map_model_reconcile_result(
+                &awaiting,
+                &ModelReconcileResult::Completed(response.clone()),
+                true
+            ),
+            ModelResumeAction::UseRecorded
+        );
+        assert_eq!(
+            map_model_reconcile_result(
+                &awaiting,
+                &ModelReconcileResult::StillRunning(ModelDeferral {
+                    handle: deferred(ReconciliationPolicy::CallbackOrPoll).handle,
+                    reconciliation: ReconciliationPolicy::CallbackOrPoll,
+                    next_poll_at: None,
+                    expires_at: None,
+                }),
+                true
+            ),
+            ModelResumeAction::WaitExternal
+        );
+        assert_eq!(
+            map_model_reconcile_result(&awaiting, &ModelReconcileResult::NotStarted, true),
+            ModelResumeAction::Retry
+        );
+        assert_eq!(
+            map_model_reconcile_result(&awaiting, &ModelReconcileResult::Unknown, true),
+            ModelResumeAction::Retry
+        );
+        assert_eq!(
+            map_model_reconcile_result(&awaiting, &ModelReconcileResult::Unknown, false),
+            ModelResumeAction::SuspendUncertain
+        );
+        assert_eq!(
+            map_model_reconcile_result(&awaiting, &ModelReconcileResult::NonRepeatable, true),
+            ModelResumeAction::SuspendUncertain
+        );
+        assert_eq!(
+            map_model_reconcile_result(&deferred_state, &ModelReconcileResult::NotStarted, true),
+            ModelResumeAction::SuspendUncertain
+        );
+        assert_eq!(
+            map_model_reconcile_result(
+                &state_with(Some(RunPhase::AwaitingModel), Some(pending(None)), true),
+                &ModelReconcileResult::Completed(response),
+                true
+            ),
+            ModelResumeAction::UseRecorded
+        );
+        assert!(!model_retry_allowed(
+            &requested(RetrySafety::AtMostOnce),
+            &ModelCapabilities {
+                input: InputCapabilities {
+                    text: true,
+                    json: false,
+                    images: false,
+                    audio: false,
+                    files: false,
+                },
+                context_profile: profile(),
+                native_tool_calls: false,
+                parallel_tool_calls: false,
+                structured_output: StructuredOutputCapability::Unsupported,
+                reasoning: false,
+                prompt_cache: false,
+                resumable_stream: false,
+                idempotent_requests: true,
+                native_capabilities: BTreeSet::new(),
+            }
+        ));
     }
 }

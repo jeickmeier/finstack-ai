@@ -63,6 +63,20 @@ impl ModelDispatcher {
         Arc::clone(&self.active)
     }
 
+    pub(crate) async fn resume_request(
+        &self,
+        seed: ModelDispatchSeed,
+    ) -> Result<(), DispatchError> {
+        let effect_id = seed.pending.requested.effect_id();
+        self.dispatch(RuntimeDispatch {
+            action: finstack_ai_kernel::PostCommitAction::ExecuteEffect { effect_id },
+            model: Some(seed),
+            tool: None,
+            timer: None,
+        })
+        .await
+    }
+
     fn parse_and_validate(
         &self,
         raw: &finstack_ai_kernel::RawJson,

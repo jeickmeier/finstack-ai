@@ -441,6 +441,7 @@ name = "finstack-ai-provider-openai-compatible"
 version = "0.0.2"
 dependencies = [
  "criterion",
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-core",

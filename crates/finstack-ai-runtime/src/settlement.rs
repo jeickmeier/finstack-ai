@@ -4,23 +4,31 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchId, AppendBatchTag, CancellationReconciledInput,
-    CancellationRequestTag, ContentBlock, EffectCompleted, EffectDeferred, EffectFailed, EffectId,
-    EffectTag, ErrorCategory, EventId, EventTag, Id, IdTag, InteractionTag, KernelError,
-    KernelInput, Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelRequestTag,
-    ModelSettled, ModelSettlement, ProviderIds, RawJson, RecordId, RecordTag, ReducerStageOutcome,
-    RunPhase, Stage, StageCursor, StageSettled, ToolBatchContinuation, ToolBatchSettled,
-    ToolBatchTag, ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy,
-    ToolSettlement, TransitionEnv, TurnTag,
+    AllocatedIds, AppendBatchId, AppendBatchTag, AuthorizationEvidence,
+    CancellationReconciledInput, CancellationRequestTag, ContentBlock, Digest, EffectCompleted,
+    EffectDeferred, EffectFailed, EffectId, EffectInput, EffectTag, ErrorCategory, EventId,
+    EventTag, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
+    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag,
+    InteractionTag, KernelError, KernelInput, Message, MessageId, MessageRole, MessageTag,
+    Metadata, ModelRef, ModelRequestTag, ModelSettled, ModelSettlement, ProviderIds, RawJson,
+    RecordExternalCommandRejected, RecordId, RecordTag, ReducerStageOutcome, RunPhase, Stage,
+    StageCursor, StageSettled, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag,
+    ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement,
+    TransitionEnv, TurnTag,
 };
 
-use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
+use crate::coordinator::{
+    CommitCoordinator, CommitCoordinatorError, ModelDispatchSeed, ToolDispatchSeed,
+};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
-    Clock, IdGenerationError, LockedModelContextProfile, Model, ModelContextProfileOverride,
-    ModelError, ModelProgress, ModelRequestDraft, ModelTerminal, RandomSource, ResolvedToolCatalog,
-    ToolError, ToolProgress, UuidV7Generator, normalize_tool_result, resolve_model_context_profile,
+    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile, Model,
+    ModelContextProfileOverride, ModelDeferral, ModelError, ModelProgress, ModelReconcileResult,
+    ModelRequestDraft, ModelResponse, ModelResumeAction, ModelTerminal, RandomSource,
+    ReconcileContext, ResolvedToolCatalog, RunCallContext, ToolError, ToolProgress,
+    UuidV7Generator, map_model_reconcile_result, model_resume_action, model_retry_allowed,
+    normalize_tool_result, resolve_model_context_profile,
 };
 
 pub(crate) struct ModelDriverResult {
@@ -701,6 +709,352 @@ fn generate_tool_id<T: IdTag, C: Clock, R: RandomSource>(
         .map_err(|_| RunHandleError::ToolSettlement {
             code: "tool_settlement_id_source_failed",
         })
+}
+
+pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    sources: &SettlementSources<C, R>,
+    cancellation: &CancellationSignal,
+) -> Result<ModelResumeAction, RunHandleError> {
+    let first_pass = model_resume_action(coordinator.state());
+    match first_pass {
+        ModelResumeAction::NoOutstanding
+        | ModelResumeAction::UseRecorded
+        | ModelResumeAction::WaitExternal => return Ok(first_pass),
+        ModelResumeAction::Retry | ModelResumeAction::SuspendUncertain => {
+            return Ok(first_pass);
+        }
+        ModelResumeAction::Reconcile => {}
+    }
+    let Some(seed) = coordinator.pending_model_seed() else {
+        return Err(RunHandleError::ModelSettlement {
+            code: "model_resume_seed_missing",
+        });
+    };
+    let draft = pending_draft(&seed)?;
+    let retry_allowed =
+        model_retry_allowed(&seed.pending.requested, &model.capabilities(&draft.model));
+    let context = ReconcileContext {
+        run: RunCallContext {
+            locator: seed.locator.clone(),
+            authorization: seed.authorization.clone(),
+            effect_id: seed.pending.requested.effect_id(),
+            attempt: seed.attempt,
+            deadline: seed.pending.requested.deadline(),
+            budget_scope_id: seed.budget_scope_id,
+            cancellation: cancellation.child(),
+        },
+        original_input_digest: seed.pending.requested.input_digest(),
+    };
+    let Ok(result) = model.reconcile(context, seed.pending.clone()).await else {
+        return Ok(ModelResumeAction::SuspendUncertain);
+    };
+    apply_model_reconcile_result(
+        coordinator,
+        model,
+        seed,
+        draft,
+        result,
+        retry_allowed,
+        sources,
+    )
+    .await
+}
+
+async fn apply_model_reconcile_result<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    seed: ModelDispatchSeed,
+    draft: ModelRequestDraft,
+    result: ModelReconcileResult,
+    retry_allowed: bool,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelResumeAction, RunHandleError> {
+    let action = map_model_reconcile_result(coordinator.state(), &result, retry_allowed);
+    match result {
+        ModelReconcileResult::Completed(response) => {
+            settle_reconciled_completion(coordinator, model, seed, draft, response, sources).await
+        }
+        ModelReconcileResult::Deferred(deferral) | ModelReconcileResult::StillRunning(deferral) => {
+            ensure_or_wait_deferred(coordinator, model, seed, draft, deferral, sources).await
+        }
+        ModelReconcileResult::NotStarted
+        | ModelReconcileResult::RetrySafe
+        | ModelReconcileResult::Unknown
+        | ModelReconcileResult::NonRepeatable => Ok(action),
+    }
+}
+
+async fn settle_reconciled_completion<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    seed: ModelDispatchSeed,
+    draft: ModelRequestDraft,
+    response: ModelResponse,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelResumeAction, RunHandleError> {
+    if coordinator
+        .state()
+        .model_settlements
+        .contains_key(&seed.pending.requested.effect_id())
+    {
+        return Ok(ModelResumeAction::UseRecorded);
+    }
+    if coordinator.state().phase == Some(RunPhase::AwaitingExternal) {
+        return settle_external_model(coordinator, model, seed, draft, response, sources).await;
+    }
+    let driver = ModelDriverResult {
+        seed,
+        draft,
+        provider: model.descriptor().provider,
+        result: Ok(ModelTerminal::Completed(response)),
+    };
+    process_model_result(coordinator, driver, sources).await?;
+    Ok(ModelResumeAction::UseRecorded)
+}
+
+async fn ensure_or_wait_deferred<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    seed: ModelDispatchSeed,
+    draft: ModelRequestDraft,
+    deferral: ModelDeferral,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelResumeAction, RunHandleError> {
+    if let Some(existing) = seed.pending.deferred.as_ref() {
+        if existing.handle == deferral.handle {
+            return Ok(ModelResumeAction::WaitExternal);
+        }
+        return submit_fail_closed(
+            coordinator,
+            &seed,
+            deferral.handle.handle(),
+            "conflicting_or_invalid_completion",
+            sources,
+        )
+        .await;
+    }
+    let driver = ModelDriverResult {
+        seed,
+        draft,
+        provider: model.descriptor().provider,
+        result: Ok(ModelTerminal::Deferred(deferral)),
+    };
+    process_model_result(coordinator, driver, sources).await?;
+    Ok(ModelResumeAction::WaitExternal)
+}
+
+async fn settle_external_model<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    seed: ModelDispatchSeed,
+    draft: ModelRequestDraft,
+    response: ModelResponse,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelResumeAction, RunHandleError> {
+    let driver = ModelDriverResult {
+        seed: seed.clone(),
+        draft,
+        provider: model.descriptor().provider,
+        result: Ok(ModelTerminal::Completed(response.clone())),
+    };
+    let now = sources.now()?;
+    let allocation = allocate_settlement(&driver, sources)?;
+    let settled = build_settlement(driver, now, &allocation)?;
+    let ModelSettlement::Completed {
+        completion,
+        assistant_message,
+    } = settled.outcome
+    else {
+        return Err(RunHandleError::ModelSettlement {
+            code: "model_external_completion_invalid",
+        });
+    };
+    let completion_id = completion
+        .completion_id()
+        .ok_or(RunHandleError::ModelSettlement {
+            code: "model_completion_id_missing",
+        })?
+        .to_owned();
+    let input = KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
+        completion: ExternalEffectCompletion::try_new(
+            seed.pending.requested.effect_id(),
+            &completion_id,
+            ExternalEffectOutcome::Completed {
+                output: completion.output().clone(),
+                usage: completion.usage().cloned(),
+                artifacts: Arc::from(completion.artifacts()),
+            },
+        )
+        .map_err(|_| RunHandleError::ModelSettlement {
+            code: "model_external_completion_invalid",
+        })?,
+        assistant_message: Some(assistant_message),
+    });
+    match coordinator
+        .submit(
+            TransitionEnv {
+                now,
+                ids: allocation.ids,
+            },
+            input,
+        )
+        .await
+    {
+        Ok(outcome) => {
+            if let Some(fault) = outcome.fault {
+                return Err(RunHandleError::Faulted { code: fault.code });
+            }
+            Ok(ModelResumeAction::UseRecorded)
+        }
+        Err(CommitCoordinatorError::Decision {
+            code:
+                "conflicting_completion_id" | "conflicting_settlement" | "settlement_digest_mismatch",
+        }) => {
+            submit_fail_closed(
+                coordinator,
+                &seed,
+                &completion_id,
+                "conflicting_or_invalid_completion",
+                sources,
+            )
+            .await
+        }
+        Err(error) => Err(RunHandleError::Coordinator(error)),
+    }
+}
+
+async fn submit_fail_closed<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    seed: &ModelDispatchSeed,
+    command_id: &str,
+    reason_code: &'static str,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelResumeAction, RunHandleError> {
+    let accepted =
+        coordinator
+            .state()
+            .accepted
+            .as_ref()
+            .ok_or(RunHandleError::ModelSettlement {
+                code: "model_resume_accepted_missing",
+            })?;
+    let security = accepted.security();
+    let effect_id = seed.pending.requested.effect_id();
+    let accepted_digest = coordinator
+        .state()
+        .model_settlements
+        .get(&effect_id)
+        .map(|fingerprint| fingerprint.digest);
+    let rejection = ExternalCommandRejected::try_new(
+        ExternalCommandKind::EffectCompletion,
+        command_id,
+        ExternalCommandTarget::Effect(effect_id),
+        seed.authorization.principal.clone(),
+        AuthorizationEvidence::try_new(
+            security.authorization_policy_version(),
+            security.authorization_decision_id(),
+        )
+        .map_err(|_| RunHandleError::ModelSettlement {
+            code: "model_resume_authorization_invalid",
+        })?,
+        reason_code,
+        Digest::raw_json(command_id.as_bytes()),
+        accepted_digest,
+    )
+    .map_err(|_| RunHandleError::ModelSettlement {
+        code: "model_resume_rejection_invalid",
+    })?;
+    let input = KernelInput::RecordExternalCommandRejected(RecordExternalCommandRejected {
+        locator: seed.locator.clone(),
+        rejection,
+    });
+    submit_resume_input(coordinator, input, sources).await?;
+    Ok(ModelResumeAction::SuspendUncertain)
+}
+
+async fn submit_resume_input<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    input: KernelInput,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let now = sources.now()?;
+    let ids = allocate_resume_input(coordinator, now, &input, sources)?;
+    let outcome = coordinator
+        .submit(TransitionEnv { now, ids }, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+fn allocate_resume_input<C: Clock, R: RandomSource>(
+    coordinator: &CommitCoordinator,
+    now: finstack_ai_kernel::Timestamp,
+    input: &KernelInput,
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    let append_batch_id = sources.generate::<AppendBatchTag>()?;
+    let mut allocation = RuntimeIdAllocation::default();
+    for _ in 0..finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS {
+        let ids = allocation.freeze(append_batch_id)?;
+        match coordinator.classify(
+            &TransitionEnv {
+                now,
+                ids: ids.clone(),
+            },
+            input.clone(),
+        ) {
+            Ok(_) => return Ok(ids),
+            Err(KernelError::AllocatedIdsExhausted { kind }) => match kind {
+                "record_ids" => allocation.records.push(sources.generate::<RecordTag>()?),
+                "event_ids" => allocation.events.push(sources.generate::<EventTag>()?),
+                "effect_ids" => allocation.effects.push(sources.generate::<EffectTag>()?),
+                "interaction_ids" => allocation
+                    .interactions
+                    .push(sources.generate::<InteractionTag>()?),
+                "message_ids" => allocation.messages.push(sources.generate::<MessageTag>()?),
+                "turn_ids" => allocation.turns.push(sources.generate::<TurnTag>()?),
+                "model_request_ids" => allocation
+                    .model_requests
+                    .push(sources.generate::<ModelRequestTag>()?),
+                "tool_batch_ids" => allocation
+                    .tool_batches
+                    .push(sources.generate::<ToolBatchTag>()?),
+                "tool_call_ids" => allocation
+                    .tool_calls
+                    .push(sources.generate::<ToolCallTag>()?),
+                "cancellation_request_ids" => allocation
+                    .cancellations
+                    .push(sources.generate::<CancellationRequestTag>()?),
+                _ => {
+                    return Err(RunHandleError::ModelSettlement {
+                        code: "runtime_input_id_kind_unknown",
+                    });
+                }
+            },
+            Err(error) => {
+                return Err(RunHandleError::ModelSettlement { code: error.code() });
+            }
+        }
+    }
+    Err(RunHandleError::ModelSettlement {
+        code: "runtime_input_allocation_exhausted",
+    })
+}
+
+fn pending_draft(seed: &ModelDispatchSeed) -> Result<ModelRequestDraft, RunHandleError> {
+    let EffectInput::Model { request } = seed.pending.requested.input() else {
+        return Err(RunHandleError::ModelSettlement {
+            code: "model_request_invalid",
+        });
+    };
+    serde_json::from_slice(request.as_bytes()).map_err(|_| RunHandleError::ModelSettlement {
+        code: "model_request_invalid",
+    })
 }
 
 pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(

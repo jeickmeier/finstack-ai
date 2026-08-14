@@ -20,7 +20,8 @@ use crate::run_types::{
 };
 use crate::settlement::{
     SettlementSources, model_handle_error, prepare_tool_batch_if_ready, process_model_progress,
-    process_model_result, process_tool_progress, process_tool_result, validate_model_binding,
+    process_model_result, process_tool_progress, process_tool_result, resume_pending_model_effect,
+    validate_model_binding,
 };
 use crate::timer_runtime::{
     TimerDispatcher, TimerDriverMessage, TimerDriverResult, run_timer_jobs,
@@ -32,8 +33,8 @@ use crate::tool_runtime::{
 use crate::{
     CancellationSignal, Clock, CommitCoordinator, CommitCoordinatorError, CommitOutcome,
     DeadlineDiagnostic, EventSubscription, EventSubscriptionConfig, EventSubscriptionError,
-    LockedModelContextProfile, Model, ModelWarmupContext, RandomSource, ResolvedToolCatalog,
-    ToolStreamAssembler,
+    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction,
+    ModelWarmupContext, RandomSource, ResolvedToolCatalog, ToolStreamAssembler,
 };
 
 /// Cloneable bounded command/status/shutdown handle.
@@ -146,6 +147,42 @@ impl RunHandle {
     }
 }
 
+async fn resume_model_effect<C, R>(
+    coordinator: &mut CommitCoordinator,
+    model: &dyn Model,
+    dispatcher: &ModelDispatcher,
+    sources: &SettlementSources<C, R>,
+    cancellation: &CancellationSignal,
+) -> Result<(), RunHandleError>
+where
+    C: Clock + Send + Sync + 'static,
+    R: RandomSource + Send + Sync + 'static,
+{
+    let action = resume_pending_model_effect(coordinator, model, sources, cancellation).await?;
+    match action {
+        ModelResumeAction::Retry => {
+            let seed = coordinator
+                .pending_model_seed()
+                .ok_or(RunHandleError::ModelSettlement {
+                    code: "model_resume_seed_missing",
+                })?;
+            dispatcher
+                .resume_request(seed)
+                .await
+                .map_err(|error| RunHandleError::Model {
+                    code: Arc::from(error.code),
+                })
+        }
+        ModelResumeAction::SuspendUncertain => Err(RunHandleError::Model {
+            code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
+        }),
+        ModelResumeAction::NoOutstanding
+        | ModelResumeAction::UseRecorded
+        | ModelResumeAction::Reconcile
+        | ModelResumeAction::WaitExternal => Ok(()),
+    }
+}
+
 /// Single owner of all tasks spawned for one run.
 pub struct RunTaskOwner {
     handle: RunHandle,
@@ -208,6 +245,35 @@ impl RunTaskOwner {
     ///
     /// Returns configuration or warmup errors before publishing a run handle.
     pub async fn spawn_with_model<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        model: Arc<dyn Model>,
+        profile: LockedModelContextProfile,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
+        Box::pin(Self::spawn_with_model_inner(
+            coordinator,
+            run_config,
+            model_config,
+            model,
+            profile,
+            clock,
+            random,
+        ))
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "warmup, timer resume, model resume, and worker spawn stay contiguous"
+    )]
+    async fn spawn_with_model_inner<C, R>(
         mut coordinator: CommitCoordinator,
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
@@ -250,7 +316,7 @@ impl RunTaskOwner {
             Arc::clone(&model),
             profile,
             job_sender,
-            model_cancellation,
+            model_cancellation.clone(),
         ));
         let model_active = model_dispatcher.active();
         let timer_dispatcher = Arc::new(TimerDispatcher::new(
@@ -259,12 +325,22 @@ impl RunTaskOwner {
             timer_cancellation,
         ));
         let timer_active = timer_dispatcher.active();
+        let mut tasks = JoinSet::new();
+        tasks.spawn(event_task.run());
         if let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
         }
+        resume_model_effect(
+            &mut coordinator,
+            model.as_ref(),
+            &model_dispatcher,
+            &sources,
+            &model_cancellation,
+        )
+        .await?;
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::model_only(
             model_dispatcher,
             timer_dispatcher,
@@ -284,7 +360,6 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
-        let mut tasks = JoinSet::new();
         tasks.spawn(run_worker_with_model(
             coordinator,
             receiver,
@@ -308,7 +383,6 @@ impl RunTaskOwner {
             timer_job_receiver,
             timer_result_sender,
         ));
-        tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
@@ -331,10 +405,43 @@ impl RunTaskOwner {
     /// a run handle.
     #[expect(
         clippy::too_many_arguments,
-        clippy::too_many_lines,
         reason = "the public constructor receives the two explicit port configurations and injected identity sources"
     )]
     pub async fn spawn_with_model_and_tools<C, R>(
+        coordinator: CommitCoordinator,
+        run_config: RunTaskConfig,
+        model_config: ModelTaskConfig,
+        tool_config: ToolTaskConfig,
+        model: Arc<dyn Model>,
+        profile: LockedModelContextProfile,
+        catalog: Arc<ResolvedToolCatalog>,
+        clock: C,
+        random: R,
+    ) -> Result<Self, RunHandleError>
+    where
+        C: Clock + Send + Sync + 'static,
+        R: RandomSource + Send + Sync + 'static,
+    {
+        Box::pin(Self::spawn_with_model_and_tools_inner(
+            coordinator,
+            run_config,
+            model_config,
+            tool_config,
+            model,
+            profile,
+            catalog,
+            clock,
+            random,
+        ))
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "the public constructor receives the two explicit port configurations and injected identity sources"
+    )]
+    async fn spawn_with_model_and_tools_inner<C, R>(
         mut coordinator: CommitCoordinator,
         run_config: RunTaskConfig,
         model_config: ModelTaskConfig,
@@ -387,7 +494,7 @@ impl RunTaskOwner {
             Arc::clone(&model),
             profile,
             model_job_sender,
-            model_cancellation,
+            model_cancellation.clone(),
         ));
         let model_active = model_dispatcher.active();
         let tool_dispatcher = Arc::new(ToolDispatcher::new(
@@ -403,12 +510,22 @@ impl RunTaskOwner {
             timer_cancellation,
         ));
         let timer_active = timer_dispatcher.active();
+        let mut tasks = JoinSet::new();
+        tasks.spawn(event_task.run());
         if let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
         }
+        resume_model_effect(
+            &mut coordinator,
+            model.as_ref(),
+            &model_dispatcher,
+            &sources,
+            &model_cancellation,
+        )
+        .await?;
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::with_tools(
             Arc::clone(&model_dispatcher),
             tool_dispatcher,
@@ -429,7 +546,6 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
-        let mut tasks = JoinSet::new();
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
             receiver,
@@ -467,7 +583,6 @@ impl RunTaskOwner {
             timer_job_receiver,
             timer_result_sender,
         ));
-        tasks.spawn(event_task.run());
         Ok(Self {
             handle,
             tasks,
