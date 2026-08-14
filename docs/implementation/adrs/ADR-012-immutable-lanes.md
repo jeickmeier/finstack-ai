@@ -70,6 +70,9 @@ May change only through a new superseding ADR and reconciliation of every affect
   `399f3a7d9d987268f4d79ab90f31b93f854084f8` preserves lane identity in direct
   session loads, replay, and authenticated locator validation
   (PR-014-E-runtime-f7d0f0ecede0; PR-014-E-security-a8a835efcf19;
-  PR-014-E-integration-e7ec699722ab). Lane
-  creation/movement and later persistent multi-lane delivery remain mapped
-  work.
+  PR-014-E-integration-e7ec699722ab). PR-046 candidate
+  `dc16907e4e8d2c8a303788dbb9fc04febb1a0572` adds the immutable conversation
+  tree, mandatory `main` lane bootstrap, and sibling `ConversationEntry` /
+  `LaneMoved` persist/recover (PR-046-E-tree-dc16907e4e8d;
+  PR-046-E-security-dc16907e4e8d). Public concurrent multi-lane APIs remain
+  PR-047; crash-prefix remains PR-048. Do not mark Implemented.

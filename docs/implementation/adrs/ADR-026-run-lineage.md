@@ -66,4 +66,11 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial: PR-013 lineage attenuation at
+  `aba26764a448f6b2691bfac62a0f36f865f61ed6`
+  (PR-013-E-kernel-3b7e91c5a2d4; PR-013-E-security-7d2a5f9c1e84). PR-046
+  candidate `dc16907e4e8d2c8a303788dbb9fc04febb1a0572` persists and restores
+  the parent-effect → child-UUIDv7 mapping and `RunRelation` inspect for
+  CompatibleLane and IsolatedChildSession (PR-046-E-tree-dc16907e4e8d;
+  PR-046-E-security-dc16907e4e8d). Lineage-aware cancel fan-out remains
+  PR-047; crash-prefix remains PR-048. Do not mark Implemented.
