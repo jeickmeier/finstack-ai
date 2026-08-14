@@ -1442,6 +1442,7 @@ mod tests {
                     metadata: finstack_ai_kernel::Metadata::empty(),
                     committed_batches: batches.into(),
                     snapshot: None,
+                    accelerated: None,
                 })
             })
         }

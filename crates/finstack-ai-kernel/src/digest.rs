@@ -169,6 +169,21 @@ impl Digest {
         )
         .expect("fixed effect-output domain is valid")
     }
+
+    /// Digest under the `snapshot-state` domain.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the fixed [`DOMAIN_SNAPSHOT_STATE`] registry entry were invalid.
+    #[must_use]
+    pub fn snapshot_state(canonical_bytes: &[u8]) -> Self {
+        Self::domain_separated(
+            DOMAIN_SNAPSHOT_STATE,
+            SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
+            canonical_bytes,
+        )
+        .expect("fixed snapshot-state domain is valid")
+    }
 }
 
 impl fmt::Debug for Digest {
@@ -364,6 +379,16 @@ mod tests {
         assert_ne!(a, b);
         assert_ne!(a, c);
         assert_eq!(a, Digest::raw_json(payload));
+        assert_eq!(
+            Digest::snapshot_state(payload),
+            Digest::domain_separated(
+                DOMAIN_SNAPSHOT_STATE,
+                SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
+                payload
+            )
+            .expect("snapshot-state")
+        );
+        assert_ne!(a, Digest::snapshot_state(payload));
         assert_eq!(Digest::from_hex(&a.to_hex()).expect("hex"), a);
         assert!(matches!(
             Digest::domain_separated("raw\0json", 1, payload).expect_err("nul"),

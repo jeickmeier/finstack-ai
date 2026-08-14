@@ -1,9 +1,11 @@
 //! Journal store port and replay/snapshot transfer types.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AppendRequest, CommittedBatch, Digest, Metadata, RecordEnvelope, SessionId, Timestamp,
+    AppendRequest, CommittedBatch, Digest, KernelState, Metadata, RecordEnvelope, SessionId,
+    Timestamp,
 };
 use thiserror::Error;
 
@@ -55,6 +57,21 @@ pub trait JournalStore: PortObject {
             })
         })
     }
+
+    /// Encode and replace the disposable kernel-state snapshot for one session.
+    ///
+    /// Default implementations return `write_snapshot_unsupported`. Protocol-aware
+    /// stores encode [`KernelState`] through the shared snapshot envelope.
+    fn write_state_snapshot(
+        &self,
+        _request: StateSnapshotRequest,
+    ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+        Box::pin(async {
+            Err(StoreError::InvalidRequest {
+                reason_code: "write_snapshot_unsupported",
+            })
+        })
+    }
 }
 
 /// Session-scoped journal load request.
@@ -79,6 +96,8 @@ pub struct LoadedSession {
     pub committed_batches: Arc<[CommittedBatch]>,
     /// Optional bounded opaque replay cache.
     pub snapshot: Option<OpaqueSnapshot>,
+    /// Best-effort decoded snapshot used only as a disposable replay cache.
+    pub accelerated: Option<AcceleratedRestore>,
 }
 
 impl LoadedSession {
@@ -92,6 +111,7 @@ impl LoadedSession {
             metadata: Metadata::empty(),
             committed_batches: Arc::from([]),
             snapshot: None,
+            accelerated: None,
         }
     }
 }
@@ -191,6 +211,50 @@ impl OpaqueSnapshot {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+}
+
+/// Validated kernel-state restore handle decoded from a snapshot cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceleratedRestore {
+    /// Journal sequence covered by the snapshot.
+    pub sequence: u64,
+    /// Envelope checksum of the record at [`Self::sequence`].
+    pub head_checksum: Digest,
+    /// Semantic timestamp of a pending `RetryScheduled` record, when present.
+    pub pending_timer_scheduled_at: Option<Timestamp>,
+    /// Hydrated kernel state. This is not a second snapshot DTO.
+    pub state: KernelState,
+}
+
+/// Best-effort snapshot write policy used by [`crate::CommitCoordinator`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotSchedule {
+    /// Minimum records after the last snapshot before another write is attempted.
+    pub every_n_records: u64,
+    /// Maximum time a snapshot write may block an active submit.
+    pub write_timeout: Duration,
+}
+
+impl Default for SnapshotSchedule {
+    fn default() -> Self {
+        Self {
+            every_n_records: 32,
+            write_timeout: Duration::from_millis(50),
+        }
+    }
+}
+
+/// Request to encode and persist one session's disposable kernel-state snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateSnapshotRequest {
+    /// Session owning the snapshot.
+    pub session_id: SessionId,
+    /// Current replay-derived kernel state.
+    pub state: KernelState,
+    /// Envelope checksum of the record at `state.last_applied_sequence`.
+    pub head_checksum: Digest,
+    /// Semantic timestamp of a pending `RetryScheduled` record, when present.
+    pub pending_timer_scheduled_at: Option<Timestamp>,
 }
 
 /// Request to replace one session's disposable snapshot cache.

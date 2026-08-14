@@ -76,117 +76,11 @@ impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
             }
         }
 
-        if deserializer.is_human_readable() {
-            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-            validate_json_string_length(raw.get(), MAX).map_err(de::Error::custom)?;
-            let value = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
-            return Ok(Self(value));
-        }
-
-        deserializer.deserialize_string(BoundedStringVisitor::<MAX>)
+        // Internally tagged content uses serde's ContentDeserializer, which
+        // reports `is_human_readable() == true` even on canonical CBOR. Accept
+        // a decoded string from either JSON or CBOR.
+        deserializer.deserialize_any(BoundedStringVisitor::<MAX>)
     }
-}
-
-fn validate_json_string_length(input: &str, max: usize) -> Result<(), String> {
-    let bytes = input.as_bytes();
-    if bytes.len() < 2 || bytes.first() != Some(&b'"') || bytes.last() != Some(&b'"') {
-        return Err("expected a JSON string".to_owned());
-    }
-    let max_source = max.saturating_mul(6).saturating_add(2);
-    if bytes.len() > max_source {
-        return Err(format!(
-            "JSON string source length {} exceeds max {max_source}",
-            bytes.len()
-        ));
-    }
-    // Escapes only ever shrink a string, so a source that already fits cannot
-    // decode past the ceiling. Skipping the scan makes the common (short, or
-    // escape-free) case one pass instead of two; `serde_json` still rejects
-    // malformed escapes when it decodes.
-    if bytes.len() - 2 <= max {
-        return Ok(());
-    }
-
-    let mut decoded_len = 0_usize;
-    let mut index = 1_usize;
-    while index < bytes.len() - 1 {
-        if bytes[index] == b'\\' {
-            index += 1;
-            let Some(escape) = bytes.get(index).copied() else {
-                return Err("incomplete JSON string escape".to_owned());
-            };
-            match escape {
-                b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
-                    decoded_len += 1;
-                    index += 1;
-                }
-                b'u' => {
-                    let high = parse_json_hex_quad(bytes, index + 1)?;
-                    index += 5;
-                    if (0xd800..=0xdbff).contains(&high) {
-                        if bytes.get(index..index + 2) != Some(br"\u") {
-                            return Err("high surrogate requires a low surrogate".to_owned());
-                        }
-                        let low = parse_json_hex_quad(bytes, index + 2)?;
-                        if !(0xdc00..=0xdfff).contains(&low) {
-                            return Err("high surrogate requires a low surrogate".to_owned());
-                        }
-                        decoded_len += 4;
-                        index += 6;
-                    } else if (0xdc00..=0xdfff).contains(&high) {
-                        return Err("unexpected low surrogate".to_owned());
-                    } else {
-                        let scalar = char::from_u32(u32::from(high))
-                            .ok_or_else(|| "invalid Unicode scalar".to_owned())?;
-                        decoded_len += scalar.len_utf8();
-                    }
-                }
-                _ => return Err("invalid JSON string escape".to_owned()),
-            }
-        } else {
-            let remaining = &input[index..bytes.len() - 1];
-            let character = remaining
-                .chars()
-                .next()
-                .ok_or_else(|| "invalid UTF-8 JSON string".to_owned())?;
-            if character <= '\u{001f}' || character == '"' {
-                return Err("unescaped control or quote in JSON string".to_owned());
-            }
-            let length = character.len_utf8();
-            decoded_len += length;
-            index += length;
-        }
-
-        if decoded_len > max {
-            return Err(format!("string length {decoded_len} exceeds max {max}"));
-        }
-    }
-    Ok(())
-}
-
-fn parse_json_hex_quad(bytes: &[u8], start: usize) -> Result<u16, String> {
-    let end = start
-        .checked_add(4)
-        .ok_or_else(|| "invalid Unicode escape".to_owned())?;
-    let digits = bytes
-        .get(start..end)
-        .ok_or_else(|| "incomplete Unicode escape".to_owned())?;
-    let mut value = 0_u16;
-    for digit in digits {
-        value = value
-            .checked_mul(16)
-            .and_then(|accumulator| {
-                let nibble = match digit {
-                    b'0'..=b'9' => digit - b'0',
-                    b'a'..=b'f' => digit - b'a' + 10,
-                    b'A'..=b'F' => digit - b'A' + 10,
-                    _ => return None,
-                };
-                accumulator.checked_add(u16::from(nibble))
-            })
-            .ok_or_else(|| "invalid Unicode escape".to_owned())?;
-    }
-    Ok(value)
 }
 
 pub(crate) struct ContentItems(Vec<ContentBlock>);
@@ -479,18 +373,8 @@ impl<'de> Deserialize<'de> for JsonBlock {
     {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct HumanWire {
-            value: StrictRawJson,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct BinaryWire {
             value: RawJson,
-        }
-
-        if deserializer.is_human_readable() {
-            let wire = HumanWire::deserialize(deserializer)?;
-            return Ok(Self::new(wire.value.0));
         }
 
         let wire = BinaryWire::deserialize(deserializer)?;
@@ -551,27 +435,10 @@ impl<'de> Deserialize<'de> for ToolCallBlock {
     {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct HumanWire {
-            tool_call_id: ToolCallId,
-            tool_name: BoundedString<LABEL_MAX_BYTES>,
-            arguments: StrictRawJson,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct BinaryWire {
             tool_call_id: ToolCallId,
             tool_name: BoundedString<LABEL_MAX_BYTES>,
             arguments: RawJson,
-        }
-
-        if deserializer.is_human_readable() {
-            let wire = HumanWire::deserialize(deserializer)?;
-            return Self::try_new(
-                wire.tool_call_id,
-                wire.tool_name.into_inner(),
-                wire.arguments.0,
-            )
-            .map_err(de::Error::custom);
         }
 
         let wire = BinaryWire::deserialize(deserializer)?;

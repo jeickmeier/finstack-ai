@@ -38,5 +38,5 @@ SQLCipher remain a deployer concern.
 
 ## Exclusions
 
-No PostgreSQL, distributed locking, snapshot acceleration, journal pruning,
-or default binding wiring.
+No PostgreSQL, distributed locking, journal pruning, or default binding
+wiring. Snapshots remain a disposable replay cache.

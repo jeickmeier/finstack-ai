@@ -339,6 +339,7 @@ impl LoadedSessionWire {
             metadata: self.metadata,
             committed_batches: self.committed_batches.into(),
             snapshot,
+            accelerated: None,
         })
     }
 }

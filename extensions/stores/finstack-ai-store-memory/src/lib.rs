@@ -12,11 +12,13 @@ use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordDraft, RecordEnvelope,
     RecordId, SessionId,
 };
-use finstack_ai_protocol::{ProtocolError, commit_records, verify_chain};
+use finstack_ai_protocol::{
+    ProtocolError, commit_records, decode_opaque_snapshot, encode_snapshot, verify_chain,
+};
 use finstack_ai_runtime::{
-    JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot, PortFuture,
-    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth, WriteMetadataRequest,
+    AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
+    PortFuture, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
@@ -226,13 +228,15 @@ impl MemoryJournalStore {
             return Ok(LoadedSession::empty(request.session_id));
         };
         verify_session(session)?;
+        let snapshot = session.snapshot.clone();
         Ok(LoadedSession {
             session_id: request.session_id,
             head_sequence: session.head_sequence,
             head_checksum: session.head_checksum,
             metadata: session.metadata.clone(),
             committed_batches: session.batches.clone().into(),
-            snapshot: session.snapshot.clone(),
+            snapshot: snapshot.clone(),
+            accelerated: snapshot.as_ref().and_then(accelerated_from),
         })
     }
 
@@ -346,6 +350,34 @@ impl MemoryJournalStore {
         session.snapshot = Some(request.snapshot);
         Ok(receipt)
     }
+
+    fn write_state_snapshot_sync(
+        &self,
+        request: &StateSnapshotRequest,
+    ) -> Result<SnapshotReceipt, StoreError> {
+        let snapshot = encode_state_request(request, self.limits.snapshot_bytes)?;
+        self.write_snapshot_sync(SnapshotRequest {
+            session_id: request.session_id,
+            snapshot,
+        })
+    }
+
+    /// Drop the disposable snapshot cache for one session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] when the session is missing.
+    pub fn discard_snapshot(&self, session_id: SessionId) -> Result<(), StoreError> {
+        let mut inner = self.lock()?;
+        let session = inner
+            .sessions
+            .get_mut(&session_id)
+            .ok_or(StoreError::InvalidRequest {
+                reason_code: "snapshot_session_not_found",
+            })?;
+        session.snapshot = None;
+        Ok(())
+    }
 }
 
 impl JournalStore for MemoryJournalStore {
@@ -389,6 +421,14 @@ impl JournalStore for MemoryJournalStore {
         let result = self.write_metadata_sync(request);
         Box::pin(async move { result })
     }
+
+    fn write_state_snapshot(
+        &self,
+        request: StateSnapshotRequest,
+    ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+        let result = self.write_state_snapshot_sync(&request);
+        Box::pin(async move { result })
+    }
 }
 
 #[derive(Default)]
@@ -417,6 +457,38 @@ struct RecordIndexEntry {
     batch_id: AppendBatchId,
     #[allow(dead_code)]
     draft: RecordDraft,
+}
+
+fn encode_state_request(
+    request: &StateSnapshotRequest,
+    max_bytes: usize,
+) -> Result<OpaqueSnapshot, StoreError> {
+    let (bytes, digest) = encode_snapshot(
+        &request.state,
+        request.state.last_applied_sequence,
+        request.head_checksum,
+        request.pending_timer_scheduled_at,
+    )
+    .map_err(|_| StoreError::Integrity {
+        reason_code: "snapshot_encode_failed",
+    })?;
+    OpaqueSnapshot::try_new(
+        request.state.last_applied_sequence,
+        digest,
+        bytes,
+        max_bytes,
+    )
+}
+
+fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
+    let decoded =
+        decode_opaque_snapshot(snapshot.sequence(), snapshot.digest(), snapshot.bytes()).ok()?;
+    Some(AcceleratedRestore {
+        sequence: decoded.sequence,
+        head_checksum: decoded.head_checksum,
+        pending_timer_scheduled_at: decoded.pending_timer_scheduled_at,
+        state: decoded.state,
+    })
 }
 
 fn build_committed_batch(

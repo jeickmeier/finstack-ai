@@ -14,11 +14,14 @@ use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
     RecordEnvelope, RecordId, SessionId, Timestamp,
 };
-use finstack_ai_protocol::{ProtocolError, commit_records, decode, encode, verify_chain};
+use finstack_ai_protocol::{
+    ProtocolError, commit_records, decode, decode_opaque_snapshot, encode, encode_snapshot,
+    verify_chain,
+};
 use finstack_ai_runtime::{
-    JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot, PortFuture,
-    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StoreError,
-    StoreHealth, WriteMetadataRequest,
+    AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
+    PortFuture, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -535,6 +538,45 @@ impl SqliteJournalStore {
         self.append_in_transaction(&transaction, request)?;
         transaction.rollback().map_err(map_sqlite_error)
     }
+
+    fn write_state_snapshot_sync(
+        &self,
+        request: &StateSnapshotRequest,
+    ) -> Result<SnapshotReceipt, StoreError> {
+        let snapshot = encode_state_request(request, self.limits.snapshot_bytes)?;
+        self.write_snapshot_sync(&SnapshotRequest {
+            session_id: request.session_id,
+            snapshot,
+        })
+    }
+
+    /// Drop the disposable snapshot cache for one session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] when the session is missing.
+    pub fn discard_snapshot(&self, session_id: SessionId) -> Result<(), StoreError> {
+        self.with_immediate(|transaction| {
+            if load_session_row(transaction, session_id)?.is_none() {
+                return Err(StoreError::InvalidRequest {
+                    reason_code: "snapshot_session_not_found",
+                });
+            }
+            transaction
+                .execute(
+                    "DELETE FROM snapshots WHERE session_id = ?1",
+                    params![session_id.as_bytes().as_slice()],
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "UPDATE sessions SET snapshot_sequence = NULL WHERE session_id = ?1",
+                    params![session_id.as_bytes().as_slice()],
+                )
+                .map_err(map_sqlite_error)?;
+            Ok(())
+        })
+    }
 }
 
 impl JournalStore for SqliteJournalStore {
@@ -579,6 +621,14 @@ impl JournalStore for SqliteJournalStore {
         request: WriteMetadataRequest,
     ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
         let result = self.write_metadata_sync(request);
+        Box::pin(async move { result })
+    }
+
+    fn write_state_snapshot(
+        &self,
+        request: StateSnapshotRequest,
+    ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+        let result = self.write_state_snapshot_sync(&request);
         Box::pin(async move { result })
     }
 }
@@ -1118,7 +1168,8 @@ fn load_session(
         head_checksum,
         metadata,
         committed_batches: committed_batches.into(),
-        snapshot,
+        snapshot: snapshot.clone(),
+        accelerated: snapshot.as_ref().and_then(accelerated_from),
     })
 }
 
@@ -1183,6 +1234,38 @@ fn load_snapshot(
         payload,
         snapshot_bytes,
     )?))
+}
+
+fn encode_state_request(
+    request: &StateSnapshotRequest,
+    max_bytes: usize,
+) -> Result<OpaqueSnapshot, StoreError> {
+    let (bytes, digest) = encode_snapshot(
+        &request.state,
+        request.state.last_applied_sequence,
+        request.head_checksum,
+        request.pending_timer_scheduled_at,
+    )
+    .map_err(|_| StoreError::Integrity {
+        reason_code: "snapshot_encode_failed",
+    })?;
+    OpaqueSnapshot::try_new(
+        request.state.last_applied_sequence,
+        digest,
+        bytes,
+        max_bytes,
+    )
+}
+
+fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
+    let decoded =
+        decode_opaque_snapshot(snapshot.sequence(), snapshot.digest(), snapshot.bytes()).ok()?;
+    Some(AcceleratedRestore {
+        sequence: decoded.sequence,
+        head_checksum: decoded.head_checksum,
+        pending_timer_scheduled_at: decoded.pending_timer_scheduled_at,
+        state: decoded.state,
+    })
 }
 
 fn verify_stored_session(
@@ -1423,11 +1506,15 @@ mod tests {
     use std::thread;
 
     use finstack_ai_kernel::{
-        AuthorizationEvidence, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
-        LaneCreated, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
-        RecordDraft, RecordTag, RunTag, SessionCreated, SessionTag,
+        AcceptRun, AllocatedIds, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
+        DeadlinePropagation, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
+        KernelInput, LaneCreated, LaneTag, PrincipalPropagation, PrincipalRef,
+        RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordDraft, RecordTag, RunAccepted, RunLimits,
+        RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionCreated, SessionTag,
+        Timestamp, TransitionEnv,
     };
     use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
+    use finstack_ai_runtime::CommitCoordinator;
     use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};
     use tempfile::TempDir;
 
@@ -1459,6 +1546,82 @@ mod tests {
             records_per_session: 16,
             snapshot_bytes: 1024,
         }
+    }
+
+    fn snapshot_capable_store() -> Arc<SqliteJournalStore> {
+        Arc::new(
+            SqliteJournalStore::try_open(SqliteStoreConfig {
+                path: PathBuf::from(":memory:"),
+                durability: SqliteDurability::Relaxed {
+                    synchronous: SqliteSynchronous::Normal,
+                },
+                limits: SqliteStoreLimits {
+                    sessions: 4,
+                    batches_per_session: 8,
+                    records_per_session: 16,
+                    snapshot_bytes: 256 * 1024,
+                },
+                busy_timeout: DEFAULT_BUSY_TIMEOUT,
+            })
+            .expect("store"),
+        )
+    }
+
+    fn accept_root_run(store: &Arc<SqliteJournalStore>) {
+        let mut coordinator = CommitCoordinator::new(Arc::clone(store) as Arc<dyn JournalStore>);
+        let run_id = id::<RunTag>(3);
+        block_on(
+            coordinator.submit(
+                TransitionEnv {
+                    now: Timestamp::from_unix_ms(1_000).expect("ts"),
+                    ids: AllocatedIds::try_new(
+                        vec![id(1)],
+                        vec![id(1)],
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        vec![id(101)],
+                        Vec::new(),
+                    )
+                    .expect("ids"),
+                },
+                KernelInput::AcceptRun(AcceptRun {
+                    session_id: id::<SessionTag>(1),
+                    lane_id: id::<LaneTag>(2),
+                    accepted: RunAccepted::try_new(
+                        run_id,
+                        RunRelation::root(run_id).expect("relation"),
+                        RunSecurityContext::try_new(
+                            "tenant-a",
+                            PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                                .expect("principal"),
+                            "oidc",
+                            "high",
+                            "policy-v1",
+                            "decision-v1",
+                            None,
+                        )
+                        .expect("security"),
+                        None,
+                        RunLimits::empty(),
+                        RunPropagationPolicy {
+                            cancellation: CancellationPropagation::Cascade,
+                            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                            budget: BudgetPropagation::SharedScope,
+                            principal: PrincipalPropagation::Inherit,
+                        },
+                        Digest::raw_json(br#"{"agent":"fixture"}"#),
+                        None,
+                    )
+                    .expect("accepted"),
+                }),
+            ),
+        )
+        .expect("accept");
     }
 
     fn memory_store() -> SqliteJournalStore {
@@ -1895,6 +2058,46 @@ mod tests {
             },
         ))
         .expect("conformance");
+    }
+
+    #[test]
+    fn discarding_sqlite_snapshots_still_recovers_from_the_journal() {
+        let store = snapshot_capable_store();
+        accept_root_run(&store);
+        let recovered = block_on(CommitCoordinator::recover(
+            Arc::clone(&store) as Arc<dyn JournalStore>,
+            id::<SessionTag>(1),
+        ))
+        .expect("recover");
+        let expected = recovered.state().state_hash().expect("hash");
+        let loaded = block_on(store.load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        }))
+        .expect("load");
+        block_on(store.write_state_snapshot(StateSnapshotRequest {
+            session_id: id::<SessionTag>(1),
+            state: recovered.state().clone(),
+            head_checksum: loaded.head_checksum.expect("head"),
+            pending_timer_scheduled_at: None,
+        }))
+        .expect("snapshot");
+        let loaded = block_on(store.load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        }))
+        .expect("accelerated");
+        assert!(loaded.accelerated.is_some());
+        store
+            .discard_snapshot(id::<SessionTag>(1))
+            .expect("discard");
+        let loaded = block_on(store.load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        }))
+        .expect("after discard");
+        assert!(loaded.snapshot.is_none());
+        assert!(loaded.accelerated.is_none());
+        let rebuilt =
+            block_on(CommitCoordinator::recover(store, id::<SessionTag>(1))).expect("rebuild");
+        assert_eq!(rebuilt.state().state_hash().expect("hash"), expected);
     }
 
     #[test]

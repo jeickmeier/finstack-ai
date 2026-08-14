@@ -702,6 +702,7 @@ mod tests {
             metadata: Metadata::empty(),
             committed_batches: Arc::from([batch]),
             snapshot: None,
+            accelerated: None,
         }
     }
 
