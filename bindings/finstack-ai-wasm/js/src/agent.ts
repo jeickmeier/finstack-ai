@@ -87,7 +87,7 @@ export interface AgentOptions {
   instruction?: string;
   /**
    * Optional host journal. When omitted, the Rust in-memory store is used.
-   * Persistence is experimental until PR-048 revalidation.
+   * Persistence remains experimental after PR-048; it does not meet NFR-REL-001.
    */
   store?: JsJournalStore;
   /**

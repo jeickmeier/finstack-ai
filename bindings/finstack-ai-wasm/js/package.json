@@ -1,7 +1,7 @@
 {
   "name": "@finstack/ai",
-  "version": "0.0.2",
-  "description": "Browser WASM bindings for the finstack-ai engine. IndexedDB persistence is experimental until PR-048.",
+  "version": "0.0.3",
+  "description": "Browser WASM bindings for the finstack-ai engine. IndexedDB persistence remains experimental after PR-048.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "private": true,

@@ -414,7 +414,7 @@ test("package and example docs label persistence experimental", async ({ page })
     "utf8",
   );
   const exampleReadme = readFileSync(join(EXAMPLE_DIR, "README.md"), "utf8");
-  expect(packageReadme).toContain("experimental until PR-048");
-  expect(exampleReadme).toContain("experimental until PR-048");
+  expect(packageReadme).toContain("experimental after PR-048");
+  expect(exampleReadme).toContain("experimental after PR-048");
   expect(exampleReadme).toContain("not crash-durable");
 });

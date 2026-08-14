@@ -145,7 +145,7 @@ pub use content::{
 };
 pub use conversation::{
     ConversationEntry, ConversationError, EntryBody, LaneProjection, OperationSummary,
-    SessionProjection, apply_conversation_entry, extract_history,
+    SessionProjection, apply_conversation_entry, extract_history, walk_conversation,
 };
 pub use digest::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, DOMAIN_AGENT_SPEC,

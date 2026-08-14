@@ -16,12 +16,13 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_protocol::{
     ProtocolError, commit_records, decode, decode_opaque_snapshot, encode, encode_snapshot,
-    verify_chain,
+    verify_chain, verify_chain_from,
 };
 use finstack_ai_runtime::{
     AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
-    PortFuture, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
-    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
+    PortFuture, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest,
+    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth,
+    WriteMetadataRequest,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -121,8 +122,10 @@ impl SqliteStoreConfig {
 
 /// File-backed or in-memory sqlite journal with one owned connection.
 ///
-/// Records are append-only and authoritative. This crate documents pruning
-/// policy only; it does not expose a prune API.
+/// Records are append-only and authoritative. Optional
+/// [`JournalStore::prune`](finstack_ai_runtime::JournalStore::prune) deletes
+/// snapshot-covered prefix records while retaining the snapshot-boundary
+/// record, outstanding tail, and settlement indexes.
 pub struct SqliteJournalStore {
     path: PathBuf,
     limits: SqliteStoreLimits,
@@ -577,6 +580,67 @@ impl SqliteJournalStore {
             Ok(())
         })
     }
+
+    fn prune_sync(&self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
+        self.with_immediate(|transaction| {
+            let session = load_session_row(transaction, request.session_id)?.ok_or(
+                StoreError::InvalidRequest {
+                    reason_code: "prune_session_not_found",
+                },
+            )?;
+            let snapshot =
+                load_snapshot(transaction, request.session_id, self.limits.snapshot_bytes)?.ok_or(
+                    StoreError::InvalidRequest {
+                        reason_code: "prune_requires_snapshot",
+                    },
+                )?;
+            if snapshot.sequence() == 0 || snapshot.sequence() > session.current_sequence {
+                return Err(StoreError::InvalidRequest {
+                    reason_code: "prune_snapshot_not_aligned",
+                });
+            }
+            let aligned: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM batches
+                     WHERE session_id = ?1 AND last_sequence = ?2",
+                    params![
+                        request.session_id.as_bytes().as_slice(),
+                        i64_from_u64(snapshot.sequence(), "snapshot_sequence")?,
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(map_sqlite_error)?;
+            if aligned == 0 {
+                return Err(StoreError::InvalidRequest {
+                    reason_code: "prune_not_batch_aligned",
+                });
+            }
+            let accelerated = accelerated_from(&snapshot).ok_or(StoreError::Integrity {
+                reason_code: "prune_snapshot_undecodable",
+            })?;
+            let retained_outstanding = outstanding_count(&accelerated);
+            let retained_tombstones = tombstone_count(&accelerated);
+            let pruned_through = i64_from_u64(snapshot.sequence(), "snapshot_sequence")?;
+            transaction
+                .execute(
+                    "DELETE FROM records WHERE session_id = ?1 AND sequence < ?2",
+                    params![request.session_id.as_bytes().as_slice(), pruned_through],
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "DELETE FROM batches WHERE session_id = ?1 AND last_sequence < ?2",
+                    params![request.session_id.as_bytes().as_slice(), pruned_through],
+                )
+                .map_err(map_sqlite_error)?;
+            let _ = request.horizon;
+            Ok(PruneReceipt {
+                pruned_through_sequence: snapshot.sequence(),
+                retained_outstanding,
+                retained_tombstones,
+            })
+        })
+    }
 }
 
 impl JournalStore for SqliteJournalStore {
@@ -629,6 +693,11 @@ impl JournalStore for SqliteJournalStore {
         request: StateSnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
         let result = self.write_state_snapshot_sync(&request);
+        Box::pin(async move { result })
+    }
+
+    fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
+        let result = self.prune_sync(request);
         Box::pin(async move { result })
     }
 }
@@ -1268,6 +1337,24 @@ fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
     })
 }
 
+fn outstanding_count(restored: &AcceleratedRestore) -> u64 {
+    u64::from(restored.state.pending_model_effect.is_some())
+        .saturating_add(u64::from(restored.state.pending_interaction.is_some()))
+}
+
+fn tombstone_count(restored: &AcceleratedRestore) -> u64 {
+    u64::try_from(
+        restored
+            .state
+            .completion_identities
+            .len()
+            .saturating_add(restored.state.resolution_identities.len())
+            .saturating_add(restored.state.model_settlements.len())
+            .saturating_add(restored.state.tool_settlements.len()),
+    )
+    .unwrap_or(u64::MAX)
+}
+
 fn verify_stored_session(
     connection: &Connection,
     session_id: SessionId,
@@ -1277,7 +1364,13 @@ fn verify_stored_session(
         .iter()
         .map(|row| row.envelope.clone())
         .collect::<Vec<_>>();
-    let head = verify_chain(&records).map_err(protocol_error)?;
+    let head = match records.first() {
+        Some(first) if first.sequence() > 1 => {
+            verify_chain_from(&records, first.previous_checksum(), Some(first.sequence()))
+                .map_err(protocol_error)?
+        }
+        _ => verify_chain(&records).map_err(protocol_error)?,
+    };
     let stored_head = connection
         .query_row(
             "SELECT head_checksum FROM sessions WHERE session_id = ?1",

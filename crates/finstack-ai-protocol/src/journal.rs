@@ -189,8 +189,23 @@ pub fn verify_envelope(envelope: &RecordEnvelope) -> Result<(), ProtocolError> {
 ///
 /// Returns integrity failures before any caller `apply`.
 pub fn verify_chain(records: &[RecordEnvelope]) -> Result<Option<Digest>, ProtocolError> {
-    let mut previous = None;
-    let mut expected_sequence = None;
+    verify_chain_from(records, None, None)
+}
+
+/// Verify a contiguous record chain that may start after a deleted prefix.
+///
+/// `previous` is the checksum the first record must cite. `expected_sequence`
+/// is that record's sequence when the chain does not start at 1. An empty
+/// slice returns `previous`.
+///
+/// # Errors
+///
+/// Returns integrity failures before any caller `apply`.
+pub fn verify_chain_from(
+    records: &[RecordEnvelope],
+    mut previous: Option<Digest>,
+    mut expected_sequence: Option<u64>,
+) -> Result<Option<Digest>, ProtocolError> {
     for record in records {
         verify_envelope(record)?;
         if record.previous_checksum() != previous {

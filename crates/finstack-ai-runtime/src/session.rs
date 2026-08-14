@@ -475,6 +475,10 @@ impl SessionRuntime {
 
     /// Inspect one lane after refreshing the projection.
     ///
+    /// History may include an open tool-call pair while a run is awaiting
+    /// tools or interaction. Model-facing [`SessionProjection::history`]
+    /// still rejects that incomplete pair.
+    ///
     /// # Errors
     ///
     /// Returns [`SessionError::UnknownLane`] or a recover/history failure.
@@ -484,9 +488,7 @@ impl SessionRuntime {
             .lane_by_id(lane_id)
             .ok_or(SessionError::UnknownLane)?;
         let history = match lane.leaf_id {
-            Some(leaf) => projection
-                .history(leaf)
-                .map_err(SessionError::Conversation)?,
+            Some(leaf) => projection.walk(leaf).map_err(SessionError::Conversation)?,
             None => Vec::new(),
         };
         Ok(LaneInspect {

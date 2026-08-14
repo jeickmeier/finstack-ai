@@ -3,8 +3,10 @@
 Trusted native SQLite [`JournalStore`](https://docs.rs/finstack-ai-runtime) leaf.
 This crate is opt-in. Do not treat it as the Agent, Python, or WASM default.
 
-Records are append-only and authoritative. There is no prune API in this
-version. Snapshots are a disposable cache, not a second semantic model.
+Records are append-only and authoritative. Optional `JournalStore::prune`
+deletes snapshot-covered prefix records while keeping the snapshot-boundary
+record, outstanding tail, and settlement indexes. Snapshots stay a disposable
+cache, not a second semantic model.
 
 ## Durability
 
@@ -24,19 +26,39 @@ honoring those flush settings.
 opens as-is. Any other version fails closed (`sqlite_schema_unsupported`).
 The v1 migration is one-way. There is no reversible migrator in this crate.
 
-## Backup
+## Backup and leaf commands
 
-Before any later migrator or file-format change, copy the live database and
-its sidecar files together while the writer is quiet or stopped:
+`sqlite_ops` is a leaf binary over the existing store APIs. It is not a
+seventh port.
+
+```text
+sqlite_ops backup <src-db> <dest-db>
+sqlite_ops restore <src-db> <dest-db>
+sqlite_ops export <db> <session>
+sqlite_ops import <db> <session>
+sqlite_ops diagnose <db> <session>
+sqlite_ops migrate <db>
+```
+
+`backup` / `restore` copy the live database and its sidecar files together
+while the writer is quiet or stopped:
 
 - `*.sqlite` (or the configured path)
 - `*-wal`
 - `*-shm`
 
-Restoring a subset of those files can yield a torn journal. Encryption and
-SQLCipher remain a deployer concern.
+`restore` refuses a destination that already exists and refuses orphan
+destination sidecars. Restoring a subset of those files can yield a torn
+journal. Encryption and SQLCipher remain a deployer concern.
+
+`export` / `import` use the protocol diagnostic JSONL projection.
+`diagnose` prints head sequence, checksum, snapshot validity, outstanding
+work, child mappings, and a corruption class. `migrate` applies user_version
+`0`/`1` → `1` and fails closed on any other version.
+
+`sqlite_fault_helper` stays a test helper, not a product command.
 
 ## Exclusions
 
-No PostgreSQL, distributed locking, journal pruning, or default binding
-wiring. Snapshots remain a disposable replay cache.
+No PostgreSQL, distributed locking, or default binding wiring. Snapshots
+remain a disposable replay cache. IndexedDB is not this crate.

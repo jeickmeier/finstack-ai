@@ -3,8 +3,8 @@
 Experimental same-origin browser persistence demo for `@finstack/ai`.
 
 IndexedDB is a trusted host JournalStore adapter. It is not JournalStore v1
-and not crash-durable. Persistence is experimental until PR-048
-revalidates the schema against JournalStore v1. `health().detail` is
+and not crash-durable. Persistence remains experimental after PR-048;
+it does not meet NFR-REL-001. `health().detail` is
 `js_indexeddb_experimental`. Reload restore is **inspect**, not
 continue-the-run.
 
@@ -15,7 +15,7 @@ continue-the-run.
 - Shared-device browsers keep the journal until the user clears site data or
   clicks **Clear local data**.
 - Schema v1 is provisional. A later upgrade may refuse to open this database
-  (`journal_schema_unsupported`) until PR-048 migrates it.
+  (`journal_schema_unsupported`). Schema version remains 1.
 - Deleting the database discards inspect history. That is not run cancellation.
 
 ## Topology

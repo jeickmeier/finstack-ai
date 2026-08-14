@@ -240,13 +240,15 @@ pub fn apply_conversation_entry(
     }
 }
 
-/// Walk `parent_id` from `leaf_id` to the root and validate tool-call pairs.
+/// Walk `parent_id` from `leaf_id` to the root without requiring closed tool pairs.
+///
+/// Inspect and mid-run restore use this path. Model-facing history still goes
+/// through [`extract_history`], which rejects an open tool-call/result pair.
 ///
 /// # Errors
 ///
-/// Returns [`ConversationError`] for a missing leaf/parent, a cycle, or an
-/// invalid tool-call/result pair.
-pub fn extract_history(
+/// Returns [`ConversationError`] for a missing leaf/parent or a cycle.
+pub fn walk_conversation(
     entries: &BTreeMap<EntryId, ConversationEntry>,
     leaf_id: EntryId,
 ) -> Result<Vec<ConversationEntry>, ConversationError> {
@@ -269,6 +271,20 @@ pub fn extract_history(
         walk.push(entry);
     }
     walk.reverse();
+    Ok(walk)
+}
+
+/// Walk `parent_id` from `leaf_id` to the root and validate tool-call pairs.
+///
+/// # Errors
+///
+/// Returns [`ConversationError`] for a missing leaf/parent, a cycle, or an
+/// invalid tool-call/result pair.
+pub fn extract_history(
+    entries: &BTreeMap<EntryId, ConversationEntry>,
+    leaf_id: EntryId,
+) -> Result<Vec<ConversationEntry>, ConversationError> {
+    let walk = walk_conversation(entries, leaf_id)?;
     validate_tool_pairs(&walk)?;
     Ok(walk)
 }
@@ -447,7 +463,16 @@ impl SessionProjection {
         self.child_mappings.get(&(parent_run_id, parent_effect_id))
     }
 
-    /// Extract valid history ending at `leaf_id`.
+    /// Walk ancestors ending at `leaf_id` without requiring closed tool pairs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConversationError`] when the path is incomplete or cyclic.
+    pub fn walk(&self, leaf_id: EntryId) -> Result<Vec<ConversationEntry>, ConversationError> {
+        walk_conversation(&self.entries, leaf_id)
+    }
+
+    /// Extract model-ready history ending at `leaf_id`.
     ///
     /// # Errors
     ///
@@ -725,6 +750,7 @@ mod tests {
             extract_history(&entries, id(11)),
             Err(ConversationError::InvalidToolPair)
         );
+        assert_eq!(walk_conversation(&entries, id(11)).expect("walk").len(), 2);
     }
 
     #[test]

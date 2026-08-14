@@ -2,7 +2,7 @@
 name = "finstack-ai-rust-backed-starter"
 version = "0.0.0"
 requires-python = ">=3.11"
-dependencies = ["finstack-ai==0.0.2"]
+dependencies = ["finstack-ai==0.0.3"]
 
 [build-system]
 requires = ["hatchling==1.29.0"]

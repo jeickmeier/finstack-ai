@@ -53,8 +53,10 @@ Python.
 
 `normalize_prebeta_shape()` exposes data-only Rust validation for child-lineage,
 interaction-resolution, and authenticated external-completion shapes. It does
-not route those commands or claim durable restart, pruning, or duplicate
-completion semantics; PR-048 remains the blocking beta gate for those claims.
+not route those commands. PR-048 proves session/lane open after drop and
+inspect of a completed run. Interaction resolve-after-open and live
+external-completion routing stay Rust-owned because `open_session` does not
+respawn parked runs. IndexedDB remains experimental and non-durable.
 
 ## Optional Pydantic adapters
 

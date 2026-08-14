@@ -14,11 +14,13 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_protocol::{
     ProtocolError, commit_records, decode_opaque_snapshot, encode_snapshot, verify_chain,
+    verify_chain_from,
 };
 use finstack_ai_runtime::{
     AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
-    PortFuture, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
-    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
+    PortFuture, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest,
+    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth,
+    WriteMetadataRequest,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
@@ -362,6 +364,54 @@ impl MemoryJournalStore {
         })
     }
 
+    fn prune_sync(&self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
+        let mut inner = self.lock()?;
+        let session =
+            inner
+                .sessions
+                .get_mut(&request.session_id)
+                .ok_or(StoreError::InvalidRequest {
+                    reason_code: "prune_session_not_found",
+                })?;
+        let snapshot = session
+            .snapshot
+            .as_ref()
+            .ok_or(StoreError::InvalidRequest {
+                reason_code: "prune_requires_snapshot",
+            })?;
+        if snapshot.sequence() == 0 || snapshot.sequence() > session.head_sequence {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "prune_snapshot_not_aligned",
+            });
+        }
+        let aligned = session
+            .batches
+            .iter()
+            .any(|batch| batch.last_sequence == snapshot.sequence());
+        if !aligned {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "prune_not_batch_aligned",
+            });
+        }
+        let accelerated = accelerated_from(snapshot).ok_or(StoreError::Integrity {
+            reason_code: "prune_snapshot_undecodable",
+        })?;
+        let retained_outstanding = outstanding_count(&accelerated);
+        let retained_tombstones = tombstone_count(&accelerated);
+        let pruned_through_sequence = snapshot.sequence();
+        session
+            .batches
+            .retain(|batch| batch.last_sequence >= pruned_through_sequence);
+        session.records = flatten_records(session).len();
+        verify_session(session)?;
+        let _ = request.horizon;
+        Ok(PruneReceipt {
+            pruned_through_sequence,
+            retained_outstanding,
+            retained_tombstones,
+        })
+    }
+
     /// Drop the disposable snapshot cache for one session.
     ///
     /// # Errors
@@ -427,6 +477,11 @@ impl JournalStore for MemoryJournalStore {
         request: StateSnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
         let result = self.write_state_snapshot_sync(&request);
+        Box::pin(async move { result })
+    }
+
+    fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
+        let result = self.prune_sync(request);
         Box::pin(async move { result })
     }
 }
@@ -525,13 +580,38 @@ fn build_committed_batch(
 
 fn verify_session(session: &SessionData) -> Result<(), StoreError> {
     let records = flatten_records(session);
-    let head = verify_chain(&records).map_err(|error| protocol_error(&error))?;
+    let head = match records.first() {
+        Some(first) if first.sequence() > 1 => {
+            verify_chain_from(&records, first.previous_checksum(), Some(first.sequence()))
+                .map_err(|error| protocol_error(&error))?
+        }
+        _ => verify_chain(&records).map_err(|error| protocol_error(&error))?,
+    };
     if head != session.head_checksum {
         return Err(StoreError::Integrity {
             reason_code: "head_checksum_mismatch",
         });
     }
     Ok(())
+}
+
+fn outstanding_count(restored: &AcceleratedRestore) -> u64 {
+    let pending_model = u64::from(restored.state.pending_model_effect.is_some());
+    let pending_interaction = u64::from(restored.state.pending_interaction.is_some());
+    pending_model.saturating_add(pending_interaction)
+}
+
+fn tombstone_count(restored: &AcceleratedRestore) -> u64 {
+    u64::try_from(
+        restored
+            .state
+            .completion_identities
+            .len()
+            .saturating_add(restored.state.resolution_identities.len())
+            .saturating_add(restored.state.model_settlements.len())
+            .saturating_add(restored.state.tool_settlements.len()),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {

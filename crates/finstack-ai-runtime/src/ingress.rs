@@ -67,6 +67,7 @@ pub struct ExternalCompletionRouter {
     store: Arc<dyn JournalStore>,
     audit: Arc<SecurityAuditGate>,
     ids: UuidV7Generator<SystemClock, OsRandomSource>,
+    horizon: Option<crate::IdempotencyHorizon>,
 }
 
 impl ExternalCompletionRouter {
@@ -77,7 +78,15 @@ impl ExternalCompletionRouter {
             store,
             audit,
             ids: UuidV7Generator::new(SystemClock, OsRandomSource),
+            horizon: None,
         }
+    }
+
+    /// Bind the application-configured settlement horizon.
+    #[must_use]
+    pub fn with_horizon(mut self, horizon: crate::IdempotencyHorizon) -> Self {
+        self.horizon = Some(horizon);
+        self
     }
 
     /// Route one fully authenticated command without accepting raw callback tokens.
@@ -97,6 +106,22 @@ impl ExternalCompletionRouter {
     ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
         let locator_digest = normalized_digest(OPERATION_LOCATOR_DIGEST_DOMAIN, &command.locator)?;
         let submitted_digest = normalized_digest(EXTERNAL_COMMAND_DIGEST_DOMAIN, &command)?;
+        if self
+            .horizon
+            .is_some_and(|horizon| submitted_at >= horizon.expire_at)
+        {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.principal.clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "expired_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await;
+        }
         let Ok(mut coordinator) =
             CommitCoordinator::recover(Arc::clone(&self.store), command.locator.session_id).await
         else {
