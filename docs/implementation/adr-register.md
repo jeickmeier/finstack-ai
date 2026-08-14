@@ -39,7 +39,7 @@ Index last reconciled: 2026-08-14 (G4-D-binding-parity-101224c5eb60; Phase 5 `Do
 | ADR-012 | `immutable-lanes` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-013 | `at-least-once-effects` | Durability/ecosystem lead | PR-006–PR-008, PR-014, PR-043, PR-046–PR-048 | Accepted | Standalone | Not started | Missing |
 | ADR-014 | `protocol-separation` | Runtime/security owner | PR-049–PR-054, PR-058 | Accepted | Standalone | Not started | Missing |
-| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Implemented | Partial ([PR-039 codec/fixture candidate](artifacts/pr-039/candidate-validation.txt); verified at local merge) |
+| ADR-015 | `canonical-cbor` | Durability/ecosystem lead | PR-004 profile; PR-008 digest-domain freeze; PR-039 codec/digests | Accepted | Standalone | Implemented | Verified ([PR-039 codec, checksums, and journal v1 fixtures](artifacts/pr-039/integration-validation.txt)) |
 | ADR-016 | `sqlite-before-multilane` | Durability/ecosystem lead | PR-040 before PR-047 | Accepted | Standalone | Not started | Missing |
 | ADR-017 | `single-python-wheel` | Bindings lead | Freeze before PR-027; verify through PR-032 | Accepted | Standalone | Implemented | Verified ([PR-032 single-extension wheel, staged 0.0.2 artifacts, and Phase 4 wheel exit](artifacts/pr-032/phase4-exit-review.txt)) |
 | ADR-018 | `python-version-matrix` | Bindings lead | Approve before PR-027; verify through PR-032 | Accepted | Standalone | Implemented | Verified ([PR-032 effective 21/21 hosted non-abi3 CPython/target matrix and Phase 4 wheel exit](artifacts/pr-032/phase4-exit-review.txt)) |
@@ -257,6 +257,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-14 | ADR-007 | Evidence | me@jeickmeier.com | Partial | Verified | Phase 4/5 exits, PR-027–PR-038 acceptance, hosted Ubuntu CI, and G4 pass; DeferredBindingAdapter::wasm() stays Unavailable | G4-D-binding-parity-101224c5eb60; PR-038-E-hosted-71b0197f7669 | me@jeickmeier.com |
 | 2026-08-14 | ADR-015 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-039 candidate ships the ADR-015 wrapper, limits, diagnostic JSON/JSONL, and journal v1 fixtures | PR-039-E-candidate-40c837e54fb9 | me@jeickmeier.com |
 | 2026-08-14 | ADR-015 | Evidence | me@jeickmeier.com | Partial | Partial | Codec, checksum, and 103-fixture corpus exist at `40c837e54fb95e8a509bcd2cf4f015b4bf44d1b0`; Verified waits for local merge | PR-039-E-journal-40c837e54fb9; PR-039-E-security-40c837e54fb9 | me@jeickmeier.com |
+| 2026-08-14 | ADR-015 | Evidence | me@jeickmeier.com | Partial | Verified | PR-039 local merge closes the ADR-015 codec, limits, diagnostic JSON/JSONL, checksums, and journal v1 fixtures | PR-039-E-integration-64c54e767f53; PR-039-E-security-40c837e54fb9 | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -276,7 +277,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-012 | [ADR-012-immutable-lanes.md](adrs/ADR-012-immutable-lanes.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-013 | [ADR-013-at-least-once-effects.md](adrs/ADR-013-at-least-once-effects.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-014 | [ADR-014-protocol-separation.md](adrs/ADR-014-protocol-separation.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
-| ADR-015 | [ADR-015-canonical-cbor.md](adrs/ADR-015-canonical-cbor.md) | me@jeickmeier.com | Partial: PR-039-E-candidate-40c837e54fb9; PR-039-E-journal-40c837e54fb9; PR-039-E-security-40c837e54fb9 at `40c837e54fb95e8a509bcd2cf4f015b4bf44d1b0` | PR-004 standalone ADR; PR-039 codec/fixture candidate | 2026-08-14 |
+| ADR-015 | [ADR-015-canonical-cbor.md](adrs/ADR-015-canonical-cbor.md) | me@jeickmeier.com | Verified: PR-039-E-integration-64c54e767f53; PR-039-E-journal-40c837e54fb9; PR-039-E-security-40c837e54fb9 at merge `64c54e767f53faac240ab92c19a8447264e82ff8` | PR-004 standalone ADR; PR-039 local merge | 2026-08-14 |
 | ADR-016 | [ADR-016-sqlite-before-multilane.md](adrs/ADR-016-sqlite-before-multilane.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-017 | [ADR-017-single-python-wheel.md](adrs/ADR-017-single-python-wheel.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-018 | [ADR-018-python-version-matrix.md](adrs/ADR-018-python-version-matrix.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |

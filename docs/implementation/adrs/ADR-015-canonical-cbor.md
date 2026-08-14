@@ -84,4 +84,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: PR-039 candidate `40c837e54fb95e8a509bcd2cf4f015b4bf44d1b0` publishes the project canonical-CBOR wrapper, TDD §6.5 limits, diagnostic JSON/JSONL, payload/envelope checksums, and `fixtures/compatibility/journal/v1/`. Verified status waits for local merge evidence.
+- Implementation evidence: PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8` publishes the project canonical-CBOR wrapper, TDD §6.5 limits, diagnostic JSON/JSONL, payload/envelope checksums, and `fixtures/compatibility/journal/v1/`
