@@ -1,0 +1,17 @@
+PR-033 local integration validation
+Date: 2026-08-13
+Merge: 1781b8d4841d573a3bc2d82b7fe5a6abce5df145
+Parents: f915cbfd3ed80446fcfa1dceeabf1f3491aeb774 (main) and
+         6609027 (codex/pr-033-wasm-package evidence head)
+Candidate: dd674e7dff7cdb126d184a1cbd33dd5cb7df8053
+Result: PASS (local merge)
+
+The merge tree on main contains the wasm-bindgen package, selected wasm-host
+graph gate, generated glue, and candidate evidence. No hosted pull request or
+merge, npm publish, tag, G4, or cross-binding checkpoint occurred.
+
+Post-merge checks:
+- git merge --no-ff completed with a clean worktree
+- tools/wasm_package/check.py dirty remains clean
+- DeferredBindingAdapter::wasm() remains unavailable
+- ADR-031 remains Accepted with Partial implementation evidence
