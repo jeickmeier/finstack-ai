@@ -1,0 +1,47 @@
+Phase 4 exit review
+Date: 2026-08-13
+Reviewed revision: 5f15210780254e27dbe0ecf665cf38f99e412b1f
+Result: PASS (4/4)
+
+The local `main` merge tree `39309c6191df9ceafa479ab31cb3352a479ee13d`
+equals hosted-evidence commit `7649742190dd7686bc85a0208b9788f4a89eea09`.
+This review closes the four Phase 4 exit criteria. It does not decide G4.
+
+Exit dispositions
+
+1. PH4-E-exit-traces-ca384aa02727 - PASS
+   Rust-backed Python runs pass the applicable shared trace suite. Structured-
+   output, tool-batch, and Always/Application/Model activation traces match
+   Rust-owned records through the Python facade, and the stable prompt prefix
+   remains unchanged. Evidence: PR-032-E-conformance-058893b85c8e,
+   PR-032-E-local-058893b85c8e, and PR-032-A01/A04.
+
+2. PH4-E-exit-callbacks-23a86984a585 - PASS
+   Python callback boundaries stay coarse and are benchmarked. Sync/async
+   Model/Toolset and coarse ContextProvider/Middleware/Observer adapters use
+   the native callback bridge; no per-token callback is added. The Rust-backed
+   fast path reports 1.3336% synthetic binding overhead against the 10%
+   warning budget. Evidence: PR-029-E-fast-path-e238f55524c7,
+   PR-030-E-callbacks-0342057f6bef, and PR-032-E-local-058893b85c8e.
+
+3. PH4-E-exit-pydantic-0bc98c672744 - PASS
+   Pydantic inputs/outputs work without placing Pydantic in the Rust core.
+   Optional cached TypeAdapter tools and structured outputs normalize to
+   portable Draft 2020-12; Rust remains the canonical validator; the kernel
+   owns durable validation retry; and the base package import does not require
+   or import Pydantic. Evidence: PR-031-E-adapters-ee5d8c5f3459,
+   PR-031-E-local-ee5d8c5f3459, and PR-027-E-rust-graph-704dc7f12b23.
+
+4. PH4-E-exit-wheels-45a88cc26d0b - PASS
+   Wheels install without a Rust toolchain on the approved platforms. The
+   effective 21/21 hosted matrix built one sdist plus CPython 3.11-3.14/3.14t
+   wheels for manylinux x86_64/aarch64, macOS arm64, and Windows x64, then
+   installed and smoked each artifact in a compiler-free environment.
+   Evidence: PR-032-E-wheel-matrix-bc1403f15062 and
+   PR-032-E-reduced-envelope-fe535966ac87. The later one-wheel Linux envelope
+   is prospective and user-owned; it does not replace this matrix.
+
+No open blocker or exception remains for the Phase 4 exit criteria. Package
+publication, hosted pull-request merge, the exact 0.0.2 cross-binding
+checkpoint, browser/WASM peers, PR-048 durability, PR-063 budget ratification,
+and G4 remain outside Phase 4 rather than waived exit obligations.

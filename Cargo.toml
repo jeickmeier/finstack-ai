@@ -13,12 +13,10 @@ members = [
     "extensions/toolsets/finstack-ai-tools-calculator",
     "extensions/toolsets/finstack-ai-tools-filesystem",
     "examples/rust-minimal",
-    "fixtures/ci/release-smoke",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
     "fixtures/ci/extension-port-leaf",
 ]
-exclude = ["fuzz"]
 
 [profile.release]
 codegen-units = 1
@@ -28,14 +26,6 @@ panic = "unwind"
 opt-level = 3
 debug = false
 incremental = false
-
-# Hosted PR wheels keep this thinner than profile.release so the platform
-# matrix stays off the critical path. Reproducible staging
-# (`mise run stage-python`) still uses profile.release.
-[profile.release-ci]
-inherits = "release"
-codegen-units = 8
-lto = "thin"
 
 [workspace.package]
 version = "0.0.2"

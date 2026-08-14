@@ -372,13 +372,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "finstack-ai-ci-smoke"
-version = "0.0.2"
-dependencies = [
- "finstack-ai",
-]
-
-[[package]]
 name = "finstack-ai-extension-port-leaf-fixture"
 version = "0.0.2"
 dependencies = [

@@ -1,6 +1,0 @@
-{
-  "description": "Expected redacted projection once a redactor exists.",
-  "secret_ref": "secret://demo/api-token",
-  "token": "[REDACTED]",
-  "evidence_eligible": false
-}

@@ -30,8 +30,8 @@ and journal-store fixtures; deterministic clocks and ID sources; golden-trace
 drivers; and `check_compaction_conformance` for canonical-history, protected
 item, tool-pair, checkpoint, hard-budget, and shared-projection invariants.
 
-Run the repository acceptance task with:
+These suites run as part of the repository test task:
 
 ```text
-mise run conformance
+mise run test
 ```

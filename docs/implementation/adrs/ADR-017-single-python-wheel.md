@@ -72,4 +72,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Verified through PR-027–PR-032 single-extension packaging, staged 0.0.2 wheel/sdist artifacts, `PH4-E-exit-wheels-45a88cc26d0b`, and local merge `5f15210780254e27dbe0ecf665cf38f99e412b1f`

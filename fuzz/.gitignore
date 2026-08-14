@@ -1,5 +1,0 @@
-artifacts/
-target/
-# libFuzzer grows working corpora locally; retain only reviewed named JSON seeds.
-corpus/*/*
-!corpus/**/*.json

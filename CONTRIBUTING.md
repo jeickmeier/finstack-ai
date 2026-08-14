@@ -8,9 +8,8 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tools and tasks.
 
 1. Install mise: <https://mise.jdx.dev/getting-started.html>
 2. From the repository root: `mise install`
-3. Verify: `mise run doctor`
 
-Prefer `mise run <task>` over ad-hoc wrappers once a task exists. See [`mise.toml`](mise.toml), [`README.md`](README.md), and [`.github/ci/README.md`](.github/ci/README.md).
+The repository defines four tasks: `format`, `check`, `test`, and `ci`. Prefer `mise run <task>` over ad-hoc wrappers. See [`mise.toml`](mise.toml), [`README.md`](README.md), and [`.github/ci/README.md`](.github/ci/README.md).
 
 Before opening a pull request, run at least:
 
@@ -18,7 +17,7 @@ Before opening a pull request, run at least:
 mise run ci
 ```
 
-Hosted workflows (`ci.yml`, `security.yml`, `nightly.yml`) invoke the same task names. Do not reimplement checks in workflow YAML.
+The hosted `ci.yml` workflow invokes the same task names. Do not reimplement checks in workflow YAML.
 
 ## Developer Certificate of Origin (DCO)
 

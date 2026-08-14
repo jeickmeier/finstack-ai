@@ -14,7 +14,11 @@ publish = false
 name = "_finstack_ai"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
+# PyO3 extension modules are exercised by pytest, not rustc/rustdoc.
+# rustdoc still compiles the crate for doctests and can fail with a stale
+# `--extern pyo3=*.rlib` path during workspace-parallel `cargo test`.
 test = false
+doctest = false
 
 [features]
 default = []

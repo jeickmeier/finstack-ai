@@ -13,11 +13,7 @@ declarative capability activation, starter projects, API/migration references,
 and staged checksums/SBOM/keyless signatures.
 
 ```bash
-mise run python-develop
-mise run test-python
-mise run test-pr031
-mise run test-pr032
-
+mise run test
 ```
 
 The initial distribution links the Rust-backed OpenAI-compatible provider into

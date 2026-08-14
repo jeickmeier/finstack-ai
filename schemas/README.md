@@ -31,8 +31,6 @@ Fixtures: [`../fixtures/compatibility/`](../fixtures/compatibility/).
 
 ## Dirty-change policy
 
-Once `*.schema.json` or versioned `.wit` files exist, a change that modifies a
-family/version without updating fixtures for that same family/version under
-`fixtures/compatibility/<family>/` fails `mise run schema-governance` (GOV006)
-when a git base revision is provided.
+A change that modifies a family/version must update the fixtures for that same
+family/version under `fixtures/compatibility/<family>/` in the same change.
 Reserved README-only directories are not passing schema or conformance evidence.

@@ -18,11 +18,7 @@ or a stable plugin ABI. Those remain later gated work.
 ## Local verification
 
 ```text
-mise run test-pr032
-
-mise run preview-performance
-mise run preview-stage
+mise run ci
 ```
 
-The stage is written to `target/preview/0.0.2-alpha-candidate` and is not
-published, tagged, or represented as a passed gate.
+Nothing here is published, tagged, or represented as a passed gate.

@@ -1,9 +1,0 @@
-# Contract-only redaction fixture metadata for PR-003.
-# This fixture is not executed by a redactor yet and must not close acceptance.
-
-name = "canary-redaction-v1"
-evidence_eligible = false
-contract_only_not_executed = true
-owner = "me@jeickmeier.com"
-activation_pr = "PR-014/PR-057"
-controls = "SEC-INV-005; TM-04; Engineering Standards §8; Threat Model §§10,13.1"

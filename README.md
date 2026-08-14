@@ -21,22 +21,15 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tool installs and 
 
 1. Install mise if needed: <https://mise.jdx.dev/getting-started.html>
 2. From the repo root, install pinned tools: `mise install`
-3. Verify the toolchain: `mise run doctor`
 
-Useful tasks after bootstrap:
+Tasks after bootstrap:
 
 - `mise run format` — write-mode Rust and Python formatter
-- `mise run clippy` / `test` / `docs` — Rust merge gates
-- `mise run check-minimal` — kernel-only and no-default-features graphs
-- `mise run architecture` — dependency/feature boundary enforcement
-- `mise run schema-governance` — ADR inventory, contract registry, and schema/fixture coupling
-- `mise run supply-chain` / `secret-scan` / `secret-scan-canary` — Eng §8–9 / TM-04 / TM-18
-- `mise run release-smoke` — private CI release binary packaging
-- `mise run build-python` — Python binding package under `bindings/finstack-ai-python`
-- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (no percentage gate)
-- `mise run ci` — local aggregate of the tasks above
+- `mise run check` — formatting, Clippy, Ruff, and mypy checks
+- `mise run test` — Rust workspace tests and Python tests
+- `mise run ci` — `check` plus `test`, the same thing hosted CI runs
 
-The installable Python package lives under `bindings/finstack-ai-python`, not the repository root. Prefer `mise run build-python`, or from the root: `uv build --package finstack-ai`.
+The installable Python package lives under `bindings/finstack-ai-python`, not the repository root. Build it from the root with `uv build --package finstack-ai`.
 
 Tool versions and tasks live in [`mise.toml`](mise.toml). Prefer `mise run <task>` over ad-hoc wrappers. Hosted CI workflows and the reserved matrix documentation live under [`.github/ci/README.md`](.github/ci/README.md).
 

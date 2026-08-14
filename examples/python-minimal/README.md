@@ -9,11 +9,12 @@ PR-032 provides two deliberately small starters against the typed public
 - [`python-callback/`](python-callback/) runs an entirely offline trusted Python
   callback through the Rust-owned kernel/runtime loop.
 
-Build the local candidate and validate both projects without a compiler:
+Build the local candidate and run either starter against it:
 
 ```bash
-mise run build-python
-mise run test-python-starters
+uv build --project bindings/finstack-ai-python --out-dir target/python-dist
+uv run --isolated --no-project --with target/python-dist/*.whl \
+  python examples/python-minimal/rust-backed/main.py
 ```
 
 The callback starter is trusted in-process code. It is not an isolation

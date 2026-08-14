@@ -1,152 +1,53 @@
-# CI matrix (PR-003)
+# CI
 
 Owner: `me@jeickmeier.com`
 
 All executable checks are canonical mise tasks. Workflows must call
 `mise run <task>` and must not reimplement policy in YAML.
 
+## Tasks
+
+Root [`mise.toml`](../../mise.toml) defines exactly four tasks:
+
+| Task | Purpose |
+| --- | --- |
+| `format` | Write-mode `cargo fmt` and `ruff format` |
+| `check` | `cargo fmt --check`, Clippy with warnings denied, `ruff format --check`, `ruff check`, and `mypy --strict` |
+| `test` | `cargo test --workspace` and the Python test suite against an editable binding install |
+| `ci` | `check` followed by `test` |
+
 ## Workflows
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Linux Clippy/tests/native example bins (Python binding excluded; owned by `python-package`); parallel Ubuntu `wasm`, `linux-quality` (format/docs/minimal/architecture/helpers/bench compile), and `python-package` (`test-pr032`); fuzz smoke; schema governance; Linux release-smoke; coverage on `main`/manual only |
-| [`python-wheels.yml`](../workflows/python-wheels.yml) | every PR, `main` / `codex/pr-*` push, manual | temporary CPython 3.14 manylinux x86_64 wheel using `release-ci` (thin LTO); isolated install/import/concurrency smoke; sdist staging |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `mise run check` then `mise run test` |
 
-| [`security.yml`](../workflows/security.yml) | every PR, `main` push, Mondays 04:17 UTC, manual | cargo-deny (Eng §9 / TM-18), secret scan + canary negatives (SEC-INV-005 / TM-04) |
-| [`nightly.yml`](../workflows/nightly.yml) | Sundays 05:37 UTC, manual | pinned `nightly-2026-08-01` compatibility; ten-minute-per-target fuzz campaigns on Sunday/manual, with 30-day corpus/crash artifact retention |
-| [`benchmark.yml`](../workflows/benchmark.yml) | Mondays 06:17 UTC, manual | Criterion benches + machine-readable metadata; artifact upload; **not** a required PR check |
+Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
-PR-032 through PR-038 run under a user-authorized temporary Linux-only hosted
-execution envelope with one CPython 3.14 manylinux x86_64 wheel. The other
-interpreter and platform jobs are removed for that interval. Restoring and
-running the full matrix is explicitly user-owned and must not be dispatched
-automatically. Historical evidence remains unchanged.
-
-## Toolchain channels (PR-003-A02)
+## Toolchain pins
 
 | Channel | Pin | Cadence | Owner |
 | --- | --- | --- | --- |
-| stable | mise Rust `1.97.1` | every PR (`ci.yml` label `stable`) | `me@jeickmeier.com` |
-| MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (`ci.yml` label `msrv`; intentionally coincides with stable) | `me@jeickmeier.com` |
-| nightly | `nightly-2026-08-01` | weekly + manual (`nightly.yml`) | `me@jeickmeier.com` |
-| fuzz | `cargo-fuzz 0.13.2`, `nightly-2026-08-01` | bounded smoke every PR; long campaign Sunday/manual | `me@jeickmeier.com` |
-
-## Path filters
-
-Required checks intentionally have **no** `paths` / `paths-ignore` filters in
-PR-003. Path-aware skipping may be added later only when it cannot skip
-architecture, supply-chain, secret, or release-smoke evidence on code changes.
+| stable | mise Rust `1.97.1` | every PR | `me@jeickmeier.com` |
+| MSRV | workspace/mise `1.97.1` until an explicit MSRV ADR | every PR (intentionally coincides with stable) | `me@jeickmeier.com` |
 
 ## Action and tool pins
 
 - GitHub Actions are pinned by full commit SHA with a version comment.
 - Contributor/CI tools are pinned in root [`mise.toml`](../../mise.toml).
-- Update pins by changing `mise.toml` and the workflow SHA comments together;
-  then run `mise run lint-workflows` and `mise run doctor`.
-- The Rust matrix, WASM, linux-quality, release-smoke, and native (macOS/Windows)
-  Python wheel jobs use the pinned `Swatinem/rust-cache` action to reuse
-  dependency build artifacts across runs. Shared keys keep each job family
-  stable; rustc host/toolchain identity and the Cargo graph still participate
-  in the cache key. Steps within one job continue to share the workspace
-  `target/` directory directly. Hosted rust/wasm jobs set
-  `CARGO_INCREMENTAL=0` and `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut
-  link time, especially on Windows. The rust matrix sets
-  `FINSTACK_CI_EXCLUDE_PYTHON=1` so Clippy/tests/docs skip the PyO3 crate;
-  `python-package` remains the Python binding owner. Linux wheels compile
-  inside the manylinux container and reuse `maturin-action` sccache instead of
-  a host `target/` cache. Hosted PR wheels use Cargo profile `release-ci`
-  (thin LTO); `mise run stage-python` keeps `profile.release` for the
-  size-budget and reproducibility proof.
+- Update pins by changing `mise.toml` and the workflow SHA comments together.
+- The `ci` job uses the pinned `Swatinem/rust-cache` action to reuse dependency
+  build artifacts across runs, and sets `CARGO_INCREMENTAL=0` and
+  `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut link time. It exports
+  `PYO3_PYTHON` so the PyO3 crate builds against the pinned interpreter.
 
-## Release artifacts (PR-003-A03)
+## Retired automation
 
-`mise run release-smoke` builds the private unpublished
-`fixtures/ci/release-smoke` binary (`finstack-ai-ci-smoke`), executes it, and
-stages:
-
-- the platform binary under `target/ci-release/`
-- `SHA256SUMS`
-- `build-metadata.json` (commit, rustc, host triple, features)
-
-Linux also runs `mise run release-reproducible` (two clean target dirs, digest
-compare). Artifacts upload with 30-day retention. This is CI retention, not
-publication to crates.io/PyPI/npm.
-
-## Generated bindings and fixtures (PR-003-A04)
-
-Current inventory:
-
-| Surface | Status | Regeneration | Dirty-tree policy |
-| --- | --- | --- | --- |
-| Python binding package | maturin mixed Rust/Python project with checked-in type stubs | `mise run test-python`; `mise run build-python` | stubs are hand-authored until later API PRs own generation; wheel/sdist artifacts are verified for contents, size, and reproducibility |
-| Browser WASM binding | hand-authored crate placeholder | `mise run check-wasm` | no wasm-bindgen glue yet |
-| WIT / schema codegen | not present | deferred to owning PRs | when generators exist, CI must regenerate and fail on dirty output |
-| Schema / ADR governance | hand-authored reserved roots + checker | `mise run schema-governance` | schema path changes without fixture updates fail GOV006 when a base SHA is available; reserved README-only dirs are not conformance evidence |
-| Architecture fixtures | hand-authored case files | `mise run architecture` | fixtures must activate the claimed check |
-| Security canary-redaction fixture | contract-only fragments | `mise run secret-scan-canary` (runtime temp repos) | `evidence_eligible = false` until a redactor consumes it |
-
-### Schema governance (PR-004)
-
-Owner: `me@jeickmeier.com`
-
-Canonical tasks:
-
-- `mise run test-schema-governance`
-- `mise run lint-schema-governance` / `format-schema-governance`
-- `mise run schema-governance` (optional `--base <sha>` or `SCHEMA_GOVERNANCE_BASE`)
-
-The checker enforces ADR-001–ADR-037 inventory/links (GOV001–GOV003), contract
-registry completeness (GOV004), schema/fixture naming and coupling
-(GOV005–GOV006), and PR-template impact sections (GOV007). Hosted
-`schema-governance` uses `fetch-depth: 0` and the pull-request base SHA when
-present; workflow_dispatch/manual runs without a base still execute static
-checks. Reserved `schemas/` and `fixtures/compatibility/` directories are
-governance scaffolding only until owning PRs add payloads.
-
-When a generator lands, document its owning package command here and add a CI
-step that regenerates then fails if `git status --porcelain` is non-empty.
-
-## Reserved matrices (`evidence_eligible = false`)
-
-These reservations are documentation-only. Do not add green placeholder jobs.
-
-| Matrix | Reservation | Cadence (once activated) | Activation | Owner |
-| --- | --- | --- | --- | --- |
-| Headless browser smoke | browser WASM conformance placeholders | every PR once browser package exists | PR-033–PR-036 | `me@jeickmeier.com` |
-| Parser fuzz beyond candidate-v1 | protocol framing, CBOR, provider streams, and binding/browser inputs remain unimplemented | activate with the owning later-phase parser | owning parser PR | `me@jeickmeier.com` |
-| Security-boundary suites | adversarial authorization/permission suites | every PR for owning surface | owning runtime/binding/plugin PRs | `me@jeickmeier.com` |
-| Benchmark regression | activated as scheduled/manual artifact collection; not merge-blocking; no threshold enforcement | Mondays 06:17 UTC + `workflow_dispatch` via `benchmark.yml`; PR CI only compiles benches (`tools/benchmark/run.py compile`) | PR-005 | `me@jeickmeier.com` |
-
-### Benchmark harness (PR-005)
-
-Owner: `me@jeickmeier.com`
-
-Canonical tasks:
-
-- `mise run conformance` — golden-trace / conformance unit+integration tests
-- `mise run test-benchmark` / `lint-benchmark` / `format-benchmark`
-- `mise run benchmark-smoke` — compile + short Criterion run with metadata
-- `mise run benchmark` — full non-blocking Criterion run with metadata under `target/benchmark/`
-- `mise run coverage` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports under `target/coverage/` (uploaded by the Ubuntu `coverage` job on `main`/manual only; no percentage gate; WASM is a scaffold until real wasm tests exist)
-
-The required Rust matrix runs conformance once through `mise run test`
-(`cargo test --workspace`). The focused `mise run conformance` task remains
-available for local development without rerunning the same package in the
-aggregate CI sequence.
-
-Metadata schema: `schemas/benchmark-report/v1/metadata.schema.json`.  
-Artifacts include compiler, target, commit, feature set, and machine metadata
-(PR-005-A03). Flamegraphs remain optional until regression thresholds exist.
-`evidence_eligible` for merge gates remains false for performance budgets;
-metadata shape evidence is eligible for PR-005-A03.
-
-Placeholder jobs must not report passing evidence for unimplemented work.
-
-## Local commands
-
-```bash
-mise install
-mise run doctor
-mise run ci
-mise run check-nightly   # installs pinned nightly via rustup
-```
+Supply-chain (`cargo-deny`), secret scanning, fuzz and Miri campaigns, pinned
+nightly compatibility, Criterion benchmarks, coverage reports, architecture and
+schema-governance enforcement, release smoke and reproducibility, and Python
+wheel/sdist staging have been removed along with their helper scripts,
+configuration, and fixtures. Reintroducing any of them means writing the check
+again as an explicit mise task. Historical evidence under
+`docs/implementation/` records the runs made while those gates were active and
+is unchanged.

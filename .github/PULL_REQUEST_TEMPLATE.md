@@ -40,11 +40,11 @@
 - [ ] Scope matches one coherent logical PR; deferred work not pulled in early
 - [ ] Engineering Standards and Security/Threat Model review triggers considered ([Eng Standards](../docs/planning/00-finstack-ai-engineering-standards.md), [Threat Model](../docs/planning/06-finstack-ai-security-threat-model.md))
 - [ ] Schema/contract changes use the [change-classification template](../docs/implementation/schema-change-template.md) when applicable
-- [ ] Exceptions/waivers recorded when required ([exceptions register](../docs/implementation/exceptions-register.md), [architecture allowlist](../tools/architecture/allowlist.toml))
+- [ ] Exceptions/waivers recorded when required ([exceptions register](../docs/implementation/exceptions-register.md))
 - [ ] Acceptance evidence updated when criteria are claimed ([evidence register](../docs/implementation/evidence-register.md))
 - [ ] Commits are DCO signed-off (`git commit -s`)
-- [ ] Affected `mise run` / `cargo` checks documented below (include `mise run architecture` when boundaries change; `mise run schema-governance` when ADRs/schemas/fixtures change)
-- [ ] Hosted CI workflows considered (see [`.github/ci/README.md`](./ci/README.md)); supply-chain/secret jobs name TM/ENG controls when security-relevant
+- [ ] Affected `mise run` / `cargo` checks documented below
+- [ ] Hosted CI workflow considered (see [`.github/ci/README.md`](./ci/README.md))
 
 ## Verification
 

@@ -1,8 +1,0 @@
-{
-  "description": "Non-secret fragment placeholders for a future redactor.",
-  "secret_ref": "secret://demo/api-token",
-  "marker_prefix": "finstack_canary_",
-  "marker_body_half_a": "Aa0Bb1Cc2Dd3Ee4Ff5Gg6",
-  "marker_body_half_b": "Hh7Ii8Jj9Kk0Ll1Mm2Nn3Oo",
-  "note": "Halves must not be concatenated in committed fixtures or examples."
-}
