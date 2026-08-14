@@ -260,6 +260,13 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-033-A03 | PR-033 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-033-E-browser-dd674e7dff7c | Headless Chromium loads @finstack/ai, health/metadata, and the embedded no-op scripted trace; DeferredBindingAdapter::wasm() stays unavailable | me@jeickmeier.com | 2026-08-13 |
 | PR-033-A04 | PR-033 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-033-E-repro-dd674e7dff7c | generate-wasm is the only regen path; consecutive SOURCE_DATE_EPOCH=0 builds are byte-identical; dirty-tree check is clean | me@jeickmeier.com | 2026-08-13 |
 | PR-033-A05 | PR-033 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-033-E-ci-dd674e7dff7c; PR-033-E-check-wasm-dd674e7dff7c | Thin wasm graph check plus workspace Clippy/tests pass; the retired architecture suite is not claimed | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A01 | PR-034 | PLAN-0.18 / [PR-034](../planning/04-finstack-ai-implementation-plan.md#pr-034---implement-javascript-host-adapters) | Pending | me@jeickmeier.com | — | Scripted JS model/tool conformance through host wrappers; not Agent-run parity | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A02 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | AbortSignal cancellation maps to `js_host_cancelled` | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A03 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | Malformed host responses map to `js_host_result_invalid` without raw JS exception text | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A04 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | ReadableStream or async iterable is sufficient; no per-token callback | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A05 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | Same-origin OpenAI-compatible fetch/SSE battery with mock SSE and secret scan | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A06 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | `normalizePrebetaShape` plus scripted coordinator command traces | me@jeickmeier.com | 2026-08-13 |
+| PR-034-A07 | PR-034 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | JS journal store is in-memory/scripted only; no IndexedDB or SQLite durability claim | me@jeickmeier.com | 2026-08-13 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

@@ -7,6 +7,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +25,19 @@ FORBIDDEN_WASM = frozenset(
         "wasmtime",
         "hyper",
         "native-tls",
+        "finstack-ai-provider-openai-compatible",
     }
+)
+SECRET_ROOTS = (
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "src",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "README.md",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "harness.html",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "generated",
+)
+SECRET_PATTERNS = (
+    "apiKey",
+    "OPENAI_API_KEY",
+    "sk-[A-Za-z0-9]{8,}",
 )
 FORBIDDEN_KERNEL = FORBIDDEN_WASM | frozenset(
     {"wasm-bindgen", "wasm-bindgen-futures", "js-sys"}
@@ -191,7 +204,7 @@ def check_size() -> int:
         / "docs"
         / "implementation"
         / "artifacts"
-        / "pr-033"
+        / "pr-034"
         / "bundle-size.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,11 +272,57 @@ def check_dirty() -> int:
     return 0
 
 
+def iter_secret_files() -> list[Path]:
+    files: list[Path] = []
+    for root in SECRET_ROOTS:
+        if root.is_file():
+            files.append(root)
+            continue
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in {
+                ".ts",
+                ".js",
+                ".md",
+                ".html",
+                ".d.ts",
+            }:
+                files.append(path)
+    return files
+
+
+def check_secrets() -> int:
+    compiled = [re.compile(pattern) for pattern in SECRET_PATTERNS]
+    hits: list[str] = []
+    for path in iter_secret_files():
+        text = path.read_text(encoding="utf-8")
+        for pattern in compiled:
+            if pattern.search(text):
+                hits.append(f"{path.relative_to(REPO_ROOT)} matches {pattern.pattern}")
+    if hits:
+        print("error: provider-secret patterns found in JS sources", file=sys.stderr)
+        for hit in hits:
+            print(f"  {hit}", file=sys.stderr)
+        return 1
+    print("wasm secret scan: no credential field or provider-secret pattern")
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "mode",
-        choices=("graph", "generated", "size", "snapshot", "compare", "dirty", "all"),
+        choices=(
+            "graph",
+            "generated",
+            "size",
+            "snapshot",
+            "compare",
+            "dirty",
+            "secrets",
+            "all",
+        ),
         help="check to run",
     )
     parser.add_argument(
@@ -295,7 +354,12 @@ def main() -> int:
         return compare_snapshot(args.path)
     if args.mode == "dirty":
         return check_dirty()
+    if args.mode == "secrets":
+        return check_secrets()
     status = check_graph()
+    if status != 0:
+        return status
+    status = check_secrets()
     if status != 0:
         return status
     status = check_generated()

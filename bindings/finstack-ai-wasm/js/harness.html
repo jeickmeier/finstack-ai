@@ -6,9 +6,35 @@
   </head>
   <body>
     <script type="module">
-      import { buildMetadata, health, init } from "./dist/index.js";
       import {
+        JsArtifactStore,
+        JsClock,
+        JsContextProvider,
+        JsJournalStore,
+        JsMiddleware,
+        JsModel,
+        JsObserver,
+        JsRandomSource,
+        JsToolset,
+        buildMetadata,
+        createHostClock,
+        createHostRandomSource,
+        createMemoryArtifactStore,
+        createMemoryJournalStore,
+        health,
+        init,
+        normalizePrebetaShape,
+      } from "./dist/index.js";
+      import {
+        OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
+        createOpenAICompatibleModel,
+      } from "./dist/adapters/openai-compatible.js";
+      import {
+        applyScriptedCoordinatorCommands,
         compilePortProxies,
+        driveScriptedJournalHealth,
+        driveScriptedModelRequest,
+        driveScriptedToolCall,
         runNoopTrace,
       } from "./generated/finstack_ai_wasm.js";
 
@@ -18,6 +44,30 @@
           buildMetadata,
           compilePortProxies,
           runNoopTrace,
+          JsModel,
+          JsToolset,
+          JsContextProvider,
+          JsMiddleware,
+          JsObserver,
+          JsJournalStore,
+          JsClock,
+          JsRandomSource,
+          JsArtifactStore,
+          createMemoryJournalStore,
+          createMemoryArtifactStore,
+          createHostClock,
+          createHostRandomSource,
+          createOpenAICompatibleModel,
+          openaiCompatibleDefaultBaseUrl: OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
+          normalizePrebetaShape,
+          applyScriptedCoordinatorCommands: (commands) =>
+            JSON.parse(applyScriptedCoordinatorCommands(JSON.stringify(commands))),
+          driveScriptedModelRequest: async (adapter, options, signal) =>
+            JSON.parse(await driveScriptedModelRequest(adapter, options, signal)),
+          driveScriptedToolCall: async (adapter, options, signal) =>
+            JSON.parse(await driveScriptedToolCall(adapter, options, signal)),
+          driveScriptedJournalHealth: async (adapter, options) =>
+            JSON.parse(await driveScriptedJournalHealth(adapter, options)),
         };
       });
     </script>

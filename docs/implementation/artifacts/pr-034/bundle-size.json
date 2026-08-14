@@ -1,0 +1,28 @@
+{
+  "files": [
+    {
+      "bytes": 8971,
+      "gzip_bytes": 1839,
+      "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm.d.ts",
+      "sha256": "dc0d37c00f5e6ac0ceac504e6f78518950ab1677781483aec3eb7ed542bc9826"
+    },
+    {
+      "bytes": 37907,
+      "gzip_bytes": 6108,
+      "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm.js",
+      "sha256": "4ee4cd9b12fd73ee3f111ec438c09d11be62c493e5d41f6fe67338a080d6d827"
+    },
+    {
+      "bytes": 1013707,
+      "gzip_bytes": 311306,
+      "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
+      "sha256": "962aa2f9a4be06a2192feaba6c93e52941a4e4520a7dd7892c83215e52401e64"
+    },
+    {
+      "bytes": 2644,
+      "gzip_bytes": 478,
+      "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm.d.ts",
+      "sha256": "8d02295216c70c848cab6710b492c9d3ad158ed1e290f7d3deeb88dff064db00"
+    }
+  ]
+}
