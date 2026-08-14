@@ -81,4 +81,7 @@ May change only through a new superseding ADR and reconciliation of every affect
   PR-044 candidate `e56d6f1d0638986d1201f2b901f372d64d01d062` continues the
   interaction path under the original `EffectId`
   (PR-044-E-lifecycle-e56d6f1d0638; PR-044-E-security-e56d6f1d0638).
+  PR-045 candidate `e58ff33138dd1c4d5c1be9e611575b12cd3a4ac5` continues
+  cancel-during-deferred restore under that `EffectId`
+  (PR-045-E-cancel-e58ff33138dd; PR-045-E-security-e58ff33138dd).
   Later persistent completion paths remain mapped to PR-048.
