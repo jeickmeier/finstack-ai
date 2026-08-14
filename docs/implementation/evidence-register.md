@@ -271,6 +271,10 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-035-A02 | PR-035 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-035-E-browser-09631ecc6a15; PR-035-E-candidate-09631ecc6a15 | State remains in WASM until explicit serialization | me@jeickmeier.com | 2026-08-13 |
 | PR-035-A03 | PR-035 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-035-E-browser-09631ecc6a15; PR-035-E-candidate-09631ecc6a15 | Event batching preserves sequence and terminal events | me@jeickmeier.com | 2026-08-13 |
 | PR-035-A04 | PR-035 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-035-E-browser-09631ecc6a15; PR-035-E-security-09631ecc6a15 | Dropped handles release observation resources; cancel is explicit | me@jeickmeier.com | 2026-08-13 |
+| PR-036-A01 | PR-036 | PLAN-0.18 / [PR-036](../planning/04-finstack-ai-implementation-plan.md#pr-036---add-web-worker-helpers-backpressure-and-cancellation-tests) | In progress | me@jeickmeier.com | — | Worker-hosted 1000-delta stream; UI tick; no UI wasm | — | 2026-08-13 |
+| PR-036-A02 | PR-036 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Terminate/unload/cancel-fetch leave cancelled or dropped waiters | — | 2026-08-13 |
+| PR-036-A03 | PR-036 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Bounded drop-progress backpressure is observable | — | 2026-08-13 |
+| PR-036-A04 | PR-036 | PLAN-0.18 / same | In progress | me@jeickmeier.com | — | Main-thread and worker scripted traces match | — | 2026-08-13 |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

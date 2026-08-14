@@ -20,6 +20,10 @@
     "./adapters/openai-compatible": {
       "types": "./dist/adapters/openai-compatible.d.ts",
       "import": "./dist/adapters/openai-compatible.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
     }
   },
   "scripts": {

@@ -54,6 +54,44 @@ Compose `createOpenAICompatibleModel()` from
 is no `Agent.openaiCompatible` on the root barrel. Do not embed provider
 credentials in browser bundles.
 
+The production browser topology hosts the WASM engine in a Dedicated Worker.
+Import `@finstack/ai/worker`, call `exposeWorkerHost` inside a module worker,
+and consume transferable event-batch snapshots with `connectWorker` on the UI
+thread. Construct `JsModel` / `JsToolset` inside the worker; do not post host
+objects across the boundary. Main-thread `Agent.create` remains the documented
+host-compatible mode with the same bounds. The default worker lag policy is
+`drop-progress` (queue 32, 2s durable wait). SharedArrayBuffer and threaded
+WASM are a post-preview opt-in that requires cross-origin isolation and a new
+ADR-031 reconsideration.
+
+```ts
+import { Agent, JsModel, init } from "@finstack/ai";
+import { connectWorker, exposeWorkerHost } from "@finstack/ai/worker";
+
+// Dedicated Worker module
+await init();
+exposeWorkerHost({
+  async create() {
+    return Agent.create({
+      model: new JsModel(
+        {
+          async request() {
+            return { text: "ok", completion_id: "scripted-1" };
+          },
+        },
+        { component: "app.model", provider: "scripted", model: "scripted-model" },
+      ),
+    });
+  },
+});
+
+// UI thread
+const worker = new Worker(new URL("./agent-worker.js", import.meta.url), {
+  type: "module",
+});
+const client = await connectWorker(worker);
+```
+
 `normalizePrebetaShape` validates the three pre-beta command kinds against the
 same Rust DTOs as the Python binding. It does not submit a live Agent.
 
@@ -76,7 +114,7 @@ TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
 bundles, headers, or examples. Terminate secrets at a trusted same-origin
 proxy. Optional application `headers` are not a credential helper.
 
-## Public surface (PR-035)
+## Public surface (PR-035 / PR-036)
 
 - `init(): Promise<void>`
 - `health(): string`
@@ -88,10 +126,11 @@ proxy. Optional application `headers` are not a credential helper.
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
 - `@finstack/ai/adapters/openai-compatible`
+- `@finstack/ai/worker` (`connectWorker`, `exposeWorkerHost`, `WorkerRun`)
 
 Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
-remains a pre-beta health stub. Workers, IndexedDB, npm publish, and G4 remain
-later work. Dropping a `Run` detaches observation and does not cancel.
+remains a pre-beta health stub. IndexedDB, npm publish, and G4 remain later
+work. Dropping a `Run` or `WorkerRun` detaches observation and does not cancel.
 
 ## Regenerate
 

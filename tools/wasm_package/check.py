@@ -32,6 +32,7 @@ SECRET_ROOTS = (
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "src",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "README.md",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "harness.html",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "worker-harness.html",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "generated",
 )
 SECRET_PATTERNS = (
@@ -213,7 +214,7 @@ def check_size() -> int:
         / "docs"
         / "implementation"
         / "artifacts"
-        / "pr-035"
+        / "pr-036"
         / "bundle-size.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,7 @@
     <title>@finstack/ai harness</title>
   </head>
   <body>
+    <p id="ui-tick">0</p>
     <script type="module">
       import {
         Agent,
@@ -31,6 +32,7 @@
         OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
         createOpenAICompatibleModel,
       } from "./dist/adapters/openai-compatible.js";
+      import { connectWorker } from "./dist/worker.js";
       import {
         applyScriptedCoordinatorCommands,
         compilePortProxies,
@@ -39,6 +41,17 @@
         driveScriptedToolCall,
         runNoopTrace,
       } from "./generated/finstack_ai_wasm.js";
+
+      const tick = document.getElementById("ui-tick");
+      let ticks = 0;
+      const pulse = () => {
+        ticks += 1;
+        if (tick !== null) {
+          tick.textContent = String(ticks);
+        }
+        window.requestAnimationFrame(pulse);
+      };
+      window.requestAnimationFrame(pulse);
 
       window.finstackReady = init().then(() => {
         window.finstackTest = {
@@ -72,6 +85,10 @@
             JSON.parse(await driveScriptedToolCall(adapter, options, signal)),
           driveScriptedJournalHealth: async (adapter, options) =>
             JSON.parse(await driveScriptedJournalHealth(adapter, options)),
+          connectWorker,
+          createAgentWorker: () =>
+            new Worker("/dist/worker-fixture.js", { type: "module" }),
+          uiTicks: () => ticks,
         };
       });
     </script>

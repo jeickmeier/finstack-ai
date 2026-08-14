@@ -32,6 +32,7 @@ export function createOpenAICompatibleModel(options = {}) {
                 messages: readMessages(parsed),
                 stream: true,
             };
+            const signal = detachAbort(requestOptions?.signal);
             let response;
             try {
                 response = await fetch(baseUrl, {
@@ -42,7 +43,7 @@ export function createOpenAICompatibleModel(options = {}) {
                         ...(headers ?? {}),
                     },
                     body: JSON.stringify(body),
-                    ...(requestOptions?.signal ? { signal: requestOptions.signal } : {}),
+                    ...(signal === undefined ? {} : { signal }),
                 });
             }
             catch (error) {
@@ -51,9 +52,34 @@ export function createOpenAICompatibleModel(options = {}) {
             if (!response.ok || response.body === null) {
                 throw new TypeError("js_host_failed");
             }
-            return streamSse(response.body, requestOptions?.signal);
+            return streamSse(response.body, signal);
         },
     };
+}
+/**
+ * Copy an incoming abort onto a local controller after the current turn.
+ *
+ * wasm-bindgen drops host futures during `Run.cancel`. Attaching that signal
+ * directly to `fetch` re-enters a dropped closure. A detached controller
+ * aborts the network after cancel returns.
+ */
+function detachAbort(signal) {
+    if (signal === undefined) {
+        return undefined;
+    }
+    const local = new AbortController();
+    const abort = () => {
+        setTimeout(() => {
+            local.abort();
+        }, 0);
+    };
+    if (signal.aborted) {
+        abort();
+    }
+    else {
+        signal.addEventListener("abort", abort, { once: true });
+    }
+    return local.signal;
 }
 function mapFetchError(error) {
     if (error instanceof DOMException && error.name === "AbortError") {
