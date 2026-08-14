@@ -10,14 +10,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    ComponentId, ContentBlock, ErrorCategory, ExternalHandleRef, Metadata, ProviderIds, RawJson,
-    ReconciliationPolicy, TextBlock, Usage,
+    ComponentId, ContentBlock, ErrorCategory, ExternalHandleRef, Metadata, PendingModelEffect,
+    ProviderIds, RawJson, ReconciliationPolicy, TextBlock, Usage,
 };
 use finstack_ai_runtime::{
     CancellationSignal, InputCapabilities, Model, ModelCapabilities, ModelContextProfile,
-    ModelDeferral, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
-    ModelResponse, ModelStreamItem, ModelTokenEstimate, ModelToolCall, ModelWarmupContext,
-    PortFuture, StructuredOutputCapability, TextDelta, ToolCallDelta,
+    ModelDeferral, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult,
+    ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate, ModelToolCall,
+    ModelWarmupContext, PortFuture, ReconcileContext, StructuredOutputCapability, TextDelta,
+    ToolCallDelta,
 };
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -202,12 +203,16 @@ pub struct ScriptedModel {
     profile: ModelContextProfile,
     descriptor: ModelDescriptor,
     plans: Mutex<VecDeque<ScriptedModelPlan>>,
+    reconcile_results: Mutex<VecDeque<ModelReconcileResult>>,
     control: ScriptedModelControl,
     warmups: Arc<AtomicUsize>,
     requests: Arc<AtomicUsize>,
+    reconciles: Arc<AtomicUsize>,
+    last_request: Mutex<Option<ModelRequest>>,
     cancellation_acknowledgements: Arc<AtomicUsize>,
     active_streams: Arc<AtomicUsize>,
     dropped_streams: Arc<AtomicUsize>,
+    idempotent_requests: bool,
 }
 
 impl ScriptedModel {
@@ -223,13 +228,34 @@ impl ScriptedModel {
             profile,
             descriptor,
             plans: Mutex::new(plans.into()),
+            reconcile_results: Mutex::new(VecDeque::new()),
             control: ScriptedModelControl::default(),
             warmups: Arc::new(AtomicUsize::new(0)),
             requests: Arc::new(AtomicUsize::new(0)),
+            reconciles: Arc::new(AtomicUsize::new(0)),
+            last_request: Mutex::new(None),
             cancellation_acknowledgements: Arc::new(AtomicUsize::new(0)),
             active_streams: Arc::new(AtomicUsize::new(0)),
             dropped_streams: Arc::new(AtomicUsize::new(0)),
+            idempotent_requests: true,
         }
+    }
+
+    /// Queue provider reconcile outcomes consumed in order. Default is `Unknown`.
+    #[must_use]
+    pub fn with_reconcile_results(self, results: Vec<ModelReconcileResult>) -> Self {
+        *self
+            .reconcile_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = results.into();
+        self
+    }
+
+    /// Override the advertised idempotent-request capability.
+    #[must_use]
+    pub fn with_idempotent_requests(mut self, idempotent_requests: bool) -> Self {
+        self.idempotent_requests = idempotent_requests;
+        self
     }
 
     /// Construct from the existing version-1 golden-trace fixture language.
@@ -262,6 +288,21 @@ impl ScriptedModel {
     #[must_use]
     pub fn request_count(&self) -> usize {
         self.requests.load(Ordering::Acquire)
+    }
+
+    /// Last request observed by [`Model::request`], if any.
+    #[must_use]
+    pub fn last_request(&self) -> Option<ModelRequest> {
+        self.last_request
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Number of reconcile calls observed.
+    #[must_use]
+    pub fn reconcile_count(&self) -> usize {
+        self.reconciles.load(Ordering::Acquire)
     }
 
     /// Number of effect-local cancellations acknowledged by a blocked stream.
@@ -304,7 +345,7 @@ impl Model for ScriptedModel {
             reasoning: true,
             prompt_cache: false,
             resumable_stream: true,
-            idempotent_requests: true,
+            idempotent_requests: self.idempotent_requests,
             native_capabilities: BTreeSet::default(),
         }
     }
@@ -337,6 +378,10 @@ impl Model for ScriptedModel {
 
     fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
         self.requests.fetch_add(1, Ordering::AcqRel);
+        *self
+            .last_request
+            .lock()
+            .expect("scripted model last request is not poisoned") = Some(request.clone());
         let plan = self
             .plans
             .lock()
@@ -362,6 +407,21 @@ impl Model for ScriptedModel {
                 active_gate: None,
             }) as ModelEventStream)
         })
+    }
+
+    fn reconcile(
+        &self,
+        _ctx: ReconcileContext,
+        _effect: PendingModelEffect,
+    ) -> PortFuture<Result<ModelReconcileResult, ModelError>> {
+        self.reconciles.fetch_add(1, Ordering::AcqRel);
+        let result = self
+            .reconcile_results
+            .lock()
+            .expect("scripted model reconcile queue is not poisoned")
+            .pop_front()
+            .unwrap_or(ModelReconcileResult::Unknown);
+        Box::pin(async move { Ok(result) })
     }
 }
 

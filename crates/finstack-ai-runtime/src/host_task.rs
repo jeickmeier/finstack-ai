@@ -28,15 +28,17 @@ use crate::run_types::{
 use crate::settlement::{
     ModelDriverResult, SettlementSources, ToolDriverResult, model_handle_error,
     prepare_tool_batch_if_ready, process_model_progress, process_model_result,
-    process_tool_progress, process_tool_result, validate_model_binding,
+    process_tool_progress, process_tool_result, resume_pending_model_effect,
+    validate_model_binding,
 };
 use crate::tool::AssembledToolTerminal;
 use crate::{
     CancellationSignal, Clock, CommitCoordinatorError, CommitOutcome, EventSubscription,
-    EventSubscriptionConfig, EventSubscriptionError, LockedModelContextProfile, Model,
-    ModelCallContext, ModelError, ModelRequest, ModelRequestDraft, ModelStreamAssembler,
-    ModelTerminal, ModelWarmupContext, PortFuture, RandomSource, ResolvedTool, ResolvedToolCatalog,
-    RunCallContext, ToolCallContext, ToolError, ToolStreamAssembler, validate_model_request,
+    EventSubscriptionConfig, EventSubscriptionError, LockedModelContextProfile,
+    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelCallContext, ModelError, ModelRequest,
+    ModelRequestDraft, ModelResumeAction, ModelStreamAssembler, ModelTerminal, ModelWarmupContext,
+    PortFuture, RandomSource, ResolvedTool, ResolvedToolCatalog, RunCallContext, ToolCallContext,
+    ToolError, ToolStreamAssembler, validate_model_request,
 };
 
 /// Cloneable bounded command/status/shutdown handle.
@@ -316,14 +318,42 @@ impl RunTaskOwner {
 
         let pending = Arc::new(Mutex::new(VecDeque::new()));
         let active = Arc::new(Mutex::new(BTreeMap::new()));
-        coordinator.install_dispatcher(Arc::new(HostDispatcher {
+        let dispatcher = Arc::new(HostDispatcher {
             model: Arc::clone(&model),
             profile,
             catalog: catalog.clone(),
             pending: Arc::clone(&pending),
             active: Arc::clone(&active),
             parent: parent.clone(),
-        }));
+        });
+        let action =
+            resume_pending_model_effect(&mut coordinator, model.as_ref(), &sources, &parent)
+                .await?;
+        match action {
+            ModelResumeAction::Retry => {
+                let seed =
+                    coordinator
+                        .pending_model_seed()
+                        .ok_or(RunHandleError::ModelSettlement {
+                            code: "model_resume_seed_missing",
+                        })?;
+                dispatcher
+                    .resume_request(seed)
+                    .map_err(|error| RunHandleError::Model {
+                        code: Arc::from(error.code),
+                    })?;
+            }
+            ModelResumeAction::SuspendUncertain => {
+                return Err(RunHandleError::Model {
+                    code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
+                });
+            }
+            ModelResumeAction::NoOutstanding
+            | ModelResumeAction::UseRecorded
+            | ModelResumeAction::Reconcile
+            | ModelResumeAction::WaitExternal => {}
+        }
+        coordinator.install_dispatcher(dispatcher);
 
         let shared = Shared::new(event_handle, run_config.command_capacity);
         let handle = RunHandle {
@@ -604,42 +634,35 @@ impl HostDispatcher {
         Ok(resolved)
     }
 
-    fn dispatch_model(
+    fn resume_request(&self, seed: ModelDispatchSeed) -> Result<(), DispatchError> {
+        self.enqueue_model(seed.pending.requested.effect_id(), seed)
+    }
+
+    fn enqueue_model(
         &self,
         effect_id: EffectId,
         seed: ModelDispatchSeed,
-    ) -> PortFuture<Result<(), DispatchError>> {
+    ) -> Result<(), DispatchError> {
         let EffectInput::Model { request: raw } = seed.pending.requested.input() else {
-            return Box::pin(async {
-                Err(DispatchError {
-                    code: "model_request_invalid",
-                })
+            return Err(DispatchError {
+                code: "model_request_invalid",
             });
         };
-        let draft = match self.parse_and_validate(raw) {
-            Ok(draft) => draft,
-            Err(error) => {
-                return Box::pin(async move {
-                    Err(DispatchError {
-                        code: stable_dispatch_code(error.code()),
-                    })
-                });
-            }
-        };
+        let draft = self
+            .parse_and_validate(raw)
+            .map_err(|error| DispatchError {
+                code: stable_dispatch_code(error.code()),
+            })?;
         let cancellation = self.parent.child();
         {
             let Ok(mut active) = self.active.lock() else {
-                return Box::pin(async {
-                    Err(DispatchError {
-                        code: "model_effect_registry_unavailable",
-                    })
+                return Err(DispatchError {
+                    code: "model_effect_registry_unavailable",
                 });
             };
             if active.insert(effect_id, cancellation.clone()).is_some() {
-                return Box::pin(async {
-                    Err(DispatchError {
-                        code: "model_effect_already_active",
-                    })
+                return Err(DispatchError {
+                    code: "model_effect_already_active",
                 });
             }
         }
@@ -659,7 +682,15 @@ impl HostDispatcher {
             draft,
             continuation_state: None,
         };
-        let result = self.enqueue(HostWork::Model { seed, request });
+        self.enqueue(HostWork::Model { seed, request })
+    }
+
+    fn dispatch_model(
+        &self,
+        effect_id: EffectId,
+        seed: ModelDispatchSeed,
+    ) -> PortFuture<Result<(), DispatchError>> {
+        let result = self.enqueue_model(effect_id, seed);
         Box::pin(async move { result })
     }
 

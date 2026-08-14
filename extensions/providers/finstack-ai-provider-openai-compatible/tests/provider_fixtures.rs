@@ -2,6 +2,10 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    Digest, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
+    PendingModelEffect, TurnId,
+};
 use finstack_ai_provider_openai_compatible::{
     Authentication, EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider,
     OpenAiModelConfig, SecretString,
@@ -9,10 +13,11 @@ use finstack_ai_provider_openai_compatible::{
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, ContentBlock,
     EffectId, JsonSchemaDraft, LaneId, Message, MessageId, MessageRole, Metadata, Model,
-    ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestId, ModelRequestLimits,
-    ModelSettings, ModelStreamItem, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
-    RawJson, RetrySafety, RunCallContext, RunId, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, SessionId,
-    SideEffectClass, TextBlock, Timestamp, ToolExecutionMode, ToolId, ToolSpec,
+    ModelCallContext, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestId,
+    ModelRequestLimits, ModelSettings, ModelStreamItem, OperationLocator, OutputSpec, PrincipalRef,
+    ProviderIds, RawJson, ReconcileContext, RetrySafety, RunCallContext, RunId,
+    SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, SessionId, SideEffectClass, TextBlock, Timestamp,
+    ToolExecutionMode, ToolId, ToolSpec,
 };
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -199,6 +204,54 @@ async fn optional_live_smoke() {
         }
     }
     assert!(completed, "live stream must complete");
+}
+
+#[tokio::test]
+async fn openai_compatible_reconcile_is_unknown_without_retrieve() {
+    let provider = provider("http://127.0.0.1:9/v1/chat/completions");
+    assert!(
+        !provider
+            .capabilities(&finstack_ai_runtime::ModelName::try_new("fixture-model").expect("model"))
+            .idempotent_requests
+    );
+    let pending = PendingModelEffect {
+        cycle: 0,
+        turn_id: TurnId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("turn"),
+        model_request_id: ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789a5")
+            .expect("request"),
+        requested: EffectRequested::try_new(
+            EffectId::parse("01234567-89ab-7cde-89ab-0123456789a4").expect("effect"),
+            EffectKind::Model,
+            None,
+            None,
+            None,
+            EffectOutputContract {
+                kind: EffectOutputKind::ModelResponse,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"model-response"),
+            },
+            EffectInput::Model {
+                request: RawJson::parse(b"{}").expect("request"),
+            },
+            RetrySafety::SafeToRetry,
+            None,
+        )
+        .expect("requested"),
+        deferred: None,
+    };
+    let result = provider
+        .reconcile(
+            ReconcileContext {
+                run: request(draft(OutputSpec::PlainText, Arc::from([])))
+                    .call
+                    .run,
+                original_input_digest: pending.requested.input_digest(),
+            },
+            pending,
+        )
+        .await
+        .expect("reconcile");
+    assert_eq!(result, ModelReconcileResult::Unknown);
 }
 
 fn provider(base_url: &str) -> OpenAiCompatibleProvider {

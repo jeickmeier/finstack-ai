@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     ContentBlock, ErrorCategory, JsonBlock, Metadata, Model, ModelCapabilities, ModelDescriptor,
-    ModelError, ModelEventStream, ModelName, ModelRequest, ModelResponse, ModelStreamItem,
-    ModelTokenEstimate, ModelToolCall, OutputSpec, ProviderIds, RawJson, ReasoningDelta, TextBlock,
-    TextDelta, ToolCallDelta, Usage, UsageDelta,
+    ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelResponse,
+    ModelStreamItem, ModelTokenEstimate, ModelToolCall, OutputSpec, PendingModelEffect,
+    ProviderIds, RawJson, ReasoningDelta, ReconcileContext, TextBlock, TextDelta, ToolCallDelta,
+    Usage, UsageDelta,
 };
 use futures_core::Stream;
 use futures_util::StreamExt;
@@ -214,6 +215,14 @@ impl Model for OpenAiCompatibleProvider {
             ));
             Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
         })
+    }
+
+    fn reconcile(
+        &self,
+        _ctx: ReconcileContext,
+        _effect: PendingModelEffect,
+    ) -> finstack_ai_runtime::PortFuture<Result<ModelReconcileResult, ModelError>> {
+        Box::pin(async { Ok(ModelReconcileResult::Unknown) })
     }
 }
 

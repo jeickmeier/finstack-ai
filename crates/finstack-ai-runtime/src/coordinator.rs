@@ -185,6 +185,21 @@ impl CommitCoordinator {
     }
 
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn pending_model_seed(&self) -> Option<ModelDispatchSeed> {
+        let state = self.kernel.state();
+        let pending = state.pending_model_effect.clone()?;
+        let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+        Some(ModelDispatchSeed {
+            pending,
+            locator,
+            authorization,
+            budget_scope_id,
+            attempt: state.retry.attempts.checked_add(1)?,
+            requested_at: state.accepted_at?,
+        })
+    }
+
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn classify(
         &self,
         env: &TransitionEnv,
