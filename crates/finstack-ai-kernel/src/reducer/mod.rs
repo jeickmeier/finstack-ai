@@ -99,4 +99,34 @@ impl Kernel {
         self.state = state;
         Ok(events)
     }
+
+    /// Install already-replayed state after snapshot validation.
+    ///
+    /// The caller must treat the snapshot as a disposable cache: this only
+    /// hydrates validated `KernelState`. It does not consult a journal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KernelError`] when the state fails [`KernelState::validate`]
+    /// or cannot produce a `kernel-state` digest.
+    pub fn try_restore(state: KernelState) -> Result<Self, KernelError> {
+        state.validate()?;
+        let _ = state.state_hash()?;
+        Ok(Self { state })
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::{Kernel, KernelState};
+
+    #[test]
+    fn try_restore_accepts_default_state() {
+        let restored = Kernel::try_restore(KernelState::default()).expect("restore");
+        assert_eq!(restored.state().last_applied_sequence, 0);
+        assert_eq!(
+            restored.state().state_hash().expect("hash"),
+            KernelState::default().state_hash().expect("hash")
+        );
+    }
 }

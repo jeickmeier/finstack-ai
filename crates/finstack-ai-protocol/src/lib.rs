@@ -12,6 +12,7 @@ mod error;
 mod journal;
 mod json;
 mod ser;
+mod snapshot;
 mod value;
 
 use serde::Serialize;
@@ -23,6 +24,10 @@ pub use journal::{
     journal_known_answer, payload_digest, verify_chain, verify_envelope,
 };
 pub use json::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
+pub use snapshot::{
+    DecodedSnapshot, SNAPSHOT_ENVELOPE_FORMAT_VERSION, decode_opaque_snapshot, decode_snapshot,
+    encode_snapshot,
+};
 pub use value::{CanonicalValue, decode_value, encode_value, to_ciborium};
 
 /// Canonical record-envelope byte ceiling (TDD §6.5).

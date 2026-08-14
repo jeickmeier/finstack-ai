@@ -165,14 +165,87 @@ impl<'de> Deserialize<'de> for RawJson {
     where
         D: serde::Deserializer<'de>,
     {
-        if deserializer.is_human_readable() {
-            // Preserve source text (including duplicate keys) before strict parse.
-            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-            Self::parse(raw.get().as_bytes()).map_err(serde::de::Error::custom)
-        } else {
-            let bytes = Vec::<u8>::deserialize(deserializer)?;
-            Self::parse(bytes).map_err(serde::de::Error::custom)
+        deserializer.deserialize_any(RawJsonVisitor)
+    }
+}
+
+struct RawJsonVisitor;
+
+impl<'de> Visitor<'de> for RawJsonVisitor {
+    type Value = RawJson;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("canonical JSON bytes or a JSON value")
+    }
+
+    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
+        RawJson::parse(value).map_err(E::custom)
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+        RawJson::parse(value).map_err(E::custom)
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        let source = serde_json::to_string(value).map_err(E::custom)?;
+        RawJson::parse(source).map_err(E::custom)
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        self.visit_str(&value)
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        RawJson::parse(if value { "true" } else { "false" }).map_err(E::custom)
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        let source = serde_json::to_string(&value).map_err(E::custom)?;
+        RawJson::parse(source).map_err(E::custom)
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        let source = serde_json::to_string(&value).map_err(E::custom)?;
+        RawJson::parse(source).map_err(E::custom)
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        let source = serde_json::to_string(&value).map_err(E::custom)?;
+        RawJson::parse(source).map_err(E::custom)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        RawJson::parse(b"null").map_err(E::custom)
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        self.visit_unit()
+    }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let value = StrictValue {
+            depth: 0,
+            max_depth: RAW_JSON_MAX_DEPTH,
+            max_key_bytes: None,
         }
+        .deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+        RawJson::parse(value.to_string()).map_err(de::Error::custom)
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let value = StrictValue {
+            depth: 0,
+            max_depth: RAW_JSON_MAX_DEPTH,
+            max_key_bytes: None,
+        }
+        .deserialize(de::value::MapAccessDeserializer::new(map))?;
+        RawJson::parse(value.to_string()).map_err(de::Error::custom)
     }
 }
 
@@ -265,13 +338,8 @@ impl<'de> Deserialize<'de> for Metadata {
     where
         D: serde::Deserializer<'de>,
     {
-        if deserializer.is_human_readable() {
-            let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-            Self::parse(raw.get().as_bytes()).map_err(serde::de::Error::custom)
-        } else {
-            let bytes = Vec::<u8>::deserialize(deserializer)?;
-            Self::parse(bytes).map_err(serde::de::Error::custom)
-        }
+        let raw = RawJson::deserialize(deserializer)?;
+        Self::parse(raw.as_bytes()).map_err(serde::de::Error::custom)
     }
 }
 

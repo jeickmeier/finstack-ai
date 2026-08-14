@@ -12,8 +12,8 @@ use finstack_ai_kernel::{
 use thiserror::Error;
 
 use crate::{
-    AuthorizationContext, JournalStore, LoadRequest, LoadedSession, ModelProgress, PortFuture,
-    PortObject, StoreError,
+    AcceleratedRestore, AuthorizationContext, JournalStore, LoadRequest, LoadedSession,
+    ModelProgress, PortFuture, PortObject, SnapshotSchedule, StateSnapshotRequest, StoreError,
 };
 
 /// Stable run-local fault state owned by a commit coordinator.
@@ -88,6 +88,8 @@ pub struct CommitCoordinator {
     store: Arc<dyn JournalStore>,
     next_transient_sequence: u64,
     pending_timer_scheduled_at: Option<Timestamp>,
+    snapshot_schedule: SnapshotSchedule,
+    last_snapshot_sequence: Option<u64>,
     fault: Option<RunFault>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
     #[cfg(feature = "native-tokio")]
@@ -105,6 +107,8 @@ impl CommitCoordinator {
             store,
             next_transient_sequence: 0,
             pending_timer_scheduled_at: None,
+            snapshot_schedule: SnapshotSchedule::default(),
+            last_snapshot_sequence: None,
             fault: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
@@ -112,6 +116,13 @@ impl CommitCoordinator {
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             event_publisher: None,
         }
+    }
+
+    /// Replace the default snapshot write policy.
+    #[must_use]
+    pub fn with_snapshot_schedule(mut self, schedule: SnapshotSchedule) -> Self {
+        self.snapshot_schedule = schedule;
+        self
     }
 
     /// Reconstruct a coordinator solely by loading and replaying one session.
@@ -127,13 +138,23 @@ impl CommitCoordinator {
             .load(LoadRequest { session_id })
             .await
             .map_err(CommitCoordinatorError::Store)?;
-        let (kernel, next_transient_sequence, pending_timer_scheduled_at) = replay_loaded(&loaded)
-            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
+            replay_loaded(&loaded)
+                .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         Ok(Self {
             kernel,
             store,
             next_transient_sequence,
             pending_timer_scheduled_at,
+            snapshot_schedule: SnapshotSchedule::default(),
+            last_snapshot_sequence: used_snapshot
+                .then(|| {
+                    loaded
+                        .accelerated
+                        .as_ref()
+                        .map(|snapshot| snapshot.sequence)
+                })
+                .flatten(),
             fault: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
@@ -237,11 +258,23 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("conflict_reload_failed"))?;
-                    let (kernel, next_transient_sequence, pending_timer_scheduled_at) =
-                        replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    let (
+                        kernel,
+                        next_transient_sequence,
+                        pending_timer_scheduled_at,
+                        used_snapshot,
+                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
                     self.kernel = kernel;
                     self.next_transient_sequence = next_transient_sequence;
                     self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+                    self.last_snapshot_sequence = used_snapshot
+                        .then(|| {
+                            loaded
+                                .accelerated
+                                .as_ref()
+                                .map(|snapshot| snapshot.sequence)
+                        })
+                        .flatten();
                     decision = self
                         .kernel
                         .decide(&env, input.clone())
@@ -301,6 +334,7 @@ impl CommitCoordinator {
                 }
                 dispatched_actions += 1;
             }
+            self.maybe_write_snapshot(&committed).await;
             return Ok(CommitOutcome {
                 committed: Some(committed),
                 events,
@@ -308,6 +342,37 @@ impl CommitCoordinator {
                 dispatched_actions,
                 fault: None,
             });
+        }
+    }
+
+    async fn maybe_write_snapshot(&mut self, committed: &CommittedBatch) {
+        if self.snapshot_schedule.every_n_records == 0 {
+            return;
+        }
+        let head = self.kernel.state().last_applied_sequence;
+        let last = self.last_snapshot_sequence.unwrap_or(0);
+        if head.saturating_sub(last) < self.snapshot_schedule.every_n_records {
+            return;
+        }
+        let Some(record) = committed.records.last() else {
+            return;
+        };
+        let request = StateSnapshotRequest {
+            session_id: record.session_id(),
+            state: self.kernel.state().clone(),
+            head_checksum: record.checksum(),
+            pending_timer_scheduled_at: self.pending_timer_scheduled_at,
+        };
+        let write = self.store.write_state_snapshot(request);
+        #[cfg(feature = "native-tokio")]
+        let accepted = matches!(
+            tokio::time::timeout(self.snapshot_schedule.write_timeout, write).await,
+            Ok(Ok(_))
+        );
+        #[cfg(not(feature = "native-tokio"))]
+        let accepted = write.await.is_ok();
+        if accepted {
+            self.last_snapshot_sequence = Some(head);
         }
     }
 
@@ -381,11 +446,23 @@ impl CommitCoordinator {
                         .load(LoadRequest { session_id })
                         .await
                         .map_err(|_| self.boundary_fault("composition_conflict_reload_failed"))?;
-                    let (kernel, next_transient_sequence, pending_timer_scheduled_at) =
-                        replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
+                    let (
+                        kernel,
+                        next_transient_sequence,
+                        pending_timer_scheduled_at,
+                        used_snapshot,
+                    ) = replay_loaded(&loaded).map_err(|code| self.boundary_fault(code))?;
                     self.kernel = kernel;
                     self.next_transient_sequence = next_transient_sequence;
                     self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+                    self.last_snapshot_sequence = used_snapshot
+                        .then(|| {
+                            loaded
+                                .accelerated
+                                .as_ref()
+                                .map(|snapshot| snapshot.sequence)
+                        })
+                        .flatten();
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -684,7 +761,74 @@ fn empty_outcome(decision: Decision) -> CommitOutcome {
     }
 }
 
-fn replay_loaded(loaded: &LoadedSession) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
+fn replay_loaded(
+    loaded: &LoadedSession,
+) -> Result<(Kernel, u64, Option<Timestamp>, bool), &'static str> {
+    if let Some(accelerated) = loaded.accelerated.as_ref()
+        && let Ok((kernel, next_transient_sequence, pending_timer_scheduled_at)) =
+            replay_from_snapshot(loaded, accelerated)
+    {
+        return Ok((
+            kernel,
+            next_transient_sequence,
+            pending_timer_scheduled_at,
+            true,
+        ));
+    }
+    let (kernel, next_transient_sequence, pending_timer_scheduled_at) =
+        replay_from_default(loaded)?;
+    Ok((
+        kernel,
+        next_transient_sequence,
+        pending_timer_scheduled_at,
+        false,
+    ))
+}
+
+fn replay_from_snapshot(
+    loaded: &LoadedSession,
+    accelerated: &AcceleratedRestore,
+) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
+    if accelerated.sequence > loaded.head_sequence
+        || accelerated.sequence != accelerated.state.last_applied_sequence
+    {
+        return Err("snapshot_sequence_invalid");
+    }
+    let journal_checksum =
+        checksum_at(loaded, accelerated.sequence).ok_or("snapshot_missing_record")?;
+    if journal_checksum != accelerated.head_checksum {
+        return Err("snapshot_checksum_mismatch");
+    }
+    let mut kernel =
+        Kernel::try_restore(accelerated.state.clone()).map_err(|_| "snapshot_state_invalid")?;
+    let mut next_transient_sequence = 0_u64;
+    let mut pending_timer_scheduled_at = accelerated.pending_timer_scheduled_at;
+    for batch in loaded.committed_batches.iter() {
+        if batch.last_sequence <= accelerated.sequence {
+            continue;
+        }
+        if batch.first_sequence <= accelerated.sequence {
+            return Err("snapshot_splits_batch");
+        }
+        let events = kernel
+            .apply(batch, next_transient_sequence)
+            .map_err(|_| "journal_replay_failed")?;
+        next_transient_sequence = next_transient_sequence
+            .checked_add(
+                u64::try_from(events.len()).map_err(|_| "transient_event_sequence_exhausted")?,
+            )
+            .ok_or("transient_event_sequence_exhausted")?;
+        update_pending_timer_timestamp(&mut pending_timer_scheduled_at, batch);
+    }
+    if kernel.state().last_applied_sequence != loaded.head_sequence {
+        return Err("loaded_head_mismatch");
+    }
+    Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
+}
+
+fn replay_from_default(
+    loaded: &LoadedSession,
+) -> Result<(Kernel, u64, Option<Timestamp>), &'static str> {
     let mut kernel = Kernel::default();
     let mut next_transient_sequence = 0_u64;
     let mut last_batch_sequence = 0_u64;
@@ -707,6 +851,15 @@ fn replay_loaded(loaded: &LoadedSession) -> Result<(Kernel, u64, Option<Timestam
         return Err("loaded_head_mismatch");
     }
     Ok((kernel, next_transient_sequence, pending_timer_scheduled_at))
+}
+
+fn checksum_at(loaded: &LoadedSession, sequence: u64) -> Option<finstack_ai_kernel::Digest> {
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .find(|record| record.sequence() == sequence)
+        .map(finstack_ai_kernel::RecordEnvelope::checksum)
 }
 
 fn update_pending_timer_timestamp(pending: &mut Option<Timestamp>, committed: &CommittedBatch) {
@@ -1006,7 +1159,8 @@ mod tests {
         BudgetReservationState, BudgetReserveRequest, ChildCoordinationIds, ChildPlacement,
         ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunLocator, ChildRunRequest,
         CompositionError, LoadedSession, OperationLocator, PortFuture, SnapshotReceipt,
-        SnapshotRequest, StoreHealth, child_relation_digest,
+        SnapshotRequest, SnapshotSchedule, StateSnapshotRequest, StoreHealth,
+        child_relation_digest,
     };
 
     fn block_on<T>(future: impl Future<Output = T>) -> T {
@@ -1203,6 +1357,47 @@ mod tests {
         requests: BTreeMap<finstack_ai_kernel::AppendBatchId, AppendRequest>,
     }
 
+    struct StallingSnapshotStore {
+        inner: FakeStore,
+    }
+
+    impl JournalStore for StallingSnapshotStore {
+        fn append(
+            &self,
+            request: finstack_ai_kernel::AppendRequest,
+        ) -> PortFuture<Result<finstack_ai_kernel::CommittedBatch, StoreError>> {
+            self.inner.append(request)
+        }
+
+        fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
+            self.inner.load(request)
+        }
+
+        fn write_snapshot(
+            &self,
+            request: SnapshotRequest,
+        ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+            self.inner.write_snapshot(request)
+        }
+
+        fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
+            self.inner.health()
+        }
+
+        fn write_state_snapshot(
+            &self,
+            _request: StateSnapshotRequest,
+        ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+            Box::pin(async {
+                #[cfg(feature = "native-tokio")]
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                Err(StoreError::Unavailable {
+                    reason_code: "snapshot_write_stalled",
+                })
+            })
+        }
+    }
+
     impl FakeStore {
         fn new(mode: FakeMode) -> Self {
             Self {
@@ -1312,6 +1507,7 @@ mod tests {
                     metadata: finstack_ai_kernel::Metadata::empty(),
                     committed_batches: batches.into(),
                     snapshot: None,
+                    accelerated: None,
                 })
             })
         }
@@ -1600,6 +1796,32 @@ mod tests {
                 effect_id: effect.effect_id,
             }]
         );
+    }
+
+    #[cfg(feature = "native-tokio")]
+    #[tokio::test]
+    async fn snapshot_write_timeout_does_not_fail_or_stall_submit() {
+        let store = Arc::new(StallingSnapshotStore {
+            inner: FakeStore::new(FakeMode::Normal),
+        });
+        let mut coordinator =
+            CommitCoordinator::new(store).with_snapshot_schedule(SnapshotSchedule {
+                every_n_records: 1,
+                write_timeout: std::time::Duration::from_millis(50),
+            });
+        let started = std::time::Instant::now();
+        coordinator
+            .submit(
+                env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+                accept_input(),
+            )
+            .await
+            .expect("accept");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(150),
+            "snapshot write must not block submit beyond write_timeout"
+        );
+        assert!(coordinator.fault().is_none());
     }
 
     #[test]

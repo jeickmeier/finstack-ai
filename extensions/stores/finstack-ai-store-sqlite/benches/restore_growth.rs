@@ -10,11 +10,14 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::{
-    AppendRequest, AuthorizationEvidence, Digest, ExternalCommandKind, ExternalCommandRejected,
-    ExternalCommandTarget, Id, IdTag, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION,
-    RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag, RunTag, SessionTag, Timestamp,
+    AppendRequest, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
+    DeadlinePropagation, Digest, EventTag, ExternalCommandKind, ExternalCommandRejected,
+    ExternalCommandTarget, Id, IdTag, LaneTag, PrincipalPropagation, PrincipalRef,
+    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag, RunAccepted,
+    RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionTag,
+    Timestamp,
 };
-use finstack_ai_runtime::{JournalStore, LoadRequest};
+use finstack_ai_runtime::{CommitCoordinator, JournalStore, LoadRequest, StateSnapshotRequest};
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
     SqliteStoreLimits,
@@ -81,6 +84,55 @@ fn request(batch_ordinal: u64, expected_sequence: u64) -> AppendRequest {
     .expect("request")
 }
 
+fn accept_request() -> AppendRequest {
+    let run_id = id::<RunTag>(201);
+    let accepted = RunAccepted::try_new(
+        run_id,
+        RunRelation::root(run_id).expect("relation"),
+        RunSecurityContext::try_new(
+            "tenant-a",
+            PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(br#"{"agent":"fixture"}"#),
+        None,
+    )
+    .expect("accepted");
+    AppendRequest::try_new(
+        id(1),
+        id::<SessionTag>(1),
+        1,
+        vec![
+            RecordDraft::try_new(
+                RECORD_FORMAT_VERSION,
+                RECORD_KIND_VERSION,
+                id::<RecordTag>(1),
+                id::<SessionTag>(1),
+                id::<LaneTag>(101),
+                Some(run_id),
+                Timestamp::from_unix_ms(1).expect("timestamp"),
+                vec![id::<EventTag>(301)],
+                RecordBody::RunAccepted(accepted),
+            )
+            .expect("draft"),
+        ],
+    )
+    .expect("accept request")
+}
+
 fn seed(path: &Path, records: u64) {
     let store = SqliteJournalStore::try_open(SqliteStoreConfig {
         path: path.to_path_buf(),
@@ -89,13 +141,18 @@ fn seed(path: &Path, records: u64) {
             sessions: 1,
             batches_per_session: usize::try_from(records).expect("batches"),
             records_per_session: usize::try_from(records).expect("records"),
-            snapshot_bytes: 64,
+            snapshot_bytes: 256 * 1024,
         },
         busy_timeout: DEFAULT_BUSY_TIMEOUT,
     })
     .expect("open");
     for sequence in 1..=records {
-        block_on(store.append(request(sequence, sequence))).expect("append");
+        let append = if sequence == 1 {
+            accept_request()
+        } else {
+            request(sequence, sequence)
+        };
+        block_on(store.append(append)).expect("append");
     }
 }
 
@@ -120,7 +177,7 @@ fn restore_and_growth(criterion: &mut Criterion) {
                     sessions: 1,
                     batches_per_session: 64,
                     records_per_session: 64,
-                    snapshot_bytes: 64,
+                    snapshot_bytes: 256 * 1024,
                 },
                 busy_timeout: Duration::from_secs(1),
             })
@@ -134,5 +191,84 @@ fn restore_and_growth(criterion: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, restore_and_growth);
+fn open(path: &Path) -> SqliteJournalStore {
+    SqliteJournalStore::try_open(SqliteStoreConfig {
+        path: path.to_path_buf(),
+        durability: SqliteDurability::Durable,
+        limits: SqliteStoreLimits {
+            sessions: 1,
+            batches_per_session: 64,
+            records_per_session: 64,
+            snapshot_bytes: 256 * 1024,
+        },
+        busy_timeout: Duration::from_secs(1),
+    })
+    .expect("open")
+}
+
+fn snapshot_versus_full_replay(criterion: &mut Criterion) {
+    const RECORDS: u64 = 64;
+    const SNAPSHOT_AT: u64 = 32;
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.sqlite");
+    seed(&path, SNAPSHOT_AT);
+    let store = open(&path);
+    let recovered = block_on(CommitCoordinator::recover(
+        std::sync::Arc::new(store) as std::sync::Arc<dyn JournalStore>,
+        id::<SessionTag>(1),
+    ))
+    .expect("recover prefix");
+    let store = open(&path);
+    let loaded = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }))
+    .expect("load prefix");
+    block_on(store.write_state_snapshot(StateSnapshotRequest {
+        session_id: id::<SessionTag>(1),
+        state: recovered.state().clone(),
+        head_checksum: loaded.head_checksum.expect("head"),
+        pending_timer_scheduled_at: None,
+    }))
+    .expect("snapshot");
+    drop(store);
+    for sequence in (SNAPSHOT_AT + 1)..=RECORDS {
+        let store = open(&path);
+        block_on(store.append(request(sequence, sequence))).expect("tail");
+    }
+
+    criterion.bench_function("sqlite_recover_snapshot_plus_tail_64", |bencher| {
+        bencher.iter(|| {
+            let store = open(&path);
+            let recovered = block_on(CommitCoordinator::recover(
+                std::sync::Arc::new(store) as std::sync::Arc<dyn JournalStore>,
+                id::<SessionTag>(1),
+            ))
+            .expect("snapshot recover");
+            assert_eq!(recovered.state().last_applied_sequence, RECORDS);
+        });
+    });
+
+    let store = open(&path);
+    store
+        .discard_snapshot(id::<SessionTag>(1))
+        .expect("discard");
+    drop(store);
+
+    criterion.bench_function("sqlite_recover_full_replay_64", |bencher| {
+        bencher.iter(|| {
+            let store = open(&path);
+            let recovered = block_on(CommitCoordinator::recover(
+                std::sync::Arc::new(store) as std::sync::Arc<dyn JournalStore>,
+                id::<SessionTag>(1),
+            ))
+            .expect("full recover");
+            assert_eq!(recovered.state().last_applied_sequence, RECORDS);
+        });
+    });
+    eprintln!(
+        "sqlite_snapshot_vs_full records={RECORDS} snapshot_at={SNAPSHOT_AT} (warning-only; PR-063 owns budgets)"
+    );
+}
+
+criterion_group!(benches, restore_and_growth, snapshot_versus_full_replay);
 criterion_main!(benches);
