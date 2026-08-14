@@ -2,6 +2,7 @@ PR-040 local candidate validation
 Date: 2026-08-14
 Owner: me@jeickmeier.com
 Branch: codex/pr-040-sqlite-journalstore
+Candidate: dc8c6259ab2e0204cdb5fcb93fc4b13294da291c
 Host: Darwin arm64; rustc 1.97.1
 
 Commands and results:

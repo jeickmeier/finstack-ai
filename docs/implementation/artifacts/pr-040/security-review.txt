@@ -1,5 +1,6 @@
 PR-040 TM-12 / Threat Model section 18 security review
 Date: 2026-08-14
+Candidate: dc8c6259ab2e0204cdb5fcb93fc4b13294da291c
 Reviewer: me@jeickmeier.com
 Decision: Pass for the native rusqlite JournalStore leaf, WAL+FULL
 durable mode, and store-level fault surface. No threat-model rewrite.
