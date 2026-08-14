@@ -1,6 +1,6 @@
 import type { PrebetaKind } from "./host.js";
 export { Agent, Event, EventBatch, FinstackError, Run, RunResult, Session, } from "./agent.js";
-export type { AgentOptions, EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./agent.js";
+export type { AgentOptions, EventOptions, RunOptions, RunResultSnapshot, SessionInspectPhase, SessionInspectSnapshot, SessionSnapshot, } from "./agent.js";
 export type { HostArtifactStore, HostCallOptions, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostModelCompletion, HostModelResult, HostObserver, HostRandomSource, HostToolResult, HostToolset, PrebetaKind, } from "./host.js";
 export { JsArtifactStore, JsClock, JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsRandomSource, JsToolset, createHostClock, createHostRandomSource, createMemoryArtifactStore, createMemoryJournalStore, } from "./adapters.js";
 export type { JsContextProviderOptions, JsJournalStoreOptions, JsMiddlewareOptions, JsModelOptions, JsObserverOptions, JsToolsetOptions, } from "./adapters.js";

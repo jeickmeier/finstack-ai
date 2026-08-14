@@ -1,3 +1,4 @@
+import type { SessionInspectSnapshot } from "./agent.js";
 import { FinstackError } from "./errors.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 import {
@@ -46,6 +47,7 @@ export interface WorkerHostEventBatch {
  */
 export interface WorkerHostFactory {
   create(options?: unknown): Promise<WorkerHostAgent>;
+  inspectSession?(sessionId: string): Promise<SessionInspectSnapshot>;
 }
 
 interface WorkerScope {
@@ -200,6 +202,25 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
         }
         const waiter = slot.waiters.shift();
         waiter?.();
+        return;
+      }
+      case "inspect": {
+        if (factory.inspectSession === undefined) {
+          throw new FinstackError("worker inspect is unavailable", {
+            code: "agent_run_invalid_configuration",
+            retryable: false,
+          });
+        }
+        const snapshot = await factory.inspectSession(message.sessionId);
+        post({
+          v: 1,
+          type: "inspected",
+          id: message.id,
+          snapshot: {
+            ...snapshot,
+            headSequence: Number(snapshot.headSequence),
+          },
+        });
         return;
       }
       case "shutdown":

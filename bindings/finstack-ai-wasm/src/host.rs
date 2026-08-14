@@ -377,6 +377,35 @@ mod wasm_invoke {
         normalize_js_result(awaited, signal).await
     }
 
+    /// Invoke a host method and preserve the raw JavaScript rejection value.
+    pub async fn invoke_host_raw(
+        this: &JsValue,
+        method: &Function,
+        positional: &[JsValue],
+        signal: Option<&JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let options = js_sys::Object::new();
+        if let Some(signal) = signal {
+            Reflect::set(&options, &JsValue::from_str("signal"), signal)?;
+        }
+        let args = js_sys::Array::new();
+        for value in positional {
+            args.push(value);
+        }
+        args.push(&options);
+        let result = method.apply(this, &args)?;
+        if is_promise(&result) {
+            JsFuture::from(Promise::from(result)).await
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// Return a host method when present and callable.
+    pub fn extract_optional_method(adapter: &JsValue, name: &str) -> Option<Function> {
+        extract_method(adapter, name).ok()
+    }
+
     /// Normalized host return: one object or collected stream items.
     pub enum HostJsResult {
         Value(JsValue),
@@ -639,7 +668,8 @@ mod wasm_invoke {
 #[cfg(target_arch = "wasm32")]
 pub use wasm_invoke::{
     AbortOnDrop, HostJsResult, bytes_from_uint8_array, create_abort_controller, extract_method,
-    invoke_host, json_string_value, stringify_js, uint8_array_from_bytes,
+    extract_optional_method, invoke_host, invoke_host_raw, json_string_value, stringify_js,
+    uint8_array_from_bytes,
 };
 
 /// Native callback result used to prove DTO and stream-item paths without JS.

@@ -1,3 +1,4 @@
+import type { SessionInspectSnapshot } from "./agent.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 /**
  * Structural Agent surface used inside the worker. The factory supplies the
@@ -40,6 +41,7 @@ export interface WorkerHostEventBatch {
  */
 export interface WorkerHostFactory {
     create(options?: unknown): Promise<WorkerHostAgent>;
+    inspectSession?(sessionId: string): Promise<SessionInspectSnapshot>;
 }
 /**
  * Serve the worker protocol from a Dedicated Worker.

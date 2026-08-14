@@ -101,7 +101,11 @@ export interface HostObserver {
     observe(batch: unknown, options?: HostCallOptions): Promise<void>;
 }
 /**
- * Pre-beta in-memory journal store. IndexedDB and crash durability are later work.
+ * Trusted host journal store.
+ *
+ * `health` is required. `append`, `load`, and `writeSnapshot` are optional;
+ * the Rust wrapper returns Unavailable when they are missing.
+ * `durable` is always treated as false by the wrapper.
  */
 export interface HostJournalStore {
     /**
@@ -111,6 +115,24 @@ export interface HostJournalStore {
         ready: boolean;
         detail?: string;
     }>;
+    /**
+     * Append one frozen transitional JSON batch.
+     *
+     * @param request - JSON string of `AppendRequest`.
+     */
+    append?(request: unknown, options?: HostCallOptions): Promise<unknown>;
+    /**
+     * Load one session's committed batches.
+     *
+     * @param request - JSON string of `{ session_id }`.
+     */
+    load?(request: unknown, options?: HostCallOptions): Promise<unknown>;
+    /**
+     * Replace one session's disposable snapshot cache.
+     *
+     * @param request - JSON string of `SnapshotRequest`.
+     */
+    writeSnapshot?(request: unknown, options?: HostCallOptions): Promise<unknown>;
 }
 /**
  * Host clock. `now` returns Unix milliseconds.

@@ -21,6 +21,8 @@ export type {
   EventOptions,
   RunOptions,
   RunResultSnapshot,
+  SessionInspectPhase,
+  SessionInspectSnapshot,
   SessionSnapshot,
 } from "./agent.js";
 

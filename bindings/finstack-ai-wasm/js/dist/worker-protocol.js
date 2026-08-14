@@ -102,6 +102,13 @@ export function decodeMainToWorker(data) {
                 runId: requiredString(record, "runId"),
                 lastSequence: requiredNumber(record, "lastSequence"),
             };
+        case "inspect":
+            return {
+                v: 1,
+                type,
+                id: requiredString(record, "id"),
+                sessionId: requiredString(record, "sessionId"),
+            };
         default: {
             const _exhaustive = type;
             throw new FinstackError(`unsupported worker command: ${String(_exhaustive)}`, {
@@ -199,6 +206,13 @@ export function decodeWorkerToMain(data) {
             };
         case "terminated":
             return { v: 1, type, reason: requiredString(record, "reason") };
+        case "inspected":
+            return {
+                v: 1,
+                type,
+                id: requiredString(record, "id"),
+                snapshot: requiredInspect(record.snapshot),
+            };
         default: {
             const _exhaustive = type;
             throw new FinstackError(`unsupported worker event: ${String(_exhaustive)}`, {
@@ -300,6 +314,41 @@ function requiredResult(value) {
         });
     }
     return { ...session, text };
+}
+function requiredInspect(value) {
+    if (value === null || typeof value !== "object") {
+        throw new FinstackError("worker message missing inspect snapshot", {
+            code: "agent_run_invalid_configuration",
+            retryable: false,
+        });
+    }
+    const record = value;
+    const phase = record.phase;
+    const headSequence = Number(record.headSequence);
+    if (typeof record.sessionId !== "string" ||
+        !Number.isFinite(headSequence) ||
+        (phase !== "empty" &&
+            phase !== "in_progress" &&
+            phase !== "completed" &&
+            phase !== "failed" &&
+            phase !== "cancelled")) {
+        throw new FinstackError("worker message missing inspect snapshot", {
+            code: "agent_run_invalid_configuration",
+            retryable: false,
+        });
+    }
+    const snapshot = {
+        sessionId: record.sessionId,
+        headSequence,
+        phase,
+    };
+    if (typeof record.resultText === "string") {
+        snapshot.resultText = record.resultText;
+    }
+    if (typeof record.lastRecordKind === "string") {
+        snapshot.lastRecordKind = record.lastRecordKind;
+    }
+    return snapshot;
 }
 function requiredPolicy(value) {
     if (value === "drop-progress" || value === "disconnect" || value === "block-bounded") {

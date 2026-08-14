@@ -6,6 +6,7 @@ import type {
   HostClock,
   HostContextProvider,
   HostJournalStore,
+  SessionInspectSnapshot,
   HostMiddleware,
   HostModel,
   HostObserver,
@@ -31,6 +32,12 @@ import type {
 import type {
   OpenAICompatibleOptions,
 } from "./adapters/openai-compatible.ts";
+import type {
+  createIndexedDbArtifactStore,
+  createIndexedDbJournalStore,
+  createMapJournalStore,
+  deleteIndexedDbStores,
+} from "./adapters/indexeddb.ts";
 import type { WorkerClient, WorkerConnectOptions } from "./worker.ts";
 
 type DriveResult = {
@@ -77,6 +84,14 @@ declare global {
       JsArtifactStore: new (adapter: HostArtifactStore) => JsArtifactStore;
       createMemoryJournalStore: () => HostJournalStore;
       createMemoryArtifactStore: () => HostArtifactStore;
+      createMapJournalStore: typeof createMapJournalStore;
+      createIndexedDbJournalStore: typeof createIndexedDbJournalStore;
+      createIndexedDbArtifactStore: typeof createIndexedDbArtifactStore;
+      deleteIndexedDbStores: typeof deleteIndexedDbStores;
+      inspectSession: (
+        store: JsJournalStore,
+        sessionId: string,
+      ) => Promise<SessionInspectSnapshot>;
       createHostClock: (now?: () => number) => HostClock;
       createHostRandomSource: () => HostRandomSource;
       createOpenAICompatibleModel: (options?: OpenAICompatibleOptions) => HostModel;

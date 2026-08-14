@@ -23,6 +23,7 @@ export {
   WorkerRun,
   connectWorker,
 } from "./worker-client.js";
+export type { SessionInspectPhase, SessionInspectSnapshot } from "./agent.js";
 export type { WorkerBackpressure, WorkerConnectOptions } from "./worker-client.js";
 export { exposeWorkerHost } from "./worker-host.js";
 export type {

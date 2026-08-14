@@ -15,7 +15,18 @@ export class Agent {
      *
      * Returns a structured host error when configuration is invalid.
      */
-    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null): Promise<any>;
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null): Promise<any>;
+    /**
+     * Replay one stored session into a provisional inspect snapshot.
+     *
+     * This does not continue an interrupted run or retry in-flight effects.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session id is invalid or the
+     * stored journal cannot be replayed.
+     */
+    static inspectSession(store: JsJournalStore, session_id: string): Promise<any>;
     /**
      * Execute one run and await its committed result.
      *
@@ -157,13 +168,17 @@ export class JsContextProvider {
 }
 
 /**
- * Pre-beta in-memory JS journal-store wrapper. Not crash-durable.
+ * Trusted JS journal-store wrapper. Not crash-durable.
  */
 export class JsJournalStore {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Construct a scripted journal-store wrapper.
+     * Clone the wrapper without moving the caller's handle.
+     */
+    cloneHandle(): JsJournalStore;
+    /**
+     * Construct a journal-store wrapper around a trusted host adapter.
      *
      * # Errors
      *
@@ -460,7 +475,8 @@ export interface InitOutput {
     readonly __wbg_run_free: (a: number, b: number) => void;
     readonly __wbg_runresult_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly agent_create: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
@@ -481,6 +497,7 @@ export interface InitOutput {
     readonly jsartifactstore_new: (a: number, b: number) => void;
     readonly jsclock_new: (a: number, b: number) => void;
     readonly jscontextprovider_new: (a: number, b: number, c: number) => void;
+    readonly jsjournalstore_cloneHandle: (a: number) => number;
     readonly jsjournalstore_new: (a: number, b: number, c: number) => void;
     readonly jsmiddleware_new: (a: number, b: number, c: number) => void;
     readonly jsmodel_new: (a: number, b: number, c: number) => void;
@@ -509,9 +526,9 @@ export interface InitOutput {
     readonly driveScriptedToolCall: (a: number, b: number, c: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_926: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_940: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_288: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1364: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1378: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_331: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

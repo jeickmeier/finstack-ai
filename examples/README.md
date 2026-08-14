@@ -1,1 +1,7 @@
-Placeholder directory; implementation lands in later pull requests. See docs/planning/03-finstack-ai-technical-design.md §2.
+# Examples
+
+Public-API examples for finstack-ai bindings.
+
+- [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
+  inspect demo. Persistence is not crash-durable and is labeled experimental
+  until PR-048. The Dedicated Worker topology is the production default.

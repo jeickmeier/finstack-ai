@@ -95,9 +95,14 @@ const client = await connectWorker(worker);
 `normalizePrebetaShape` validates the three pre-beta command kinds against the
 same Rust DTOs as the Python binding. It does not submit a live Agent.
 
-Journal-store wrappers are scripted and in-memory only. They never claim crash
-durability. IndexedDB persistence is later work; crash-durable browser storage
-is later still. This package does not ship SQLite.
+Default `Agent.create` stays memory-backed. Opt into a host journal with
+`Agent.create({ store })`. IndexedDB batteries live on
+`@finstack/ai/adapters/indexeddb` and report `health().detail =
+js_indexeddb_experimental`. Persistence is experimental until PR-048
+revalidates against JournalStore v1. `durable` stays false. Reload restore is
+`Agent.inspectSession` / `WorkerClient.inspectSession`, not continue-the-run.
+Call `deleteIndexedDbStores()` to drop origin-local data. This package does
+not ship SQLite and does not claim crash durability.
 
 ## Same-origin OpenAI-compatible battery
 
@@ -114,23 +119,26 @@ TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
 bundles, headers, or examples. Terminate secrets at a trusted same-origin
 proxy. Optional application `headers` are not a credential helper.
 
-## Public surface (PR-035 / PR-036)
+## Public surface (PR-035 / PR-037)
 
 - `init(): Promise<void>`
 - `health(): string`
 - `buildMetadata(): { version, engineVersion, implementation: "wasm", target: "wasm32-unknown-unknown" }`
-- `Agent.create`, `Agent.start`, `Agent.run`
+- `Agent.create`, `Agent.start`, `Agent.run`, `Agent.inspectSession`
 - `Run` (`session`, `events`, `result`, `cancel`, `closeEvents`)
 - `Session`, `RunResult`, `Event`, `EventBatch`, `FinstackError`
 - Host interfaces and `Js*` wrappers for model, toolset, context, middleware,
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
 - `@finstack/ai/adapters/openai-compatible`
-- `@finstack/ai/worker` (`connectWorker`, `exposeWorkerHost`, `WorkerRun`)
+- `@finstack/ai/adapters/indexeddb`
+- `@finstack/ai/worker` (`connectWorker`, `exposeWorkerHost`, `WorkerRun`,
+  `inspectSession`)
 
 Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
-remains a pre-beta health stub. IndexedDB, npm publish, and G4 remain later
-work. Dropping a `Run` or `WorkerRun` detaches observation and does not cancel.
+remains a pre-beta health stub. IndexedDB persistence is experimental until
+PR-048. npm publish and G4 remain later work. Dropping a `Run` or `WorkerRun`
+detaches observation and does not cancel.
 
 ## Regenerate
 

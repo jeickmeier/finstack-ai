@@ -34,6 +34,11 @@ SECRET_ROOTS = (
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "harness.html",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "worker-harness.html",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "generated",
+    REPO_ROOT / "examples" / "browser-minimal" / "index.html",
+    REPO_ROOT / "examples" / "browser-minimal" / "main.ts",
+    REPO_ROOT / "examples" / "browser-minimal" / "worker.ts",
+    REPO_ROOT / "examples" / "browser-minimal" / "README.md",
+    REPO_ROOT / "examples" / "README.md",
 )
 SECRET_PATTERNS = (
     "apiKey",
@@ -214,7 +219,7 @@ def check_size() -> int:
         / "docs"
         / "implementation"
         / "artifacts"
-        / "pr-036"
+        / "pr-037"
         / "bundle-size.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)

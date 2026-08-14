@@ -7,6 +7,7 @@ function assertInitialized(flag) {
 let initialized = false;
 const wasmModels = new WeakMap();
 const wasmToolsets = new WeakMap();
+const wasmStores = new WeakMap();
 /**
  * Throw when the generated wasm module has not been initialized.
  *
@@ -40,6 +41,20 @@ export function wasmToolsetHandle(toolset) {
     const handle = wasmToolsets.get(toolset);
     if (handle === undefined) {
         throw new TypeError("JsToolset is not a live wasm handle");
+    }
+    return handle;
+}
+/**
+ * Return the crate-private wasm-bindgen journal-store handle.
+ *
+ * @param store - Public {@link JsJournalStore} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmJournalStoreHandle(store) {
+    const handle = wasmStores.get(store);
+    if (handle === undefined) {
+        throw new TypeError("JsJournalStore is not a live wasm handle");
     }
     return handle;
 }
@@ -154,15 +169,15 @@ export class JsObserver {
     }
 }
 /**
- * Pre-beta in-memory journal-store wrapper. Not crash-durable.
+ * Trusted JS journal-store wrapper. Not crash-durable.
  */
 export class JsJournalStore {
     #handle;
     /**
      * Wrap a trusted {@link HostJournalStore}.
      *
-     * IndexedDB and crash durability are later pull requests. This wrapper is
-     * scripted / in-memory only.
+     * Persistence is opt-in through a host that implements `append` / `load` /
+     * `writeSnapshot`. The default memory helper remains health-only.
      *
      * @param adapter - Host object that reports non-durable health.
      * @param options - Optional detail label.
@@ -171,6 +186,7 @@ export class JsJournalStore {
     constructor(adapter, options = {}) {
         assertInitialized(initialized);
         this.#handle = new WasmJsJournalStore(adapter, options);
+        wasmStores.set(this, this.#handle);
     }
 }
 /**

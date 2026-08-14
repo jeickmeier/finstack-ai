@@ -299,17 +299,17 @@ impl JsObserver {
     }
 }
 
-/// Pre-beta in-memory JS journal-store wrapper. Not crash-durable.
+/// Trusted JS journal-store wrapper. Not crash-durable.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsJournalStore)]
 pub struct JsJournalStore {
-    _inner: host_store::HostJournalStore,
+    inner: std::sync::Arc<host_store::HostJournalStore>,
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_class = JsJournalStore)]
 impl JsJournalStore {
-    /// Construct a scripted journal-store wrapper.
+    /// Construct a journal-store wrapper around a trusted host adapter.
     ///
     /// # Errors
     ///
@@ -318,9 +318,26 @@ impl JsJournalStore {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsJournalStore, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_store::HostJournalStore::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: std::sync::Arc::new(
+                host_store::HostJournalStore::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+
+    /// Clone the wrapper without moving the caller's handle.
+    #[wasm_bindgen(js_name = cloneHandle)]
+    pub fn clone_handle(&self) -> JsJournalStore {
+        Self {
+            inner: std::sync::Arc::clone(&self.inner),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsJournalStore {
+    pub(crate) fn port(&self) -> std::sync::Arc<dyn finstack_ai::runtime::JournalStore> {
+        std::sync::Arc::clone(&self.inner) as std::sync::Arc<dyn finstack_ai::runtime::JournalStore>
     }
 }
 

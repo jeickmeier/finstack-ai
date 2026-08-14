@@ -345,6 +345,34 @@ export class WorkerClient {
      * const agent = await client.create({ scenario: "model-only" });
      * ```
      */
+    /**
+     * Inspect one stored session inside the worker.
+     *
+     * The store stays in the worker. This does not continue an interrupted run.
+     *
+     * @param sessionId - Session identity to inspect.
+     * @returns A provisional inspect snapshot.
+     * @throws {FinstackError} When the worker rejects inspect.
+     * @example
+     * ```ts
+     * const snapshot = await client.inspectSession(sessionId);
+     * ```
+     */
+    async inspectSession(sessionId) {
+        const inspected = await this.request({
+            v: 1,
+            type: "inspect",
+            id: this.nextId(),
+            sessionId,
+        });
+        if (inspected.type !== "inspected") {
+            throw new FinstackError("worker inspect did not return a snapshot", {
+                code: "agent_run_runtime_failure",
+                retryable: false,
+            });
+        }
+        return inspected.snapshot;
+    }
     async create(options) {
         const created = await this.request({
             v: 1,
@@ -537,6 +565,7 @@ export class WorkerClient {
         switch (message.type) {
             case "ready":
             case "created":
+            case "inspected":
                 this.#resolve(message.id, message);
                 return;
             case "started": {

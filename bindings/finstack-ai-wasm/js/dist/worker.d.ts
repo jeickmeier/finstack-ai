@@ -10,6 +10,7 @@
 export { FinstackError } from "./errors.js";
 export type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./errors.js";
 export { WorkerAgent, WorkerClient, WorkerEvent, WorkerEventBatch, WorkerRun, connectWorker, } from "./worker-client.js";
+export type { SessionInspectPhase, SessionInspectSnapshot } from "./agent.js";
 export type { WorkerBackpressure, WorkerConnectOptions } from "./worker-client.js";
 export { exposeWorkerHost } from "./worker-host.js";
 export type { WorkerHostAgent, WorkerHostEventBatch, WorkerHostFactory, WorkerHostRun, WorkerHostRunResult, } from "./worker-host.js";

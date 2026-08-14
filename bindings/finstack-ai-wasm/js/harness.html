@@ -32,6 +32,12 @@
         OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
         createOpenAICompatibleModel,
       } from "./dist/adapters/openai-compatible.js";
+      import {
+        createIndexedDbArtifactStore,
+        createIndexedDbJournalStore,
+        createMapJournalStore,
+        deleteIndexedDbStores,
+      } from "./dist/adapters/indexeddb.js";
       import { connectWorker } from "./dist/worker.js";
       import {
         applyScriptedCoordinatorCommands,
@@ -72,6 +78,11 @@
           JsArtifactStore,
           createMemoryJournalStore,
           createMemoryArtifactStore,
+          createMapJournalStore,
+          createIndexedDbJournalStore,
+          createIndexedDbArtifactStore,
+          deleteIndexedDbStores,
+          inspectSession: (store, sessionId) => Agent.inspectSession(store, sessionId),
           createHostClock,
           createHostRandomSource,
           createOpenAICompatibleModel,
