@@ -1,0 +1,34 @@
+[package]
+name = "finstack-ai-store-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Durable local SQLite journal store for finstack-ai"
+publish = false
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
+finstack-ai-runtime = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+finstack-ai-test = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "restore_growth"
+harness = false
+
+[[bin]]
+name = "sqlite_fault_helper"
+path = "src/bin/sqlite_fault_helper.rs"
+
+[lints]
+workspace = true

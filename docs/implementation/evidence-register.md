@@ -302,6 +302,11 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-039-A07 | PR-039 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-039-E-journal-40c837e54fb9; PR-039-E-ci-40c837e54fb9 | Memory store uses the protocol codec; runtime/SDK stay protocol-free | me@jeickmeier.com | 2026-08-14 |
 | PR-039-A08 | PR-039 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-039-E-journal-40c837e54fb9 | Historical journal fixture runner | me@jeickmeier.com | 2026-08-14 |
 | PR-039-A09 | PR-039 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-039-E-journal-40c837e54fb9 | Ambiguous-ack retry returns the original receipt once | me@jeickmeier.com | 2026-08-14 |
+| PR-040-A01 | PR-040 | PLAN-0.18 / [PR-040](../planning/04-finstack-ai-implementation-plan.md#pr-040---implement-the-sqlite-journalstore) | Pending | me@jeickmeier.com | — | Committed batches are all-or-nothing under injected failures | — | — |
+| PR-040-A02 | PR-040 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | Durable-mode commits survive process-kill and simulated power-loss separately; relaxed never advertises NFR-REL-001 | — | — |
+| PR-040-A03 | PR-040 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | A second writer receives a deterministic conflict/busy result | — | — |
+| PR-040-A04 | PR-040 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | Restore time and storage growth are benchmarked | — | — |
+| PR-040-A05 | PR-040 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | Database migrations are one-way with backup guidance | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 
