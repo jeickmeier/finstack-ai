@@ -4,6 +4,44 @@ import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } fro
 export { FinstackError } from "./errors.js";
 export type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./errors.js";
 /**
+ * Declarative capability delivery mode. Rust owns activation semantics.
+ */
+export type CapabilityActivation = "always" | "application" | "model" | "disabled";
+/**
+ * Instruction-only alpha capability. Native bundles may also contribute
+ * registered toolsets, context providers, and middleware.
+ */
+export interface Capability {
+    /** Namespaced capability identity. */
+    id: string;
+    /** Compact non-secret description. */
+    description: string;
+    /** Instructions contributed after activation. */
+    instructions: string[];
+    /**
+     * Delivery mode. Defaults to `application`.
+     */
+    activation?: CapabilityActivation;
+}
+/**
+ * One compact model-visible capability catalog entry.
+ */
+export interface CapabilityCatalogItem {
+    /** Capability identity. */
+    id: string;
+    /** Compact non-secret description. */
+    description: string;
+}
+/**
+ * One Rust-owned capability activation committed for a run.
+ */
+export interface ActiveCapability {
+    /** Capability identity. */
+    id: string;
+    /** Selecting source. */
+    source: "always" | "application" | "model";
+}
+/**
  * Options for {@link Agent.create}.
  */
 export interface AgentOptions {
@@ -18,6 +56,14 @@ export interface AgentOptions {
      * Persistence is experimental until PR-048 revalidation.
      */
     store?: JsJournalStore;
+    /**
+     * Optional declarative capabilities. Instruction-only in the JS alpha.
+     */
+    capabilities?: Capability[];
+    /**
+     * Application-activated capability IDs. Model-activation IDs fail closed.
+     */
+    activeCapabilities?: string[];
 }
 /**
  * Provisional inspect phase for a stored session.
@@ -54,7 +100,7 @@ export declare class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, optional instruction, and optional store.
+     * @param options - Model, optional toolsets, instruction, store, and capabilities.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -65,11 +111,37 @@ export declare class Agent {
      *     provider: "scripted",
      *     model: "scripted-model",
      *   }),
+     *   capabilities: [{
+     *     id: "app.capability.always",
+     *     description: "Baseline guidance",
+     *     instructions: ["Always instruction."],
+     *     activation: "always",
+     *   }],
      * });
      * const result = await agent.run("hello");
      * ```
      */
     static create(options: AgentOptions): Promise<Agent>;
+    /**
+     * Return the bounded model-activated capability catalog in identity order.
+     *
+     * @returns Compact catalog entries visible to model selection.
+     * @example
+     * ```ts
+     * const catalog = agent.capabilityCatalog();
+     * ```
+     */
+    capabilityCatalog(): CapabilityCatalogItem[];
+    /**
+     * Render the compact catalog supplied to model-facing integrations.
+     *
+     * @returns One `id: description` line per model-selectable capability.
+     * @example
+     * ```ts
+     * const compact = agent.compactCapabilityCatalog();
+     * ```
+     */
+    compactCapabilityCatalog(): string;
     /**
      * Replay one stored session into a provisional inspect snapshot.
      *
@@ -216,6 +288,14 @@ export declare class RunResult {
     get text(): string;
     /** Durable retry attempts consumed by this run. */
     get retryAttempts(): number;
+    /**
+     * Stable Rust-owned committed record-kind trace in journal order.
+     */
+    get trace(): string[];
+    /**
+     * Complete Rust-owned capability activation set for this run.
+     */
+    get activeCapabilities(): ActiveCapability[];
     /** Session locator for the completed run. */
     get session(): Session;
     /**

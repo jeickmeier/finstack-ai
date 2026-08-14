@@ -1,7 +1,9 @@
 //! Target-neutral conformance runner with placeholder binding adapters.
 //!
-//! Python and WASM adapters are explicitly deferred. They never report a
-//! passing parity result (PR-005 exclusion).
+//! [`DeferredBindingAdapter`] stays `Unavailable` in `cargo test`. Python
+//! parity evidence lives in pytest; WASM parity evidence lives in the
+//! browser Playwright harness (`mise run test-browser`). The placeholder
+//! never reports a passing `ConformanceRunner` result.
 
 use std::fmt;
 
@@ -125,9 +127,21 @@ impl ConformanceRunner {
     ) -> Result<ConformanceReport, TraceError> {
         let target = adapter.target();
         if adapter.capability() == AdapterCapability::Unavailable {
-            let reason = format!(
-                "{target} adapter unavailable; cross-language parity deferred until real bindings exist"
-            );
+            let reason = match target {
+                TargetKind::Wasm => {
+                    format!(
+                        "{target} adapter unavailable in cargo test; WASM parity evidence lives in the browser Playwright harness"
+                    )
+                }
+                TargetKind::Python => {
+                    format!(
+                        "{target} adapter unavailable in cargo test; Python parity evidence lives in the pytest harness"
+                    )
+                }
+                TargetKind::Rust => {
+                    format!("{target} adapter unavailable; cross-language parity deferred")
+                }
+            };
             return Ok(ConformanceReport {
                 target,
                 trace_id: trace.trace_id.clone(),
@@ -226,8 +240,13 @@ impl ConformanceAdapter for DeferredBindingAdapter {
     fn execute(&self, _trace: &GoldenTrace) -> Result<AdapterOutcome, TraceError> {
         Ok(AdapterOutcome::Deferred {
             reason: format!(
-                "{} binding adapter is a Phase 0 placeholder and cannot claim parity",
-                self.target
+                "{} binding adapter remains a cargo-test placeholder; parity evidence lives in {}",
+                self.target,
+                match self.target {
+                    TargetKind::Python => "the pytest harness",
+                    TargetKind::Wasm => "the browser Playwright harness",
+                    TargetKind::Rust => "the native rust adapter",
+                }
             ),
         })
     }

@@ -7,7 +7,8 @@
 //!
 //! Public JavaScript is the hand-authored `@finstack/ai` facade. Generated
 //! glue stays under `js/generated/` and is not the published API.
-//! `DeferredBindingAdapter::wasm()` remains unavailable.
+//! `DeferredBindingAdapter::wasm()` remains `Unavailable` in `cargo test`.
+//! Browser Playwright Agent-run goldens are the WASM parity evidence path.
 
 #![warn(missing_docs)]
 

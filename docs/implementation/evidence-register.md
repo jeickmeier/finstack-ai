@@ -280,6 +280,12 @@ When a versioned amendment changes criterion order or inventory, append every af
 | PR-037-A03 | PR-037 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-037-E-browser-5d15278b130d; PR-037-E-candidate-5d15278b130d | CAS, idempotency, integrity, ordered load, and artifact ceilings | me@jeickmeier.com | 2026-08-13 |
 | PR-037-A04 | PR-037 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-037-E-browser-5d15278b130d; PR-037-E-candidate-5d15278b130d | browser-minimal uses public package imports only | me@jeickmeier.com | 2026-08-13 |
 | PR-037-A05 | PR-037 | PLAN-0.18 / same | Passed | me@jeickmeier.com | PR-037-E-browser-5d15278b130d; PR-037-E-security-5d15278b130d | Experimental persistence wording and clean secret scan | me@jeickmeier.com | 2026-08-13 |
+| PR-038-A01 | PR-038 | PLAN-0.18 / [PR-038](../planning/04-finstack-ai-implementation-plan.md#pr-038---complete-browser-conformance-benchmarks-and-npm-alpha) | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-038-A02 | PR-038 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-038-A03 | PR-038 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-038-A04 | PR-038 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-038-A05 | PR-038 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
+| PR-038-A06 | PR-038 | PLAN-0.18 / same | Pending | me@jeickmeier.com | — | — | — | — |
 
 PR-001 acceptance is closed against `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. Artifacts live under [`artifacts/pr-001/`](artifacts/pr-001/).
 

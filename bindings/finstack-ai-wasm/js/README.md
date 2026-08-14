@@ -6,8 +6,10 @@ TypeScript surface is hand-authored; generated wasm-bindgen glue stays in
 
 ## Install
 
-This package is not published. Consume it from the repository checkout after
-`mise run generate-wasm`.
+This package is staged, not published. Consume a packed tarball from
+`mise run stage-wasm` or the repository checkout after `mise run generate-wasm`.
+See [browser security](docs/browser-security.md) and
+[benchmarks](docs/benchmarks.md).
 
 ```ts
 import { buildMetadata, health, init } from "@finstack/ai";
@@ -119,14 +121,17 @@ TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
 bundles, headers, or examples. Terminate secrets at a trusted same-origin
 proxy. Optional application `headers` are not a credential helper.
 
-## Public surface (PR-035 / PR-037)
+## Public surface (PR-035 / PR-038)
 
 - `init(): Promise<void>`
 - `health(): string`
 - `buildMetadata(): { version, engineVersion, implementation: "wasm", target: "wasm32-unknown-unknown" }`
 - `Agent.create`, `Agent.start`, `Agent.run`, `Agent.inspectSession`
+- `Agent.capabilityCatalog`, `Agent.compactCapabilityCatalog`
 - `Run` (`session`, `events`, `result`, `cancel`, `closeEvents`)
+- `RunResult.trace`, `RunResult.activeCapabilities`
 - `Session`, `RunResult`, `Event`, `EventBatch`, `FinstackError`
+- `Capability`, `CapabilityActivation`, `CapabilityCatalogItem`, `ActiveCapability`
 - Host interfaces and `Js*` wrappers for model, toolset, context, middleware,
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
@@ -137,8 +142,9 @@ proxy. Optional application `headers` are not a credential helper.
 
 Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
 remains a pre-beta health stub. IndexedDB persistence is experimental until
-PR-048. npm publish and G4 remain later work. Dropping a `Run` or `WorkerRun`
-detaches observation and does not cancel.
+PR-048. npm artifacts may be staged; they are not published. G4 is a separate
+named decision. Dropping a `Run` or `WorkerRun` detaches observation and does
+not cancel. Applicable goldens run in Chromium, Firefox, and WebKit.
 
 ## Regenerate
 

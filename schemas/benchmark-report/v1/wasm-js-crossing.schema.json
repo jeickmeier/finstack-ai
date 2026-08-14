@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/benchmark-report/v1/wasm-js-crossing.schema.json",
+  "title": "WasmJsCrossingBenchmarkReport",
+  "description": "Separated WASM init, Agent create, scripted reducer, event-throughput, and host-callback measurements (PR-038).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "workload",
+    "commit",
+    "platform",
+    "browser",
+    "parameters",
+    "timing_ns",
+    "binding",
+    "event_delivery",
+    "throughput",
+    "bundle",
+    "external_io"
+  ],
+  "properties": {
+    "format_version": { "const": 1 },
+    "workload": { "const": "wasm-js-crossing-v1" },
+    "commit": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "release", "machine"],
+      "properties": {
+        "system": { "type": "string", "minLength": 1 },
+        "release": { "type": "string", "minLength": 1 },
+        "machine": { "type": "string", "minLength": 1 }
+      }
+    },
+    "browser": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deltas_per_run", "runs_per_sample", "samples"],
+      "properties": {
+        "deltas_per_run": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "runs_per_sample": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "samples": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "timing_ns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "init_median",
+        "create_median",
+        "reducer_run_median",
+        "event_throughput_median",
+        "host_callback_median",
+        "wasm_drive_median"
+      ],
+      "properties": {
+        "init_median": { "type": "integer", "minimum": 0 },
+        "create_median": { "type": "integer", "minimum": 0 },
+        "reducer_run_median": { "type": "integer", "minimum": 0 },
+        "event_throughput_median": { "type": "integer", "minimum": 0 },
+        "host_callback_median": { "type": "integer", "minimum": 0 },
+        "wasm_drive_median": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overhead_percent", "target_percent", "within_target"],
+      "properties": {
+        "overhead_percent": { "type": "number" },
+        "target_percent": { "type": "number" },
+        "within_target": { "type": "boolean" }
+      }
+    },
+    "event_delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_events", "model_deltas", "js_host_callbacks"],
+      "properties": {
+        "logical_events": { "type": "integer", "minimum": 0 },
+        "model_deltas": { "type": "integer", "minimum": 0 },
+        "js_host_callbacks": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "throughput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_deltas_per_second"],
+      "properties": {
+        "model_deltas_per_second": { "type": "number", "minimum": 0 }
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wasm_bytes", "wasm_gzip_bytes"],
+      "properties": {
+        "wasm_bytes": { "type": "integer", "minimum": 0 },
+        "wasm_gzip_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "external_io": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["included_in_binding_comparison", "scope"],
+      "properties": {
+        "included_in_binding_comparison": { "type": "boolean" },
+        "scope": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

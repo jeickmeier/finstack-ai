@@ -31,6 +31,48 @@ export type {
 } from "./errors.js";
 
 /**
+ * Declarative capability delivery mode. Rust owns activation semantics.
+ */
+export type CapabilityActivation = "always" | "application" | "model" | "disabled";
+
+/**
+ * Instruction-only alpha capability. Native bundles may also contribute
+ * registered toolsets, context providers, and middleware.
+ */
+export interface Capability {
+  /** Namespaced capability identity. */
+  id: string;
+  /** Compact non-secret description. */
+  description: string;
+  /** Instructions contributed after activation. */
+  instructions: string[];
+  /**
+   * Delivery mode. Defaults to `application`.
+   */
+  activation?: CapabilityActivation;
+}
+
+/**
+ * One compact model-visible capability catalog entry.
+ */
+export interface CapabilityCatalogItem {
+  /** Capability identity. */
+  id: string;
+  /** Compact non-secret description. */
+  description: string;
+}
+
+/**
+ * One Rust-owned capability activation committed for a run.
+ */
+export interface ActiveCapability {
+  /** Capability identity. */
+  id: string;
+  /** Selecting source. */
+  source: "always" | "application" | "model";
+}
+
+/**
  * Options for {@link Agent.create}.
  */
 export interface AgentOptions {
@@ -45,6 +87,14 @@ export interface AgentOptions {
    * Persistence is experimental until PR-048 revalidation.
    */
   store?: JsJournalStore;
+  /**
+   * Optional declarative capabilities. Instruction-only in the JS alpha.
+   */
+  capabilities?: Capability[];
+  /**
+   * Application-activated capability IDs. Model-activation IDs fail closed.
+   */
+  activeCapabilities?: string[];
 }
 
 /**
@@ -93,7 +143,7 @@ export class Agent {
    * to opt into a host journal. State remains in WASM until an explicit snapshot
    * or inspect. Reload restore is inspect, not continue-the-run.
    *
-   * @param options - Model, optional toolsets, optional instruction, and optional store.
+   * @param options - Model, optional toolsets, instruction, store, and capabilities.
    * @returns A resolved Agent handle.
    * @throws {FinstackError} When configuration is invalid.
    * @example
@@ -104,6 +154,12 @@ export class Agent {
    *     provider: "scripted",
    *     model: "scripted-model",
    *   }),
+   *   capabilities: [{
+   *     id: "app.capability.always",
+   *     description: "Baseline guidance",
+   *     instructions: ["Always instruction."],
+   *     activation: "always",
+   *   }],
    * });
    * const result = await agent.run("hello");
    * ```
@@ -118,11 +174,45 @@ export class Agent {
         options.store === undefined
           ? undefined
           : wasmJournalStoreHandle(options.store).cloneHandle(),
+        options.capabilities === undefined
+          ? undefined
+          : JSON.stringify(options.capabilities),
+        options.activeCapabilities === undefined
+          ? undefined
+          : JSON.stringify(options.activeCapabilities),
       );
       return new Agent(handle);
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }
+  }
+
+  /**
+   * Return the bounded model-activated capability catalog in identity order.
+   *
+   * @returns Compact catalog entries visible to model selection.
+   * @example
+   * ```ts
+   * const catalog = agent.capabilityCatalog();
+   * ```
+   */
+  capabilityCatalog(): CapabilityCatalogItem[] {
+    requireWasm();
+    return this.#handle.capabilityCatalog() as CapabilityCatalogItem[];
+  }
+
+  /**
+   * Render the compact catalog supplied to model-facing integrations.
+   *
+   * @returns One `id: description` line per model-selectable capability.
+   * @example
+   * ```ts
+   * const compact = agent.compactCapabilityCatalog();
+   * ```
+   */
+  compactCapabilityCatalog(): string {
+    requireWasm();
+    return this.#handle.compactCapabilityCatalog();
   }
 
   /**
@@ -405,6 +495,20 @@ export class RunResult {
   /** Durable retry attempts consumed by this run. */
   get retryAttempts(): number {
     return this.#handle.retryAttempts;
+  }
+
+  /**
+   * Stable Rust-owned committed record-kind trace in journal order.
+   */
+  get trace(): string[] {
+    return Array.from(this.#handle.trace);
+  }
+
+  /**
+   * Complete Rust-owned capability activation set for this run.
+   */
+  get activeCapabilities(): ActiveCapability[] {
+    return this.#handle.activeCapabilities as ActiveCapability[];
   }
 
   /** Session locator for the completed run. */

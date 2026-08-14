@@ -9,13 +9,25 @@ export class Agent {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Return the bounded model-activated capability catalog in identity order.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the catalog object cannot be constructed.
+     */
+    capabilityCatalog(): any;
+    /**
+     * Render the compact catalog supplied to model-facing integrations.
+     */
+    compactCapabilityCatalog(): string;
+    /**
      * Construct an Agent over a trusted JS model and optional toolsets.
      *
      * # Errors
      *
      * Returns a structured host error when configuration is invalid.
      */
-    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null): Promise<any>;
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null): Promise<any>;
     /**
      * Replay one stored session into a provisional inspect snapshot.
      *
@@ -328,6 +340,14 @@ export class RunResult {
      */
     toDict(): any;
     /**
+     * Complete Rust-owned capability activation set for this run.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the activation objects cannot be constructed.
+     */
+    readonly activeCapabilities: any;
+    /**
      * Durable retry attempts consumed by this run.
      */
     readonly retryAttempts: number;
@@ -339,6 +359,10 @@ export class RunResult {
      * Concatenated final assistant text.
      */
     readonly text: string;
+    /**
+     * Stable Rust-owned committed record-kind trace in journal order.
+     */
+    readonly trace: string[];
 }
 
 /**
@@ -475,7 +499,9 @@ export interface InitOutput {
     readonly __wbg_run_free: (a: number, b: number) => void;
     readonly __wbg_runresult_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly agent_capabilityCatalog: (a: number, b: number) => void;
+    readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
@@ -512,10 +538,12 @@ export interface InitOutput {
     readonly run_nextEventBatch: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
+    readonly runresult_activeCapabilities: (a: number, b: number) => void;
     readonly runresult_retryAttempts: (a: number) => number;
     readonly runresult_session: (a: number) => number;
     readonly runresult_text: (a: number, b: number) => void;
     readonly runresult_toDict: (a: number, b: number) => void;
+    readonly runresult_trace: (a: number, b: number) => void;
     readonly session_laneId: (a: number, b: number) => void;
     readonly session_runId: (a: number, b: number) => void;
     readonly session_sessionId: (a: number, b: number) => void;
@@ -526,9 +554,9 @@ export interface InitOutput {
     readonly driveScriptedToolCall: (a: number, b: number, c: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1364: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1378: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_331: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1377: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1391: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_333: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

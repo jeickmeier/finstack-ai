@@ -88,15 +88,33 @@ npm --prefix bindings/finstack-ai-wasm/js run build
 """
 
 [tasks.test-browser]
-description = "Type-check and run the headless Chromium wasm package harness"
+description = "Type-check and run the headless Chromium, Firefox, and WebKit wasm package harness"
 run = """
 set -euo pipefail
 mise run generate-wasm
 uv run --no-project python tools/wasm_package/check.py generated
 npm --prefix bindings/finstack-ai-wasm/js run typecheck
-npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium
+npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium firefox webkit
 npm --prefix bindings/finstack-ai-wasm/js test
 uv run --no-project python tools/wasm_package/check.py size
+"""
+
+[tasks.stage-wasm]
+description = "Stage unpublished npm alpha artifacts and typecheck a clean install"
+run = """
+set -euo pipefail
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
+mise run generate-wasm
+uv run --no-project python tools/wasm_package/stage.py
+"""
+
+[tasks.benchmark-wasm]
+description = "Record WASM/JS crossing warning measurements"
+run = """
+set -euo pipefail
+mise run generate-wasm
+npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium
+npm --prefix bindings/finstack-ai-wasm/js exec -- playwright test src/benchmark.test.ts --project=chromium
 """
 
 [tasks.ci]

@@ -39,6 +39,10 @@ SECRET_ROOTS = (
     REPO_ROOT / "examples" / "browser-minimal" / "worker.ts",
     REPO_ROOT / "examples" / "browser-minimal" / "README.md",
     REPO_ROOT / "examples" / "README.md",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "docs" / "browser-security.md",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "docs" / "benchmarks.md",
+    REPO_ROOT / "examples" / "ts-alpha-install" / "README.md",
+    REPO_ROOT / "examples" / "ts-alpha-install" / "main.ts",
 )
 SECRET_PATTERNS = (
     "apiKey",
@@ -219,7 +223,7 @@ def check_size() -> int:
         / "docs"
         / "implementation"
         / "artifacts"
-        / "pr-037"
+        / "pr-038"
         / "bundle-size.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)

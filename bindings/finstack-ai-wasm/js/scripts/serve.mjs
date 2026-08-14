@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const exampleRoot = resolve(root, "../../../examples/browser-minimal");
+const fixtureRoot = resolve(root, "../../../fixtures/compatibility/golden-trace");
 const port = Number(process.env.FINSTACK_WASM_HARNESS_PORT ?? 4173);
 
 const types = new Map([
@@ -79,6 +80,32 @@ const server = createServer(async (request, response) => {
         response.writeHead(500);
       }
       response.end();
+    }
+    return;
+  }
+  if (url.pathname.startsWith("/fixtures/golden-trace/")) {
+    const relative = url.pathname.slice("/fixtures/golden-trace/".length);
+    const resolved = resolve(join(fixtureRoot, normalize(relative)));
+    if (!resolved.startsWith(fixtureRoot) || relative.length === 0) {
+      response.writeHead(403);
+      response.end("forbidden");
+      return;
+    }
+    try {
+      const info = await stat(resolved);
+      if (!info.isFile()) {
+        response.writeHead(404);
+        response.end("not found");
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": types.get(extname(resolved)) ?? "application/octet-stream",
+        "cache-control": "no-store",
+      });
+      createReadStream(resolved).pipe(response);
+    } catch {
+      response.writeHead(404);
+      response.end("not found");
     }
     return;
   }

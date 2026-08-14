@@ -44,7 +44,7 @@ fn python_and_wasm_adapters_are_deferred_and_never_pass() {
     assert!(!python_report.passed);
     assert!(python_report.deferred);
     assert_eq!(python_report.target, TargetKind::Python);
-    assert!(python_report.message.contains("parity"));
+    assert!(python_report.message.contains("pytest"));
 
     let wasm = DeferredBindingAdapter::wasm();
     assert_eq!(wasm.capability(), AdapterCapability::Unavailable);
@@ -52,4 +52,5 @@ fn python_and_wasm_adapters_are_deferred_and_never_pass() {
     assert!(!wasm_report.passed);
     assert!(wasm_report.deferred);
     assert_eq!(wasm_report.target, TargetKind::Wasm);
+    assert!(wasm_report.message.contains("Playwright"));
 }

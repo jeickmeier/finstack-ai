@@ -135,9 +135,22 @@ test("interrupted persist inspect is provisional and memory cannot resume", asyn
     for (let attempt = 0; attempt < 50; attempt += 1) {
       try {
         const session = run.session;
+        for (let persistAttempt = 0; persistAttempt < 50; persistAttempt += 1) {
+          const snapshot = await client.inspectSession(session.sessionId);
+          if (snapshot.headSequence > 0) {
+            await client.terminate();
+            return { sessionId: session.sessionId };
+          }
+          await new Promise((resolve) => {
+            setTimeout(resolve, 10);
+          });
+        }
         await client.terminate();
-        return { sessionId: session.sessionId };
-      } catch {
+        throw new Error("hanging persist did not commit a journal head");
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("journal head")) {
+          throw error;
+        }
         await new Promise((resolve) => {
           setTimeout(resolve, 10);
         });

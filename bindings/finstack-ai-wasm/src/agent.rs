@@ -4,18 +4,21 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use finstack_ai::runtime::{
-    Clock, CommitCoordinator, ComponentId, ComponentRef, EventBatch as RuntimeEventBatch,
-    JournalStore, LoadRequest, ModelName, RandomSource, RunEventClass, RunEventKind, StoreError,
-    Version,
+    CapabilityId, Clock, CommitCoordinator, ComponentId, ComponentRef,
+    EventBatch as RuntimeEventBatch, JournalStore, LoadRequest, ModelName, RandomSource,
+    RunEventClass, RunEventKind, StoreError, Version,
 };
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
-    AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, Agent as FacadeAgent, AgentRun, AgentRunError,
-    AgentRunOutput, AgentRunRequest, OperationLocator, PrincipalRef, RunSecurityContext,
+    AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActiveCapability, Agent as FacadeAgent,
+    AgentRun, AgentRunError, AgentRunOutput, AgentRunRequest, CapabilityActivation,
+    CapabilityActivationSource, CapabilityCatalogEntry, CapabilitySpec, InstructionSpec,
+    OperationLocator, PrincipalRef, RunSecurityContext,
 };
 use finstack_ai_kernel::{ContentBlock, RunEvent, SessionId, TerminalState};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use js_sys::Uint8Array;
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -124,6 +127,8 @@ impl Agent {
         toolsets: Vec<JsToolset>,
         instruction: Option<String>,
         store: Option<JsJournalStore>,
+        capabilities_json: Option<String>,
+        active_capabilities_json: Option<String>,
     ) -> js_sys::Promise {
         let model_port = model.port();
         let model_component = model.component();
@@ -136,6 +141,15 @@ impl Agent {
             .map(|toolset| (toolset.component(), toolset.port()))
             .collect();
         let store = store.map(|store| store.port());
+        let capabilities = match parse_capabilities(capabilities_json.as_deref()) {
+            Ok(capabilities) => capabilities,
+            Err(error) => return js_sys::Promise::reject(&error),
+        };
+        let active_capabilities =
+            match parse_active_capabilities(active_capabilities_json.as_deref()) {
+                Ok(active) => active,
+                Err(error) => return js_sys::Promise::reject(&error),
+            };
         executor::drive(async move {
             build_agent(
                 model_name,
@@ -144,10 +158,28 @@ impl Agent {
                 ports,
                 instruction,
                 store,
+                capabilities,
+                active_capabilities,
             )
             .await
             .map(JsValue::from)
         })
+    }
+
+    /// Return the bounded model-activated capability catalog in identity order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JavaScript exception when the catalog object cannot be constructed.
+    #[wasm_bindgen(js_name = capabilityCatalog)]
+    pub fn capability_catalog(&self) -> Result<JsValue, JsValue> {
+        catalog_array(self.inner.capability_catalog())
+    }
+
+    /// Render the compact catalog supplied to model-facing integrations.
+    #[wasm_bindgen(js_name = compactCapabilityCatalog)]
+    pub fn compact_capability_catalog(&self) -> String {
+        self.inner.compact_capability_catalog()
     }
 
     /// Replay one stored session into a provisional inspect snapshot.
@@ -362,6 +394,26 @@ impl RunResult {
         self.inner.retry_attempts()
     }
 
+    /// Stable Rust-owned committed record-kind trace in journal order.
+    #[wasm_bindgen(getter)]
+    pub fn trace(&self) -> Vec<String> {
+        self.inner
+            .record_kinds()
+            .iter()
+            .map(|kind| kind.to_string())
+            .collect()
+    }
+
+    /// Complete Rust-owned capability activation set for this run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JavaScript exception when the activation objects cannot be constructed.
+    #[wasm_bindgen(getter, js_name = activeCapabilities)]
+    pub fn active_capabilities(&self) -> Result<JsValue, JsValue> {
+        active_capability_array(self.inner.active_capabilities())
+    }
+
     /// Session locator for the completed run.
     #[wasm_bindgen(getter)]
     pub fn session(&self) -> Session {
@@ -512,6 +564,10 @@ impl EventBatch {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "wasm-bindgen create forwards each host handle and capability list distinctly"
+)]
 async fn build_agent(
     model_name: ModelName,
     model_component: ComponentRef,
@@ -519,6 +575,8 @@ async fn build_agent(
     toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
     instruction: Option<String>,
     store: Option<Arc<dyn JournalStore>>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
 ) -> Result<Agent, JsValue> {
     let (store_component, store) = match store {
         Some(store) => (component("js.store.host")?, store),
@@ -551,6 +609,12 @@ async fn build_agent(
         builder = builder
             .try_instruction(instruction)
             .map_err(|error| agent_error(&error, None))?;
+    }
+    for capability in capabilities {
+        builder = builder.capability(capability);
+    }
+    for capability in active_capabilities {
+        builder = builder.activate_application(capability);
     }
     let inner = builder
         .build()
@@ -798,6 +862,120 @@ fn component(id: &str) -> Result<ComponentRef, JsValue> {
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
         Some(PREVIEW_VERSION),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct JsCapabilityWire {
+    id: String,
+    description: String,
+    instructions: Vec<String>,
+    #[serde(default)]
+    activation: Option<String>,
+}
+
+fn parse_capabilities(json: Option<&str>) -> Result<Vec<CapabilitySpec>, JsValue> {
+    let Some(json) = json.filter(|value| !value.is_empty() && *value != "undefined") else {
+        return Ok(Vec::new());
+    };
+    let wires: Vec<JsCapabilityWire> = serde_json::from_str(json)
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    wires
+        .into_iter()
+        .map(capability_from_wire)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn parse_active_capabilities(json: Option<&str>) -> Result<Vec<CapabilityId>, JsValue> {
+    let Some(json) = json.filter(|value| !value.is_empty() && *value != "undefined") else {
+        return Ok(Vec::new());
+    };
+    let ids: Vec<String> = serde_json::from_str(json)
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    ids.into_iter()
+        .map(|id| {
+            CapabilityId::parse(id)
+                .map_err(|error| agent_error(&configuration_error(error.to_string()), None))
+        })
+        .collect()
+}
+
+fn capability_from_wire(wire: JsCapabilityWire) -> Result<CapabilitySpec, JsValue> {
+    let activation = match wire.activation.as_deref().unwrap_or("application") {
+        "always" => CapabilityActivation::Always,
+        "application" => CapabilityActivation::Application,
+        "model" => CapabilityActivation::Model,
+        "disabled" => CapabilityActivation::Disabled,
+        other => {
+            return Err(agent_error(
+                &configuration_error(format!(
+                    "activation must be always, application, model, or disabled: {other}"
+                )),
+                None,
+            ));
+        }
+    };
+    let instructions = wire
+        .instructions
+        .into_iter()
+        .map(InstructionSpec::try_new)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    let capability = CapabilitySpec {
+        id: CapabilityId::parse(wire.id)
+            .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
+        description: Arc::from(wire.description),
+        instructions: instructions.into(),
+        toolsets: Arc::from([]),
+        context_providers: Arc::from([]),
+        middleware: Arc::from([]),
+        activation,
+    };
+    capability
+        .validate()
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    Ok(capability)
+}
+
+fn catalog_array(entries: Vec<CapabilityCatalogEntry>) -> Result<JsValue, JsValue> {
+    let array = js_sys::Array::new();
+    for entry in entries {
+        let object = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("id"),
+            &JsValue::from_str(entry.id().as_str()),
+        )?;
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("description"),
+            &JsValue::from_str(entry.description()),
+        )?;
+        array.push(&object);
+    }
+    Ok(array.into())
+}
+
+fn active_capability_array(active: &[ActiveCapability]) -> Result<JsValue, JsValue> {
+    let array = js_sys::Array::new();
+    for item in active {
+        let object = js_sys::Object::new();
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("id"),
+            &JsValue::from_str(item.capability_id.as_str()),
+        )?;
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("source"),
+            &JsValue::from_str(match item.source {
+                CapabilityActivationSource::Always => "always",
+                CapabilityActivationSource::Application => "application",
+                CapabilityActivationSource::Model => "model",
+            }),
+        )?;
+        array.push(&object);
+    }
+    Ok(array.into())
 }
 
 fn configuration_error(message: impl Into<String>) -> AgentRunError {

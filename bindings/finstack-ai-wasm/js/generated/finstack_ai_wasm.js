@@ -21,6 +21,49 @@ export class Agent {
         wasm.__wbg_agent_free(ptr, 0);
     }
     /**
+     * Return the bounded model-activated capability catalog in identity order.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the catalog object cannot be constructed.
+     * @returns {any}
+     */
+    capabilityCatalog() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.agent_capabilityCatalog(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Render the compact catalog supplied to model-facing integrations.
+     * @returns {string}
+     */
+    compactCapabilityCatalog() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.agent_compactCapabilityCatalog(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Construct an Agent over a trusted JS model and optional toolsets.
      *
      * # Errors
@@ -30,9 +73,11 @@ export class Agent {
      * @param {JsToolset[]} toolsets
      * @param {string | null} [instruction]
      * @param {JsJournalStore | null} [store]
+     * @param {string | null} [capabilities_json]
+     * @param {string | null} [active_capabilities_json]
      * @returns {Promise<any>}
      */
-    static create(model, toolsets, instruction, store) {
+    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json) {
         _assertClass(model, JsModel);
         const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
@@ -43,7 +88,11 @@ export class Agent {
             _assertClass(store, JsJournalStore);
             ptr2 = store.__destroy_into_raw();
         }
-        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2);
+        var ptr3 = isLikeNone(capabilities_json) ? 0 : passStringToWasm0(capabilities_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len3 = WASM_VECTOR_LEN;
+        var ptr4 = isLikeNone(active_capabilities_json) ? 0 : passStringToWasm0(active_capabilities_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len4 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4);
         return takeObject(ret);
     }
     /**
@@ -870,6 +919,29 @@ export class RunResult {
         wasm.__wbg_runresult_free(ptr, 0);
     }
     /**
+     * Complete Rust-owned capability activation set for this run.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the activation objects cannot be constructed.
+     * @returns {any}
+     */
+    get activeCapabilities() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.runresult_activeCapabilities(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Durable retry attempts consumed by this run.
      * @returns {number}
      */
@@ -924,6 +996,23 @@ export class RunResult {
                 throw takeObject(r1);
             }
             return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Stable Rust-owned committed record-kind trace in journal order.
+     * @returns {string[]}
+     */
+    get trace() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.runresult_trace(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export5(r0, r1 * 4, 4);
+            return v1;
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
         }
@@ -1407,7 +1496,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1378(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1391(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1485,13 +1574,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 424, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1364);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 425, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1377);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_331);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_333);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1523,14 +1612,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_331(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_331(arg0, arg1);
+function __wasm_bindgen_func_elem_333(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_333(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1364(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1377(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1364(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1377(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1541,8 +1630,8 @@ function __wasm_bindgen_func_elem_1364(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1378(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1378(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1391(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1391(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')
