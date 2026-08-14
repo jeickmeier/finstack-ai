@@ -1,0 +1,81 @@
+PR-043 TM-10 / TM-14 / Threat Model section 18 security review
+Date: 2026-08-14
+Candidate: 86f71c8fd47c0c6d721f9ae36df5c0ba90b22025
+Reviewer: me@jeickmeier.com
+Decision: Pass for tool-effect reconciliation. No threat-model
+rewrite. No Implementation Plan §6.3 ADR trigger. Recovery stays
+at-least-once plus idempotency; no exactly-once claim. G5 is not
+inferred.
+
+Scope reviewed:
+  crates/finstack-ai-runtime ToolResumeAction, tool_resume_action,
+    map_tool_reconcile_result, tool_retry_allowed, and
+    TOOL_RECONCILIATION_UNSUPPORTED
+  resume_pending_tool_effects, settle_reconciled_tool,
+    settle_external_tool, ensure_or_wait_tool_deferred, and
+    submit_tool_fail_closed
+  ToolDispatcher::resume_call and RunTaskOwner
+    spawn_with_model_and_tools / host twin
+  Calculator and filesystem default reconcile → Unknown
+  A01–A05 proofs in finstack-ai-test tool_port and runtime classifier
+    tests
+  External tool completion keeps assistant_message: None
+
+Triggered controls: TM-10 core; also TM-14.
+SEC-INV-003, SEC-INV-004, SEC-INV-008. No new primary port. Recover
+stays replay-only. Toolset::reconcile runs after timer and model
+resume, after the combined dispatcher is installed, and before the
+run handle is published. Classification is per call.
+
+PASS  TM-10 / spoofed or replayed external completion
+      First-pass classification reads only committed KernelState.
+      Settlement uses the original EffectId. Equal indexed completions
+      are UseRecorded. Conflicting completion IDs, settlement
+      fingerprints, or deferred handles fail closed and append
+      RecordExternalCommandRejected with
+      conflicting_or_invalid_completion. A02 never re-calls after a
+      committed ToolCallSettled / settlement-index hit. A05 proves
+      equal deferred completion is idempotent and a conflicting
+      handle fails closed. External Completed reuses
+      allocate_tool_settlement IDs and omits assistant_message.
+
+PASS  SEC-INV-003 / correlated outstanding identifier
+      ReconcileContext carries the committed locator, authorization,
+      EffectId, attempt, deadline, and original_input_digest.
+      Retry re-dispatches the same EffectId, ToolCallId, ToolBatchId,
+      and frozen ValidatedToolCall (A02). Deferred completion stays
+      under the original EffectId. AwaitingExternal
+      NotStarted / RetrySafe / Unknown never re-call.
+
+PASS  SEC-INV-004 / duplicates idempotent, conflicts audited
+      Equal completion after an index hit is UseRecorded. A different
+      deferred handle submits RecordExternalCommandRejected and
+      returns SuspendUncertain. No fabricated successful
+      ToolCallSettled is written on Unknown or NonRepeatable.
+
+PASS  SEC-INV-008 / identity not substituted
+      resume_call dispatches the committed seed only. The dispatcher
+      validates the frozen ValidatedToolCall against the catalog
+      before call(). Calculator and filesystem reconcile stay
+      Unknown. retry_allowed requires SafeToRetry or
+      IdempotentWithKey and ReadOnly or IdempotentWrite.
+      NonIdempotentWrite / AtMostOnce suspend with
+      tool_reconciliation_unsupported and do not call().
+
+PASS  TM-14 / late privileged completion and uncertainty
+      Uncertainty suspends. NonRepeatable always suspends.
+      Unknown without retry_allowed suspends. ToolFailurePolicy is
+      not an uncertainty escape hatch. Cancel-during-suspended-tool
+      remains PR-045. Deadline and cancellation continue to use the
+      existing settlement rechecks; this PR does not add that matrix.
+
+No §6.3 ADR trigger: the work stays inside at-least-once plus
+idempotency/reconciliation. Residual already recorded in the threat
+model: external tool effects can remain at-least-once or explicitly
+uncertain. Calculator and filesystem have no retrieve client.
+ADR-013 stays Not started / Missing. ADR-025 stays Partial
+(interaction path remains PR-044). ADR-033 stays Verified for
+models only. Crash-prefix and G5 remain PR-048.
+
+No independent review, hosted pull request or merge, npm publish,
+tag, or G5 decision is recorded here.
