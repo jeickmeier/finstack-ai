@@ -17,7 +17,11 @@ export {
   Session,
 } from "./agent.js";
 export type {
+  ActiveCapability,
   AgentOptions,
+  Capability,
+  CapabilityActivation,
+  CapabilityCatalogItem,
   EventOptions,
   RunOptions,
   RunResultSnapshot,

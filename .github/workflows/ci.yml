@@ -63,9 +63,10 @@ jobs:
       - name: Generate wasm package
         env:
           FINSTACK_WASM_REPRO: "1"
-        run: |
-          mise run generate-wasm
-          uv run --no-project python tools/wasm_package/check.py dirty
+        run: mise run generate-wasm
+        # Consecutive Linux rebuilds must be byte-identical. Dirty-tree vs the
+        # committed Darwin glue is a same-host `check.py dirty` obligation;
+        # rustc/wasm-bindgen output is not cross-OS identical.
 
       - name: Browser package tests
         run: mise run test-browser

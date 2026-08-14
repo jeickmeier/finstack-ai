@@ -1,4 +1,5 @@
 # benchmark-report fixtures
 
-Corpus for Criterion metadata and Python fast-path report schema validation.
-See `v1/metadata/` and `v1/python-fast-path/`.
+Corpus for Criterion metadata, Python fast-path, and WASM/JS crossing report
+schema validation. See `v1/metadata/`, `v1/python-fast-path/`, and
+`v1/wasm-js-crossing/`.

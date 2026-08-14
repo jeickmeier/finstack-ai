@@ -1,0 +1,60 @@
+# Stage signed @finstack/ai 0.0.2 artifacts. Does not publish.
+# Owner: me@jeickmeier.com
+
+name: npm-release-staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-release-staging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage:
+    name: stage-npm-alpha
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Generate wasm package
+        env:
+          SOURCE_DATE_EPOCH: "0"
+        run: mise run generate-wasm
+
+      - name: Stage npm pack artifacts
+        run: mise run stage-wasm
+
+      - name: Sign staged artifacts
+        uses: sigstore/gh-action-sigstore-python@a5caf349bc536fbef3668a10ed7f5cd309a4b53d # v3.2.0
+        with:
+          inputs: >-
+            docs/implementation/artifacts/pr-038/npm-staging/*.tgz
+            docs/implementation/artifacts/pr-038/npm-staging/SHA256SUMS
+            docs/implementation/artifacts/pr-038/npm-staging/sbom.cdx.json
+            docs/implementation/artifacts/pr-038/npm-staging/staged-manifest.json
+          release-signing-artifacts: false
+          verify: true
+          verify-cert-identity: https://github.com/${{ github.repository }}/.github/workflows/npm-release-staging.yml@${{ github.ref }}
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
+
+      - name: Upload staged artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: finstack-ai-npm-0.0.2-staged
+          path: docs/implementation/artifacts/pr-038/npm-staging/
+          if-no-files-found: error

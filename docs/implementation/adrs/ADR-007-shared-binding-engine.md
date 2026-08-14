@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial — Python Phase 4 and WASM Playwright evidence exist on PR-038 candidate `f1ff388563dfce92169c9fe6ae8c845fec86794b`. `DeferredBindingAdapter::wasm()` stays Unavailable. G4 remains a separate named decision.

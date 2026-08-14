@@ -16,14 +16,17 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `test` | `cargo test --workspace` and the Python test suite against an editable binding install |
 | `check-wasm` | Type-check the selected wasm-host graph and reject Tokio/native I/O |
 | `generate-wasm` | Regenerate wasm-bindgen glue and the `@finstack/ai` TypeScript facade |
-| `test-browser` | Type-check and run the headless Chromium package harness |
+| `test-browser` | Type-check and run the headless Chromium, Firefox, and WebKit package harness |
+| `stage-wasm` | Pack unpublished `@finstack/ai` 0.0.2 artifacts and typecheck a clean install |
+| `benchmark-wasm` | Record WASM/JS crossing warning measurements |
 | `ci` | `check`, `test`, and `check-wasm` |
 
 ## Workflows
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (dirty-tree + optional byte-identical rebuild), and `test-browser` |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (consecutive byte-identical rebuild), and `test-browser`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
+| [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` 0.0.2 artifacts. Does not publish. |
 
 Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 

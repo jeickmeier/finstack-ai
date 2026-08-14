@@ -1,0 +1,70 @@
+PR-038 binding-safety review (TM-05 / TM-18 / G4 security row)
+Date: 2026-08-14
+Candidate: f1ff388563dfce92169c9fe6ae8c845fec86794b
+Reviewer: me@jeickmeier.com
+Decision: Pass; npm staging and browser security documentation complete
+the mapped Threat Model section 18 review. No threat-model rewrite.
+No §6.3 ADR trigger. npm publication remains excluded. G4 is not inferred.
+
+Scope reviewed:
+  Agent.create capabilities / activeCapabilities and fail-closed model activation
+  RunResult.trace / activeCapabilities (Rust-owned)
+  Playwright golden fetches from fixtures/compatibility/golden-trace
+  examples/ts-alpha-install public imports and typecheck-only consumer
+  tools/wasm_package/stage.py pack-twice, checksums, CycloneDX 1.6 SBOM
+  .github/workflows/npm-release-staging.yml OIDC signing, no npm token
+  js/docs/browser-security.md same-origin proxy, CSP, persistence, workers
+  tools/wasm_package/check.py secret roots including new docs/example
+  DeferredBindingAdapter::wasm() remains Unavailable
+  health().durable remains false
+
+PASS  TM-18 build/release identity and least privilege
+      The npm staging workflow uses GitHub Actions OIDC with contents:read
+      and id-token:write. Checkout disables credential persistence. No npm
+      token, GitHub release permission, private signing key, tag, or
+      publication command is present. package.json stays "private": true.
+      Sigstore is pinned to gh-action-sigstore-python v3.2.0 at
+      a5caf349bc536fbef3668a10ed7f5cd309a4b53d. upload-artifact is pinned
+      to v4.6.2 at ea165f8d65b6e75b540449e92b4886f43607fa02. Verify uses
+      the workflow identity and https://token.actions.githubusercontent.com.
+
+PASS  TM-05 browser secrets and origin scope
+      Provider secrets terminate at a trusted same-origin proxy. The pack
+      and examples contain no provider credential fields. The secret scan
+      rejects the provider credential field token. IndexedDB stays
+      origin-scoped, experimental, and non-durable. Capability selection
+      grants no ambient authority; Rust owns validation and
+      CapabilitiesActivated.
+
+PASS  G4 security row (readiness, not a gate decision)
+      Applicable Agent-run goldens match Rust-owned record-kind prefixes
+      in Chromium, Firefox, and WebKit. Fail-closed invalid activation
+      uses agent_run_invalid_configuration /
+      capability_not_application_activated. Workers stay single-threaded.
+      SharedArrayBuffer and COOP/COEP are unimplemented and documented as
+      post-preview. This row does not record G4-D-*.
+
+PASS  Deterministic staging provenance
+      stage.py packs twice, requires byte-identical tarballs, writes
+      SHA256SUMS, and emits a sorted CycloneDX 1.6 SBOM from package-lock
+      metadata. The staged manifest binds source_revision,
+      staged_not_published, and cross_binding_checkpoint_not_cut.
+
+PASS  No G4 / adapter flip / publication
+      DeferredBindingAdapter::wasm() remains Unavailable. Playwright is
+      the WASM evidence path. The 0.0.2 checkpoint is available and not
+      cut. ADR-007 stays Partial until a named G4 decision.
+
+Residual conditions:
+  - Hosted Ubuntu CI and keyless npm signing are defined and authorized
+    to dispatch; local validation does not substitute for those runs.
+  - npm publish, tag, GitHub release, and hosted pull-request merge
+    remain prohibited.
+  - JournalStore v1, crash-prefix / durable-beta, and PR-048 remain.
+  - SharedArrayBuffer and threaded WASM require a new ADR-031
+    reconsideration after preview.
+  - PR-063 still owns performance-budget ratification.
+  - No JS JSON-Schema / Pydantic peer is shipped.
+
+No independent review, npm publication, hosted pull request or merge,
+tag, exact 0.0.2 checkpoint cut, or G4 decision is made.

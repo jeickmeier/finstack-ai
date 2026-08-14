@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial — PR-033 package start; PR-036 worker helper and transferable batch protocol at local merge `ecf6d22962676ba0159ab6f31ba5040d0d4cd7f4`; SharedArrayBuffer and threaded WASM remain PR-038
+- Implementation evidence: Partial — PR-033 package start; PR-036 worker helper and transferable batch protocol at local merge `ecf6d22962676ba0159ab6f31ba5040d0d4cd7f4`; PR-038 candidate `f1ff388563dfce92169c9fe6ae8c845fec86794b` keeps the single-thread worker default and documents SharedArrayBuffer as post-preview reconsideration. Implemented closeout waits for local merge.

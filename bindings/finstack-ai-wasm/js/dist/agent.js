@@ -17,7 +17,7 @@ export class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, optional instruction, and optional store.
+     * @param options - Model, optional toolsets, instruction, store, and capabilities.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -28,6 +28,12 @@ export class Agent {
      *     provider: "scripted",
      *     model: "scripted-model",
      *   }),
+     *   capabilities: [{
+     *     id: "app.capability.always",
+     *     description: "Baseline guidance",
+     *     instructions: ["Always instruction."],
+     *     activation: "always",
+     *   }],
      * });
      * const result = await agent.run("hello");
      * ```
@@ -37,12 +43,42 @@ export class Agent {
         try {
             const handle = await WasmAgent.create(wasmModelHandle(options.model), (options.toolsets ?? []).map((toolset) => wasmToolsetHandle(toolset).cloneHandle()), options.instruction, options.store === undefined
                 ? undefined
-                : wasmJournalStoreHandle(options.store).cloneHandle());
+                : wasmJournalStoreHandle(options.store).cloneHandle(), options.capabilities === undefined
+                ? undefined
+                : JSON.stringify(options.capabilities), options.activeCapabilities === undefined
+                ? undefined
+                : JSON.stringify(options.activeCapabilities));
             return new Agent(handle);
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);
         }
+    }
+    /**
+     * Return the bounded model-activated capability catalog in identity order.
+     *
+     * @returns Compact catalog entries visible to model selection.
+     * @example
+     * ```ts
+     * const catalog = agent.capabilityCatalog();
+     * ```
+     */
+    capabilityCatalog() {
+        requireWasm();
+        return this.#handle.capabilityCatalog();
+    }
+    /**
+     * Render the compact catalog supplied to model-facing integrations.
+     *
+     * @returns One `id: description` line per model-selectable capability.
+     * @example
+     * ```ts
+     * const compact = agent.compactCapabilityCatalog();
+     * ```
+     */
+    compactCapabilityCatalog() {
+        requireWasm();
+        return this.#handle.compactCapabilityCatalog();
     }
     /**
      * Replay one stored session into a provisional inspect snapshot.
@@ -292,6 +328,18 @@ export class RunResult {
     /** Durable retry attempts consumed by this run. */
     get retryAttempts() {
         return this.#handle.retryAttempts;
+    }
+    /**
+     * Stable Rust-owned committed record-kind trace in journal order.
+     */
+    get trace() {
+        return Array.from(this.#handle.trace);
+    }
+    /**
+     * Complete Rust-owned capability activation set for this run.
+     */
+    get activeCapabilities() {
+        return this.#handle.activeCapabilities;
     }
     /** Session locator for the completed run. */
     get session() {

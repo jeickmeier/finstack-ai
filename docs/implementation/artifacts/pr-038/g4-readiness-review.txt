@@ -1,0 +1,39 @@
+G4 readiness review
+Date: 2026-08-14
+Reviewed revision: f1ff388563dfce92169c9fe6ae8c845fec86794b
+Reviewer: me@jeickmeier.com
+Result: READY FOR NAMED DECISION; G4-D-* is not recorded
+
+This pack states that Phase 4 and Phase 5 exit evidence and the mapped
+logical-PR acceptance sets are complete enough for the owner to consider
+a named G4 decision. Range authorization is not that decision.
+
+Ready inputs
+
+- Phase 4 is Done. All four Phase 4 exits passed at
+  PH4-E-exit-traces-ca384aa02727, PH4-E-exit-callbacks-23a86984a585,
+  PH4-E-exit-pydantic-0bc98c672744, and PH4-E-exit-wheels-45a88cc26d0b.
+- Phase 5 exits pass in phase5-exit-review.txt:
+  PH5-E-exit-traces-f1ff388563df, PH5-E-exit-host-f1ff388563df,
+  PH5-E-exit-workers-f1ff388563df, and PH5-E-exit-artifacts-f1ff388563df.
+- PR-027–PR-037 are Done. PR-038 A01–A06 pass on this candidate.
+- Python half of 0.0.2 is the PR-032 staged candidate. JS/WASM half is
+  the staged private npm tarball on this candidate. The exact
+  cross-binding checkpoint is available and not cut.
+- TM-05 / TM-18 / G4 security-row review passes in security-review.txt.
+- DeferredBindingAdapter::wasm() remains Unavailable. Playwright is the
+  WASM parity evidence path, matching pytest for Python.
+
+Explicitly not decided
+
+- No G4-D-* row is written.
+- ADR-007 remains Accepted / In progress / Partial until that named
+  decision exists.
+- No npm publish, tag, GitHub release, or hosted pull-request merge.
+- Hosted Ubuntu CI and npm signing are authorized and defined; they are
+  not claimed as a local pass in this file.
+- PR-063 budget ratification, PR-048 durability, WIT/Wasmtime, and
+  SharedArrayBuffer remain later work.
+
+Ask the owner whether to record a named G4-D-* decision after reviewing
+this pack and any subsequently dispatched hosted Linux CI/signing runs.
