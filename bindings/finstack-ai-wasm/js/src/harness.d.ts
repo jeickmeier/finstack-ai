@@ -1,5 +1,7 @@
 import type {
+  Agent,
   BuildMetadata,
+  FinstackError,
   HostArtifactStore,
   HostClock,
   HostContextProvider,
@@ -50,6 +52,8 @@ declare global {
     finstackTest: {
       health: () => string;
       buildMetadata: () => BuildMetadata;
+      Agent: typeof Agent;
+      FinstackError: typeof FinstackError;
       compilePortProxies: () => void;
       runNoopTrace: () => string;
       JsModel: new (adapter: HostModel, options: JsModelOptions) => JsModel;

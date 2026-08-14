@@ -17,12 +17,12 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-scripted-trace = ["dep:finstack-ai-store-memory"]
+scripted-trace = []
 
 [dependencies]
 finstack-ai = { workspace = true, default-features = false, features = ["wasm-host"] }
 finstack-ai-kernel = { workspace = true }
-finstack-ai-store-memory = { workspace = true, optional = true }
+finstack-ai-store-memory = { workspace = true }
 futures-core = { workspace = true }
 futures-util = { workspace = true }
 js-sys = { workspace = true }

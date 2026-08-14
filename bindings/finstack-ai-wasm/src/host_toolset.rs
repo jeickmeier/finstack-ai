@@ -130,26 +130,44 @@ impl HostToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let adapter = self.adapter.clone();
         let method = self.call.borrow().clone();
+        let cancellation = ctx.run.cancellation.clone();
         Box::pin(async move {
-            if ctx.run.cancellation.is_cancelled() {
+            let owned = if signal.is_none() {
+                crate::host::create_abort_controller().ok()
+            } else {
+                None
+            };
+            let effective = signal.or_else(|| owned.as_ref().map(|(_, value)| value.clone()));
+            let mut abort_on_drop = crate::host::AbortOnDrop {
+                controller: owned.as_ref().map(|(controller, _)| controller.clone()),
+            };
+            if cancellation.is_cancelled() {
                 return Err(tool_failure(HostFailure::Cancelled));
             }
             let context_json = serde_json::to_string(&ctx.run.locator)
                 .map_err(|_| tool_failure(HostFailure::InvalidResult))?;
             let call_json = serde_json::to_string(&call)
                 .map_err(|_| tool_failure(HostFailure::InvalidResult))?;
-            let result = crate::host::invoke_host(
-                &adapter,
-                &method,
-                &[
-                    crate::host::json_string_value(&context_json),
-                    crate::host::json_string_value(&call_json),
-                ],
-                signal.as_ref(),
+            let positional = [
+                crate::host::json_string_value(&context_json),
+                crate::host::json_string_value(&call_json),
+            ];
+            let invoke =
+                crate::host::invoke_host(&adapter, &method, &positional, effective.as_ref());
+            let result = match futures_util::future::select(
+                std::pin::pin!(invoke),
+                std::pin::pin!(cancellation.cancelled()),
             )
             .await
-            .map_err(tool_failure)?;
-            tool_items_from_js(result)
+            {
+                futures_util::future::Either::Left((result, _)) => result,
+                futures_util::future::Either::Right(((), invoke)) => {
+                    drop(invoke);
+                    return Err(tool_failure(HostFailure::Cancelled));
+                }
+            };
+            abort_on_drop.disarm();
+            tool_items_from_js(result.map_err(tool_failure)?)
         })
     }
 }

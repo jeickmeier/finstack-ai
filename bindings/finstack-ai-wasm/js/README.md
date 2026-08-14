@@ -33,7 +33,7 @@ iterable. No per-token JavaScript hook is required. Pass an `AbortSignal` on
 the call options to cancel a pending host promise or close a stream.
 
 ```ts
-import { JsModel, init } from "@finstack/ai";
+import { Agent, JsModel, init } from "@finstack/ai";
 
 await init();
 const model = new JsModel(
@@ -45,7 +45,14 @@ const model = new JsModel(
   },
   { component: "app.model", provider: "scripted", model: "scripted-model" },
 );
+const agent = await Agent.create({ model });
+const result = await agent.run("hello");
 ```
+
+Compose `createOpenAICompatibleModel()` from
+`@finstack/ai/adapters/openai-compatible` with `Agent.create({ model })`. There
+is no `Agent.openaiCompatible` on the root barrel. Do not embed provider
+credentials in browser bundles.
 
 `normalizePrebetaShape` validates the three pre-beta command kinds against the
 same Rust DTOs as the Python binding. It does not submit a live Agent.
@@ -69,18 +76,22 @@ TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
 bundles, headers, or examples. Terminate secrets at a trusted same-origin
 proxy. Optional application `headers` are not a credential helper.
 
-## Public surface (PR-034)
+## Public surface (PR-035)
 
 - `init(): Promise<void>`
 - `health(): string`
 - `buildMetadata(): { version, engineVersion, implementation: "wasm", target: "wasm32-unknown-unknown" }`
+- `Agent.create`, `Agent.start`, `Agent.run`
+- `Run` (`session`, `events`, `result`, `cancel`, `closeEvents`)
+- `Session`, `RunResult`, `Event`, `EventBatch`, `FinstackError`
 - Host interfaces and `Js*` wrappers for model, toolset, context, middleware,
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
 - `@finstack/ai/adapters/openai-compatible`
 
-Agent, Run, Result, and event-batch handles remain later work, as do workers,
-IndexedDB, npm publish, and G4.
+Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
+remains a pre-beta health stub. Workers, IndexedDB, npm publish, and G4 remain
+later work. Dropping a `Run` detaches observation and does not cancel.
 
 ## Regenerate
 

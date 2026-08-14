@@ -7,14 +7,14 @@
 
 #![warn(missing_docs)]
 
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod agent;
 mod bundle;
 mod registry;
 mod result;
 mod spec;
 
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use agent::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, Agent, AgentRun, AgentRunError, AgentRunOutput,
@@ -27,7 +27,7 @@ pub use bundle::{
     CompatibilityRequirements, HostFeature, LockedBundle, LockedCapability, LockedComponent,
     LockedComponentKind, RequiredServices, ResolvedAgentLock, RuntimeServices, VersionRequirement,
 };
-#[cfg(feature = "native-tokio")]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_kernel::{
     ActiveCapability, CapabilityActivationSource, OperationLocator, PrincipalRef,
     RunSecurityContext, SessionId,

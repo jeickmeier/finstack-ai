@@ -194,8 +194,17 @@ impl HostModel {
         let method = self.request.borrow().clone();
         let cancellation = request.call.run.cancellation.clone();
         Box::pin(async move {
+            let owned = if signal.is_none() {
+                crate::host::create_abort_controller().ok()
+            } else {
+                None
+            };
+            let effective = signal.or_else(|| owned.as_ref().map(|(_, value)| value.clone()));
+            let mut abort_on_drop = crate::host::AbortOnDrop {
+                controller: owned.as_ref().map(|(controller, _)| controller.clone()),
+            };
             if cancellation.is_cancelled()
-                || signal.as_ref().is_some_and(|value| {
+                || effective.as_ref().is_some_and(|value| {
                     js_sys::Reflect::get(value, &wasm_bindgen::JsValue::from_str("aborted"))
                         .ok()
                         .and_then(|aborted| aborted.as_bool())
@@ -205,11 +214,23 @@ impl HostModel {
                 return Err(model_failure(HostFailure::Cancelled));
             }
             let draft_value = crate::host::json_string_value(&draft);
-            let result =
-                crate::host::invoke_host(&adapter, &method, &[draft_value], signal.as_ref())
-                    .await
-                    .map_err(model_failure)?;
-            items_from_js(result)
+            let positional = [draft_value];
+            let invoke =
+                crate::host::invoke_host(&adapter, &method, &positional, effective.as_ref());
+            let result = match futures_util::future::select(
+                std::pin::pin!(invoke),
+                std::pin::pin!(cancellation.cancelled()),
+            )
+            .await
+            {
+                futures_util::future::Either::Left((result, _)) => result,
+                futures_util::future::Either::Right(((), invoke)) => {
+                    drop(invoke);
+                    return Err(model_failure(HostFailure::Cancelled));
+                }
+            };
+            abort_on_drop.disarm();
+            items_from_js(result.map_err(model_failure)?)
         })
     }
 }
@@ -256,13 +277,18 @@ fn items_from_native(result: NativeHostResult) -> Result<ModelEventStream, Model
 fn items_from_encoded(items: &[String]) -> Result<ModelEventStream, ModelError> {
     let mut stream_items = Vec::new();
     let mut completed = None;
+    let mut streamed_text = String::new();
     for encoded in items {
         let item: crate::host::HostModelStreamItem =
             parse_host_json(encoded).map_err(model_failure)?;
         if item_has_completion(&item) {
-            let output = completed_from_stream_item(item).map_err(model_failure)?;
+            let mut output = completed_from_stream_item(item).map_err(model_failure)?;
+            if output.text.is_empty() {
+                output.text.clone_from(&streamed_text);
+            }
             completed = Some(model_response(output).map_err(model_failure)?);
         } else if let Some(text) = item_text(&item) {
+            streamed_text.push_str(&text);
             stream_items.push(ModelStreamItem::TextDelta(TextDelta {
                 text: Arc::from(text),
             }));

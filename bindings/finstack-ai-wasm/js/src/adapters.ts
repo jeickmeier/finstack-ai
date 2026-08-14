@@ -99,6 +99,47 @@ function assertInitialized(flag: boolean): void {
 }
 
 let initialized = false;
+const wasmModels = new WeakMap<JsModel, WasmJsModel>();
+const wasmToolsets = new WeakMap<JsToolset, WasmJsToolset>();
+
+/**
+ * Throw when the generated wasm module has not been initialized.
+ *
+ * @throws When {@link init} has not completed.
+ */
+export function requireWasm(): void {
+  assertInitialized(initialized);
+}
+
+/**
+ * Return the crate-private wasm-bindgen model handle.
+ *
+ * @param model - Public {@link JsModel} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmModelHandle(model: JsModel): WasmJsModel {
+  const handle = wasmModels.get(model);
+  if (handle === undefined) {
+    throw new TypeError("JsModel is not a live wasm handle");
+  }
+  return handle;
+}
+
+/**
+ * Return the crate-private wasm-bindgen toolset handle.
+ *
+ * @param toolset - Public {@link JsToolset} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset {
+  const handle = wasmToolsets.get(toolset);
+  if (handle === undefined) {
+    throw new TypeError("JsToolset is not a live wasm handle");
+  }
+  return handle;
+}
 
 /**
  * Record that {@link init} has completed so wrappers may construct wasm handles.
@@ -132,6 +173,7 @@ export class JsModel {
   constructor(adapter: HostModel, options: JsModelOptions) {
     assertInitialized(initialized);
     this.#handle = new WasmJsModel(adapter, options);
+    wasmModels.set(this, this.#handle);
   }
 }
 
@@ -159,6 +201,7 @@ export class JsToolset {
   constructor(adapter: HostToolset, options: JsToolsetOptions) {
     assertInitialized(initialized);
     this.#handle = new WasmJsToolset(adapter, options);
+    wasmToolsets.set(this, this.#handle);
   }
 }
 

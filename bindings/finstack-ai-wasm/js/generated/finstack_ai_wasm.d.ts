@@ -2,6 +2,113 @@
 /* eslint-disable */
 
 /**
+ * Rust-owned Agent handle.
+ */
+export class Agent {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Construct an Agent over a trusted JS model and optional toolsets.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when configuration is invalid.
+     */
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null): Promise<any>;
+    /**
+     * Execute one run and await its committed result.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the run fails.
+     */
+    run(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null): Promise<any>;
+    /**
+     * Start one run and return its detached control handle.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the request is invalid.
+     */
+    start(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null): Run;
+}
+
+/**
+ * Immutable runtime event handle.
+ */
+export class Event {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Explicit JSON snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the event cannot be serialized.
+     */
+    toJson(): string;
+    /**
+     * Durable sequence, when the event is durable-derived.
+     */
+    readonly durableSequence: bigint | undefined;
+    /**
+     * Durable or transient class.
+     */
+    readonly eventClass: string;
+    /**
+     * Event kind name.
+     */
+    readonly kind: string;
+    /**
+     * Transient sequence.
+     */
+    readonly transientSequence: bigint;
+}
+
+/**
+ * Bounded transport batch. Expand events only on request.
+ */
+export class EventBatch {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Expand contained events. This is the per-event FFI boundary.
+     */
+    events(): Event[];
+    /**
+     * Explicit JSON snapshot of the contained events.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the batch cannot be serialized.
+     */
+    toJson(): string;
+    /**
+     * Explicit UTF-8 JSON bytes of the contained events.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the batch cannot be serialized.
+     */
+    toJsonBytes(): Uint8Array;
+    /**
+     * Lag-dropped transient events since the previous batch.
+     */
+    readonly droppedProgress: bigint;
+    /**
+     * First contained sequence.
+     */
+    readonly firstSequence: bigint;
+    /**
+     * Last contained sequence.
+     */
+    readonly lastSequence: bigint;
+}
+
+/**
  * Host artifact-store wrapper over `Uint8Array` payloads.
  */
 export class JsArtifactStore {
@@ -136,6 +243,10 @@ export class JsToolset {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Clone the wrapper without moving the caller's handle.
+     */
+    cloneHandle(): JsToolset;
+    /**
      * Construct a toolset wrapper around a trusted host adapter.
      *
      * # Errors
@@ -143,6 +254,109 @@ export class JsToolset {
      * Returns a TypeError-equivalent when options or the adapter are invalid.
      */
     constructor(adapter: any, options: any);
+}
+
+/**
+ * Detached run control handle. Drop detaches observation and does not cancel.
+ */
+export class Run {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Submit idempotent durable cancellation.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when cancellation cannot be committed.
+     */
+    cancel(_reason?: string | null): Promise<any>;
+    /**
+     * Close event delivery without cancelling the run.
+     */
+    closeEvents(): Promise<any>;
+    /**
+     * Receive the next transport batch, or `undefined` after close/terminal.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when event delivery fails to start.
+     */
+    nextEventBatch(): Promise<any>;
+    /**
+     * Wait for the retained terminal result.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the run fails, times out, or is cancelled.
+     */
+    result(): Promise<any>;
+    /**
+     * Immutable session locator for this run.
+     */
+    readonly session: Session;
+}
+
+/**
+ * Successful terminal result handle.
+ */
+export class RunResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Explicit result snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     */
+    toDict(): any;
+    /**
+     * Durable retry attempts consumed by this run.
+     */
+    readonly retryAttempts: number;
+    /**
+     * Session locator for the completed run.
+     */
+    readonly session: Session;
+    /**
+     * Concatenated final assistant text.
+     */
+    readonly text: string;
+}
+
+/**
+ * Read-only session locator.
+ */
+export class Session {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Explicit locator snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     */
+    toDict(): any;
+    /**
+     * Lane identity.
+     */
+    readonly laneId: string;
+    /**
+     * Run identity.
+     */
+    readonly runId: string;
+    /**
+     * Session identity.
+     */
+    readonly sessionId: string;
+    /**
+     * Tenant scope captured at acceptance.
+     */
+    readonly tenantScope: string;
 }
 
 /**
@@ -223,10 +437,18 @@ export function normalizePrebetaShape(kind: string, encoded: string): string;
  */
 export function runNoopTrace(): string;
 
+/**
+ * Install the host driver when the generated module loads.
+ */
+export function wasm_start(): void;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_agent_free: (a: number, b: number) => void;
+    readonly __wbg_event_free: (a: number, b: number) => void;
+    readonly __wbg_eventbatch_free: (a: number, b: number) => void;
     readonly __wbg_jsartifactstore_free: (a: number, b: number) => void;
     readonly __wbg_jsclock_free: (a: number, b: number) => void;
     readonly __wbg_jscontextprovider_free: (a: number, b: number) => void;
@@ -235,9 +457,26 @@ export interface InitOutput {
     readonly __wbg_jsmodel_free: (a: number, b: number) => void;
     readonly __wbg_jsobserver_free: (a: number, b: number) => void;
     readonly __wbg_jstoolset_free: (a: number, b: number) => void;
+    readonly __wbg_run_free: (a: number, b: number) => void;
+    readonly __wbg_runresult_free: (a: number, b: number) => void;
+    readonly __wbg_session_free: (a: number, b: number) => void;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+    readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
     readonly buildMetadata: (a: number) => void;
     readonly compilePortProxies: () => void;
+    readonly event_durableSequence: (a: number, b: number) => void;
+    readonly event_eventClass: (a: number, b: number) => void;
+    readonly event_kind: (a: number, b: number) => void;
+    readonly event_toJson: (a: number, b: number) => void;
+    readonly event_transientSequence: (a: number) => bigint;
+    readonly eventbatch_droppedProgress: (a: number) => bigint;
+    readonly eventbatch_events: (a: number, b: number) => void;
+    readonly eventbatch_firstSequence: (a: number) => bigint;
+    readonly eventbatch_lastSequence: (a: number) => bigint;
+    readonly eventbatch_toJson: (a: number, b: number) => void;
+    readonly eventbatch_toJsonBytes: (a: number, b: number) => void;
     readonly health: (a: number) => void;
     readonly jsartifactstore_new: (a: number, b: number) => void;
     readonly jsclock_new: (a: number, b: number) => void;
@@ -247,22 +486,39 @@ export interface InitOutput {
     readonly jsmodel_new: (a: number, b: number, c: number) => void;
     readonly jsobserver_new: (a: number, b: number, c: number) => void;
     readonly jsrandomsource_new: (a: number, b: number) => void;
+    readonly jstoolset_cloneHandle: (a: number) => number;
     readonly jstoolset_new: (a: number, b: number, c: number) => void;
     readonly normalizePrebetaShape: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly runNoopTrace: (a: number) => void;
+    readonly run_cancel: (a: number, b: number, c: number) => number;
+    readonly run_closeEvents: (a: number) => number;
+    readonly run_nextEventBatch: (a: number) => number;
+    readonly run_result: (a: number) => number;
+    readonly run_session: (a: number) => number;
+    readonly runresult_retryAttempts: (a: number) => number;
+    readonly runresult_session: (a: number) => number;
+    readonly runresult_text: (a: number, b: number) => void;
+    readonly runresult_toDict: (a: number, b: number) => void;
+    readonly session_laneId: (a: number, b: number) => void;
+    readonly session_runId: (a: number, b: number) => void;
+    readonly session_sessionId: (a: number, b: number) => void;
+    readonly session_tenantScope: (a: number, b: number) => void;
+    readonly session_toDict: (a: number, b: number) => void;
+    readonly wasm_start: () => void;
     readonly driveScriptedModelRequest: (a: number, b: number, c: number) => number;
     readonly driveScriptedToolCall: (a: number, b: number, c: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_861: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_874: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_193: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_926: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_940: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_288: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;
     readonly __wbindgen_export4: (a: number, b: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
     readonly __wbindgen_export5: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_start: () => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;

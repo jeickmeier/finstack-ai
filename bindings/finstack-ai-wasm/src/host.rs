@@ -307,6 +307,49 @@ mod wasm_invoke {
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::JsFuture;
 
+    /// Create a host `AbortController` and its `AbortSignal`.
+    pub fn create_abort_controller() -> Result<(JsValue, JsValue), HostFailure> {
+        let global = js_sys::global();
+        let ctor = Reflect::get(&global, &JsValue::from_str("AbortController"))
+            .map_err(|_| HostFailure::Failed)?;
+        let ctor = ctor
+            .dyn_into::<Function>()
+            .map_err(|_| HostFailure::Failed)?;
+        let controller =
+            Reflect::construct(&ctor, &js_sys::Array::new()).map_err(|_| HostFailure::Failed)?;
+        let signal = Reflect::get(&controller, &JsValue::from_str("signal"))
+            .map_err(|_| HostFailure::Failed)?;
+        Ok((controller, signal))
+    }
+
+    /// Abort a host `AbortController` created by [`create_abort_controller`].
+    pub fn abort_controller(controller: &JsValue) {
+        if let Ok(abort) = Reflect::get(controller, &JsValue::from_str("abort"))
+            && abort.is_function()
+        {
+            let _ = Function::from(abort).call0(controller);
+        }
+    }
+
+    /// Abort an owned controller if the host invoke is dropped before settle.
+    pub struct AbortOnDrop {
+        pub controller: Option<JsValue>,
+    }
+
+    impl AbortOnDrop {
+        pub fn disarm(&mut self) {
+            self.controller = None;
+        }
+    }
+
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            if let Some(controller) = self.controller.take() {
+                abort_controller(&controller);
+            }
+        }
+    }
+
     /// Invoke a host method with JSON-string arguments and an optional AbortSignal.
     pub async fn invoke_host(
         this: &JsValue,
@@ -595,8 +638,8 @@ mod wasm_invoke {
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm_invoke::{
-    HostJsResult, bytes_from_uint8_array, extract_method, invoke_host, json_string_value,
-    stringify_js, uint8_array_from_bytes,
+    AbortOnDrop, HostJsResult, bytes_from_uint8_array, create_abort_controller, extract_method,
+    invoke_host, json_string_value, stringify_js, uint8_array_from_bytes,
 };
 
 /// Native callback result used to prove DTO and stream-item paths without JS.

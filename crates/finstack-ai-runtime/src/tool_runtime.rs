@@ -14,49 +14,20 @@ use tokio::time::timeout;
 
 use crate::coordinator::{DispatchError, PostCommitDispatcher, RuntimeDispatch, ToolDispatchSeed};
 use crate::model_runtime::ModelDispatcher;
+use crate::settlement::ToolDriverResult;
 use crate::tool::AssembledToolTerminal;
 use crate::{
     CancellationSignal, Clock, MonotonicDeadline, PortFuture, ResolvedTool, ResolvedToolCatalog,
     RunCallContext, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED, TOOL_PANICKED, ToolCallContext,
-    ToolError, ToolProgress, ToolStreamAssembler, ToolStreamLimits,
+    ToolError, ToolProgress, ToolStreamAssembler,
 };
 
-/// Configuration for bounded native tool execution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ToolTaskConfig {
-    /// Bounded committed tool-job queue capacity.
-    pub job_capacity: usize,
-    /// Bounded incremental driver-message queue capacity.
-    pub result_capacity: usize,
-    /// Executor-wide active-call ceiling.
-    pub global_max_concurrency: usize,
-    /// Target-neutral stream normalization limits.
-    pub stream_limits: ToolStreamLimits,
-}
-
-impl ToolTaskConfig {
-    pub(crate) fn validate(self) -> Result<Self, &'static str> {
-        if self.job_capacity == 0
-            || self.result_capacity == 0
-            || self.global_max_concurrency == 0
-            || self.stream_limits.max_items == 0
-            || self.stream_limits.max_stream_bytes == 0
-        {
-            return Err("tool_task_configuration_invalid");
-        }
-        Ok(self)
-    }
-}
+pub use crate::run_types::ToolTaskConfig;
 
 pub(crate) struct ToolJob {
     pub(crate) seed: ToolDispatchSeed,
     pub(crate) context: ToolCallContext,
     pub(crate) resolved: Arc<ResolvedTool>,
-}
-
-pub(crate) struct ToolDriverResult {
-    pub(crate) seed: ToolDispatchSeed,
-    pub(crate) result: Result<AssembledToolTerminal, ToolError>,
 }
 
 pub(crate) enum ToolDriverMessage {
