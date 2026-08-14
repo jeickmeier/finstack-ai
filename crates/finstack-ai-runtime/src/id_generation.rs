@@ -3,6 +3,9 @@
 //! The kernel never reads ambient clocks or OS randomness. Runtime code supplies
 //! timestamps and entropy through these ports; tests inject deterministic fakes.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use finstack_ai_kernel::{Id, IdTag, TimeError, Timestamp};
 use thiserror::Error;
 use uuid::Builder;
@@ -84,6 +87,70 @@ impl<C: Clock, R: RandomSource> UuidV7Generator<C, R> {
         self.random.fill_bytes(&mut counter_random)?;
         let uuid = Builder::from_unix_timestamp_millis(millis, &counter_random).into_uuid();
         Ok(Id::from_bytes(*uuid.as_bytes()))
+    }
+}
+
+/// Injectable wall clock for tests and durable workflow hosts.
+///
+/// This is not a seventh port and not a timer. The kernel never reads it; the
+/// runtime supplies [`Clock::now`] when building a [`finstack_ai_kernel::TransitionEnv`].
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai_kernel::Timestamp;
+/// use finstack_ai_runtime::{Clock, ExternalClock};
+///
+/// let clock = ExternalClock::new(Timestamp::from_unix_ms(1_000).expect("ts"));
+/// clock.jump(250).expect("forward");
+/// assert_eq!(clock.now().expect("now").as_unix_ms(), 1_250);
+/// clock.set(Timestamp::from_unix_ms(800).expect("ts"));
+/// assert_eq!(clock.now().expect("now").as_unix_ms(), 800);
+/// ```
+#[derive(Debug, Clone)]
+pub struct ExternalClock {
+    now_ms: Arc<AtomicI64>,
+}
+
+impl ExternalClock {
+    /// Create a clock fixed at `now`.
+    #[must_use]
+    pub fn new(now: Timestamp) -> Self {
+        Self {
+            now_ms: Arc::new(AtomicI64::new(now.as_unix_ms())),
+        }
+    }
+
+    /// Replace the current wall time.
+    pub fn set(&self, now: Timestamp) {
+        self.now_ms.store(now.as_unix_ms(), Ordering::Release);
+    }
+
+    /// Shift the current wall time by `delta_ms` milliseconds.
+    ///
+    /// Negative values move backward. The resulting timestamp must stay in the
+    /// canonical range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdGenerationError::Time`] when the shifted value is out of range.
+    pub fn jump(&self, delta_ms: i64) -> Result<(), IdGenerationError> {
+        let next = self
+            .now_ms
+            .load(Ordering::Acquire)
+            .checked_add(delta_ms)
+            .ok_or(IdGenerationError::Time(TimeError::Overflow))?;
+        let timestamp = Timestamp::from_unix_ms(next)?;
+        self.now_ms.store(timestamp.as_unix_ms(), Ordering::Release);
+        Ok(())
+    }
+}
+
+impl Clock for ExternalClock {
+    fn now(&self) -> Result<Timestamp, IdGenerationError> {
+        Ok(Timestamp::from_unix_ms(
+            self.now_ms.load(Ordering::Acquire),
+        )?)
     }
 }
 
@@ -281,5 +348,16 @@ mod tests {
         let mut small = [0_u8; 10];
         source.fill_bytes(&mut small).expect("entropy");
         assert!(small.iter().any(|byte| *byte != 0), "pool still usable");
+    }
+
+    #[test]
+    fn external_clock_jumps_forward_and_backward() {
+        let clock = ExternalClock::new(Timestamp::from_unix_ms(1_000).expect("ts"));
+        clock.jump(250).expect("forward");
+        assert_eq!(clock.now().expect("now").as_unix_ms(), 1_250);
+        clock.set(Timestamp::from_unix_ms(800).expect("ts"));
+        assert_eq!(clock.now().expect("now").as_unix_ms(), 800);
+        clock.jump(-100).expect("backward");
+        assert_eq!(clock.now().expect("now").as_unix_ms(), 700);
     }
 }

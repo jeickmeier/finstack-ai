@@ -672,7 +672,14 @@ impl KernelState {
                 reason_code: "unsupported_or_inconsistent",
             });
         }
-        if (self.phase == Some(RunPhase::AwaitingInteraction)) != self.pending_interaction.is_some()
+        if (self.phase == Some(RunPhase::AwaitingInteraction) && self.pending_interaction.is_none())
+            || (self.pending_interaction.is_some()
+                && !matches!(
+                    self.phase,
+                    Some(
+                        RunPhase::AwaitingInteraction | RunPhase::Cancelling | RunPhase::Suspended
+                    )
+                ))
         {
             return Err(KernelError::InvalidInputPayload {
                 field: "pending_interaction",
@@ -725,7 +732,11 @@ impl KernelState {
                 });
             }
             if self.retry.pending.as_ref().is_some_and(|pending| {
-                pending.attempt != self.retry.attempts || self.phase != Some(RunPhase::Sleeping)
+                pending.attempt != self.retry.attempts
+                    || !matches!(
+                        self.phase,
+                        Some(RunPhase::Sleeping | RunPhase::Cancelling | RunPhase::Suspended)
+                    )
             }) || (self.phase == Some(RunPhase::Sleeping) && self.retry.pending.is_none())
             {
                 return Err(KernelError::InvalidInputPayload {

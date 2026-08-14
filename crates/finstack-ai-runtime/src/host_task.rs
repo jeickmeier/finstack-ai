@@ -27,9 +27,9 @@ use crate::run_types::{
 };
 use crate::settlement::{
     ModelDriverResult, SettlementSources, ToolDriverResult, apply_interaction_resume,
-    model_handle_error, prepare_tool_batch_if_ready, process_model_progress, process_model_result,
-    process_tool_progress, process_tool_result, resume_pending_model_effect,
-    resume_pending_tool_effects, validate_model_binding,
+    drain_idle_cancellation, model_handle_error, prepare_tool_batch_if_ready,
+    process_model_progress, process_model_result, process_tool_progress, process_tool_result,
+    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
 use crate::tool::AssembledToolTerminal;
 use crate::{
@@ -328,36 +328,42 @@ impl RunTaskOwner {
             active: Arc::clone(&active),
             parent: parent.clone(),
         });
-        let action =
-            resume_pending_model_effect(&mut coordinator, model.as_ref(), &sources, &parent)
-                .await?;
-        match action {
-            ModelResumeAction::Retry => {
-                let seed =
-                    coordinator
-                        .pending_model_seed()
-                        .ok_or(RunHandleError::ModelSettlement {
+        let cancelling = coordinator.state().cancellation.is_some();
+        if cancelling {
+            drain_idle_cancellation(&mut coordinator, &sources, true).await?;
+        } else {
+            let action =
+                resume_pending_model_effect(&mut coordinator, model.as_ref(), &sources, &parent)
+                    .await?;
+            match action {
+                ModelResumeAction::Retry => {
+                    let seed = coordinator.pending_model_seed().ok_or(
+                        RunHandleError::ModelSettlement {
                             code: "model_resume_seed_missing",
+                        },
+                    )?;
+                    dispatcher
+                        .resume_request(seed)
+                        .map_err(|error| RunHandleError::Model {
+                            code: Arc::from(error.code),
                         })?;
-                dispatcher
-                    .resume_request(seed)
-                    .map_err(|error| RunHandleError::Model {
-                        code: Arc::from(error.code),
-                    })?;
+                }
+                ModelResumeAction::SuspendUncertain => {
+                    return Err(RunHandleError::Model {
+                        code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
+                    });
+                }
+                ModelResumeAction::NoOutstanding
+                | ModelResumeAction::UseRecorded
+                | ModelResumeAction::Reconcile
+                | ModelResumeAction::WaitExternal => {}
             }
-            ModelResumeAction::SuspendUncertain => {
-                return Err(RunHandleError::Model {
-                    code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
-                });
-            }
-            ModelResumeAction::NoOutstanding
-            | ModelResumeAction::UseRecorded
-            | ModelResumeAction::Reconcile
-            | ModelResumeAction::WaitExternal => {}
         }
         coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);
-        apply_interaction_resume(&mut coordinator, &sources).await?;
-        if let Some(catalog) = catalog.as_ref() {
+        if !cancelling {
+            apply_interaction_resume(&mut coordinator, &sources).await?;
+        }
+        if !cancelling && let Some(catalog) = catalog.as_ref() {
             let opened_tool_batch =
                 prepare_tool_batch_if_ready(&mut coordinator, catalog, &sources).await?;
             let action = if opened_tool_batch {
@@ -904,6 +910,17 @@ async fn run_worker_with_effects<C, R>(
             continue;
         }
         if submit_and_reply(&mut coordinator, &shared, command).await {
+            break;
+        }
+        if let Err(error) = drain_idle_cancellation(&mut coordinator, &sources, false).await {
+            fault_shared(
+                &shared,
+                match error {
+                    RunHandleError::CancellationSettlement { code }
+                    | RunHandleError::Faulted { code } => code,
+                    _ => "host_idle_cancellation_failed",
+                },
+            );
             break;
         }
         if let Err(error) = drain_effects_accepting_commands(

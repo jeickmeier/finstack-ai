@@ -172,8 +172,7 @@ fn cancellation_without_outstanding_effects_reconciles_to_cancelled() {
     ));
 }
 
-#[test]
-fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
+pub(super) fn drive_to_sleeping() -> Harness {
     let mut harness = drive_to_awaiting_model();
     let error = ErrorDescriptor::new(
         "provider_retry",
@@ -199,7 +198,6 @@ fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
             ),
         }),
     );
-
     let retry = finstack_ai_kernel::RetryDirective::try_new(
         finstack_ai_kernel::RetryClassification::Model,
         finstack_ai_kernel::Duration::from_millis(250),
@@ -216,6 +214,12 @@ fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
             effect_id: id::<finstack_ai_kernel::EffectTag>(701),
         }]
     );
+    harness
+}
+
+#[test]
+fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
+    let mut harness = drive_to_sleeping();
     assert_eq!(harness.kernel.state().phase, Some(RunPhase::Sleeping));
     assert_eq!(harness.kernel.state().retry.attempts, 1);
 
@@ -252,6 +256,94 @@ fn retry_records_timer_intent_and_starts_a_fresh_cycle_after_firing() {
         serde_json::from_value(encoded).expect("state v3 round trip");
     assert_eq!(decoded, *harness.kernel.state());
     assert_termination_golden("valid--pr011-retry.json", &harness);
+}
+
+#[test]
+fn cancel_requested_while_sleeping_includes_the_timer_effect() {
+    let mut harness = drive_to_sleeping();
+    let decision = harness.apply_input(
+        cancellation_env(1_600, &[20], &[], &[800]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    assert_eq!(
+        decision.actions,
+        vec![PostCommitAction::CancelEffect {
+            effect_id: id::<finstack_ai_kernel::EffectTag>(701),
+        }]
+    );
+    let state = harness.kernel.state();
+    assert_eq!(state.phase, Some(RunPhase::Cancelling));
+    assert!(state.retry.pending.is_some());
+    assert_eq!(
+        state
+            .cancellation
+            .as_ref()
+            .expect("cancellation")
+            .outstanding_effects
+            .as_ref(),
+        [id::<finstack_ai_kernel::EffectTag>(701)]
+    );
+}
+
+#[test]
+fn reconcile_cancelled_timer_does_not_start_a_fresh_cycle() {
+    let mut harness = drive_to_sleeping();
+    harness.apply_input(
+        cancellation_env(1_600, &[20], &[], &[800]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    let decision = harness.apply_input(
+        transition_env(1_650, &[21, 22, 23], &[10, 11], &[], &[], &[], &[]),
+        KernelInput::CancellationReconciled(finstack_ai_kernel::CancellationReconciledInput {
+            request_id: id::<finstack_ai_kernel::CancellationRequestTag>(800),
+            completed_effects: Arc::from([]),
+            cancelled_effects: Arc::from([id::<finstack_ai_kernel::EffectTag>(701)]),
+            uncertain_effects: Arc::from([]),
+        }),
+    );
+    assert_eq!(
+        decision_body_names(&decision),
+        [
+            "effect_cancelled",
+            "cancellation_reconciled",
+            "run_cancelled",
+        ]
+    );
+    let state = harness.kernel.state();
+    assert_eq!(state.phase, Some(RunPhase::Cancelled));
+    assert!(state.retry.pending.is_none());
+    assert!(state.retry.timer_firings.is_empty());
+    assert_eq!(state.cycle, 0);
+}
+
+#[test]
+fn timer_fired_after_cancel_is_rejected() {
+    let mut harness = drive_to_sleeping();
+    harness.apply_input(
+        cancellation_env(1_600, &[20], &[], &[800]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    let error = harness
+        .kernel
+        .decide(
+            &empty_env(1_750),
+            KernelInput::TimerFired(finstack_ai_kernel::TimerFiredInput {
+                effect_id: id::<finstack_ai_kernel::EffectTag>(701),
+                due_at: timestamp(1_750),
+                fired_at: timestamp(1_750),
+            }),
+        )
+        .expect_err("late timer");
+    assert_eq!(error.code(), "invalid_phase_input");
 }
 
 #[test]

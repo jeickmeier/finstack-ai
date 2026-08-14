@@ -4,8 +4,8 @@ use super::tool_batches::{
 };
 use super::*;
 use finstack_ai_kernel::{
-    ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolExecutionMode, ToolFailurePolicy,
-    ToolSettlement,
+    InteractionKind, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolExecutionMode,
+    ToolFailurePolicy, ToolSettlement,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -754,7 +754,10 @@ fn cancellation_is_accepted_idempotently_from_every_reachable_nonterminal_phase(
         ),
     );
 
-    let mut harnesses = Vec::with_capacity(10);
+    let awaiting_interaction = super::interactions::request_and_await(InteractionKind::Approval);
+    let sleeping = super::termination::drive_to_sleeping();
+
+    let mut harnesses = Vec::with_capacity(12);
     harnesses.push(before_run);
     harnesses.push(preparing);
     harnesses.push(before_model);
@@ -765,6 +768,8 @@ fn cancellation_is_accepted_idempotently_from_every_reachable_nonterminal_phase(
     harnesses.push(after_tool_batch);
     harnesses.push(before_finalize);
     harnesses.push(awaiting_external);
+    harnesses.push(awaiting_interaction);
+    harnesses.push(sleeping);
     for (index, harness) in harnesses.iter().enumerate() {
         let cancel = KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
             initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,

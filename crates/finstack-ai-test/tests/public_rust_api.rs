@@ -13,8 +13,8 @@ use finstack_ai_test::{
 fn public_rust_api_corpus_passes() {
     let count = run_all_public_api_fixtures().expect("public-rust-api fixtures");
     assert_eq!(
-        count, 125,
-        "expected the PR-006–PR-044 public-rust-api corpus size, found {count}"
+        count, 127,
+        "expected the PR-006–PR-045 public-rust-api corpus size, found {count}"
     );
 }
 

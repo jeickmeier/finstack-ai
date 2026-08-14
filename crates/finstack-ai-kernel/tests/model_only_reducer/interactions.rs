@@ -121,7 +121,7 @@ fn accepted_resolution(approved: bool) -> InteractionResolution {
     .expect("resolution")
 }
 
-fn request_and_await(kind: InteractionKind) -> Harness {
+pub(super) fn request_and_await(kind: InteractionKind) -> Harness {
     let mut harness = Harness::default();
     accept(&mut harness);
     harness.apply_input(
@@ -322,6 +322,106 @@ fn expiry_is_recorded_when_the_run_deadline_has_also_been_reached() {
             .outcome,
         InteractionTerminalOutcome::Expired
     );
+}
+
+#[test]
+fn cancel_requested_while_awaiting_interaction_includes_the_interaction_effect() {
+    let mut harness = request_and_await(InteractionKind::Approval);
+    let decision = harness.apply_input(
+        cancellation_env(1_700, &[90], &[], &[700]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    assert_eq!(
+        decision.actions,
+        vec![PostCommitAction::CancelEffect {
+            effect_id: id::<EffectTag>(INTERACTION_EFFECT),
+        }]
+    );
+    let state = harness.kernel.state();
+    assert_eq!(state.phase, Some(RunPhase::Cancelling));
+    assert!(state.pending_interaction.is_some());
+    assert_eq!(
+        state
+            .cancellation
+            .as_ref()
+            .expect("cancellation")
+            .outstanding_effects
+            .as_ref(),
+        [id::<EffectTag>(INTERACTION_EFFECT)]
+    );
+}
+
+#[test]
+fn reconcile_cancelled_interaction_emits_the_pair_and_keeps_cancelling_until_run_cancelled() {
+    let mut harness = request_and_await(InteractionKind::Approval);
+    harness.apply_input(
+        cancellation_env(1_700, &[90], &[], &[700]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    let decision = harness.apply_input(
+        transition_env(1_800, &[91, 92, 93, 94], &[90, 91, 92], &[], &[], &[], &[]),
+        KernelInput::CancellationReconciled(finstack_ai_kernel::CancellationReconciledInput {
+            request_id: id::<finstack_ai_kernel::CancellationRequestTag>(700),
+            completed_effects: Arc::from([]),
+            cancelled_effects: Arc::from([id::<EffectTag>(INTERACTION_EFFECT)]),
+            uncertain_effects: Arc::from([]),
+        }),
+    );
+    assert_eq!(
+        decision_body_names(&decision),
+        [
+            "interaction_cancelled",
+            "effect_cancelled",
+            "cancellation_reconciled",
+            "run_cancelled",
+        ]
+    );
+    let state = harness.kernel.state();
+    assert_eq!(state.phase, Some(RunPhase::Cancelled));
+    assert!(state.pending_interaction.is_none());
+    assert_eq!(
+        state
+            .last_interaction_terminal
+            .as_ref()
+            .expect("terminal")
+            .outcome,
+        InteractionTerminalOutcome::Cancelled
+    );
+    assert!(matches!(state.terminal, Some(TerminalState::Cancelled(_))));
+}
+
+#[test]
+fn interaction_settled_after_run_cancel_is_rejected() {
+    let mut harness = request_and_await(InteractionKind::Approval);
+    harness.apply_input(
+        cancellation_env(1_700, &[90], &[], &[700]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    let error = harness
+        .kernel
+        .decide(
+            &resolve_env(1_800),
+            KernelInput::InteractionSettled(InteractionSettled::Cancelled(
+                InteractionCancelled::try_new(
+                    id::<InteractionTag>(INTERACTION_ONE),
+                    None,
+                    None,
+                    Some("late-cancel"),
+                )
+                .expect("cancelled"),
+            )),
+        )
+        .expect_err("late settlement");
+    assert_eq!(error.code(), "invalid_phase_input");
 }
 
 #[test]

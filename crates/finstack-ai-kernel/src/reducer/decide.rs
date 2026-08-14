@@ -21,7 +21,7 @@ use crate::content::{ContentBlock, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::digest::Digest;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
-    EffectRequested,
+    EffectRequested, InteractionCancelled,
 };
 use crate::entries::{
     ContextPrepared, EntryAppended, RetryClassification, RetryScheduled, RunCancelled,
@@ -1370,11 +1370,7 @@ fn retry_bodies(
         None,
         None,
         None,
-        EffectOutputContract {
-            kind: EffectOutputKind::TimerFiring,
-            schema_version: 1,
-            schema_digest: Digest::effect_output(br#"{"type":"timer_firing"}"#),
-        },
+        timer_firing_contract(),
         EffectInput::Timer { due_at },
         RetrySafety::IdempotentWithKey,
         Some(due_at),
@@ -1594,6 +1590,48 @@ fn decide_reconciliation(
                 .map_err(|_| KernelError::InvariantViolation)?,
             ));
         }
+        if let Some(pending) = state
+            .pending_interaction
+            .as_ref()
+            .filter(|pending| pending.request.effect_id() == *effect_id)
+        {
+            bodies.push(RecordBody::InteractionCancelled(
+                InteractionCancelled::try_new(
+                    pending.request.interaction_id(),
+                    None,
+                    None,
+                    Some("cancelled"),
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    *effect_id,
+                    super::interaction::interaction_contract(
+                        pending.request.response_schema_digest(),
+                    ),
+                    Some("cancelled"),
+                    Some(pending.request.interaction_id().to_canonical_string()),
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
+        if let Some(pending) = state
+            .retry
+            .pending
+            .as_ref()
+            .filter(|pending| pending.timer_effect_id == *effect_id)
+        {
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    pending.timer_effect_id,
+                    timer_firing_contract(),
+                    Some("cancelled"),
+                    Option::<&str>::None,
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
     }
     let mut tool_followups =
         super::tool::cancellation_followups(state, env, &newly_completed, &newly_cancelled)?;
@@ -1669,6 +1707,12 @@ fn decide_timer_fired(
             Err(KernelError::ConflictingSettlement)
         };
     }
+    if state.cancellation.is_some() {
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "timer_fired",
+        });
+    }
     let pending = state
         .retry
         .pending
@@ -1701,7 +1745,7 @@ fn decide_timer_fired(
     })
 }
 
-fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
+pub(super) fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
     let mut effects = state
         .pending_model_effect
         .as_ref()
@@ -1713,9 +1757,23 @@ fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
             _ => None,
         }));
     }
+    if let Some(pending) = &state.pending_interaction {
+        effects.push(pending.request.effect_id());
+    }
+    if let Some(pending) = &state.retry.pending {
+        effects.push(pending.timer_effect_id);
+    }
     effects.sort_unstable();
     effects.dedup();
     effects
+}
+
+fn timer_firing_contract() -> EffectOutputContract {
+    EffectOutputContract {
+        kind: EffectOutputKind::TimerFiring,
+        schema_version: 1,
+        schema_digest: Digest::effect_output(br#"{"type":"timer_firing"}"#),
+    }
 }
 
 fn validate_reconciliation_input(

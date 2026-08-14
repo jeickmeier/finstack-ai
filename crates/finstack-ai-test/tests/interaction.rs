@@ -7,14 +7,15 @@ use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation,
-    CancellationPropagation, ComponentId, ComponentRef, ContentBlock, Digest, EffectKind,
-    EffectOutputContract, EffectOutputKind, EffectTag, EventTag, Id, IdTag, InteractionCancelled,
-    InteractionId, InteractionKind, InteractionRequest, InteractionResolution, InteractionSettled,
-    InteractionTag, InteractionTerminalOutcome, KernelInput, LaneTag, Message, MessageRole,
-    Metadata, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
-    RawJson, RecordBody, RecordTag, ReducerStageOutcome, RequestInteraction, RetrySafety,
-    RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext,
-    SessionTag, Stage, StageCursor, TextBlock, Timestamp, TransitionEnv, Version,
+    CancelRequested, CancellationInitiator, CancellationPropagation, CancellationRequestTag,
+    ComponentId, ComponentRef, ContentBlock, Digest, EffectKind, EffectOutputContract,
+    EffectOutputKind, EffectTag, EventTag, Id, IdTag, InteractionCancelled, InteractionId,
+    InteractionKind, InteractionRequest, InteractionResolution, InteractionSettled, InteractionTag,
+    InteractionTerminalOutcome, KernelInput, LaneTag, Message, MessageRole, Metadata,
+    OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson,
+    RecordBody, RecordTag, ReducerStageOutcome, RequestInteraction, RetrySafety, RunAccepted,
+    RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, SessionTag, Stage,
+    StageCursor, TextBlock, Timestamp, TransitionEnv, Version,
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, ExternalRouteOutcome,
@@ -395,7 +396,7 @@ async fn spawn_owner(
     clock_ms: i64,
     random: u64,
 ) -> Result<RunTaskOwner, RunHandleError> {
-    RunTaskOwner::spawn_with_model_and_tools(
+    Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
         RunTaskConfig {
             command_capacity: 8,
@@ -423,7 +424,7 @@ async fn spawn_owner(
         catalog,
         FixedClock::new(timestamp(clock_ms)),
         CounterRandom(AtomicU64::new(random)),
-    )
+    ))
     .await
 }
 
@@ -1054,6 +1055,93 @@ async fn remaining_kinds_request_and_resolve() {
         let kinds = resolve_kind_envelope(kind.clone()).await;
         assert_shared_envelope(&kinds);
     }
+}
+
+fn cancel_env(now: i64, record: u64, append_batch: u64, request: u64) -> TransitionEnv {
+    TransitionEnv {
+        now: timestamp(now),
+        ids: AllocatedIds::try_new(
+            vec![id(record)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![id(append_batch)],
+            vec![id::<CancellationRequestTag>(request)],
+        )
+        .expect("cancel ids"),
+    }
+}
+
+#[tokio::test]
+async fn run_level_cancel_while_awaiting_interaction_closes_without_dispatching() {
+    let (ports, mut owner) = park_on_approval(None).await;
+    owner
+        .handle()
+        .submit(
+            cancel_env(2_400, 90, 190, 700),
+            KernelInput::CancelRequested(CancelRequested {
+                initiator: CancellationInitiator::RuntimeShutdown,
+                reason: Some(Arc::from("approval-cancel")),
+            }),
+        )
+        .await
+        .expect("cancel");
+    wait_state(&ports.store, |state| {
+        state.phase == Some(RunPhase::Cancelled)
+    })
+    .await;
+    let cancelled = recover_session(&ports.store).await;
+    assert_eq!(
+        cancelled
+            .state()
+            .last_interaction_terminal
+            .as_ref()
+            .expect("terminal")
+            .outcome,
+        InteractionTerminalOutcome::Cancelled
+    );
+    assert_eq!(ports.toolset.call_count(), 0);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn late_privileged_resolution_after_run_cancel_fails_closed() {
+    let (ports, mut owner) = park_on_approval(None).await;
+    let interaction_id = pending_id(recover_session(&ports.store).await.state());
+    owner
+        .handle()
+        .submit(
+            cancel_env(2_400, 91, 191, 701),
+            KernelInput::CancelRequested(CancelRequested {
+                initiator: CancellationInitiator::RuntimeShutdown,
+                reason: Some(Arc::from("approval-cancel")),
+            }),
+        )
+        .await
+        .expect("cancel");
+    wait_state(&ports.store, |state| {
+        state.phase == Some(RunPhase::Cancelled)
+    })
+    .await;
+    owner.shutdown().await;
+    let sink = RecordingSink::new();
+    let router = audited_router(ports.store.clone(), Arc::clone(&sink)).await;
+    let outcome = router
+        .route(resolve_command(interaction_id, true), timestamp(2_700))
+        .await
+        .expect("late privileged");
+    assert!(matches!(outcome, ExternalRouteOutcome::Rejected { .. }));
+    assert!(
+        record_kinds(&ports.store)
+            .await
+            .contains(&"external_command_rejected")
+    );
+    assert_eq!(ports.toolset.call_count(), 0);
 }
 
 #[test]

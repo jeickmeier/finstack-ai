@@ -19,8 +19,9 @@ use crate::run_types::{
     TimerDiagnostics,
 };
 use crate::settlement::{
-    SettlementSources, apply_interaction_resume, model_handle_error, prepare_tool_batch_if_ready,
-    process_model_progress, process_model_result, process_tool_progress, process_tool_result,
+    SettlementSources, apply_interaction_resume, drain_idle_cancellation, model_handle_error,
+    prepare_tool_batch_if_ready, process_model_progress, process_model_result,
+    process_tool_progress, process_tool_result, reconcile_cancelled_effect,
     resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
 use crate::timer_runtime::{
@@ -362,25 +363,32 @@ impl RunTaskOwner {
         let timer_active = timer_dispatcher.active();
         let mut tasks = JoinSet::new();
         tasks.spawn(event_task.run());
-        if let Some(seed) = coordinator.pending_timer_seed() {
+        let cancelling = coordinator.state().cancellation.is_some();
+        if !cancelling && let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
         }
-        resume_model_effect(
-            &mut coordinator,
-            model.as_ref(),
-            &model_dispatcher,
-            &sources,
-            &model_cancellation,
-        )
-        .await?;
+        if cancelling {
+            drain_idle_cancellation(&mut coordinator, &sources, true).await?;
+        } else {
+            resume_model_effect(
+                &mut coordinator,
+                model.as_ref(),
+                &model_dispatcher,
+                &sources,
+                &model_cancellation,
+            )
+            .await?;
+        }
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::model_only(
             model_dispatcher,
             timer_dispatcher,
         )));
-        apply_interaction_resume(&mut coordinator, &sources).await?;
+        if !cancelling {
+            apply_interaction_resume(&mut coordinator, &sources).await?;
+        }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
         let shared = Arc::new(Shared {
@@ -548,37 +556,44 @@ impl RunTaskOwner {
         let timer_active = timer_dispatcher.active();
         let mut tasks = JoinSet::new();
         tasks.spawn(event_task.run());
-        if let Some(seed) = coordinator.pending_timer_seed() {
+        let cancelling = coordinator.state().cancellation.is_some();
+        if !cancelling && let Some(seed) = coordinator.pending_timer_seed() {
             timer_dispatcher
                 .resume(seed)
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
         }
-        resume_model_effect(
-            &mut coordinator,
-            model.as_ref(),
-            &model_dispatcher,
-            &sources,
-            &model_cancellation,
-        )
-        .await?;
+        if cancelling {
+            drain_idle_cancellation(&mut coordinator, &sources, true).await?;
+        } else {
+            resume_model_effect(
+                &mut coordinator,
+                model.as_ref(),
+                &model_dispatcher,
+                &sources,
+                &model_cancellation,
+            )
+            .await?;
+        }
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::with_tools(
             Arc::clone(&model_dispatcher),
             Arc::clone(&tool_dispatcher),
             timer_dispatcher,
         )));
-        apply_interaction_resume(&mut coordinator, &sources).await?;
-        let opened_tool_batch =
-            prepare_tool_batch_if_ready(&mut coordinator, catalog.as_ref(), &sources).await?;
-        if !opened_tool_batch {
-            resume_tool_effects(
-                &mut coordinator,
-                catalog.as_ref(),
-                &tool_dispatcher,
-                &sources,
-                &tool_batch_cancellation,
-            )
-            .await?;
+        if !cancelling {
+            apply_interaction_resume(&mut coordinator, &sources).await?;
+            let opened_tool_batch =
+                prepare_tool_batch_if_ready(&mut coordinator, catalog.as_ref(), &sources).await?;
+            if !opened_tool_batch {
+                resume_tool_effects(
+                    &mut coordinator,
+                    catalog.as_ref(),
+                    &tool_dispatcher,
+                    &sources,
+                    &tool_batch_cancellation,
+                )
+                .await?;
+            }
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
@@ -850,9 +865,20 @@ async fn run_worker_with_model<C, R>(
                     .await
                     .map_err(RunHandleError::Coordinator);
                 let fault_code = result_fault_code(&result);
+                let drain = if result.is_ok() {
+                    drain_idle_cancellation(&mut coordinator, &sources, false)
+                        .await
+                        .err()
+                } else {
+                    None
+                };
                 let _ = command.reply.send(result);
                 if let Some(code) = fault_code {
                     fault_worker(&shared, &mut receiver, code);
+                    break;
+                }
+                if let Some(error) = drain {
+                    fault_worker(&shared, &mut receiver, model_runtime_fault(&error));
                     break;
                 }
             }
@@ -984,6 +1010,12 @@ async fn run_worker_with_model_and_tools<C, R>(
                 {
                     result = Err(error);
                 }
+                if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
+                    && let Err(error) =
+                        drain_idle_cancellation(&mut coordinator, &sources, false).await
+                {
+                    result = Err(error);
+                }
                 let fault_code = result_fault_code(&result);
                 let _ = command.reply.send(result);
                 if let Some(code) = fault_code {
@@ -1008,6 +1040,21 @@ async fn process_timer_result<C: Clock, R: RandomSource>(
         input,
         diagnostic: _,
     } = result;
+    if coordinator.state().terminal.is_some() {
+        return Ok(());
+    }
+    if coordinator.state().cancellation.is_some() {
+        let effect_id = input.effect_id;
+        let outstanding = coordinator
+            .state()
+            .cancellation
+            .as_ref()
+            .is_some_and(|cancellation| cancellation.outstanding_effects.contains(&effect_id));
+        if outstanding {
+            return reconcile_cancelled_effect(coordinator, effect_id, true, sources).await;
+        }
+        return Ok(());
+    }
     let now = input.fired_at;
     let ids = AllocatedIds::try_new(
         vec![sources.generate::<RecordTag>()?],

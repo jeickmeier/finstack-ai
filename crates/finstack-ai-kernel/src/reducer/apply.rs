@@ -504,8 +504,11 @@ fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool
         return false;
     };
     if records[..reconciled_index].iter().any(|record| {
-        !matches!(record.body(), RecordBody::EffectCancelled(cancelled)
-            if cancellation.outstanding_effects.contains(&cancelled.effect_id()))
+        !matches!(
+            record.body(),
+            RecordBody::EffectCancelled(cancelled)
+                if cancellation.outstanding_effects.contains(&cancelled.effect_id())
+        ) && !matches!(record.body(), RecordBody::InteractionCancelled(_))
     }) {
         return false;
     }
@@ -1127,18 +1130,7 @@ fn apply_record(
             }
         }
         RecordBody::CancellationRequested(requested) => {
-            let mut outstanding = Vec::new();
-            if let Some(pending) = &state.pending_model_effect {
-                outstanding.push(pending.requested.effect_id());
-            }
-            if let Some(batch) = &state.active_tool_batch {
-                outstanding.extend(batch.calls.iter().filter_map(|call| match call.status {
-                    ActiveToolCallStatus::Requested { .. } => Some(call.assigned.effect_id),
-                    _ => None,
-                }));
-            }
-            outstanding.sort_unstable();
-            outstanding.dedup();
+            let outstanding = super::decide::outstanding_requested_effects(state);
             state.cancellation = Some(CancellationState {
                 request: requested.request.clone(),
                 prior_phase: state.phase.ok_or(KernelError::InvalidRecordOrder)?,
@@ -1441,6 +1433,10 @@ fn apply_record(
                 )?;
                 return Ok(());
             }
+            if cancelled.output_contract().kind == EffectOutputKind::TimerFiring {
+                apply_timer_effect_cancelled(state, cancelled)?;
+                return Ok(());
+            }
             if let Some(pending) = state.pending_model_effect.as_ref()
                 && pending.requested.effect_id() == cancelled.effect_id()
             {
@@ -1736,7 +1732,35 @@ fn apply_interaction_effect_terminal(
             },
         );
     }
-    state.phase = Some(pending.prior_phase);
+    if state.cancellation.is_some() {
+        if !matches!(
+            state.phase,
+            Some(RunPhase::Cancelling | RunPhase::Suspended | RunPhase::Cancelled)
+        ) {
+            state.phase = Some(RunPhase::Cancelling);
+        }
+    } else {
+        state.phase = Some(pending.prior_phase);
+    }
+    Ok(())
+}
+
+fn apply_timer_effect_cancelled(
+    state: &mut KernelState,
+    cancelled: &crate::EffectCancelled,
+) -> Result<(), KernelError> {
+    let pending = state
+        .retry
+        .pending
+        .take()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.timer_effect_id != cancelled.effect_id()
+        || cancelled.output_contract().kind != EffectOutputKind::TimerFiring
+    {
+        state.retry.pending = Some(pending);
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    state.state_version = state.state_version.max(3);
     Ok(())
 }
 

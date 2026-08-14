@@ -1748,7 +1748,7 @@ async fn spawn_tool_owner(
     clock_ms: i64,
     random: u64,
 ) -> Result<RunTaskOwner, RunHandleError> {
-    RunTaskOwner::spawn_with_model_and_tools(
+    Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
         owner_run_config(),
         owner_model_config(),
@@ -1758,7 +1758,7 @@ async fn spawn_tool_owner(
         catalog,
         FixedClock::new(timestamp(clock_ms)),
         CounterRandom(AtomicU64::new(random)),
-    )
+    ))
     .await
 }
 
@@ -2356,4 +2356,54 @@ async fn tool_resume_conflicting_deferred_handle_fails_closed() {
         Some(RunPhase::AwaitingExternal)
     );
     assert_eq!(toolset.call_count(), 1);
+}
+
+#[tokio::test]
+async fn cancel_while_deferred_tool_does_not_issue_a_second_request() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("defer-cancel", 1)],
+        vec![ToolReconcileResult::StillRunning(scripted_tool_deferral(
+            "job-cancel",
+        ))],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        800,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "defer-cancel").await;
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 801)
+        .await
+        .expect("deferred");
+    wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    owner
+        .handle()
+        .submit(
+            cancellation_env(2_600, 800),
+            KernelInput::CancelRequested(CancelRequested {
+                initiator: CancellationInitiator::RuntimeShutdown,
+                reason: Some(Arc::from("deferred-tool-cancel")),
+            }),
+        )
+        .await
+        .expect("cancel");
+    wait_state(&store, |state| {
+        matches!(state.phase, Some(RunPhase::Cancelled | RunPhase::Suspended))
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 1);
+    owner.shutdown().await;
 }

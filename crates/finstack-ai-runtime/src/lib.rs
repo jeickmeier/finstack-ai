@@ -136,7 +136,7 @@ pub use event_hub::{
     EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
     EventSubscriptionStatus, ProgressCoalescing,
 };
-pub use id_generation::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
+pub use id_generation::{Clock, ExternalClock, IdGenerationError, RandomSource, UuidV7Generator};
 pub use journal::{
     AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
     SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
