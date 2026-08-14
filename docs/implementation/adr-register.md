@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-14 (G4-D-binding-parity-101224c5eb60; Phase 5 `Done`; ADR-007/ADR-019/ADR-031 `Implemented`; G4 `Passed`; ADR-016 `In progress` / `Partial`; ADR-032 `In progress` / `Partial` on PR-041).
+Index last reconciled: 2026-08-14 (G4-D-binding-parity-101224c5eb60; Phase 5 `Done`; ADR-007/ADR-019/ADR-031/ADR-032 `Implemented`; G4 `Passed`; ADR-016 `In progress` / `Partial`).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ Index last reconciled: 2026-08-14 (G4-D-binding-parity-101224c5eb60; Phase 5 `Do
 | ADR-029 | `typed-identifiers` | Core/runtime lead | PR-006 | Accepted | Standalone | Implemented | Verified |
 | ADR-030 | `boxed-port-abi` | Core/runtime lead | PR-015–PR-018, PR-026; G3 | Accepted | Standalone | Implemented | Verified (native/WASM boxed ABI, Phase 3 benchmarks, hosted matrix, and G3 passed without triggering an ABI change) |
 | ADR-031 | `worker-based-wasm` | Bindings lead | PR-033, PR-036, PR-038 | Accepted | Standalone | Implemented | Verified ([PR-038 single-thread worker default](artifacts/pr-038/integration-validation.txt); SharedArrayBuffer is post-preview reconsideration) |
-| ADR-032 | `disposable-snapshots` | Durability/ecosystem lead | PR-041 | Accepted | Standalone | In progress | Partial (PR-041 candidate ships disposable state-CBOR restore; Verified waits for local merge) |
+| ADR-032 | `disposable-snapshots` | Durability/ecosystem lead | PR-041 | Accepted | Standalone | Implemented | Verified (PR-041 local merge ships disposable state-CBOR restore) |
 | ADR-033 | `explicit-interruption` | Core/runtime lead | PR-042 | Accepted | Standalone | Not started | Missing |
 | ADR-034 | `durable-middleware-outcomes` | Core/runtime lead | PR-018, PR-048 | Accepted | Standalone | In progress | Partial ([PR-018 committed invocation/outcome/recovery evidence](artifacts/pr-018/README.md); PR-048 end-to-end recovery remains) |
 | ADR-035 | `experimental-wit-versioning` | Runtime/security owner | PR-049–PR-054, PR-062 | Accepted | Standalone | Not started | Missing |
@@ -263,6 +263,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-14 | ADR-016 | Evidence | me@jeickmeier.com | Partial | Partial | PR-040 local merge ships the SQLite store and conflict/busy proofs; PR-047 public multi-lane remains | PR-040-E-integration-dbd10d35b223 | me@jeickmeier.com |
 | 2026-08-14 | ADR-032 | Implementation | me@jeickmeier.com | Not started | In progress | PR-041 candidate ships protocol state-CBOR snapshots and journal-authoritative recover | PR-041-E-candidate-8643349141ec | — |
 | 2026-08-14 | ADR-032 | Evidence | me@jeickmeier.com | Missing | Partial | A01–A04 and TM-13 review exist at `8643349141ec43a342307a8708c7b204a91960c9`; Verified waits for local merge | PR-041-E-restore-8643349141ec; PR-041-E-security-8643349141ec | — |
+| 2026-08-14 | ADR-032 | Implementation | me@jeickmeier.com | In progress | Implemented | PR-041 local merge ships disposable state-CBOR snapshots and journal-authoritative recover | PR-041-E-integration-8a8429326429 | me@jeickmeier.com |
+| 2026-08-14 | ADR-032 | Evidence | me@jeickmeier.com | Partial | Verified | PR-041 local merge closes A01–A04 and the TM-13 review; compact projections stay a later ADR | PR-041-E-integration-8a8429326429; PR-041-E-security-8643349141ec | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -299,7 +301,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-029 | [ADR-029-typed-identifiers.md](adrs/ADR-029-typed-identifiers.md) | me@jeickmeier.com | Verified: PR-006-E-test-kernel-bc373cf935e4; PR-006-E-conformance-adfd96007628; PR-006-E-hosted-ci-9a1ccbb88ae5 at merge `56d7777956df145213b03d2b0b5c1922db42b346` | PR-004 standalone ADR; PR-006 [#4](https://github.com/jeickmeier/finstack-ai/pull/4) | 2026-08-08 |
 | ADR-030 | [ADR-030-boxed-port-abi.md](adrs/ADR-030-boxed-port-abi.md) | me@jeickmeier.com | Verified: target-correct boxed native/WASM port evidence plus PR-026-E-compat-c24fa275210a, PR-026-E-performance-75b910d4a4f2, PR-026-E-hosted-56c3039835fb, and G3-D-native-preview-14a386c7db24 | PR-004 standalone ADR; PR-015–PR-018/PR-026 integrations; G3 Passed | 2026-08-11 |
 | ADR-031 | [ADR-031-worker-based-wasm.md](adrs/ADR-031-worker-based-wasm.md) | me@jeickmeier.com | Verified: PR-036 worker helper plus PR-038 local merge `04407192289c24cbfb087357b1e2ca928a8f3b55` single-thread default; SharedArrayBuffer is post-preview reconsideration | PR-004 standalone ADR; PR-036/PR-038 local merges | 2026-08-14 |
-| ADR-032 | [ADR-032-disposable-snapshots.md](adrs/ADR-032-disposable-snapshots.md) | me@jeickmeier.com | Partial: PR-041 candidate `8643349141ec43a342307a8708c7b204a91960c9` ships disposable state-CBOR restore; Verified waits for local merge | PR-004 standalone ADR; PR-041 candidate | 2026-08-14 |
+| ADR-032 | [ADR-032-disposable-snapshots.md](adrs/ADR-032-disposable-snapshots.md) | me@jeickmeier.com | Verified: PR-041-E-restore-8643349141ec, PR-041-E-security-8643349141ec, PR-041-E-candidate-8643349141ec, and PR-041-E-integration-8a8429326429 at local merge `8a84293264291dbe158fae1b4e5dedcc30c74061` | PR-004 standalone ADR; PR-041 local merge | 2026-08-14 |
 | ADR-033 | [ADR-033-explicit-interruption.md](adrs/ADR-033-explicit-interruption.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |
 | ADR-034 | [ADR-034-durable-middleware-outcomes.md](adrs/ADR-034-durable-middleware-outcomes.md) | me@jeickmeier.com | Partial: locally integrated PR-018 evidence through PR-018-E-integration-3fe0314c6434 covers exact committed invocation guards, normalized recorded output, replay action classification, and uncertainty suspension; PR-048 end-to-end recovery remains | PR-004 standalone ADR; PR-018 local merge | 2026-08-10 |
 | ADR-035 | [ADR-035-experimental-wit-versioning.md](adrs/ADR-035-experimental-wit-versioning.md) | me@jeickmeier.com | — | PR-004 standalone ADR | 2026-08-08 |

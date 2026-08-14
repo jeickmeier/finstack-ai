@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial at PR-041 candidate `8643349141ec43a342307a8708c7b204a91960c9` (A01–A04; TM-13 review). Verified waits for local merge.
+- Implementation evidence: Verified at PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061` (A01–A04; TM-13 review)
