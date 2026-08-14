@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>@finstack/ai worker harness</title>
+  </head>
+  <body>
+    <p id="ui-tick">0</p>
+    <script type="module">
+      import { connectWorker } from "./dist/worker.js";
+
+      const tick = document.getElementById("ui-tick");
+      let ticks = 0;
+      const pulse = () => {
+        ticks += 1;
+        if (tick !== null) {
+          tick.textContent = String(ticks);
+        }
+        window.requestAnimationFrame(pulse);
+      };
+      window.requestAnimationFrame(pulse);
+
+      window.finstackWorkerReady = Promise.resolve();
+      window.finstackWorker = {
+        connectWorker,
+        createAgentWorker: () =>
+          new Worker("/dist/worker-fixture.js", { type: "module" }),
+        uiTicks: () => ticks,
+      };
+    </script>
+  </body>
+</html>

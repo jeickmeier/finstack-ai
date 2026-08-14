@@ -15,6 +15,11 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src/index.ts", "src/adapters/openai-compatible.ts"],
+  "include": [
+    "src/index.ts",
+    "src/adapters/openai-compatible.ts",
+    "src/worker.ts",
+    "src/worker-fixture.ts"
+  ],
   "exclude": ["src/**/*.test.ts", "src/harness.d.ts"]
 }

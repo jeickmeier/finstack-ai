@@ -31,6 +31,7 @@ import type {
 import type {
   OpenAICompatibleOptions,
 } from "./adapters/openai-compatible.ts";
+import type { WorkerClient, WorkerConnectOptions } from "./worker.ts";
 
 type DriveResult = {
   ok: boolean;
@@ -98,6 +99,21 @@ declare global {
         adapter: HostJournalStore,
         options?: JsJournalStoreOptions,
       ) => Promise<DriveResult>;
+      connectWorker: (
+        worker: Worker,
+        options?: WorkerConnectOptions,
+      ) => Promise<WorkerClient>;
+      createAgentWorker: () => Worker;
+      uiTicks: () => number;
+    };
+    finstackWorkerReady: Promise<void>;
+    finstackWorker: {
+      connectWorker: (
+        worker: Worker,
+        options?: WorkerConnectOptions,
+      ) => Promise<WorkerClient>;
+      createAgentWorker: () => Worker;
+      uiTicks: () => number;
     };
   }
 }
