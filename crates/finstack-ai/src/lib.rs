@@ -12,6 +12,8 @@ mod agent;
 mod bundle;
 mod registry;
 mod result;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+mod session;
 mod spec;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -29,10 +31,15 @@ pub use bundle::{
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_kernel::{
-    ActiveCapability, CapabilityActivationSource, OperationLocator, PrincipalRef,
-    RunSecurityContext, SessionId,
+    ActiveCapability, CapabilityActivationSource, InteractionRequest, InteractionResolution,
+    OperationLocator, PrincipalRef, RunSecurityContext, SessionId,
 };
 pub use finstack_ai_runtime as runtime;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub use finstack_ai_runtime::{
+    ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, LaneInspect,
+    MemoryExternalIdentityMap, SessionError,
+};
 pub use registry::{
     AGENT_BUILD_CANCELLED, AGENT_BUILD_CONFIGURATION_CONFLICT, AGENT_BUILD_DUPLICATE_SELECTION,
     AGENT_BUILD_FACTORY_FAILED, AGENT_BUILD_INVALID_DESCRIPTOR, AGENT_BUILD_KIND_MISMATCH,
@@ -51,6 +58,8 @@ pub use registry::{
 pub use result::{
     RESULT_DECODE_INVALID_VALUE, RESULT_DECODE_SCHEMA_MISMATCH, ResultDecodeError, RunResult,
 };
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub use session::{Lane, Session};
 pub use spec::{
     AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, CapabilityActivation,
     CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec, RunPolicy,

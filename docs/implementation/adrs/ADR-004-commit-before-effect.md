@@ -72,3 +72,7 @@ May change only through a new superseding ADR and reconciliation of every affect
   (PR-014-E-runtime-f7d0f0ecede0; PR-014-E-security-a8a835efcf19;
   PR-014-E-integration-e7ec699722ab).
   Persistent-store and later recovery delivery remain mapped work.
+  PR-045 candidate `e58ff33138dd1c4d5c1be9e611575b12cd3a4ac5` adds
+  timer/cancel commit-before-effect on same-run restore
+  (PR-045-E-cancel-e58ff33138dd; PR-045-E-security-e58ff33138dd).
+  PR-048/G5 remain.

@@ -17,14 +17,18 @@ use crate::budget::{
 use crate::capabilities::ActiveCapability;
 use crate::content::{BoundedString, ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::digest::Digest;
-use crate::effects::{EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested};
+use crate::effects::{
+    EffectDeferred, EffectInput, EffectKind, EffectOutputKind, EffectRequested, InteractionKind,
+    InteractionRequest,
+};
 use crate::entries::{
     ContextPrepared, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
     StageCursor, TimerFired,
 };
 use crate::error::ErrorDescriptor;
 use crate::ids::{
-    BudgetReservationId, EffectId, LaneId, MessageId, ModelRequestId, SessionId, ToolCallId, TurnId,
+    BudgetReservationId, EffectId, InteractionId, LaneId, MessageId, ModelRequestId, SessionId,
+    ToolCallId, TurnId,
 };
 use crate::limits::{LimitReached, LimitUsage};
 use crate::message::Message;
@@ -192,6 +196,56 @@ pub struct CompletionIdentity {
     pub settlement_digest: Digest,
 }
 
+/// Outstanding typed interaction reconstructed from the journal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingInteraction {
+    /// Committed request envelope.
+    pub request: InteractionRequest,
+    /// Phase held when the request was committed.
+    pub prior_phase: RunPhase,
+    /// Unsettled stage cursor that must remain available after resume.
+    pub cursor: StageCursor,
+}
+
+/// Replay-derived identity for one interaction resolution command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolutionIdentity {
+    /// Interaction identified by the resolution.
+    pub interaction_id: InteractionId,
+    /// Normalized resolution digest.
+    pub settlement_digest: Digest,
+}
+
+/// Terminal outcome of the most recently settled interaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionTerminalOutcome {
+    /// Schema-valid granting resolution, or a non-approval success.
+    Granted,
+    /// Schema-valid approval denial.
+    Denied,
+    /// Request expired before a valid resolution.
+    Expired,
+    /// Cancelled while waiting.
+    Cancelled,
+}
+
+/// Last settled interaction retained so approval policy can release a cursor once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InteractionTerminal {
+    /// Settled interaction identity.
+    pub interaction_id: InteractionId,
+    /// Requested kind.
+    pub kind: InteractionKind,
+    /// Stage cursor that requested the interaction.
+    pub cursor: StageCursor,
+    /// Terminal classification.
+    pub outcome: InteractionTerminalOutcome,
+}
+
 /// Applied terminal state owned by PR-009.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -348,6 +402,42 @@ impl<'de> Deserialize<'de> for CompletionIdentityHashEntryV1 {
     }
 }
 
+/// Sorted state-hash projection entry for one interaction resolution identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolutionIdentityHashEntryV6 {
+    /// External resolution identity.
+    pub resolution_id: Arc<str>,
+    /// Settled interaction identity.
+    pub interaction_id: InteractionId,
+    /// Normalized resolution digest.
+    pub settlement_digest: Digest,
+}
+
+impl<'de> Deserialize<'de> for ResolutionIdentityHashEntryV6 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            resolution_id: BoundedString<LABEL_MAX_BYTES>,
+            interaction_id: InteractionId,
+            settlement_digest: Digest,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let resolution_id = wire.resolution_id.into_inner();
+        if resolution_id.is_empty() || resolution_id.as_bytes().contains(&0) {
+            return Err(de::Error::custom("invalid resolution_id"));
+        }
+        Ok(Self {
+            resolution_id: resolution_id.into(),
+            interaction_id: wire.interaction_id,
+            settlement_digest: wire.settlement_digest,
+        })
+    }
+}
+
 /// Complete authoritative state derived only from committed records.
 #[derive(Debug, Clone)]
 pub struct KernelState {
@@ -386,6 +476,12 @@ pub struct KernelState {
     pub model_settlements: BTreeMap<EffectId, ModelSettlementFingerprint>,
     /// Replay-derived external completion identity index.
     pub completion_identities: BTreeMap<Arc<str>, CompletionIdentity>,
+    /// Outstanding typed interaction.
+    pub pending_interaction: Option<PendingInteraction>,
+    /// Replay-derived interaction resolution identity index.
+    pub resolution_identities: BTreeMap<Arc<str>, ResolutionIdentity>,
+    /// Most recently settled interaction, when present.
+    pub last_interaction_terminal: Option<InteractionTerminal>,
     /// Active source-ordered tool batch.
     pub active_tool_batch: Option<ActiveToolBatch>,
     /// Persistent source call identities.
@@ -462,6 +558,9 @@ impl Default for KernelState {
             stage_settlements: BTreeMap::new(),
             model_settlements: BTreeMap::new(),
             completion_identities: BTreeMap::new(),
+            pending_interaction: None,
+            resolution_identities: BTreeMap::new(),
+            last_interaction_terminal: None,
             active_tool_batch: None,
             tool_calls: BTreeMap::new(),
             tool_settlements: BTreeMap::new(),
@@ -512,6 +611,7 @@ impl KernelState {
             ("child_preparations", self.child_preparations.len()),
             ("budget_reservations", self.budget_reservations.len()),
             ("budget_charges", self.budget_charges.len()),
+            ("resolution_identities", self.resolution_identities.len()),
         ] {
             if length > SEMANTIC_MAP_MAX_ENTRIES {
                 return Err(KernelError::InvalidInputPayload {
@@ -527,6 +627,16 @@ impl KernelState {
         }) {
             return Err(KernelError::InvalidInputPayload {
                 field: "completion_identities",
+                reason_code: "invalid_label",
+            });
+        }
+        if self.resolution_identities.keys().any(|resolution_id| {
+            resolution_id.is_empty()
+                || resolution_id.len() > LABEL_MAX_BYTES
+                || resolution_id.as_bytes().contains(&0)
+        }) {
+            return Err(KernelError::InvalidInputPayload {
+                field: "resolution_identities",
                 reason_code: "invalid_label",
             });
         }
@@ -547,15 +657,33 @@ impl KernelState {
         let has_composition_state = !self.child_preparations.is_empty()
             || !self.budget_reservations.is_empty()
             || !self.budget_charges.is_empty();
-        if !matches!(self.state_version, 1..=5)
+        let has_interaction_state = self.pending_interaction.is_some()
+            || !self.resolution_identities.is_empty()
+            || self.last_interaction_terminal.is_some();
+        if !matches!(self.state_version, 1..=6)
             || (self.state_version == 1 && has_tool_state)
             || (self.state_version < 3 && has_control_state)
             || (self.state_version < 4 && has_structured_state)
             || (self.state_version < 5 && has_composition_state)
+            || (self.state_version < 6 && has_interaction_state)
         {
             return Err(KernelError::InvalidInputPayload {
                 field: "state_version",
                 reason_code: "unsupported_or_inconsistent",
+            });
+        }
+        if (self.phase == Some(RunPhase::AwaitingInteraction) && self.pending_interaction.is_none())
+            || (self.pending_interaction.is_some()
+                && !matches!(
+                    self.phase,
+                    Some(
+                        RunPhase::AwaitingInteraction | RunPhase::Cancelling | RunPhase::Suspended
+                    )
+                ))
+        {
+            return Err(KernelError::InvalidInputPayload {
+                field: "pending_interaction",
+                reason_code: "inconsistent",
             });
         }
         if self.state_version >= 2 && has_tool_state {
@@ -604,7 +732,11 @@ impl KernelState {
                 });
             }
             if self.retry.pending.as_ref().is_some_and(|pending| {
-                pending.attempt != self.retry.attempts || self.phase != Some(RunPhase::Sleeping)
+                pending.attempt != self.retry.attempts
+                    || !matches!(
+                        self.phase,
+                        Some(RunPhase::Sleeping | RunPhase::Cancelling | RunPhase::Suspended)
+                    )
             }) || (self.phase == Some(RunPhase::Sleeping) && self.retry.pending.is_none())
             {
                 return Err(KernelError::InvalidInputPayload {
@@ -1245,7 +1377,7 @@ impl KernelState {
                 ),
                 &mut writer,
             )
-        } else {
+        } else if self.state_version == 5 {
             serde_json_canonicalizer::to_writer(
                 &hash_projection::KernelStateHashV5::from_state(
                     self,
@@ -1254,6 +1386,19 @@ impl KernelState {
                     completion_hash_entries(&self.completion_identities),
                     tool_call_hash_entries(&self.tool_calls),
                     tool_settlement_hash_entries(&self.tool_settlements),
+                ),
+                &mut writer,
+            )
+        } else {
+            serde_json_canonicalizer::to_writer(
+                &hash_projection::KernelStateHashV6::from_state(
+                    self,
+                    stage_hash_entries(&self.stage_settlements),
+                    model_hash_entries(&self.model_settlements),
+                    completion_hash_entries(&self.completion_identities),
+                    tool_call_hash_entries(&self.tool_calls),
+                    tool_settlement_hash_entries(&self.tool_settlements),
+                    resolution_hash_entries(&self.resolution_identities),
                 ),
                 &mut writer,
             )
@@ -1409,6 +1554,15 @@ struct KernelStateWireV5<'a> {
     budget_charges: Vec<&'a BudgetChargeReceipt>,
 }
 
+#[derive(Serialize)]
+struct KernelStateWireV6<'a> {
+    #[serde(flatten)]
+    base: KernelStateWireV5<'a>,
+    pending_interaction: Option<&'a PendingInteraction>,
+    resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
+    last_interaction_terminal: Option<&'a InteractionTerminal>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KernelStateWireOwned {
@@ -1471,6 +1625,13 @@ struct KernelStateWireOwned {
         RequiredField<BoundedVec<BudgetReservationReplay, SEMANTIC_MAP_MAX_ENTRIES>>,
     #[serde(default)]
     budget_charges: RequiredField<BoundedVec<BudgetChargeReceipt, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    pending_interaction: NullableField<PendingInteraction>,
+    #[serde(default)]
+    resolution_identities:
+        RequiredField<BoundedVec<ResolutionIdentityHashEntryV6, SEMANTIC_MAP_MAX_ENTRIES>>,
+    #[serde(default)]
+    last_interaction_terminal: NullableField<InteractionTerminal>,
     #[serde(default)]
     terminal: Option<TerminalState>,
 }
@@ -1628,7 +1789,7 @@ impl Serialize for KernelState {
             }
             .serialize(serializer)
         } else {
-            KernelStateWireV5 {
+            let base = KernelStateWireV5 {
                 base: KernelStateWireV4 {
                     state_version: self.state_version,
                     last_applied_sequence: self.last_applied_sequence,
@@ -1664,8 +1825,18 @@ impl Serialize for KernelState {
                 child_preparations: self.child_preparations.values().collect(),
                 budget_reservations: self.budget_reservations.values().collect(),
                 budget_charges: self.budget_charges.values().collect(),
+            };
+            if self.state_version == 5 {
+                base.serialize(serializer)
+            } else {
+                KernelStateWireV6 {
+                    base,
+                    pending_interaction: self.pending_interaction.as_ref(),
+                    resolution_identities: resolution_hash_entries(&self.resolution_identities),
+                    last_interaction_terminal: self.last_interaction_terminal.as_ref(),
+                }
+                .serialize(serializer)
             }
-            .serialize(serializer)
         }
     }
 }
@@ -1680,7 +1851,7 @@ impl<'de> Deserialize<'de> for KernelState {
         D: Deserializer<'de>,
     {
         let wire = KernelStateWireOwned::deserialize(deserializer)?;
-        if !matches!(wire.state_version, 1..=5) {
+        if !matches!(wire.state_version, 1..=6) {
             return Err(de::Error::custom("unsupported kernel state_version"));
         }
         let tool_fields_present = matches!(&wire.active_tool_batch, NullableField::Present(_))
@@ -1700,7 +1871,7 @@ impl<'de> Deserialize<'de> for KernelState {
             && matches!(&wire.tool_calls, RequiredField::Present(_))
             && matches!(&wire.tool_settlements, RequiredField::Present(_))
             && matches!(&wire.last_tool_batch, NullableField::Present(_));
-        if matches!(wire.state_version, 2..=5) && !all_tool_fields_present {
+        if matches!(wire.state_version, 2..=6) && !all_tool_fields_present {
             return Err(de::Error::custom("v2 kernel state is missing tool indexes"));
         }
         let all_control_fields_present = matches!(&wire.accepted_at, NullableField::Present(_))
@@ -1738,7 +1909,7 @@ impl<'de> Deserialize<'de> for KernelState {
         }
         if wire.state_version >= 4 && !all_structured_fields_present {
             return Err(de::Error::custom(
-                "v4/v5 kernel state is missing structured-output fields",
+                "v4+ kernel state is missing structured-output fields",
             ));
         }
         let composition_fields_present =
@@ -1754,9 +1925,27 @@ impl<'de> Deserialize<'de> for KernelState {
                 "v1/v2/v3/v4 kernel state contains composition fields",
             ));
         }
-        if wire.state_version == 5 && !all_composition_fields_present {
+        if wire.state_version >= 5 && !all_composition_fields_present {
             return Err(de::Error::custom(
-                "v5 kernel state is missing composition fields",
+                "v5+ kernel state is missing composition fields",
+            ));
+        }
+        let interaction_fields_present =
+            matches!(&wire.pending_interaction, NullableField::Present(_))
+                || matches!(&wire.resolution_identities, RequiredField::Present(_))
+                || matches!(&wire.last_interaction_terminal, NullableField::Present(_));
+        let all_interaction_fields_present =
+            matches!(&wire.pending_interaction, NullableField::Present(_))
+                && matches!(&wire.resolution_identities, RequiredField::Present(_))
+                && matches!(&wire.last_interaction_terminal, NullableField::Present(_));
+        if wire.state_version < 6 && interaction_fields_present {
+            return Err(de::Error::custom(
+                "v1-v5 kernel state contains interaction fields",
+            ));
+        }
+        if wire.state_version == 6 && !all_interaction_fields_present {
+            return Err(de::Error::custom(
+                "v6 kernel state is missing interaction fields",
             ));
         }
         let mut stage_settlements = BTreeMap::new();
@@ -1882,6 +2071,25 @@ impl<'de> Deserialize<'de> for KernelState {
                 return Err(de::Error::custom("duplicate budget charge identity"));
             }
         }
+        let mut resolution_identities = BTreeMap::new();
+        let resolution_entries = match wire.resolution_identities {
+            RequiredField::Missing => Vec::new(),
+            RequiredField::Present(entries) => entries.into_inner(),
+        };
+        for entry in resolution_entries {
+            if resolution_identities
+                .insert(
+                    entry.resolution_id,
+                    ResolutionIdentity {
+                        interaction_id: entry.interaction_id,
+                        settlement_digest: entry.settlement_digest,
+                    },
+                )
+                .is_some()
+            {
+                return Err(de::Error::custom("duplicate resolution identity"));
+            }
+        }
         let state = Self {
             state_version: wire.state_version,
             last_applied_sequence: wire.last_applied_sequence,
@@ -1901,6 +2109,15 @@ impl<'de> Deserialize<'de> for KernelState {
             stage_settlements,
             model_settlements,
             completion_identities,
+            pending_interaction: match wire.pending_interaction {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
+            resolution_identities,
+            last_interaction_terminal: match wire.last_interaction_terminal {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            },
             active_tool_batch: match wire.active_tool_batch {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
@@ -1999,6 +2216,19 @@ fn completion_hash_entries(
         .map(|(completion_id, identity)| CompletionIdentityHashEntryV1 {
             completion_id: Arc::clone(completion_id),
             effect_id: identity.effect_id,
+            settlement_digest: identity.settlement_digest,
+        })
+        .collect()
+}
+
+fn resolution_hash_entries(
+    entries: &BTreeMap<Arc<str>, ResolutionIdentity>,
+) -> Vec<ResolutionIdentityHashEntryV6> {
+    entries
+        .iter()
+        .map(|(resolution_id, identity)| ResolutionIdentityHashEntryV6 {
+            resolution_id: Arc::clone(resolution_id),
+            interaction_id: identity.interaction_id,
             settlement_digest: identity.settlement_digest,
         })
         .collect()

@@ -8,28 +8,32 @@ use std::task::{Context, Poll};
 use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{
-    AcceptRun, AllocatedIds, AppendRequest, BudgetPropagation, CancelRequested,
-    CancellationInitiator, CancellationPropagation, CancellationRequestTag, CommittedBatch,
-    ContentBlock, Digest, EffectOutputContract, EffectOutputKind, Id, IdTag, KernelInput, LaneTag,
-    Message, MessageRole, Metadata, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
-    RawJson, RecordBody, ReducerStageOutcome, RetrySafety, RunAccepted, RunEventBody, RunEventKind,
-    RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, Sensitivity,
-    SessionTag, Stage, StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock, ToolCallId,
-    ToolCallPlan, ToolCallTag, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress,
-    ToolResultBlock, TransitionEnv, Usage, ValidationIssue, ValidationOutcome,
+    AcceptRun, ActiveToolCallStatus, AllocatedIds, AppendRequest, BudgetPropagation,
+    CancelRequested, CancellationInitiator, CancellationPropagation, CancellationRequestTag,
+    CommittedBatch, ComponentId, ContentBlock, Digest, EffectId, EffectOutputContract,
+    EffectOutputKind, ExternalHandleRef, Id, IdTag, KernelInput, KernelState, LaneTag, Message,
+    MessageRole, Metadata, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson,
+    ReconciliationPolicy, RecordBody, ReducerStageOutcome, RetrySafety, RunAccepted, RunEventBody,
+    RunEventKind, RunLimits, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext,
+    Sensitivity, SessionTag, Stage, StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock,
+    ToolCallId, ToolCallPlan, ToolCallTag, ToolExecutionMode, ToolFailurePolicy, ToolId,
+    ToolProgress, ToolResultBlock, TransitionEnv, Usage, ValidatedToolCall, ValidationIssue,
+    ValidationOutcome,
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, CommitCoordinator, CommitCoordinatorError,
     EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
     IdGenerationError, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, LoadedSession,
-    LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
-    ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
-    ModelToolCall, PortFuture, ProgressCoalescing, RandomSource, ResolvedToolCatalog, RunHandle,
-    RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner, SideEffectClass, SnapshotReceipt,
-    SnapshotRequest, StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallDelta, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
-    ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator,
-    ToolValidatorCompiler, Toolset, ToolsetRegistration, UsageDelta, resolve_model_context_profile,
+    LockedModelContextProfile, ManualDriveAction, Model, ModelContextProfile, ModelRequestDraft,
+    ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
+    ModelTaskConfig, ModelToolCall, PortFuture, ProgressCoalescing, RandomSource,
+    ResolvedToolCatalog, RunHandle, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
+    SideEffectClass, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
+    TOOL_RECONCILIATION_UNSUPPORTED, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolDeferral, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem,
+    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetRegistration, UsageDelta, resolve_model_context_profile, tool_resume_action,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -739,25 +743,55 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
     .expect("catalog");
     assert_eq!(compilation_counter.load(Ordering::Acquire), 6);
 
-    let planned = catalog.plan_call(
+    let planned = catalog.decide_plan(
         tool_call(77, "catalog-required", br#"{"value":1}"#),
         None,
         None,
+        false,
+        false,
     );
     assert_eq!(validations.load(Ordering::Acquire), 1);
-    let ToolCallPlan::SyntheticClosure(closure) = planned else {
-        panic!("required approval must remain undispatched");
-    };
-    assert_eq!(closure.error.code.as_str(), "tool_approval_required");
+    assert_eq!(
+        planned,
+        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+    );
 
-    let planned = catalog.plan_call(
+    let planned = catalog.decide_plan(
         tool_call(78, "catalog-host-guard", br#"{"value":1}"#),
         None,
         None,
+        false,
+        false,
     );
     assert_eq!(validations.load(Ordering::Acquire), 2);
-    let ToolCallPlan::SyntheticClosure(closure) = planned else {
-        panic!("host approval policy must override non-authoritative metadata");
+    assert_eq!(
+        planned,
+        finstack_ai_runtime::ToolCatalogPlan::RequireApproval
+    );
+
+    let granted = catalog.decide_plan(
+        tool_call(77, "catalog-required", br#"{"value":1}"#),
+        None,
+        None,
+        true,
+        false,
+    );
+    assert!(matches!(
+        granted,
+        finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::Execute(_))
+    ));
+
+    let refused = catalog.decide_plan(
+        tool_call(77, "catalog-required", br#"{"value":1}"#),
+        None,
+        None,
+        false,
+        true,
+    );
+    let finstack_ai_runtime::ToolCatalogPlan::Ready(ToolCallPlan::SyntheticClosure(closure)) =
+        refused
+    else {
+        panic!("refused approval must close diagnostically without execute");
     };
     assert_eq!(closure.error.code.as_str(), "tool_approval_required");
 
@@ -766,7 +800,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         None,
         Some(ToolPolicyDecision::Deny),
     );
-    assert_eq!(validations.load(Ordering::Acquire), 3);
+    assert_eq!(validations.load(Ordering::Acquire), 5);
     let ToolCallPlan::SyntheticClosure(closure) = planned else {
         panic!("stricter middleware denial must remain undispatched");
     };
@@ -777,7 +811,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         None,
         None,
     );
-    assert_eq!(validations.load(Ordering::Acquire), 4);
+    assert_eq!(validations.load(Ordering::Acquire), 6);
     let ToolCallPlan::SyntheticClosure(closure) = planned else {
         panic!("invalid arguments must close synthetically");
     };
@@ -792,7 +826,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         panic!("unknown tools must close synthetically");
     };
     assert_eq!(closure.error.code.as_str(), "unknown_tool");
-    assert_eq!(validations.load(Ordering::Acquire), 4);
+    assert_eq!(validations.load(Ordering::Acquire), 6);
 
     let planned = catalog.plan_call(
         tool_call(82, "catalog-deadline", br#"{"value":1}"#),
@@ -803,7 +837,7 @@ fn catalog_compiles_once_validates_at_one_boundary_and_enforces_approval_floor()
         panic!("allowed call must remain executable");
     };
     assert_eq!(call.deadline, Some(timestamp(9_000)));
-    assert_eq!(validations.load(Ordering::Acquire), 5);
+    assert_eq!(validations.load(Ordering::Acquire), 7);
     assert_eq!(compilation_counter.load(Ordering::Acquire), 6);
 }
 
@@ -1604,5 +1638,772 @@ async fn native_panic_becomes_stable_call_failure_without_leaking_payload_or_kil
     assert_eq!(toolset.call_count(), 2);
     assert_eq!(toolset.active_call_count(), 0);
     assert_eq!(handle.status(), RunStatus::Running);
+    owner.shutdown().await;
+}
+
+fn memory_store() -> Arc<MemoryJournalStore> {
+    Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 1,
+            batches_per_session: 128,
+            records_per_session: 512,
+            snapshot_bytes: 1_024,
+        })
+        .expect("store"),
+    )
+}
+
+fn owner_run_config() -> RunTaskConfig {
+    RunTaskConfig {
+        command_capacity: 8,
+        event_hub: EventHubConfig {
+            source_capacity: 16,
+            max_subscribers: 8,
+        },
+        shutdown_deadline: StdDuration::from_millis(500),
+    }
+}
+
+fn owner_model_config() -> ModelTaskConfig {
+    ModelTaskConfig {
+        job_capacity: 2,
+        result_capacity: 2,
+        stream_limits: ModelStreamLimits::default(),
+        warmup_deadline: None,
+        warmup_metadata: Metadata::empty(),
+    }
+}
+
+fn owner_tool_config() -> ToolTaskConfig {
+    ToolTaskConfig {
+        job_capacity: 8,
+        result_capacity: 8,
+        global_max_concurrency: 2,
+        stream_limits: ToolStreamLimits::default(),
+    }
+}
+
+fn tool_result(value: i64) -> ToolResult {
+    ToolResult {
+        output: RawJson::parse(format!(r#"{{"ok":true,"value":{value}}}"#)).expect("result"),
+        is_error: false,
+    }
+}
+
+fn scripted_tool_deferral(handle: &str) -> ToolDeferral {
+    ToolDeferral {
+        handle: ExternalHandleRef::try_new(
+            ComponentId::parse("finstack.tool.scripted").expect("component"),
+            handle,
+            RawJson::parse(b"{}").expect("metadata"),
+        )
+        .expect("handle"),
+        reconciliation: ReconciliationPolicy::CallbackOrPoll,
+        next_poll_at: None,
+        expires_at: None,
+    }
+}
+
+fn at_most_once_spec() -> finstack_ai_runtime::ToolSpec {
+    let mut spec = tool_spec("echo");
+    spec.retry_safety = RetrySafety::AtMostOnce;
+    spec
+}
+
+fn non_idempotent_spec() -> finstack_ai_runtime::ToolSpec {
+    let mut spec = tool_spec("echo");
+    spec.side_effect = SideEffectClass::NonIdempotentWrite;
+    spec
+}
+
+type ResumePorts = (
+    Arc<MemoryJournalStore>,
+    Arc<ScriptedToolset>,
+    Arc<dyn Model>,
+    Arc<ResolvedToolCatalog>,
+    Arc<[finstack_ai_runtime::ToolSpec]>,
+);
+
+fn resume_ports(
+    call_count: usize,
+    plans: Vec<ScriptedToolPlan>,
+    reconcile: Vec<ToolReconcileResult>,
+    spec: finstack_ai_runtime::ToolSpec,
+) -> ResumePorts {
+    let tools: Arc<[finstack_ai_runtime::ToolSpec]> = Arc::from([spec]);
+    let toolset =
+        Arc::new(ScriptedToolset::new(Arc::clone(&tools), plans).with_reconcile_results(reconcile));
+    let catalog = catalog(Arc::clone(&toolset), 2);
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![model_plan(call_count, "echo")],
+    ));
+    (memory_store(), toolset, model, catalog, tools)
+}
+
+async fn spawn_tool_owner(
+    coordinator: CommitCoordinator,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    clock_ms: i64,
+    random: u64,
+) -> Result<RunTaskOwner, RunHandleError> {
+    Box::pin(RunTaskOwner::spawn_with_model_and_tools(
+        coordinator,
+        owner_run_config(),
+        owner_model_config(),
+        owner_tool_config(),
+        model,
+        locked_profile(),
+        catalog,
+        FixedClock::new(timestamp(clock_ms)),
+        CounterRandom(AtomicU64::new(random)),
+    ))
+    .await
+}
+
+async fn recover_session(store: &Arc<MemoryJournalStore>) -> CommitCoordinator {
+    CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))
+        .await
+        .expect("recover")
+}
+
+async fn wait_state(
+    store: &Arc<MemoryJournalStore>,
+    predicate: impl Fn(&KernelState) -> bool,
+) -> CommitCoordinator {
+    tokio::time::timeout(StdDuration::from_secs(2), async {
+        loop {
+            let recovered = recover_session(store).await;
+            if predicate(recovered.state()) {
+                return recovered;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("state wait")
+}
+
+async fn wait_gate(control: &finstack_ai_test::ScriptedToolsetControl, name: &str) {
+    tokio::time::timeout(StdDuration::from_secs(2), async {
+        while control.entries(name) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("gate");
+}
+
+async fn journal_has_rejection(store: &Arc<MemoryJournalStore>) -> bool {
+    let loaded = store
+        .load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        })
+        .await
+        .expect("load");
+    loaded.committed_batches.iter().any(|batch| {
+        batch
+            .records
+            .iter()
+            .any(|record| matches!(record.body(), RecordBody::ExternalCommandRejected(_)))
+    })
+}
+
+fn requested_execute(state: &KernelState) -> (EffectId, ToolCallId, ValidatedToolCall) {
+    let batch = state.active_tool_batch.as_ref().expect("batch");
+    let call = batch
+        .calls
+        .iter()
+        .find(|call| {
+            matches!(
+                call.status,
+                ActiveToolCallStatus::Requested { deferred: None, .. }
+            )
+        })
+        .expect("requested");
+    let ToolCallPlan::Execute(validated) = &call.assigned.plan else {
+        panic!("execute");
+    };
+    (
+        call.assigned.effect_id,
+        *validated.call.tool_call_id(),
+        validated.clone(),
+    )
+}
+
+fn tool_result_call_ids(state: &KernelState) -> Vec<ToolCallId> {
+    state
+        .messages
+        .iter()
+        .filter_map(|message| match message.content() {
+            [ContentBlock::ToolResult(result)] => Some(*result.tool_call_id()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn source_tool_call_ids(state: &KernelState) -> Vec<ToolCallId> {
+    state
+        .messages
+        .iter()
+        .flat_map(|message| {
+            message.content().iter().filter_map(|block| match block {
+                ContentBlock::ToolCall(call) => Some(*call.tool_call_id()),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+async fn crash_before_tool_dispatch(
+    store: Arc<MemoryJournalStore>,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+) -> CommitCoordinator {
+    Box::pin(crash_before_tool_dispatch_inner(
+        store, model, catalog, tools,
+    ))
+    .await
+}
+
+async fn crash_before_tool_dispatch_inner(
+    store: Arc<MemoryJournalStore>,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    tools: Arc<[finstack_ai_runtime::ToolSpec]>,
+) -> CommitCoordinator {
+    let mut coordinator = CommitCoordinator::new(store.clone());
+    let mut drive = coordinator.enable_manual_drive(1).expect("manual drive");
+    let owner = spawn_tool_owner(coordinator, model, catalog, 2_000, 700)
+        .await
+        .expect("owner");
+    let handle = owner.handle();
+    let drive_store = store.clone();
+    let driving = tokio::spawn(async move {
+        drive_to_tools(&handle, &drive_store, tools).await;
+    });
+    let model_permit = tokio::time::timeout(StdDuration::from_secs(2), drive.next_effect())
+        .await
+        .expect("model paused")
+        .expect("model permit");
+    assert_eq!(model_permit.effect().action, ManualDriveAction::Execute);
+    model_permit.continue_dispatch();
+    let tool_permit = tokio::time::timeout(StdDuration::from_secs(2), drive.next_effect())
+        .await
+        .expect("tool paused")
+        .expect("tool permit");
+    assert_eq!(tool_permit.effect().action, ManualDriveAction::Execute);
+    drop(owner);
+    driving.abort();
+    let _ = driving.await;
+    drop(tool_permit);
+    recover_session(&store).await
+}
+
+#[tokio::test]
+async fn tool_resume_unstarted_crash_retries_same_identity() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![completed_tool(9)],
+        vec![ToolReconcileResult::NotStarted],
+        tool_spec("echo"),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    assert_eq!(toolset.call_count(), 0);
+    let (effect_id, tool_call_id, frozen) = requested_execute(recovered.state());
+    let tool_batch_id = recovered
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .expect("batch")
+        .opened
+        .tool_batch_id;
+    assert_eq!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::Reconcile
+    );
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 701)
+        .await
+        .expect("respawn");
+    wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&effect_id)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 1);
+    assert_eq!(toolset.reconcile_count(), 1);
+    assert_eq!(toolset.last_effect_id(), Some(effect_id));
+    let retried = toolset.last_call().expect("retried call");
+    assert_eq!(*retried.call.tool_call_id(), tool_call_id);
+    assert_eq!(retried, frozen);
+    let settled = recover_session(&store).await;
+    assert!(settled.state().tool_settlements.contains_key(&effect_id));
+    assert_eq!(
+        settled
+            .state()
+            .active_tool_batch
+            .as_ref()
+            .map(|batch| batch.opened.tool_batch_id),
+        None
+    );
+    let _ = tool_batch_id;
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_in_flight_still_running_defers_without_second_call() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("in-flight", 1)],
+        vec![ToolReconcileResult::StillRunning(scripted_tool_deferral(
+            "job-1",
+        ))],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        710,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "in-flight").await;
+    assert_eq!(toolset.call_count(), 1);
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let (effect_id, _, _) = requested_execute(recovered.state());
+    assert_eq!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::Reconcile
+    );
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 711)
+        .await
+        .expect("respawn");
+    wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 1);
+    assert_eq!(toolset.reconcile_count(), 1);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_in_flight_unknown_retries_same_effect_id() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("in-flight-retry", 1), completed_tool(2)],
+        vec![ToolReconcileResult::Unknown],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        720,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "in-flight-retry").await;
+    let recovered = recover_session(&store).await;
+    let (effect_id, tool_call_id, frozen) = requested_execute(recovered.state());
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 721)
+        .await
+        .expect("respawn");
+    wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&effect_id)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 2);
+    assert_eq!(toolset.last_effect_id(), Some(effect_id));
+    let retried = toolset.last_call().expect("retried call");
+    assert_eq!(*retried.call.tool_call_id(), tool_call_id);
+    assert_eq!(retried, frozen);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_completed_uncommitted_settles_without_call() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![completed_tool(3)],
+        vec![ToolReconcileResult::Completed(tool_result(3))],
+        tool_spec("echo"),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    let (effect_id, _, _) = requested_execute(recovered.state());
+    assert_eq!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::Reconcile
+    );
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 731)
+        .await
+        .expect("respawn");
+    wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&effect_id)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 0);
+    assert_eq!(toolset.reconcile_count(), 1);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_deferred_same_handle_waits_and_completed_settles_externally() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("defer", 1)],
+        vec![
+            ToolReconcileResult::StillRunning(scripted_tool_deferral("job-1")),
+            ToolReconcileResult::StillRunning(scripted_tool_deferral("job-1")),
+            ToolReconcileResult::Completed(tool_result(4)),
+        ],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        740,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "defer").await;
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let (effect_id, _, _) = requested_execute(recovered.state());
+    let mut owner = spawn_tool_owner(recovered, model.clone(), catalog.clone(), 2_500, 741)
+        .await
+        .expect("ensure deferred");
+    wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    let calls = toolset.call_count();
+    owner.shutdown().await;
+
+    let recovered = recover_session(&store).await;
+    assert_eq!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::Reconcile
+    );
+    let mut owner = spawn_tool_owner(recovered, model.clone(), catalog.clone(), 2_500, 742)
+        .await
+        .expect("respawn wait");
+    assert_eq!(toolset.call_count(), calls);
+    assert_eq!(
+        recover_session(&store).await.state().phase,
+        Some(RunPhase::AwaitingExternal)
+    );
+    owner.shutdown().await;
+
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model.clone(), catalog.clone(), 2_600, 743)
+        .await
+        .expect("respawn complete");
+    wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&effect_id)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), calls);
+    owner.shutdown().await;
+
+    let recovered = recover_session(&store).await;
+    assert!(matches!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::UseRecorded | ToolResumeAction::NoOutstanding
+    ));
+    let reconciles = toolset.reconcile_count();
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_600, 744)
+        .await
+        .expect("equal completion idempotent");
+    assert_eq!(toolset.call_count(), calls);
+    assert_eq!(toolset.reconcile_count(), reconciles);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_non_resumable_suspends_without_call() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![completed_tool(1)],
+        vec![ToolReconcileResult::Unknown],
+        at_most_once_spec(),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    let (effect_id, _, _) = requested_execute(recovered.state());
+    assert_eq!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::Reconcile
+    );
+    let Err(error) = spawn_tool_owner(recovered, model, catalog, 2_500, 751).await else {
+        panic!("suspend");
+    };
+    assert_eq!(
+        error,
+        RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }
+    );
+    assert_eq!(toolset.call_count(), 0);
+    assert_eq!(
+        recover_session(&store).await.state().phase,
+        Some(RunPhase::AwaitingTools)
+    );
+
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![completed_tool(1)],
+        vec![ToolReconcileResult::Unknown],
+        non_idempotent_spec(),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    let Err(error) = spawn_tool_owner(recovered, model, catalog, 2_500, 752).await else {
+        panic!("non-idempotent suspend");
+    };
+    assert_eq!(
+        error,
+        RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }
+    );
+    assert_eq!(toolset.call_count(), 0);
+
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![completed_tool(1)],
+        vec![ToolReconcileResult::NonRepeatable],
+        tool_spec("echo"),
+    );
+    let recovered =
+        crash_before_tool_dispatch(store.clone(), model.clone(), catalog.clone(), tools).await;
+    let Err(error) = spawn_tool_owner(recovered, model, catalog, 2_500, 753).await else {
+        panic!("non-repeatable suspend");
+    };
+    assert_eq!(
+        error,
+        RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }
+    );
+    assert_eq!(toolset.call_count(), 0);
+}
+
+#[tokio::test]
+async fn tool_resume_settled_effect_never_calls_or_reconciles() {
+    let (store, toolset, model, catalog, tools) =
+        resume_ports(1, vec![completed_tool(5)], Vec::new(), tool_spec("echo"));
+    let mut owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        760,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
+    let effect_id = *settled.state().tool_settlements.keys().next().expect("id");
+    let calls = toolset.call_count();
+    owner.shutdown().await;
+    let recovered = recover_session(&store).await;
+    assert!(matches!(
+        tool_resume_action(recovered.state(), effect_id),
+        ToolResumeAction::UseRecorded | ToolResumeAction::NoOutstanding
+    ));
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 761)
+        .await
+        .expect("respawn");
+    assert_eq!(toolset.call_count(), calls);
+    assert_eq!(toolset.reconcile_count(), 0);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_completed_subset_retries_outstanding_in_source_order() {
+    let mut spec = tool_spec("echo");
+    spec.execution = ToolExecutionMode::Sequential;
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        2,
+        vec![
+            completed_tool(0),
+            gated_tool("subset", 1),
+            completed_tool(1),
+        ],
+        vec![ToolReconcileResult::Unknown],
+        spec,
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        770,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "subset").await;
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let batch = recovered
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .expect("batch")
+        .clone();
+    assert_eq!(batch.calls.len(), 2);
+    let first = batch.calls[0].assigned.effect_id;
+    let second = batch.calls[1].assigned.effect_id;
+    assert!(matches!(
+        batch.calls[0].status,
+        ActiveToolCallStatus::Settled { .. }
+    ));
+    assert!(matches!(
+        batch.calls[1].status,
+        ActiveToolCallStatus::Requested { deferred: None, .. }
+    ));
+    assert_eq!(
+        tool_resume_action(recovered.state(), first),
+        ToolResumeAction::UseRecorded
+    );
+    assert_eq!(
+        tool_resume_action(recovered.state(), second),
+        ToolResumeAction::Reconcile
+    );
+    let calls = toolset.call_count();
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 771)
+        .await
+        .expect("respawn");
+    let settled = wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&first) && state.tool_settlements.contains_key(&second)
+    })
+    .await;
+    assert_eq!(toolset.call_count(), calls + 1);
+    assert_eq!(toolset.last_effect_id(), Some(second));
+    assert_eq!(
+        tool_result_call_ids(settled.state()),
+        source_tool_call_ids(settled.state())
+    );
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn tool_resume_conflicting_deferred_handle_fails_closed() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("conflict", 1)],
+        vec![
+            ToolReconcileResult::StillRunning(scripted_tool_deferral("job-1")),
+            ToolReconcileResult::StillRunning(scripted_tool_deferral("job-other")),
+        ],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        780,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "conflict").await;
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model.clone(), catalog.clone(), 2_500, 781)
+        .await
+        .expect("ensure deferred");
+    wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    owner.shutdown().await;
+    let recovered = recover_session(&store).await;
+    let Err(error) = spawn_tool_owner(recovered, model, catalog, 2_500, 782).await else {
+        panic!("conflict");
+    };
+    assert_eq!(
+        error,
+        RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }
+    );
+    assert!(journal_has_rejection(&store).await);
+    assert_eq!(
+        recover_session(&store).await.state().phase,
+        Some(RunPhase::AwaitingExternal)
+    );
+    assert_eq!(toolset.call_count(), 1);
+}
+
+#[tokio::test]
+async fn cancel_while_deferred_tool_does_not_issue_a_second_request() {
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![gated_tool("defer-cancel", 1)],
+        vec![ToolReconcileResult::StillRunning(scripted_tool_deferral(
+            "job-cancel",
+        ))],
+        tool_spec("echo"),
+    );
+    let control = toolset.control();
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model.clone(),
+        catalog.clone(),
+        2_000,
+        800,
+    )
+    .await
+    .expect("owner");
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "defer-cancel").await;
+    drop(owner);
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_500, 801)
+        .await
+        .expect("deferred");
+    wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    owner
+        .handle()
+        .submit(
+            cancellation_env(2_600, 800),
+            KernelInput::CancelRequested(CancelRequested {
+                initiator: CancellationInitiator::RuntimeShutdown,
+                reason: Some(Arc::from("deferred-tool-cancel")),
+            }),
+        )
+        .await
+        .expect("cancel");
+    wait_state(&store, |state| {
+        matches!(state.phase, Some(RunPhase::Cancelled | RunPhase::Suspended))
+    })
+    .await;
+    assert_eq!(toolset.call_count(), 1);
     owner.shutdown().await;
 }

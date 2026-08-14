@@ -1,8 +1,9 @@
 use super::*;
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, Digest, EffectId, EffectOutputContract,
-    EffectOutputKind, LaneId, OperationLocator, PrincipalRef, RunCallContext, RunId, SessionId,
-    ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy,
+    EffectOutputKind, LaneId, OperationLocator, PendingToolEffect, PrincipalRef, ReconcileContext,
+    RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass, ToolBatchId, ToolCallBlock,
+    ToolCallId, ToolFailurePolicy, ToolReconcileResult, Toolset,
 };
 use futures_util::StreamExt;
 
@@ -102,4 +103,26 @@ async fn public_call_uses_committed_authority_context() {
         panic!("mismatched principal must fail");
     };
     assert_eq!(error.code(), CALCULATOR_INVALID_ARGUMENTS);
+}
+
+#[tokio::test]
+async fn reconcile_stays_unknown_and_spec_is_retry_allowed() {
+    let toolset = CalculatorToolset::try_new().expect("calculator");
+    let spec = &toolset.tools()[0];
+    assert_eq!(spec.side_effect, SideEffectClass::ReadOnly);
+    assert_eq!(spec.retry_safety, RetrySafety::SafeToRetry);
+    let ctx = context("tenant-a");
+    let result = toolset
+        .reconcile(
+            ReconcileContext {
+                run: ctx.run,
+                original_input_digest: Digest::raw_json(b"{}"),
+            },
+            PendingToolEffect {
+                call: validated_call(&toolset),
+            },
+        )
+        .await
+        .expect("reconcile");
+    assert_eq!(result, ToolReconcileResult::Unknown);
 }

@@ -1086,6 +1086,7 @@ fn run_event_body_from_record(
         | RecordBody::LaneCreated(_)
         | RecordBody::LaneMoved(_)
         | RecordBody::SnapshotWritten(_)
+        | RecordBody::ConversationEntry(_)
         | RecordBody::ToolCallSettled(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
@@ -1372,7 +1373,8 @@ pub fn derived_event_kind(
         | RecordBody::SessionCreated(_)
         | RecordBody::LaneCreated(_)
         | RecordBody::LaneMoved(_)
-        | RecordBody::SnapshotWritten(_) => {
+        | RecordBody::SnapshotWritten(_)
+        | RecordBody::ConversationEntry(_) => {
             return Err(EventError::UnsupportedOrdinal { ordinal });
         }
     };

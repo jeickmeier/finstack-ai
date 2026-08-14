@@ -1,0 +1,98 @@
+PR-047 local candidate validation
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Branch: codex/pr-047-multi-lane-concurrency
+Candidate: 14af719a078f1cdf52382e89e0a44837ab207237
+Baseline: 0303309c2b8ebffc583514d6190d90dc089f06a8
+Host: Darwin 25.5.0 arm64; rustc 1.97.1
+
+Commands and results:
+
+  cargo fmt --all --check
+    Pass.
+
+  cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    Pass.
+
+  cargo clippy -p finstack-ai-wasm --all-targets --offline --locked --features scripted-trace -- -D warnings
+    Pass.
+
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked session
+    Pass: 4 tests (session error codes, identity bind/conflict,
+    identity empty-key, plus an ingress name match).
+
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked lanes
+    No name match. A01–A05 live in finstack-ai-test --test lanes.
+
+  cargo test -p finstack-ai-test --test lanes --offline --locked
+    Pass: 6 tests covering A01–A05 and the identity hook.
+
+  cargo test -p finstack-ai-test --test conversation --offline --locked
+    Pass: 9 tests, including CompatibleLane after public LaneCreated.
+
+  cargo test -p finstack-ai-test --test public_rust_api --offline --locked
+    Pass: 4 tests; corpus is 131 after pr047-identity (2) and
+    pr047-lane-inspect (1).
+
+  cargo test --workspace --offline --locked --exclude finstack-ai-store-sqlite
+    Pass: 524 passed, 2 ignored.
+
+  cargo test -p finstack-ai-store-sqlite --offline --locked -- --test-threads=1
+    Pass: 22 passed on the first isolated run. The unrelated
+    concurrent_readers_never_observe_a_torn_batch flake did not
+    appear. A04 is the lanes.rs SQLite parallel-appender fixture,
+    not that reader test.
+
+  cargo test -p finstack-ai-test --test journal_v1 --offline --locked
+    Pass: 40 record-body families; existing envelope known-answers
+    were not rewritten.
+
+  cargo tree -e normal --locked --offline for finstack-ai-runtime,
+  finstack-ai, and finstack-ai-kernel
+    Pass: no finstack-ai-protocol, no finstack-ai-store-sqlite, no
+    rusqlite.
+
+  uv run --no-project python tools/wasm_package/check.py graph
+    Pass: wasm graph: no Tokio, sockets, filesystem drivers, or kernel
+    wasm-bindgen.
+
+  Focused Python handle tests
+    Pass: uv run pytest bindings/finstack-ai-python/tests/test_handles.py
+    bindings/finstack-ai-python/tests/test_session.py — 6 passed.
+
+  mise run generate-wasm
+    Pass after regenerating wasm-bindgen glue; npm package tsc build
+    passed.
+
+Acceptance:
+  PR-047-A01 two lanes share a history prefix and diverge without
+             copying entries; create_lane(fork) plus a later append
+             leaves the source leaf and shared parent_id unchanged
+  PR-047-A02 a busy lane rejects a second owner; a sibling lane
+             accepts and continues
+  PR-047-A03 interleaved lane records restore the same leaves,
+             operations, and session-head last_applied_sequence
+  PR-047-A04 SQLite parallel lane appenders do not tear a batch or
+             reuse a sequence; the in-process (session_id, lane_id)
+             guard rejects a second owner
+  PR-047-A05 CompatibleLane and IsolatedChildSession stay distinct
+             RunId/LaneId/SessionId; parent cancel walks
+             child_mappings and submits CancelRequested { ParentRun };
+             detach-preauthorized children stay up; lanes are not
+             lineage
+
+Limits:
+  No seventh port. No SessionStore / Lane / Timer / Channel port.
+  No kernel-state v7. No ConversationId. No new journal family.
+  No rewrite of v1–v6 hashes or LaneMoved / EntryAppended /
+  ConversationEntry wire shapes. No RemoteChildSession dispatch.
+  No exactly-once claim. No G5 inference.
+  No hosted PR/merge, npm publish, or tag.
+  Full pytest, mise run ci, sqlite kill, and browser tests were
+  not required to prove A01–A05. Rust workspace tests, clippy,
+  journal_v1, public-rust-api, focused Python handle tests, and
+  graph checks were run.
+  Crash-prefix and WASM durable restart remain PR-048.
+  PR-043, PR-044, PR-045, and PR-046 stay In review.
+  ADR-012, ADR-016, and ADR-026 stay Partial. ADR-013 stays
+  Not started / Missing.

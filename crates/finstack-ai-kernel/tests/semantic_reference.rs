@@ -140,6 +140,8 @@ fn input_name(value: &KernelInput) -> &'static str {
         KernelInput::CapabilitiesActivated(_) => "CapabilitiesActivated",
         KernelInput::OutputValidated(_) => "OutputValidated",
         KernelInput::RecordExternalCommandRejected(_) => "RecordExternalCommandRejected",
+        KernelInput::RequestInteraction(_) => "RequestInteraction",
+        KernelInput::InteractionSettled(_) => "InteractionSettled",
     }
 }
 
@@ -185,6 +187,7 @@ fn record_name(value: &RecordBody) -> &'static str {
         RecordBody::LaneCreated(_) => "LaneCreated",
         RecordBody::LaneMoved(_) => "LaneMoved",
         RecordBody::SnapshotWritten(_) => "SnapshotWritten",
+        RecordBody::ConversationEntry(_) => "ConversationEntry",
     }
 }
 

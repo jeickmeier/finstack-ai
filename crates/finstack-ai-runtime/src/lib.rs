@@ -23,19 +23,20 @@ pub use finstack_ai_kernel::{
     BudgetReservationReleased, BudgetReservationReplay, BudgetReservationRequested,
     BudgetReservationSettled, BudgetReserveRequest, BudgetScopeId, BundleId, CapabilityId,
     ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentInvocation,
-    ComponentRef, ContentBlock, CostLimit, DOMAIN_AGENT_SPEC, Digest, EffectCompleted, EffectId,
-    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation,
-    EntryId, ErrorCategory, ErrorCode, ExternalEffectCompletionCommand, ExternalHandleRef,
-    FinalResultRecorded, InteractionKind, InteractionRequest, InteractionResolutionCommand,
-    InvocationRecovery, JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message, MessageId,
-    MessageRole, Metadata, MiddlewareRef, ModelRequestId, OperationLocator, OutputEndStrategy,
-    OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
-    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody,
-    RecordDraft, RecordEnvelope, RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent,
-    RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL,
-    SchemaRef, Sensitivity, SessionId, Stage, StructuredResultSource, TextBlock, Timestamp,
-    ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan, ToolExecutionMode, ToolFailurePolicy,
-    ToolId, ToolProgress, ToolResultBlock, TurnId, Usage, ValidatedToolCall, ValidationIssue,
+    ComponentRef, ContentBlock, ConversationEntry, ConversationError, CostLimit, DOMAIN_AGENT_SPEC,
+    Digest, EffectCompleted, EffectId, EffectInput, EffectKind, EffectOutputContract,
+    EffectOutputKind, EffectPurpose, EffectRelation, EntryBody, EntryId, ErrorCategory, ErrorCode,
+    ExternalEffectCompletionCommand, ExternalHandleRef, FinalResultRecorded, InteractionKind,
+    InteractionRequest, InteractionResolution, InteractionResolutionCommand, InvocationRecovery,
+    JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message, MessageId, MessageRole, Metadata,
+    MiddlewareRef, ModelRequestId, OperationLocator, OutputEndStrategy, OutputSpec,
+    PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody, RecordDraft, RecordEnvelope,
+    RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent, RunEventBody, RunEventClass,
+    RunEventKind, RunId, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, Sensitivity, SessionId,
+    SessionProjection, Stage, StructuredResultSource, TextBlock, Timestamp, ToolBatchId,
+    ToolCallBlock, ToolCallId, ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId,
+    ToolProgress, ToolResultBlock, TurnId, Usage, ValidatedToolCall, ValidationIssue,
     ValidationOutcome, Version,
 };
 pub use finstack_ai_kernel::{
@@ -53,6 +54,8 @@ mod coordinator;
 mod error;
 mod event_hub;
 mod id_generation;
+mod identity_map;
+mod interaction;
 mod journal;
 #[cfg(feature = "native-tokio")]
 mod manual_drive;
@@ -60,6 +63,7 @@ mod middleware;
 mod model;
 mod observer;
 mod ports;
+mod session;
 mod tool;
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -115,6 +119,14 @@ pub use composition::{
 };
 
 pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
+pub use identity_map::{
+    ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
+};
+pub use interaction::{InteractionResumeAction, interaction_resume_action};
+pub use session::{
+    LaneAppendIds, LaneCreateIds, LaneInspect, LaneOwner, SessionCreateIds, SessionError,
+    SessionRuntime,
+};
 
 pub use context::{
     AssembledContext, CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED,
@@ -134,12 +146,12 @@ pub use event_hub::{
     EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
     EventSubscriptionStatus, ProgressCoalescing,
 };
-pub use id_generation::{Clock, IdGenerationError, RandomSource, UuidV7Generator};
+pub use id_generation::{Clock, ExternalClock, IdGenerationError, RandomSource, UuidV7Generator};
 pub use journal::{
-    AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
-    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
-    SnapshotSchedule, StateSnapshotRequest, StoreCommitTimestamp, StoreError, StoreHealth,
-    WriteMetadataRequest,
+    AcceleratedRestore, IdempotencyHorizon, JournalStore, LoadRequest, LoadedSession,
+    MetadataReceipt, OpaqueSnapshot, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage,
+    ScanRequest, SnapshotReceipt, SnapshotRequest, SnapshotSchedule, StateSnapshotRequest,
+    StoreCommitTimestamp, StoreError, StoreHealth, WriteMetadataRequest,
 };
 #[cfg(feature = "native-tokio")]
 pub use manual_drive::{
@@ -190,11 +202,13 @@ pub use tool::{
     AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
     ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
     TOOL_DEADLINE_EXCEEDED, TOOL_OUTPUT_INVALID, TOOL_PANICKED, TOOL_POLICY_DENIED,
-    TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID,
-    TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolDeferral, ToolError, ToolEventStream,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolStreamAssembler,
-    ToolStreamItem, ToolStreamLimits, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL, normalize_tool_result,
+    TOOL_RECONCILIATION_UNSUPPORTED, TOOL_REGISTRATION_INVALID, TOOL_RESULT_LIMIT_EXCEEDED,
+    TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext, ToolCatalogPlan,
+    ToolDeferral, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem,
+    ToolStreamLimits, ToolValidator, ToolValidatorCompiler, Toolset, ToolsetDescriptor,
+    ToolsetRegistration, UNKNOWN_TOOL, map_tool_reconcile_result, normalize_tool_result,
+    tool_resume_action, tool_retry_allowed,
 };
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

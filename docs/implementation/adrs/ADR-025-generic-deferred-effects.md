@@ -75,5 +75,13 @@ May change only through a new superseding ADR and reconciliation of every affect
   runtime lifecycle, same-identity retry, and fail-closed conflict under that
   `EffectId` (PR-042-E-resume-d69e4a140a85; PR-042-E-security-d69e4a140a85;
   PR-042-E-integration-4d627711632c).
-  Tool-effect reconciliation, interaction resolution, and later persistent
-  completion paths remain mapped work.
+  PR-043 candidate `86f71c8fd47c0c6d721f9ae36df5c0ba90b22025` adds
+  tool-effect runtime lifecycle under that `EffectId`
+  (PR-043-E-resume-86f71c8fd47c; PR-043-E-security-86f71c8fd47c).
+  PR-044 candidate `e56d6f1d0638986d1201f2b901f372d64d01d062` continues the
+  interaction path under the original `EffectId`
+  (PR-044-E-lifecycle-e56d6f1d0638; PR-044-E-security-e56d6f1d0638).
+  PR-045 candidate `e58ff33138dd1c4d5c1be9e611575b12cd3a4ac5` continues
+  cancel-during-deferred restore under that `EffectId`
+  (PR-045-E-cancel-e58ff33138dd; PR-045-E-security-e58ff33138dd).
+  Later persistent completion paths remain mapped to PR-048.

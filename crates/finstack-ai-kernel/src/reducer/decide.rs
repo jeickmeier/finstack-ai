@@ -21,7 +21,7 @@ use crate::content::{ContentBlock, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::digest::Digest;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
-    EffectRequested,
+    EffectRequested, InteractionCancelled,
 };
 use crate::entries::{
     ContextPrepared, EntryAppended, RetryClassification, RetryScheduled, RunCancelled,
@@ -93,6 +93,12 @@ pub(super) fn decide(
         KernelInput::RecordExternalCommandRejected(_) => {
             unreachable!("external rejection returns before limit processing")
         }
+        KernelInput::RequestInteraction(input) => {
+            super::interaction::decide_request(state, env, &input)
+        }
+        KernelInput::InteractionSettled(input) => {
+            super::interaction::decide_settled(state, env, &input)
+        }
     }
 }
 
@@ -116,10 +122,26 @@ fn decide_external_command_rejected(
     {
         return Err(KernelError::InvalidRunAcceptance);
     }
-    if let crate::ExternalCommandTarget::Effect(effect_id) = input.rejection.target
-        && !known_effect(state, effect_id)
-    {
-        return Err(KernelError::EffectNotPending { effect_id });
+    match input.rejection.target {
+        crate::ExternalCommandTarget::Effect(effect_id) if !known_effect(state, effect_id) => {
+            return Err(KernelError::EffectNotPending { effect_id });
+        }
+        crate::ExternalCommandTarget::Interaction(interaction_id)
+            if state
+                .pending_interaction
+                .as_ref()
+                .is_none_or(|pending| pending.request.interaction_id() != interaction_id)
+                && state
+                    .last_interaction_terminal
+                    .as_ref()
+                    .is_none_or(|terminal| terminal.interaction_id != interaction_id) =>
+        {
+            return Err(KernelError::InvalidPhaseInput {
+                phase: state.phase,
+                input: "record_external_command_rejected",
+            });
+        }
+        _ => {}
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
     Ok(Decision {
@@ -149,6 +171,10 @@ fn known_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
             .completion_identities
             .values()
             .any(|identity| identity.effect_id == effect_id)
+        || state
+            .pending_interaction
+            .as_ref()
+            .is_some_and(|pending| pending.request.effect_id() == effect_id)
 }
 
 fn decide_configure_output(
@@ -446,13 +472,25 @@ fn decide_limit(
     input: &KernelInput,
     context_canonical: Option<(Digest, usize)>,
 ) -> Result<Option<Decision>, KernelError> {
-    if matches!(input, KernelInput::AcceptRun(_))
-        || state.accepted.is_none()
+    // Close an outstanding interaction before converting the command into a
+    // run-limit failure. Approval `expires_at` is copied from the run
+    // deadline, so expire-if-due would otherwise emit LimitReached+RunFailed
+    // and fail apply with `pending_interaction` still set.
+    if matches!(
+        input,
+        KernelInput::AcceptRun(_) | KernelInput::InteractionSettled(_)
+    ) || state.accepted.is_none()
         || state.cancellation.is_some()
         || state.terminal.is_some()
+        || state.pending_interaction.is_some()
         || matches!(
             state.phase,
-            Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
+            Some(
+                RunPhase::AwaitingInteraction
+                    | RunPhase::Completed
+                    | RunPhase::Failed
+                    | RunPhase::Cancelled
+            )
         )
     {
         return Ok(None);
@@ -1332,11 +1370,7 @@ fn retry_bodies(
         None,
         None,
         None,
-        EffectOutputContract {
-            kind: EffectOutputKind::TimerFiring,
-            schema_version: 1,
-            schema_digest: Digest::effect_output(br#"{"type":"timer_firing"}"#),
-        },
+        timer_firing_contract(),
         EffectInput::Timer { due_at },
         RetrySafety::IdempotentWithKey,
         Some(due_at),
@@ -1556,6 +1590,48 @@ fn decide_reconciliation(
                 .map_err(|_| KernelError::InvariantViolation)?,
             ));
         }
+        if let Some(pending) = state
+            .pending_interaction
+            .as_ref()
+            .filter(|pending| pending.request.effect_id() == *effect_id)
+        {
+            bodies.push(RecordBody::InteractionCancelled(
+                InteractionCancelled::try_new(
+                    pending.request.interaction_id(),
+                    None,
+                    None,
+                    Some("cancelled"),
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    *effect_id,
+                    super::interaction::interaction_contract(
+                        pending.request.response_schema_digest(),
+                    ),
+                    Some("cancelled"),
+                    Some(pending.request.interaction_id().to_canonical_string()),
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
+        if let Some(pending) = state
+            .retry
+            .pending
+            .as_ref()
+            .filter(|pending| pending.timer_effect_id == *effect_id)
+        {
+            bodies.push(RecordBody::EffectCancelled(
+                EffectCancelled::try_new(
+                    pending.timer_effect_id,
+                    timer_firing_contract(),
+                    Some("cancelled"),
+                    Option::<&str>::None,
+                )
+                .map_err(|_| KernelError::InvariantViolation)?,
+            ));
+        }
     }
     let mut tool_followups =
         super::tool::cancellation_followups(state, env, &newly_completed, &newly_cancelled)?;
@@ -1631,6 +1707,12 @@ fn decide_timer_fired(
             Err(KernelError::ConflictingSettlement)
         };
     }
+    if state.cancellation.is_some() {
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "timer_fired",
+        });
+    }
     let pending = state
         .retry
         .pending
@@ -1663,7 +1745,7 @@ fn decide_timer_fired(
     })
 }
 
-fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
+pub(super) fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
     let mut effects = state
         .pending_model_effect
         .as_ref()
@@ -1675,9 +1757,23 @@ fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
             _ => None,
         }));
     }
+    if let Some(pending) = &state.pending_interaction {
+        effects.push(pending.request.effect_id());
+    }
+    if let Some(pending) = &state.retry.pending {
+        effects.push(pending.timer_effect_id);
+    }
     effects.sort_unstable();
     effects.dedup();
     effects
+}
+
+fn timer_firing_contract() -> EffectOutputContract {
+    EffectOutputContract {
+        kind: EffectOutputKind::TimerFiring,
+        schema_version: 1,
+        schema_digest: Digest::effect_output(br#"{"type":"timer_firing"}"#),
+    }
 }
 
 fn validate_reconciliation_input(
@@ -2321,7 +2417,7 @@ fn terminal_body_from_candidate(state: &KernelState) -> Result<RecordBody, Kerne
     }
 }
 
-fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
+pub(super) fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
     let expected_stage = match state.phase? {
         RunPhase::BeforeRun => Stage::BeforeRun,
         RunPhase::PreparingContext => Stage::PrepareContext,

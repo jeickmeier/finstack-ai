@@ -82,7 +82,28 @@ impl ChildRunCoordinator {
         request.validate().map_err(CompositionError::Agent)?;
         validate_parent(commit, &context.parent)?;
         validate_child_placement(&context.parent, &request)?;
+        if request.placement == crate::ChildPlacement::CompatibleLaneInParentSession
+            && commit
+                .session()
+                .lane_by_id(request.locator.operation.lane_id)
+                .is_none()
+        {
+            return Err(CompositionError::InvalidRequest {
+                code: "unknown_child_lane",
+            });
+        }
         validate_reservation_shape(&request, reservation.as_ref(), ids)?;
+        if let Some(existing) = commit
+            .session()
+            .child_mapping(context.parent.run_id, context.parent_effect_id)
+            && (existing.child != request.locator
+                || existing.request_digest != request.request_digest
+                || existing.placement != request.placement)
+        {
+            return Err(CompositionError::Commit(
+                CommitCoordinatorError::SidecarConflict,
+            ));
+        }
 
         let prepared = ChildRunPrepared {
             parent_run_id: context.parent.run_id,

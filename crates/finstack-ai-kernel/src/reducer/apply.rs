@@ -14,7 +14,7 @@ use super::fingerprint::{
 };
 use crate::content::ContentBlock;
 use crate::digest::Digest;
-use crate::effects::{EffectKind, EffectOutputKind};
+use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
 use crate::entries::{
     EntryAppended, RunCompleted, RunFailed, Stage, StageCursor, StageDisposition,
     StageOutcomeRecorded,
@@ -23,9 +23,10 @@ use crate::events::{EventCorrelations, RunEvent};
 use crate::message::MessageRole;
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RecordBody, RecordEnvelope};
 use crate::state::{
-    BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn, KernelState,
-    ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
-    TerminalCandidate, TerminalState,
+    BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
+    InteractionTerminalOutcome, KernelState, ModelSettlementFingerprint, ModelSettlementKind,
+    PendingInteraction, PendingModelEffect, ResolutionIdentity, RunPhase, TerminalCandidate,
+    TerminalState,
 };
 use crate::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchOutcome, ToolCallIdentity,
@@ -57,8 +58,10 @@ pub(super) fn apply(
         .records
         .iter()
         .all(|record| matches!(record.body(), RecordBody::BudgetReservationReleased(_)));
+    let foreign_only = foreign_run_shape(original, &committed.records);
     if !external_rejection_only
         && !structural_only
+        && !foreign_only
         && !post_terminal_budget_release
         && (original.terminal.is_some()
             || matches!(
@@ -284,11 +287,16 @@ fn validate_identities(state: &KernelState, records: &[RecordEnvelope]) -> Resul
             }
             continue;
         }
-        if let (Some(session_id), Some(lane_id), Some(accepted)) =
-            (state.session_id, state.lane_id, state.accepted.as_ref())
-            && (record.session_id() != session_id
-                || record.lane_id() != lane_id
-                || record.run_id() != Some(accepted.run_id()))
+        if let Some(session_id) = state.session_id
+            && record.session_id() != session_id
+        {
+            return Err(KernelError::RecordIdentityMismatch);
+        }
+        if is_foreign_run(state, record) {
+            continue;
+        }
+        if let (Some(lane_id), Some(accepted)) = (state.lane_id, state.accepted.as_ref())
+            && (record.lane_id() != lane_id || record.run_id() != Some(accepted.run_id()))
         {
             return Err(KernelError::RecordIdentityMismatch);
         }
@@ -304,7 +312,10 @@ fn validate_batch_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
-    if composition_record_shape(state, records) || structural_record_shape(records) {
+    if composition_record_shape(state, records)
+        || structural_record_shape(records)
+        || foreign_run_shape(state, records)
+    {
         return Ok(());
     }
     if state.accepted.is_some()
@@ -333,15 +344,17 @@ fn validate_batch_shape(
                     disposition,
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
-            })
+            }) || interaction_request_shape(records)
         }
         Some(RunPhase::PreparingContext) => {
             prepare_context_shape(records, state.cycle)
                 || one_failed_stage(records, state.cycle, Stage::PrepareContext)
+                || interaction_request_shape(records)
         }
         Some(RunPhase::BeforeModel) => {
             request_model_shape(state, records)
                 || one_failed_stage(records, state.cycle, Stage::BeforeModel)
+                || interaction_request_shape(records)
         }
         Some(RunPhase::AwaitingModel) => model_settlement_shape(state, records, true),
         Some(RunPhase::AwaitingExternal) => {
@@ -360,11 +373,12 @@ fn validate_batch_shape(
                     disposition,
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
-            })
+            }) || interaction_request_shape(records)
         }
         Some(RunPhase::BeforeToolBatch) => {
             tool_batch_open_shape(state, records)
                 || one_failed_stage(records, state.cycle, Stage::BeforeToolBatch)
+                || interaction_request_shape(records)
         }
         Some(RunPhase::AwaitingTools) => tool_settlement_shape(state, records, true),
         Some(RunPhase::AfterToolBatch) => {
@@ -373,14 +387,17 @@ fn validate_batch_shape(
                     disposition,
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
-            })
+            }) || interaction_request_shape(records)
         }
         Some(RunPhase::BeforeFinalize) => {
-            finalize_shape(state, records) || retry_shape(state, records)
+            finalize_shape(state, records)
+                || retry_shape(state, records)
+                || interaction_request_shape(records)
         }
         Some(RunPhase::Sleeping) => timer_fired_shape(state, records),
         Some(RunPhase::Cancelling) => reconciliation_shape(state, records),
-        Some(RunPhase::Accepted | RunPhase::AwaitingInteraction | RunPhase::Suspended) => false,
+        Some(RunPhase::AwaitingInteraction) => interaction_terminal_shape(records),
+        Some(RunPhase::Accepted | RunPhase::Suspended) => false,
         Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled) => {
             return Err(KernelError::TerminalStateImmutable);
         }
@@ -409,6 +426,27 @@ fn validate_batch_shape(
 
 fn structural_record_shape(records: &[RecordEnvelope]) -> bool {
     !records.is_empty() && records.iter().all(|record| record.body().is_structural())
+}
+
+fn is_foreign_run(state: &KernelState, record: &RecordEnvelope) -> bool {
+    match (state.accepted.as_ref(), record.run_id()) {
+        (Some(accepted), Some(run_id)) if run_id != accepted.run_id() => {
+            matches!(record.body(), RecordBody::RunAccepted(_))
+                || state
+                    .child_preparations
+                    .values()
+                    .any(|prepared| prepared.child.operation.run_id == run_id)
+        }
+        _ => false,
+    }
+}
+
+fn foreign_run_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
+    !records.is_empty()
+        && state.accepted.is_some()
+        && records
+            .iter()
+            .all(|record| record.body().is_structural() || is_foreign_run(state, record))
 }
 
 fn composition_record_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
@@ -497,8 +535,11 @@ fn reconciliation_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool
         return false;
     };
     if records[..reconciled_index].iter().any(|record| {
-        !matches!(record.body(), RecordBody::EffectCancelled(cancelled)
-            if cancellation.outstanding_effects.contains(&cancelled.effect_id()))
+        !matches!(
+            record.body(),
+            RecordBody::EffectCancelled(cancelled)
+                if cancellation.outstanding_effects.contains(&cancelled.effect_id())
+        ) && !matches!(record.body(), RecordBody::InteractionCancelled(_))
     }) {
         return false;
     }
@@ -1011,6 +1052,9 @@ fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if is_foreign_run(state, record) {
+        return Ok(());
+    }
     if !matches!(
         record.body(),
         RecordBody::ExternalCommandRejected(_)
@@ -1018,6 +1062,7 @@ fn apply_record(
             | RecordBody::LaneCreated(_)
             | RecordBody::LaneMoved(_)
             | RecordBody::SnapshotWritten(_)
+            | RecordBody::ConversationEntry(_)
     ) {
         update_wall_usage(state, record.timestamp())?;
     }
@@ -1062,7 +1107,7 @@ fn apply_record(
                 .ok_or(KernelError::InvalidRecordOrder)?;
         }
         RecordBody::EffectRequested(requested) => {
-            apply_effect_requested(state, requested)?;
+            apply_effect_requested(state, requested, next)?;
         }
         RecordBody::EffectDeferred(deferred) => {
             apply_effect_deferred(state, deferred)?;
@@ -1120,18 +1165,7 @@ fn apply_record(
             }
         }
         RecordBody::CancellationRequested(requested) => {
-            let mut outstanding = Vec::new();
-            if let Some(pending) = &state.pending_model_effect {
-                outstanding.push(pending.requested.effect_id());
-            }
-            if let Some(batch) = &state.active_tool_batch {
-                outstanding.extend(batch.calls.iter().filter_map(|call| match call.status {
-                    ActiveToolCallStatus::Requested { .. } => Some(call.assigned.effect_id),
-                    _ => None,
-                }));
-            }
-            outstanding.sort_unstable();
-            outstanding.dedup();
+            let outstanding = super::decide::outstanding_requested_effects(state);
             state.cancellation = Some(CancellationState {
                 request: requested.request.clone(),
                 prior_phase: state.phase.ok_or(KernelError::InvalidRecordOrder)?,
@@ -1286,7 +1320,8 @@ fn apply_record(
         | RecordBody::SessionCreated(_)
         | RecordBody::LaneCreated(_)
         | RecordBody::LaneMoved(_)
-        | RecordBody::SnapshotWritten(_) => {}
+        | RecordBody::SnapshotWritten(_)
+        | RecordBody::ConversationEntry(_) => {}
         RecordBody::ChildRunPrepared(prepared) => {
             let accepted = state
                 .accepted
@@ -1425,6 +1460,19 @@ fn apply_record(
             state.state_version = 5;
         }
         RecordBody::EffectCancelled(cancelled) => {
+            if cancelled.output_contract().kind == EffectOutputKind::InteractionResolution {
+                apply_interaction_effect_terminal(
+                    state,
+                    cancelled.effect_id(),
+                    cancelled.completion_id(),
+                    crate::Digest::raw_json(b"interaction-effect-cancelled"),
+                )?;
+                return Ok(());
+            }
+            if cancelled.output_contract().kind == EffectOutputKind::TimerFiring {
+                apply_timer_effect_cancelled(state, cancelled)?;
+                return Ok(());
+            }
             if let Some(pending) = state.pending_model_effect.as_ref()
                 && pending.requested.effect_id() == cancelled.effect_id()
             {
@@ -1477,13 +1525,278 @@ fn apply_record(
             }
             state.state_version = state.state_version.max(3);
         }
-        RecordBody::InteractionRequested(_)
-        | RecordBody::InteractionResolved(_)
-        | RecordBody::InteractionExpired(_)
-        | RecordBody::InteractionCancelled(_) => {
-            return Err(KernelError::InvalidRecordOrder);
+        RecordBody::InteractionRequested(request) => {
+            apply_interaction_requested(state, request)?;
+        }
+        RecordBody::InteractionResolved(resolved) => {
+            apply_interaction_resolved(state, resolved)?;
+        }
+        RecordBody::InteractionExpired(expired) => {
+            apply_interaction_expired(state, expired)?;
+        }
+        RecordBody::InteractionCancelled(cancelled) => {
+            apply_interaction_cancelled(state, cancelled)?;
         }
     }
+    Ok(())
+}
+
+fn interaction_request_shape(records: &[RecordEnvelope]) -> bool {
+    if records.len() != 2 {
+        return false;
+    }
+    let mut requested = None;
+    let mut interaction = None;
+    for record in records {
+        match record.body() {
+            RecordBody::EffectRequested(effect) if effect.kind() == EffectKind::Interaction => {
+                requested = Some(effect);
+            }
+            RecordBody::InteractionRequested(request) => interaction = Some(request),
+            _ => return false,
+        }
+    }
+    match (requested, interaction) {
+        (Some(effect), Some(request)) => {
+            matches!(
+                effect.input(),
+                EffectInput::Interaction {
+                    interaction_id,
+                    request_digest
+                } if *interaction_id == request.interaction_id()
+                    && effect.effect_id() == request.effect_id()
+                    && request.request_digest().is_ok_and(|digest| digest == *request_digest)
+            )
+        }
+        _ => false,
+    }
+}
+
+fn interaction_terminal_shape(records: &[RecordEnvelope]) -> bool {
+    matches!(
+        records,
+        [left, right]
+            if matches!(left.body(), RecordBody::InteractionResolved(_))
+                && matches!(
+                    right.body(),
+                    RecordBody::EffectCompleted(completed)
+                        if completed.output_contract().kind == EffectOutputKind::InteractionResolution
+                )
+    ) || matches!(
+        records,
+        [left, right]
+            if matches!(left.body(), RecordBody::InteractionExpired(_))
+                && matches!(
+                    right.body(),
+                    RecordBody::EffectFailed(failed)
+                        if failed.output_contract().kind == EffectOutputKind::InteractionResolution
+                )
+    ) || matches!(
+        records,
+        [left, right]
+            if matches!(left.body(), RecordBody::InteractionCancelled(_))
+                && matches!(
+                    right.body(),
+                    RecordBody::EffectCancelled(cancelled)
+                        if cancelled.output_contract().kind == EffectOutputKind::InteractionResolution
+                )
+    )
+}
+
+fn stage_cursor_for_phase(state: &KernelState) -> Option<crate::StageCursor> {
+    let cursor_stage = match state.phase? {
+        RunPhase::BeforeRun => Stage::BeforeRun,
+        RunPhase::PreparingContext => Stage::PrepareContext,
+        RunPhase::BeforeModel => Stage::BeforeModel,
+        RunPhase::AfterModel => Stage::AfterModel,
+        RunPhase::BeforeToolBatch => Stage::BeforeToolBatch,
+        RunPhase::AfterToolBatch => Stage::AfterToolBatch,
+        RunPhase::BeforeFinalize => Stage::BeforeFinalize,
+        _ => return None,
+    };
+    Some(crate::StageCursor {
+        cycle: state.cycle,
+        stage: cursor_stage,
+    })
+}
+
+fn apply_interaction_requested(
+    state: &mut KernelState,
+    request: &crate::InteractionRequest,
+) -> Result<(), KernelError> {
+    state.state_version = state.state_version.max(6);
+    if let Some(pending) = &state.pending_interaction {
+        return if pending.request.interaction_id() == request.interaction_id()
+            && pending.request.effect_id() == request.effect_id()
+        {
+            Ok(())
+        } else {
+            Err(KernelError::InvalidRecordOrder)
+        };
+    }
+    let prior_phase = state.phase.ok_or(KernelError::InvalidRecordOrder)?;
+    let cursor = stage_cursor_for_phase(state).ok_or(KernelError::InvalidRecordOrder)?;
+    state.pending_interaction = Some(PendingInteraction {
+        request: request.clone(),
+        prior_phase,
+        cursor,
+    });
+    Ok(())
+}
+
+fn apply_interaction_effect_requested(
+    state: &mut KernelState,
+    requested: &crate::EffectRequested,
+    next: Option<&RecordBody>,
+) -> Result<(), KernelError> {
+    let request = match next {
+        Some(RecordBody::InteractionRequested(request)) => request.clone(),
+        _ => state
+            .pending_interaction
+            .as_ref()
+            .map(|pending| pending.request.clone())
+            .ok_or(KernelError::InvalidRecordOrder)?,
+    };
+    let request_digest = request
+        .request_digest()
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    if requested.effect_id() != request.effect_id()
+        || !matches!(
+            requested.input(),
+            EffectInput::Interaction {
+                interaction_id,
+                request_digest: digest
+            } if *interaction_id == request.interaction_id() && *digest == request_digest
+        )
+    {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    if state.pending_interaction.is_none() {
+        apply_interaction_requested(state, &request)?;
+    }
+    state.phase = Some(RunPhase::AwaitingInteraction);
+    state.state_version = state.state_version.max(6);
+    Ok(())
+}
+
+fn apply_interaction_resolved(
+    state: &mut KernelState,
+    resolved: &crate::InteractionResolution,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_interaction
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.request.interaction_id() != resolved.interaction_id() {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    let digest = super::interaction::resolution_digest(resolved)
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    let outcome = super::interaction::approval_outcome(pending.request.kind(), resolved.response())
+        .map_err(|_| KernelError::InvalidRecordOrder)?;
+    state.resolution_identities.insert(
+        Arc::from(resolved.resolution_id()),
+        ResolutionIdentity {
+            interaction_id: resolved.interaction_id(),
+            settlement_digest: digest,
+        },
+    );
+    state.last_interaction_terminal =
+        Some(super::interaction::terminal_from_pending(pending, outcome));
+    state.state_version = state.state_version.max(6);
+    Ok(())
+}
+
+fn apply_interaction_expired(
+    state: &mut KernelState,
+    expired: &crate::InteractionExpired,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_interaction
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.request.interaction_id() != expired.interaction_id {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    state.last_interaction_terminal = Some(super::interaction::terminal_from_pending(
+        pending,
+        InteractionTerminalOutcome::Expired,
+    ));
+    state.state_version = state.state_version.max(6);
+    Ok(())
+}
+
+fn apply_interaction_cancelled(
+    state: &mut KernelState,
+    cancelled: &crate::InteractionCancelled,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_interaction
+        .as_ref()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.request.interaction_id() != cancelled.interaction_id() {
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    state.last_interaction_terminal = Some(super::interaction::terminal_from_pending(
+        pending,
+        InteractionTerminalOutcome::Cancelled,
+    ));
+    state.state_version = state.state_version.max(6);
+    Ok(())
+}
+
+fn apply_interaction_effect_terminal(
+    state: &mut KernelState,
+    effect_id: crate::EffectId,
+    completion_id: Option<&str>,
+    settlement_digest: crate::Digest,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_interaction
+        .take()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.request.effect_id() != effect_id {
+        state.pending_interaction = Some(pending);
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    if let Some(completion_id) = completion_id {
+        state.completion_identities.insert(
+            Arc::from(completion_id),
+            CompletionIdentity {
+                effect_id,
+                settlement_digest,
+            },
+        );
+    }
+    if state.cancellation.is_some() {
+        if !matches!(
+            state.phase,
+            Some(RunPhase::Cancelling | RunPhase::Suspended | RunPhase::Cancelled)
+        ) {
+            state.phase = Some(RunPhase::Cancelling);
+        }
+    } else {
+        state.phase = Some(pending.prior_phase);
+    }
+    Ok(())
+}
+
+fn apply_timer_effect_cancelled(
+    state: &mut KernelState,
+    cancelled: &crate::EffectCancelled,
+) -> Result<(), KernelError> {
+    let pending = state
+        .retry
+        .pending
+        .take()
+        .ok_or(KernelError::InvalidRecordOrder)?;
+    if pending.timer_effect_id != cancelled.effect_id()
+        || cancelled.output_contract().kind != EffectOutputKind::TimerFiring
+    {
+        state.retry.pending = Some(pending);
+        return Err(KernelError::InvalidRecordOrder);
+    }
+    state.state_version = state.state_version.max(3);
     Ok(())
 }
 
@@ -1501,7 +1814,11 @@ fn apply_limit_reached(
 fn apply_effect_requested(
     state: &mut KernelState,
     requested: &crate::EffectRequested,
+    next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if requested.kind() == EffectKind::Interaction {
+        return apply_interaction_effect_requested(state, requested, next);
+    }
     if requested.kind() == EffectKind::Timer {
         let pending = state
             .retry
@@ -1695,6 +2012,14 @@ fn apply_effect_completed(
     completed: &crate::EffectCompleted,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if completed.output_contract().kind == EffectOutputKind::InteractionResolution {
+        return apply_interaction_effect_terminal(
+            state,
+            completed.effect_id(),
+            completed.completion_id(),
+            completed.output_digest(),
+        );
+    }
     if completed.output_contract().kind == EffectOutputKind::ToolResult {
         return apply_tool_effect_completed(state, completed);
     }
@@ -2414,6 +2739,14 @@ fn apply_effect_failed(
     state: &mut KernelState,
     failed: &crate::EffectFailed,
 ) -> Result<(), KernelError> {
+    if failed.output_contract().kind == EffectOutputKind::InteractionResolution {
+        return apply_interaction_effect_terminal(
+            state,
+            failed.effect_id(),
+            failed.completion_id(),
+            crate::Digest::raw_json(b"interaction-effect-failed"),
+        );
+    }
     if failed.output_contract().kind == EffectOutputKind::ToolResult {
         return apply_tool_effect_failed(state, failed);
     }

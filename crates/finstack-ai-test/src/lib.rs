@@ -10,6 +10,7 @@
 
 mod compaction_conformance;
 mod conformance;
+mod crash_prefix;
 mod fakes;
 mod golden_scenarios;
 mod journal_bodies;
@@ -34,6 +35,7 @@ pub use conformance::{
     AdapterCapability, AdapterOutcome, ConformanceAdapter, ConformanceReport, ConformanceRunner,
     DeferredBindingAdapter, NoOpRustAdapter, TargetKind,
 };
+pub use crash_prefix::{LegalRestore, classify_phase};
 pub use fakes::{
     DeterministicIdSource, FixedClock, ManualClock, ManualGate, PatternRandomSource,
     SequenceRandomSource,

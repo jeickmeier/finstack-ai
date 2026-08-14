@@ -4,17 +4,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchId, AppendBatchTag, AuthorizationEvidence,
-    CancellationReconciledInput, CancellationRequestTag, ContentBlock, Digest, EffectCompleted,
-    EffectDeferred, EffectFailed, EffectId, EffectInput, EffectTag, ErrorCategory, EventId,
-    EventTag, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
-    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag,
-    InteractionTag, KernelError, KernelInput, Message, MessageId, MessageRole, MessageTag,
-    Metadata, ModelRef, ModelRequestTag, ModelSettled, ModelSettlement, ProviderIds, RawJson,
-    RecordExternalCommandRejected, RecordId, RecordTag, ReducerStageOutcome, RunPhase, Stage,
-    StageCursor, StageSettled, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag,
-    ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement,
-    TransitionEnv, TurnTag,
+    ActiveToolCallStatus, AllocatedIds, AppendBatchId, AppendBatchTag, AuthorizationEvidence,
+    CancellationReconciledInput, CancellationRequestTag, ComponentId, ComponentRef, ContentBlock,
+    Digest, EffectCompleted, EffectDeferred, EffectFailed, EffectId, EffectInput, EffectTag,
+    ErrorCategory, EventId, EventTag, ExternalCommandKind, ExternalCommandRejected,
+    ExternalCommandTarget, ExternalEffectCompletedInput, ExternalEffectCompletion,
+    ExternalEffectOutcome, Id, IdTag, InteractionExpired, InteractionKind, InteractionRequest,
+    InteractionSettled, InteractionTag, InteractionTerminalOutcome, KernelError, KernelInput,
+    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelRequestTag, ModelSettled,
+    ModelSettlement, ProviderIds, RawJson, RecordExternalCommandRejected, RecordId, RecordTag,
+    ReducerStageOutcome, RequestInteraction, RetrySafety, RunPhase, Stage, StageCursor,
+    StageSettled, TextBlock, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolCallBlock,
+    ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement, TransitionEnv,
+    TurnTag, Version,
 };
 
 use crate::coordinator::{
@@ -23,12 +25,15 @@ use crate::coordinator::{
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
-    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile, Model,
-    ModelContextProfileOverride, ModelDeferral, ModelError, ModelProgress, ModelReconcileResult,
-    ModelRequestDraft, ModelResponse, ModelResumeAction, ModelTerminal, RandomSource,
-    ReconcileContext, ResolvedToolCatalog, RunCallContext, ToolError, ToolProgress,
-    UuidV7Generator, map_model_reconcile_result, model_resume_action, model_retry_allowed,
-    normalize_tool_result, resolve_model_context_profile,
+    CancellationSignal, Clock, IdGenerationError, InteractionResumeAction,
+    LockedModelContextProfile, Model, ModelContextProfileOverride, ModelDeferral, ModelError,
+    ModelProgress, ModelReconcileResult, ModelRequestDraft, ModelResponse, ModelResumeAction,
+    ModelTerminal, PendingToolEffect, RandomSource, ReconcileContext, ResolvedToolCatalog,
+    RunCallContext, ToolCatalogPlan, ToolDeferral, ToolError, ToolProgress, ToolReconcileResult,
+    ToolResult, ToolResumeAction, UuidV7Generator, interaction_resume_action,
+    map_model_reconcile_result, map_tool_reconcile_result, model_resume_action,
+    model_retry_allowed, normalize_tool_result, resolve_model_context_profile, tool_resume_action,
+    tool_retry_allowed,
 };
 
 pub(crate) struct ModelDriverResult {
@@ -127,9 +132,23 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
     sources: &SettlementSources<C, R>,
-) -> Result<(), RunHandleError> {
+) -> Result<bool, RunHandleError> {
     if coordinator.state().phase != Some(RunPhase::BeforeToolBatch) {
-        return Ok(());
+        return Ok(false);
+    }
+    let now = sources.now()?;
+    if coordinator.state().cancellation.is_some() {
+        return Ok(false);
+    }
+    if coordinator
+        .state()
+        .accepted
+        .as_ref()
+        .and_then(finstack_ai_kernel::RunAccepted::effective_deadline)
+        .is_some_and(|deadline| now >= deadline)
+    {
+        fail_closed_on_run_deadline(coordinator, sources, now).await?;
+        return Ok(false);
     }
     let state = coordinator.state();
     let source = state
@@ -159,10 +178,18 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         .accepted
         .as_ref()
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
-    let plans = calls
-        .into_iter()
-        .map(|call| catalog.plan_call(call, deadline, None))
-        .collect::<Vec<_>>();
+    let granted = approval_released_for_current_cursor(state);
+    let refused = approval_refused_for_current_cursor(state);
+    let mut plans = Vec::with_capacity(calls.len());
+    for call in calls {
+        match catalog.decide_plan(call, deadline, None, granted, refused) {
+            ToolCatalogPlan::Ready(plan) => plans.push(plan),
+            ToolCatalogPlan::RequireApproval => {
+                request_approval_interaction(coordinator, sources).await?;
+                return Ok(false);
+            }
+        }
+    }
     let continuation = if state.final_result.is_some() {
         ToolBatchContinuation::Finalize
     } else {
@@ -178,7 +205,6 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
             continuation,
         },
     });
-    let now = sources.now()?;
     let ids = allocate_tool_opening(&plans, sources)?;
     let env = TransitionEnv { now, ids };
     let decision =
@@ -195,14 +221,83 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     if let Some(fault) = outcome.fault {
         return Err(RunHandleError::Faulted { code: fault.code });
     }
+    Ok(true)
+}
+
+async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    now: finstack_ai_kernel::Timestamp,
+) -> Result<(), RunHandleError> {
+    let input = KernelInput::StageSettled(StageSettled {
+        cursor: StageCursor {
+            cycle: coordinator.state().cycle,
+            stage: Stage::BeforeToolBatch,
+        },
+        outcome: ReducerStageOutcome::Continue,
+    });
+    let ids = AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(2, sources)?,
+        generate_tool_ids::<EventTag, _, _>(2, sources)?,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "deadline_ids_invalid",
+    })?;
+    let env = TransitionEnv { now, ids };
+    coordinator
+        .classify(&env, input.clone())
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "deadline_allocation_mismatch",
+        })?;
+    let outcome = coordinator
+        .submit(env, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
     Ok(())
 }
 
 // --- extracted from task.rs 1225-1353 ---
+enum IdleCancelClass {
+    Cancelled,
+    Completed,
+    Uncertain,
+}
+
 pub(crate) async fn reconcile_cancelled_effect<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     effect_id: EffectId,
     cancelled: bool,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    reconcile_classified_effect(
+        coordinator,
+        effect_id,
+        if cancelled {
+            IdleCancelClass::Cancelled
+        } else {
+            IdleCancelClass::Completed
+        },
+        sources,
+    )
+    .await
+}
+
+async fn reconcile_classified_effect<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    effect_id: EffectId,
+    class: IdleCancelClass,
     sources: &SettlementSources<C, R>,
 ) -> Result<(), RunHandleError> {
     let request_id = coordinator
@@ -214,16 +309,16 @@ pub(crate) async fn reconcile_cancelled_effect<C: Clock, R: RandomSource>(
         })?
         .request
         .request_id;
-    let (completed_effects, cancelled_effects) = if cancelled {
-        (Arc::from([]), Arc::from([effect_id]))
-    } else {
-        (Arc::from([effect_id]), Arc::from([]))
+    let (completed_effects, cancelled_effects, uncertain_effects) = match class {
+        IdleCancelClass::Cancelled => (Arc::from([]), Arc::from([effect_id]), Arc::from([])),
+        IdleCancelClass::Completed => (Arc::from([effect_id]), Arc::from([]), Arc::from([])),
+        IdleCancelClass::Uncertain => (Arc::from([]), Arc::from([]), Arc::from([effect_id])),
     };
     let input = KernelInput::CancellationReconciled(CancellationReconciledInput {
         request_id,
         completed_effects,
         cancelled_effects,
-        uncertain_effects: Arc::from([]),
+        uncertain_effects,
     });
     let now = sources.now()?;
     let ids = allocate_for_runtime_input(coordinator, now, &input, sources)?;
@@ -235,6 +330,96 @@ pub(crate) async fn reconcile_cancelled_effect<C: Clock, R: RandomSource>(
         return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
+}
+
+pub(crate) async fn drain_idle_cancellation<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    force_all: bool,
+) -> Result<(), RunHandleError> {
+    loop {
+        let Some(cancellation) = coordinator.state().cancellation.clone() else {
+            return Ok(());
+        };
+        if coordinator.state().terminal.is_some()
+            || coordinator.state().phase == Some(RunPhase::Suspended)
+        {
+            return Ok(());
+        }
+        let Some(effect_id) = cancellation
+            .outstanding_effects
+            .iter()
+            .copied()
+            .find(|id| idle_cancellation_class(coordinator.state(), *id, force_all).is_some())
+        else {
+            return Ok(());
+        };
+        let class = idle_cancellation_class(coordinator.state(), effect_id, force_all).ok_or(
+            RunHandleError::CancellationSettlement {
+                code: "idle_cancellation_class_missing",
+            },
+        )?;
+        reconcile_classified_effect(coordinator, effect_id, class, sources).await?;
+    }
+}
+
+fn idle_cancellation_class(
+    state: &finstack_ai_kernel::KernelState,
+    effect_id: EffectId,
+    force_all: bool,
+) -> Option<IdleCancelClass> {
+    if state
+        .pending_interaction
+        .as_ref()
+        .is_some_and(|pending| pending.request.effect_id() == effect_id)
+    {
+        return Some(IdleCancelClass::Cancelled);
+    }
+    if state
+        .retry
+        .pending
+        .as_ref()
+        .is_some_and(|pending| pending.timer_effect_id == effect_id)
+    {
+        return Some(IdleCancelClass::Cancelled);
+    }
+    if let Some(pending) = state.pending_model_effect.as_ref()
+        && pending.requested.effect_id() == effect_id
+    {
+        return effect_idle_class(
+            pending.requested.retry_safety(),
+            pending.deferred.is_some(),
+            force_all,
+        );
+    }
+    state.active_tool_batch.as_ref().and_then(|batch| {
+        batch.calls.iter().find_map(|call| {
+            if call.assigned.effect_id != effect_id {
+                return None;
+            }
+            match &call.status {
+                ActiveToolCallStatus::Requested {
+                    requested,
+                    deferred,
+                } => effect_idle_class(requested.retry_safety(), deferred.is_some(), force_all),
+                _ => None,
+            }
+        })
+    })
+}
+
+fn effect_idle_class(
+    safety: RetrySafety,
+    deferred: bool,
+    force_all: bool,
+) -> Option<IdleCancelClass> {
+    if !deferred && !force_all {
+        return None;
+    }
+    Some(match safety {
+        RetrySafety::AtMostOnce | RetrySafety::Unknown => IdleCancelClass::Uncertain,
+        RetrySafety::SafeToRetry | RetrySafety::IdempotentWithKey => IdleCancelClass::Cancelled,
+    })
 }
 
 #[derive(Default)]
@@ -373,6 +558,185 @@ fn tool_opening_counts(plans: &[ToolCallPlan]) -> Result<ToolOpeningCounts, RunH
         effects: plans.len(),
         messages,
     })
+}
+
+fn approval_cursor(state: &finstack_ai_kernel::KernelState) -> StageCursor {
+    StageCursor {
+        cycle: state.cycle,
+        stage: Stage::BeforeToolBatch,
+    }
+}
+
+fn approval_released_for_current_cursor(state: &finstack_ai_kernel::KernelState) -> bool {
+    state
+        .last_interaction_terminal
+        .as_ref()
+        .is_some_and(|terminal| {
+            terminal.kind == InteractionKind::Approval
+                && terminal.outcome == InteractionTerminalOutcome::Granted
+                && terminal.cursor == approval_cursor(state)
+        })
+}
+
+fn approval_refused_for_current_cursor(state: &finstack_ai_kernel::KernelState) -> bool {
+    state
+        .last_interaction_terminal
+        .as_ref()
+        .is_some_and(|terminal| {
+            terminal.kind == InteractionKind::Approval
+                && matches!(
+                    terminal.outcome,
+                    InteractionTerminalOutcome::Denied
+                        | InteractionTerminalOutcome::Expired
+                        | InteractionTerminalOutcome::Cancelled
+                )
+                && terminal.cursor == approval_cursor(state)
+        })
+}
+
+fn approval_schema() -> Result<RawJson, RunHandleError> {
+    RawJson::parse(
+        r#"{"additionalProperties":false,"properties":{"approved":{"type":"boolean"}},"required":["approved"],"type":"object"}"#,
+    )
+    .map_err(|_| RunHandleError::InteractionSettlement {
+        code: "approval_schema_invalid",
+    })
+}
+
+async fn request_approval_interaction<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let now = sources.now()?;
+    let interaction_id = generate_tool_id::<InteractionTag, _, _>(sources)?;
+    let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
+    let expires_at = coordinator
+        .state()
+        .accepted
+        .as_ref()
+        .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
+    let request = InteractionRequest::try_new(
+        1,
+        interaction_id,
+        effect_id,
+        InteractionKind::Approval,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("approve the next tool action").map_err(|_| {
+                RunHandleError::InteractionSettlement {
+                    code: "approval_prompt_invalid",
+                }
+            })?,
+        )],
+        approval_schema()?,
+        ComponentRef::new(
+            ComponentId::parse("finstack.policy.approval").map_err(|_| {
+                RunHandleError::InteractionSettlement {
+                    code: "approval_policy_invalid",
+                }
+            })?,
+            Some(Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            }),
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        None,
+        expires_at,
+        false,
+        Metadata::empty(),
+    )
+    .map_err(|_| RunHandleError::InteractionSettlement {
+        code: "approval_request_invalid",
+    })?;
+    let input = KernelInput::RequestInteraction(RequestInteraction { request });
+    let ids = AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(2, sources)?,
+        generate_tool_ids::<EventTag, _, _>(2, sources)?,
+        vec![effect_id],
+        vec![interaction_id],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::InteractionSettlement {
+        code: "interaction_request_ids_invalid",
+    })?;
+    let env = TransitionEnv { now, ids };
+    coordinator.classify(&env, input.clone()).map_err(|_| {
+        RunHandleError::InteractionSettlement {
+            code: "interaction_request_allocation_mismatch",
+        }
+    })?;
+    let outcome = coordinator
+        .submit(env, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+) -> Result<InteractionResumeAction, RunHandleError> {
+    if coordinator.state().cancellation.is_some() {
+        return Ok(InteractionResumeAction::WaitResolution);
+    }
+    let now = sources.now()?;
+    let action = interaction_resume_action(coordinator.state(), now);
+    if action != InteractionResumeAction::ExpireIfDue {
+        return Ok(action);
+    }
+    let pending = coordinator.state().pending_interaction.as_ref().ok_or(
+        RunHandleError::InteractionSettlement {
+            code: "interaction_pending_missing",
+        },
+    )?;
+    let input = KernelInput::InteractionSettled(InteractionSettled::Expired(InteractionExpired {
+        interaction_id: pending.request.interaction_id(),
+        expired_at: now,
+    }));
+    let ids = AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(2, sources)?,
+        generate_tool_ids::<EventTag, _, _>(2, sources)?,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::InteractionSettlement {
+        code: "interaction_expire_ids_invalid",
+    })?;
+    let env = TransitionEnv { now, ids };
+    coordinator.classify(&env, input.clone()).map_err(|_| {
+        RunHandleError::InteractionSettlement {
+            code: "interaction_expire_allocation_mismatch",
+        }
+    })?;
+    let outcome = coordinator
+        .submit(env, input)
+        .await
+        .map_err(RunHandleError::Coordinator)?;
+    if let Some(fault) = outcome.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(action)
 }
 
 fn allocate_tool_opening<C: Clock, R: RandomSource>(
@@ -757,6 +1121,410 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
         draft,
         result,
         retry_allowed,
+        sources,
+    )
+    .await
+}
+
+pub(crate) async fn resume_pending_tool_effects<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    catalog: &ResolvedToolCatalog,
+    sources: &SettlementSources<C, R>,
+    cancellation: &CancellationSignal,
+) -> Result<ToolResumeAction, RunHandleError> {
+    let Some(batch) = coordinator.state().active_tool_batch.clone() else {
+        return Ok(ToolResumeAction::NoOutstanding);
+    };
+    let mut first_pass = Vec::new();
+    let mut to_reconcile = Vec::new();
+    for call in batch.calls.iter() {
+        let effect_id = call.assigned.effect_id;
+        let action = tool_resume_action(coordinator.state(), effect_id);
+        first_pass.push(action);
+        if action == ToolResumeAction::Reconcile {
+            to_reconcile.push(effect_id);
+        }
+    }
+    if to_reconcile.is_empty() {
+        return Ok(aggregate_tool_resume_actions(&first_pass));
+    }
+    let seeds = coordinator.pending_tool_seeds();
+    let mut mapped = Vec::new();
+    for effect_id in to_reconcile {
+        let Some(seed) = seeds
+            .iter()
+            .find(|seed| seed.requested.effect_id() == effect_id)
+            .cloned()
+            .or_else(|| tool_seed_for_deferred(coordinator, effect_id))
+        else {
+            return Ok(ToolResumeAction::SuspendUncertain);
+        };
+        let Some(resolved) = catalog.by_id(&seed.call.tool_id) else {
+            return Ok(ToolResumeAction::SuspendUncertain);
+        };
+        let retry_allowed = tool_retry_allowed(&seed.requested, &resolved.spec);
+        let context = ReconcileContext {
+            run: RunCallContext {
+                locator: seed.locator.clone(),
+                authorization: seed.authorization.clone(),
+                effect_id,
+                attempt: seed.attempt,
+                deadline: seed.requested.deadline(),
+                budget_scope_id: seed.budget_scope_id,
+                cancellation: cancellation.child(),
+            },
+            original_input_digest: seed.requested.input_digest(),
+        };
+        let Ok(result) = resolved
+            .toolset
+            .reconcile(
+                context,
+                PendingToolEffect {
+                    call: seed.call.clone(),
+                },
+            )
+            .await
+        else {
+            return Ok(ToolResumeAction::SuspendUncertain);
+        };
+        let action =
+            map_tool_reconcile_result(coordinator.state(), effect_id, &result, retry_allowed);
+        mapped.push((seed, result, action));
+    }
+    if mapped
+        .iter()
+        .any(|(_, _, action)| *action == ToolResumeAction::SuspendUncertain)
+    {
+        return Ok(ToolResumeAction::SuspendUncertain);
+    }
+    let mut applied = Vec::new();
+    for (seed, result, mapped_action) in &mapped {
+        let action = apply_tool_reconcile_result(coordinator, seed, result, sources).await?;
+        if action == ToolResumeAction::SuspendUncertain {
+            return Ok(ToolResumeAction::SuspendUncertain);
+        }
+        applied.push(*mapped_action);
+    }
+    let mut actions = first_pass
+        .into_iter()
+        .filter(|action| *action != ToolResumeAction::Reconcile)
+        .collect::<Vec<_>>();
+    actions.extend(applied);
+    Ok(aggregate_tool_resume_actions(&actions))
+}
+
+fn aggregate_tool_resume_actions(actions: &[ToolResumeAction]) -> ToolResumeAction {
+    if actions.contains(&ToolResumeAction::SuspendUncertain) {
+        return ToolResumeAction::SuspendUncertain;
+    }
+    if actions.contains(&ToolResumeAction::Retry) {
+        return ToolResumeAction::Retry;
+    }
+    if actions.contains(&ToolResumeAction::WaitExternal) {
+        return ToolResumeAction::WaitExternal;
+    }
+    if actions.contains(&ToolResumeAction::UseRecorded) {
+        return ToolResumeAction::UseRecorded;
+    }
+    if actions.contains(&ToolResumeAction::Reconcile) {
+        return ToolResumeAction::Reconcile;
+    }
+    ToolResumeAction::NoOutstanding
+}
+
+fn tool_seed_for_deferred(
+    coordinator: &CommitCoordinator,
+    effect_id: EffectId,
+) -> Option<ToolDispatchSeed> {
+    coordinator
+        .pending_tool_seeds()
+        .into_iter()
+        .find(|seed| seed.requested.effect_id() == effect_id)
+        .or_else(|| deferred_tool_seed(coordinator, effect_id))
+}
+
+fn deferred_tool_seed(
+    coordinator: &CommitCoordinator,
+    effect_id: EffectId,
+) -> Option<ToolDispatchSeed> {
+    let state = coordinator.state();
+    let batch = state.active_tool_batch.as_ref()?;
+    let call = batch
+        .calls
+        .iter()
+        .find(|call| call.assigned.effect_id == effect_id)?;
+    let ActiveToolCallStatus::Requested { requested, .. } = &call.status else {
+        return None;
+    };
+    let ToolCallPlan::Execute(validated) = &call.assigned.plan else {
+        return None;
+    };
+    let (locator, authorization, budget_scope_id) = dispatch_security_from_state(state)?;
+    Some(ToolDispatchSeed {
+        requested: requested.clone(),
+        tool_batch_id: batch.opened.tool_batch_id,
+        tool_call_id: *validated.call.tool_call_id(),
+        call: validated.clone(),
+        locator,
+        authorization,
+        budget_scope_id,
+        attempt: 1,
+        requested_at: state.accepted_at?,
+    })
+}
+
+fn dispatch_security_from_state(
+    state: &finstack_ai_kernel::KernelState,
+) -> Option<(
+    finstack_ai_kernel::OperationLocator,
+    crate::AuthorizationContext,
+    Option<finstack_ai_kernel::BudgetScopeId>,
+)> {
+    let accepted = state.accepted.as_ref()?;
+    let security = accepted.security();
+    let locator = finstack_ai_kernel::OperationLocator::try_new(
+        security.tenant_scope(),
+        state.session_id?,
+        state.lane_id?,
+        accepted.run_id(),
+    )
+    .ok()?;
+    Some((
+        locator,
+        crate::AuthorizationContext {
+            principal: security.principal().clone(),
+            authentication_method: Arc::from(security.authentication_method()),
+            assurance_level: Arc::from(security.assurance_level()),
+            roles: Arc::from([]),
+            permitted_scopes: Arc::from([Arc::from(security.tenant_scope())]),
+            safe_claims: Metadata::empty(),
+            policy_version: Arc::from(security.authorization_policy_version()),
+            decision_id: Arc::from(security.authorization_decision_id()),
+        },
+        accepted.relation().budget_scope_id(),
+    ))
+}
+
+async fn apply_tool_reconcile_result<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    seed: &ToolDispatchSeed,
+    result: &ToolReconcileResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<ToolResumeAction, RunHandleError> {
+    match result {
+        ToolReconcileResult::Completed(tool_result) => {
+            settle_reconciled_tool(coordinator, seed.clone(), tool_result.clone(), sources).await
+        }
+        ToolReconcileResult::Deferred(deferral) | ToolReconcileResult::StillRunning(deferral) => {
+            ensure_or_wait_tool_deferred(coordinator, seed, deferral, sources).await
+        }
+        ToolReconcileResult::NotStarted
+        | ToolReconcileResult::RetrySafe
+        | ToolReconcileResult::Unknown
+        | ToolReconcileResult::NonRepeatable => Ok(ToolResumeAction::NoOutstanding),
+    }
+}
+
+async fn settle_reconciled_tool<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    seed: ToolDispatchSeed,
+    result: ToolResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<ToolResumeAction, RunHandleError> {
+    let effect_id = seed.requested.effect_id();
+    if coordinator
+        .state()
+        .tool_settlements
+        .contains_key(&effect_id)
+    {
+        return Ok(ToolResumeAction::UseRecorded);
+    }
+    let deferred = coordinator
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(|batch| {
+            batch.calls.iter().any(|call| {
+                call.assigned.effect_id == effect_id
+                    && matches!(
+                        call.status,
+                        ActiveToolCallStatus::Requested {
+                            deferred: Some(_),
+                            ..
+                        }
+                    )
+            })
+        });
+    let driver = ToolDriverResult {
+        seed,
+        result: Ok(AssembledToolTerminal {
+            usage: None,
+            result,
+        }),
+    };
+    if deferred {
+        return settle_external_tool(coordinator, driver, sources).await;
+    }
+    process_tool_result(coordinator, driver, sources).await?;
+    Ok(ToolResumeAction::UseRecorded)
+}
+
+async fn settle_external_tool<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    driver: ToolDriverResult,
+    sources: &SettlementSources<C, R>,
+) -> Result<ToolResumeAction, RunHandleError> {
+    let effect_id = driver.seed.requested.effect_id();
+    let settled = build_tool_settlement(driver)?;
+    let ToolSettlement::Completed(completion) = &settled.outcome else {
+        return Err(RunHandleError::ToolSettlement {
+            code: "tool_external_completion_invalid",
+        });
+    };
+    let completion_id = effect_id.to_canonical_string();
+    let input = KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
+        completion: ExternalEffectCompletion::try_new(
+            effect_id,
+            &completion_id,
+            ExternalEffectOutcome::Completed {
+                output: completion.output().clone(),
+                usage: completion.usage().cloned(),
+                artifacts: Arc::from(completion.artifacts()),
+            },
+        )
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "tool_external_completion_invalid",
+        })?,
+        assistant_message: None,
+    });
+    let now = sources.now()?;
+    let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;
+    match coordinator
+        .submit(
+            TransitionEnv {
+                now,
+                ids: allocation,
+            },
+            input,
+        )
+        .await
+    {
+        Ok(outcome) => {
+            if let Some(fault) = outcome.fault {
+                return Err(RunHandleError::Faulted { code: fault.code });
+            }
+            Ok(ToolResumeAction::UseRecorded)
+        }
+        Err(CommitCoordinatorError::Decision {
+            code:
+                "conflicting_completion_id" | "conflicting_settlement" | "settlement_digest_mismatch",
+        }) => {
+            submit_tool_fail_closed(coordinator, effect_id, &completion_id, sources).await?;
+            Ok(ToolResumeAction::SuspendUncertain)
+        }
+        Err(error) => Err(RunHandleError::Coordinator(error)),
+    }
+}
+
+async fn ensure_or_wait_tool_deferred<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    seed: &ToolDispatchSeed,
+    deferral: &ToolDeferral,
+    sources: &SettlementSources<C, R>,
+) -> Result<ToolResumeAction, RunHandleError> {
+    let effect_id = seed.requested.effect_id();
+    let existing = coordinator
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .and_then(|batch| {
+            batch.calls.iter().find_map(|call| {
+                (call.assigned.effect_id == effect_id)
+                    .then_some(call.status.clone())
+                    .and_then(|status| match status {
+                        ActiveToolCallStatus::Requested {
+                            deferred: Some(deferred),
+                            ..
+                        } => Some(deferred),
+                        _ => None,
+                    })
+            })
+        });
+    if let Some(existing) = existing {
+        if existing.handle == deferral.handle {
+            return Ok(ToolResumeAction::WaitExternal);
+        }
+        submit_tool_fail_closed(coordinator, effect_id, deferral.handle.handle(), sources).await?;
+        return Ok(ToolResumeAction::SuspendUncertain);
+    }
+    let settled = ToolBatchSettled {
+        tool_batch_id: seed.tool_batch_id,
+        outcome: ToolSettlement::Deferred(EffectDeferred {
+            effect_id,
+            handle: deferral.handle.clone(),
+            reconciliation: deferral.reconciliation,
+            next_poll_at: deferral.next_poll_at,
+            expires_at: deferral.expires_at,
+            output_contract: seed.requested.output_contract().clone(),
+        }),
+    };
+    submit_resume_input(coordinator, KernelInput::ToolBatchSettled(settled), sources).await?;
+    Ok(ToolResumeAction::WaitExternal)
+}
+
+async fn submit_tool_fail_closed<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    effect_id: EffectId,
+    command_id: &str,
+    sources: &SettlementSources<C, R>,
+) -> Result<(), RunHandleError> {
+    let accepted = coordinator
+        .state()
+        .accepted
+        .as_ref()
+        .ok_or(RunHandleError::ToolSettlement {
+            code: "tool_resume_accepted_missing",
+        })?;
+    let security = accepted.security();
+    let locator = coordinator
+        .pending_tool_seeds()
+        .into_iter()
+        .find(|seed| seed.requested.effect_id() == effect_id)
+        .or_else(|| deferred_tool_seed(coordinator, effect_id))
+        .ok_or(RunHandleError::ToolSettlement {
+            code: "tool_resume_seed_missing",
+        })?
+        .locator;
+    let accepted_digest = coordinator
+        .state()
+        .tool_settlements
+        .get(&effect_id)
+        .map(|fingerprint| fingerprint.digest);
+    let rejection = ExternalCommandRejected::try_new(
+        ExternalCommandKind::EffectCompletion,
+        command_id,
+        ExternalCommandTarget::Effect(effect_id),
+        accepted.security().principal().clone(),
+        AuthorizationEvidence::try_new(
+            security.authorization_policy_version(),
+            security.authorization_decision_id(),
+        )
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "tool_resume_authorization_invalid",
+        })?,
+        "conflicting_or_invalid_completion",
+        Digest::raw_json(command_id.as_bytes()),
+        accepted_digest,
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "tool_resume_rejection_invalid",
+    })?;
+    submit_resume_input(
+        coordinator,
+        KernelInput::RecordExternalCommandRejected(RecordExternalCommandRejected {
+            locator,
+            rejection,
+        }),
         sources,
     )
     .await

@@ -31,8 +31,8 @@ cross-origin isolation (`COOP`/`COEP`) are not required and are not shipped.
 
 IndexedDB batteries on `@finstack/ai/adapters/indexeddb` are origin-scoped,
 size-bounded, and deletable through `deleteIndexedDbStores()`. Schema v1 is
-provisional. Persistence is experimental until PR-048 revalidates against
-JournalStore v1. `health().durable` stays false. Reload restore is inspect, not
+provisional. Persistence remains experimental after PR-048; it does not
+meet NFR-REL-001. `health().durable` stays false. Reload restore is inspect, not
 continue-the-run. Shared-device browsers share the origin database; treat the
 journal as application data, not a secret store.
 

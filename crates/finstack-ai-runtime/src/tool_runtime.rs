@@ -118,6 +118,17 @@ impl ToolDispatcher {
         self.per_tool.clone()
     }
 
+    pub(crate) async fn resume_call(&self, seed: ToolDispatchSeed) -> Result<(), DispatchError> {
+        let effect_id = seed.requested.effect_id();
+        self.dispatch(RuntimeDispatch {
+            action: finstack_ai_kernel::PostCommitAction::ExecuteEffect { effect_id },
+            model: None,
+            tool: Some(seed),
+            timer: None,
+        })
+        .await
+    }
+
     fn resolved_for_seed(
         &self,
         seed: &ToolDispatchSeed,

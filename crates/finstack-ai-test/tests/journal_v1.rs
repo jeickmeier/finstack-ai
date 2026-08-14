@@ -28,11 +28,11 @@ fn journal_v1_corpus_is_byte_identical_and_covers_every_family() {
     let count = run_journal_v1_corpus().expect("journal v1 corpus");
     assert_eq!(
         count,
-        39 * 2 + 11 + 10 + 4,
+        40 * 2 + 11 + 10 + 4,
         "expected payload+envelope known-answers plus profile/limit/tamper fixtures, found {count}"
     );
     let bodies = all_activated_record_bodies().expect("bodies");
-    assert_eq!(bodies.len(), 39, "every activated RecordBody family");
+    assert_eq!(bodies.len(), 40, "every activated RecordBody family");
     let kinds = bodies.iter().map(RecordBody::kind_name).collect::<Vec<_>>();
     let mut unique = kinds.clone();
     unique.sort_unstable();

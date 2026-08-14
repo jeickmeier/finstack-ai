@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "request_interaction": {
+      "request": {
+        "request_version": 1,
+        "interaction_id": "01234567-89ab-7000-8000-0000000001f5",
+        "effect_id": "01234567-89ab-7000-8000-0000000001f6",
+        "kind": {
+          "kind": "approval"
+        },
+        "prompt": [
+          {
+            "kind": "text",
+            "text": "approve the next action"
+          }
+        ],
+        "prompt_digest": "01adc53f55a633e3710abf4d43986fcef488849b4e3cf631d887c7217d2bd59f",
+        "response_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "approved"
+          ],
+          "type": "object"
+        },
+        "response_schema_digest": "d5ee3b7bee13080c36c5d6b6c665269f768d2528ca36b673fb5c617427a72fd7",
+        "policy_component": {
+          "id": "finstack.policy.approval",
+          "version": {
+            "major": 1,
+            "minor": 0,
+            "patch": 0
+          }
+        },
+        "policy_version": {
+          "major": 1,
+          "minor": 0,
+          "patch": 0
+        },
+        "delegatable": false,
+        "metadata": {}
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

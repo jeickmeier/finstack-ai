@@ -96,6 +96,21 @@ export class Agent {
         return takeObject(ret);
     }
     /**
+     * Create a live session on this agent's journal store.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session cannot be created.
+     * @param {string | null} [tenant_scope]
+     * @returns {Promise<any>}
+     */
+    createSession(tenant_scope) {
+        var ptr0 = isLikeNone(tenant_scope) ? 0 : passStringToWasm0(tenant_scope, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_createSession(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
      * Replay one stored session into a provisional inspect snapshot.
      *
      * This does not continue an interrupted run or retry in-flight effects.
@@ -113,6 +128,25 @@ export class Agent {
         const ptr0 = passStringToWasm0(session_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.agent_inspectSession(store.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
+     * Open an existing session without respawning parked runs.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session id is invalid or the
+     * stored journal cannot be replayed.
+     * @param {string} session_id
+     * @param {string | null} [tenant_scope]
+     * @returns {Promise<any>}
+     */
+    openSession(session_id, tenant_scope) {
+        const ptr0 = passStringToWasm0(session_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(tenant_scope) ? 0 : passStringToWasm0(tenant_scope, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_openSession(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         return takeObject(ret);
     }
     /**
@@ -821,6 +855,269 @@ export class JsToolset {
 if (Symbol.dispose) JsToolset.prototype[Symbol.dispose] = JsToolset.prototype.free;
 
 /**
+ * Live lane handle.
+ */
+export class Lane {
+    static __wrap(ptr) {
+        const obj = Object.create(Lane.prototype);
+        obj.__wbg_ptr = ptr;
+        LaneFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        LaneFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_lane_free(ptr, 0);
+    }
+    /**
+     * Inspect name, leaf, and history length.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane cannot be inspected.
+     * @returns {Promise<any>}
+     */
+    inspect() {
+        const ret = wasm.lane_inspect(this.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Durable lane identity.
+     * @returns {string}
+     */
+    get laneId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.lane_laneId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Point this idle lane at an existing entry without copying.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the entry is unknown or the lane
+     * is busy.
+     * @param {string} entry_id
+     * @returns {Promise<any>}
+     */
+    navigate(entry_id) {
+        const ptr0 = passStringToWasm0(entry_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.lane_navigate(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
+     * Session that owns this lane.
+     * @returns {Session}
+     */
+    get session() {
+        const ret = wasm.lane_session(this.__wbg_ptr);
+        return Session.__wrap(ret);
+    }
+}
+if (Symbol.dispose) Lane.prototype[Symbol.dispose] = Lane.prototype.free;
+
+/**
+ * Read-only operation locator.
+ */
+export class Locator {
+    static __wrap(ptr) {
+        const obj = Object.create(Locator.prototype);
+        obj.__wbg_ptr = ptr;
+        LocatorFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        LocatorFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_locator_free(ptr, 0);
+    }
+    /**
+     * Lane identity.
+     * @returns {string}
+     */
+    get laneId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.locator_laneId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Run identity.
+     * @returns {string}
+     */
+    get runId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.locator_runId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Session identity.
+     * @returns {string}
+     */
+    get sessionId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.locator_sessionId(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Tenant scope captured at acceptance.
+     * @returns {string}
+     */
+    get tenantScope() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.locator_tenantScope(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Explicit locator snapshot.
+     *
+     * # Errors
+     *
+     * Returns a JavaScript exception when the snapshot object cannot be constructed.
+     * @returns {any}
+     */
+    toDict() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.locator_toDict(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) Locator.prototype[Symbol.dispose] = Locator.prototype.free;
+
+/**
+ * In-process external identity map.
+ */
+export class MemoryExternalIdentityMap {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MemoryExternalIdentityMapFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_memoryexternalidentitymap_free(ptr, 0);
+    }
+    /**
+     * Empty map.
+     */
+    constructor() {
+        const ret = wasm.memoryexternalidentitymap_new();
+        this.__wbg_ptr = ret;
+        MemoryExternalIdentityMapFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Resolve one previously bound key.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the key is invalid.
+     * @param {string} channel
+     * @param {string} account
+     * @param {string} thread
+     * @returns {any}
+     */
+    resolve(channel, account, thread) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(channel, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(account, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(thread, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.memoryexternalidentitymap_resolve(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) MemoryExternalIdentityMap.prototype[Symbol.dispose] = MemoryExternalIdentityMap.prototype.free;
+
+/**
  * Detached run control handle. Drop detaches observation and does not cancel.
  */
 export class Run {
@@ -864,6 +1161,14 @@ export class Run {
         return takeObject(ret);
     }
     /**
+     * Immutable operation locator snapshot.
+     * @returns {Locator}
+     */
+    get locator() {
+        const ret = wasm.run_locator(this.__wbg_ptr);
+        return Locator.__wrap(ret);
+    }
+    /**
      * Receive the next transport batch, or `undefined` after close/terminal.
      *
      * # Errors
@@ -888,7 +1193,7 @@ export class Run {
         return takeObject(ret);
     }
     /**
-     * Immutable session locator for this run.
+     * Live session handle for this run.
      * @returns {Session}
      */
     get session() {
@@ -942,6 +1247,14 @@ export class RunResult {
         }
     }
     /**
+     * Operation locator for the completed run.
+     * @returns {Locator}
+     */
+    get locator() {
+        const ret = wasm.runresult_locator(this.__wbg_ptr);
+        return Locator.__wrap(ret);
+    }
+    /**
      * Durable retry attempts consumed by this run.
      * @returns {number}
      */
@@ -950,12 +1263,12 @@ export class RunResult {
         return ret >>> 0;
     }
     /**
-     * Session locator for the completed run.
-     * @returns {Session}
+     * Locator snapshot for the completed run.
+     * @returns {Locator}
      */
     get session() {
         const ret = wasm.runresult_session(this.__wbg_ptr);
-        return Session.__wrap(ret);
+        return Locator.__wrap(ret);
     }
     /**
      * Concatenated final assistant text.
@@ -1021,7 +1334,7 @@ export class RunResult {
 if (Symbol.dispose) RunResult.prototype[Symbol.dispose] = RunResult.prototype.free;
 
 /**
- * Read-only session locator.
+ * Live session handle.
  */
 export class Session {
     static __wrap(ptr) {
@@ -1041,44 +1354,84 @@ export class Session {
         wasm.__wbg_session_free(ptr, 0);
     }
     /**
-     * Lane identity.
-     * @returns {string}
+     * Bind a host-owned external identity to one lane.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the key is invalid, the lane is
+     * unknown, or the key is already bound to a different session lane.
+     * @param {MemoryExternalIdentityMap} map
+     * @param {string} channel
+     * @param {string} account
+     * @param {string} thread
+     * @param {string} lane_id
      */
-    get laneId() {
-        let deferred1_0;
-        let deferred1_1;
+    bindExternalIdentity(map, channel, account, thread, lane_id) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.session_laneId(retptr, this.__wbg_ptr);
+            _assertClass(map, MemoryExternalIdentityMap);
+            const ptr0 = passStringToWasm0(channel, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(account, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(thread, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len2 = WASM_VECTOR_LEN;
+            const ptr3 = passStringToWasm0(lane_id, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len3 = WASM_VECTOR_LEN;
+            wasm.session_bindExternalIdentity(retptr, this.__wbg_ptr, map.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            deferred1_0 = r0;
-            deferred1_1 = r1;
-            return getStringFromWasm0(r0, r1);
+            if (r1) {
+                throw takeObject(r0);
+            }
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
         }
     }
     /**
-     * Run identity.
-     * @returns {string}
+     * Create a named lane, optionally forking from an existing entry.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane cannot be created.
+     * @param {string} name
+     * @param {string | null} [fork]
+     * @returns {Promise<any>}
      */
-    get runId() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.session_runId(retptr, this.__wbg_ptr);
-            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            deferred1_0 = r0;
-            deferred1_1 = r1;
-            return getStringFromWasm0(r0, r1);
-        } finally {
-            wasm.__wbindgen_add_to_stack_pointer(16);
-            wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
-        }
+    createLane(name, fork) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(fork) ? 0 : passStringToWasm0(fork, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.session_createLane(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return takeObject(ret);
+    }
+    /**
+     * Look up one lane by application name.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane does not exist.
+     * @param {string} name
+     * @returns {Promise<any>}
+     */
+    lane(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_lane(this.__wbg_ptr, ptr0, len0);
+        return takeObject(ret);
+    }
+    /**
+     * List restored lanes.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the session cannot be loaded.
+     * @returns {Promise<any>}
+     */
+    listLanes() {
+        const ret = wasm.session_listLanes(this.__wbg_ptr);
+        return takeObject(ret);
     }
     /**
      * Session identity.
@@ -1101,7 +1454,7 @@ export class Session {
         }
     }
     /**
-     * Tenant scope captured at acceptance.
+     * Tenant scope captured by the host.
      * @returns {string}
      */
     get tenantScope() {
@@ -1118,29 +1471,6 @@ export class Session {
         } finally {
             wasm.__wbindgen_add_to_stack_pointer(16);
             wasm.__wbindgen_export5(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * Explicit locator snapshot.
-     *
-     * # Errors
-     *
-     * Returns a JavaScript exception when the snapshot object cannot be constructed.
-     * @returns {any}
-     */
-    toDict() {
-        try {
-            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-            wasm.session_toDict(retptr, this.__wbg_ptr);
-            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
-            if (r2) {
-                throw takeObject(r1);
-            }
-            return takeObject(r0);
-        } finally {
-            wasm.__wbindgen_add_to_stack_pointer(16);
         }
     }
 }
@@ -1500,6 +1830,10 @@ function __wbg_get_imports() {
             const ret = JsToolset.__unwrap(getObject(arg0));
             return ret;
         },
+        __wbg_lane_new: function(arg0) {
+            const ret = Lane.__wrap(arg0);
+            return addHeapObject(ret);
+        },
         __wbg_length_36bd29c6848c2144: function(arg0) {
             const ret = getObject(arg0).length;
             return ret;
@@ -1535,7 +1869,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1405(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1531(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1580,6 +1914,10 @@ function __wbg_get_imports() {
             const ret = RunResult.__wrap(arg0);
             return addHeapObject(ret);
         },
+        __wbg_session_new: function(arg0) {
+            const ret = Session.__wrap(arg0);
+            return addHeapObject(ret);
+        },
         __wbg_set_8155bb79a948541b: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(getObject(arg0), getObject(arg1), getObject(arg2));
             return ret;
@@ -1613,13 +1951,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 438, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1391);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 484, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1517);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_334);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_375);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1651,14 +1989,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_334(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_334(arg0, arg1);
+function __wasm_bindgen_func_elem_375(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_375(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1391(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1517(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1391(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1517(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -1669,8 +2007,8 @@ function __wasm_bindgen_func_elem_1391(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1405(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1405(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1531(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1531(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1709,6 +2047,15 @@ const JsRandomSourceFinalization = (typeof FinalizationRegistry === 'undefined')
 const JsToolsetFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_jstoolset_free(ptr, 1));
+const LaneFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_lane_free(ptr, 1));
+const LocatorFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_locator_free(ptr, 1));
+const MemoryExternalIdentityMapFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_memoryexternalidentitymap_free(ptr, 1));
 const RunFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_run_free(ptr, 1));

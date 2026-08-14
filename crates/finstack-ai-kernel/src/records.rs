@@ -13,6 +13,7 @@ use crate::budget::{
     BudgetReservationSettled,
 };
 use crate::capabilities::CapabilitiesActivated;
+use crate::conversation::ConversationEntry;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind,
     EffectOutputKind, EffectRequested, InteractionCancelled, InteractionExpired,
@@ -534,6 +535,8 @@ pub enum RecordBody {
     LaneMoved(LaneMoved),
     /// Disposable snapshot written.
     SnapshotWritten(SnapshotWritten),
+    /// Immutable conversation-tree entry (TDD §24.1).
+    ConversationEntry(ConversationEntry),
 }
 
 impl RecordBody {
@@ -568,7 +571,8 @@ impl RecordBody {
             | Self::SessionCreated(_)
             | Self::LaneCreated(_)
             | Self::LaneMoved(_)
-            | Self::SnapshotWritten(_) => 0,
+            | Self::SnapshotWritten(_)
+            | Self::ConversationEntry(_) => 0,
             Self::ToolCallSettled(_) => 2,
             _ => 1,
         })
@@ -617,6 +621,7 @@ impl RecordBody {
             Self::LaneCreated(_) => "lane_created",
             Self::LaneMoved(_) => "lane_moved",
             Self::SnapshotWritten(_) => "snapshot_written",
+            Self::ConversationEntry(_) => "conversation_entry",
         }
     }
 
@@ -629,6 +634,7 @@ impl RecordBody {
                 | Self::LaneCreated(_)
                 | Self::LaneMoved(_)
                 | Self::SnapshotWritten(_)
+                | Self::ConversationEntry(_)
         )
     }
 }
@@ -886,6 +892,7 @@ fn validate_record_run_id(run_id: Option<RunId>, body: &RecordBody) -> Result<()
             | RecordBody::LaneCreated(_)
             | RecordBody::LaneMoved(_)
             | RecordBody::SnapshotWritten(_)
+            | RecordBody::ConversationEntry(_)
     ) && run_id.is_some()
     {
         return Err(RecordError::Session(

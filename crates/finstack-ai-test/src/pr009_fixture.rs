@@ -29,9 +29,8 @@ pub(crate) fn run_pr009_subject(fixture: &PublicApiFixture) -> Result<(), Public
         }
         "external-command-rejected" => run_strict_parse::<ExternalCommandRejected>(fixture),
         "corrupt-replay" => run_corrupt_replay(fixture),
-        "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" | "pr014-record" => {
-            run_record(fixture)
-        }
+        "pr009-record" | "pr010-record" | "pr011-record" | "pr012-record" | "pr014-record"
+        | "pr046-record" => run_record(fixture),
         other => Err(fail(format!("unsupported PR-009 subject {other}"))),
     }
 }

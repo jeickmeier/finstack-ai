@@ -6,9 +6,10 @@ use finstack_ai_kernel::{
     AllocatedIds, AppendBatchId, AuthorizationEvidence, CancellationRequestId, Digest, EffectId,
     EventId, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
     ExternalEffectCompletedInput, ExternalEffectCompletionCommand, ExternalEffectOutcome,
-    InteractionId, InteractionResolutionCommand, KernelError, KernelInput, MessageId,
-    ModelRequestId, OperationLocator, PrincipalRef, RecordExternalCommandRejected, RecordId,
-    Timestamp, ToolBatchId, ToolCallId, TransitionEnv, TurnId,
+    InteractionExpired, InteractionId, InteractionRequest, InteractionResolutionCommand,
+    InteractionSettled, KernelError, KernelInput, MessageId, ModelRequestId, OperationLocator,
+    PrincipalRef, RecordExternalCommandRejected, RecordId, Timestamp, ToolBatchId, ToolCallId,
+    TransitionEnv, TurnId,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -66,6 +67,7 @@ pub struct ExternalCompletionRouter {
     store: Arc<dyn JournalStore>,
     audit: Arc<SecurityAuditGate>,
     ids: UuidV7Generator<SystemClock, OsRandomSource>,
+    horizon: Option<crate::IdempotencyHorizon>,
 }
 
 impl ExternalCompletionRouter {
@@ -76,7 +78,15 @@ impl ExternalCompletionRouter {
             store,
             audit,
             ids: UuidV7Generator::new(SystemClock, OsRandomSource),
+            horizon: None,
         }
+    }
+
+    /// Bind the application-configured settlement horizon.
+    #[must_use]
+    pub fn with_horizon(mut self, horizon: crate::IdempotencyHorizon) -> Self {
+        self.horizon = Some(horizon);
+        self
     }
 
     /// Route one fully authenticated command without accepting raw callback tokens.
@@ -96,6 +106,22 @@ impl ExternalCompletionRouter {
     ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
         let locator_digest = normalized_digest(OPERATION_LOCATOR_DIGEST_DOMAIN, &command.locator)?;
         let submitted_digest = normalized_digest(EXTERNAL_COMMAND_DIGEST_DOMAIN, &command)?;
+        if self
+            .horizon
+            .is_some_and(|horizon| submitted_at >= horizon.expire_at)
+        {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.principal.clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "expired_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await;
+        }
         let Ok(mut coordinator) =
             CommitCoordinator::recover(Arc::clone(&self.store), command.locator.session_id).await
         else {
@@ -314,66 +340,282 @@ impl ExternalCompletionRouter {
     }
 }
 
-/// Locator/authentication/audit router for interaction commands deferred to PR-044.
+/// Direct-locator router for authenticated interaction resolutions.
 pub struct InteractionRouter {
     store: Arc<dyn JournalStore>,
     audit: Arc<SecurityAuditGate>,
+    ids: UuidV7Generator<SystemClock, OsRandomSource>,
 }
 
 impl InteractionRouter {
     /// Construct a router over a direct store and enabled healthy audit gate.
     #[must_use]
     pub fn new(store: Arc<dyn JournalStore>, audit: Arc<SecurityAuditGate>) -> Self {
-        Self { store, audit }
+        Self {
+            store,
+            audit,
+            ids: UuidV7Generator::new(SystemClock, OsRandomSource),
+        }
     }
 
-    /// Validate session identity/authentication, audit, then reject unavailable resolution.
+    /// Construct a router over a direct store and an in-process no-op audit gate.
     ///
     /// # Errors
     ///
-    /// Always returns the same non-existence-revealing rejection in PR-014.
+    /// Returns [`ExternalRouteError::IngressRejected`] when the trusted gate
+    /// cannot be enabled.
+    pub async fn trusted(store: Arc<dyn JournalStore>) -> Result<Self, ExternalRouteError> {
+        let audit = SecurityAuditGate::enable_noop()
+            .await
+            .map_err(|_| ExternalRouteError::IngressRejected)?;
+        Ok(Self::new(store, audit))
+    }
+
+    /// Route one fully authenticated interaction resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns one non-existence-revealing rejection after required audit for locator
+    /// or authorization failures, and fail-closed runtime errors otherwise.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the security-sensitive route keeps locator, authorization, expiry, and durable rejection order explicit"
+    )]
     pub async fn route(
         &self,
         command: InteractionResolutionCommand,
         submitted_at: Timestamp,
-    ) -> Result<(), ExternalRouteError> {
+    ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
         let locator_digest = normalized_digest(OPERATION_LOCATOR_DIGEST_DOMAIN, &command.locator)?;
         let submitted_digest = normalized_digest(EXTERNAL_COMMAND_DIGEST_DOMAIN, &command)?;
-        let coordinator =
-            CommitCoordinator::recover(Arc::clone(&self.store), command.locator.session_id).await;
-        let valid = coordinator.ok().is_some_and(|coordinator| {
-            coordinator.state().session_id == Some(command.locator.session_id)
-                && coordinator.state().lane_id == Some(command.locator.lane_id)
-                && coordinator
-                    .state()
-                    .accepted
-                    .as_ref()
-                    .is_some_and(|accepted| {
-                        accepted.run_id() == command.locator.run_id
-                            && accepted.security().tenant_scope()
-                                == command.locator.tenant_scope.as_ref()
-                    })
-                && authorization_matches(
-                    coordinator.state(),
-                    command.resolution.principal(),
-                    command.resolution.authorization(),
+        let Ok(mut coordinator) =
+            CommitCoordinator::recover(Arc::clone(&self.store), command.locator.session_id).await
+        else {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.resolution.principal().clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "unknown_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
                 )
-        });
-        let (category, reason_code) = if valid {
-            (
-                SecurityAuditCategory::UnsupportedInteraction,
-                "interaction_resolution_unavailable",
-            )
-        } else {
-            (SecurityAuditCategory::UnknownLocator, "unknown_locator")
+                .await;
         };
+
+        let identity_valid = coordinator.state().session_id == Some(command.locator.session_id)
+            && coordinator.state().lane_id == Some(command.locator.lane_id)
+            && coordinator
+                .state()
+                .accepted
+                .as_ref()
+                .is_some_and(|accepted| {
+                    accepted.run_id() == command.locator.run_id
+                        && accepted.security().tenant_scope()
+                            == command.locator.tenant_scope.as_ref()
+                });
+        if !identity_valid {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.resolution.principal().clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "unknown_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await;
+        }
+        if !authorization_matches(
+            coordinator.state(),
+            command.resolution.principal(),
+            command.resolution.authorization(),
+        ) {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.resolution.principal().clone()),
+                    SecurityAuditCategory::ScopeMismatch,
+                    "scope_mismatch",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await;
+        }
+
+        let interaction_id = command.resolution.interaction_id();
+        if !known_interaction(coordinator.state(), interaction_id) {
+            return self
+                .reject_unknown(
+                    &command.locator,
+                    Some(command.resolution.principal().clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "unknown_target",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await;
+        }
+
+        let accepted_digest = coordinator
+            .state()
+            .resolution_identities
+            .get(command.resolution.resolution_id())
+            .map(|identity| identity.settlement_digest);
+        let input = interaction_settled_input(coordinator.state(), &command, submitted_at);
+        let env = match allocate_transition_env(&coordinator, &input, submitted_at, self.ids) {
+            Ok(env) => env,
+            Err(ExternalRouteError::Runtime(CommitCoordinatorError::Decision {
+                code:
+                    "conflicting_settlement"
+                    | "invalid_phase_input"
+                    | "invalid_run_acceptance"
+                    | "invalid_input_payload"
+                    | "terminal_state_immutable",
+            })) => {
+                return self
+                    .record_rejection(
+                        &mut coordinator,
+                        &command,
+                        submitted_at,
+                        submitted_digest,
+                        accepted_digest,
+                        "conflicting_or_invalid_resolution",
+                    )
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
+        match coordinator.submit(env, input).await {
+            Ok(outcome) if outcome.committed.is_none() => Ok(ExternalRouteOutcome::Idempotent {
+                command_id: Arc::from(command.resolution.resolution_id()),
+                submitted_digest,
+            }),
+            Ok(outcome) => Ok(ExternalRouteOutcome::Committed(outcome)),
+            Err(CommitCoordinatorError::Decision {
+                code:
+                    "conflicting_settlement"
+                    | "invalid_phase_input"
+                    | "invalid_run_acceptance"
+                    | "invalid_input_payload"
+                    | "terminal_state_immutable",
+            }) => {
+                self.record_rejection(
+                    &mut coordinator,
+                    &command,
+                    submitted_at,
+                    submitted_digest,
+                    accepted_digest,
+                    "conflicting_or_invalid_resolution",
+                )
+                .await
+            }
+            Err(error) => Err(ExternalRouteError::Runtime(error)),
+        }
+    }
+
+    /// List the outstanding interaction for one authenticated locator (0 or 1).
+    ///
+    /// # Errors
+    ///
+    /// Returns one non-existence-revealing rejection after required audit for locator
+    /// or authorization failures.
+    pub async fn list(
+        &self,
+        locator: &OperationLocator,
+        principal: &PrincipalRef,
+        authorization: &AuthorizationEvidence,
+        submitted_at: Timestamp,
+    ) -> Result<Vec<InteractionRequest>, ExternalRouteError> {
+        let locator_digest = normalized_digest(OPERATION_LOCATOR_DIGEST_DOMAIN, locator)?;
+        let submitted_digest = normalized_digest(
+            EXTERNAL_COMMAND_DIGEST_DOMAIN,
+            &(locator, principal, authorization),
+        )?;
+        let Ok(coordinator) =
+            CommitCoordinator::recover(Arc::clone(&self.store), locator.session_id).await
+        else {
+            return self
+                .reject_unknown(
+                    locator,
+                    Some(principal.clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "unknown_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await
+                .map(|_| Vec::new());
+        };
+        let identity_valid = coordinator.state().session_id == Some(locator.session_id)
+            && coordinator.state().lane_id == Some(locator.lane_id)
+            && coordinator
+                .state()
+                .accepted
+                .as_ref()
+                .is_some_and(|accepted| {
+                    accepted.run_id() == locator.run_id
+                        && accepted.security().tenant_scope() == locator.tenant_scope.as_ref()
+                });
+        if !identity_valid {
+            return self
+                .reject_unknown(
+                    locator,
+                    Some(principal.clone()),
+                    SecurityAuditCategory::UnknownLocator,
+                    "unknown_locator",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await
+                .map(|_| Vec::new());
+        }
+        if !authorization_matches(coordinator.state(), principal, authorization) {
+            return self
+                .reject_unknown(
+                    locator,
+                    Some(principal.clone()),
+                    SecurityAuditCategory::ScopeMismatch,
+                    "scope_mismatch",
+                    locator_digest,
+                    submitted_digest,
+                    submitted_at,
+                )
+                .await
+                .map(|_| Vec::new());
+        }
+        Ok(coordinator
+            .state()
+            .pending_interaction
+            .as_ref()
+            .map(|pending| vec![pending.request.clone()])
+            .unwrap_or_default())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn reject_unknown(
+        &self,
+        locator: &OperationLocator,
+        principal: Option<PrincipalRef>,
+        category: SecurityAuditCategory,
+        reason_code: &'static str,
+        locator_digest: Digest,
+        submission_digest: Digest,
+        submitted_at: Timestamp,
+    ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
         let event = audit_event(
-            &command.locator,
-            Some(command.resolution.principal().clone()),
+            locator,
+            principal,
             category,
             reason_code,
             locator_digest,
-            submitted_digest,
+            submission_digest,
             submitted_at,
         )?;
         self.audit
@@ -382,6 +624,80 @@ impl InteractionRouter {
             .map_err(|_| ExternalRouteError::IngressRejected)?;
         Err(ExternalRouteError::IngressRejected)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_rejection(
+        &self,
+        coordinator: &mut CommitCoordinator,
+        command: &InteractionResolutionCommand,
+        submitted_at: Timestamp,
+        submitted_digest: Digest,
+        accepted_digest: Option<Digest>,
+        reason_code: &'static str,
+    ) -> Result<ExternalRouteOutcome, ExternalRouteError> {
+        let rejection = ExternalCommandRejected::try_new(
+            ExternalCommandKind::InteractionResolution,
+            command.resolution.resolution_id(),
+            ExternalCommandTarget::Interaction(command.resolution.interaction_id()),
+            command.resolution.principal().clone(),
+            command.resolution.authorization().clone(),
+            reason_code,
+            submitted_digest,
+            accepted_digest,
+        )
+        .map_err(|_| ExternalRouteError::InvalidNormalizedCommand)?;
+        let input = KernelInput::RecordExternalCommandRejected(RecordExternalCommandRejected {
+            locator: command.locator.clone(),
+            rejection,
+        });
+        let env = allocate_transition_env(coordinator, &input, submitted_at, self.ids)?;
+        let evidence = coordinator
+            .submit(env, input)
+            .await
+            .map_err(ExternalRouteError::Runtime)?;
+        Ok(ExternalRouteOutcome::Rejected {
+            reason_code,
+            evidence,
+        })
+    }
+}
+
+fn known_interaction(
+    state: &finstack_ai_kernel::KernelState,
+    interaction_id: InteractionId,
+) -> bool {
+    state
+        .pending_interaction
+        .as_ref()
+        .is_some_and(|pending| pending.request.interaction_id() == interaction_id)
+        || state
+            .last_interaction_terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.interaction_id == interaction_id)
+        || state
+            .resolution_identities
+            .values()
+            .any(|identity| identity.interaction_id == interaction_id)
+}
+
+fn interaction_settled_input(
+    state: &finstack_ai_kernel::KernelState,
+    command: &InteractionResolutionCommand,
+    submitted_at: Timestamp,
+) -> KernelInput {
+    if let Some(pending) = &state.pending_interaction
+        && pending.request.interaction_id() == command.resolution.interaction_id()
+        && pending
+            .request
+            .expires_at()
+            .is_some_and(|deadline| submitted_at >= deadline)
+    {
+        return KernelInput::InteractionSettled(InteractionSettled::Expired(InteractionExpired {
+            interaction_id: pending.request.interaction_id(),
+            expired_at: submitted_at,
+        }));
+    }
+    KernelInput::InteractionSettled(InteractionSettled::Resolved(command.resolution.clone()))
 }
 
 fn known_effect(state: &finstack_ai_kernel::KernelState, effect_id: EffectId) -> bool {
@@ -877,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn principal_mismatch_and_interaction_unavailable_are_audited_nonrevealing() {
+    fn principal_mismatch_and_unknown_interaction_are_audited_nonrevealing() {
         runtime().block_on(async {
             let store: Arc<dyn JournalStore> = Arc::new(StaticStore(loaded_session()));
             let sink = Arc::new(AuditSink::new(false));
@@ -898,7 +1214,7 @@ mod tests {
                 interaction_router
                     .route(interaction(), timestamp(2_001))
                     .await
-                    .expect_err("unavailable"),
+                    .expect_err("unknown target"),
                 ExternalRouteError::IngressRejected
             );
             let events = sink.events.lock().expect("lock");
@@ -908,7 +1224,8 @@ mod tests {
                     .any(|event| event.category() == SecurityAuditCategory::ScopeMismatch)
             );
             assert!(events.values().any(|event| {
-                event.category() == SecurityAuditCategory::UnsupportedInteraction
+                event.category() == SecurityAuditCategory::UnknownLocator
+                    && event.reason_code() == "unknown_target"
             }));
         });
     }

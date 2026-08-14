@@ -13,8 +13,8 @@ use finstack_ai_test::{
 fn public_rust_api_corpus_passes() {
     let count = run_all_public_api_fixtures().expect("public-rust-api fixtures");
     assert_eq!(
-        count, 121,
-        "expected the PR-006–PR-015 public-rust-api corpus size, found {count}"
+        count, 131,
+        "expected the PR-006–PR-047 public-rust-api corpus size, found {count}"
     );
 }
 
@@ -39,6 +39,9 @@ fn public_rust_api_corpus_includes_subjects_through_pr015() {
         "interaction-resolution-command",
         "external-command-rejected",
         "pr014-record",
+        "pr046-record",
+        "pr047-identity",
+        "pr047-lane-inspect",
         "corrupt-replay",
         "model-request-draft",
         "model-context-profile",

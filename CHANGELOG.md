@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
 and bundled first-party leaf crates share one lockstep workspace version. The
-current staged alpha candidate is `0.0.2`; the exact cross-binding checkpoint
-remains gated on PR-038 and G4.
+current staged unpublished candidate is `0.0.3`; the exact cross-binding
+checkpoint and named G5 remain owner decisions.
 
 ## [Unreleased]
 
 ### Changed
 
+- Stage unpublished lockstep `0.0.3` artifacts for the Phase 6 / G5 readiness
+  pack. Named G5, checkpoint cut, publish, and tag remain owner decisions.
 - Stage the lockstep `0.0.2` alpha candidate with Python conformance,
   declarative capability activation, complete typing/examples, deterministic
   checksums/SBOM references, and verified hosted keyless signatures. The exact

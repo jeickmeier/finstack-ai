@@ -1,0 +1,51 @@
+PR-048 operational guidance
+Date: 2026-08-14
+Candidate: 8342a6b56fc7832f9e861c6c034c0c1601e58f7a
+
+SQLite backup / restore
+  Use the leaf binary sqlite_ops, not a seventh port.
+  backup <src-db> <dest-db> copies db + wal + shm while the writer is quiet.
+  restore <src-db> <dest-db> refuses a destination that exists and refuses
+  orphan destination sidecars. Restoring a partial trio can tear the journal.
+  sqlite_fault_helper stays a test helper.
+
+Export / import / diagnose / migrate
+  export / import use protocol diagnostic JSONL for one session.
+  import requires an empty session and appends in sequence order.
+  diagnose prints user_version, head sequence, checksum, snapshot
+  validity (valid / ignored / absent), outstanding work, child mappings,
+  and corruption=none or the recover error.
+  migrate applies user_version 0/1 → 1. Any other version fails closed
+  (sqlite_schema_unsupported). No user_version bump shipped in this PR.
+
+Prune and horizon
+  JournalStore::prune is optional; the default is prune_unsupported.
+  Memory and SQLite prune require a snapshot aligned to a batch boundary.
+  Records/batches with sequence / last_sequence < snapshot.sequence are
+  deleted. The snapshot-boundary record, outstanding tail, and settlement
+  indexes stay. Horizon is unused during prune; expiry is ingress-only.
+  After expire_at, ExternalCompletionRouter.with_horizon rejects with
+  expired_locator and does not claim historical idempotency.
+  Outstanding tokens cannot be pruned.
+
+Corruption classes
+  checksum_chain_break / sequence_gap / snapshot_missing_record /
+  snapshot_checksum_mismatch / snapshot_splits_batch /
+  sqlite_schema_unsupported / prune_requires_snapshot /
+  prune_not_batch_aligned / import_session_not_empty /
+  restore_dest_exists / restore_partial_set / source_db_missing.
+  Torn or corrupt snapshots are discarded; the journal remains
+  authoritative (ADR-032).
+
+IndexedDB
+  health().detail stays js_indexeddb_experimental. durable stays false.
+  PR-048 does not claim NFR-REL-001 for IndexedDB. Reload restore is
+  inspect, not continue-the-run. Schema version remains 1.
+
+At-least-once
+  Cancel fan-out, effect retry, and duplicate completion stay
+  at-least-once plus idempotent equal replay. Conflicting duplicates
+  fail closed. No exactly-once external-effect claim.
+
+Benches
+  sqlite restore_growth remains warning-only. PR-063 owns budgets.

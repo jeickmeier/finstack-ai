@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "subject": "kernel-input",
+  "operation": "parse",
+  "input": {
+    "interaction_settled": {
+      "cancelled": {
+        "interaction_id": "01234567-89ab-7000-8000-0000000001f5",
+        "reason": "operator-cancel"
+      }
+    }
+  },
+  "expect": {
+    "ok": true
+  }
+}

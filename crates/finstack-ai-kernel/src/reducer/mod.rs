@@ -7,6 +7,7 @@ mod decide;
 mod decision;
 mod fingerprint;
 mod input;
+mod interaction;
 mod tool;
 mod validation;
 
@@ -17,8 +18,9 @@ use serde::Serialize;
 pub use decision::{CommittedBatch, Decision, KernelError, PostCommitAction};
 pub use input::{
     AcceptRun, CancelRequested, CancellationReconciledInput, ExternalEffectCompletedInput,
-    ExternalEffectCompletion, ExternalEffectOutcome, KernelInput, ModelSettled, ModelSettlement,
-    ReducerStageOutcome, StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
+    ExternalEffectCompletion, ExternalEffectOutcome, InteractionSettled, KernelInput, ModelSettled,
+    ModelSettlement, ReducerStageOutcome, RequestInteraction, StageSettled, TimerFiredInput,
+    ToolBatchSettled, ToolSettlement,
 };
 
 use crate::entries::RunFailed;
@@ -26,7 +28,10 @@ use crate::events::RunEvent;
 use crate::state::{KernelState, TransitionEnv};
 use crate::{Digest, ErrorDescriptor};
 
-fn canonical_digest<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, KernelError> {
+pub(super) fn canonical_digest<T: Serialize>(
+    domain: &'static str,
+    value: &T,
+) -> Result<Digest, KernelError> {
     Ok(canonical_digest_and_len(domain, value)?.0)
 }
 

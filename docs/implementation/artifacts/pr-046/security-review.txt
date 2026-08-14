@@ -1,0 +1,93 @@
+PR-046 TM-15 / Threat Model section 18 security review
+Date: 2026-08-14
+Candidate: dc16907e4e8d2c8a303788dbb9fc04febb1a0572
+Reviewer: me@jeickmeier.com
+Decision: Pass for the immutable conversation tree, mandatory main
+lane, and persist/recover of the parent-effect → child-UUIDv7
+mapping. No threat-model rewrite. No Implementation Plan §6.3 ADR
+trigger. Recovery stays at-least-once plus idempotency; no
+exactly-once claim. G5 is not inferred.
+
+Scope reviewed:
+  ConversationEntry as a structural journal family (no run_id,
+    derived_event_count 0, not hashed into kernel-state)
+  apply_conversation_entry parent immutability and equal replay
+  extract_history parent_id walk, cycle detect, tool-pair close
+  SessionProjection rebuilt from every committed batch on recover
+  Kernel apply: structural no-op; last_applied_sequence is the
+    session head; foreign-run skip only for known children or a
+    child RunAccepted; unknown foreign run_id still
+    RecordIdentityMismatch
+  commit_session_records preview-before-append; sibling
+    ConversationEntry + LaneMoved after EntryAppended /
+    ToolCallSettled
+  Agent bootstrap SessionCreated / LaneCreated("main") / user
+    entry / LaneMoved before AcceptRun; busy-main reject
+  start_or_attach session mapping equal-retry vs SidecarConflict
+  A01–A05 proofs in kernel conversation tests and
+    finstack-ai-test conversation.rs
+
+Triggered controls: TM-15 primary; secondary TM-12.
+SEC-INV-004, SEC-INV-008, SEC-INV-010.
+No new primary port. Recover stays replay-only. The conversation
+tree is a session-level projection, not KernelState.
+
+PASS  TM-15 / child-run identity and mapping
+      ChildRunPrepared remains the durable parent-effect → child
+      locator mapping. Kernel apply rejects a conflicting
+      preparation (InvalidRecordOrder). start_or_attach consults
+      SessionProjection.child_mapping and returns SidecarConflict
+      on digest/locator/placement mismatch; equal retry is
+      idempotent. CompatibleLane and IsolatedChildSession mappings
+      survive recover and match the restored RunRelation.
+      ChildRunPrepared envelopes keep the parent run_id. Same-
+      session child RunAccepted does not apply onto the parent
+      kernel; last_applied_sequence still advances. Lanes are not
+      treated as lineage. No cancel, deadline, or budget fan-out
+      is added (PR-047). RemoteChildSession dispatch is not added.
+
+PASS  SEC-INV-008 / identity not substituted
+      ConversationEntry identity shares message UUID bytes.
+      Sibling ConversationEntry RecordId uses those bytes;
+      LaneMoved RecordId is a deterministic xor of the same
+      bytes. EntryId reuse with a different parent_id or body is
+      conversation_immutable. ConversationEntry rejects a run_id
+      on the envelope. Unknown foreign run_id still fails closed;
+      only a known child preparation or a child RunAccepted is
+      skipped. Session metadata never grants authority.
+
+PASS  SEC-INV-004 / duplicates idempotent, conflicts fail closed
+      Equal ConversationEntry replay (same id, parent_id, lane_id,
+      body) is idempotent even when the envelope sequence differs.
+      A rewrite fails closed before append (preview_session_records).
+      A second root AcceptRun while main is busy is rejected.
+      Conflicting child remap is SidecarConflict. Incomplete or
+      duplicate tool-call pairs fail extract_history.
+
+PASS  SEC-INV-010 / journal remains authoritative
+      Snapshots are not authoritative. Dropping SnapshotWritten /
+      snapshot bytes / accelerated restore rebuilds the same tree
+      from the journal. Pre-046 journals without SessionCreated
+      still load. Existing v1–v6 kernel-state hashes and
+      EntryAppended / LaneMoved wire shapes are unchanged.
+      ConversationEntry is omitted from kernel-state hash.
+
+PASS  TM-12 secondary
+      Structural records use the existing checksum/encoding
+      policy. Sequence is the envelope sequence. lane_id must
+      match the envelope. Corrupt identity substitution still
+      fails closed. Crash-prefix and WASM durable restart remain
+      PR-048.
+
+No §6.3 ADR trigger: the work stays inside the existing six ports,
+existing checksum/encoding policy, and at-least-once plus
+idempotency. Activating the TDD §24.1 ConversationEntry family is
+deferred session vocabulary, not a compatibility-policy change.
+Residual already recorded in the threat model: child-run
+concurrency and lineage-aware cancel remain PR-047; crash-prefix
+and WASM durable restart remain PR-048. ADR-012 and ADR-026 stay
+Partial. ADR-016 stays Partial (public multi-lane is PR-047).
+ADR-013 stays Not started / Missing.
+
+No independent review, hosted pull request or merge, npm publish,
+tag, or G5 decision is recorded here.

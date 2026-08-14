@@ -7,18 +7,18 @@ use finstack_ai_kernel::{
     BudgetReleaseRequest, BudgetRequest, BudgetReservationReceipt, BudgetReservationReleased,
     BudgetReservationRequested, BudgetReservationSettled, BudgetReserveRequest,
     CancellationInitiator, CancellationReconciled, CancellationRequest, CancellationRequested,
-    ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentRef, ContextPrepared,
-    Digest, EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectInput,
-    EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested, ErrorCategory, ErrorCode,
-    ErrorDescriptor, ExternalHandleRef, Id, IdTag, InteractionCancelled, InteractionExpired,
-    InteractionKind, InteractionRequest, InteractionResolution, JsonSchemaDraft, LaneCreated,
-    LaneMoved, Message, Metadata, OperationLocator, OutputConfiguration, OutputValidationFailed,
-    PrincipalRef, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson,
-    ReconciliationPolicy, RecordBody, RecordDraft, RecordEnvelope, RetryClassification,
-    RetrySafety, RetryScheduled, RunAccepted, RunCompleted, RunFailed, RunLimits,
-    RunPropagationPolicy, RunRelation, RunSecurityContext, RunSuspended, SchemaRef, SessionCreated,
-    SnapshotWritten, StructuredResultSource, TimerFired, Timestamp, Usage, ValidationIssue,
-    Version,
+    ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentRef, ContentBlock,
+    ContextPrepared, ConversationEntry, Digest, EffectCancelled, EffectCompleted, EffectDeferred,
+    EffectFailed, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
+    ErrorCategory, ErrorCode, ErrorDescriptor, ExternalHandleRef, Id, IdTag, InteractionCancelled,
+    InteractionExpired, InteractionKind, InteractionRequest, InteractionResolution,
+    JsonSchemaDraft, LaneCreated, LaneMoved, Message, MessageRole, Metadata, OperationLocator,
+    OutputConfiguration, OutputValidationFailed, PrincipalRef, ProviderIds, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody, RecordDraft, RecordEnvelope,
+    RetryClassification, RetrySafety, RetryScheduled, RunAccepted, RunCompleted, RunFailed,
+    RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunSuspended, SchemaRef,
+    SessionCreated, SnapshotWritten, StructuredResultSource, TextBlock, TimerFired, Timestamp,
+    Usage, ValidationIssue, Version,
 };
 
 use crate::paths::compatibility_fixture;
@@ -145,6 +145,7 @@ pub fn all_activated_record_bodies() -> Result<Vec<RecordBody>, String> {
         RecordBody::LaneCreated(LaneCreated::try_new("main").map_err(err)?),
         RecordBody::LaneMoved(LaneMoved::new(id(80))),
         RecordBody::SnapshotWritten(SnapshotWritten::new(1, Digest::raw_json(b"snap"))),
+        RecordBody::ConversationEntry(sample_conversation_entry()?),
     ];
     bodies.sort_by_key(RecordBody::kind_name);
     Ok(bodies)
@@ -191,6 +192,22 @@ fn body_from_public_api(relative: &str) -> Result<RecordBody, String> {
         .ok_or_else(|| format!("missing input in {relative}"))?;
     let envelope: RecordEnvelope = serde_json::from_value(input).map_err(err)?;
     Ok(envelope.body().clone())
+}
+
+fn sample_conversation_entry() -> Result<ConversationEntry, String> {
+    let message = Message::try_new(
+        id(90),
+        MessageRole::User,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("hello").map_err(err)?,
+        )],
+        ts(),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .map_err(err)?;
+    ConversationEntry::from_message(&message, None, id(2), 1).map_err(err)
 }
 
 fn sample_run_accepted() -> Result<RunAccepted, String> {

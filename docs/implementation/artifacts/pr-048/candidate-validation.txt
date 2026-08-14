@@ -1,0 +1,119 @@
+PR-048 local candidate validation
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Branch: codex/pr-048-crash-prefix-durability
+Candidate: 8342a6b56fc7832f9e861c6c034c0c1601e58f7a
+Baseline: 5850a90e957b447731beb6ba3ed28fc01af8eb2d
+Host: Darwin 25.5.0 arm64; rustc 1.97.1
+
+Commands and results:
+
+  cargo fmt --all --check
+    Pass.
+
+  cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    Pass.
+
+  cargo clippy -p finstack-ai-wasm --all-targets --offline --locked --features scripted-trace -- -D warnings
+    Pass.
+
+  cargo test -p finstack-ai-test --test crash_prefix --offline --locked -- --test-threads=1
+    Pass: 12 tests covering the 37 enumerated prefix IDs, journal
+    family count 40, and sqlite v1 open/prune with process-kill
+    kept on sqlite_fault_helper.
+
+  cargo test -p finstack-ai-test --test snapshot_replay --offline --locked
+    Pass: 5 tests.
+
+  cargo test -p finstack-ai-test --test conversation --offline --locked
+    Pass: 9 tests. Inspect walk accepts an open tool pair; model-facing
+    extract_history still rejects it.
+
+  cargo test -p finstack-ai-test --test lanes --offline --locked
+    Pass: 6 tests.
+
+  cargo test -p finstack-ai-test --test interaction --offline --locked
+    Pass: 13 tests.
+
+  cargo test -p finstack-ai-test --test journal_v1 --offline --locked
+    Pass: 4 tests; 40 record-body families; existing envelope
+    known-answers were not rewritten.
+
+  cargo test -p finstack-ai-test --test public_rust_api --offline --locked
+    Pass: 4 tests; corpus stays 131. No new facade types.
+
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked
+    Pass: 77 tests.
+
+  cargo test -p finstack-ai-store-sqlite --offline --locked -- --test-threads=1
+    Pass: 22 passed, 1 ignored
+    (concurrent_readers_never_observe_a_torn_batch; not an A01 row).
+    ops.rs covers backup/restore/export/import/diagnose/migrate and
+    unknown user_version fail-closed.
+
+  cargo test --workspace --offline --locked --exclude finstack-ai-store-sqlite
+    Pass: 536 passed, 2 ignored.
+
+  cargo tree -e normal --locked --offline for finstack-ai-runtime,
+  finstack-ai, and finstack-ai-kernel
+    Pass: no finstack-ai-protocol, no finstack-ai-store-sqlite, no
+    rusqlite.
+
+  uv run --no-project python tools/wasm_package/check.py graph
+    Pass: wasm graph: no Tokio, sockets, filesystem drivers, or kernel
+    wasm-bindgen.
+
+  Focused Python restart tests
+    Pass: uv run pytest bindings/finstack-ai-python/tests/test_durable_restart.py
+    bindings/finstack-ai-python/tests/test_import.py
+    bindings/finstack-ai-python/tests/test_session.py — 11 passed.
+    Version is 0.0.3. open_session after drop covers N1–N2, I1 lane
+    inspect, A1 capabilities, and completed-run inspect.
+    Resolve-after-open and live external-completion routing stay
+    Rust-owned because open_session does not respawn parked runs.
+
+  npx playwright test src/durable-restart.test.ts --project=chromium
+    Pass: 1 test. IndexedDB reload inspects the same session.
+    health().detail stays js_indexeddb_experimental.
+
+Acceptance:
+  PR-048-A01 every enumerated prefix restores to a legal class;
+             sqlite process-kill stays on sqlite_fault_helper
+  PR-048-A02 journal v1/40 families, kernel-state v1–v6 unchanged,
+             snapshot format_version 1, sqlite user_version 1,
+             IndexedDB schema 1, public-rust-api corpus 131;
+             unknown sqlite version fails closed
+  PR-048-A03 settlement indexes survive restart, snapshot discard,
+             and prune; post-horizon is expired_locator
+  PR-048-A04 lineage, interaction, deferral, duplicate completion,
+             before_finalize, and lane restart rows pass
+  PR-048-A05 child prefixes attach to one mapped UUIDv7
+  PR-048-A06 budget prefixes never double-allocate, double-charge,
+             or silently grant
+  PR-048-A07 CapabilitiesActivated applies only after commit
+  PR-048-A08 recorded compaction outcomes replay; disposable
+             checkpoints rebuild
+  PR-048-A09 required ArtifactRef faults on corrupt content
+  PR-048-A10 Python session/lane/inspect restart plus Chromium
+             IndexedDB reload; provisional IndexedDB label stays
+  PR-048-A11 Phase 6 exit review, G5 readiness pack, and staged
+             unpublished 0.0.3 npm tarball exist
+
+Limits:
+  No seventh port. No SessionStore / Lane / Timer / Channel port.
+  No kernel-state v7. No new journal family.
+  No rewrite of v1–v6 hashes or LaneMoved / EntryAppended /
+  ConversationEntry wire shapes. No RemoteChildSession dispatch.
+  No exactly-once claim. No G5 inference. No Phase 6 Done.
+  No hosted PR/merge, npm/pypi publish, or tag.
+  mise run ci, full pytest, and the full Playwright matrix were
+  not required. Workspace tests used --exclude finstack-ai-store-sqlite
+  plus an isolated sqlite --test-threads=1 run.
+  Python wheels were not rebuilt; only lockstep 0.0.3 metadata and
+  the unpublished npm tarball were staged. The tarball was packed
+  after a local `tsc` rebuild so declarations match source labels;
+  tracked `dist/` stayed at this candidate.
+  PR-043, PR-044, PR-045, PR-046, and PR-047 stay In review.
+  ADR-004, ADR-008, ADR-012, ADR-016, ADR-020, ADR-026, ADR-027,
+  ADR-034, and ADR-037 stay Partial. ADR-013 is now Partial.
+  ADR-032 stays Implemented.

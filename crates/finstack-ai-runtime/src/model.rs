@@ -627,6 +627,10 @@ pub struct ModelWarmupContext {
 }
 
 /// Reconciliation context for the original effect.
+///
+/// `run.effect_id` is the application-level idempotency key for tools and
+/// models. Implementations should key retries and external lookups on that
+/// identity rather than allocating a new one.
 #[derive(Debug, Clone)]
 pub struct ReconcileContext {
     /// Original run-call context.

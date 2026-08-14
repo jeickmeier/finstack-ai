@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "subject": "pr046-record",
+  "operation": "parse_and_derive",
+  "input": {
+    "format_version": 1,
+    "kind_version": 1,
+    "record_id": "01234567-89ab-7cde-89ab-012345679301",
+    "session_id": "01234567-89ab-7cde-89ab-012345679302",
+    "lane_id": "01234567-89ab-7cde-89ab-012345679303",
+    "sequence": 1,
+    "timestamp": "1970-01-01T00:00:01.000Z",
+    "payload_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+    "derived_event_ids": [],
+    "body": {
+      "conversation_entry": {
+        "id": "01234567-89ab-7cde-89ab-012345679304",
+        "lane_id": "01234567-89ab-7cde-89ab-012345679303",
+        "sequence": 1,
+        "body": {
+          "message": {
+            "id": "01234567-89ab-7cde-89ab-012345679304",
+            "role": "user",
+            "content": [
+              {
+                "kind": "text",
+                "text": "hello"
+              }
+            ],
+            "created_at": "1970-01-01T00:00:01.000Z",
+            "provider_ids": {},
+            "metadata": {}
+          }
+        }
+      }
+    }
+  },
+  "expect": {
+    "ok": true,
+    "body_kind": "conversation_entry",
+    "derived_event_count": 0
+  }
+}

@@ -17,6 +17,7 @@ pub(super) struct StateGrowth<'a> {
     pub stage: Option<StageCursor>,
     pub model: Option<EffectId>,
     pub completion: Option<&'a str>,
+    pub resolution: Option<&'a str>,
     pub tool_calls: &'a [ToolCallId],
     pub tool_settlements: &'a [EffectId],
 }
@@ -61,6 +62,16 @@ pub(super) fn preflight_decision(
         ),
         SEMANTIC_MAP_MAX_ENTRIES,
     )?;
+    check(
+        "resolution_identities",
+        state.resolution_identities.len(),
+        usize::from(
+            growth
+                .resolution
+                .is_some_and(|key| !state.resolution_identities.contains_key(key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
     let tool_call_growth = growth
         .tool_calls
         .iter()
@@ -89,6 +100,10 @@ pub(super) fn preflight_decision(
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "batch preflight keeps every semantic collection ceiling in one fail-closed pass"
+)]
 pub(super) fn preflight_batch(
     state: &KernelState,
     records: &[RecordEnvelope],
@@ -97,6 +112,7 @@ pub(super) fn preflight_batch(
     let mut stage_keys = BTreeSet::new();
     let mut model_keys = BTreeSet::new();
     let mut completion_keys = BTreeSet::new();
+    let mut resolution_keys = BTreeSet::new();
     let mut tool_call_keys = BTreeSet::new();
     let mut tool_settlement_keys = BTreeSet::new();
     for record in records {
@@ -122,12 +138,22 @@ pub(super) fn preflight_batch(
                     tool_settlement_keys.insert(settled.effect_id);
                 }
             }
+            RecordBody::InteractionResolved(value) => {
+                if !state
+                    .resolution_identities
+                    .contains_key(value.resolution_id())
+                {
+                    resolution_keys.insert(value.resolution_id());
+                }
+            }
             RecordBody::EffectCompleted(value) => {
                 if value.output_contract().kind == crate::EffectOutputKind::ToolResult {
                     if !state.tool_settlements.contains_key(&value.effect_id()) {
                         tool_settlement_keys.insert(value.effect_id());
                     }
-                } else if !state.model_settlements.contains_key(&value.effect_id()) {
+                } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
+                    && !state.model_settlements.contains_key(&value.effect_id())
+                {
                     model_keys.insert(value.effect_id());
                 }
                 if let Some(id) = value.completion_id()
@@ -141,7 +167,9 @@ pub(super) fn preflight_batch(
                     if !state.tool_settlements.contains_key(&value.effect_id()) {
                         tool_settlement_keys.insert(value.effect_id());
                     }
-                } else if !state.model_settlements.contains_key(&value.effect_id()) {
+                } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
+                    && !state.model_settlements.contains_key(&value.effect_id())
+                {
                     model_keys.insert(value.effect_id());
                 }
                 if let Some(id) = value.completion_id()
@@ -175,6 +203,12 @@ pub(super) fn preflight_batch(
         "completion_identities",
         state.completion_identities.len(),
         completion_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "resolution_identities",
+        state.resolution_identities.len(),
+        resolution_keys.len(),
         SEMANTIC_MAP_MAX_ENTRIES,
     )?;
     check(

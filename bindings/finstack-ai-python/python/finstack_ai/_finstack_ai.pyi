@@ -200,7 +200,7 @@ class PythonObserver:
     @property
     def component(self) -> str: ...
 
-class Session:
+class Locator:
     """Immutable identifiers for one accepted operation."""
 
     @property
@@ -212,7 +212,143 @@ class Session:
     @property
     def run_id(self) -> str: ...
     def to_dict(self) -> dict[str, str]:
-        """Serialize the identifier snapshot explicitly."""
+        """Serialize the identifier snapshot explicitly.
+
+        Returns:
+            ``tenant_scope``, ``session_id``, ``lane_id``, and ``run_id``.
+        """
+
+class Session:
+    """Live handle for one journaled session."""
+
+    @property
+    def tenant_scope(self) -> str: ...
+    @property
+    def session_id(self) -> str: ...
+    def create_lane(self, name: str, fork: str | None = None) -> Awaitable[Lane]:
+        """Create a named lane, optionally forking from an existing entry.
+
+        Args:
+            name: Application lane name. ``main`` is reserved for bootstrap.
+            fork: Optional existing entry identity to share without copying.
+
+        Returns:
+            The new live lane handle.
+
+        Raises:
+            ConfigurationError: The name is invalid, duplicated, or the fork
+                entry is unknown.
+        """
+    def list_lanes(self) -> Awaitable[list[Lane]]:
+        """List restored lanes.
+
+        Returns:
+            Live handles for every lane in the session.
+
+        Raises:
+            ConfigurationError: The session journal cannot be loaded.
+        """
+    def lane(self, name: str) -> Awaitable[Lane]:
+        """Look up one lane by application name.
+
+        Args:
+            name: Application lane name.
+
+        Returns:
+            The live lane handle.
+
+        Raises:
+            ConfigurationError: The named lane does not exist.
+        """
+    def bind_external_identity(
+        self,
+        map: MemoryExternalIdentityMap,
+        channel: str,
+        account: str,
+        thread: str,
+        lane_id: str,
+    ) -> None:
+        """Bind a host-owned external identity to one lane.
+
+        Args:
+            map: In-process identity map owned by the host.
+            channel: Channel or adapter name.
+            account: Account identity on that channel.
+            thread: Conversation or thread identity.
+            lane_id: Durable lane identity in this session.
+
+        Raises:
+            ConfigurationError: The key is invalid, the lane is unknown, or
+                the key is already bound to a different session lane.
+        """
+    @staticmethod
+    def resolve_external_identity(
+        map: MemoryExternalIdentityMap,
+        channel: str,
+        account: str,
+        thread: str,
+    ) -> tuple[str, str] | None:
+        """Resolve a host-owned external identity key.
+
+        Args:
+            map: In-process identity map owned by the host.
+            channel: Channel or adapter name.
+            account: Account identity on that channel.
+            thread: Conversation or thread identity.
+
+        Returns:
+            ``(session_id, lane_id)`` when the key is bound, otherwise
+            ``None``.
+        """
+
+class Lane:
+    """Live handle for one lane in a session."""
+
+    @property
+    def lane_id(self) -> str: ...
+    @property
+    def session(self) -> Session: ...
+    def navigate(self, entry_id: str) -> Awaitable[None]:
+        """Point this idle lane at an existing entry without copying.
+
+        Args:
+            entry_id: Existing conversation entry identity.
+
+        Raises:
+            ConfigurationError: The entry is unknown or the lane is busy.
+        """
+    def inspect(self) -> Awaitable[dict[str, object]]:
+        """Inspect name, leaf, active run, and history length.
+
+        Returns:
+            A mapping with ``lane_id``, ``name``, ``leaf_id``,
+            ``active_run_id``, and ``history_len``.
+
+        Raises:
+            ConfigurationError: The lane cannot be inspected.
+        """
+
+class MemoryExternalIdentityMap:
+    """In-process external identity map."""
+
+    def __init__(self) -> None: ...
+    def resolve(
+        self, channel: str, account: str, thread: str
+    ) -> tuple[str, str] | None:
+        """Resolve one previously bound key.
+
+        Args:
+            channel: Channel or adapter name.
+            account: Account identity on that channel.
+            thread: Conversation or thread identity.
+
+        Returns:
+            ``(session_id, lane_id)`` when the key is bound, otherwise
+            ``None``.
+
+        Raises:
+            ConfigurationError: The key is empty, oversized, or contains NUL.
+        """
 
 class Event:
     """Immutable runtime event snapshot."""
@@ -273,7 +409,9 @@ class RunResult:
     def trace(self) -> list[str]:
         """Stable Rust-owned committed record-kind trace in journal order."""
     @property
-    def session(self) -> Session: ...
+    def locator(self) -> Locator: ...
+    @property
+    def session(self) -> Locator: ...
     def to_dict(self) -> dict[str, str]:
         """Serialize the terminal result explicitly."""
 
@@ -282,8 +420,40 @@ class Run:
 
     @property
     def session(self) -> Session: ...
+    @property
+    def locator(self) -> Locator: ...
     async def result(self) -> RunResult:
         """Wait for the retained terminal result."""
+    async def list_interactions(self) -> list[dict[str, object]]:
+        """List the outstanding typed interaction for this run.
+
+        Rust owns routing. The result is the persisted request envelope
+        (0 or 1 item), not a Python-owned queue.
+
+        Returns:
+            Zero or one interaction-request dictionaries for this run's
+            locator.
+
+        Raises:
+            FinstackError: The authenticated locator cannot be listed.
+        """
+    async def resolve_interaction(self, resolution: dict[str, object]) -> None:
+        """Resolve the outstanding interaction through the live run.
+
+        A schema-valid approval denial is ``{"approved": false}``. The
+        live worker coordinator stays authoritative; do not route a
+        second coordinator against a live journal.
+
+        Args:
+            resolution: Binding-neutral resolution dictionary with
+                ``interaction_id``, ``resolution_id``, ``principal``,
+                ``authorization``, and ``response``.
+
+        Raises:
+            FinstackError: The handle is unavailable or the settlement
+                is rejected as conflicting, expired, or unauthorized.
+            TypeError: ``resolution`` is not a valid resolution shape.
+        """
     async def cancel(self) -> None:
         """Submit idempotent durable cancellation."""
     def events(self) -> EventBatchIterator:
@@ -317,6 +487,32 @@ class Agent:
         """Return the bounded model-activated catalog in identity order."""
     def compact_capability_catalog(self) -> str:
         """Render the compact model-facing catalog without activation."""
+    def create_session(self, tenant_scope: str = "default") -> Awaitable[Session]:
+        """Create a live session on this agent's journal store.
+
+        Args:
+            tenant_scope: Tenant scope captured by the host.
+
+        Returns:
+            A live session handle with a bootstrapped ``main`` lane.
+
+        Raises:
+            ConfigurationError: The session cannot be created.
+        """
+    def open_session(self, session_id: str, tenant_scope: str) -> Awaitable[Session]:
+        """Open an existing session without respawning parked runs.
+
+        Args:
+            session_id: Durable session identity.
+            tenant_scope: Tenant scope captured by the host.
+
+        Returns:
+            A live session handle rebuilt from the journal.
+
+        Raises:
+            ConfigurationError: The session id is invalid or the journal
+                cannot be replayed.
+        """
     def start(
         self,
         input: str,

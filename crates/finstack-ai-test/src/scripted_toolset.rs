@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, ValidatedToolCall};
 use finstack_ai_runtime::{
-    CancellationSignal, PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor,
+    CancellationSignal, PendingToolEffect, PortFuture, ReconcileContext, ToolCallContext,
+    ToolError, ToolEventStream, ToolReconcileResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use futures_core::Stream;
 
@@ -105,8 +106,12 @@ pub struct ScriptedToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
     plans: Mutex<VecDeque<ScriptedToolPlan>>,
+    reconcile_results: Mutex<VecDeque<ToolReconcileResult>>,
     control: ScriptedToolsetControl,
     calls: Arc<AtomicUsize>,
+    reconciles: Arc<AtomicUsize>,
+    last_effect_id: Mutex<Option<finstack_ai_kernel::EffectId>>,
+    last_call: Mutex<Option<ValidatedToolCall>>,
     active_calls: Arc<AtomicUsize>,
     max_active_calls: Arc<AtomicUsize>,
     cancellations: Arc<AtomicUsize>,
@@ -123,12 +128,26 @@ impl ScriptedToolset {
             },
             tools,
             plans: Mutex::new(plans.into()),
+            reconcile_results: Mutex::new(VecDeque::new()),
             control: ScriptedToolsetControl::default(),
             calls: Arc::new(AtomicUsize::new(0)),
+            reconciles: Arc::new(AtomicUsize::new(0)),
+            last_effect_id: Mutex::new(None),
+            last_call: Mutex::new(None),
             active_calls: Arc::new(AtomicUsize::new(0)),
             max_active_calls: Arc::new(AtomicUsize::new(0)),
             cancellations: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    /// Queue tool reconcile outcomes consumed in order. Default is `Unknown`.
+    #[must_use]
+    pub fn with_reconcile_results(self, results: Vec<ToolReconcileResult>) -> Self {
+        *self
+            .reconcile_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = results.into();
+        self
     }
 
     /// Clone the deterministic blocking controller.
@@ -141,6 +160,30 @@ impl ScriptedToolset {
     #[must_use]
     pub fn call_count(&self) -> usize {
         self.calls.load(Ordering::Acquire)
+    }
+
+    /// Number of reconcile calls observed.
+    #[must_use]
+    pub fn reconcile_count(&self) -> usize {
+        self.reconciles.load(Ordering::Acquire)
+    }
+
+    /// Last effect identity observed by [`Toolset::call`] or [`Toolset::reconcile`].
+    #[must_use]
+    pub fn last_effect_id(&self) -> Option<finstack_ai_kernel::EffectId> {
+        *self
+            .last_effect_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Last frozen call observed by [`Toolset::call`].
+    #[must_use]
+    pub fn last_call(&self) -> Option<ValidatedToolCall> {
+        self.last_call
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Current live streams.
@@ -174,13 +217,21 @@ impl Toolset for ScriptedToolset {
     fn call(
         &self,
         ctx: ToolCallContext,
-        _call: ValidatedToolCall,
+        call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         self.calls.fetch_add(1, Ordering::AcqRel);
+        *self
+            .last_effect_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ctx.run.effect_id);
+        *self
+            .last_call
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(call);
         let plan = self
             .plans
             .lock()
-            .expect("scripted tool plan queue is not poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front();
         let control = self.control.clone();
         let active = Arc::clone(&self.active_calls);
@@ -208,6 +259,25 @@ impl Toolset for ScriptedToolset {
                 active_gate: None,
             }) as ToolEventStream)
         })
+    }
+
+    fn reconcile(
+        &self,
+        ctx: ReconcileContext,
+        _effect: PendingToolEffect,
+    ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
+        self.reconciles.fetch_add(1, Ordering::AcqRel);
+        *self
+            .last_effect_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ctx.run.effect_id);
+        let result = self
+            .reconcile_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .unwrap_or(ToolReconcileResult::Unknown);
+        Box::pin(async move { Ok(result) })
     }
 }
 

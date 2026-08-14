@@ -72,6 +72,46 @@ pub trait JournalStore: PortObject {
             })
         })
     }
+
+    /// Delete snapshot-covered prefix records while retaining the session head.
+    ///
+    /// Default implementations return `prune_unsupported`. Outstanding tail
+    /// records are never deleted. Settlement classification after prune is
+    /// rebuilt from the retained snapshot plus tail.
+    fn prune(&self, _request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
+        Box::pin(async {
+            Err(StoreError::InvalidRequest {
+                reason_code: "prune_unsupported",
+            })
+        })
+    }
+}
+
+/// Application-configured callback-token / settlement retention window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdempotencyHorizon {
+    /// Commands submitted at or after this timestamp are `expired_locator`.
+    pub expire_at: Timestamp,
+}
+
+/// Session-scoped prune request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PruneRequest {
+    /// Session whose snapshot-covered prefix may be deleted.
+    pub session_id: SessionId,
+    /// Retention window for post-horizon expiry. Prune itself requires a snapshot.
+    pub horizon: IdempotencyHorizon,
+}
+
+/// Receipt for an accepted prefix prune.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PruneReceipt {
+    /// Highest deleted sequence, equal to the snapshot sequence.
+    pub pruned_through_sequence: u64,
+    /// Outstanding effects or interactions retained in snapshot/tail state.
+    pub retained_outstanding: u64,
+    /// Settlement or rejection identities retained in the snapshot index.
+    pub retained_tombstones: u64,
 }
 
 /// Session-scoped journal load request.

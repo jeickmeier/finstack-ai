@@ -31,7 +31,8 @@ use crate::validation::OutputValidationFailed;
 
 use super::{
     BudgetReservationReplay, CancellationState, CompletionIdentityHashEntryV1, CurrentTurn,
-    KernelState, ModelSettlementHashEntryV1, PendingModelEffect, RetryState, RunPhase,
+    InteractionTerminal, KernelState, ModelSettlementHashEntryV1, PendingInteraction,
+    PendingModelEffect, ResolutionIdentityHashEntryV6, RetryState, RunPhase,
     StageSettlementHashEntryV1, TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2,
     ToolSettlementHashEntryV2,
 };
@@ -362,6 +363,41 @@ impl<'a> KernelStateHashV5<'a> {
             child_preparations: state.child_preparations.values().collect(),
             budget_reservations: state.budget_reservations.values().collect(),
             budget_charges: state.budget_charges.values().collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct KernelStateHashV6<'a> {
+    #[serde(flatten)]
+    base: KernelStateHashV5<'a>,
+    pending_interaction: Option<&'a PendingInteraction>,
+    resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
+    last_interaction_terminal: Option<&'a InteractionTerminal>,
+}
+
+impl<'a> KernelStateHashV6<'a> {
+    pub(super) fn from_state(
+        state: &'a KernelState,
+        stage_settlements: Vec<StageSettlementHashEntryV1>,
+        model_settlements: Vec<ModelSettlementHashEntryV1>,
+        completion_identities: Vec<CompletionIdentityHashEntryV1>,
+        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_settlements: Vec<ToolSettlementHashEntryV2>,
+        resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
+    ) -> Self {
+        Self {
+            base: KernelStateHashV5::from_state(
+                state,
+                stage_settlements,
+                model_settlements,
+                completion_identities,
+                tool_calls,
+                tool_settlements,
+            ),
+            pending_interaction: state.pending_interaction.as_ref(),
+            resolution_identities,
+            last_interaction_terminal: state.last_interaction_terminal.as_ref(),
         }
     }
 }

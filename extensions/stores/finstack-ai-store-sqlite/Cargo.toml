@@ -30,5 +30,9 @@ harness = false
 name = "sqlite_fault_helper"
 path = "src/bin/sqlite_fault_helper.rs"
 
+[[bin]]
+name = "sqlite_ops"
+path = "src/bin/sqlite_ops.rs"
+
 [lints]
 workspace = true

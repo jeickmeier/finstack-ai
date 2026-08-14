@@ -100,8 +100,8 @@ same Rust DTOs as the Python binding. It does not submit a live Agent.
 Default `Agent.create` stays memory-backed. Opt into a host journal with
 `Agent.create({ store })`. IndexedDB batteries live on
 `@finstack/ai/adapters/indexeddb` and report `health().detail =
-js_indexeddb_experimental`. Persistence is experimental until PR-048
-revalidates against JournalStore v1. `durable` stays false. Reload restore is
+js_indexeddb_experimental`. Persistence remains experimental after PR-048;
+it does not meet NFR-REL-001. `durable` stays false. Reload restore is
 `Agent.inspectSession` / `WorkerClient.inspectSession`, not continue-the-run.
 Call `deleteIndexedDbStores()` to drop origin-local data. This package does
 not ship SQLite and does not claim crash durability.

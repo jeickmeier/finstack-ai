@@ -196,6 +196,47 @@ impl Agent {
         executor::drive(async move { inspect_session_inner(store, session_id).await })
     }
 
+    /// Create a live session on this agent's journal store.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the session cannot be created.
+    #[wasm_bindgen(js_name = createSession)]
+    pub fn create_session(&self, tenant_scope: Option<String>) -> js_sys::Promise {
+        let store = self.inner.journal_store();
+        let tenant_scope = tenant_scope.unwrap_or_else(|| "default".into());
+        executor::drive(async move {
+            finstack_ai::Session::create(store, tenant_scope)
+                .await
+                .map(|inner| JsValue::from(Session { inner }))
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Open an existing session without respawning parked runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the session id is invalid or the
+    /// stored journal cannot be replayed.
+    #[wasm_bindgen(js_name = openSession)]
+    pub fn open_session(
+        &self,
+        session_id: String,
+        tenant_scope: Option<String>,
+    ) -> js_sys::Promise {
+        let store = self.inner.journal_store();
+        let tenant_scope = tenant_scope.unwrap_or_else(|| "default".into());
+        executor::drive(async move {
+            let session_id = SessionId::parse(&session_id)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            finstack_ai::Session::open(store, session_id, tenant_scope)
+                .await
+                .map(|inner| JsValue::from(Session { inner }))
+                .map_err(|error| session_error(&error))
+        })
+    }
+
     /// Start one run and return its detached control handle.
     ///
     /// # Errors
@@ -263,10 +304,18 @@ pub struct Run {
 
 #[wasm_bindgen(js_class = Run)]
 impl Run {
-    /// Immutable session locator for this run.
+    /// Live session handle for this run.
     #[wasm_bindgen(getter)]
     pub fn session(&self) -> Session {
         Session {
+            inner: self.inner.session(),
+        }
+    }
+
+    /// Immutable operation locator snapshot.
+    #[wasm_bindgen(getter)]
+    pub fn locator(&self) -> Locator {
+        Locator {
             locator: self.inner.locator().clone(),
         }
     }
@@ -331,14 +380,14 @@ impl Run {
     }
 }
 
-/// Read-only session locator.
-#[wasm_bindgen(js_name = Session)]
-pub struct Session {
+/// Read-only operation locator.
+#[wasm_bindgen(js_name = Locator)]
+pub struct Locator {
     locator: OperationLocator,
 }
 
-#[wasm_bindgen(js_class = Session)]
-impl Session {
+#[wasm_bindgen(js_class = Locator)]
+impl Locator {
     /// Tenant scope captured at acceptance.
     #[wasm_bindgen(getter, js_name = tenantScope)]
     pub fn tenant_scope(&self) -> String {
@@ -371,6 +420,236 @@ impl Session {
     #[wasm_bindgen(js_name = toDict)]
     pub fn to_dict(&self) -> Result<JsValue, JsValue> {
         locator_object(&self.locator)
+    }
+}
+
+/// Live session handle.
+#[wasm_bindgen(js_name = Session)]
+pub struct Session {
+    inner: finstack_ai::Session,
+}
+
+#[wasm_bindgen(js_class = Session)]
+impl Session {
+    /// Tenant scope captured by the host.
+    #[wasm_bindgen(getter, js_name = tenantScope)]
+    pub fn tenant_scope(&self) -> String {
+        self.inner.tenant_scope().to_string()
+    }
+
+    /// Session identity.
+    #[wasm_bindgen(getter, js_name = sessionId)]
+    pub fn session_id(&self) -> String {
+        self.inner.session_id().to_string()
+    }
+
+    /// Create a named lane, optionally forking from an existing entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the lane cannot be created.
+    #[wasm_bindgen(js_name = createLane)]
+    pub fn create_lane(&self, name: String, fork: Option<String>) -> js_sys::Promise {
+        let session = self.inner.clone();
+        executor::drive(async move {
+            let fork = fork
+                .map(|value| finstack_ai::runtime::EntryId::parse(&value))
+                .transpose()
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            session
+                .create_lane(name, fork)
+                .await
+                .map(|inner| JsValue::from(Lane { inner }))
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// List restored lanes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the session cannot be loaded.
+    #[wasm_bindgen(js_name = listLanes)]
+    pub fn list_lanes(&self) -> js_sys::Promise {
+        let session = self.inner.clone();
+        executor::drive(async move {
+            session
+                .list_lanes()
+                .await
+                .map(|lanes| {
+                    lanes
+                        .into_iter()
+                        .map(|inner| JsValue::from(Lane { inner }))
+                        .collect::<js_sys::Array>()
+                        .into()
+                })
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Look up one lane by application name.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the lane does not exist.
+    pub fn lane(&self, name: String) -> js_sys::Promise {
+        let session = self.inner.clone();
+        executor::drive(async move {
+            session
+                .lane(&name)
+                .await
+                .map(|inner| JsValue::from(Lane { inner }))
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Bind a host-owned external identity to one lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the key is invalid, the lane is
+    /// unknown, or the key is already bound to a different session lane.
+    #[wasm_bindgen(js_name = bindExternalIdentity)]
+    pub fn bind_external_identity(
+        &self,
+        map: &MemoryExternalIdentityMap,
+        channel: String,
+        account: String,
+        thread: String,
+        lane_id: String,
+    ) -> Result<(), JsValue> {
+        let key = finstack_ai::ExternalIdentityKey::try_new(channel, account, thread)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let lane_id = finstack_ai::runtime::LaneId::parse(&lane_id)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.inner
+            .bind_external_identity(&map.inner, key, lane_id)
+            .map_err(|error| session_error(&error))
+    }
+}
+
+/// Live lane handle.
+#[wasm_bindgen(js_name = Lane)]
+pub struct Lane {
+    inner: finstack_ai::Lane,
+}
+
+#[wasm_bindgen(js_class = Lane)]
+impl Lane {
+    /// Durable lane identity.
+    #[wasm_bindgen(getter, js_name = laneId)]
+    pub fn lane_id(&self) -> String {
+        self.inner.lane_id().to_string()
+    }
+
+    /// Session that owns this lane.
+    #[wasm_bindgen(getter)]
+    pub fn session(&self) -> Session {
+        Session {
+            inner: self.inner.session().clone(),
+        }
+    }
+
+    /// Point this idle lane at an existing entry without copying.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the entry is unknown or the lane
+    /// is busy.
+    pub fn navigate(&self, entry_id: String) -> js_sys::Promise {
+        let lane = self.inner.clone();
+        executor::drive(async move {
+            let entry_id = finstack_ai::runtime::EntryId::parse(&entry_id)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            lane.navigate(entry_id)
+                .await
+                .map(|()| JsValue::UNDEFINED)
+                .map_err(|error| session_error(&error))
+        })
+    }
+
+    /// Inspect name, leaf, and history length.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the lane cannot be inspected.
+    pub fn inspect(&self) -> js_sys::Promise {
+        let lane = self.inner.clone();
+        executor::drive(async move {
+            lane.inspect()
+                .await
+                .map(|inspect| {
+                    let object = js_sys::Object::new();
+                    let _ = js_sys::Reflect::set(
+                        &object,
+                        &JsValue::from_str("laneId"),
+                        &JsValue::from_str(&inspect.lane_id.to_string()),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &object,
+                        &JsValue::from_str("name"),
+                        &JsValue::from_str(&inspect.name),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &object,
+                        &JsValue::from_str("historyLen"),
+                        &JsValue::from_f64(inspect.history.len() as f64),
+                    );
+                    JsValue::from(object)
+                })
+                .map_err(|error| session_error(&error))
+        })
+    }
+}
+
+/// In-process external identity map.
+#[wasm_bindgen(js_name = MemoryExternalIdentityMap)]
+pub struct MemoryExternalIdentityMap {
+    inner: finstack_ai::MemoryExternalIdentityMap,
+}
+
+#[wasm_bindgen(js_class = MemoryExternalIdentityMap)]
+impl MemoryExternalIdentityMap {
+    /// Empty map.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: finstack_ai::MemoryExternalIdentityMap::new(),
+        }
+    }
+
+    /// Resolve one previously bound key.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the key is invalid.
+    pub fn resolve(
+        &self,
+        channel: String,
+        account: String,
+        thread: String,
+    ) -> Result<JsValue, JsValue> {
+        let key = finstack_ai::ExternalIdentityKey::try_new(channel, account, thread)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        Ok(
+            finstack_ai::ExternalIdentityMap::resolve(&self.inner, &key).map_or(
+                JsValue::UNDEFINED,
+                |(session_id, lane_id)| {
+                    let object = js_sys::Object::new();
+                    let _ = js_sys::Reflect::set(
+                        &object,
+                        &JsValue::from_str("sessionId"),
+                        &JsValue::from_str(&session_id.to_string()),
+                    );
+                    let _ = js_sys::Reflect::set(
+                        &object,
+                        &JsValue::from_str("laneId"),
+                        &JsValue::from_str(&lane_id.to_string()),
+                    );
+                    object.into()
+                },
+            ),
+        )
     }
 }
 
@@ -414,10 +693,18 @@ impl RunResult {
         active_capability_array(self.inner.active_capabilities())
     }
 
-    /// Session locator for the completed run.
+    /// Operation locator for the completed run.
     #[wasm_bindgen(getter)]
-    pub fn session(&self) -> Session {
-        Session {
+    pub fn locator(&self) -> Locator {
+        Locator {
+            locator: self.inner.locator.clone(),
+        }
+    }
+
+    /// Locator snapshot for the completed run.
+    #[wasm_bindgen(getter)]
+    pub fn session(&self) -> Locator {
+        Locator {
             locator: self.inner.locator.clone(),
         }
     }
@@ -983,6 +1270,27 @@ fn configuration_error(message: impl Into<String>) -> AgentRunError {
         code: AGENT_RUN_INVALID_CONFIGURATION,
         message: message.into(),
     }
+}
+
+fn session_error(error: &finstack_ai::SessionError) -> JsValue {
+    let object = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("name"),
+        &JsValue::from_str("FinstackError"),
+    );
+    let _ = js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("code"),
+        &JsValue::from_str(error.code()),
+    );
+    let _ = js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("message"),
+        &JsValue::from_str(&error.to_string()),
+    );
+    let _ = js_sys::Reflect::set(&object, &JsValue::from_str("retryable"), &JsValue::FALSE);
+    object.into()
 }
 
 fn agent_error(error: &AgentRunError, locator: Option<&OperationLocator>) -> JsValue {

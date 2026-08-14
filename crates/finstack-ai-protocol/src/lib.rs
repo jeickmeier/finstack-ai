@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 pub use error::ProtocolError;
 pub use journal::{
     JournalKnownAnswer, batch_canonical_len, commit_record, commit_records, envelope_checksum,
-    journal_known_answer, payload_digest, verify_chain, verify_envelope,
+    journal_known_answer, payload_digest, verify_chain, verify_chain_from, verify_envelope,
 };
 pub use json::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
 pub use snapshot::{

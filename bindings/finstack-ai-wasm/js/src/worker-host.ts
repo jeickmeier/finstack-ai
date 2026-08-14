@@ -19,7 +19,7 @@ export interface WorkerHostAgent {
 
 /** Structural run handle used inside the worker. */
 export interface WorkerHostRun {
-  readonly session: { toDict(): SessionSnapshot };
+  readonly locator: { toDict(): SessionSnapshot };
   events(options?: EventOptions): AsyncIterable<WorkerHostEventBatch>;
   result(): Promise<WorkerHostRunResult>;
   cancel(reason?: string): Promise<void>;
@@ -155,7 +155,7 @@ export function exposeWorkerHost(factory: WorkerHostFactory): void {
           });
         }
         const run = agent.start(message.input, message.options);
-        const session = run.session.toDict();
+        const session = run.locator.toDict();
         const slot: RunSlot = {
           agentId: message.agentId,
           runId: session.runId,

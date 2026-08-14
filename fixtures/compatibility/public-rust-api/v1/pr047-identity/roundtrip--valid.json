@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "subject": "pr047-identity",
+  "operation": "parse",
+  "input": {
+    "channel": "slack",
+    "account": "acct-a",
+    "thread": "thread-1"
+  },
+  "expect": {
+    "ok": true
+  }
+}

@@ -1,0 +1,39 @@
+G5 readiness review
+Date: 2026-08-14
+Reviewed revision: 8342a6b56fc7832f9e861c6c034c0c1601e58f7a
+Reviewer: me@jeickmeier.com
+Result: READY FOR NAMED DECISION; G5-D-* is not recorded
+
+This pack states that Phase 6 crash-prefix, prune/horizon, sqlite
+ops, binding restart traces, and staged unpublished 0.0.3 artifacts
+are complete enough for the owner to consider a named G5 decision
+after PR-043–PR-047 are integrated to the decision target. Range
+authorization is not that decision.
+
+Ready inputs
+
+- Phase 6 entrance is Passed (3/3).
+- PR-032 and PR-038 are Done. PR-039–PR-042 are Done.
+- PR-043–PR-047 A01–A05/A04 pass at their stacked candidates and
+  remain In review.
+- PR-048 A01–A11 pass on this candidate.
+- TM-12 / Threat Model §18 review passes in security-review.txt.
+- Workspace/Python/JS versions are 0.0.3. Unpublished npm tarball
+  finstack-ai-0.0.3.tgz is staged under staging/.
+- IndexedDB remains experimental and non-durable.
+
+Explicitly not decided
+
+- No G5-D-* row is written.
+- Phase 6 remains In progress. Exit ledger stays 0/4.
+- ADR-004/008/012/016/020/026/027/034/037 stay Partial.
+  ADR-013 is Partial, not Implemented.
+- No npm/pypi publish, tag, GitHub release, or hosted pull-request
+  merge.
+- A named G5 decision against main also needs PR-043–PR-047
+  integrated. This stacked envelope does not perform that
+  integration.
+
+Ask the owner whether to record a named G5-D-* decision after
+reviewing this pack and any subsequently authorized integration
+and hosted Linux CI/signing runs.
