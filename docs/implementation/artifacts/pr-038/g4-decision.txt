@@ -1,0 +1,59 @@
+G4 Binding Parity Alpha gate decision
+Decision: G4-D-binding-parity-101224c5eb60
+Date: 2026-08-14
+Approver: me@jeickmeier.com
+Result: PASSED
+
+Reviewed revisions and runs
+
+- Phase 4 local main merge: 5f15210780254e27dbe0ecf665cf38f99e412b1f
+- PR-038 implementation candidate: f1ff388563dfce92169c9fe6ae8c845fec86794b
+- Hosted Ubuntu remediation tip: 71b0197f7669373ac775db7495d41a61c43bfdc7
+- Phase 5 local main merge: 04407192289c24cbfb087357b1e2ca928a8f3b55
+- Phase 5 closeout: 101224c5eb60e61df105beb9fe03063ce588c0e4
+- Controlling hosted CI: 31798404175 (success)
+
+Reviewed evidence
+
+- PR-027 through PR-038 acceptance evidence, with PR-032 A01-A05 and
+  PR-038 A01-A06 passed.
+- Python pytest shared traces for the supported in-memory/scripted feature
+  set, including structured-output, tool-batch, and Always/Application/Model
+  activation with the cache-stable prompt prefix.
+- Browser Playwright Agent-run goldens on Chromium, Firefox, and WebKit
+  matching Rust-owned record-kind prefixes for the same applicable set.
+  DeferredBindingAdapter::wasm() remains Unavailable; Playwright is the
+  WASM parity evidence path.
+- Host-driven JavaScript promises for model/tool/store effects, Dedicated
+  Worker batching, and experimental IndexedDB inspect-not-continue restore.
+- Staged unpublished Python 0.0.2 and private npm 0.0.2 artifacts with
+  TypeScript declarations, SHA256SUMS, and CycloneDX metadata. The exact
+  cross-binding checkpoint is available and not cut.
+- TM-05 / TM-18 / G4 security-row review in PR-038 security-review.txt.
+- Hosted Ubuntu ci.yml check, test, check-wasm, consecutive generate-wasm
+  identity, and three-browser harness on 71b0197f7669373ac775db7495d41a61c43bfdc7.
+- Phase 4 exits PH4-E-exit-traces-ca384aa02727,
+  PH4-E-exit-callbacks-23a86984a585, PH4-E-exit-pydantic-0bc98c672744, and
+  PH4-E-exit-wheels-45a88cc26d0b, all passed.
+- Phase 5 exits PH5-E-exit-traces-f1ff388563df,
+  PH5-E-exit-host-f1ff388563df, PH5-E-exit-workers-f1ff388563df, and
+  PH5-E-exit-artifacts-f1ff388563df, all passed.
+- No open blocker, active exception, unresolved compatibility finding, or
+  incomplete Phase 4/5 acceptance or exit criterion.
+
+Decision
+
+G4 - Binding Parity Alpha is Passed. Phase 4 and Phase 5 remain Done.
+Python and browser WASM pass shared traces for the supported feature set
+through one Rust-owned engine. ADR-007 is Implemented / Verified.
+
+Residual scope
+
+The 0.0.2 checkpoint is staged and not published. npm-release-staging.yml
+was not dispatched because GitHub requires that workflow on the default
+branch. Full interpreter/platform wheel-matrix restoration remains
+user-owned under the PR-032 Linux-only envelope. Performance reports are
+warning evidence; PR-063 owns ratification. JournalStore v1, crash
+durability, SharedArrayBuffer, WIT/Wasmtime, a JS JSON-Schema peer, live
+providers, and later production hardening remain mapped later-phase
+obligations. They are not G4 exceptions or blockers.
