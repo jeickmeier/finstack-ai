@@ -1,0 +1,82 @@
+PR-044 local candidate validation
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Branch: codex/pr-044-typed-interactions
+Candidate: e56d6f1d0638986d1201f2b901f372d64d01d062
+Baseline: 598f2a0c27bed021135fa16a4f50b95c206133de
+Host: Darwin 25.5.0 arm64; rustc 1.97.1
+
+Commands and results:
+
+  cargo fmt --all --check
+    Pass.
+
+  cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    Pass.
+
+  cargo test -p finstack-ai-kernel --offline --locked interaction
+    Pass: 16 lifecycle/pairing tests, 1 ignored fixture printer.
+
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked interaction
+    Pass: 3 router/classifier tests.
+
+  cargo test -p finstack-ai-test --test interaction --offline --locked
+    Pass: 11 crash/resolution-matrix rows (A01–A04).
+
+  cargo test -p finstack-ai-test --test tool_port --offline --locked
+    Pass: 25 tests; approval deny/expire stay on the existing tool floor.
+
+  cargo test -p finstack-ai --offline --locked interaction
+    Pass: 0 matches. SDK list/resolve is covered by the interaction
+    integration crate and Python binding tests.
+
+  uv run --no-cache --isolated --no-project
+    --with-editable bindings/finstack-ai-python
+    --with pytest==9.1.1 --with pydantic==2.12.5
+    pytest -q bindings/finstack-ai-python/tests/test_interactions.py
+    Pass: 2 tests (grant and deny).
+
+  cargo test --workspace --offline --locked
+    First aggregates: unrelated flake in
+    finstack-ai-store-sqlite faults::concurrent_readers_never_observe_a_torn_batch
+    on an untouched crate. Isolated rerun passed.
+    Workspace excluding that crate: Pass: 484 passed, 2 ignored.
+    Isolated `finstack-ai-store-sqlite -- --test-threads=1`:
+    Pass: 22 passed.
+    Combined equivalent: 506 passed, 2 ignored.
+
+  cargo test -p finstack-ai-test --test journal_v1 --offline --locked
+    Pass: 4 tests; runtime and SDK stay protocol-free.
+
+  cargo test -p finstack-ai-test --test public_rust_api --offline --locked
+    Pass: 4 tests; corpus is 125 after four kernel-input fixtures.
+
+  cargo tree -e normal --locked --offline for finstack-ai-runtime,
+  finstack-ai, and finstack-ai-kernel
+    Pass: no finstack-ai-protocol (runtime/SDK), no
+    finstack-ai-store-sqlite, no rusqlite.
+
+  uv run --no-project python tools/wasm_package/check.py graph
+    Pass: wasm graph: no Tokio, sockets, filesystem drivers, or kernel
+    wasm-bindgen. rusqlite remains forbidden.
+
+Acceptance:
+  PR-044-A01 a process can stop after requesting any supported
+             InteractionKind and resume after a later valid resolution
+  PR-044-A02 a denied or expired approval never dispatches the
+             protected tool effect
+  PR-044-A03 duplicate equivalent resolutions are idempotent;
+             conflicting or late resolutions fail closed and are audited
+  PR-044-A04 approval, choice, and review traces use the same
+             persisted interaction envelope; Rust and Python list/resolve
+             go through InteractionRouter after accept
+
+Limits:
+  No seventh port. No exactly-once claim. No G5 inference.
+  No hosted PR/merge, npm publish, or tag.
+  Full pytest, mise run ci, sqlite kill, and browser tests were
+  not required to prove A01–A04. Rust workspace tests, clippy,
+  journal_v1, public-rust-api, and graph checks were run.
+  WASM/JS list/resolve remains PR-048.
+  Cancel-during-suspended-interaction remains PR-045.
+  PR-043 remains In review and is not marked Done.
