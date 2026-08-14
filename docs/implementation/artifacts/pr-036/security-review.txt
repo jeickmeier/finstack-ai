@@ -1,0 +1,79 @@
+PR-036 binding-safety review (postMessage, terminate/unload, redaction)
+Date: 2026-08-13
+Candidate: 9ecaa1e1c4e50cf78a3bb5d9478b9e923f2a0f23
+Reviewer: me@jeickmeier.com
+Decision: Pass; no new trust class, listener, persistence surface,
+SharedArrayBuffer, or in-browser credential field. npm publication remains
+excluded.
+
+Scope reviewed:
+  worker protocol versioning, size bounds, and handle correlation
+  exposeWorkerHost outbound queue and transferable ArrayBuffer copies
+  connectWorker snapshot facades (no wasm load on the UI thread)
+  terminate / unload / cancel-fetch lifecycle
+  OpenAI-compatible fetch abort detachment
+  tools/wasm_package/check.py secret roots (js/src, README, harness,
+    worker-harness.html, generated)
+  README worker topology (credential-free)
+
+PASS  Threat Model §8.3 handle-correlated bounds
+      Every protocol message is versioned JSON. Control envelopes are
+      rejected above 16 KiB. Transferred event-batch buffers are rejected
+      above 256 KiB. Batch, ack, cancel, and backpressure messages carry
+      agentId and runId. Uncorrelated or unknown handles are rejected.
+      toJsonBytes() is copied into a fresh ArrayBuffer before transfer so
+      wasm memory is not detached.
+
+PASS  Terminate, unload, and cancel
+      WorkerClient.terminate() cancels in-flight result waiters with
+      agent_run_cancelled and session context when the run has started,
+      then worker.terminate(). Page navigation drops main-thread waiters.
+      Memory-store restart cannot resume. cancel() is explicit and
+      idempotent. Dropping WorkerRun / aborting events() closes delivery
+      only. Unexpected worker crash (other than the known wasm-bindgen
+      abort-on-drop throw, which also occurs on the UI thread) maps to
+      agent_run_runtime_failure.
+
+PASS  Drop is not cancel
+      Default lag policy is drop-progress. Transient batches may be
+      dropped when the outbound queue is full. Durable and terminal
+      batches are never dropped. droppedProgress is aggregated onto the
+      next delivered batch and exposed on backpressure(). Disconnect and
+      block-bounded are documented on WorkerConnectOptions.
+
+PASS  Redaction and secrets
+      Protocol errors reuse FinstackError codes. Durable diagnostics stay
+      free of raw JS exception text. Secret scan of js/src, README,
+      harness.html, worker-harness.html, and generated glue found no
+      apiKey, OPENAI_API_KEY, or provider-token pattern. The OpenAI
+      adapter still has no credential field. Fetch abort uses a detached
+      local AbortController so wasm cancel does not attach the engine
+      signal directly to fetch.
+
+PASS  Trust class and persistence
+      JS adapters remain trusted T2 and are constructed inside the worker
+      factory. No MessagePort-bridged main-thread adapters. No
+      SharedWorker, Service Worker, SharedArrayBuffer, or COOP/COEP.
+      Default journal remains process-local Rust MemoryJournalStore.
+      Worker restart cannot resume. IndexedDB remains PR-037.
+
+PASS  No G4 / adapter flip / ADR Implemented
+      DeferredBindingAdapter::wasm() remains Unavailable. ADR-031 stays
+      Accepted / In progress / Partial. ADR-019 stays Partial. UI-thread
+      Agent.create is unchanged and is not auto-wrapped in a Worker.
+
+Residual conditions:
+  - Hosted Ubuntu proof of the new surfaces is defined but not dispatched
+    in this local-integrate envelope.
+  - npm publish, multi-browser, and G4 remain PR-038.
+  - SharedArrayBuffer and threaded WASM remain PR-038 and require a new
+    ADR-031 reconsideration.
+  - IndexedDB and crash durability remain PR-037/PR-048.
+  - Cross-binding Agent-run golden traces remain PR-038 / G4.
+  - wasm-bindgen may still throw "closure invoked recursively or after
+    being dropped" during AbortOnDrop; the worker stays up and durable
+    cancel still completes. A Rust host-abort deferral is later work.
+
+No independent review, npm publication, hosted pull request or merge, tag,
+G4 decision, WASM conformance-adapter activation, SharedArrayBuffer, or
+IndexedDB durability is claimed.

@@ -1,0 +1,61 @@
+PR-036 candidate validation
+Date: 2026-08-13
+Candidate: 9ecaa1e1c4e50cf78a3bb5d9478b9e923f2a0f23
+Host: Darwin 25.5.0 arm64
+Toolchain: rustc/cargo 1.97.1; Node 22.22.3; wasm-bindgen-cli 0.2.122
+Result: PASS (local)
+
+Commands and outcomes
+
+1. cargo test -p finstack-ai-runtime --locked --features native-tokio
+   PASS. 64 tests. Native Tokio owner unchanged.
+
+2. cargo test -p finstack-ai --locked --features native-tokio
+   PASS. 28 tests. Native Agent proofs remain green.
+
+3. cargo test -p finstack-ai-wasm --locked --features scripted-trace
+   PASS. 22 tests. Host DTO/error mapping and scripted store proofs remain.
+
+4. mise run check-wasm
+   PASS. Type-checked kernel, runtime wasm-host, facade wasm-host, wasm
+   crate (default and scripted-trace), and the three leaf fixtures for
+   wasm32-unknown-unknown. Selected graphs contain no Tokio, reqwest,
+   rusqlite, pyo3, wasmtime, hyper, native-tls, or
+   finstack-ai-provider-openai-compatible. Kernel graph contains no
+   wasm-bindgen. finstack-ai-store-memory is present. Secret scan of
+   js/src, README, harness.html, worker-harness.html, and generated glue
+   found no credential field or provider-secret pattern.
+
+5. mise run generate-wasm
+   PASS. SOURCE_DATE_EPOCH=0. tools/wasm_package/check.py dirty is clean
+   on this candidate. Generated wasm/glue bytes are unchanged from PR-035
+   (no Rust crate edits).
+
+6. mise run test-browser
+   PASS. tsc --noEmit against the published entrypoints including
+   `@finstack/ai/worker`. Playwright Chromium ran 21 tests: the existing
+   15 PR-033–035 proofs plus 6 worker tests covering A01–A04 (UI tick
+   during a 1000-delta stream, terminate/unload/cancel-fetch, bounded
+   drop-progress, and matching main-thread/worker traces).
+
+7. mise run ci
+   PASS. format/clippy/ruff/mypy, cargo test --workspace --locked, Python
+   pytest (33 passed, 1 skipped), and check-wasm.
+
+8. DeferredBindingAdapter::wasm()
+   Unchanged. Capability remains Unavailable. Not G4.
+
+Limits
+
+- Validation ran on Darwin arm64. Hosted Ubuntu CI is defined in
+  .github/workflows/ci.yml under the PR-032 Linux-only envelope and was not
+  dispatched (hosted pull requests remain prohibited).
+- Bundle-size.json is reporting only; PR-038 owns budgets. Published wasm
+  bytes are unchanged from PR-035.
+- The retired 22-test architecture suite was not run and is not claimed.
+- Agent-run binding parity across native/Python/WASM golden traces remains
+  PR-038 / G4.
+- No npm publish, IndexedDB durability, SharedArrayBuffer, threaded WASM,
+  or DeferredBindingAdapter::wasm() flip is claimed.
+- ADR-031 remains Accepted / In progress / Partial.
+- ADR-019 remains Accepted / In progress / Partial.

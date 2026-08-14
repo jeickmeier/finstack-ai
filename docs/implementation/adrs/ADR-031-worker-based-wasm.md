@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial — PR-033 package start; PR-036 worker helper and transferable batch protocol at candidate `9ecaa1e1c4e50cf78a3bb5d9478b9e923f2a0f23`; SharedArrayBuffer and threaded WASM remain PR-038
