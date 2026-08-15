@@ -1,0 +1,8 @@
+{
+  "packages": [
+    "finstack:ai-types@0.0.4",
+    "finstack:ai-host@0.0.4",
+    "finstack:ai-toolset@0.0.4"
+  ],
+  "crate_version": "0.0.3"
+}

@@ -583,6 +583,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-wit"
+version = "0.0.3"
+dependencies = [
+ "finstack-ai-runtime",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "fluent-uri"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

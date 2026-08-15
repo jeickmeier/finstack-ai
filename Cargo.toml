@@ -17,6 +17,7 @@ members = [
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
     "fixtures/ci/extension-port-leaf",
+    "plugins/finstack-ai-wit",
 ]
 
 [profile.release]
@@ -53,6 +54,7 @@ rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"
 finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack-ai-provider-openai-compatible", version = "0.0.3" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.0.3" }
 finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.0.3" }
+finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "0.0.3" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"

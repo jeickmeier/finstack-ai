@@ -1,0 +1,9 @@
+{
+  "world": "toolset-plugin",
+  "exports": ["toolset"],
+  "funcs": ["list-tools", "call"],
+  "imports": [
+    "finstack:ai-host/logging@0.0.4",
+    "finstack:ai-host/blobs@0.0.4"
+  ]
+}
