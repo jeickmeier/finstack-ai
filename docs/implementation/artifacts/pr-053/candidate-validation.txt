@@ -1,0 +1,45 @@
+PR-053-E-candidate-4dcdc0968416
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Candidate: 4dcdc0968416a4cfbea6717e7edff19ab15c1c87
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1 (8bab26f4f 2026-07-14)
+Result: Pass for A01–A04. No G5 or G6 inference.
+
+Commands:
+  cargo tree -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai --locked --no-default-features --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-native-examples -p finstack-ai-wit --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-guest-sdk --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-plugin-host --locked --prefix none --format '{p}' --edges normal
+  cargo test -p finstack-ai-guest-sdk --offline --locked
+  cargo test -p finstack-ai-plugin-host --offline --locked --lib
+  cargo test -p finstack-ai-wit --offline --locked --lib
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  mise run check-wit
+  mise run check-guest-sdk
+  mise run check-plugin-wasm
+  mise run check-plugin-template
+  mise run check-wasm
+  uv run --no-project python tools/wasm_package/check.py graph
+
+Results:
+  default / minimal / wit / native-examples trees: no wasmtime, no wasmtime-wasi, no finstack-ai-plugin-host, no finstack-ai-guest-sdk
+  guest-sdk tree: no wasmtime, no wasmtime-wasi, no plugin-host, no finstack-ai-wit, no finstack-ai, no kernel, no runtime, no tokio, no libloading
+  plugin-host tree: wasmtime 47.0.3; wasmtime-wasi 47.0.3; no libloading; no finstack-ai-guest-sdk
+  finstack-ai-guest-sdk tests: 6 passed
+  finstack-ai-plugin-host lib tests: 44 passed, 1 ignored (template run is mise check-plugin-template)
+  finstack-ai-wit lib tests: 26 passed
+  workspace clippy: pass
+  check-wit / check-guest-sdk / check-plugin-wasm: clean
+  check-plugin-template: toolset and context templates build; template echo call returns {"text":"from-template"}
+  check-wasm / wasm graph: no Tokio, sockets, filesystem drivers, kernel wasm-bindgen, or wasmtime
+  wasm secret scan: no credential field or provider-secret pattern
+  (pre-existing EventBatch::new dead_code warning on isolated wasm check)
+
+Acceptance:
+  A01 Pass — mise run check-plugin-template copies plugins/templates/toolset-plugin/, rewrites the guest-sdk path, builds wasm32-unknown-unknown, encodes with tools/plugin_wasm/encoder, and WasmToolsetAdapter calls finstack.plugin.template.echo. Context template builds the same way. Template requests only {logging}.
+  A02 Pass — calculator wasm passes check_toolset_conformance for add [1,2,3] -> {"result":6} and matches native evaluate for empty multiply, divide-by-zero (calculator_arithmetic_error), and >1024 operands (calculator_invalid_arguments). Context wasm matches in-process ReferenceContextProvider via check_context_conformance. Filesystem sandbox lists/reads under a granted tempdir preopen; default grants -> plugin_permission_denied; filesystem offered without preopen -> plugin_instantiate_failed.
+  A03 Pass — wit-bindgen 0.57.1 (macros + realloc). Vendored guest WIT is byte-identical to plugins/finstack-ai-wit/wit/v0.0.4/. check-guest-sdk and check-plugin-wasm fail on drift. Workspace version stays 0.0.3. Packages stay @0.0.4.
+  A04 Pass — guest-sdk / templates / references depend on finstack-ai-guest-sdk only. cargo tree proofs above. Host tests live in finstack-ai-plugin-host.
+
+Exclusions remain: lockfile/G6, 0.0.4 cut, crates.io/npm/pypi publish, ExtensionTrust::IsolatedWasm, secret provider, write/glob/shell filesystem, @0.0.5/@1.0.0 worlds, wasmtime-wasi-http. Public rust-api corpus stays 131. Plugin-host and guest-sdk stay off check-wasm.
