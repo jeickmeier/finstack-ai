@@ -24,6 +24,7 @@ mod grants;
 mod host;
 mod instantiate;
 mod limits;
+mod lockfile;
 mod signature;
 
 pub use adapters::{WasmContextAdapter, WasmPluginExtension, WasmToolsetAdapter};
@@ -32,14 +33,19 @@ pub use cache::{
 };
 pub use error::{
     PLUGIN_COMPILE_FAILED, PLUGIN_INSTANCE_LIMIT, PLUGIN_INSTANTIATE_FAILED,
-    PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT, PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP,
-    PluginHostError,
+    PLUGIN_LOCK_DIGEST_MISMATCH, PLUGIN_LOCK_DISABLED, PLUGIN_LOCK_DUPLICATE, PLUGIN_LOCK_INVALID,
+    PLUGIN_LOCK_NOT_FOUND, PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT,
+    PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP, PluginHostError,
 };
 pub use grants::{FilesystemPreopen, GrantResources};
 pub use host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld, ReadyWasm};
 pub use instantiate::HostState;
 pub use limits::EffectiveLimits;
+pub use lockfile::{LockedPlugin, ResolvedPluginLock, resolve_lockfile};
 pub use signature::SignaturePolicy;
+
+#[cfg(test)]
+mod conformance_tests;
 
 #[cfg(test)]
 mod fixture_tests;
@@ -176,6 +182,30 @@ mod graph_tests {
             !has_package(&host, "finstack-ai-guest-sdk"),
             "plugin-host must not depend on finstack-ai-guest-sdk:\n{host}"
         );
+        assert_host_has_no_discovery_clients();
+    }
+
+    fn assert_host_has_no_discovery_clients() {
+        let direct = tree(&[
+            "tree",
+            "-p",
+            "finstack-ai-plugin-host",
+            "--locked",
+            "--depth",
+            "1",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+            "--edges",
+            "normal",
+        ]);
+        for forbidden in ["reqwest", "ureq", "hyper", "libloading"] {
+            assert!(
+                !has_package(&direct, forbidden),
+                "plugin-host must not take {forbidden} as a direct dependency:\n{direct}"
+            );
+        }
     }
 
     fn has_package(tree: &str, name: &str) -> bool {

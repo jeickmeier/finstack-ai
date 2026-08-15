@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/plugin-lock/v1/plugin-lock.schema.json",
+  "title": "PluginLock",
+  "description": "Local-only plugin lockfile. Runtime discovery reads this document and does not search or fetch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "lockfile_version",
+    "plugins"
+  ],
+  "properties": {
+    "lockfile_version": {
+      "const": 1
+    },
+    "plugins": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identity",
+          "version",
+          "enabled",
+          "component",
+          "component_digest",
+          "manifest",
+          "manifest_digest"
+        ],
+        "properties": {
+          "identity": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 256,
+            "pattern": "^finstack\\.plugin\\."
+          },
+          "version": {
+            "const": "0.0.4"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "component": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "not": {
+              "pattern": "(://)|(^/)|(\\.\\.)"
+            }
+          },
+          "component_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "manifest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "not": {
+              "pattern": "(://)|(^/)|(\\.\\.)"
+            }
+          },
+          "manifest_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

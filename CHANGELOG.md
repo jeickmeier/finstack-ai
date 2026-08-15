@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
 and bundled first-party leaf crates share one lockstep workspace version. The
-current staged unpublished candidate is `0.0.3`; the exact cross-binding
-checkpoint and named G5 remain owner decisions.
+current staged unpublished candidate is `0.0.4`; the exact cross-binding
+checkpoint and named G5 / G6 remain owner decisions.
 
 ## [Unreleased]
 
 ### Changed
 
+- Stage unpublished lockstep `0.0.4` artifacts for the Phase 7 / G6 readiness
+  pack. Named G6, checkpoint cut, publish, and tag remain owner decisions.
 - Stage unpublished lockstep `0.0.3` artifacts for the Phase 6 / G5 readiness
   pack. Named G5, checkpoint cut, publish, and tag remain owner decisions.
 - Stage the lockstep `0.0.2` alpha candidate with Python conformance,
@@ -23,6 +25,8 @@ checkpoint and named G5 remain owner decisions.
 
 ### Added
 
+- Local plugin lockfile discovery (`PluginHost::load_enabled`), published
+  hostile conformance rows, and the plugin-lock schema family (PR-054).
 - JournalStore v1 canonical-CBOR codec, payload/envelope checksums, remaining session/lane/snapshot record variants, memory-store scan/metadata CAS, and Python/JS known-answer helpers (PR-039). SQLite, snapshot acceleration, crash durability, and G5 remain later work.
 - Trusted JavaScript host adapters, AbortSignal/stream normalization, `normalizePrebetaShape`, and a tree-shakeable same-origin OpenAI-compatible fetch/SSE battery (PR-034). Agent/Run handles, workers, IndexedDB, npm publish, and G4 remain later work.
 - wasm-bindgen `@finstack/ai` preview package, host-driven local executor, six-port JS promise compile fixtures, and a headless Chromium no-op trace (PR-033). Agent/Run handles, JS host adapters, workers, IndexedDB, npm publish, and G4 remain later work.

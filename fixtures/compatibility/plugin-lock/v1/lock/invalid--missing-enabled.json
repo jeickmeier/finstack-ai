@@ -1,0 +1,13 @@
+{
+  "lockfile_version": 1,
+  "plugins": [
+    {
+      "identity": "finstack.plugin.calculator",
+      "version": "0.0.4",
+      "component": "calculator/component.wasm",
+      "component_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest": "calculator/plugin.manifest.json",
+      "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}

@@ -4,5 +4,5 @@
   "worlds": ["toolset-plugin"],
   "permissions": ["logging"],
   "configuration_schema": {},
-  "digest": "compute-with-host-manifest_digest_hex"
+  "digest": "204b2658cff5fdbbbdd80583a5909e0a09be03cb744bb2436dd52cf1a3ed84b8"
 }

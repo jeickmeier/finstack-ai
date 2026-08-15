@@ -31,6 +31,7 @@ fixtures/compatibility/<family>/migrations/v<from>-to-v<to>--<slug>.{before,afte
 | WIT | [`wit/`](wit/) |
 | Golden traces | [`golden-trace/`](golden-trace/) |
 | Benchmark reports | [`benchmark-report/`](benchmark-report/) |
+| Plugin lockfile | [`plugin-lock/`](plugin-lock/) |
 
 Reserved README-only directories are not passing conformance evidence.
 Active PR-005 corpora under `golden-trace/` and `benchmark-report/` are.

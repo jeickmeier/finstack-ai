@@ -19,6 +19,7 @@ that crate only, and encode with `tools/plugin_wasm/encoder`. Published
 reference components live under `reference/` (calculator, context
 provider, read-only filesystem sandbox). The sandbox is a T3 fixture
 over a granted preopen; it is not `finstack-ai-tools-filesystem`.
+Runtime discovery reads `reference/plugin.lock.json` only.
 
 ```text
 rust-version: 1.97.1
@@ -33,6 +34,8 @@ mise run gen-guest-sdk
 mise run check-guest-sdk
 mise run gen-plugin-wasm
 mise run check-plugin-wasm
+mise run gen-plugin-lock
+mise run check-plugin-lock
 mise run check-plugin-template
 cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_

@@ -4,7 +4,7 @@
   "worlds": ["toolset-plugin"],
   "permissions": ["logging", "filesystem"],
   "configuration_schema": {},
-  "digest": "compute-with-host-manifest_digest_hex",
+  "digest": "20c42b83488c05e2f54556e4ddcd887e83ecf6a182cb960278a3d2de0a6b42b6",
   "resource_limits": {
     "max_output_bytes": 65536,
     "call_timeout_ms": 5000,

@@ -15,7 +15,8 @@ encode: tools/plugin_wasm/encoder
 ```
 
 Regenerate vendored WIT with `mise run gen-guest-sdk`.
-`mise run check-guest-sdk` fails on drift.
+`mise run check-guest-sdk` fails on drift. Runtime discovery is
+lockfile-only (`PluginHost::load_enabled`); guests are not searched.
 
 ## Author a guest
 
