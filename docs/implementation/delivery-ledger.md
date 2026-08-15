@@ -10,7 +10,7 @@ Last updated 2026-08-15 and reconciled against documentation pack v0.21 / PLAN-0
 | --- | ---: | ---: | --- |
 | Phases | 10 | 9 | Phase 0–8 `Done`; Phase 9 `In progress` |
 | Logical PRs | 66 | 62 | PR-001–PR-062 `Done`; PR-063 `In progress`; PR-064–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 334 | PR-001–PR-062 closed; PR-063 A01–A04 Pending |
+| PR acceptance-evidence bullets | 345 | 338 | PR-001–PR-063 A01–A04 Passed; PR-063 not yet merged |
 | Phase entrance and exit bullets | 62 | 58 | Phase 0–8 entrance and exit `Passed`; Phase 9 entrance `Passed` (2/2); Phase 9 exit `0/4` |
 | Program gates | 9 | 8 | G0–G7 `Passed`; G8 `Not ready` |
 | Implementation tasks | 388 | 388 | PR-063 tasks complete; A01–A04 still Pending until the candidate SHA |
@@ -100,7 +100,7 @@ Phase 8 entrance is `Passed` via `PH8-E-entrance-gates-400228a63790` and `PH8-E-
 
 PR-062 is `Done` at local `main` merge `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` (A01–A04 Passed; no GitHub issue or actual pull request). Residual closeout candidate is `900d84cc9ab352330b33ed5cc41d002b35419d4b`. A04 passed via `COMP-1.0-D-contract-freeze-00b78667ecc4`. Phase 9 entrance stays `Passed` (2/2). Phase 9 exit stays `0/4`. G8 remains `Not ready`.
 
-PR-063 is `In progress` on `codex/pr-063-perf-memory-startup-budgets` from local `main` at `dd3557d8742805d003023f9fd8bf628672f3e33f`. A01–A04 are `Pending`. Do not start PR-064+. Do not write `G8-D-*`. Do not cut or publish `1.0.0`.
+PR-063 is `In progress` on `codex/pr-063-perf-memory-startup-budgets`. Candidate `0a84c8196624bdc4eeff8ec229a304fe6d69866d` records A01–A04 Passed. Do not start PR-064+. Do not write `G8-D-*`. Do not cut or publish `1.0.0`.
 
 ## Active execution envelope
 
@@ -339,7 +339,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-062 | Done | me@jeickmeier.com | local `main` merge `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` of `codex/pr-062-closeout` after first merge `fa2923c5b57854baa81e9a9e6ea1685b8422b6f8` (no issue or actual PR) | 7 | 4/4 | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12; PR-062-E-candidate-fe6b29ee4400; PR-062-E-security-1bbadf7b2adc; PR-062-E-integration-5e8cbcf0588d; PR-062-E-closeout-2b935a5bf981; PR-062-E-security-closeout-b9f5a3319ad2; COMP-1.0-D-contract-freeze-00b78667ecc4; PR-062-E-integration-5ec6101883c3 | — | `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` / 2026-08-15 | 2026-08-15 |
-| PR-063 | In progress | me@jeickmeier.com | `codex/pr-063-perf-memory-startup-budgets` from `dd3557d8742805d003023f9fd8bf628672f3e33f` (no issue or actual PR) | 7 | 0/4 | [`artifacts/pr-063/plan.md`](artifacts/pr-063/plan.md) | — | — | 2026-08-15 |
+| PR-063 | In progress | me@jeickmeier.com | `codex/pr-063-perf-memory-startup-budgets` from `dd3557d8742805d003023f9fd8bf628672f3e33f` (no issue or actual PR) | 7 | 4/4 | PR-063-E-candidate-67d4658eab90; PR-063-E-security-9d385ed9ec26 | — | — | 2026-08-15 |
 | PR-064 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-065 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-066 | Todo | — | — | 0 | 0/4 | — | — | — | — |

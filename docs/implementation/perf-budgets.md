@@ -20,7 +20,7 @@ as a hosted perf-lab result.
 | Node | 22.18.0 (`mise.toml` pin) |
 | Feature set | default native-tokio SDK; scripted models only |
 | Comparison commit | tag `v0.1.0` = `9d09b87108f6286918fcc436c53d195d0b6b10cc` |
-| Candidate commit | recorded per PR-063 evidence row |
+| Candidate commit | `0a84c8196624bdc4eeff8ec229a304fe6d69866d` |
 
 PR-061 rehearsal artifacts are not a Criterion corpus. The checked-in
 `0.1.0` comparison line is the method-plus-number corpus that exists at
