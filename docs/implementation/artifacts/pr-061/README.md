@@ -14,7 +14,7 @@ closeout `55b3cfdfc222e3a4faa6b911fefc5be0c1e9df8b`.
 | `candidate-validation.txt` | Local Darwin A01–A04 plus A05 step 1 proofs at `8197246e58981b3ba2dd806a7036e13238cb5fb9` |
 | `security-review.txt` | TM-18 review at the same candidate |
 | `rehearsal/` | Two-run comparable checksums and provenance |
-| `integration-validation.txt` | Local `main` merge (when recorded) |
+| `integration-validation.txt` | Local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` |
 
 Phase 8 entrance is `Passed` (2/2) and is not re-recorded here.
 PR-055–PR-060 are `Done`. A05 steps 2–3, `G7-D-*`, tag, and publish
