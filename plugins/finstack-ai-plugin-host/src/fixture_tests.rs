@@ -317,6 +317,13 @@ async fn echo_toolset_resolves_and_calls() {
         panic!("expected completion");
     };
     assert_eq!(result.output.as_bytes(), br#"{"sum":5}"#);
+    let descriptor = toolset.descriptor();
+    let metadata = descriptor.metadata.as_str();
+    assert!(metadata.contains("\"plugin.identity\""));
+    assert!(metadata.contains("finstack.plugin.echo.toolset"));
+    assert!(metadata.contains("plugin.granted_permissions"));
+    assert!(metadata.contains("logging"));
+    assert!(!metadata.contains("signature"));
 }
 
 #[tokio::test]
@@ -472,6 +479,64 @@ async fn exclusive_concurrent_calls_succeed() {
         )
     );
     assert!(a.is_ok() && b.is_ok());
+}
+
+#[tokio::test]
+async fn fuel_burner_trips_resource_limit_and_echo_still_runs() {
+    let shared = host(InstancePolicy::Exclusive, 2);
+    let burner = WasmToolsetAdapter::try_new(
+        Arc::clone(&shared),
+        &fixture_wasm("fuel-burner"),
+        parse_manifest(&manifest_bytes(
+            "finstack.plugin.fuel.toolset",
+            &["toolset-plugin"],
+        ))
+        .expect("manifest"),
+        &construction("finstack.plugin.fuel.toolset"),
+        Arc::new(NoopPluginHooks),
+    )
+    .await
+    .expect("burner");
+    let Err(error) = burner
+        .call(tool_ctx(), validated_call("finstack.plugin.burn", b"{}"))
+        .await
+    else {
+        panic!("fuel");
+    };
+    assert_eq!(
+        error.code(),
+        "plugin_resource_limit",
+        "{} / {}",
+        error.code(),
+        error.message()
+    );
+    assert!(error.metadata().as_str().contains("plugin.identity"));
+    assert!(!error.metadata().as_str().contains("signature"));
+
+    let echo = WasmPluginExtension::toolset(
+        shared,
+        &fixture_wasm("echo-toolset"),
+        parse_manifest(&manifest_bytes(
+            "finstack.plugin.echo.toolset",
+            &["toolset-plugin"],
+        ))
+        .expect("manifest"),
+    )
+    .await
+    .expect("echo");
+    let resolved = register_with_plugin(&echo).await;
+    let toolset = Arc::clone(resolved.run_plan().toolsets()[0].handle());
+    let mut stream = toolset
+        .call(
+            tool_ctx(),
+            validated_call("finstack.plugin.add", br#"{"a":2,"b":3}"#),
+        )
+        .await
+        .expect("echo after burn");
+    let ToolStreamItem::Completed(result) = stream.next().await.expect("item").expect("ok") else {
+        panic!("expected completion");
+    };
+    assert_eq!(result.output.as_bytes(), br#"{"sum":5}"#);
 }
 
 #[test]

@@ -445,6 +445,10 @@ mod tests {
             Some(&PluginResourceLimits {
                 max_output_bytes: 1_024,
                 call_timeout_ms: 10,
+                max_memory_bytes: None,
+                max_tables: None,
+                max_instances: None,
+                fuel: None,
             }),
         )
         .expect("budget");

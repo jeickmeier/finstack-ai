@@ -7,7 +7,7 @@ use finstack_ai::{
     AgentConstructionContext, ComponentConstructionContext, ComponentHealth, ComponentLifecycle,
     LifecycleError,
 };
-use finstack_ai_runtime::PortFuture;
+use finstack_ai_runtime::{PortFuture, Timestamp};
 use thiserror::Error;
 
 /// Stable plugin lifecycle failure. Wrap into [`LifecycleError::failed`] at the SDK boundary.
@@ -165,8 +165,35 @@ pub fn honor_deadline(context: &ComponentConstructionContext) -> Result<(), Plug
     if context.cancellation.is_cancelled() {
         return Err(PluginLifecycleError::Timeout);
     }
-    let _ = context.deadline;
+    if let Some(deadline) = context.deadline
+        && unix_now_ms() >= deadline.as_unix_ms()
+    {
+        return Err(PluginLifecycleError::Timeout);
+    }
     Ok(())
+}
+
+fn unix_now_ms() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or_default(),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+/// Build an absolute deadline from `now + timeout_ms`, keeping the earlier of
+/// that instant and `incoming` when both exist.
+#[must_use]
+pub fn merge_call_deadline(incoming: Option<Timestamp>, timeout_ms: u64) -> Option<Timestamp> {
+    let from_timeout = unix_now_ms()
+        .checked_add(i64::try_from(timeout_ms).unwrap_or(i64::MAX))
+        .and_then(|ms| Timestamp::from_unix_ms(ms).ok());
+    match (incoming, from_timeout) {
+        (Some(left), Some(right)) if left.as_unix_ms() <= right.as_unix_ms() => Some(left),
+        (incoming, from_timeout) => from_timeout.or(incoming),
+    }
 }
 
 /// No-op hooks used by the in-process reference guests.
@@ -181,7 +208,9 @@ mod tests {
         NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginLifecycleError, honor_deadline,
     };
     use finstack_ai::{AgentConstructionContext, ComponentConstructionContext, ComponentLifecycle};
-    use finstack_ai_runtime::{CancellationSignal, ComponentId, ComponentRef, Metadata, Version};
+    use finstack_ai_runtime::{
+        CancellationSignal, ComponentId, ComponentRef, Metadata, Timestamp, Version,
+    };
     use std::sync::Arc;
 
     fn construction(cancelled: bool) -> ComponentConstructionContext {
@@ -235,6 +264,12 @@ mod tests {
             honor_deadline(&construction(true))
                 .expect_err("timeout")
                 .code(),
+            "plugin_lifecycle_timeout"
+        );
+        let mut expired = construction(false);
+        expired.deadline = Some(Timestamp::from_unix_ms(1).expect("past"));
+        assert_eq!(
+            honor_deadline(&expired).expect_err("deadline").code(),
             "plugin_lifecycle_timeout"
         );
         let init = PluginLifecycle::new(Arc::new(FailingInit));

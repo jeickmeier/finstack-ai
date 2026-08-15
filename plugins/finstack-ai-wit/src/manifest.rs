@@ -11,10 +11,19 @@ use crate::limits::{MAX_RAW_JSON_BYTES, reject_before_allocation};
 
 const EXPERIMENTAL_VERSION: &str = "0.0.4";
 const ALLOWED_WORLDS: [&str; 2] = ["toolset-plugin", "context-plugin"];
-const ALLOWED_PERMISSIONS: [&str; 2] = ["logging", "blobs"];
+const ALLOWED_PERMISSIONS: [&str; 8] = [
+    "logging",
+    "blobs",
+    "http",
+    "filesystem",
+    "network",
+    "secrets",
+    "clock",
+    "random",
+];
 const IDENTITY_PREFIX: &str = "finstack.plugin.";
 
-/// Optional signature metadata stored on the manifest. Verification is PR-052.
+/// Optional signature metadata stored on the manifest. Host-side verify is PR-052.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginSignature {
@@ -26,7 +35,7 @@ pub struct PluginSignature {
     pub signature: String,
 }
 
-/// Optional host-side resource ceilings. Fuel/WASI stay PR-052.
+/// Optional host-side resource ceilings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginResourceLimits {
@@ -34,6 +43,18 @@ pub struct PluginResourceLimits {
     pub max_output_bytes: u64,
     /// Host call deadline in milliseconds.
     pub call_timeout_ms: u64,
+    /// Optional linear-memory ceiling in bytes.
+    #[serde(default)]
+    pub max_memory_bytes: Option<u64>,
+    /// Optional per-store table ceiling.
+    #[serde(default)]
+    pub max_tables: Option<u32>,
+    /// Optional per-store instance ceiling.
+    #[serde(default)]
+    pub max_instances: Option<u32>,
+    /// Optional fuel budget for one store.
+    #[serde(default)]
+    pub fuel: Option<u64>,
 }
 
 /// Fail-closed experimental plugin package metadata.
@@ -123,16 +144,16 @@ pub fn reject_duplicate_identities(manifests: &[PluginManifest]) -> Result<(), W
     Ok(())
 }
 
-/// Host-computed digest over canonical `{identity, version, worlds}`.
+/// Canonical `{identity, version, worlds}` bytes used for digest and signatures.
 ///
 /// # Errors
 ///
 /// Returns [`WitMapError`] when canonicalization exceeds the JSON ceiling.
-pub fn manifest_digest_hex(
+pub fn manifest_signing_payload(
     identity: &str,
     version: &str,
     worlds: &[String],
-) -> Result<String, WitMapError> {
+) -> Result<Vec<u8>, WitMapError> {
     let mut worlds = worlds.to_vec();
     worlds.sort();
     worlds.dedup();
@@ -145,7 +166,21 @@ pub fn manifest_digest_hex(
     reject_before_allocation(&encoded, MAX_RAW_JSON_BYTES, "manifest-digest-json")?;
     let raw = RawJson::parse(&encoded)
         .map_err(|_| WitMapError::ManifestInvalid("manifest digest JSON is invalid"))?;
-    Ok(Digest::raw_json(raw.as_bytes()).to_hex())
+    Ok(raw.as_bytes().to_vec())
+}
+
+/// Host-computed digest over canonical `{identity, version, worlds}`.
+///
+/// # Errors
+///
+/// Returns [`WitMapError`] when canonicalization exceeds the JSON ceiling.
+pub fn manifest_digest_hex(
+    identity: &str,
+    version: &str,
+    worlds: &[String],
+) -> Result<String, WitMapError> {
+    let payload = manifest_signing_payload(identity, version, worlds)?;
+    Ok(Digest::raw_json(&payload).to_hex())
 }
 
 fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
@@ -211,7 +246,12 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
         ));
     }
     if let Some(limits) = &wire.resource_limits
-        && (limits.max_output_bytes == 0 || limits.call_timeout_ms == 0)
+        && (limits.max_output_bytes == 0
+            || limits.call_timeout_ms == 0
+            || limits.max_memory_bytes == Some(0)
+            || limits.max_tables == Some(0)
+            || limits.max_instances == Some(0)
+            || limits.fuel == Some(0))
     {
         return Err(WitMapError::ManifestInvalid(
             "resource limit fields must be non-zero",
@@ -249,6 +289,25 @@ mod tests {
             "digest": digest
         }))
         .expect("json")
+    }
+
+    #[test]
+    fn catalog_permissions_parse_without_sandboxing() {
+        let identity = "finstack.plugin.reference.context";
+        let worlds = vec!["context-plugin".to_owned()];
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "identity": identity,
+            "version": "0.0.4",
+            "worlds": worlds,
+            "permissions": ["logging", "filesystem", "clock"],
+            "configuration_schema": {},
+            "digest": digest
+        }))
+        .expect("json");
+        let parsed = parse_manifest(&bytes).expect("catalog names parse");
+        assert!(parsed.permissions.contains(&"filesystem".to_owned()));
+        assert!(parsed.permissions.contains(&"clock".to_owned()));
     }
 
     #[test]

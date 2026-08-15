@@ -1,5 +1,6 @@
 //! Isolated Wasmtime engine, host configuration, and compiled-component load.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use finstack_ai_wit::{PluginManifest, validate_manifest};
@@ -13,7 +14,13 @@ use crate::cache::{
     host_target,
 };
 use crate::error::PluginHostError;
+use crate::grants::{
+    FilesystemPreopen, GrantResources, default_application_grants, require_offered,
+    validate_application_grants,
+};
 use crate::instantiate::HostState;
+use crate::limits::EffectiveLimits;
+use crate::signature::{SignaturePolicy, verify_manifest};
 
 /// Per-call instance/store policy. Worlds do not declare safe reuse, so this
 /// crate never pools live instances across components.
@@ -51,6 +58,11 @@ pub struct PluginHostConfig {
     cache_dir: Option<PathBuf>,
     instance_policy: InstancePolicy,
     max_concurrent_instances: u32,
+    application_grants: BTreeSet<String>,
+    signature_policy: SignaturePolicy,
+    trust_roots: BTreeMap<String, [u8; 32]>,
+    resources: GrantResources,
+    default_limits: EffectiveLimits,
 }
 
 impl PluginHostConfig {
@@ -58,6 +70,7 @@ impl PluginHostConfig {
     ///
     /// `cache_dir` of `None` keeps compiled artifacts in memory. Directory
     /// mode is host-owned and does not use Wasmtime's implicit global cache.
+    /// Default grants are `{logging, blobs}`. Signature policy is Permissive.
     ///
     /// # Errors
     ///
@@ -77,7 +90,79 @@ impl PluginHostConfig {
             cache_dir,
             instance_policy,
             max_concurrent_instances,
+            application_grants: default_application_grants(),
+            signature_policy: SignaturePolicy::Permissive,
+            trust_roots: BTreeMap::new(),
+            resources: GrantResources::default(),
+            default_limits: EffectiveLimits::default(),
         })
+    }
+
+    /// Replace the host-offered grant set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginHostError::ConfigInvalid`] for `secrets` or unknown names.
+    pub fn with_application_grants(
+        mut self,
+        grants: BTreeSet<String>,
+    ) -> Result<Self, PluginHostError> {
+        validate_application_grants(&grants)?;
+        self.application_grants = grants;
+        Ok(self)
+    }
+
+    /// Set signature policy. Strict with empty trust roots rejects every package.
+    #[must_use]
+    pub const fn with_signature_policy(mut self, policy: SignaturePolicy) -> Self {
+        self.signature_policy = policy;
+        self
+    }
+
+    /// Replace ed25519 trust roots keyed by non-secret `key_id`.
+    #[must_use]
+    pub fn with_trust_roots(mut self, roots: BTreeMap<String, [u8; 32]>) -> Self {
+        self.trust_roots = roots;
+        self
+    }
+
+    /// Replace filesystem preopens. An empty list does not link `wasi:filesystem`.
+    #[must_use]
+    pub fn with_filesystem_preopens(mut self, preopens: Vec<FilesystemPreopen>) -> Self {
+        self.resources.filesystem = preopens;
+        self
+    }
+
+    /// Replace the HTTP hostname allowlist. Empty does not link `wasi:http`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginHostError::ConfigInvalid`] when an entry contains
+    /// userinfo or a scheme.
+    pub fn with_http_allowlist(mut self, hosts: BTreeSet<String>) -> Result<Self, PluginHostError> {
+        for host in &hosts {
+            if host.contains("://") || host.contains('@') {
+                return Err(PluginHostError::ConfigInvalid(
+                    "http allowlist entries must be hostnames",
+                ));
+            }
+        }
+        self.resources.http_hosts = hosts;
+        Ok(self)
+    }
+
+    /// Enable or disable the explicit socket grant. Off by default.
+    #[must_use]
+    pub const fn with_socket_grant(mut self, enabled: bool) -> Self {
+        self.resources.sockets = enabled;
+        self
+    }
+
+    /// Replace experimental host default limits.
+    #[must_use]
+    pub const fn with_default_limits(mut self, limits: EffectiveLimits) -> Self {
+        self.default_limits = limits;
+        self
     }
 
     /// Configured instance policy.
@@ -102,6 +187,11 @@ pub struct PluginHost {
     cache: ComponentCache,
     instance_policy: InstancePolicy,
     max_concurrent_instances: u32,
+    application_grants: BTreeSet<String>,
+    signature_policy: SignaturePolicy,
+    trust_roots: BTreeMap<String, [u8; 32]>,
+    resources: GrantResources,
+    default_limits: EffectiveLimits,
 }
 
 /// Compiled component retained without a live instance.
@@ -111,6 +201,7 @@ pub struct ReadyWasm {
     pub(crate) digest: String,
     pub(crate) world: PluginWorld,
     pub(crate) manifest: PluginManifest,
+    pub(crate) granted: BTreeSet<String>,
 }
 
 impl PluginHost {
@@ -138,6 +229,7 @@ impl PluginHost {
             wasm_config.async_support(true);
         }
         wasm_config.epoch_interruption(true);
+        wasm_config.consume_fuel(true);
         let engine = Engine::new(&wasm_config)
             .map_err(|error| PluginHostError::CompileFailed(format!("engine: {error}")))?;
         let mut toolset_linker = Linker::new(&engine);
@@ -159,6 +251,11 @@ impl PluginHost {
             cache,
             instance_policy: config.instance_policy,
             max_concurrent_instances: config.max_concurrent_instances,
+            application_grants: config.application_grants,
+            signature_policy: config.signature_policy,
+            trust_roots: config.trust_roots,
+            resources: config.resources,
+            default_limits: config.default_limits,
         })
     }
 
@@ -192,6 +289,43 @@ impl PluginHost {
         &self.context_linker
     }
 
+    /// Host-offered grant set.
+    #[must_use]
+    pub const fn application_grants(&self) -> &BTreeSet<String> {
+        &self.application_grants
+    }
+
+    /// Concrete grant resources (preopens, HTTP allowlist, socket flag).
+    #[must_use]
+    pub const fn grant_resources(&self) -> &GrantResources {
+        &self.resources
+    }
+
+    /// Experimental host default limits.
+    #[must_use]
+    pub const fn default_limits(&self) -> EffectiveLimits {
+        self.default_limits
+    }
+
+    /// Clone the world linker and add only granted WASI interfaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginHostError::InstantiateFailed`] when a selected WASI
+    /// interface cannot be linked.
+    pub fn linker_for_world(
+        &self,
+        world: PluginWorld,
+        granted: &BTreeSet<String>,
+    ) -> Result<Linker<HostState>, PluginHostError> {
+        let mut linker = match world {
+            PluginWorld::Toolset => self.toolset_linker.clone(),
+            PluginWorld::Context => self.context_linker.clone(),
+        };
+        crate::instantiate::link_granted_wasi(&mut linker, granted, &self.resources)?;
+        Ok(linker)
+    }
+
     /// Validate `manifest`, compile or deserialize `bytes`, and retain the
     /// `Component` without instantiating it.
     ///
@@ -207,6 +341,8 @@ impl PluginHost {
     ) -> Result<ReadyWasm, PluginHostError> {
         validate_manifest(&manifest).map_err(|error| PluginHostError::from_map(&error))?;
         require_world(&manifest, world.as_str())?;
+        let granted = require_offered(&manifest.permissions, &self.application_grants)?;
+        verify_manifest(&manifest, self.signature_policy, &self.trust_roots)?;
         let digest = component_digest(bytes);
         let key = cache_key(&CacheKeyParts {
             digest: digest.clone(),
@@ -229,6 +365,7 @@ impl PluginHost {
             digest,
             world,
             manifest,
+            granted,
         })
     }
 
@@ -284,6 +421,12 @@ impl ReadyWasm {
     #[must_use]
     pub const fn component(&self) -> &Component {
         &self.component
+    }
+
+    /// Granted permission names (manifest ∩ host offers).
+    #[must_use]
+    pub const fn granted(&self) -> &BTreeSet<String> {
+        &self.granted
     }
 }
 
@@ -380,6 +523,63 @@ mod tests {
             abi: abi_identity("context-plugin"),
             ..base
         }));
+    }
+
+    #[test]
+    fn strict_unsigned_load_is_rejected() {
+        use crate::signature::SignaturePolicy;
+        use finstack_ai_wit::{manifest_digest_hex, parse_manifest};
+
+        let host = PluginHost::try_new(
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
+                .expect("cfg")
+                .with_signature_policy(SignaturePolicy::Strict),
+        )
+        .expect("host");
+        let identity = "finstack.plugin.echo.toolset";
+        let worlds = vec!["toolset-plugin".to_owned()];
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "identity": identity,
+            "version": "0.0.4",
+            "worlds": worlds,
+            "permissions": ["logging"],
+            "configuration_schema": {},
+            "digest": digest
+        }))
+        .expect("json");
+        let manifest = parse_manifest(&bytes).expect("parses");
+        let Err(error) = host.load(b"(component)", manifest, super::PluginWorld::Toolset) else {
+            panic!("unsigned package must fail Strict policy");
+        };
+        assert_eq!(error.code(), "plugin_signature_untrusted");
+    }
+
+    #[test]
+    fn filesystem_request_without_host_grant_is_denied() {
+        use finstack_ai_wit::{manifest_digest_hex, parse_manifest};
+
+        let host = PluginHost::try_new(
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2).expect("cfg"),
+        )
+        .expect("host");
+        let identity = "finstack.plugin.echo.toolset";
+        let worlds = vec!["toolset-plugin".to_owned()];
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "identity": identity,
+            "version": "0.0.4",
+            "worlds": worlds,
+            "permissions": ["logging", "filesystem"],
+            "configuration_schema": {},
+            "digest": digest
+        }))
+        .expect("json");
+        let manifest = parse_manifest(&bytes).expect("parses");
+        let Err(error) = host.load(b"(component)", manifest, super::PluginWorld::Toolset) else {
+            panic!("ungranted filesystem must fail");
+        };
+        assert_eq!(error.code(), "plugin_permission_denied");
     }
 
     #[test]

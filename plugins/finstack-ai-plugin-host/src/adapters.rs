@@ -9,12 +9,12 @@ use finstack_ai::{
 use finstack_ai_runtime::{
     ComponentRef, ContextCallContext, ContextContribution, ContextError, ContextProvider,
     ContextProviderDescriptor, ContextRequest, Digest, ErrorCategory, InvocationRecovery, Metadata,
-    PortFuture, RawJson, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall, Version,
+    PortFuture, RawJson, Timestamp, ToolCallContext, ToolError, ToolEventStream, ToolResult,
+    ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall, Version,
 };
 use finstack_ai_wit::{
     NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginManifest, honor_deadline,
-    map_context_item, map_query, register_catalog, sanitize_call_context,
+    map_context_item, map_query, merge_call_deadline, register_catalog, sanitize_call_context,
 };
 use futures_util::stream;
 use tokio::sync::{Mutex, Semaphore};
@@ -28,7 +28,10 @@ use crate::convert::{
 };
 use crate::error::PluginHostError;
 use crate::host::{InstancePolicy, PluginHost, PluginWorld, ReadyWasm};
-use crate::instantiate::{HostState, map_wasmtime_error, new_store, with_cancellation};
+use crate::instantiate::{
+    HostState, host_state_for, map_wasmtime_error, new_store, with_cancellation,
+};
+use crate::limits::effective_limits;
 
 type LiveToolset = (Store<HostState>, ToolsetPlugin);
 type LiveContext = (Store<HostState>, ContextPlugin);
@@ -66,11 +69,15 @@ impl WasmToolsetAdapter {
         construction: &ComponentConstructionContext,
         hooks: Arc<dyn PluginGuestHooks>,
     ) -> Result<Self, PluginHostError> {
-        honor_deadline(construction).map_err(|error| PluginHostError::from_lifecycle(&error))?;
+        let limits = effective_limits(&manifest, host.default_limits());
+        let mut construction = construction.clone();
+        construction.deadline = merge_call_deadline(construction.deadline, limits.call_timeout_ms);
+        honor_deadline(&construction).map_err(|error| PluginHostError::from_lifecycle(&error))?;
         let ready = host.load(bytes, manifest, PluginWorld::Toolset)?;
+        let metadata = plugin_metadata(&ready);
         let lifecycle = Arc::new(PluginLifecycle::new(hooks));
         lifecycle
-            .run_construction(construction)
+            .run_construction(&construction)
             .map_err(|error| PluginHostError::from_lifecycle(&error))?;
         let exclusive = Arc::new(Semaphore::new(host.max_concurrent_instances() as usize));
         let serialized = Arc::new(Mutex::new(None));
@@ -80,6 +87,7 @@ impl WasmToolsetAdapter {
             &exclusive,
             &serialized,
             &construction.cancellation,
+            construction.deadline,
         )
         .await?;
         let tools =
@@ -87,7 +95,7 @@ impl WasmToolsetAdapter {
         Ok(Self {
             descriptor: ToolsetDescriptor {
                 name: Arc::from(ready.manifest.identity.as_str()),
-                metadata: Metadata::empty(),
+                metadata,
             },
             tools: tools.into(),
             lifecycle,
@@ -145,9 +153,14 @@ impl Toolset for WasmToolsetAdapter {
         let tool_id = call.tool_id.to_string();
         let args = call.call.arguments().as_bytes().to_vec();
         let cancel = ctx.run.cancellation.clone();
+        let metadata = self.descriptor.metadata.clone();
+        let deadline = merge_call_deadline(
+            ctx.run.deadline,
+            effective_limits(&self.ready.manifest, self.host.default_limits()).call_timeout_ms,
+        );
         Box::pin(async move {
             if cancel.is_cancelled() {
-                return Err(tool_error(&PluginHostError::Timeout));
+                return Err(tool_error(&PluginHostError::Timeout, metadata));
             }
             let result = call_tool(
                 &host,
@@ -155,16 +168,20 @@ impl Toolset for WasmToolsetAdapter {
                 &exclusive,
                 &serialized,
                 &cancel,
+                deadline,
                 &context,
                 &tool_id,
                 &args,
             )
             .await
-            .map_err(|error| tool_error(&error))?;
+            .map_err(|error| tool_error(&error, metadata.clone()))?;
             let output = RawJson::parse(&result.content_json).map_err(|_| {
-                tool_error(&PluginHostError::Mapped(
-                    "plugin_result_invalid: tool result JSON is invalid".into(),
-                ))
+                tool_error(
+                    &PluginHostError::Mapped(
+                        "plugin_result_invalid: tool result JSON is invalid".into(),
+                    ),
+                    metadata,
+                )
             })?;
             let completed = ToolResult {
                 output,
@@ -205,11 +222,15 @@ impl WasmContextAdapter {
         construction: &ComponentConstructionContext,
         hooks: Arc<dyn PluginGuestHooks>,
     ) -> Result<Self, PluginHostError> {
-        honor_deadline(construction).map_err(|error| PluginHostError::from_lifecycle(&error))?;
+        let limits = effective_limits(&manifest, host.default_limits());
+        let mut construction = construction.clone();
+        construction.deadline = merge_call_deadline(construction.deadline, limits.call_timeout_ms);
+        honor_deadline(&construction).map_err(|error| PluginHostError::from_lifecycle(&error))?;
         let ready = host.load(bytes, manifest, PluginWorld::Context)?;
+        let metadata = plugin_metadata(&ready);
         let lifecycle = Arc::new(PluginLifecycle::new(hooks));
         lifecycle
-            .run_construction(construction)
+            .run_construction(&construction)
             .map_err(|error| PluginHostError::from_lifecycle(&error))?;
         Ok(Self {
             descriptor: ContextProviderDescriptor {
@@ -220,7 +241,7 @@ impl WasmContextAdapter {
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
                 trusted_application_instructions: false,
-                metadata: Metadata::empty(),
+                metadata,
             },
             limits: ready.manifest.resource_limits.clone(),
             exclusive: Arc::new(Semaphore::new(host.max_concurrent_instances() as usize)),
@@ -248,10 +269,11 @@ impl ContextProvider for WasmContextAdapter {
         ctx: ContextCallContext,
         request: ContextRequest,
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
+        let metadata = self.descriptor.metadata.clone();
         let query = match map_query(&ctx.run, &request, self.limits.as_ref()) {
             Ok(query) => query,
             Err(error) => {
-                let error = context_error(&PluginHostError::from_map(&error));
+                let error = context_error(&PluginHostError::from_map(&error), metadata);
                 return Box::pin(async move { Err(error) });
             }
         };
@@ -261,19 +283,36 @@ impl ContextProvider for WasmContextAdapter {
         let serialized = Arc::clone(&self.serialized);
         let descriptor = self.descriptor.clone();
         let cancel = ctx.run.cancellation.clone();
+        let deadline = merge_call_deadline(
+            ctx.run.deadline,
+            effective_limits(&ready.manifest, host.default_limits()).call_timeout_ms,
+        );
         Box::pin(async move {
-            let items = collect_items(&host, &ready, &exclusive, &serialized, &cancel, &query)
-                .await
-                .map_err(|error| context_error(&error))?;
+            let items = collect_items(
+                &host,
+                &ready,
+                &exclusive,
+                &serialized,
+                &cancel,
+                deadline,
+                &query,
+            )
+            .await
+            .map_err(|error| context_error(&error, metadata.clone()))?;
             let native = items
                 .iter()
                 .map(|item| map_context_item(item, &descriptor))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| context_error(&PluginHostError::from_map(&error)))?;
+                .map_err(|error| {
+                    context_error(&PluginHostError::from_map(&error), metadata.clone())
+                })?;
             ContextContribution::try_new(native, None::<&str>).map_err(|_| {
-                context_error(&PluginHostError::Mapped(
-                    "plugin_context_item_invalid: context contribution is invalid".into(),
-                ))
+                context_error(
+                    &PluginHostError::Mapped(
+                        "plugin_context_item_invalid: context contribution is invalid".into(),
+                    ),
+                    metadata,
+                )
             })
         })
     }
@@ -421,8 +460,14 @@ async fn instantiate_toolset(
     ready: &ReadyWasm,
     cancel: &finstack_ai_runtime::CancellationSignal,
 ) -> Result<(Store<HostState>, ToolsetPlugin), PluginHostError> {
-    let mut store = new_store(host.engine(), HostState::new());
-    let bindings = ToolsetPlugin::instantiate_async(&mut store, ready.component(), host.linker())
+    let limits = effective_limits(&ready.manifest, host.default_limits());
+    let mut store = new_store(
+        host.engine(),
+        host_state_for(limits, &ready.granted, host.grant_resources())?,
+        limits.fuel,
+    )?;
+    let linker = host.linker_for_world(PluginWorld::Toolset, &ready.granted)?;
+    let bindings = ToolsetPlugin::instantiate_async(&mut store, ready.component(), &linker)
         .await
         .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
     Ok((store, bindings))
@@ -433,11 +478,16 @@ async fn instantiate_context(
     ready: &ReadyWasm,
     cancel: &finstack_ai_runtime::CancellationSignal,
 ) -> Result<(Store<HostState>, ContextPlugin), PluginHostError> {
-    let mut store = new_store(host.engine(), HostState::new());
-    let bindings =
-        ContextPlugin::instantiate_async(&mut store, ready.component(), host.context_linker())
-            .await
-            .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
+    let limits = effective_limits(&ready.manifest, host.default_limits());
+    let mut store = new_store(
+        host.engine(),
+        host_state_for(limits, &ready.granted, host.grant_resources())?,
+        limits.fuel,
+    )?;
+    let linker = host.linker_for_world(PluginWorld::Context, &ready.granted)?;
+    let bindings = ContextPlugin::instantiate_async(&mut store, ready.component(), &linker)
+        .await
+        .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
     Ok((store, bindings))
 }
 
@@ -464,13 +514,14 @@ async fn list_tools(
     exclusive: &Semaphore,
     serialized: &SerializedToolset,
     cancel: &finstack_ai_runtime::CancellationSignal,
+    deadline: Option<Timestamp>,
 ) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
     match host.instance_policy() {
         InstancePolicy::Exclusive => {
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 let (mut store, bindings) = instantiate_toolset(host, ready, cancel).await?;
                 map_guest_result(
                     bindings
@@ -487,7 +538,7 @@ async fn list_tools(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
@@ -513,6 +564,7 @@ async fn call_tool(
     exclusive: &Semaphore,
     serialized: &SerializedToolset,
     cancel: &finstack_ai_runtime::CancellationSignal,
+    deadline: Option<Timestamp>,
     context: &finstack_ai_wit::CallContext,
     tool_id: &str,
     args: &[u8],
@@ -523,7 +575,7 @@ async fn call_tool(
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 let (mut store, bindings) = instantiate_toolset(host, ready, cancel).await?;
                 map_guest_result(
                     bindings
@@ -540,7 +592,7 @@ async fn call_tool(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
@@ -565,6 +617,7 @@ async fn collect_items(
     exclusive: &Semaphore,
     serialized: &SerializedContext,
     cancel: &finstack_ai_runtime::CancellationSignal,
+    deadline: Option<Timestamp>,
     query: &finstack_ai_wit::ContextQuery,
 ) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
     let wasm_query = wasm_context_query(query);
@@ -573,7 +626,7 @@ async fn collect_items(
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 let (mut store, bindings) = instantiate_context(host, ready, cancel).await?;
                 map_guest_result(
                     bindings
@@ -590,7 +643,7 @@ async fn collect_items(
             let mut slot = serialized
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
-            with_cancellation(host.engine(), cancel, async {
+            with_cancellation(host.engine(), cancel, deadline, async {
                 if slot.is_none() {
                     *slot = Some(instantiate_context(host, ready, cancel).await?);
                 }
@@ -609,25 +662,36 @@ async fn collect_items(
     }
 }
 
-fn tool_error(error: &PluginHostError) -> ToolError {
+fn tool_error(error: &PluginHostError, metadata: Metadata) -> ToolError {
     ToolError::try_new(
         error.code(),
         ErrorCategory::Plugin,
         false,
         error.to_string(),
-        Metadata::empty(),
+        metadata,
     )
     .unwrap_or_else(|fallback| fallback)
 }
 
-fn context_error(error: &PluginHostError) -> ContextError {
+fn context_error(error: &PluginHostError, metadata: Metadata) -> ContextError {
     ContextError::try_new(
         error.code(),
         ErrorCategory::Plugin,
         error.to_string(),
-        Metadata::empty(),
+        metadata,
     )
     .unwrap_or_else(|fallback| fallback)
+}
+
+fn plugin_metadata(ready: &ReadyWasm) -> Metadata {
+    let granted: Vec<&str> = ready.granted.iter().map(String::as_str).collect();
+    let encoded = serde_json::json!({
+        "plugin.identity": ready.manifest.identity.as_str(),
+        "plugin.manifest_digest": ready.manifest.digest,
+        "plugin.granted_permissions": granted,
+    });
+    Metadata::parse(serde_json::to_vec(&encoded).unwrap_or_else(|_| b"{}".to_vec()))
+        .unwrap_or_else(|_| Metadata::empty())
 }
 
 #[cfg(test)]

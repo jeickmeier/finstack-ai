@@ -1,0 +1,17 @@
+{
+  "configuration_schema": {},
+  "digest": "184e5d57e155d8a60267ff1ab834b72592ead667e1b4e30e18848a9f2860f517",
+  "identity": "finstack.plugin.echo.toolset",
+  "permissions": [
+    "logging"
+  ],
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "test-root",
+    "signature": "2945868352f0802206b5078a65a77b99d6b3e147a4894f0e10dd4b597b542019725af0a21bda45348f1166ed73d39bc01d1ab18f8f8e9375cba20cc82cd95800"
+  },
+  "version": "0.0.4",
+  "worlds": [
+    "toolset-plugin"
+  ]
+}

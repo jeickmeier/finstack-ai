@@ -161,9 +161,10 @@ pub fn cache_key(parts: &CacheKeyParts) -> String {
     hex_sha256(&canonical)
 }
 
-/// Config fingerprint recorded in the engine field. Epoch interruption is the
-/// cancellation channel only; it is not a resource-limit claim.
-pub const CONFIG_FINGERPRINT: &str = "async=true,epoch=true,compiler=cranelift";
+/// Config fingerprint recorded in the engine field. Fuel and the store limiter
+/// are resource-limit claims; epoch interruption remains the cancel channel.
+pub const CONFIG_FINGERPRINT: &str =
+    "async=true,epoch=true,fuel=true,limiter=true,compiler=cranelift";
 
 fn cranelift_isa() -> &'static str {
     if cfg!(target_arch = "aarch64") {

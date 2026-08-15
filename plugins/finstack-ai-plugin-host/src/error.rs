@@ -11,6 +11,12 @@ pub const PLUGIN_INSTANTIATE_FAILED: &str = "plugin_instantiate_failed";
 pub const PLUGIN_COMPILE_FAILED: &str = "plugin_compile_failed";
 /// Concurrent instance ceiling overflow.
 pub const PLUGIN_INSTANCE_LIMIT: &str = "plugin_instance_limit";
+/// Requested permission is not in the host grant set.
+pub const PLUGIN_PERMISSION_DENIED: &str = "plugin_permission_denied";
+/// Fuel, memory, table, or instance exhaustion.
+pub const PLUGIN_RESOURCE_LIMIT: &str = "plugin_resource_limit";
+/// Unsigned or untrusted package under the configured signature policy.
+pub const PLUGIN_SIGNATURE_UNTRUSTED: &str = "plugin_signature_untrusted";
 
 /// Fail-closed error for the isolated Wasmtime host.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -30,6 +36,15 @@ pub enum PluginHostError {
     /// Construction or call cancellation/deadline fired.
     #[error("plugin_lifecycle_timeout")]
     Timeout,
+    /// Manifest requested a capability the host does not offer.
+    #[error("plugin_permission_denied: {0}")]
+    PermissionDenied(String),
+    /// Fuel or store-limiter exhaustion contained without aborting the host.
+    #[error("plugin_resource_limit: {0}")]
+    ResourceLimit(String),
+    /// Signature policy rejected the package.
+    #[error("plugin_signature_untrusted: {0}")]
+    SignatureUntrusted(String),
     /// Host configuration rejected before the engine was built.
     #[error("plugin_registration_invalid: {0}")]
     ConfigInvalid(&'static str),
@@ -48,6 +63,9 @@ impl PluginHostError {
             Self::Trap(_) => PLUGIN_TRAP,
             Self::InstanceLimit => PLUGIN_INSTANCE_LIMIT,
             Self::Timeout => "plugin_lifecycle_timeout",
+            Self::PermissionDenied(_) => PLUGIN_PERMISSION_DENIED,
+            Self::ResourceLimit(_) => PLUGIN_RESOURCE_LIMIT,
+            Self::SignatureUntrusted(_) => PLUGIN_SIGNATURE_UNTRUSTED,
             Self::ConfigInvalid(_) => "plugin_registration_invalid",
             Self::Mapped(message) => mapped_code(message),
         }
@@ -84,6 +102,12 @@ fn mapped_code(message: &str) -> &'static str {
         "plugin_lifecycle_failed"
     } else if message.starts_with("plugin_lifecycle_timeout") {
         "plugin_lifecycle_timeout"
+    } else if message.starts_with(PLUGIN_PERMISSION_DENIED) {
+        PLUGIN_PERMISSION_DENIED
+    } else if message.starts_with(PLUGIN_RESOURCE_LIMIT) {
+        PLUGIN_RESOURCE_LIMIT
+    } else if message.starts_with(PLUGIN_SIGNATURE_UNTRUSTED) {
+        PLUGIN_SIGNATURE_UNTRUSTED
     } else {
         "plugin_registration_invalid"
     }
@@ -91,10 +115,13 @@ fn mapped_code(message: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{PLUGIN_TRAP, PluginHostError};
+    use super::{
+        PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT, PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP,
+        PluginHostError,
+    };
 
     #[test]
-    fn trap_and_limit_codes_are_stable() {
+    fn trap_limit_and_policy_codes_are_stable() {
         assert_eq!(
             PluginHostError::Trap("unreachable".into()).code(),
             PLUGIN_TRAP
@@ -104,5 +131,17 @@ mod tests {
             "plugin_instance_limit"
         );
         assert_eq!(PluginHostError::Timeout.code(), "plugin_lifecycle_timeout");
+        assert_eq!(
+            PluginHostError::PermissionDenied("filesystem".into()).code(),
+            PLUGIN_PERMISSION_DENIED
+        );
+        assert_eq!(
+            PluginHostError::ResourceLimit("fuel".into()).code(),
+            PLUGIN_RESOURCE_LIMIT
+        );
+        assert_eq!(
+            PluginHostError::SignatureUntrusted("unsigned".into()).code(),
+            PLUGIN_SIGNATURE_UNTRUSTED
+        );
     }
 }

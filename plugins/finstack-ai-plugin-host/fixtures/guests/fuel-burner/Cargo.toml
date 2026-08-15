@@ -1,0 +1,16 @@
+[package]
+name = "finstack-ai-plugin-guest-fuel-burner"
+version = "0.0.3"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = "1.0.151"
+serde_json_canonicalizer = "0.3.2"
+sha2 = "0.10.9"
+wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
