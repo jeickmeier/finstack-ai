@@ -14,6 +14,29 @@ unpublished.
 
 ## [Unreleased]
 
+### Fixed
+
+- Session intern-table poison, sidecar `AmbiguousAcknowledgement`,
+  dispatcher cancel-registry poison, and SDK event-lock poison fail
+  closed instead of returning a live owner, `Ok(())`, or hanging.
+- `SessionRuntime::existing` now returns `Result` and surfaces
+  `session_lock_poisoned` when the intern table is unavailable.
+- `Agent::start` no longer selects a model capability by incidental word
+  overlap in user input. Pass optional `AgentRunRequest.capability` to
+  run a model-activated variant; `None` keeps the `Agent` that was called.
+  Rust struct literals that listed every `AgentRunRequest` field must
+  set `capability` (use `try_new`, which defaults it to `None`).
+- wasm-host event hub uses `event_sequence_mismatch`, a real observer
+  audience, and `BlockBounded` waits via the host driver.
+- Ready-slot resolution fails closed when a per-request configuration is
+  supplied (`AGENT_BUILD_CONFIGURATION_CONFLICT`) instead of ignoring it.
+- Capacity preflight runs before transactional apply.
+- Secret-free bundle config rejects whole-token secret keys (`auth`,
+  `apikey`, `authorization`, `secretkey`, `client_secret`, and the
+  existing needles). `oauth_client_id` and `author` stay allowed.
+  Values are not scanned; `*_ref` keys remain allowed. Innocuous keys
+  that hold credential values stay a host problem (TM-04 residual).
+
 ## [1.0.0] - 2026-08-15
 
 Tagged lockstep general-availability cut `v1.0.0` (local; not pushed).

@@ -119,7 +119,9 @@ test("all activation modes share Rust-owned traces and a stable prefix", async (
       activeCapabilities: ["js.capability.application"],
     });
     const first = await agent.run("say hello");
-    const second = await agent.run("research financial statements");
+    const second = await agent.run("research financial statements", {
+      capability: "js.capability.research",
+    });
     return {
       catalog: agent.capabilityCatalog(),
       compact: agent.compactCapabilityCatalog(),

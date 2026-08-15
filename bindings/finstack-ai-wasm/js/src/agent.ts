@@ -299,7 +299,7 @@ export class Agent {
    * the durable run. Call {@link Run.cancel} for explicit cancellation.
    *
    * @param input - Plain-text user input.
-   * @param options - Optional timeout, cycle, and retry bounds.
+   * @param options - Optional timeout, cycle, retry, and capability selection.
    * @returns A shared run handle.
    * @throws {FinstackError} When the request is invalid.
    * @example
@@ -317,6 +317,7 @@ export class Agent {
           options?.timeoutSeconds,
           options?.maxCycles,
           options?.maxOutputRetries,
+          options?.capability,
         ),
       );
     } catch (error) {
@@ -328,7 +329,7 @@ export class Agent {
    * Execute one run and await its committed result.
    *
    * @param input - Plain-text user input.
-   * @param options - Optional timeout, cycle, and retry bounds.
+   * @param options - Optional timeout, cycle, retry, and capability selection.
    * @returns The retained terminal result.
    * @throws {FinstackError} When the run fails, times out, or is cancelled.
    * @example
@@ -344,6 +345,7 @@ export class Agent {
         options?.timeoutSeconds,
         options?.maxCycles,
         options?.maxOutputRetries,
+        options?.capability,
       );
       return new RunResult(handle);
     } catch (error) {

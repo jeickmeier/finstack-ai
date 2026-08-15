@@ -71,6 +71,10 @@ At each transition, recheck the plan baseline, predecessor evidence, phase and g
 - Keep secrets as references; do not place secret material in model context, durable records, telemetry, errors, or generated fixtures.
 - Isolated extensions receive no ambient authority. Grant only explicit, bounded capabilities with applicable timeout, size, destination, and tenant constraints.
 
+## Keep large modules from growing
+
+New kernel, runtime, or SDK behavior goes in a sibling module when the natural home already exceeds about 1500 lines. Do not split existing large files solely to relocate unchanged behavior.
+
 ## Hard stops
 
 Stop the affected implementation when it lacks an eligible logical PR, requires a program gate not recorded `Passed`, conflicts with an authoritative document, or depends on an unresolved required decision. Work expressly permitted to begin in parallel by the Implementation Plan may proceed before a later gate only when that PR's own dependencies and stated entrance criteria are evidenced. Before coding, check Implementation Plan section 6.3 ADR triggers and Security and Threat Model section 18 review triggers. Reviewer unavailability blocks review or merge, not coding, unless pre-implementation approval is explicit or that reviewer must resolve an open decision.

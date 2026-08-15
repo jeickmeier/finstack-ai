@@ -113,7 +113,7 @@ pub(super) fn decide_batch_prepared(
         let ToolCallPlan::SyntheticClosure(closure) = &assigned_call.plan else {
             break;
         };
-        let result = synthetic_result(closure.plan_call(), &closure.error)?;
+        let result = synthetic_result(&closure.call, &closure.error)?;
         let digest = synthetic_tool_digest(
             tool_batch_id,
             *closure.call.tool_call_id(),
@@ -1173,14 +1173,4 @@ fn requirements_for_bodies(
         IdRequirements::new(bodies.len(), events, effects, 0, 0, messages)
             .with_tools(tool_batches, 0),
     )
-}
-
-trait SyntheticClosureExt {
-    fn plan_call(&self) -> &ToolCallBlock;
-}
-
-impl SyntheticClosureExt for crate::SyntheticToolClosure {
-    fn plan_call(&self) -> &ToolCallBlock {
-        &self.call
-    }
 }

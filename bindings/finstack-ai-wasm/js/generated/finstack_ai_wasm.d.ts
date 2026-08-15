@@ -63,7 +63,7 @@ export class Agent {
      *
      * Returns a structured host error when the run fails.
      */
-    run(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null): Promise<any>;
+    run(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null, capability?: string | null): Promise<any>;
     /**
      * Start one run and return its detached control handle.
      *
@@ -71,7 +71,7 @@ export class Agent {
      *
      * Returns a structured host error when the request is invalid.
      */
-    start(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null): Run;
+    start(input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null, capability?: string | null): Run;
 }
 
 /**
@@ -646,8 +646,8 @@ export interface InitOutput {
     readonly agent_createSession: (a: number, b: number, c: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
-    readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
+    readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
     readonly buildMetadata: (a: number) => void;
     readonly compilePortProxies: () => void;
@@ -714,7 +714,7 @@ export interface InitOutput {
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
     readonly __wasm_bindgen_func_elem_1517: (a: number, b: number, c: number, d: number) => void;
     readonly __wasm_bindgen_func_elem_1531: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_375: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_373: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

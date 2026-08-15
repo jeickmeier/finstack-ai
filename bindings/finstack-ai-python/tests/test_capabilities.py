@@ -76,7 +76,10 @@ def test_all_activation_modes_share_rust_owned_trace_and_stable_prefix() -> None
             }
         ]
         first = await agent.run("say hello")
-        second = await agent.run("research financial statements")
+        second = await agent.run(
+            "research financial statements",
+            capability="python.capability.research",
+        )
         return first, second, agent.compact_capability_catalog()
 
     first, second, catalog = asyncio.run(exercise())

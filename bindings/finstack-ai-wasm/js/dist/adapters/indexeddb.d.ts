@@ -1,9 +1,9 @@
 /**
  * Experimental same-origin IndexedDB journal and artifact batteries.
  *
- * Persistence is origin-scoped and not crash-durable. `health().detail` is
- * `js_indexeddb_experimental` until PR-048 revalidates against JournalStore v1.
- * Schema v1 is provisional and must migrate in PR-048.
+ * Persistence is origin-scoped and not crash-durable. `health().detail` stays
+ * `js_indexeddb_experimental`: PR-048 does not claim NFR-REL-001 for IndexedDB.
+ * Schema version remains 1.
  */
 import type { HostArtifactStore, HostJournalStore } from "../host.js";
 /** Default experimental database name. */

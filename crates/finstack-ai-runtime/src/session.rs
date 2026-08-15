@@ -192,14 +192,14 @@ impl SessionRuntime {
     ///
     /// # Errors
     ///
-    /// Returns a recover or commit failure when the journal cannot be written.
+    /// Returns a recover, commit, or intern-table poison failure.
     pub async fn create(
         store: Arc<dyn JournalStore>,
         tenant_scope: impl Into<Arc<str>>,
         ids: SessionCreateIds,
     ) -> Result<Arc<Self>, SessionError> {
         let tenant_scope = tenant_scope.into();
-        if let Some(existing) = interned(&store, ids.session_id) {
+        if let Some(existing) = interned(&store, ids.session_id)? {
             return Ok(existing);
         }
         let loaded = store
@@ -239,7 +239,7 @@ impl SessionRuntime {
             )
             .await
             .map_err(|error| SessionError::commit(&error))?;
-        Ok(intern(Self {
+        intern(Self {
             store,
             session_id: ids.session_id,
             tenant_scope,
@@ -247,7 +247,7 @@ impl SessionRuntime {
                 projection: coordinator.session().clone(),
                 guards: BTreeMap::new(),
             }),
-        }))
+        })
     }
 
     /// Rebuild the projection without respawning non-terminal runs.
@@ -256,13 +256,13 @@ impl SessionRuntime {
     ///
     /// # Errors
     ///
-    /// Returns a recover failure when the journal cannot be loaded or projected.
+    /// Returns a recover or intern-table poison failure.
     pub async fn open(
         store: Arc<dyn JournalStore>,
         session_id: SessionId,
         tenant_scope: impl Into<Arc<str>>,
     ) -> Result<Arc<Self>, SessionError> {
-        if let Some(existing) = interned(&store, session_id) {
+        if let Some(existing) = interned(&store, session_id)? {
             return Ok(existing);
         }
         let loaded =
@@ -273,7 +273,7 @@ impl SessionRuntime {
                     code: "session_load_failed",
                 })?;
         let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
-        Ok(intern(Self {
+        intern(Self {
             store,
             session_id,
             tenant_scope: tenant_scope.into(),
@@ -281,12 +281,18 @@ impl SessionRuntime {
                 projection,
                 guards: BTreeMap::new(),
             }),
-        }))
+        })
     }
 
     /// Return the interned writer for this store and session, when present.
-    #[must_use]
-    pub fn existing(store: &Arc<dyn JournalStore>, session_id: SessionId) -> Option<Arc<Self>> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::Poisoned`] when the intern table is unavailable.
+    pub fn existing(
+        store: &Arc<dyn JournalStore>,
+        session_id: SessionId,
+    ) -> Result<Option<Arc<Self>>, SessionError> {
         interned(store, session_id)
     }
 
@@ -774,9 +780,18 @@ fn store_key(store: &Arc<dyn JournalStore>) -> usize {
     Arc::as_ptr(store).cast::<u8>() as usize
 }
 
+#[cfg(test)]
+thread_local! {
+    static FAIL_INTERNS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn with_interns<R>(
     f: impl FnOnce(&mut BTreeMap<InternKey, Weak<SessionRuntime>>) -> R,
-) -> Option<R> {
+) -> Result<R, SessionError> {
+    #[cfg(test)]
+    if FAIL_INTERNS.with(std::cell::Cell::get) {
+        return Err(SessionError::Poisoned);
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         static INTERNS: OnceLock<Mutex<BTreeMap<InternKey, Weak<SessionRuntime>>>> =
@@ -784,8 +799,8 @@ fn with_interns<R>(
         INTERNS
             .get_or_init(|| Mutex::new(BTreeMap::new()))
             .lock()
-            .ok()
             .map(|mut map| f(&mut map))
+            .map_err(|_| SessionError::Poisoned)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -794,25 +809,31 @@ fn with_interns<R>(
             static INTERNS: RefCell<BTreeMap<InternKey, Weak<SessionRuntime>>> =
                 const { RefCell::new(BTreeMap::new()) };
         }
-        INTERNS.with(|cell| cell.try_borrow_mut().ok().map(|mut map| f(&mut map)))
+        INTERNS.with(|cell| {
+            cell.try_borrow_mut()
+                .map(|mut map| f(&mut map))
+                .map_err(|_| SessionError::Poisoned)
+        })
     }
 }
 
-fn interned(store: &Arc<dyn JournalStore>, session_id: SessionId) -> Option<Arc<SessionRuntime>> {
+fn interned(
+    store: &Arc<dyn JournalStore>,
+    session_id: SessionId,
+) -> Result<Option<Arc<SessionRuntime>>, SessionError> {
     with_interns(|map| {
         map.get(&(store_key(store), session_id))
             .and_then(Weak::upgrade)
     })
-    .flatten()
 }
 
-fn intern(runtime: SessionRuntime) -> Arc<SessionRuntime> {
+fn intern(runtime: SessionRuntime) -> Result<Arc<SessionRuntime>, SessionError> {
     let key = (store_key(&runtime.store), runtime.session_id);
     let runtime = Arc::new(runtime);
-    let _ = with_interns(|map| {
+    with_interns(|map| {
         map.insert(key, Arc::downgrade(&runtime));
-    });
-    runtime
+    })?;
+    Ok(runtime)
 }
 
 #[cfg(test)]
@@ -827,5 +848,92 @@ mod tests {
             SessionError::DuplicateLaneName.code(),
             "duplicate_lane_name"
         );
+        assert_eq!(SessionError::Poisoned.code(), "session_lock_poisoned");
+    }
+
+    struct UnavailableStore;
+
+    impl JournalStore for UnavailableStore {
+        fn append(
+            &self,
+            _request: finstack_ai_kernel::AppendRequest,
+        ) -> crate::PortFuture<Result<finstack_ai_kernel::CommittedBatch, crate::StoreError>>
+        {
+            Box::pin(async {
+                Err(crate::StoreError::Unavailable {
+                    reason_code: "unavailable",
+                })
+            })
+        }
+
+        fn load(
+            &self,
+            _request: LoadRequest,
+        ) -> crate::PortFuture<Result<crate::LoadedSession, crate::StoreError>> {
+            Box::pin(async {
+                Err(crate::StoreError::Unavailable {
+                    reason_code: "unavailable",
+                })
+            })
+        }
+
+        fn write_snapshot(
+            &self,
+            _request: crate::SnapshotRequest,
+        ) -> crate::PortFuture<Result<crate::SnapshotReceipt, crate::StoreError>> {
+            Box::pin(async {
+                Err(crate::StoreError::Unavailable {
+                    reason_code: "unavailable",
+                })
+            })
+        }
+
+        fn health(&self) -> crate::PortFuture<Result<crate::StoreHealth, crate::StoreError>> {
+            Box::pin(async {
+                Err(crate::StoreError::Unavailable {
+                    reason_code: "unavailable",
+                })
+            })
+        }
+    }
+
+    struct FailInterns;
+
+    impl FailInterns {
+        fn arm() -> Self {
+            FAIL_INTERNS.with(|flag| flag.set(true));
+            Self
+        }
+    }
+
+    impl Drop for FailInterns {
+        fn drop(&mut self) {
+            FAIL_INTERNS.with(|flag| flag.set(false));
+        }
+    }
+
+    #[test]
+    fn intern_table_unavailable_does_not_yield_a_second_owner() {
+        let store: Arc<dyn JournalStore> = Arc::new(UnavailableStore);
+        let session_id = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+        let _guard = FailInterns::arm();
+        assert!(matches!(
+            SessionRuntime::existing(&store, session_id),
+            Err(SessionError::Poisoned)
+        ));
+        let leaked = intern(SessionRuntime {
+            store: Arc::clone(&store),
+            session_id,
+            tenant_scope: Arc::from("tenant"),
+            inner: Mutex::new(SessionInner {
+                projection: SessionProjection::new(session_id),
+                guards: BTreeMap::new(),
+            }),
+        });
+        assert!(matches!(leaked, Err(SessionError::Poisoned)));
+        assert!(matches!(
+            SessionRuntime::existing(&store, session_id),
+            Err(SessionError::Poisoned)
+        ));
     }
 }

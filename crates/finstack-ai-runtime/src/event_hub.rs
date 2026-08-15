@@ -89,6 +89,16 @@ pub enum ProgressCoalescing {
     Enabled,
 }
 
+/// Who registered the subscription. Observer delivery never waits.
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubscriberAudience {
+    /// Frontend or SDK consumer; honors [`EventLagPolicy`].
+    Interactive,
+    /// Isolated observer; try-only, drop progress, fail closed on durable loss.
+    Observer,
+}
+
 /// Behavior when a subscription cannot keep up with event delivery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventLagPolicy {
@@ -270,19 +280,12 @@ mod native {
     use tokio::time::{Instant, Sleep, sleep_until, timeout};
 
     use super::{
-        EventBatch, EventDeliveryStats, EventHubConfig, EventLagPolicy,
+        EventBatch, EventDeliveryStats, EventHubConfig, EventLagPolicy, EventPublishError,
         EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
-        EventSubscriptionStatus, ProgressCoalescing,
+        EventSubscriptionStatus, ProgressCoalescing, RuntimeEventPublisher, SubscriberAudience,
+        validate_event_sequences,
     };
     use crate::PortFuture;
-
-    use super::{EventPublishError, RuntimeEventPublisher};
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum SubscriberAudience {
-        Interactive,
-        Observer,
-    }
 
     #[derive(Debug, Clone)]
     struct SizedEvent {
@@ -394,11 +397,7 @@ mod native {
                 }
                 let mut sized = Vec::with_capacity(events.len());
                 for event in events.iter() {
-                    let bytes = serde_json::to_vec(event)
-                        .map_err(|_| EventPublishError {
-                            code: "event_serialization_failed",
-                        })?
-                        .len();
+                    let bytes = super::json_byte_len(event)?;
                     sized.push(SizedEvent {
                         event: event.clone(),
                         bytes,
@@ -644,19 +643,10 @@ mod native {
         events: &[SizedEvent],
         next_sequence: &mut Option<u64>,
     ) -> Result<(), EventPublishError> {
-        let mut expected = next_sequence.unwrap_or_else(|| events[0].event.transient_sequence());
-        for item in events {
-            if item.event.transient_sequence() != expected {
-                return Err(EventPublishError {
-                    code: "event_sequence_mismatch",
-                });
-            }
-            expected = expected.checked_add(1).ok_or(EventPublishError {
-                code: "event_sequence_exhausted",
-            })?;
-        }
-        *next_sequence = Some(expected);
-        Ok(())
+        validate_event_sequences(
+            events.iter().map(|item| item.event.transient_sequence()),
+            next_sequence,
+        )
     }
 
     async fn run_subscriber(
@@ -1180,6 +1170,15 @@ mod native {
             close_hub(&hub, task).await;
         }
 
+        #[test]
+        fn json_byte_len_matches_to_vec() {
+            let event = progress(0);
+            assert_eq!(
+                super::super::json_byte_len(&event).expect("count"),
+                serde_json::to_vec(&event).expect("vec").len()
+            );
+        }
+
         #[tokio::test(start_paused = true)]
         async fn count_byte_and_timer_thresholds_flush_without_reordering() {
             let (hub, task) = spawn_hub(3);
@@ -1374,14 +1373,6 @@ mod native {
         #[tokio::test]
         async fn stalled_observer_does_not_delay_interactive_delivery() {
             let (hub, task) = spawn_hub(2);
-            let mut interactive_config = subscription_config();
-            interactive_config.queue_capacity = 2;
-            interactive_config.batching.flush_count = 100;
-            let mut interactive = hub
-                .subscribe_interactive(interactive_config)
-                .await
-                .expect("interactive subscription");
-
             let mut observer_config = subscription_config();
             observer_config.queue_capacity = 1;
             observer_config.progress_coalescing = ProgressCoalescing::Disabled;
@@ -1390,6 +1381,13 @@ mod native {
                 .subscribe_observer(observer_config)
                 .await
                 .expect("observer subscription");
+            let mut interactive_config = subscription_config();
+            interactive_config.queue_capacity = 2;
+            interactive_config.batching.flush_count = 100;
+            let mut interactive = hub
+                .subscribe_interactive(interactive_config)
+                .await
+                .expect("interactive subscription");
 
             let events = (0..100).map(progress).collect::<Vec<_>>();
             publish(&hub, events.clone()).await;
@@ -1449,6 +1447,130 @@ pub(crate) struct EventPublishError {
 }
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+fn validate_event_sequences(
+    sequences: impl IntoIterator<Item = u64>,
+    next_sequence: &mut Option<u64>,
+) -> Result<(), EventPublishError> {
+    let mut sequences = sequences.into_iter();
+    let Some(first) = sequences.next() else {
+        return Ok(());
+    };
+    let mut expected = next_sequence.unwrap_or(first);
+    for sequence in std::iter::once(first).chain(sequences) {
+        if sequence != expected {
+            return Err(EventPublishError {
+                code: "event_sequence_mismatch",
+            });
+        }
+        expected = expected.checked_add(1).ok_or(EventPublishError {
+            code: "event_sequence_exhausted",
+        })?;
+    }
+    *next_sequence = Some(expected);
+    Ok(())
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+fn json_byte_len(event: &RunEvent) -> Result<usize, EventPublishError> {
+    let mut writer = CountingJsonWriter::default();
+    serde_json::to_writer(&mut writer, event).map_err(|_| EventPublishError {
+        code: "event_serialization_failed",
+    })?;
+    Ok(writer.len)
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+#[derive(Default)]
+struct CountingJsonWriter {
+    len: usize,
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+impl std::io::Write for CountingJsonWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.len = self.len.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(all(test, any(feature = "native-tokio", feature = "wasm-host")))]
+mod sequence_tests {
+    use super::{EventPublishError, validate_event_sequences};
+
+    struct SequenceCase {
+        name: &'static str,
+        sequences: &'static [u64],
+        start: Option<u64>,
+        expected: Result<Option<u64>, &'static str>,
+    }
+
+    #[test]
+    fn source_sequence_table_matches_native_codes() {
+        let cases = [
+            SequenceCase {
+                name: "empty keeps cursor",
+                sequences: &[],
+                start: Some(4),
+                expected: Ok(Some(4)),
+            },
+            SequenceCase {
+                name: "empty starts unset",
+                sequences: &[],
+                start: None,
+                expected: Ok(None),
+            },
+            SequenceCase {
+                name: "first batch sets cursor",
+                sequences: &[3, 4],
+                start: None,
+                expected: Ok(Some(5)),
+            },
+            SequenceCase {
+                name: "continues from cursor",
+                sequences: &[5],
+                start: Some(5),
+                expected: Ok(Some(6)),
+            },
+            SequenceCase {
+                name: "gap is mismatch",
+                sequences: &[2],
+                start: Some(1),
+                expected: Err("event_sequence_mismatch"),
+            },
+            SequenceCase {
+                name: "internal gap is mismatch",
+                sequences: &[1, 3],
+                start: None,
+                expected: Err("event_sequence_mismatch"),
+            },
+            SequenceCase {
+                name: "u64 overflow is exhausted",
+                sequences: &[u64::MAX],
+                start: Some(u64::MAX),
+                expected: Err("event_sequence_exhausted"),
+            },
+        ];
+        for case in cases {
+            let mut next = case.start;
+            let result = validate_event_sequences(case.sequences.iter().copied(), &mut next);
+            match case.expected {
+                Ok(cursor) => {
+                    assert_eq!(result, Ok(()), "{}", case.name);
+                    assert_eq!(next, cursor, "{}", case.name);
+                }
+                Err(code) => {
+                    assert_eq!(result, Err(EventPublishError { code }), "{}", case.name);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) trait RuntimeEventPublisher: crate::PortObject {
     fn publish(&self, events: Arc<[RunEvent]>) -> crate::PortFuture<Result<(), EventPublishError>>;
 }
@@ -1477,7 +1599,8 @@ mod host {
     use super::{
         EventBatch, EventDeliveryStats, EventHubConfig, EventLagPolicy, EventPublishError,
         EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
-        EventSubscriptionStatus, ProgressCoalescing, RuntimeEventPublisher,
+        EventSubscriptionStatus, ProgressCoalescing, RuntimeEventPublisher, SubscriberAudience,
+        validate_event_sequences,
     };
     use crate::PortFuture;
     use crate::host_driver::Signal;
@@ -1509,8 +1632,10 @@ mod host {
     }
 
     struct Subscriber {
+        audience: SubscriberAudience,
         inner: Mutex<SubscriberInner>,
         ready: Signal,
+        space: Signal,
         closed: AtomicBool,
     }
 
@@ -1560,7 +1685,10 @@ mod host {
 
         fn take_ready_batch(&self) -> Option<EventBatch> {
             let mut inner = self.subscriber.inner.lock().ok()?;
-            inner.delivered.pop_front()
+            let batch = inner.delivered.pop_front()?;
+            drop(inner);
+            self.subscriber.space.notify_waiters();
+            Some(batch)
         }
 
         fn flush_wait(&self) -> Option<Duration> {
@@ -1573,14 +1701,14 @@ mod host {
 
         fn flush_due(&self) {
             if let Ok(mut inner) = self.subscriber.inner.lock() {
-                let _ = flush_pending(&mut inner);
+                flush_pending(&mut inner);
             }
             self.subscriber.ready.notify_waiters();
         }
 
         fn close_with(&self, reason: EventSubscriptionCloseReason) {
             if let Ok(mut inner) = self.subscriber.inner.lock() {
-                let _ = flush_pending(&mut inner);
+                flush_pending(&mut inner);
                 if inner.status.public.close_reason.is_none() {
                     inner.status.public.close_reason = Some(reason);
                 }
@@ -1588,6 +1716,7 @@ mod host {
             }
             self.subscriber.closed.store(true, Ordering::Release);
             self.subscriber.ready.notify_waiters();
+            self.subscriber.space.notify_waiters();
         }
     }
 
@@ -1614,11 +1743,19 @@ mod host {
             &self,
             config: EventSubscriptionConfig,
         ) -> Result<EventSubscription, EventSubscriptionError> {
-            self.subscribe_interactive(config)
+            self.subscribe(SubscriberAudience::Observer, config)
         }
 
         pub(crate) fn subscribe_interactive(
             &self,
+            config: EventSubscriptionConfig,
+        ) -> Result<EventSubscription, EventSubscriptionError> {
+            self.subscribe(SubscriberAudience::Interactive, config)
+        }
+
+        fn subscribe(
+            &self,
+            audience: SubscriberAudience,
             config: EventSubscriptionConfig,
         ) -> Result<EventSubscription, EventSubscriptionError> {
             config.validate()?;
@@ -1635,6 +1772,7 @@ mod host {
                 return Err(EventSubscriptionError::CapacityExhausted);
             }
             let subscriber = Arc::new(Subscriber {
+                audience,
                 inner: Mutex::new(SubscriberInner {
                     config,
                     pending: PendingBatch {
@@ -1647,6 +1785,7 @@ mod host {
                     closed: false,
                 }),
                 ready: Signal::new(),
+                space: Signal::new(),
                 closed: AtomicBool::new(false),
             });
             subscribers.push(Arc::clone(&subscriber));
@@ -1663,7 +1802,7 @@ mod host {
                 .unwrap_or_default();
             for subscriber in subscribers {
                 if let Ok(mut inner) = subscriber.inner.lock() {
-                    let _ = flush_pending(&mut inner);
+                    flush_pending(&mut inner);
                     if inner.status.public.close_reason.is_none() {
                         inner.status.public.close_reason =
                             Some(EventSubscriptionCloseReason::HubClosed);
@@ -1672,6 +1811,7 @@ mod host {
                 }
                 subscriber.closed.store(true, Ordering::Release);
                 subscriber.ready.notify_waiters();
+                subscriber.space.notify_waiters();
             }
         }
     }
@@ -1685,11 +1825,7 @@ mod host {
                 }
                 let mut sized = Vec::with_capacity(events.len());
                 for event in events.iter() {
-                    let bytes = serde_json::to_vec(event)
-                        .map_err(|_| EventPublishError {
-                            code: "event_serialization_failed",
-                        })?
-                        .len();
+                    let bytes = super::json_byte_len(event)?;
                     sized.push(SizedEvent {
                         event: event.clone(),
                         bytes,
@@ -1710,7 +1846,7 @@ mod host {
                     })?
                     .clone();
                 for subscriber in subscribers {
-                    ingest(&subscriber, &sized);
+                    deliver(&subscriber, &sized).await;
                 }
                 Ok(())
             })
@@ -1734,48 +1870,216 @@ mod host {
         ))
     }
 
-    fn ingest(subscriber: &Subscriber, events: &[SizedEvent]) {
-        let Ok(mut inner) = subscriber.inner.lock() else {
-            return;
-        };
-        if inner.closed {
-            return;
+    async fn deliver(subscriber: &Subscriber, events: &[SizedEvent]) {
+        for item in events {
+            if subscriber.closed.load(Ordering::Acquire) {
+                return;
+            }
+            loop {
+                match try_ingest(subscriber, item) {
+                    IngestStep::Skipped | IngestStep::Accepted => break,
+                    IngestStep::Blocked {
+                        timeout,
+                        durable,
+                        accepted,
+                    } => {
+                        if crate::host_driver::timeout(timeout, wait_for_space(subscriber))
+                            .await
+                            .is_err()
+                        {
+                            close_subscriber(
+                                subscriber,
+                                if durable {
+                                    EventSubscriptionCloseReason::MissedDurable
+                                } else {
+                                    EventSubscriptionCloseReason::Lagged
+                                },
+                            );
+                            return;
+                        }
+                        if let IngestStep::Closed(reason) = complete_blocked_flush(subscriber) {
+                            close_subscriber(subscriber, reason);
+                            return;
+                        }
+                        if accepted {
+                            break;
+                        }
+                    }
+                    IngestStep::Closed(reason) => {
+                        close_subscriber(subscriber, reason);
+                        return;
+                    }
+                }
+            }
         }
-        for item in events.iter().cloned() {
-            if !inner.config.filter.matches(&item.event) {
-                continue;
-            }
-            let durable = item.event.class() == RunEventClass::DurableDerived;
-            let oversized = item.bytes > inner.config.batching.flush_bytes;
-            if (durable || oversized) && !inner.pending.events.is_empty() {
-                let _ = flush_pending(&mut inner);
-            }
-            if inner.pending.events.is_empty() {
-                inner.pending.flush_after = Some(inner.config.batching.flush_interval);
-            }
-            inner.pending.bytes = inner.pending.bytes.saturating_add(item.bytes);
-            let terminal = is_terminal(item.event.kind());
-            inner.pending.events.push(item);
-            let immediate_progress =
-                inner.config.progress_coalescing == ProgressCoalescing::Disabled && !durable;
-            let should_flush = immediate_progress
-                || durable
-                || oversized
-                || terminal
-                || inner.pending.events.len() >= inner.config.batching.flush_count
-                || inner.pending.bytes >= inner.config.batching.flush_bytes;
-            if should_flush {
-                let _ = flush_pending(&mut inner);
-            }
-        }
-        drop(inner);
         subscriber.ready.notify_waiters();
     }
 
-    fn flush_pending(inner: &mut SubscriberInner) -> Result<(), EventSubscriptionCloseReason> {
+    async fn wait_for_space(subscriber: &Subscriber) {
+        loop {
+            if subscriber.closed.load(Ordering::Acquire) {
+                return;
+            }
+            if delivered_has_space(subscriber) {
+                return;
+            }
+            subscriber.space.notified().await;
+        }
+    }
+
+    fn delivered_has_space(subscriber: &Subscriber) -> bool {
+        subscriber
+            .inner
+            .lock()
+            .is_ok_and(|inner| inner.closed || inner.delivered.len() < inner.config.queue_capacity)
+    }
+
+    enum IngestStep {
+        Skipped,
+        Accepted,
+        Blocked {
+            timeout: Duration,
+            durable: bool,
+            accepted: bool,
+        },
+        Closed(EventSubscriptionCloseReason),
+    }
+
+    fn try_ingest(subscriber: &Subscriber, item: &SizedEvent) -> IngestStep {
+        let Ok(mut inner) = subscriber.inner.lock() else {
+            return IngestStep::Closed(EventSubscriptionCloseReason::ReceiverDropped);
+        };
+        if inner.closed {
+            return IngestStep::Closed(EventSubscriptionCloseReason::ReceiverDropped);
+        }
+        if !inner.config.filter.matches(&item.event) {
+            return IngestStep::Skipped;
+        }
+        let durable = item.event.class() == RunEventClass::DurableDerived;
+        let oversized = item.bytes > inner.config.batching.flush_bytes;
+        if (durable || oversized)
+            && !inner.pending.events.is_empty()
+            && let Some(step) = flush_or_wait(subscriber.audience, &mut inner, false)
+        {
+            return step;
+        }
+        if inner.pending.events.is_empty() {
+            inner.pending.flush_after = Some(inner.config.batching.flush_interval);
+        }
+        inner.pending.bytes = inner.pending.bytes.saturating_add(item.bytes);
+        let terminal = is_terminal(item.event.kind());
+        inner.pending.events.push(item.clone());
+        let immediate_progress =
+            inner.config.progress_coalescing == ProgressCoalescing::Disabled && !durable;
+        let should_flush = immediate_progress
+            || durable
+            || oversized
+            || terminal
+            || inner.pending.events.len() >= inner.config.batching.flush_count
+            || inner.pending.bytes >= inner.config.batching.flush_bytes;
+        if should_flush && let Some(step) = flush_or_wait(subscriber.audience, &mut inner, true) {
+            return step;
+        }
+        IngestStep::Accepted
+    }
+
+    fn complete_blocked_flush(subscriber: &Subscriber) -> IngestStep {
+        let Ok(mut inner) = subscriber.inner.lock() else {
+            return IngestStep::Closed(EventSubscriptionCloseReason::ReceiverDropped);
+        };
+        if inner.closed {
+            return IngestStep::Closed(EventSubscriptionCloseReason::ReceiverDropped);
+        }
+        flush_or_wait(subscriber.audience, &mut inner, true).unwrap_or(IngestStep::Accepted)
+    }
+
+    fn flush_or_wait(
+        audience: SubscriberAudience,
+        inner: &mut SubscriberInner,
+        accepted: bool,
+    ) -> Option<IngestStep> {
+        match try_flush_pending(inner) {
+            Ok(()) => None,
+            Err(FlushBlock { durable }) => match wait_policy(audience, inner, durable) {
+                Ok(None) => None,
+                Ok(Some(timeout)) => Some(IngestStep::Blocked {
+                    timeout,
+                    durable,
+                    accepted,
+                }),
+                Err(reason) => Some(IngestStep::Closed(reason)),
+            },
+        }
+    }
+
+    struct FlushBlock {
+        durable: bool,
+    }
+
+    fn wait_policy(
+        audience: SubscriberAudience,
+        inner: &mut SubscriberInner,
+        durable: bool,
+    ) -> Result<Option<Duration>, EventSubscriptionCloseReason> {
+        match audience {
+            SubscriberAudience::Observer => {
+                if durable {
+                    Err(EventSubscriptionCloseReason::MissedDurable)
+                } else {
+                    drop_pending_progress(inner);
+                    Ok(None)
+                }
+            }
+            SubscriberAudience::Interactive => match inner.config.lag_policy {
+                EventLagPolicy::DropProgress { .. } if !durable => {
+                    drop_pending_progress(inner);
+                    Ok(None)
+                }
+                EventLagPolicy::DropProgress { durable_timeout } => Ok(Some(durable_timeout)),
+                EventLagPolicy::BlockBounded { timeout } => Ok(Some(timeout)),
+                EventLagPolicy::Disconnect if durable => {
+                    Err(EventSubscriptionCloseReason::MissedDurable)
+                }
+                EventLagPolicy::Disconnect => Err(EventSubscriptionCloseReason::Lagged),
+            },
+        }
+    }
+
+    fn drop_pending_progress(inner: &mut SubscriberInner) {
+        let dropped = u64::try_from(inner.pending.events.len()).unwrap_or(u64::MAX);
+        inner.pending.events.clear();
+        inner.pending.bytes = 0;
+        inner.pending.flush_after = None;
+        inner.status.public.stats.dropped_progress = inner
+            .status
+            .public
+            .stats
+            .dropped_progress
+            .saturating_add(dropped);
+        inner.status.unreported_dropped = inner.status.unreported_dropped.saturating_add(dropped);
+    }
+
+    fn try_flush_pending(inner: &mut SubscriberInner) -> Result<(), FlushBlock> {
+        if inner.pending.events.is_empty() {
+            inner.pending.flush_after = None;
+            return Ok(());
+        }
+        let durable = inner
+            .pending
+            .events
+            .iter()
+            .any(|item| item.event.class() == RunEventClass::DurableDerived);
+        if inner.delivered.len() >= inner.config.queue_capacity {
+            return Err(FlushBlock { durable });
+        }
+        flush_pending(inner);
+        Ok(())
+    }
+
+    fn flush_pending(inner: &mut SubscriberInner) {
         inner.pending.flush_after = None;
         if inner.pending.events.is_empty() {
-            return Ok(());
+            return;
         }
         let events = inner
             .pending
@@ -1784,39 +2088,12 @@ mod host {
             .map(|item| item.event)
             .collect::<Vec<_>>();
         inner.pending.bytes = 0;
-        let durable = events
-            .iter()
-            .any(|event| event.class() == RunEventClass::DurableDerived);
         let dropped = inner.status.unreported_dropped;
         let count = events.len();
         let last_sequence = events.last().map(RunEvent::transient_sequence);
         let Some(batch) = EventBatch::new(events, dropped) else {
-            return Ok(());
+            return;
         };
-        if inner.delivered.len() >= inner.config.queue_capacity {
-            return match inner.config.lag_policy {
-                EventLagPolicy::DropProgress { .. } if !durable => {
-                    let dropped = u64::try_from(count).unwrap_or(u64::MAX);
-                    inner.status.public.stats.dropped_progress = inner
-                        .status
-                        .public
-                        .stats
-                        .dropped_progress
-                        .saturating_add(dropped);
-                    inner.status.unreported_dropped =
-                        inner.status.unreported_dropped.saturating_add(dropped);
-                    Ok(())
-                }
-                EventLagPolicy::DropProgress { .. }
-                | EventLagPolicy::BlockBounded { .. }
-                | EventLagPolicy::Disconnect
-                    if durable =>
-                {
-                    Err(EventSubscriptionCloseReason::MissedDurable)
-                }
-                _ => Err(EventSubscriptionCloseReason::Lagged),
-            };
-        }
         inner.delivered.push_back(batch);
         inner.status.public.stats.delivered_batches = inner
             .status
@@ -1832,28 +2109,29 @@ mod host {
             .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
         inner.status.public.stats.last_delivered_sequence = last_sequence;
         inner.status.unreported_dropped = inner.status.unreported_dropped.saturating_sub(dropped);
-        Ok(())
+    }
+
+    fn close_subscriber(subscriber: &Subscriber, reason: EventSubscriptionCloseReason) {
+        if let Ok(mut inner) = subscriber.inner.lock() {
+            flush_pending(&mut inner);
+            if inner.status.public.close_reason.is_none() {
+                inner.status.public.close_reason = Some(reason);
+            }
+            inner.closed = true;
+        }
+        subscriber.closed.store(true, Ordering::Release);
+        subscriber.ready.notify_waiters();
+        subscriber.space.notify_waiters();
     }
 
     fn validate_source_order(
         events: &[SizedEvent],
         next_sequence: &mut Option<u64>,
     ) -> Result<(), EventPublishError> {
-        for item in events {
-            let sequence = item.event.transient_sequence();
-            match *next_sequence {
-                None => *next_sequence = Some(sequence.saturating_add(1)),
-                Some(expected) if sequence == expected => {
-                    *next_sequence = Some(expected.saturating_add(1));
-                }
-                Some(_) => {
-                    return Err(EventPublishError {
-                        code: "event_source_sequence_gap",
-                    });
-                }
-            }
-        }
-        Ok(())
+        validate_event_sequences(
+            events.iter().map(|item| item.event.transient_sequence()),
+            next_sequence,
+        )
     }
 
     const fn is_terminal(kind: RunEventKind) -> bool {
@@ -1861,5 +2139,170 @@ mod host {
             kind,
             RunEventKind::RunCompleted | RunEventKind::RunFailed | RunEventKind::RunCancelled
         )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::future::Future;
+        use std::sync::Arc;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        use finstack_ai_kernel::{
+            EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
+            RUN_EVENT_SCHEMA_VERSION, RunEvent, RunEventBody, RunTag, Sensitivity, SessionTag,
+            Timestamp,
+        };
+
+        use super::*;
+        use crate::host_driver;
+        use crate::{EventBatchConfig, EventFilter, ProgressCoalescing};
+
+        fn block_on<F: Future>(future: F) -> F::Output {
+            let mut future = std::pin::pin!(future);
+            let waker = Waker::noop().clone();
+            let mut cx = Context::from_waker(&waker);
+            loop {
+                host_driver::drive_local();
+                if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+                    return output;
+                }
+                host_driver::drive_local();
+            }
+        }
+
+        fn id<T: IdTag>(value: u64) -> Id<T> {
+            let mut bytes = [0_u8; 16];
+            bytes[6] = 0x70;
+            bytes[8] = 0x80;
+            bytes[9..].copy_from_slice(&value.to_be_bytes()[1..]);
+            Id::from_bytes(bytes)
+        }
+
+        fn progress(sequence: u64) -> RunEvent {
+            RunEvent::try_transient(
+                RUN_EVENT_SCHEMA_VERSION,
+                RUN_EVENT_KIND_VERSION,
+                id::<EventTag>(1_000 + sequence),
+                id::<SessionTag>(1),
+                id::<LaneTag>(2),
+                id::<RunTag>(3),
+                None,
+                None,
+                None,
+                None,
+                None,
+                sequence,
+                Timestamp::from_unix_ms(1_000).expect("timestamp"),
+                Sensitivity::Internal,
+                RunEventBody::QueueDepthWarning(QueueDepthWarning {
+                    depth: u32::try_from(sequence).unwrap_or(u32::MAX),
+                    limit: u32::MAX,
+                }),
+            )
+            .expect("progress event")
+        }
+
+        fn subscription_config() -> EventSubscriptionConfig {
+            EventSubscriptionConfig {
+                queue_capacity: 8,
+                filter: EventFilter {
+                    include_durable: true,
+                    include_transient: true,
+                    kinds: Arc::from([]),
+                    max_sensitivity: Sensitivity::Credential,
+                },
+                batching: EventBatchConfig {
+                    flush_count: 8,
+                    flush_bytes: 64 * 1_024,
+                    flush_interval: Duration::from_secs(1),
+                },
+                progress_coalescing: ProgressCoalescing::Enabled,
+                lag_policy: EventLagPolicy::DropProgress {
+                    durable_timeout: Duration::from_millis(10),
+                },
+            }
+        }
+
+        fn hub() -> EventHubHandle {
+            event_hub(EventHubConfig {
+                source_capacity: 8,
+                max_subscribers: 3,
+            })
+            .expect("hub")
+            .0
+        }
+
+        fn publish(handle: &EventHubHandle, events: Vec<RunEvent>) {
+            block_on(RuntimeEventPublisher::publish(handle, events.into())).expect("publish");
+        }
+
+        #[test]
+        fn host_sequence_gap_uses_native_mismatch_code() {
+            let handle = hub();
+            let _subscription = handle
+                .subscribe_interactive(subscription_config())
+                .expect("subscribe");
+            publish(&handle, vec![progress(0)]);
+            let error = block_on(RuntimeEventPublisher::publish(
+                &handle,
+                Arc::from([progress(2)]),
+            ))
+            .expect_err("gap");
+            assert_eq!(error.code, "event_sequence_mismatch");
+        }
+
+        #[test]
+        fn host_observer_does_not_block_interactive_delivery() {
+            let handle = hub();
+            let mut observer_config = subscription_config();
+            observer_config.queue_capacity = 1;
+            observer_config.progress_coalescing = ProgressCoalescing::Disabled;
+            observer_config.lag_policy = EventLagPolicy::Disconnect;
+            let observer = handle
+                .subscribe_observer(observer_config)
+                .expect("observer");
+            let mut interactive_config = subscription_config();
+            interactive_config.queue_capacity = 2;
+            interactive_config.batching.flush_count = 32;
+            let mut interactive = handle
+                .subscribe_interactive(interactive_config)
+                .expect("interactive");
+            let events = (0..32).map(progress).collect::<Vec<_>>();
+            publish(&handle, events.clone());
+            let batch = block_on(interactive.next_batch()).expect("interactive batch");
+            assert_eq!(batch.events(), events);
+            assert!(
+                observer.status().close_reason.is_some()
+                    || observer.status().stats.dropped_progress > 0
+            );
+        }
+
+        #[test]
+        fn json_byte_len_matches_to_vec() {
+            let event = progress(0);
+            assert_eq!(
+                super::super::json_byte_len(&event).expect("count"),
+                serde_json::to_vec(&event).expect("vec").len()
+            );
+        }
+
+        #[test]
+        fn host_block_bounded_times_out_as_lagged() {
+            let handle = hub();
+            let mut config = subscription_config();
+            config.queue_capacity = 1;
+            config.progress_coalescing = ProgressCoalescing::Disabled;
+            config.lag_policy = EventLagPolicy::BlockBounded {
+                timeout: Duration::from_millis(15),
+            };
+            let subscription = handle.subscribe_interactive(config).expect("subscribe");
+            publish(&handle, vec![progress(0)]);
+            publish(&handle, vec![progress(1)]);
+            assert_eq!(
+                subscription.status().close_reason,
+                Some(EventSubscriptionCloseReason::Lagged)
+            );
+        }
     }
 }

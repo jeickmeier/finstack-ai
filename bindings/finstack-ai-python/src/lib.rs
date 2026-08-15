@@ -459,7 +459,7 @@ impl PyAgent {
     }
 
     /// Start a run and return its shared control handle immediately.
-    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1))]
+    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
     fn start(
         &self,
         py: Python<'_>,
@@ -467,6 +467,7 @@ impl PyAgent {
         timeout_seconds: f64,
         max_cycles: u64,
         max_output_retries: u32,
+        capability: Option<String>,
     ) -> PyResult<PyRun> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
@@ -481,6 +482,7 @@ impl PyAgent {
                 timeout_seconds,
                 max_cycles,
                 max_output_retries,
+                capability,
             )?;
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
@@ -493,7 +495,7 @@ impl PyAgent {
     }
 
     /// Execute one run and await its committed result.
-    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1))]
+    #[pyo3(signature = (input, *, timeout_seconds = DEFAULT_TIMEOUT_SECONDS, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
     fn run<'py>(
         &self,
         py: Python<'py>,
@@ -501,6 +503,7 @@ impl PyAgent {
         timeout_seconds: f64,
         max_cycles: u64,
         max_output_retries: u32,
+        capability: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
@@ -515,6 +518,7 @@ impl PyAgent {
                 timeout_seconds,
                 max_cycles,
                 max_output_retries,
+                capability,
             ) {
                 Ok(request) => request,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
@@ -1380,6 +1384,7 @@ fn run_request(
     timeout_seconds: f64,
     max_cycles: u64,
     max_output_retries: u32,
+    capability: Option<String>,
 ) -> Result<AgentRunRequest, AgentRunError> {
     if !timeout_seconds.is_finite()
         || timeout_seconds <= 0.0
@@ -1404,6 +1409,12 @@ fn run_request(
     request.timeout = Duration::from_secs_f64(timeout_seconds);
     request.max_cycles = max_cycles;
     request.max_output_retries = max_output_retries;
+    if let Some(capability) = capability {
+        request.capability = Some(
+            CapabilityId::parse(&capability)
+                .map_err(|error| configuration_error(error.to_string()))?,
+        );
+    }
     Ok(request)
 }
 

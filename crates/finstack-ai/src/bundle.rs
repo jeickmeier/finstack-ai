@@ -1401,30 +1401,53 @@ fn ensure_secret_free_config(
     Ok(())
 }
 
+/// Secret-key detector for bundle configuration objects.
+///
+/// Scans object keys only. String values are ignored to avoid false positives.
+/// Keys ending in `_ref` are allowed. Tokens are split on non-alphanumeric
+/// characters so `auth` matches `auth_token` but not `oauth` or `author`.
+/// Innocuous keys that hold credential values remain a host problem
+/// (TM-04 residual); this is not a config-schema allowlist.
 fn contains_secret(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
-            let normalized = key.to_ascii_lowercase();
-            let suspicious = [
-                "password",
-                "token",
-                "credential",
-                "api_key",
-                "access_key",
-                "private_key",
-                "bearer",
-                "secret",
-            ]
+        serde_json::Value::Object(map) => map
             .iter()
-            .any(|needle| normalized.contains(needle));
-            (suspicious && !normalized.ends_with("_ref")) || contains_secret(value)
-        }),
+            .any(|(key, value)| key_looks_secret(key) || contains_secret(value)),
         serde_json::Value::Array(values) => values.iter().any(contains_secret),
         serde_json::Value::Null
         | serde_json::Value::Bool(_)
         | serde_json::Value::Number(_)
         | serde_json::Value::String(_) => false,
     }
+}
+
+const SECRET_TOKENS: &[&str] = &[
+    "password",
+    "token",
+    "credential",
+    "apikey",
+    "bearer",
+    "secret",
+    "auth",
+    "authorization",
+    "secretkey",
+];
+
+const SECRET_COMPOUNDS: &[&[&str]] = &[&["api", "key"], &["access", "key"], &["private", "key"]];
+
+fn key_looks_secret(key: &str) -> bool {
+    let normalized = key.to_ascii_lowercase();
+    if normalized.ends_with("_ref") {
+        return false;
+    }
+    let tokens: Vec<&str> = normalized
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+    tokens.iter().any(|token| SECRET_TOKENS.contains(token))
+        || tokens
+            .windows(2)
+            .any(|pair| SECRET_COMPOUNDS.contains(&pair))
 }
 
 fn version_tuple(version: Version) -> (u16, u16, u16) {
@@ -1543,6 +1566,44 @@ mod tests {
             RawJson::parse(br#"{"api_key_ref":"vault://model"}"#).expect("JSON"),
         )]);
         ensure_secret_free_config(&good).expect("secret reference");
+        for key in [
+            "apikey",
+            "auth",
+            "authorization",
+            "secretkey",
+            "client_secret",
+        ] {
+            let body = format!(r#"{{"{key}":"secret-canary"}}"#);
+            let bad = BTreeMap::from([(
+                ComponentId::parse("finstack.model.test").expect("component"),
+                RawJson::parse(body.as_bytes()).expect("JSON"),
+            )]);
+            assert!(
+                ensure_secret_free_config(&bad).is_err(),
+                "{key} must fail closed"
+            );
+            let ref_body = format!(r#"{{"{key}_ref":"vault://model"}}"#);
+            let allowed = BTreeMap::from([(
+                ComponentId::parse("finstack.model.test").expect("component"),
+                RawJson::parse(ref_body.as_bytes()).expect("JSON"),
+            )]);
+            ensure_secret_free_config(&allowed)
+                .unwrap_or_else(|_| panic!("{key}_ref must be allowed"));
+        }
+        for key in ["oauth_client_id", "author", "authority"] {
+            let body = format!(r#"{{"{key}":"not-a-secret"}}"#);
+            let allowed = BTreeMap::from([(
+                ComponentId::parse("finstack.model.test").expect("component"),
+                RawJson::parse(body.as_bytes()).expect("JSON"),
+            )]);
+            ensure_secret_free_config(&allowed)
+                .unwrap_or_else(|_| panic!("{key} must stay allowed"));
+        }
+        let auth_token = BTreeMap::from([(
+            ComponentId::parse("finstack.model.test").expect("component"),
+            RawJson::parse(br#"{"auth_token":"secret-canary"}"#).expect("JSON"),
+        )]);
+        assert!(ensure_secret_free_config(&auth_token).is_err());
     }
 
     #[test]

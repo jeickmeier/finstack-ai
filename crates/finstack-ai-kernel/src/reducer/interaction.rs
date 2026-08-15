@@ -31,11 +31,12 @@ pub(super) fn decide_request(
             input: "request_interaction",
         });
     }
-    let cursor = expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
+    // Request-interaction only requires a requestable stage. Cursor compare
+    // is for inputs that carry a cursor (`StageCursorMismatch`).
+    expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
         phase: state.phase,
         input: "request_interaction",
     })?;
-    let _ = cursor;
     let request = &input.request;
     validate_allocated_ids(
         &env.ids,

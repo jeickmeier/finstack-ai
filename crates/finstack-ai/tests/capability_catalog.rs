@@ -41,10 +41,10 @@ async fn capability_activation_prefix_is_stable_across_repeated_runs() {
     let agent = catalog_agent(Arc::clone(&model) as Arc<dyn Model>).await;
     let first = agent.run(request("say hello")).await.expect("first run");
     let first_prefix = instruction_prefix(&model);
-    let second = agent
-        .run(request("research financial statements"))
-        .await
-        .expect("second run");
+    let mut research = request("research financial statements");
+    research.capability =
+        Some(CapabilityId::parse("test.capability.research").expect("research capability"));
+    let second = agent.run(research).await.expect("second run");
     let second_prefix = instruction_prefix(&model);
     assert_eq!(
         first_prefix,

@@ -53,7 +53,7 @@ export interface AgentOptions {
     instruction?: string;
     /**
      * Optional host journal. When omitted, the Rust in-memory store is used.
-     * Persistence is experimental until PR-048 revalidation.
+     * Persistence remains experimental after PR-048; it does not meet NFR-REL-001.
      */
     store?: JsJournalStore;
     /**
@@ -189,7 +189,7 @@ export declare class Agent {
      * the durable run. Call {@link Run.cancel} for explicit cancellation.
      *
      * @param input - Plain-text user input.
-     * @param options - Optional timeout, cycle, and retry bounds.
+     * @param options - Optional timeout, cycle, retry, and capability selection.
      * @returns A shared run handle.
      * @throws {FinstackError} When the request is invalid.
      * @example
@@ -203,7 +203,7 @@ export declare class Agent {
      * Execute one run and await its committed result.
      *
      * @param input - Plain-text user input.
-     * @param options - Optional timeout, cycle, and retry bounds.
+     * @param options - Optional timeout, cycle, retry, and capability selection.
      * @returns The retained terminal result.
      * @throws {FinstackError} When the run fails, times out, or is cancelled.
      * @example

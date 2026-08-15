@@ -590,8 +590,18 @@ class Agent:
         timeout_seconds: float = 30.0,
         max_cycles: int = 16,
         max_output_retries: int = 1,
+        capability: str | None = None,
     ) -> Run:
-        """Start a run and return its shared handle immediately."""
+        """Start a run and return its shared handle immediately.
+
+        Args:
+            input: Plain-text user input.
+            timeout_seconds: Operational deadline in seconds.
+            max_cycles: Maximum model cycles.
+            max_output_retries: Maximum structured-output retries.
+            capability: Optional model-activated capability id. ``None``
+                runs this agent; a missing catalog id fails closed.
+        """
     async def run(
         self,
         input: str,
@@ -599,8 +609,18 @@ class Agent:
         timeout_seconds: float = 30.0,
         max_cycles: int = 16,
         max_output_retries: int = 1,
+        capability: str | None = None,
     ) -> RunResult:
-        """Execute one run and await its committed result."""
+        """Execute one run and await its committed result.
+
+        Args:
+            input: Plain-text user input.
+            timeout_seconds: Operational deadline in seconds.
+            max_cycles: Maximum model cycles.
+            max_output_retries: Maximum structured-output retries.
+            capability: Optional model-activated capability id. ``None``
+                runs this agent; a missing catalog id fails closed.
+        """
 
 def health() -> str:
     """Return ``\"ok\"`` without initializing runtime or network resources."""

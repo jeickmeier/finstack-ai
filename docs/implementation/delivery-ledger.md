@@ -4,16 +4,16 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-15 and reconciled against documentation pack v0.21 / PLAN-0.19 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, `G8-D-general-availability-a889a29a3f54`, tag `v1.0.0` at `6e9ec39fae89a70f696ee740de2d2094670cba3e`, Phase 9 entrance `PH9-E-entrance-tag-b610b0ba93b5` / `PH9-E-entrance-feedback-ee6999c59a12`, and `COMP-1.0-D-contract-freeze-00b78667ecc4`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-15 and reconciled against documentation pack v0.22 / PLAN-0.20 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, `G8-D-general-availability-a889a29a3f54`, tag `v1.0.0` at `6e9ec39fae89a70f696ee740de2d2094670cba3e`, Phase 9 entrance `PH9-E-entrance-tag-b610b0ba93b5` / `PH9-E-entrance-feedback-ee6999c59a12`, and `COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-067 is `In progress` on local `main` (uncommitted; no candidate). Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
-| Phases | 10 | 10 | Phase 0–9 `Done` |
-| Logical PRs | 66 | 66 | PR-001–PR-066 `Done` |
-| PR acceptance-evidence bullets | 345 | 350 | PR-001–PR-066 closed |
-| Phase entrance and exit bullets | 62 | 62 | Phase 0–9 entrance and exit `Passed` |
+| Phases | 11 | 10 | Phase 0–9 `Done`; Phase 10 `In progress` |
+| Logical PRs | 67 | 66 | PR-001–PR-066 `Done`; PR-067 `In progress` |
+| PR acceptance-evidence bullets | 354 | 350 | PR-001–PR-066 closed; PR-067 acceptance not yet evidenced |
+| Phase entrance and exit bullets | 69 | 64 | Phase 0–9 entrance and exit `Passed`; Phase 10 entrance cited from G8/PR-066; exit 0/5 |
 | Program gates | 9 | 9 | G0–G8 `Passed` |
-| Implementation tasks | 406 | 406 | PR-066 tasks Done; G8 recorded; local tag `v1.0.0` |
+| Implementation tasks | 406 | 406 | PR-066 tasks Done; PR-067 has no separate task rows |
 | Open blockers | 0 | 4 | No open blocker; all four recorded blockers are `Resolved` |
 
 PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). PR-007 is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). PR-008 is `Done` at merge `4b68a9397a8e07a581f34dfc34f0bfb96873c00d` ([#5](https://github.com/jeickmeier/finstack-ai/pull/5); A01–A08 Passed after review remediation and final hosted/merge verification). PR-009 is `Done` at local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` (A01–A05 Passed; no GitHub issue or actual PR). PR-010 is `Done` at local `main` integration `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` (A01–A04 Passed; no GitHub issue or actual PR). PR-011 is `Done` at local `main` integration `01380ead5c5ca7b9e7d28d681d84719c9bf0279e` (A01–A06 Passed; no GitHub issue or actual PR). PR-012 is `Done` at local `main` integration `dc58a11fbc871e70326d04fd9840297b5179023f` (fast-forward of `codex/pr-012-structured-output`; A01–A05 Passed; no GitHub issue or actual PR). PR-013 is `Done` at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` ([#6](https://github.com/jeickmeier/finstack-ai/pull/6); A01–A04 Passed). PR-014 is `Done` at merge `399f3a7d9d987268f4d79ab90f31b93f854084f8` ([#8](https://github.com/jeickmeier/finstack-ai/pull/8); A01–A07 Passed after hosted and immutable merge verification). PR-015 is `Done` at local `main` merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` (A01–A04 Passed; no GitHub issue or actual PR). PR-016 is `Done` at local `main` merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` (A01–A05 Passed; no GitHub issue or actual PR). Phase 0 and Phase 1 are `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`; G1 passed via `G1-D-kernel-semantics-4f52c8a91d6e`. Both Phase 2 entrance criteria are passed.
@@ -107,6 +107,8 @@ PR-064 is `Done` at local `main` merge `299888d06671d0bd6873dc3033fbaf4465ccf3c9
 PR-065 is `Done` at local `main` merge `f87818d5593b2110b551327ccd68c26f58d5c760` (A01–A04 Passed; no GitHub issue or actual pull request). Candidate `a353361927296c8398ac23d215a99341dbd4025f`. Phase 9 entrance stays `Passed` (2/2). Phase 9 exit stays `0/4`. G8 remains `Not ready`. The PR-065 envelope is closed and is not reused.
 
 PR-066 is `Done` at local `main` merge `4888cfe285b2897b1da4e6a2d13ceb8c8bdda1a5` (A01–A04 Passed; no GitHub issue or actual pull request). Candidate `3631a416b2e495e7749317bee44d54294c928d4f`. G8 passed via `G8-D-general-availability-a889a29a3f54` against `6e9ec39fae89a70f696ee740de2d2094670cba3e`. Local tag `v1.0.0` points at that commit. Phase 9 entrance stays `Passed` (2/2). Phase 9 exit is `Passed` (4/4) and Phase 9 is `Done`. A01 residual: §21.12 soak gap accepted by owner. A04 residual: publish, GitHub Release, announce, and tag push were not executed. The PR-066 envelope is closed and is not reused.
+
+PR-067 is `In progress` on local `main` (uncommitted worktree; no issue, actual pull request, or candidate commit). Phase 10 is `In progress`. Closed PR-001–PR-066 envelopes are not reused. TM-04 secret-needle review is recorded at [`artifacts/pr-067/tm-04-secret-needles.md`](artifacts/pr-067/tm-04-secret-needles.md) (Pass with residual; not a merge decision). Do not mark PR-067 `Done`.
 
 ## Active execution envelope
 
@@ -218,6 +220,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | [Phase 7](../planning/04-finstack-ai-implementation-plan.md#15-phase-7-isolated-witwasmtime-extensions) | PR-049–PR-054 | 3/3 | 4/4 | G6 | Done | me@jeickmeier.com | — | — | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4; PR-049-E-integration-5a6eeeb783be; PR-050-E-integration-5c987e379d0c; PR-051-E-integration-cf7eaebab383; PR-052-E-integration-5e531591350a; PR-053-E-integration-3297eb44fb12; PR-054-E-integration-81eb369c8f5a; PH7-E-exit-components-81eb369c8f5a; PH7-E-exit-permissions-81eb369c8f5a; PH7-E-exit-wasmtime-81eb369c8f5a; PH7-E-exit-packaging-81eb369c8f5a; G6-D-plugin-alpha-018aaea9aa00 @ `018aaea9aa00cf3f7d86207372b553f900a272b1` | 2026-08-14 |
 | [Phase 8](../planning/04-finstack-ai-implementation-plan.md#16-phase-8-ecosystem-readiness-and-public-preview) | PR-055–PR-061 | 2/2 | 4/4 | G7 | Done | me@jeickmeier.com | — | — | PH8-E-entrance-gates-400228a63790; PH8-E-entrance-api-backlog-267035e95daa; PH8-E-exit-batteries-170a85ccd4e1; PH8-E-exit-server-170a85ccd4e1; PH8-E-exit-reports-170a85ccd4e1; PH8-E-exit-preview-170a85ccd4e1; G7-D-public-preview-f7c7e70b9e04 @ `002b615bf75c194b7d00acd6be2a036bfd614482` | 2026-08-15 |
 | [Phase 9](../planning/04-finstack-ai-implementation-plan.md#17-phase-9-10-hardening-and-general-availability) | PR-062–PR-066 | 2/2 | 4/4 | G8 | Done | me@jeickmeier.com | — | — | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12; PH9-E-exit-contracts-0da38bcce4df; PH9-E-exit-security-161e4b14de39; PH9-E-exit-perf-876d66292c13; PH9-E-exit-release-3ae4f465ed69; G8-D-general-availability-a889a29a3f54 @ `6e9ec39fae89a70f696ee740de2d2094670cba3e` | 2026-08-15 |
+| [Phase 10](../planning/04-finstack-ai-implementation-plan.md#17a-phase-10-10x-reliability-hardening) | PR-067 | 2/2 | 0/5 | — | In progress | me@jeickmeier.com | PR-067 | — | G8-D-general-availability-a889a29a3f54; local tag `v1.0.0`; PR-066 `Done` (no new Phase 10 entrance evidence id) | 2026-08-15 |
 
 ## Gate ledger
 
@@ -352,6 +355,12 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-064 | Done | me@jeickmeier.com | local `main` merge `299888d06671d0bd6873dc3033fbaf4465ccf3c9` of `codex/pr-064-reliability-fuzz-security-review` (no issue or actual PR) | 6 | 4/4 | PR-064-E-candidate-6d3d0d5ddc1e; PR-064-E-security-9ac67ca75bd7; PR-064-E-integration-e1f94bcab639 | — | `299888d06671d0bd6873dc3033fbaf4465ccf3c9` / 2026-08-15 | 2026-08-15 |
 | PR-065 | Done | me@jeickmeier.com | local `main` merge `f87818d5593b2110b551327ccd68c26f58d5c760` of `codex/pr-065-ecosystem-conformance-release-eng` (no issue or actual PR) | 6 | 4/4 | PR-065-E-candidate-510a9fc6d169; PR-065-E-security-e9dbcf2e3baf; PR-065-E-integration-28bc92e626e1 | — | `f87818d5593b2110b551327ccd68c26f58d5c760` / 2026-08-15 | 2026-08-15 |
 | PR-066 | Done | me@jeickmeier.com | local `main` merge `4888cfe285b2897b1da4e6a2d13ceb8c8bdda1a5` of `codex/pr-066-1.0.0-ga`; G8-D and local tag `v1.0.0` at `6e9ec39fae89a70f696ee740de2d2094670cba3e` (no issue or actual PR) | 6 | 4/4 | PR-066-E-candidate-3d690c2b54f6; PR-066-E-security-78538f5ec95e; PR-066-E-integration-831af79fd276; PR-066-E-g8-6e9ec39fae89; G8-D-general-availability-a889a29a3f54 | — | `4888cfe285b2897b1da4e6a2d13ceb8c8bdda1a5` / 2026-08-15 | 2026-08-15 |
+
+### Phase 10
+
+| Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
+| --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
+| PR-067 | In progress | me@jeickmeier.com | local `main` uncommitted 1.0.x Deep Audit slices (no issue or actual PR) | 0 | 0/9 | — | — | — | 2026-08-15 |
 
 ## Actual PR mapping
 

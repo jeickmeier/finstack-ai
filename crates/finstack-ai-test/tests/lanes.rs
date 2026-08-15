@@ -645,6 +645,7 @@ async fn child_run_and_lane_stay_distinct_and_cancel_fans_out() {
         .expect("fan-out");
 
     let compatible_again = SessionRuntime::existing(&store, id(1))
+        .expect("intern table")
         .expect("parent intern")
         .coordinator_for_run(Some(id(51)))
         .await

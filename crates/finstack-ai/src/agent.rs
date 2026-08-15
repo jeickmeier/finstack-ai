@@ -1,7 +1,7 @@
 //! Native developer-preview execution facade.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 use crate::{
@@ -260,13 +260,14 @@ impl Agent {
     ///
     /// The caller must already be inside the selected runtime driver. Dropping the returned
     /// handle detaches frontend observation; it does not cancel the durable run.
+    /// `request.capability` selects a model-activated variant; `None` runs `self`.
     ///
     /// # Errors
     ///
     /// Returns a stable configuration or runtime error before the background
     /// run task is accepted.
     pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
-        let selected = self.select_for_input(&request.input).clone();
+        let selected = self.select_for_request(&request)?.clone();
         let prepared = selected.prepare(request)?;
         let locator = prepared.locator.clone();
         let store = Arc::clone(&prepared.store);
@@ -280,6 +281,7 @@ impl Agent {
             result: Mutex::new(None),
             result_ready: driver::Signal::new(),
             events: Mutex::new(EventStreamState::Waiting),
+            events_fault: OnceLock::new(),
             cancellation: Mutex::new(CancellationState::default()),
             cancellation_ready: driver::Signal::new(),
         });
@@ -303,7 +305,7 @@ impl Agent {
         lane: &crate::Lane,
         request: AgentRunRequest,
     ) -> Result<AgentRun, AgentRunError> {
-        let selected = self.select_for_input(&request.input).clone();
+        let selected = self.select_for_request(&request)?.clone();
         let prepared = selected.prepare_on(request, lane)?;
         let locator = prepared.locator.clone();
         let store = Arc::clone(&prepared.store);
@@ -317,6 +319,7 @@ impl Agent {
             result: Mutex::new(None),
             result_ready: driver::Signal::new(),
             events: Mutex::new(EventStreamState::Waiting),
+            events_fault: OnceLock::new(),
             cancellation: Mutex::new(CancellationState::default()),
             cancellation_ready: driver::Signal::new(),
         });
@@ -336,23 +339,20 @@ impl Agent {
         Arc::clone(self.resolved.run_plan().store().handle())
     }
 
-    fn select_for_input(&self, input: &str) -> &Self {
-        let input_tokens = activation_tokens(input);
+    fn select_for_request(&self, request: &AgentRunRequest) -> Result<&Self, AgentRunError> {
+        let Some(capability) = request.capability.as_ref() else {
+            return Ok(self);
+        };
         self.model_capabilities
             .iter()
-            .filter_map(|variant| {
-                let score = activation_tokens(variant.entry.id.as_str())
-                    .union(&activation_tokens(&variant.entry.description))
-                    .filter(|token| input_tokens.contains(*token))
-                    .count();
-                (score > 0).then_some((score, variant))
+            .find(|variant| variant.entry.id == *capability)
+            .map(|variant| &variant.agent)
+            .ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    format!("unknown model capability {capability}"),
+                )
             })
-            .max_by(|(left_score, left), (right_score, right)| {
-                left_score
-                    .cmp(right_score)
-                    .then_with(|| right.entry.id.cmp(&left.entry.id))
-            })
-            .map_or(self, |(_, variant)| &variant.agent)
     }
 
     /// Execute one bounded native run through the commit-before-effect runtime.
@@ -1002,8 +1002,28 @@ struct AgentRunInner {
     result: Mutex<Option<Result<AgentRunOutput, AgentRunError>>>,
     result_ready: driver::Signal,
     events: Mutex<EventStreamState>,
+    events_fault: OnceLock<AgentRunError>,
     cancellation: Mutex<CancellationState>,
     cancellation_ready: driver::Signal,
+}
+
+const EVENT_LOCK_POISONED: &str = "run event lock is poisoned";
+const RESULT_LOCK_POISONED: &str = "run result lock is poisoned";
+const HANDLE_LOCK_POISONED: &str = "run handle lock is poisoned";
+
+fn record_events_fault(inner: &AgentRunInner, message: &'static str) {
+    let _ = inner
+        .events_fault
+        .set(AgentRunError::runtime_message(message));
+    inner.result_ready.notify_waiters();
+    inner.handle_ready.notify_waiters();
+}
+
+fn events_fault(inner: &AgentRunInner) -> Result<(), AgentRunError> {
+    match inner.events_fault.get() {
+        Some(error) => Err(error.clone()),
+        None => Ok(()),
+    }
 }
 
 enum EventStreamState {
@@ -1028,11 +1048,10 @@ impl EventConsumerGuard {
     }
 
     fn finish(mut self, batch: Option<EventBatch>) -> Result<Option<EventBatch>, AgentRunError> {
-        let mut state = self
-            .inner
-            .events
-            .lock()
-            .map_err(|_| AgentRunError::runtime_message("run event lock is poisoned"))?;
+        let mut state = self.inner.events.lock().map_err(|_| {
+            record_events_fault(&self.inner, EVENT_LOCK_POISONED);
+            AgentRunError::runtime_message(EVENT_LOCK_POISONED)
+        })?;
         let mut subscription = self
             .subscription
             .take()
@@ -1069,6 +1088,7 @@ impl Drop for EventConsumerGuard {
         };
         let Ok(mut state) = self.inner.events.lock() else {
             subscription.close();
+            record_events_fault(&self.inner, EVENT_LOCK_POISONED);
             return;
         };
         if matches!(&*state, EventStreamState::Busy) {
@@ -1192,12 +1212,16 @@ impl AgentRun {
     /// error that settled the run.
     pub async fn result(&self) -> Result<AgentRunOutput, AgentRunError> {
         loop {
+            events_fault(&self.inner)?;
             let notified = self.inner.result_ready.notified();
             let result = self
                 .inner
                 .result
                 .lock()
-                .map_err(|_| AgentRunError::runtime_message("run result lock is poisoned"))?
+                .map_err(|_| {
+                    record_events_fault(&self.inner, RESULT_LOCK_POISONED);
+                    AgentRunError::runtime_message(RESULT_LOCK_POISONED)
+                })?
                 .clone();
             if let Some(result) = result {
                 return result;
@@ -1275,11 +1299,12 @@ impl AgentRun {
     /// event subscription.
     pub async fn next_event_batch(&self) -> Result<Option<EventBatch>, AgentRunError> {
         loop {
+            events_fault(&self.inner)?;
             let subscription = {
-                let mut state =
-                    self.inner.events.lock().map_err(|_| {
-                        AgentRunError::runtime_message("run event lock is poisoned")
-                    })?;
+                let mut state = self.inner.events.lock().map_err(|_| {
+                    record_events_fault(&self.inner, EVENT_LOCK_POISONED);
+                    AgentRunError::runtime_message(EVENT_LOCK_POISONED)
+                })?;
                 match &*state {
                     EventStreamState::Waiting
                     | EventStreamState::Busy
@@ -1305,6 +1330,7 @@ impl AgentRun {
                 subscription: Some(subscription),
             };
             let batch = guard.subscription_mut().next_batch().await;
+            events_fault(&self.inner)?;
             return guard.finish(batch);
         }
     }
@@ -1312,6 +1338,7 @@ impl AgentRun {
     /// Close frontend event delivery without cancelling the owning run.
     pub fn close_events(&self) {
         let Ok(mut state) = self.inner.events.lock() else {
+            record_events_fault(&self.inner, EVENT_LOCK_POISONED);
             return;
         };
         match &mut *state {
@@ -1326,12 +1353,16 @@ impl AgentRun {
 
     async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
         loop {
+            events_fault(&self.inner)?;
             let notified = self.inner.handle_ready.notified();
             let result = self
                 .inner
                 .handle
                 .lock()
-                .map_err(|_| AgentRunError::runtime_message("run handle lock is poisoned"))?
+                .map_err(|_| {
+                    record_events_fault(&self.inner, HANDLE_LOCK_POISONED);
+                    AgentRunError::runtime_message(HANDLE_LOCK_POISONED)
+                })?
                 .clone();
             if let Some(result) = result {
                 return result;
@@ -1361,6 +1392,14 @@ impl AgentRun {
         )
         .await
     }
+
+    #[cfg(test)]
+    fn poison_events_lock(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.inner.events.lock().expect("event lock");
+            panic!("poison");
+        }));
+    }
 }
 
 fn publish_start_failure(execution: &Weak<AgentRunInner>, error: &AgentRunError) {
@@ -1369,12 +1408,16 @@ fn publish_start_failure(execution: &Weak<AgentRunInner>, error: &AgentRunError)
     };
     if let Ok(mut handle) = inner.handle.lock() {
         *handle = Some(Err(error.clone()));
+    } else {
+        record_events_fault(&inner, HANDLE_LOCK_POISONED);
     }
     inner.handle_ready.notify_waiters();
-    if let Ok(mut events) = inner.events.lock()
-        && matches!(*events, EventStreamState::Waiting)
-    {
-        *events = EventStreamState::StartupFailed(error.clone());
+    match inner.events.lock() {
+        Ok(mut events) if matches!(*events, EventStreamState::Waiting) => {
+            *events = EventStreamState::StartupFailed(error.clone());
+        }
+        Ok(_) => {}
+        Err(_) => record_events_fault(&inner, EVENT_LOCK_POISONED),
     }
 }
 
@@ -1388,12 +1431,16 @@ fn publish_started(
     };
     if let Ok(mut handle) = inner.handle.lock() {
         *handle = Some(Ok(runtime_handle));
+    } else {
+        record_events_fault(&inner, HANDLE_LOCK_POISONED);
     }
     inner.handle_ready.notify_waiters();
-    if let Ok(mut events) = inner.events.lock()
-        && matches!(*events, EventStreamState::Waiting)
-    {
-        *events = EventStreamState::Active(subscription);
+    match inner.events.lock() {
+        Ok(mut events) if matches!(*events, EventStreamState::Waiting) => {
+            *events = EventStreamState::Active(subscription);
+        }
+        Ok(_) => {}
+        Err(_) => record_events_fault(&inner, EVENT_LOCK_POISONED),
     }
 }
 
@@ -1403,6 +1450,8 @@ fn publish_result(execution: &Weak<AgentRunInner>, result: Result<AgentRunOutput
     };
     if let Ok(mut retained) = inner.result.lock() {
         *retained = Some(result);
+    } else {
+        record_events_fault(&inner, RESULT_LOCK_POISONED);
     }
     inner.result_ready.notify_waiters();
 }
@@ -1732,20 +1781,6 @@ fn validate_compact_catalog(capabilities: &[CapabilitySpec]) -> Result<(), Agent
     Ok(())
 }
 
-fn activation_tokens(value: &str) -> BTreeSet<String> {
-    value
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .map(str::to_ascii_lowercase)
-        .filter(|token| token.len() >= 4)
-        .filter(|token| {
-            !matches!(
-                token.as_str(),
-                "capability" | "model" | "with" | "from" | "that" | "this"
-            )
-        })
-        .collect()
-}
-
 const PREVIEW_ENGINE_VERSION: Version = Version {
     major: 0,
     minor: 0,
@@ -1837,6 +1872,11 @@ pub struct AgentRunRequest {
     pub max_cycles: u64,
     /// Maximum structured-output validation retries.
     pub max_output_retries: u32,
+    /// Optional model-activated capability to run instead of `self`.
+    ///
+    /// `None` keeps the `Agent` that was called. `Some` must name a
+    /// model-activation catalog entry or the start fails closed.
+    pub capability: Option<CapabilityId>,
 }
 
 impl AgentRunRequest {
@@ -1862,6 +1902,7 @@ impl AgentRunRequest {
             timeout: Duration::from_secs(30),
             max_cycles: DEFAULT_MAX_CYCLES,
             max_output_retries: DEFAULT_MAX_OUTPUT_RETRIES,
+            capability: None,
         };
         request.validate()?;
         Ok(request)
@@ -2620,8 +2661,6 @@ impl Model for ReadyModel {
 
 #[cfg(all(test, feature = "native-tokio"))]
 mod tests {
-    use std::collections::BTreeSet;
-
     use finstack_ai_kernel::{
         AgentId, BundleId, ComponentId, ComponentRef, RunEventClass, Usage, Version,
     };
@@ -2869,14 +2908,24 @@ mod tests {
                 .to_string()
                 .contains("compact capability catalog exceeds")
         );
-        assert_eq!(
-            activation_tokens("Research this capability: financial-statements"),
-            BTreeSet::from([
-                "financial".to_owned(),
-                "research".to_owned(),
-                "statements".to_owned(),
-            ])
-        );
+        assert_eq!(request("unused").capability, None);
+    }
+
+    #[tokio::test]
+    async fn unknown_request_capability_fails_closed() {
+        let model = Arc::new(ScriptedModel::from_plans(
+            profile(),
+            vec![completed("unused")],
+        ));
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+        let mut run_request = request("Say hello");
+        run_request.capability =
+            Some(CapabilityId::parse("test.capability.missing").expect("capability id"));
+        let Err(error) = agent.start(run_request) else {
+            panic!("unknown capability must fail closed");
+        };
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("unknown model capability"));
     }
 
     #[tokio::test]
@@ -3011,6 +3060,30 @@ mod tests {
             run.result().await.expect("retained result").text(),
             "event delivery resumed"
         );
+    }
+
+    #[tokio::test]
+    async fn event_lock_poison_fail_closes_result_and_poll() {
+        let control_name = Arc::<str>::from("poisoned-event-lock");
+        let mut plan = completed("must not settle after poison");
+        plan.actions
+            .insert(0, ScriptedModelAction::Block(Arc::clone(&control_name)));
+        let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+        let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+        let run = agent.start(request("poison event lock")).expect("start");
+        run.poison_events_lock();
+        run.close_events();
+
+        let poll = tokio::time::timeout(Duration::from_millis(200), run.next_event_batch())
+            .await
+            .expect("event poll must not hang")
+            .expect_err("event poll fail-closed");
+        assert_eq!(poll.code(), AGENT_RUN_RUNTIME_FAILURE);
+        let result = tokio::time::timeout(Duration::from_millis(200), run.result())
+            .await
+            .expect("result must not hang")
+            .expect_err("result fail-closed");
+        assert_eq!(result.code(), AGENT_RUN_RUNTIME_FAILURE);
     }
 
     #[tokio::test]

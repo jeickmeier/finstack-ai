@@ -160,6 +160,7 @@ pub use journal::{
     StoreCommitTimestamp, StoreError, StoreHealth, WriteMetadataRequest,
 };
 #[cfg(feature = "native-tokio")]
+#[doc(hidden)]
 pub use manual_drive::{
     ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
     ManualDrivePermit,

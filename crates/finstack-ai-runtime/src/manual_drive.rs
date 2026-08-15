@@ -1,4 +1,6 @@
 //! Deterministic post-commit dispatch control for native runtime tests.
+//!
+//! Test harness only. Manual drive stalls dispatch with no timeout.
 
 use finstack_ai_kernel::{EffectId, PostCommitAction};
 use thiserror::Error;

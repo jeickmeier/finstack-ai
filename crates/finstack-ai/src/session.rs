@@ -66,6 +66,10 @@ impl Session {
     }
 
     /// Construct a live handle that opens the runtime on first mutation.
+    ///
+    /// Intern-table poison is treated as absence so construction stays
+    /// infallible. The first mutation fail-closes through
+    /// [`SessionRuntime::open`].
     #[must_use]
     pub fn pending(
         store: Arc<dyn JournalStore>,
@@ -73,7 +77,7 @@ impl Session {
         tenant_scope: impl Into<Arc<str>>,
     ) -> Self {
         let tenant_scope = tenant_scope.into();
-        let runtime = SessionRuntime::existing(&store, session_id);
+        let runtime = SessionRuntime::existing(&store, session_id).ok().flatten();
         Self {
             store,
             session_id,

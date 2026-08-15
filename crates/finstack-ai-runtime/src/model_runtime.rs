@@ -124,11 +124,14 @@ impl PostCommitDispatcher for ModelDispatcher {
     fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>> {
         match dispatch.action {
             PostCommitAction::CancelEffect { effect_id } => {
-                let cancellation = self
-                    .active
-                    .lock()
-                    .ok()
-                    .and_then(|active| active.get(&effect_id).cloned());
+                let cancellation = match crate::coordinator::cancel_registered_effect(
+                    &self.active,
+                    effect_id,
+                    "model_effect_registry_unavailable",
+                ) {
+                    Ok(cancellation) => cancellation,
+                    Err(error) => return Box::pin(async move { Err(error) }),
+                };
                 Box::pin(async move {
                     // Completion may win the active-map race after the durable
                     // cancellation decision. The run worker still rejects the

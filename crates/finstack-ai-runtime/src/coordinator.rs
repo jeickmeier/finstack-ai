@@ -103,6 +103,7 @@ pub struct CommitCoordinator {
     snapshot_schedule: SnapshotSchedule,
     last_snapshot_sequence: Option<u64>,
     fault: Option<RunFault>,
+    last_store_reason: Option<Arc<str>>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
     #[cfg(feature = "native-tokio")]
     manual_drive: Option<crate::manual_drive::ManualDriveGate>,
@@ -124,6 +125,7 @@ impl CommitCoordinator {
             snapshot_schedule: SnapshotSchedule::default(),
             last_snapshot_sequence: None,
             fault: None,
+            last_store_reason: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
             manual_drive: None,
@@ -174,6 +176,7 @@ impl CommitCoordinator {
                 })
                 .flatten(),
             fault: None,
+            last_store_reason: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
             manual_drive: None,
@@ -231,6 +234,7 @@ impl CommitCoordinator {
                 })
                 .flatten(),
             fault: None,
+            last_store_reason: None,
             dispatcher: None,
             #[cfg(feature = "native-tokio")]
             manual_drive: None,
@@ -256,6 +260,14 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn fault(&self) -> Option<RunFault> {
         self.fault
+    }
+
+    /// Redacted store `Display` retained from the last integrity/corruption fault.
+    ///
+    /// The public boundary code stays `store_integrity_uncertain`.
+    #[must_use]
+    pub fn last_store_reason(&self) -> Option<&str> {
+        self.last_store_reason.as_deref()
     }
 
     #[cfg(feature = "native-tokio")]
@@ -415,8 +427,7 @@ impl CommitCoordinator {
                     return Err(self.boundary_fault("continued_ambiguous_acknowledgement"));
                 }
                 Err(error @ (StoreError::Corruption { .. } | StoreError::Integrity { .. })) => {
-                    let _ = error;
-                    return Err(self.boundary_fault("store_integrity_uncertain"));
+                    return Err(self.boundary_fault_with_store("store_integrity_uncertain", &error));
                 }
                 Err(error) => return Err(CommitCoordinatorError::Store(error)),
             };
@@ -605,7 +616,7 @@ impl CommitCoordinator {
                             .saturating_add(1),
                     }));
                 }
-                Err(error) => return Err(CommitCoordinatorError::Store(error)),
+                Err(error) => return Err(self.sidecar_append_error(error)),
             };
             let events = self
                 .kernel
@@ -683,7 +694,7 @@ impl CommitCoordinator {
                             .saturating_add(1),
                     }));
                 }
-                Err(error) => return Err(CommitCoordinatorError::Store(error)),
+                Err(error) => return Err(self.sidecar_append_error(error)),
             };
             let events = self
                 .kernel
@@ -789,6 +800,27 @@ impl CommitCoordinator {
         CommitCoordinatorError::BoundaryFault { code }
     }
 
+    fn boundary_fault_with_store(
+        &mut self,
+        code: &'static str,
+        error: &StoreError,
+    ) -> CommitCoordinatorError {
+        self.last_store_reason = Some(Arc::from(error.to_string()));
+        self.boundary_fault(code)
+    }
+
+    fn sidecar_append_error(&mut self, error: StoreError) -> CommitCoordinatorError {
+        match error {
+            StoreError::AmbiguousAcknowledgement => {
+                self.boundary_fault("continued_ambiguous_acknowledgement")
+            }
+            error @ (StoreError::Corruption { .. } | StoreError::Integrity { .. }) => {
+                self.boundary_fault_with_store("store_integrity_uncertain", &error)
+            }
+            error => CommitCoordinatorError::Store(error),
+        }
+    }
+
     #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
     pub(crate) fn install_dispatcher(&mut self, dispatcher: Arc<dyn PostCommitDispatcher>) {
         self.dispatcher = Some(dispatcher);
@@ -796,13 +828,15 @@ impl CommitCoordinator {
 
     /// Pause every committed execute/cancel action immediately before external dispatch.
     ///
-    /// This deterministic native test mode preserves normal validation, append,
-    /// apply, event publication, and dispatch precondition checks. The returned
-    /// exclusive controller must explicitly release each action.
+    /// Test harness only. This deterministic native mode preserves normal
+    /// validation, append, apply, event publication, and dispatch precondition
+    /// checks, then stalls each post-commit action with no timeout until the
+    /// exclusive controller releases it. Do not use in production.
     ///
     /// # Errors
     ///
     /// Returns [`crate::ManualDriveError::ZeroCapacity`] when `capacity` is zero.
+    #[doc(hidden)]
     #[cfg(feature = "native-tokio")]
     pub fn enable_manual_drive(
         &mut self,
@@ -1446,6 +1480,22 @@ pub(crate) struct DispatchError {
     pub(crate) code: &'static str,
 }
 
+/// Look up a registered cancellation signal.
+///
+/// A poisoned registry is a dispatch error. Missing `effect_id` after a
+/// successful lock is an idempotent no-op for the caller.
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+pub(crate) fn cancel_registered_effect(
+    active: &std::sync::Mutex<std::collections::BTreeMap<EffectId, crate::CancellationSignal>>,
+    effect_id: EffectId,
+    unavailable: &'static str,
+) -> Result<Option<crate::CancellationSignal>, DispatchError> {
+    let guard = active
+        .lock()
+        .map_err(|_| DispatchError { code: unavailable })?;
+    Ok(guard.get(&effect_id).cloned())
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
 pub(crate) struct ModelDispatchSeed {
@@ -1834,6 +1884,7 @@ mod tests {
         ConflictAlways,
         AmbiguousOnce,
         AmbiguousAlways,
+        IntegrityAlways,
     }
 
     struct FakeStore {
@@ -1948,6 +1999,13 @@ mod tests {
                     return Box::pin(async { Err(StoreError::AmbiguousAcknowledgement) });
                 }
                 return Box::pin(async move { Ok(committed) });
+            }
+            if inner.mode == FakeMode::IntegrityAlways {
+                return Box::pin(async {
+                    Err(StoreError::Integrity {
+                        reason_code: "checksum_mismatch",
+                    })
+                });
             }
             if inner.mode == FakeMode::ConflictAlways
                 || (inner.mode == FakeMode::ConflictOnce && inner.append_calls == 1)
@@ -3044,5 +3102,156 @@ mod tests {
                 code: "continued_ambiguous_acknowledgement"
             })
         ));
+    }
+
+    #[test]
+    fn sidecar_composition_ambiguous_ack_faults_later_submit() {
+        let store = Arc::new(FakeStore::new(FakeMode::AmbiguousAlways));
+        let mut coordinator = CommitCoordinator::new(store);
+        let prepared = finstack_ai_kernel::ChildRunPrepared {
+            parent_run_id: id(1),
+            parent_effect_id: id(2),
+            child: ChildRunLocator {
+                operation: OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
+                    .expect("locator"),
+                remote: None,
+            },
+            request_digest: Digest::raw_json(b"child"),
+            placement: ChildPlacement::CompatibleLaneInParentSession,
+            budget_reservation_id: None,
+        };
+        assert!(matches!(
+            block_on(coordinator.commit_composition_records(
+                id(394),
+                vec![session_draft(
+                    id(395),
+                    id::<SessionTag>(1),
+                    id::<LaneTag>(2),
+                    timestamp(1_050),
+                    RecordBody::ChildRunPrepared(prepared),
+                )
+                .expect("composition draft")],
+            )),
+            Err(CommitCoordinatorError::BoundaryFault {
+                code: "continued_ambiguous_acknowledgement"
+            })
+        ));
+        assert_eq!(
+            coordinator.fault().map(|fault| fault.code),
+            Some("continued_ambiguous_acknowledgement")
+        );
+        assert!(matches!(
+            block_on(coordinator.submit(
+                env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+                accept_input(),
+            )),
+            Err(CommitCoordinatorError::Faulted {
+                code: "continued_ambiguous_acknowledgement"
+            })
+        ));
+    }
+
+    #[test]
+    fn sidecar_ambiguous_ack_faults_later_submit() {
+        let store = Arc::new(FakeStore::new(FakeMode::AmbiguousAlways));
+        let mut coordinator = CommitCoordinator::new(store);
+        assert!(matches!(
+            block_on(coordinator.commit_session_records(
+                id(390),
+                vec![session_draft(
+                    id(391),
+                    id::<SessionTag>(1),
+                    id::<LaneTag>(2),
+                    timestamp(1_050),
+                    RecordBody::LaneCreated(LaneCreated::try_new("research").expect("lane")),
+                )
+                .expect("lane draft")],
+            )),
+            Err(CommitCoordinatorError::BoundaryFault {
+                code: "continued_ambiguous_acknowledgement"
+            })
+        ));
+        assert_eq!(
+            coordinator.fault().map(|fault| fault.code),
+            Some("continued_ambiguous_acknowledgement")
+        );
+        assert!(matches!(
+            block_on(coordinator.submit(
+                env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+                accept_input(),
+            )),
+            Err(CommitCoordinatorError::Faulted {
+                code: "continued_ambiguous_acknowledgement"
+            })
+        ));
+    }
+
+    #[test]
+    fn store_integrity_keeps_public_code_and_retains_reason() {
+        let store = Arc::new(FakeStore::new(FakeMode::IntegrityAlways));
+        let mut coordinator = CommitCoordinator::new(store);
+        assert!(matches!(
+            block_on(coordinator.commit_session_records(
+                id(392),
+                vec![session_draft(
+                    id(393),
+                    id::<SessionTag>(1),
+                    id::<LaneTag>(2),
+                    timestamp(1_050),
+                    RecordBody::LaneCreated(LaneCreated::try_new("research").expect("lane")),
+                )
+                .expect("lane draft")],
+            )),
+            Err(CommitCoordinatorError::BoundaryFault {
+                code: "store_integrity_uncertain"
+            })
+        ));
+        assert_eq!(
+            coordinator.fault().map(|fault| fault.code),
+            Some("store_integrity_uncertain")
+        );
+        assert_eq!(
+            coordinator.last_store_reason(),
+            Some("store integrity failure: checksum_mismatch")
+        );
+    }
+
+    fn poison_mutex<T>(mutex: &Mutex<T>) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = mutex.lock().expect("lock");
+            panic!("poison");
+        }));
+    }
+
+    #[test]
+    fn cancel_registered_effect_poison_returns_dispatch_error() {
+        let active = Mutex::new(BTreeMap::new());
+        poison_mutex(&active);
+        let error = cancel_registered_effect(&active, id(1), "model_effect_registry_unavailable")
+            .expect_err("poisoned registry");
+        assert_eq!(error.code, "model_effect_registry_unavailable");
+    }
+
+    #[test]
+    fn cancel_registered_effect_missing_id_is_idempotent() {
+        let active = Mutex::new(BTreeMap::new());
+        assert!(
+            cancel_registered_effect(&active, id(1), "model_effect_registry_unavailable")
+                .expect("lock")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn cancel_registered_effect_returns_registered_signal() {
+        let signal = crate::CancellationSignal::new();
+        let mut map = BTreeMap::new();
+        map.insert(id(7), signal.clone());
+        let active = Mutex::new(map);
+        let found = cancel_registered_effect(&active, id(7), "model_effect_registry_unavailable")
+            .expect("lock")
+            .expect("registered");
+        found.cancel();
+        assert!(signal.is_cancelled());
     }
 }

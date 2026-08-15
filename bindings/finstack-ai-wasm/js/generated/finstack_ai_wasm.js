@@ -159,12 +159,15 @@ export class Agent {
      * @param {number | null} [timeout_seconds]
      * @param {number | null} [max_cycles]
      * @param {number | null} [max_output_retries]
+     * @param {string | null} [capability]
      * @returns {Promise<any>}
      */
-    run(input, timeout_seconds, max_cycles, max_output_retries) {
+    run(input, timeout_seconds, max_cycles, max_output_retries, capability) {
         const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_run(this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries);
+        var ptr1 = isLikeNone(capability) ? 0 : passStringToWasm0(capability, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_run(this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries, ptr1, len1);
         return takeObject(ret);
     }
     /**
@@ -177,14 +180,17 @@ export class Agent {
      * @param {number | null} [timeout_seconds]
      * @param {number | null} [max_cycles]
      * @param {number | null} [max_output_retries]
+     * @param {string | null} [capability]
      * @returns {Run}
      */
-    start(input, timeout_seconds, max_cycles, max_output_retries) {
+    start(input, timeout_seconds, max_cycles, max_output_retries, capability) {
         try {
             const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
             const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len0 = WASM_VECTOR_LEN;
-            wasm.agent_start(retptr, this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries);
+            var ptr1 = isLikeNone(capability) ? 0 : passStringToWasm0(capability, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len1 = WASM_VECTOR_LEN;
+            wasm.agent_start(retptr, this.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries, ptr1, len1);
             var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
             var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
             var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -1951,13 +1957,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 484, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 488, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1517);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_375);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_373);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1989,8 +1995,8 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_375(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_375(arg0, arg1);
+function __wasm_bindgen_func_elem_373(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_373(arg0, arg1);
 }
 
 function __wasm_bindgen_func_elem_1517(arg0, arg1, arg2) {

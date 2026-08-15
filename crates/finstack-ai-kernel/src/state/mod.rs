@@ -521,8 +521,9 @@ pub struct KernelState {
 }
 
 impl PartialEq for KernelState {
-    /// Compares the canonical state projection rather than two `serde_json`
-    /// DOM trees.
+    /// Wire equality via JCS of `Serialize` (`KernelStateWireV*`), not digest
+    /// equality. [`KernelState::state_hash`] uses `KernelStateHashV*`. Tests
+    /// that care about snapshots must call `state_hash()`.
     ///
     /// A failed projection compares unequal: the previous `.ok() == .ok()`
     /// form reported two *unserializable* states as equal, which is exactly
@@ -2450,6 +2451,43 @@ mod validate_tool_state_tests {
                 reason_code: "inconsistent",
             }),
             "the same effect id assigned to two calls must stay rejected"
+        );
+    }
+}
+
+#[cfg(test)]
+mod kernel_state_eq_tests {
+    use super::*;
+
+    #[test]
+    fn eq_is_wire_json_not_state_hash_projection() {
+        let left = KernelState::default();
+        let right = KernelState::default();
+        let left_wire = serde_json_canonicalizer::to_vec(&left).expect("left wire");
+        let right_wire = serde_json_canonicalizer::to_vec(&right).expect("right wire");
+        assert_eq!(left_wire, right_wire);
+        assert_eq!(left, right);
+
+        let hash_projection = hash_projection::KernelStateHashV1::from_state(
+            &left,
+            stage_hash_entries(&left.stage_settlements),
+            model_hash_entries(&left.model_settlements),
+            completion_hash_entries(&left.completion_identities),
+        );
+        let hash_json =
+            serde_json_canonicalizer::to_vec(&hash_projection).expect("hash projection");
+        assert_ne!(
+            left_wire, hash_json,
+            "wire Serialize and hash projection must stay distinct"
+        );
+
+        let mut writer = crate::digest::DigestWriter::new("kernel-state", 1).expect("writer");
+        serde_json_canonicalizer::to_writer(&hash_projection, &mut writer).expect("hash write");
+        let (digest, _) = writer.finish();
+        assert_eq!(left.state_hash().expect("hash"), digest);
+        assert_eq!(
+            left.state_hash().expect("hash"),
+            right.state_hash().expect("hash")
         );
     }
 }

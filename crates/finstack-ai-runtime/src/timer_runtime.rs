@@ -106,11 +106,14 @@ where
     fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>> {
         match dispatch.action {
             PostCommitAction::CancelEffect { effect_id } => {
-                let cancellation = self
-                    .active
-                    .lock()
-                    .ok()
-                    .and_then(|active| active.get(&effect_id).cloned());
+                let cancellation = match crate::coordinator::cancel_registered_effect(
+                    &self.active,
+                    effect_id,
+                    "timer_effect_registry_unavailable",
+                ) {
+                    Ok(cancellation) => cancellation,
+                    Err(error) => return Box::pin(async move { Err(error) }),
+                };
                 Box::pin(async move {
                     if let Some(cancellation) = cancellation {
                         cancellation.cancel();

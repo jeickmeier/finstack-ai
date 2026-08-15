@@ -248,6 +248,7 @@ impl Agent {
         timeout_seconds: Option<f64>,
         max_cycles: Option<f64>,
         max_output_retries: Option<f64>,
+        capability: Option<String>,
     ) -> Result<Run, JsValue> {
         let request = run_request(
             &self.model,
@@ -255,6 +256,7 @@ impl Agent {
             timeout_seconds,
             max_cycles,
             max_output_retries,
+            capability,
         )?;
         self.inner
             .start(request)
@@ -273,6 +275,7 @@ impl Agent {
         timeout_seconds: Option<f64>,
         max_cycles: Option<f64>,
         max_output_retries: Option<f64>,
+        capability: Option<String>,
     ) -> js_sys::Promise {
         let agent = Arc::clone(&self.inner);
         let model = self.model.clone();
@@ -283,6 +286,7 @@ impl Agent {
                 timeout_seconds,
                 max_cycles,
                 max_output_retries,
+                capability,
             )?;
             let run = agent
                 .start(request)
@@ -1082,6 +1086,7 @@ fn run_request(
     timeout_seconds: Option<f64>,
     max_cycles: Option<f64>,
     max_output_retries: Option<f64>,
+    capability: Option<String>,
 ) -> Result<AgentRunRequest, JsValue> {
     let timeout_seconds = timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
     if !timeout_seconds.is_finite()
@@ -1122,6 +1127,12 @@ fn run_request(
     request.timeout = Duration::from_secs_f64(timeout_seconds);
     request.max_cycles = max_cycles;
     request.max_output_retries = max_output_retries;
+    if let Some(capability) = capability {
+        request.capability = Some(
+            CapabilityId::parse(&capability)
+                .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
+        );
+    }
     Ok(request)
 }
 

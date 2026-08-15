@@ -75,8 +75,8 @@ pub(super) fn apply(
     validate_batch_shape(original, &committed.records)?;
     validate_stage_digests(&committed.records)?;
     validate_tool_digests(&committed.records)?;
-    let applied = apply_semantic_records(original, &committed.records)?;
     capacity::preflight_batch(original, &committed.records)?;
+    let applied = apply_semantic_records(original, &committed.records)?;
     applied
         .state
         .validate()
@@ -103,7 +103,10 @@ pub(super) fn apply(
                     transient_sequence,
                     correlations,
                 )
-                .map_err(|_| KernelError::InvariantViolation)?,
+                .map_err(|_| KernelError::InvalidInputPayload {
+                    field: "derived_event",
+                    reason_code: "record_event_projection_failed",
+                })?,
             );
         }
     }
@@ -2188,7 +2191,10 @@ fn apply_validation_failure(
             .as_ref()
             .and_then(|accepted| accepted.limits().max_retries),
     )
-    .map_err(|_| KernelError::InvariantViolation)?;
+    .map_err(|_| KernelError::InvalidInputPayload {
+        field: "validation_error",
+        reason_code: "expected_error_unavailable",
+    })?;
     if !candidate_matches
         || &failure.schema != schema
         || failure.issues.is_empty()
@@ -3168,6 +3174,48 @@ mod tests {
         assert_eq!(
             apply(&state, &batch, 0),
             Err(KernelError::ModelSettlementMismatch)
+        );
+    }
+
+    #[test]
+    fn committed_batch_rejects_over_ceiling_with_reason_code() {
+        let record = RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            fixed_id::<crate::RecordTag>(1),
+            fixed_id::<crate::SessionTag>(1),
+            fixed_id::<crate::LaneTag>(2),
+            None,
+            1,
+            Timestamp::from_unix_ms(1_000).expect("timestamp"),
+            None,
+            Digest::raw_json(b"payload"),
+            None,
+            Digest::raw_json(b"checksum"),
+            vec![],
+            RecordBody::LaneCreated(crate::LaneCreated::try_new("research").expect("lane")),
+        )
+        .expect("record");
+        let records = vec![record; APPEND_BATCH_MAX_RECORDS + 1];
+        assert_eq!(
+            CommittedBatch::try_new(fixed_id::<crate::AppendBatchTag>(99), 1, 1, records),
+            Err(KernelError::InvalidInputPayload {
+                field: "records",
+                reason_code: "too_many_items",
+            })
+        );
+    }
+
+    #[test]
+    fn event_sequence_overflow_keeps_reason_code() {
+        let (mut state, batch) = external_batch_at_capacity(false);
+        state.model_settlements.clear();
+        assert_eq!(
+            apply(&state, &batch, u64::MAX),
+            Err(KernelError::InvalidInputPayload {
+                field: "first_transient_sequence",
+                reason_code: "overflow",
+            })
         );
     }
 

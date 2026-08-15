@@ -25,7 +25,7 @@ pub const AGENT_BUILD_DUPLICATE_SELECTION: &str = "agent_build_duplicate_selecti
 pub const AGENT_BUILD_FACTORY_FAILED: &str = "agent_build_factory_failed";
 /// Stable construction-cancellation build code.
 pub const AGENT_BUILD_CANCELLED: &str = "agent_build_cancelled";
-/// Stable cached factory-configuration conflict code.
+/// Stable construction-configuration conflict code.
 pub const AGENT_BUILD_CONFIGURATION_CONFLICT: &str = "agent_build_configuration_conflict";
 /// Stable middleware-chain construction code.
 pub const AGENT_BUILD_MIDDLEWARE_INVALID: &str = "agent_build_middleware_invalid";
@@ -1273,7 +1273,8 @@ pub enum ResolutionDiagnosticKind {
     FactoryConstructed,
     /// A prior factory result was reused.
     CachedFactoryReused,
-    /// Configuration was supplied to a ready registration and ignored.
+    /// Retained for 1.0 compatibility. Resolution now fails closed instead
+    /// of emitting this diagnostic.
     ReadyConfigurationIgnored,
     /// Configuration named no selected component.
     UnusedConfiguration,
@@ -1388,8 +1389,8 @@ pub enum AgentBuildError {
         /// Selected component.
         component: ComponentId,
     },
-    /// A cached factory was requested with a different canonical configuration.
-    #[error("{code}: cached construction configuration conflicts for {component}")]
+    /// A ready handle or cached factory was requested with conflicting configuration.
+    #[error("{code}: construction configuration conflicts for {component}")]
     ConfigurationConflict {
         /// Stable code.
         code: &'static str,
@@ -2049,7 +2050,6 @@ impl Registry {
         let Some(RegisteredEntry::Model(registration)) = self.entries.get_mut(id) else {
             unreachable!("kind checked before typed resolution");
         };
-        let had_configuration = configuration.is_some();
         let outcome = ensure_ready(
             &registration.descriptor,
             &mut registration.slot,
@@ -2100,15 +2100,6 @@ impl Registry {
             }
         }
         push_resolution_diagnostic(diagnostics, source, &registration.descriptor, outcome);
-        if had_configuration && matches!(outcome, ReadyOutcome::ReadySelected) {
-            diagnostics.push(ResolutionDiagnostic {
-                kind: ResolutionDiagnosticKind::ReadyConfigurationIgnored,
-                request_source: source.clone(),
-                component: Some(registration.descriptor.component.clone()),
-                registration_source: Some(registration.descriptor.source.id.clone()),
-                alias: None,
-            });
-        }
         Ok(resolved(&registration.descriptor, ready))
     }
 }
@@ -2127,7 +2118,6 @@ macro_rules! resolve_port {
                 let Some(RegisteredEntry::$variant(registration)) = self.entries.get_mut(id) else {
                     unreachable!("kind checked before typed resolution");
                 };
-                let had_configuration = configuration.is_some();
                 let outcome = ensure_ready(
                     &registration.descriptor,
                     &mut registration.slot,
@@ -2142,15 +2132,6 @@ macro_rules! resolve_port {
                 let ready = component.clone();
                 $validate(&registration.descriptor, ready.handle(), source)?;
                 push_resolution_diagnostic(diagnostics, source, &registration.descriptor, outcome);
-                if had_configuration && matches!(outcome, ReadyOutcome::ReadySelected) {
-                    diagnostics.push(ResolutionDiagnostic {
-                        kind: ResolutionDiagnosticKind::ReadyConfigurationIgnored,
-                        request_source: source.clone(),
-                        component: Some(registration.descriptor.component.clone()),
-                        registration_source: Some(registration.descriptor.source.id.clone()),
-                        alias: None,
-                    });
-                }
                 Ok(resolved(&registration.descriptor, ready))
             }
         }
@@ -2214,7 +2195,17 @@ async fn ensure_ready<T: ?Sized + 'static>(
         RegistrationSlot::Ready {
             factory_configuration: None,
             ..
-        } => Ok(ReadyOutcome::ReadySelected),
+        } => {
+            if !matches!(requested_configuration, FactoryConfiguration::Empty) {
+                return Err(AgentBuildError::ConfigurationConflict {
+                    code: AGENT_BUILD_CONFIGURATION_CONFLICT,
+                    request_source: request_source.clone(),
+                    component: descriptor.component.id().clone(),
+                    registration_source: descriptor.source.id.clone(),
+                });
+            }
+            Ok(ReadyOutcome::ReadySelected)
+        }
         RegistrationSlot::Factory(factory) => {
             if context.cancellation.is_cancelled() {
                 return Err(AgentBuildError::Cancelled {
@@ -3194,6 +3185,34 @@ mod tests {
         let _ = plan.store().handle().health().await;
         let _ = agent.run_plan();
         assert_eq!(registry.lookup_count, 2);
+    }
+
+    #[tokio::test]
+    async fn ready_model_rejects_per_request_configuration() {
+        let (model_extension, store_extension) = extensions();
+        let mut registrar = Registrar::new();
+        registrar
+            .register_extension(&model_extension)
+            .expect("model registers");
+        registrar
+            .register_extension(&store_extension)
+            .expect("store registers");
+        let Err(error) = registrar
+            .into_registry()
+            .resolve(
+                request_with_model(exact("test.model.scripted"))
+                    .with_configuration(
+                        component("test.model.scripted"),
+                        RawJson::parse(br#"{"temperature":0}"#).expect("config"),
+                    )
+                    .expect("request"),
+                AgentConstructionContext::new(),
+            )
+            .await
+        else {
+            panic!("ready handle must fail closed");
+        };
+        assert_eq!(error.code(), AGENT_BUILD_CONFIGURATION_CONFLICT);
     }
 
     struct FactoryExtension {

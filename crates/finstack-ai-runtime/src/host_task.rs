@@ -844,10 +844,14 @@ impl PostCommitDispatcher for HostDispatcher {
     fn dispatch(&self, dispatch: RuntimeDispatch) -> PortFuture<Result<(), DispatchError>> {
         match dispatch.action {
             PostCommitAction::CancelEffect { effect_id } => {
-                if let Ok(active) = self.active.lock()
-                    && let Some(signal) = active.get(&effect_id)
-                {
-                    signal.cancel();
+                match crate::coordinator::cancel_registered_effect(
+                    self.active.as_ref(),
+                    effect_id,
+                    "host_effect_registry_unavailable",
+                ) {
+                    Ok(Some(signal)) => signal.cancel(),
+                    Ok(None) => {}
+                    Err(error) => return Box::pin(async move { Err(error) }),
                 }
                 Box::pin(async { Ok(()) })
             }

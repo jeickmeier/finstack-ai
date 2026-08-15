@@ -13,7 +13,7 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.19 |
+| Version | 0.20 |
 | Status | Implementation baseline |
 | Date | 2026-08-15 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
@@ -46,7 +46,7 @@ Python bindings       Browser WASM       Durability/recovery
                   1.0 hardening
 ```
 
-The plan contains **66 logical pull requests** across ten phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
+The plan contains **67 logical pull requests** across eleven phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
 
 # 1. Purpose and use of this plan
 
@@ -86,6 +86,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 0.0.4 plugin alpha | Phase 7 | Permissioned WIT/Wasmtime extensions | Experimental external ABI |
 | 0.1.0 public preview | Phase 8 | Ecosystem batteries, server, workflow adapters, docs | Published preview compatibility policy |
 | 1.0.0 GA | Phase 9 | Stable contracts, audit, performance and release hardening | SemVer and schema compatibility commitments |
+| 1.0.x maintenance | Phase 10 | Post-GA fail-closed hardening; no journal/WIT/protocol meaning change | SemVer patch; public removals remain major |
 
 ## 2.1 MVP and preview boundary
 
@@ -124,6 +125,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 7. Isolated plugins | 4-6 weeks | Starts after port/API candidate freeze |
 | 8. Public preview | 4-6 weeks | Ecosystem work can begin earlier in leaf packages |
 | 9. 1.0 hardening | 6-10 weeks | Driven by preview feedback and audits |
+| 10. 1.0.x reliability | 1-2 weeks | Sequential slices after G8; one logical PR |
 
 ## 3.1 Staffing scenarios
 
@@ -194,6 +196,8 @@ Phase 4: Python     Phase 5: WASM      Phase 6: durability
                                        Phase 8: preview
                                                |
                                         Phase 9: 1.0
+                                               |
+                                        Phase 10: 1.0.x
 ```
 
 Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
@@ -2847,6 +2851,65 @@ A separate ADR is required before merging a change that:
 
 **Explicitly excluded.** Post-1.0 marketplace, broad channel catalog, and product-specific UIs.
 
+# 17A. Phase 10: 1.0.x reliability hardening
+
+**Outcome.** Post-GA `1.0.x` fail-closed hardening from the crates Deep Audit. Poison and uncertain-ack paths fail closed, SDK routing and ready-handle config are honest, native and wasm-host event hubs agree, and no journal, WIT, or protocol meaning changes.
+
+**Planning range.** 1-2 weeks
+
+**Traceability.** NFR-SEC, NFR-REL, NFR-COMP; Threat Model TM-04; 1.0 compatibility policy.
+
+## Entrance criteria
+
+- Phase 9 is complete, G8 is `Passed`, and local tag `v1.0.0` exists.
+- PR-066 is `Done`. Closed PR-001–PR-066 envelopes are not reused.
+
+## Exit criteria
+
+- Mutex-poison and uncertain store-ack paths fail closed on session intern, sidecar append, effect cancel, and SDK event publish.
+- `Agent::start` does not select a capability by user-input token overlap; optional explicit capability is additive.
+- Ready-handle per-request configuration fails closed instead of emitting only a diagnostic.
+- wasm-host event-hub sequence codes, observer audience, and `BlockBounded` match native.
+- No journal record field, WIT world, remote protocol, or `KernelError` variant-shape change.
+
+## Pull request sequence
+
+### PR-067 - 1.0.x reliability hardening (crates Deep Audit)
+
+**Purpose.** Close fail-open poison and uncertain-ack paths and remove undocumented SDK heuristics without breaking the 1.0 freeze.
+
+**Principal changes.**
+
+- Fail closed on session intern-table poison, composition/session `AmbiguousAcknowledgement`, dispatcher cancel-registry poison, and SDK event-consumer/publish poison.
+- Replace input-token capability routing with optional `AgentRunRequest.capability`; default is the `Agent` that was called.
+- Align wasm-host event-hub sequence error code, observer audience, and `BlockBounded` to native.
+- Hide manual-drive as a test harness (`#[doc(hidden)]`); do not feature-gate or remove it in `1.0.x`.
+- Fail resolution when a ready slot is selected with per-request configuration.
+- Keep interaction request-stage existence check; do not add a cursor field to `InteractionRequest`.
+- Run capacity preflight before transactional apply.
+- Prefer existing `KernelError` / coordinator reason fields over discarded `map_err(|_| …)` causes; do not reshape `InvariantViolation`.
+- Measure event flush bytes with a counting writer.
+- Expand secret-free config key needles; do not add a config-schema allowlist.
+- Inline the one-impl `SyntheticClosureExt` helper; document `KernelState` `PartialEq` as wire equality; label the reference server accept loop as non-production; add the god-file sibling-module engineering rule.
+
+**Acceptance evidence.**
+
+- Poisoned intern map cannot yield a second owner for the same `(store, session_id)`.
+- Ambiguous sidecar append sets `RunFault` and later `submit` is `Faulted`.
+- Cancel dispatch on an unavailable effect registry returns a dispatch error, not `Ok(())`.
+- SDK event poll / `result()` fail closed after event-lock poison.
+- Token-overlap routing tests are gone; explicit unknown capability fails configuration.
+- Host event-hub sequence error code is `event_sequence_mismatch`; observer and `BlockBounded` behave as native.
+- Ready handle plus non-empty config returns `AGENT_BUILD_CONFIGURATION_CONFLICT`.
+- Over-capacity apply returns `StateCapacityExceeded` before clone/apply.
+- TM-04 review of the secret-needle expansion is recorded before merge.
+
+**Dependencies.** PR-066 and G8.
+
+**Traceability.** NFR-SEC-003/005; NFR-REL; NFR-COMP; TM-04; TDD sections 2-4; 1.0 compatibility policy.
+
+**Explicitly excluded.** Journal or interaction-cursor field adds; `KernelError` variant-shape change; `manual-drive` feature-gate or public-API removal; `task.rs` / `host_task.rs` merge; production server rewrite; config-schema allowlist; god-file splits; marketplace, channel catalog, and product-specific UIs.
+
 # 18. Cross-phase quality plan
 
 ## 18.1 Test layers by phase
@@ -2971,6 +3034,7 @@ PRD lettered phases are capability groupings; the numbered phases and logical PR
 | E - Isolated extension model | Phase 7, PR-049 through PR-054 | 7 | G6 |
 | F - Server and ecosystem adapters | Phase 8, PR-055 through PR-061 | 8 | G7 |
 | Cross-cutting GA hardening | Phase 9, PR-062 through PR-066 | Definition of done and all milestones | G8 |
+| 1.0.x reliability hardening | Phase 10, PR-067 | Post-GA fail-closed maintenance | — |
 
 A family traceability reference such as `NFR-PERF` expands to every numbered requirement in that family unless the entry names a narrower range. This convention avoids duplicating requirement prose while preserving ownership.
 
@@ -2986,6 +3050,7 @@ A family traceability reference such as `NFR-PERF` expands to every numbered req
 | Isolated plugins | PR-049 to PR-054 | FR-PLG | WIT, Wasmtime, permissions, guest SDK |
 | Ecosystem/public preview | PR-055 to PR-061 | Release scope and representative use cases | Providers, compaction/context batteries, observers, server, workflows |
 | 1.0 hardening | PR-062 to PR-066 | All NFR families | Compatibility, performance, security, release |
+| 1.0.x reliability | PR-067 | NFR-SEC, NFR-REL, NFR-COMP | Fail-closed poison/ack, SDK honesty, event-hub parity |
 
 # 23. First 30 days
 

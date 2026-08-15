@@ -53,6 +53,9 @@ impl fmt::Debug for Server {
 impl Server {
     /// Enable the audit gate and validate the listen policy.
     ///
+    /// Reference-only constructor. Each [`Server::accept_once`] call rebinds;
+    /// this is not a production accept loop or execution authority.
+    ///
     /// # Errors
     ///
     /// Fails closed for an invalid listen address, missing/unhealthy sink, or
@@ -140,6 +143,9 @@ impl Server {
     }
 
     /// Bind and accept one TCP or Unix connection, then serve it.
+    ///
+    /// Rebinds on every call. This is not a production accept loop and must
+    /// not be deployed as execution authority.
     ///
     /// # Errors
     ///

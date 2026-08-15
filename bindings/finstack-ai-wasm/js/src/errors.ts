@@ -8,6 +8,11 @@ export interface RunOptions {
   maxCycles?: number;
   /** Maximum structured-output retries. Defaults to 1. */
   maxOutputRetries?: number;
+  /**
+   * Optional model-activated capability id.
+   * Omitted or `undefined` runs this agent; a missing catalog id fails closed.
+   */
+  capability?: string;
 }
 
 /**

@@ -102,6 +102,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             30.0,
             1,
             1,
+            None,
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
