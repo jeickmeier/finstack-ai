@@ -1,0 +1,78 @@
+PR-057 TM-04 / TM-17 / TM-21 security review
+Date: 2026-08-15
+Candidate: d07ed8d15b7122160419d91996840e1c98575455
+Reviewer: me@jeickmeier.com
+Decision: Pass for observer adapters and diagnostic projections.
+No threat-model rewrite. No Implementation Plan §6.3 ADR
+trigger. G7 is not inferred. ADR-009 stays In progress /
+Partial until this PR is locally integrated.
+
+Scope reviewed:
+  crates/finstack-ai-runtime/src/observer.rs
+  crates/finstack-ai-runtime/src/observer_export.rs
+  crates/finstack-ai-runtime/src/observer_queue.rs
+  crates/finstack-ai-runtime/src/event_hub.rs subscribe_observer
+  crates/finstack-ai/src/agent.rs observer fan-out
+  extensions/observers/finstack-ai-observer-log
+  extensions/observers/finstack-ai-observer-metrics
+  extensions/observers/finstack-ai-observer-otel
+  tools/wasm_package/check.py FORBIDDEN_WASM
+  Graph: kernel / runtime / default SDK / wit / examples / wasm
+
+Triggered controls: Threat Model section 18 (telemetry
+payloads / retention). Primary TM-17 and TM-04 / SEC-INV-005.
+Also TM-21 (compaction diagnostics must not leak
+source/summary content) and SEC-INV-009/012.
+
+PASS  TM-17 / SEC-INV-005 observer non-semantics
+      Native preview now attaches resolved Observer handles to
+      the existing isolated hub route. Fan-out never waits on
+      observe() from the run driver. A ScriptedObserver that
+      returns Err or waits on an unreleased ManualGate produces
+      the same RunCompleted text and journal record-kind prefix
+      as NoopObserver. Unbounded channels are not used; each
+      adapter owns a finite ObserverQueue. Overflow is a
+      diagnostic, not a RunEvent kind.
+
+PASS  TM-04 / SEC-INV-009 redaction defaults
+      ObserverEventView::from_event remains the projection:
+      MetadataOnly has no body, Redacted keeps Public only,
+      Full still hides Credential. Default log/otel adapters
+      are Redacted; metrics are MetadataOnly. journal_export_jsonl
+      strips `body` unless Full. write_support_bundle writes
+      redacted events + metadata-only journal export + versions
+      and never writes raw journal CBOR. Canary tests scan log
+      lines, Prometheus text, span snapshots, and bundle files.
+
+PASS  TM-21 compaction diagnostics
+      Metrics record strategy_id, token estimates, checkpoint
+      hit/miss, cache-impact labels, and failure/latency
+      counters. record_compaction_result reads only
+      CompactionEvidence. Replacement-message and derived-
+      summary text containing a canary do not appear in
+      encode_prometheus().
+
+PASS  SEC-INV-012 / default-graph posture
+      Kernel, runtime, default SDK, no-default SDK, wit,
+      native-examples, and wasm-host graphs contain none of
+      the observer leaves, opentelemetry*, or prometheus.
+      OTLP is an optional otel-crate feature and is off by
+      default. No HTTP metrics server. NoopObserver /
+      ReferenceObserver stay in runtime.
+
+Architecture and residual-risk disposition
+
+- No seventh port, no new RunEvent kinds, no field-level
+  redaction of authoritative journal records, no hosted
+  collector, and no default network exporter.
+- SecurityAuditSink remains a separate ingress service and is
+  not an Observer.
+- ADR-009 remains Partial until local integration closeout.
+  The port split is unchanged; this PR adds leaf adapters and
+  native fan-out only.
+- Residual: hosted matrix, cargo-deny, and gitleaks are not
+  claimed. Retention/export of operator-owned log files is
+  outside this crate.
+
+No G7-D-*, hosted pull request, publication, or tag is
+recorded.

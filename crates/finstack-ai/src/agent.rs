@@ -32,11 +32,12 @@ use finstack_ai_runtime::{
     Middleware, Model, ModelCapabilities, ModelContextProfileOverride, ModelDescriptor, ModelError,
     ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft,
     ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext,
-    PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext, ResolvedToolCatalog,
-    RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime,
-    SideEffectClass, StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy,
-    ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler,
-    Toolset, ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
+    Observer, PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext,
+    ResolvedToolCatalog, RunEvent, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
+    SessionError, SessionRuntime, SideEffectClass, StructuredOutputCapability, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, UuidV7Generator,
+    resolve_model_context_profile,
 };
 use thiserror::Error;
 
@@ -132,9 +133,9 @@ impl Agent {
 
     /// Validate and retain one resolved, no-lookup execution plan.
     ///
-    /// The developer preview supports direct model and Toolset handles. It
-    /// rejects non-empty context-provider, middleware, and observer selections
-    /// instead of silently bypassing their stage contracts.
+    /// The developer preview supports direct model, Toolset, context-provider,
+    /// middleware, and observer handles. Observer failures are isolated from
+    /// run semantics.
     ///
     /// # Errors
     ///
@@ -148,13 +149,6 @@ impl Agent {
             ));
         }
         let plan = resolved.run_plan();
-        if !plan.observers().is_empty() {
-            return Err(AgentRunError::configuration(
-                AGENT_RUN_UNSUPPORTED_PLAN,
-                "native preview does not execute observer components",
-            ));
-        }
-
         let registrations = plan
             .toolsets()
             .iter()
@@ -553,10 +547,11 @@ impl Agent {
                 }
             };
         }
+        let observer_count = self.resolved.run_plan().observers().len();
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(
                 coordinator,
-                run_task_config(),
+                run_task_config(observer_count),
                 model_task_config(),
                 ready_model,
                 prepared.profile.clone(),
@@ -568,7 +563,7 @@ impl Agent {
         } else {
             Box::pin(RunTaskOwner::spawn_with_model_and_tools(
                 coordinator,
-                run_task_config(),
+                run_task_config(observer_count),
                 model_task_config(),
                 tool_task_config(),
                 ready_model,
@@ -603,6 +598,7 @@ impl Agent {
                 return Err(error);
             }
         };
+        attach_plan_observers(&handle, self.resolved.run_plan().observers());
         publish_started(execution, handle.clone(), subscription);
         let timeout = prepared.request.timeout;
         let result = driver::timeout(
@@ -1423,6 +1419,7 @@ pub struct NativeAgentBuilder {
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
     middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
+    observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
@@ -1443,6 +1440,7 @@ impl NativeAgentBuilder {
             toolsets: Vec::new(),
             context_providers: Vec::new(),
             middleware: Vec::new(),
+            observers: Vec::new(),
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
@@ -1487,6 +1485,13 @@ impl NativeAgentBuilder {
         self
     }
 
+    /// Add one ordered direct [`Observer`] handle.
+    #[must_use]
+    pub fn observer(mut self, component: ComponentRef, observer: Arc<dyn Observer>) -> Self {
+        self.observers.push((component, observer));
+        self
+    }
+
     /// Add one validated declarative capability to the finite catalog.
     #[must_use]
     pub fn capability(mut self, capability: CapabilitySpec) -> Self {
@@ -1520,6 +1525,7 @@ impl NativeAgentBuilder {
             toolsets: self.toolsets.clone(),
             context_providers: self.context_providers.clone(),
             middleware: self.middleware.clone(),
+            observers: self.observers.clone(),
         };
         let mut registrar = Registrar::new();
         registrar.register_extension(&extension).map_err(|error| {
@@ -1626,6 +1632,13 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
             .collect::<Vec<_>>(),
     )
     .middleware(middleware)
+    .observers(
+        builder
+            .observers
+            .iter()
+            .map(|(component, _)| component.clone())
+            .collect::<Vec<_>>(),
+    )
     .capabilities(capability_refs)
     .build()
     .map_err(|error| {
@@ -1643,6 +1656,9 @@ fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), Agent
         validate_exact_component(component)?;
     }
     for (component, _) in &builder.middleware {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.observers {
         validate_exact_component(component)?;
     }
     Ok(())
@@ -1743,6 +1759,7 @@ struct NativeBuilderExtension {
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
     middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
+    observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
 }
 
 impl Extension for NativeBuilderExtension {
@@ -1771,6 +1788,12 @@ impl Extension for NativeBuilderExtension {
             registrar.middleware(
                 registration_metadata(component),
                 ReadyComponent::new(Arc::clone(middleware)),
+            )?;
+        }
+        for (component, observer) in &self.observers {
+            registrar.observer(
+                registration_metadata(component),
+                ReadyComponent::new(Arc::clone(observer)),
             )?;
         }
         registrar.store(
@@ -2468,14 +2491,54 @@ fn text_message(
     })
 }
 
-fn run_task_config() -> RunTaskConfig {
+fn run_task_config(observer_count: usize) -> RunTaskConfig {
     RunTaskConfig {
         command_capacity: DEFAULT_QUEUE_CAPACITY,
         event_hub: EventHubConfig {
             source_capacity: DEFAULT_QUEUE_CAPACITY,
-            max_subscribers: 4,
+            max_subscribers: 4usize.saturating_add(observer_count),
         },
         shutdown_deadline: Duration::from_secs(2),
+    }
+}
+
+fn observer_event_subscription() -> EventSubscriptionConfig {
+    EventSubscriptionConfig {
+        queue_capacity: DEFAULT_QUEUE_CAPACITY,
+        filter: EventFilter {
+            include_durable: true,
+            include_transient: true,
+            kinds: Arc::from([]),
+            max_sensitivity: Sensitivity::Credential,
+        },
+        batching: EventBatchConfig {
+            flush_count: DEFAULT_EVENT_BATCH_COUNT,
+            flush_bytes: DEFAULT_EVENT_BATCH_BYTES,
+            flush_interval: DEFAULT_EVENT_BATCH_INTERVAL,
+        },
+        progress_coalescing: ProgressCoalescing::Enabled,
+        lag_policy: EventLagPolicy::DropProgress {
+            durable_timeout: Duration::from_secs(2),
+        },
+    }
+}
+
+fn attach_plan_observers(handle: &RunHandle, observers: &[crate::ResolvedComponent<dyn Observer>]) {
+    for component in observers {
+        let observer = Arc::clone(component.handle());
+        let handle = handle.clone();
+        let _ = driver::spawn(Box::pin(async move {
+            let Ok(mut subscription) = handle
+                .subscribe_observer(observer_event_subscription())
+                .await
+            else {
+                return;
+            };
+            while let Some(batch) = subscription.next_batch().await {
+                let events: Arc<[RunEvent]> = Arc::from(batch.events().to_vec());
+                let _ = observer.observe(events).await;
+            }
+        }));
     }
 }
 
@@ -2564,10 +2627,14 @@ mod tests {
     };
     use finstack_ai_runtime::{
         JournalStore, ModelContextProfile, ModelResponse, ModelStreamItem, ModelToolCall,
-        TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Toolset,
+        NoopObserver, ObserverDescriptor, ObserverError, ObserverPayloadMode, TokenEstimatorRef,
+        TokenEstimatorSource, ToolCallDelta, Toolset,
     };
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-    use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
+    use finstack_ai_test::{
+        ManualGate, ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedObserver,
+        ScriptedObserverAction,
+    };
     use finstack_ai_tools_calculator::CalculatorToolset;
 
     use super::*;
@@ -3100,5 +3167,99 @@ mod tests {
         assert_eq!(output.text(), "five");
         assert_eq!(model.request_count(), 2);
         assert_eq!(model.warmup_count(), 1);
+    }
+
+    fn observer_descriptor(id: &str) -> ObserverDescriptor {
+        ObserverDescriptor {
+            component: ComponentRef::new(
+                ComponentId::parse(id).expect("observer id"),
+                Some(VERSION),
+            ),
+            payload_mode: ObserverPayloadMode::Redacted,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    async fn run_with_observer(observer_id: &str, observer: Arc<dyn Observer>) -> AgentRunOutput {
+        let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+            profile(),
+            vec![completed("observer-ok")],
+        ));
+        let store: Arc<dyn JournalStore> = Arc::new(
+            MemoryJournalStore::try_new(MemoryStoreLimits {
+                sessions: 4,
+                batches_per_session: 64,
+                records_per_session: 512,
+                snapshot_bytes: 4_096,
+            })
+            .expect("store"),
+        );
+        Agent::builder(
+            AgentId::parse("test.agent.observer").expect("agent"),
+            BundleId::parse("test.bundle.observer").expect("bundle"),
+            (
+                ComponentRef::new(
+                    ComponentId::parse("test.model.preview").expect("model"),
+                    Some(VERSION),
+                ),
+                model,
+            ),
+            (
+                ComponentRef::new(
+                    ComponentId::parse("test.store.preview").expect("store"),
+                    Some(VERSION),
+                ),
+                store,
+            ),
+        )
+        .observer(
+            ComponentRef::new(
+                ComponentId::parse(observer_id).expect("observer component"),
+                Some(VERSION),
+            ),
+            observer,
+        )
+        .build()
+        .await
+        .expect("build")
+        .run(request("observe me"))
+        .await
+        .expect("run")
+    }
+
+    #[tokio::test]
+    async fn failing_or_stalled_observer_does_not_change_journal_prefix() {
+        let noop: Arc<dyn Observer> =
+            Arc::new(NoopObserver::new(observer_descriptor("test.observer.noop")));
+        let failing: Arc<dyn Observer> = Arc::new(
+            ScriptedObserver::try_new(
+                observer_descriptor("test.observer.fail"),
+                64,
+                vec![ScriptedObserverAction::Return(Err(
+                    ObserverError::Unavailable,
+                ))],
+            )
+            .expect("failing"),
+        );
+        let gate = ManualGate::default();
+        let stalled: Arc<dyn Observer> = Arc::new(
+            ScriptedObserver::try_new(
+                observer_descriptor("test.observer.stall"),
+                64,
+                vec![ScriptedObserverAction::Wait {
+                    gate,
+                    outcome: Ok(()),
+                }],
+            )
+            .expect("stalled"),
+        );
+        let noop_out = run_with_observer("test.observer.noop", noop).await;
+        let fail_out = run_with_observer("test.observer.fail", failing).await;
+        let stall_out = run_with_observer("test.observer.stall", stalled).await;
+        assert_eq!(noop_out.text(), "observer-ok");
+        assert_eq!(fail_out.text(), noop_out.text());
+        assert_eq!(stall_out.text(), noop_out.text());
+        assert_eq!(fail_out.record_kinds(), noop_out.record_kinds());
+        assert_eq!(stall_out.record_kinds(), noop_out.record_kinds());
     }
 }

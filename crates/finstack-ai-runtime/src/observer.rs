@@ -45,7 +45,7 @@ pub struct ObserverDescriptor {
 }
 
 /// Immutable event view retained by the reference observer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ObserverEventView {
     /// Durable or transient class.
     pub class: RunEventClass,

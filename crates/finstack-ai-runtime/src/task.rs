@@ -59,6 +59,18 @@ impl RunHandle {
         self.shared.events.subscribe_interactive(config).await
     }
 
+    /// Register a read-only observer subscription isolated from interactive delivery.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid configuration, exhausted subscriber capacity, or a closed hub.
+    pub async fn subscribe_observer(
+        &self,
+        config: EventSubscriptionConfig,
+    ) -> Result<EventSubscription, EventSubscriptionError> {
+        self.shared.events.subscribe_observer(config).await
+    }
+
     /// Submit one command, awaiting bounded-channel capacity when necessary.
     ///
     /// # Errors

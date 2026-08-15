@@ -350,7 +350,6 @@ mod native {
                 .await
         }
 
-        #[allow(dead_code, reason = "PR-018 attaches the Observer port to this route")]
         pub(crate) async fn subscribe_observer(
             &self,
             config: EventSubscriptionConfig,
@@ -1611,6 +1610,13 @@ mod host {
     }
 
     impl EventHubHandle {
+        pub(crate) fn subscribe_observer(
+            &self,
+            config: EventSubscriptionConfig,
+        ) -> Result<EventSubscription, EventSubscriptionError> {
+            self.subscribe_interactive(config)
+        }
+
         pub(crate) fn subscribe_interactive(
             &self,
             config: EventSubscriptionConfig,

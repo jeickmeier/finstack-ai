@@ -62,6 +62,8 @@ mod manual_drive;
 mod middleware;
 mod model;
 mod observer;
+mod observer_export;
+mod observer_queue;
 mod ports;
 mod session;
 mod tool;
@@ -196,6 +198,13 @@ pub use observer::{
     NoopObserver, OBSERVER_CAPACITY_EXCEEDED, OBSERVER_CONFIGURATION_INVALID, OBSERVER_UNAVAILABLE,
     Observer, ObserverDescriptor, ObserverError, ObserverEventView, ObserverPayloadMode,
     ReferenceObserver,
+};
+pub use observer_export::{
+    diagnostic_contains, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
+};
+pub use observer_queue::{
+    OBSERVER_QUEUE_OVERFLOW, ObserverBackpressure, ObserverDiagnostic, ObserverQueue,
+    ObserverQueuePush,
 };
 pub use ports::{PortFuture, PortObject, PortStream};
 pub use tool::{

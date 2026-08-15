@@ -19,6 +19,9 @@ members = [
     "extensions/context/finstack-ai-context-memory",
     "extensions/middleware/finstack-ai-middleware-compaction",
     "extensions/middleware/finstack-ai-middleware-verify",
+    "extensions/observers/finstack-ai-observer-log",
+    "extensions/observers/finstack-ai-observer-otel",
+    "extensions/observers/finstack-ai-observer-metrics",
     "examples/rust-minimal",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
@@ -68,6 +71,12 @@ finstack-ai-context-repository = { path = "extensions/context/finstack-ai-contex
 finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-memory", version = "0.0.4" }
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "0.0.4" }
 finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "0.0.4" }
+finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "0.0.4" }
+finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "0.0.4" }
+finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "0.0.4" }
+opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace"] }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "0.0.4" }
 finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "0.0.4" }
 finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "0.0.4" }
