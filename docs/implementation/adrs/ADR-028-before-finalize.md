@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through PR-013 final-boundary semantics and locally integrated PR-018 seven-stage outcome-matrix evidence proving `before_finalize` permits interaction/retry but rejects replacement (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-048 remains
+- Implementation evidence: Partial through PR-013 final-boundary semantics and locally integrated PR-018 seven-stage outcome-matrix evidence proving `before_finalize` permits interaction/retry but rejects replacement (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-048 before_finalize restart and G5-D-durable-beta-a9568bd869b5 close the mapped durability work. Verified

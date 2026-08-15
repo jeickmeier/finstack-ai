@@ -73,3 +73,5 @@ May change only through a new superseding ADR and reconciliation of every affect
   (PR-014-E-runtime-f7d0f0ecede0; PR-014-E-security-a8a835efcf19;
   PR-014-E-integration-e7ec699722ab). Concrete
   effect drivers and later persistent reconciliation remain mapped work.
+  Verified — PR-048 crash-prefix at-least-once plus expire/idempotency
+  and G5-D-durable-beta-a9568bd869b5. Exactly-once is not claimed.

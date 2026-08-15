@@ -85,3 +85,5 @@ May change only through a new superseding ADR and reconciliation of every affect
   cancel-during-deferred restore under that `EffectId`
   (PR-045-E-cancel-e58ff33138dd; PR-045-E-security-e58ff33138dd).
   Later persistent completion paths remain mapped to PR-048.
+  Verified — PR-048 crash-prefix restore and
+  G5-D-durable-beta-a9568bd869b5 close the mapped durability work.

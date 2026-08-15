@@ -72,4 +72,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial — PR-022 Always/Application delivery plus PR-038 JS catalog UX on candidate `f1ff388563dfce92169c9fe6ae8c845fec86794b`. PR-048 remains.
+- Implementation evidence: Verified — PR-022 Always/Application delivery plus PR-038 JS catalog UX on candidate `f1ff388563dfce92169c9fe6ae8c845fec86794b`. PR-048 activation-restart and G5-D-durable-beta-a9568bd869b5 close the mapped durability work.

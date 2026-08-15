@@ -76,4 +76,5 @@ May change only through a new superseding ADR and reconciliation of every affect
   `14af719a078f1cdf52382e89e0a44837ab207237` adds lineage-aware cancel /
   deadline fan-out; detach-preauthorized children stay up
   (PR-047-E-lanes-14af719a078f; PR-047-E-security-14af719a078f).
-  Crash-prefix remains PR-048. Do not mark Implemented.
+  Crash-prefix child restore passes at PR-048. Verified by
+  G5-D-durable-beta-a9568bd869b5.

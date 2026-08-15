@@ -10,6 +10,7 @@ This directory is the live control surface for implementation. It answers what i
 | [Delivery ledger](delivery-ledger.md) | Phase, gate, logical PR, implementation task, and blocker status. |
 | [Evidence register](evidence-register.md) | Acceptance coverage, reproducible validation, artifacts, reviews, and explicit gate decisions. |
 | [Exceptions register](exceptions-register.md) | Approved, time-bounded deviations from Engineering Standards. |
+| [Public API change backlog](public-api-change-backlog.md) | Triaged public-surface deltas before `0.1.0`. Phase 8 entrance evidence; not the published preview policy. |
 
 ## Authority boundary
 
@@ -25,12 +26,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, G4-D-binding-parity-101224c5eb60, and G6-D-plugin-alpha-018aaea9aa00 on 2026-08-14:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, and G6-D-plugin-alpha-018aaea9aa00 on 2026-08-15:
 
-- 37 decisions are accepted and indexed. ADR-001 through ADR-003, ADR-005, ADR-006, ADR-007, ADR-010, ADR-011, ADR-015, ADR-017, ADR-018, ADR-019, ADR-023, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, and ADR-035 are `Implemented` / `Verified` through their mapped phase evidence and named gate decisions. ADR-004, ADR-008, ADR-009, ADR-012, ADR-013, ADR-016, ADR-020, ADR-022, ADR-025, ADR-026, ADR-027, ADR-028, ADR-034, ADR-036, and ADR-037 are `In progress` / `Partial`. SharedArrayBuffer is documented as post-preview reconsideration. ADR-004/008/012/013/016/020/025–028/034/037 stay `Partial` because G5 remains. ADR-024 retains its documented partial later scope. ADR-014 stays `Missing`.
-- Phase 0 through Phase 7 are `Done`; PR-001–PR-054 are `Done` at local `main` merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`; PR-055–PR-066 are `Todo`. Phase 6 entrance and exit are `Passed` (exit 4/4). Phase 7 entrance is `Passed` (3/3) and exit is `Passed` (4/4). G4 and G6 are `Passed`. G5 remains `Not ready`.
-- G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3 is `Passed` via `G3-D-native-preview-14a386c7db24`; G4 is `Passed` via `G4-D-binding-parity-101224c5eb60`; G6 is `Passed` via `G6-D-plugin-alpha-018aaea9aa00`; G5, G7, and G8 remain `Not ready`.
-- PR-001–PR-054 acceptance criteria are closed at local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`. Artifacts live under [`artifacts/pr-043/`](artifacts/pr-043/) through [`artifacts/pr-054/`](artifacts/pr-054/). No actual pull request or hosted merge, npm/pypi publication, tag, SharedArrayBuffer, exact 0.0.4 checkpoint cut, or G5 decision is claimed.
+- 37 decisions are accepted and indexed. ADR-001 through ADR-008, ADR-010 through ADR-013, ADR-015 through ADR-020, ADR-023, ADR-025 through ADR-035 are `Implemented` / `Verified` through their mapped phase evidence and named gate decisions. ADR-009, ADR-022, ADR-024, ADR-036, and ADR-037 are `In progress` / `Partial`. SharedArrayBuffer is documented as post-preview reconsideration. ADR-009 stays `Partial` because PR-057 remains. ADR-022 stays `Partial` because browser/WASM binding peers remain. ADR-024 retains its documented partial later scope. ADR-036 and ADR-037 stay `Partial` because PR-056 remains. ADR-014 stays `Missing`.
+- Phase 0 through Phase 7 are `Done`; Phase 8 is `In progress` with entrance `Passed` (2/2). PR-001–PR-054 are `Done` at local `main` merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`; PR-055 is `In progress` on `codex/pr-055-anthropic-ollama-providers`; PR-056–PR-066 remain `Todo`. Phase 6 entrance and exit are `Passed` (exit 4/4). Phase 7 entrance is `Passed` (3/3) and exit is `Passed` (4/4). G4, G5, and G6 are `Passed`.
+- G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3 is `Passed` via `G3-D-native-preview-14a386c7db24`; G4 is `Passed` via `G4-D-binding-parity-101224c5eb60`; G5 is `Passed` via `G5-D-durable-beta-a9568bd869b5`; G6 is `Passed` via `G6-D-plugin-alpha-018aaea9aa00`; G7 and G8 remain `Not ready`.
+- PR-001–PR-054 acceptance criteria are closed at local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`. Artifacts live under [`artifacts/pr-043/`](artifacts/pr-043/) through [`artifacts/pr-054/`](artifacts/pr-054/). No actual pull request or hosted merge, npm/pypi publication, tag, SharedArrayBuffer, or exact 0.0.3/0.0.4 checkpoint cut is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 
