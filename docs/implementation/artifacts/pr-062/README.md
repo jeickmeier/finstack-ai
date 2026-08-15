@@ -13,6 +13,7 @@ Admitted on `codex/pr-062-1.0-contract-freeze`.
 | `readiness.md` | `READY FOR NAMED DECISION`; stop before `COMP-1.0-D-*` |
 | `candidate-validation.txt` | Local Darwin A01–A03 proofs at `b76bfca8fcf7e6e7778aa9ee2acd0ca54bc54b8f` |
 | `security-review.txt` | TM-08 review at the same candidate |
+| `integration-validation.txt` | Local `main` merge `fa2923c5b57854baa81e9a9e6ea1685b8422b6f8` |
 
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19 / pack v0.21.
 No G8 decision, hosted pull request, npm/pypi/crates.io publish,
