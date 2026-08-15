@@ -1,0 +1,26 @@
+PR-062-E-integration-5ec6101883c3
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: ecab8484acbed92f6522dc6a3c43b4cec0ea8b31
+Tree: 3a8ac36fdfad2db46a78f94f792f46bcd20d8415
+Parents: 0329170011e62f746a145400d504b03d859ae109
+         f3afa5ffdea9104e77ac07f3fb3c4025da255ff3
+Branch: local main merge of codex/pr-062-closeout
+Result: Pass for local integration of the residual closeout and
+  COMP-1.0-D-contract-freeze-00b78667ecc4. A01–A04 Passed.
+  No G8 inference.
+
+Verified:
+  Merge is no-ff onto local main tip 0329170.
+  Feature tip f3afa5f contains residual candidate 900d84c plus
+  COMP-1.0-D evidence.
+  Re-ran check-wit, public-items --check, breaking_change (5 passed),
+  finstack-ai-wit lib (26 passed), and echo_toolset plugin-host
+  tests (2 passed, including v1 ABI mismatch) on the merge tree.
+  No hosted pull request, push, npm/pypi/crates.io publish, or tag.
+  No G8-D-* written.
+  Lockstep crate/wheel/npm version fields stay unpublished 0.1.0.
+
+PR-062 is Done. Phase 9 stays In progress.
+Phase 9 exit stays 0/4. Do not start PR-063+.
+Do not cut or publish 1.0.0.

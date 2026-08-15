@@ -39,8 +39,9 @@ Rows already marked `defer past preview` in
 ## Phase 9 themes (not admitted)
 
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
-via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is the only admitted
-Phase 9 PR. Do not infer PR-063+ or `G8-D-*` from this file.
+via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is `Done` via
+`COMP-1.0-D-contract-freeze-00b78667ecc4`. Do not infer PR-063+ or
+`G8-D-*` from this file.
 
 | Theme | Plan entry |
 | --- | --- |
