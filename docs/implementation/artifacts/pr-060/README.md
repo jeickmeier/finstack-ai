@@ -8,6 +8,11 @@ Admitted on `codex/pr-060-docs-security-release-artifacts` from local
 | File | Owns |
 | --- | --- |
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
+| `candidate-validation.txt` | Local Darwin A01–A06 proofs at `5c76ef0c671f7e03dfd2a67c9f8ed78fe51a145e` |
+| `security-review.txt` | TM-18 / TM-04 / TM-06 review at the same candidate |
+| `walkthrough-rust-minimal.md` | Owner fresh-user walkthrough |
+| `walkthrough-python-rust-backed.md` | Owner fresh-user walkthrough |
+| `rehearsal/` | Two-run comparable checksums and provenance |
 
 Phase 8 entrance is `Passed` (2/2) and is not re-recorded here.
 PR-055–PR-059 are `Done`. G7 is not recorded. No hosted pull

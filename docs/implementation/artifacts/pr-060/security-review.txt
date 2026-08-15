@@ -1,0 +1,61 @@
+PR-060 TM-18 / TM-04 / TM-06 security review
+Date: 2026-08-15
+Candidate: 5c76ef0c671f7e03dfd2a67c9f8ed78fe51a145e
+Reviewer: me@jeickmeier.com
+Decision: Pass for documentation, starters, RFC/governance, and
+local release rehearsal. No threat-model rewrite. No
+Implementation Plan §6.3 ADR trigger. G7 is not inferred.
+ADR-024 may move to Implemented / Verified for governance
+files only. That is not G7.
+
+Scope reviewed:
+  docs/site/security-trust-levels.md
+  docs/site/security-deployment.md
+  docs/site/provider-security.md
+  docs/implementation/threat-model-g7-review.md
+  docs/implementation/release-rehearsal.md
+  SECURITY.md / GOVERNANCE.md / CONTRIBUTING.md / docs/rfcs/
+  examples/python-minimal/ / examples/rust-minimal/
+  examples/browser-minimal/ / examples/durable-interaction/
+  plugins/README.md / plugins/templates/
+  tools/docs/rehearse_release.py
+  Graph: kernel / runtime / default SDK
+
+Triggered controls: Threat Model section 18 (build/release
+identities, provenance, public security process). Primary
+TM-18, TM-04, TM-06. Also SEC-INV-012.
+
+PASS  TM-06 trust labels
+      One site page owns T0–T5. T1 and T2 are never called
+      isolated or a sandbox. Python-callback, browser-minimal,
+      plugin README, and SECURITY.md link the matrix.
+      In-process WIT guests remain labeled as host-authority.
+
+PASS  TM-04 secrets
+      Starters and guides stay credential-free. Provider
+      security page repeats no-secret-in-AgentSpec. SECURITY.md
+      keeps private reporting to me@jeickmeier.com. No new
+      observer, provider, or server implementation.
+
+PASS  TM-18 / SEC-INV-012 rehearsal
+      Two local staging runs match for sdist, crate package
+      lists, plugin.lock.json, and npm pack when dist/ exists.
+      Provenance names commit SHA, mise pins, and
+      staged_not_published. Workspace stays 0.0.4. Default
+      kernel/runtime/SDK graph still omits workflow, server,
+      otel, wasmtime, and provider leaves. No git tag. No
+      registry publish. Hosted Sigstore/OIDC not required.
+
+PASS  SEC-INV-012 no new privileged default deps
+      This PR adds documentation, examples, templates, and
+      staging scripts only. No temporalio, restate-sdk, rustls,
+      otel, or wasmtime added to kernel / default SDK /
+      finstack-ai-native-examples.
+
+Residual: public tag, registry publish, supported-version
+table for 0.1.0, and named G7-D-* stay blocking for G7
+(PR-061). uv build wheel-from-sdist fails with maturin
+locked=true outside the workspace; in-tree wheel bytes are
+not claimed bit-identical. Hosted matrix / cargo-deny /
+gitleaks not claimed. Independent review is G8 / PR-065.
+No G7-D.
