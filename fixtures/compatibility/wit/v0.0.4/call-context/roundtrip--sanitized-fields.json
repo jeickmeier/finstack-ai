@@ -1,0 +1,21 @@
+{
+  "fields": [
+    "effect-id",
+    "session-id",
+    "lane-id",
+    "run-id",
+    "tenant-scope",
+    "principal-issuer",
+    "principal-subject",
+    "authorization-decision-id",
+    "permitted-scopes",
+    "budget-scope-id",
+    "deadline-unix-ms"
+  ],
+  "never": [
+    "credentials",
+    "safe-claims",
+    "cancellation",
+    "attempt"
+  ]
+}

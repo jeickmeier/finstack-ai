@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial via PR-049-E-candidate-9fbb520f2c56 and PR-049-E-security-9fbb520f2c56 at `9fbb520f2c56a3d08d080b7297a5bed78e417f03` (`@0.0.4` types/host/toolset, coarse `list-tools`/`call`, `@1.0.0` generation block). G6 owns Implemented.

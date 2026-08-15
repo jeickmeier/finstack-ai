@@ -43,6 +43,20 @@ uv run --no-cache --isolated --no-project \
   pytest -q
 """
 
+[tasks.gen-wit]
+description = "Regenerate experimental v0.0.4 WIT host and guest bindings"
+run = """
+set -euo pipefail
+uv run --no-project python tools/wit_bindgen/generate.py
+"""
+
+[tasks.check-wit]
+description = "Fail when generated WIT bindings drift from the checked-in packages"
+run = """
+set -euo pipefail
+uv run --no-project python tools/wit_bindgen/generate.py --check
+"""
+
 [tasks.check-wasm]
 description = "Type-check the wasm-host graph and reject Tokio in browser builds"
 run = """

@@ -72,7 +72,7 @@ format = "wit"
 stability = "experimental-0.x"
 compatibility_profile = "exact-world"
 fixture_root = "fixtures/compatibility/wit/"
-status = "reserved"
+status = "active"
 
 [families."golden-trace"]
 owner = "me@jeickmeier.com"

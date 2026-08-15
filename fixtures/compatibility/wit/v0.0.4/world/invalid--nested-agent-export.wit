@@ -1,0 +1,5 @@
+package finstack:ai-toolset@0.0.4;
+
+world toolset-plugin {
+    export agent;
+}

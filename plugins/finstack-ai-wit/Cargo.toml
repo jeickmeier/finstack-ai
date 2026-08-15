@@ -1,0 +1,20 @@
+[package]
+name = "finstack-ai-wit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Experimental @0.0.4 WIT types, host, and toolset bindings for finstack-ai"
+readme = "README.md"
+
+[dependencies]
+finstack-ai-runtime = { workspace = true, default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
