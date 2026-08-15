@@ -6,6 +6,7 @@ Trusted native leaf batteries that implement runtime port contracts in-process:
 - `toolsets/` — tool implementations
 - `stores/` — journal/store implementations
 - `observers/` — read-only observability adapters
+- `workflow/` — runtime-driver adapters (not a seventh port)
 
 These packages depend inward on runtime contracts (and durable stores may also use the protocol codec). They must not reverse-depend into the kernel or create facade-to-leaf cycles.
 

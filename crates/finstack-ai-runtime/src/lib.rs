@@ -24,20 +24,21 @@ pub use finstack_ai_kernel::{
     BudgetReservationSettled, BudgetReserveRequest, BudgetScopeId, BundleId, CapabilityId,
     ChildPlacement, ChildRunLocator, ChildRunPrepared, ComponentId, ComponentInvocation,
     ComponentRef, ContentBlock, ConversationEntry, ConversationError, CostLimit, DOMAIN_AGENT_SPEC,
-    Digest, EffectCompleted, EffectId, EffectInput, EffectKind, EffectOutputContract,
-    EffectOutputKind, EffectPurpose, EffectRelation, EntryBody, EntryId, ErrorCategory, ErrorCode,
-    ExternalEffectCompletionCommand, ExternalHandleRef, FinalResultRecorded, InteractionKind,
-    InteractionRequest, InteractionResolution, InteractionResolutionCommand, InvocationRecovery,
-    JsonBlock, JsonSchemaDraft, LaneId, LimitKey, Message, MessageId, MessageRole, Metadata,
+    Digest, EffectCompleted, EffectDeferred, EffectId, EffectInput, EffectKind,
+    EffectOutputContract, EffectOutputKind, EffectPurpose, EffectRelation, EffectRequested,
+    EntryBody, EntryId, ErrorCategory, ErrorCode, ExternalEffectCompletionCommand,
+    ExternalHandleRef, FinalResultRecorded, InteractionKind, InteractionRequest,
+    InteractionResolution, InteractionResolutionCommand, InvocationRecovery, JsonBlock,
+    JsonSchemaDraft, KernelState, LaneId, LimitKey, Message, MessageId, MessageRole, Metadata,
     MiddlewareRef, ModelRequestId, OpaqueBlock, OpaquePayload, OperationLocator, OutputEndStrategy,
     OutputSpec, PendingModelEffect, PipelinePosition, PrincipalRef, ProviderIds,
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy, RecordBody,
     RecordDraft, RecordEnvelope, RecordId, RemoteRouteRef, RetryDirective, RetrySafety, RunEvent,
-    RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL,
-    SchemaRef, Sensitivity, SessionId, SessionProjection, Stage, StructuredResultSource, TextBlock,
-    Timestamp, ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan, ToolExecutionMode,
-    ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, TurnId, Usage, ValidatedToolCall,
-    ValidationIssue, ValidationOutcome, Version,
+    RunEventBody, RunEventClass, RunEventKind, RunId, RunLimits, RunPhase,
+    SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, Sensitivity, SessionId, SessionProjection, Stage,
+    StructuredResultSource, TextBlock, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
+    TurnId, Usage, ValidatedToolCall, ValidationIssue, ValidationOutcome, Version,
 };
 pub use finstack_ai_kernel::{
     ModelTextDelta as RunEventModelTextDelta, ProviderHeartbeat as RunEventProviderHeartbeat,
@@ -96,6 +97,9 @@ mod timer_runtime;
 
 #[cfg(feature = "native-tokio")]
 mod ingress;
+
+#[cfg(feature = "native-tokio")]
+mod workflow;
 
 pub use agent_invoker::{
     AGENT_INVOKE_CONFLICT, AGENT_INVOKE_INVALID_ACCEPTANCE, AGENT_INVOKE_UNAVAILABLE,
@@ -247,6 +251,12 @@ pub use audit::{SecurityAuditGate, SecurityAuditGateError};
 #[cfg(feature = "native-tokio")]
 pub use ingress::{
     ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, InteractionRouter,
+};
+
+#[cfg(feature = "native-tokio")]
+pub use workflow::{
+    WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession, WorkflowWait,
+    classify_wait, resolve_checkpoint_sequence, retry_decision,
 };
 
 #[cfg(feature = "native-tokio")]

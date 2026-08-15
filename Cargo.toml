@@ -23,7 +23,10 @@ members = [
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
+    "extensions/workflow/finstack-ai-workflow-local",
+    "extensions/workflow/finstack-ai-workflow-temporal",
     "examples/rust-minimal",
+    "examples/durable-interaction",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
     "fixtures/ci/extension-port-leaf",
@@ -78,6 +81,8 @@ finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-midd
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "0.0.4" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "0.0.4" }
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "0.0.4" }
+finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "0.0.4" }
+finstack-ai-workflow-temporal = { path = "extensions/workflow/finstack-ai-workflow-temporal", version = "0.0.4" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace"] }
