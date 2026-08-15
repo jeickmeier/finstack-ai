@@ -1,7 +1,7 @@
 # Plugins
 
-WIT/Wasmtime isolation is optional. Worlds are experimental `@0.0.4`.
-`@1.0.0` worlds stay blocked until PR-062.
+WIT/Wasmtime isolation is optional. Permanent worlds are `@1.0.0`.
+Experimental `@0.0.4` worlds stay loadable and labeled.
 
 In-process WIT guests inherit host authority and are not a sandbox. The
 isolated host (`finstack-ai-plugin-host`) is [T3](security-trust-levels.md):

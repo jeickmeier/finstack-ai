@@ -7,7 +7,7 @@ endpoint.
 Trust class: [T1](../../../docs/site/security-trust-levels.md). Native
 provider code is not isolated.
 
-Workspace version is **0.0.4 unpublished**. Pin: `finstack-ai==0.0.4`.
+Workspace version is **1.0.0 unpublished**. Pin: `finstack-ai==1.0.0`.
 
 ## Quick start
 

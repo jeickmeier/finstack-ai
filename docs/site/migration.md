@@ -4,24 +4,26 @@ Compatibility routing lives in
 [compatibility-governance.md](../implementation/compatibility-governance.md).
 The adopter-facing 1.0 SemVer promise is
 [1.0-compatibility-policy.md](../implementation/1.0-compatibility-policy.md)
-(**READY FOR NAMED DECISION**). Historical tagged `0.1.0` scope stays in
+(approved by `COMP-1.0-D-contract-freeze-00b78667ecc4`). Historical
+tagged `0.1.0` scope stays in
 [preview-compatibility-policy.md](../implementation/preview-compatibility-policy.md).
+The family table is
+[1.0-compatibility-matrix.md](../implementation/1.0-compatibility-matrix.md).
 
-This tree is tagged lockstep **`0.1.0`** (`v0.1.0`). Workspace version
-fields stay `0.1.0` until PR-066. Do not treat staged artifacts as a
-crates.io / PyPI / npm publication. Support windows are in
-[support.md](support.md). Published conformance suites are in
-[conformance.md](conformance.md).
+This tree carries unpublished lockstep **`1.0.0`**. The last public tag
+is `v0.1.0`. Do not treat staged artifacts as a crates.io / PyPI / npm
+publication. Support windows are in [support.md](support.md). Published
+conformance suites are in [conformance.md](conformance.md).
 
 ## Supported 0.1.0 → 1.0.0 paths
 
 Supported means in-tree starters. No external adopter is named in the
-Phase 9 entrance review.
+Phase 9 entrance review or the PR-066 soak note.
 
 | Project | Path |
 | --- | --- |
-| `examples/rust-minimal` | Stay on lockstep crates. No journal/WIT/AgentSpec rewrite. Re-read the 1.0 policy when PR-066 cuts `1.0.0`. |
-| `examples/python-minimal/*` | Same lockstep wheel version field. `import finstack_ai` public names stay; see the Python export baseline. |
+| `examples/rust-minimal` | Stay on lockstep crates at `1.0.0`. No journal/WIT/AgentSpec rewrite. |
+| `examples/python-minimal/*` | Pin `finstack-ai==1.0.0`. `import finstack_ai` public names stay; see the Python export baseline. |
 | `examples/durable-interaction` | Journal candidate-v1 is the 1.0 durable line. No meaning change. Unknown state-bearing fields stay fatal. |
 | `examples/browser-minimal` | Uses experimental IndexedDB. **Excluded** from the permanent promise; inspect-not-continue. |
 | `examples/ts-alpha-install` | JS/WASM exports stay; SharedArrayBuffer stays post-preview. Consume from git until npm publishes. |
@@ -29,7 +31,7 @@ Phase 9 entrance review.
 
 ### Per-surface notes
 
-- **Journal / snapshots:** candidate-v1 becomes the 1.0 durable line.
+- **Journal / snapshots:** candidate-v1 is the 1.0 durable line.
   Meaning breaks still need an ADR and a migration.
 - **AgentSpec / locks:** strict reject-unknown. Additive fields need a
   version or default.
@@ -67,8 +69,8 @@ mise run release-rehearsal
 Two local staging runs from the same commit must produce identical
 checksums for the existing staging paths (Python wheel/sdist, npm tarball
 when the WASM package is already generated, crate package lists). The
-**public tag** is `v0.1.0`. This rehearsal does not publish to
-registries.
+**last public tag** is `v0.1.0`. Tag `v1.0.0` waits on a later named
+sentence. This rehearsal does not publish to registries.
 
 ## License and governance
 

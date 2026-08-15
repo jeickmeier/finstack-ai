@@ -11,7 +11,7 @@ Status: written by PR-065. Not `G8-D-*`. Not an LTS promise.
 
 | Line | Window |
 | --- | --- |
-| Current minor (`1.0.x` after PR-066) | Patches until the next minor |
+| Current minor (`1.0.x` at GA) | Patches until the next minor |
 | Previous minor | Security-only until the next minor ships or 90 days, whichever is shorter |
 | `0.1.x` preview | Supported until `1.0.0`; then security-only for 90 days |
 | Historical snapshots | Not supported |

@@ -3,9 +3,9 @@
 use crate::generated::{
     AI_CONTEXT_PACKAGE, AI_CONTEXT_PACKAGE_V1, AI_HOST_PACKAGE, AI_HOST_PACKAGE_V1,
     AI_TOOLSET_PACKAGE, AI_TOOLSET_PACKAGE_V1, AI_TYPES_PACKAGE, AI_TYPES_PACKAGE_V1,
-    CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, CRATE_VERSION, FORBIDDEN_WORLD_TOKENS, HOST_IMPORTS,
-    HOST_IMPORTS_V1, PUBLISHED_PACKAGES, PUBLISHED_PACKAGES_V004, PUBLISHED_PACKAGES_V100,
-    TOOLSET_FUNCS, TOOLSET_WORLD_EXPORTS,
+    CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, FORBIDDEN_WORLD_TOKENS, HOST_IMPORTS, HOST_IMPORTS_V1,
+    PUBLISHED_PACKAGES, PUBLISHED_PACKAGES_V004, PUBLISHED_PACKAGES_V100, TOOLSET_FUNCS,
+    TOOLSET_WORLD_EXPORTS,
 };
 
 /// Checked-in `types.wit` (`@0.0.4`).
@@ -38,9 +38,6 @@ pub fn assert_experimental_surface() -> Result<(), &'static str> {
 }
 
 fn assert_published_packages() -> Result<(), &'static str> {
-    if CRATE_VERSION == "1.0.0" {
-        return Err("plugin crate version 1.0.0 is reserved for the PR-066 GA cut");
-    }
     if PUBLISHED_PACKAGES_V004
         != [
             AI_TYPES_PACKAGE,
@@ -178,7 +175,7 @@ mod tests {
     #[test]
     fn experimental_surface_is_coarse_and_dual_major() {
         assert_experimental_surface().expect("surface");
-        assert_eq!(CRATE_VERSION, "0.1.0");
+        assert_eq!(CRATE_VERSION, "1.0.0");
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);
         assert_eq!(CONTEXT_WORLD_EXPORTS, ["context-provider"]);
         assert_eq!(CONTEXT_FUNCS, ["collect"]);

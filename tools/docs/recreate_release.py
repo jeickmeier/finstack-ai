@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two-run local staging checksum identity (PR-065-A01)."""
+"""Two-run local staging checksum identity (PR-066 unpublished 1.0.0)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from release_stage import REPO_ROOT, checksum_text, stage
 
-WORK = REPO_ROOT / "target" / "pr-065-recreate"
-RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-065"
+WORK = REPO_ROOT / "target" / "pr-066-recreate"
+RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-066"
 
 
 def main() -> int:
@@ -20,8 +20,8 @@ def main() -> int:
         shutil.rmtree(WORK)
     first = WORK / "run-a"
     second = WORK / "run-b"
-    stage(first, label="0.1.0")
-    stage(second, label="0.1.0")
+    stage(first, label="1.0.0")
+    stage(second, label="1.0.0")
     left = checksum_text(first)
     right = checksum_text(second)
     RECORD.mkdir(parents=True, exist_ok=True)

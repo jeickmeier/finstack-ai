@@ -41,8 +41,10 @@ Rows already marked `defer past preview` in
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
 via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is `Done` via
 `COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-063 is `Done`.
-PR-064 is `Done`. PR-065 is `Done`. Do not infer PR-066,
-`G8-D-*`, or a `1.0.0` cut from this file.
+PR-064 is `Done`. PR-065 is `Done`. PR-066 is `In progress` on
+`codex/pr-066-1.0.0-ga`. Post-1.0 in-repo themes live in
+[`public-ga-roadmap.md`](public-ga-roadmap.md). Do not infer
+`G8-D-*`, a tag, or a registry publish from this file.
 
 | Theme | Plan entry |
 | --- | --- |

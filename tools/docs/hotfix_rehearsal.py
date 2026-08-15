@@ -21,10 +21,10 @@ def main() -> int:
         shutil.rmtree(WORK)
     baseline = WORK / "B"
     hotfix = WORK / "H"
-    stage(baseline, label="0.1.0")
+    stage(baseline, label="1.0.0")
     stage(
         hotfix,
-        label="0.1.0-hotfix",
+        label="1.0.0-hotfix",
         extra={
             "hotfix-line.txt": (
                 "PR-065 patch-line rehearsal. Consumers pin SHA256SUMS-B. "

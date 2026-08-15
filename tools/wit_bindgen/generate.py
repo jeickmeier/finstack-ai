@@ -306,10 +306,7 @@ def crate_version() -> str:
         match = re.search(r'^version\s*=\s*"([^"]+)"', workspace, re.M)
     if match is None:
         raise WitError("unable to read crate version")
-    version = match.group(1)
-    if version == "1.0.0":
-        raise WitError("plugin crate version 1.0.0 is blocked until framework 1.0")
-    return version
+    return match.group(1)
 
 
 def emit_record(name: str, fields: list[Field]) -> str:

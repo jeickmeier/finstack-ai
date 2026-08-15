@@ -45,7 +45,7 @@ debug = false
 incremental = false
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
@@ -58,37 +58,37 @@ description = "Deterministic agent microkernel, runtime, and bindings"
 license-files = ["licenses/LICENSE-MIT", "licenses/LICENSE-APACHE"]
 
 [workspace.dependencies]
-finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "0.1.0" }
-finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.1.0", default-features = false }
-finstack-ai = { path = "crates/finstack-ai", version = "0.1.0", default-features = false }
-finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.1.0" }
-finstack-ai-server = { path = "crates/finstack-ai-server", version = "0.1.0" }
+finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "1.0.0" }
+finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "1.0.0", default-features = false }
+finstack-ai = { path = "crates/finstack-ai", version = "1.0.0", default-features = false }
+finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "1.0.0" }
+finstack-ai-server = { path = "crates/finstack-ai-server", version = "1.0.0" }
 rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
-finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.1.0" }
-finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "0.1.0" }
-finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "0.1.0" }
+finstack-ai-test = { path = "crates/finstack-ai-test", version = "1.0.0" }
+finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "1.0.0" }
+finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
 rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"] }
-finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack-ai-provider-openai-compatible", version = "0.1.0" }
-finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "0.1.0" }
-finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.1.0" }
-finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.1.0" }
-finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "0.1.0" }
-finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "0.1.0" }
-finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-memory", version = "0.1.0" }
-finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "0.1.0" }
-finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "0.1.0" }
-finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "0.1.0" }
-finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "0.1.0" }
-finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "0.1.0" }
-finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "0.1.0" }
-finstack-ai-workflow-temporal = { path = "extensions/workflow/finstack-ai-workflow-temporal", version = "0.1.0" }
+finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack-ai-provider-openai-compatible", version = "1.0.0" }
+finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "1.0.0" }
+finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
+finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "1.0.0" }
+finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "1.0.0" }
+finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "1.0.0" }
+finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-memory", version = "1.0.0" }
+finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
+finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
+finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
+finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
+finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }
+finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
+finstack-ai-workflow-temporal = { path = "extensions/workflow/finstack-ai-workflow-temporal", version = "1.0.0" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["trace"] }
-finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "0.1.0" }
-finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "0.1.0" }
-finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "0.1.0" }
+finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "1.0.0" }
+finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "1.0.0" }
+finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "1.0.0" }
 # Guest-only; do not add to kernel/runtime/SDK/host. Pin matches fixture guests.
 wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
 # Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit

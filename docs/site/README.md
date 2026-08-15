@@ -1,8 +1,9 @@
 # finstack-ai public documentation
 
-Workspace version **0.1.0** is tagged (`v0.1.0`). G7 passed via
-`G7-D-public-preview-f7c7e70b9e04`. crates.io / PyPI / npm packages
-are not published. Experimental WIT package names stay `@0.0.4`.
+Workspace version **1.0.0** is unpublished. The last public tag is
+`v0.1.0`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. crates.io /
+PyPI / npm packages are not published. Permanent WIT worlds are
+`@1.0.0`. Experimental WIT package names stay `@0.0.4`.
 
 Planning files under [`docs/planning/`](../planning/README.md) remain the
 implementation contract. Delivery status lives in
@@ -20,7 +21,7 @@ the public index and does not replace either layer.
 | [Durability](durability.md) | Journals, inspect-not-continue, at-least-once |
 | [Providers](provider.md) | Separate crates; no secrets in `AgentSpec` |
 | [Toolsets](toolset.md) | Calculator, filesystem, shell |
-| [Plugins](plugin.md) | Experimental `@0.0.4` WIT |
+| [Plugins](plugin.md) | Frozen `@1.0.0` WIT; experimental `@0.0.4` stays loadable |
 | [Server](server.md) | Loopback/Unix reference server |
 | [Migration](migration.md) | Compatibility policy and release rehearsal |
 | [Conformance](conformance.md) | Published suites and badge process |
