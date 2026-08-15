@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-14 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`, PR-050 local merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`, PR-051 local merge `cf7eaebab383724fa4b7b19cb204febec41a768a`, PR-052 local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`, and PR-053 candidate `4dcdc0968416a4cfbea6717e7edff19ab15c1c87`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-14 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`, PR-050 local merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`, PR-051 local merge `cf7eaebab383724fa4b7b19cb204febec41a768a`, PR-052 local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`, and PR-053 local merge `3297eb44fb127ff6b36af1a705cda38442efdf95`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 7 | Phase 0–6 `Done`; Phase 7 `In progress`; Phase 8–9 `Todo` |
-| Logical PRs | 66 | 52 | PR-001–PR-052 `Done`; PR-053 `In progress`; PR-054–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 282 | PR-001–PR-052 acceptance is closed at local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`; PR-053 A01–A04 are Passed at candidate `4dcdc0968416a4cfbea6717e7edff19ab15c1c87`; PR-054–PR-066 remain open |
+| Logical PRs | 66 | 53 | PR-001–PR-053 `Done`; PR-054–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 282 | PR-001–PR-053 acceptance is closed at local merge `3297eb44fb127ff6b36af1a705cda38442efdf95`; PR-054–PR-066 remain open |
 | Phase entrance and exit bullets | 62 | 46 | Phase 0–6 entrance and exit `Passed`; Phase 7 entrance `Passed` (3/3); Phase 7 exit and Phase 8–9 remain open |
 | Program gates | 9 | 5 | G0–G4 `Passed`; G5–G8 `Not ready` |
 | Implementation tasks | 321 | 321 | PR-001–PR-053 tasks are `Done`; PR-054–PR-066 remain open |
@@ -80,11 +80,13 @@ PR-051 is `Done` at local `main` merge `cf7eaebab383724fa4b7b19cb204febec41a768a
 
 PR-052 is `Done` at local `main` merge `5e531591350a8838ff7da06f50a5dc2d52b31892` (A01–A04 Passed; no issue or actual pull request). Its deny-by-default WASI grants, fuel/StoreLimits, ed25519 signature policy, auditable grant metadata, and TM-07/TM-08/TM-06 review are bound under the PR-052 evidence set. Phase 7 entrance stays `Passed` (3/3). Phase 7 exit stays `0/4`. G5 and G6 remain `Not ready`.
 
-PR-053 is `In progress` on `codex/pr-053-guest-sdk-reference-components`. Candidate `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` records A01–A04 Passed with TM-06/TM-07 review. Local merge is still required. Phase 7 entrance stays `Passed` (3/3) and is not re-recorded. Phase 7 exit stays `0/4`. G5 and G6 remain `Not ready`.
+PR-053 is `Done` at local `main` merge `3297eb44fb127ff6b36af1a705cda38442efdf95` (A01–A04 Passed; no issue or actual pull request). Its guest SDK, authoring templates, published calculator/context/filesystem-sandbox components, and TM-06/TM-07 review are bound under the PR-053 evidence set. A post-merge `check-plugin-wasm` refresh of calculator and filesystem-sandbox `component.wasm` landed at `a7d86b256f2bd805fc8ff1dc4dbf9acc8f82d77c`. Phase 7 entrance stays `Passed` (3/3). Phase 7 exit stays `0/4`. G5 and G6 remain `Not ready`.
 
 ## Active execution envelope
 
-The active PR-053 envelope is `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm/pypi/crates.io publish, tag, G5 inference, and G6 inference prohibited`. Baseline is local `main` at `d0e165d7be3ff3dbac4688c16351f6ca002896aa`. Feature branch `codex/pr-053-guest-sdk-reference-components`. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`. Do not start PR-054+.
+No active envelope. Do not start PR-054+ without a new authorization.
+
+The completed PR-053 envelope used `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm/pypi/crates.io publish, tag, G5 inference, and G6 inference prohibited`. Baseline was local `main` at `d0e165d7be3ff3dbac4688c16351f6ca002896aa`. The feature branch merged at `3297eb44fb127ff6b36af1a705cda38442efdf95`. That envelope is now closed and is not reused. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
 
 The completed PR-052 envelope used `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm publish, tag, G5 inference, and G6 inference prohibited`. Baseline was local `main` at `868c5b9727a1466ab7ac233d16e269191ccb056b`. The feature branch merged at `5e531591350a8838ff7da06f50a5dc2d52b31892`. That envelope is now closed and is not reused. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
 
@@ -279,7 +281,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | PR-050 | Done | me@jeickmeier.com | local `main` merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337` of `codex/pr-050-context-manifest-lifecycle` (no issue or actual PR) | 8 | 5/5 | PR-050-E-candidate-a02b986b284f; PR-050-E-security-a02b986b284f; PR-050-E-integration-5c987e379d0c | — | `5c987e379d0cd5a8e63f734eda26b69b07c4b337` / 2026-08-14 | 2026-08-14 |
 | PR-051 | Done | me@jeickmeier.com | local `main` merge `cf7eaebab383724fa4b7b19cb204febec41a768a` of `codex/pr-051-wasmtime-host-cache` (no issue or actual PR) | 7 | 4/4 | PR-051-E-candidate-36f1ce2e263b; PR-051-E-security-36f1ce2e263b; PR-051-E-integration-cf7eaebab383 | — | `cf7eaebab383724fa4b7b19cb204febec41a768a` / 2026-08-14 | 2026-08-14 |
 | PR-052 | Done | me@jeickmeier.com | local `main` merge `5e531591350a8838ff7da06f50a5dc2d52b31892` of `codex/pr-052-permissions-limits-signatures` (no issue or actual PR) | 7 | 4/4 | PR-052-E-candidate-4234efbcc3d9; PR-052-E-security-4234efbcc3d9; PR-052-E-integration-5e531591350a | — | `5e531591350a8838ff7da06f50a5dc2d52b31892` / 2026-08-15 | 2026-08-15 |
-| PR-053 | In progress | me@jeickmeier.com | `codex/pr-053-guest-sdk-reference-components` candidate `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` (no issue or actual PR) | 7 | 4/4 | PR-053-E-candidate-4dcdc0968416; PR-053-E-security-4dcdc0968416 | — | — | 2026-08-14 |
+| PR-053 | Done | me@jeickmeier.com | local `main` merge `3297eb44fb127ff6b36af1a705cda38442efdf95` of `codex/pr-053-guest-sdk-reference-components` (no issue or actual PR) | 7 | 4/4 | PR-053-E-candidate-4dcdc0968416; PR-053-E-security-4dcdc0968416; PR-053-E-integration-3297eb44fb12 | — | `3297eb44fb127ff6b36af1a705cda38442efdf95` / 2026-08-14 | 2026-08-14 |
 | PR-054 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 
 ### Phase 8
@@ -643,7 +645,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-053-T-references-4e6f8013253 | PR-053 | Reference calculator and context-provider plus native/WIT conformance | Done | me@jeickmeier.com | PR-053-T-sdk-2c4d6e8f0131 | `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` | PR-053-A02 | PR-053-E-candidate-4dcdc0968416 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 | PR-053-T-sandbox-5f709124364 | PR-053 | Filesystem sandbox guest, `@0.2.12` WASI imports, and grant/preopen proofs | Done | me@jeickmeier.com | PR-053-T-references-4e6f8013253 | `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` | PR-053-A02 | PR-053-E-candidate-4dcdc0968416 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 | PR-053-T-docs-6081a235475 | PR-053 | Authoring docs, migration example, echo SDK migration, and A04 graph proofs | Done | me@jeickmeier.com | PR-053-T-templates-3d5e7f902142; PR-053-T-sandbox-5f709124364 | `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` | PR-053-A03; PR-053-A04 | PR-053-E-candidate-4dcdc0968416 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
-| PR-053-T-evidence-7192b346586 | PR-053 | Focused validation, TM-06/TM-07 review, and candidate evidence; stop before G6 | Done | me@jeickmeier.com | PR-053-T-docs-6081a235475 | `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` | PR-053-A01–A04 | PR-053-E-candidate-4dcdc0968416; PR-053-E-security-4dcdc0968416 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
+| PR-053-T-evidence-7192b346586 | PR-053 | Focused validation, TM-06/TM-07 review, and candidate evidence; stop before G6 | Done | me@jeickmeier.com | PR-053-T-docs-6081a235475 | `4dcdc0968416a4cfbea6717e7edff19ab15c1c87` | PR-053-A01–A04 | PR-053-E-candidate-4dcdc0968416; PR-053-E-security-4dcdc0968416; PR-053-E-integration-3297eb44fb12 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 
 ## Blocker ledger
 

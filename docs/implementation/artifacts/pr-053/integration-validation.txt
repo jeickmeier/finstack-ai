@@ -1,0 +1,36 @@
+PR-053-E-integration-3297eb44fb12
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Merge: 3297eb44fb127ff6b36af1a705cda38442efdf95
+Parents: d0e165d7be3ff3dbac4688c16351f6ca002896aa
+         3a217f38ebc3f5aca9210cc165198074660843a9
+Implementation candidate: 4dcdc0968416a4cfbea6717e7edff19ab15c1c87
+Wasm refresh: a7d86b256f2bd805fc8ff1dc4dbf9acc8f82d77c
+Result: Pass
+
+Local `main` merge of `codex/pr-053-guest-sdk-reference-components`.
+Merge trees matched (`92f6f8dda258c461fe1eaba6dd0bc9de11c0b91e`).
+A01–A04 remain bound to the implementation candidate.
+TM-06/TM-07 review remains bound to the same candidate.
+
+A clean `mise run check-plugin-wasm` on the merge tree rebuilt
+calculator and filesystem-sandbox with a rustc 1.97.1 size delta
+(422334→422004 and 428588→428891). Those two `component.wasm` files
+were refreshed at `a7d86b256f2bd805fc8ff1dc4dbf9acc8f82d77c`. Echo,
+context-provider, trap, and fuel-burner bytes were unchanged.
+
+Re-verified on the post-refresh tip:
+  mise run check-wit: clean
+  mise run check-guest-sdk: clean
+  mise run check-plugin-wasm: clean after the refresh
+  mise run check-plugin-template: 1 passed (template echo returns {"text":"from-template"})
+  cargo test -p finstack-ai-guest-sdk --offline --locked: 6 passed
+  cargo test -p finstack-ai-plugin-host --offline --locked --lib: 44 passed, 1 ignored
+  cargo test -p finstack-ai-plugin-host --offline --locked --lib -- reference_tests: 6 passed, 1 ignored
+  cargo test -p finstack-ai-wit --offline --locked --lib: 26 passed
+  default / minimal trees: no wasmtime, no plugin-host, no guest-sdk
+  guest-sdk tree: no wasmtime, no plugin-host, no finstack-ai-wit
+  plugin-host tree: wasmtime 47.0.3; wasmtime-wasi 47.0.3; no libloading; no guest-sdk
+
+No hosted pull request or merge, npm/pypi publish, tag, G5-D, or G6-D.
+Phase 7 exit stays 0/4. Feature branch is kept. No successor is started.
