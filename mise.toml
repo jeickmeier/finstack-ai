@@ -29,6 +29,14 @@ uv run --no-project --with ruff==0.12.11 ruff format --check .
 uv run --no-project --with ruff==0.12.11 ruff check .
 uv run --isolated --no-project --with mypy==2.3.0 \
   mypy --strict bindings/finstack-ai-python/python
+mise run check-size-budgets
+"""
+
+[tasks.check-size-budgets]
+description = "Fail when ratified wheel, WASM, or CLI size budgets are exceeded"
+run = """
+set -euo pipefail
+uv run --no-project python tools/perf/check_size_budgets.py
 """
 
 [tasks.test]
@@ -190,8 +198,9 @@ description = "Record WASM/JS crossing warning measurements"
 run = """
 set -euo pipefail
 mise run generate-wasm
-npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium
-npm --prefix bindings/finstack-ai-wasm/js exec -- playwright test src/benchmark.test.ts --project=chromium
+cd bindings/finstack-ai-wasm/js
+npx playwright install --with-deps chromium
+npx playwright test src/benchmark.test.ts --project=chromium
 """
 
 [tasks.docs-links]

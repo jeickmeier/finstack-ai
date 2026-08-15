@@ -1,0 +1,9 @@
+{
+  "binary": "target/release/minimal",
+  "bytes": 8730288,
+  "format_version": 1,
+  "note": "The in-tree minimal bin performs a scripted model-only run. NFR-PERF-006 warm-FS startup is process-image load; kernel init is the Criterion kernel_micro group. This script records size plus the warm full example.",
+  "pid": 97213,
+  "warm_full_example_run_ms": 10.041540954262018,
+  "workload": "minimal-cli-startup-v1"
+}

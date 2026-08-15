@@ -1,0 +1,16 @@
+PR-063 TM-04 / queue-bound review
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Branch: codex/pr-063-perf-memory-startup-budgets
+Result: Pass. No ADR. No G8 inference.
+
+TM-04: checked-in flamegraph stand-in and JSON reports contain no secrets,
+credentials, home paths, or live provider arguments. Criterion HTML under
+target/criterion is not checked in.
+
+Queue bounds: production EventHub/RunTask capacities are unchanged.
+native_runtime profiles use capacity 1 for the idle/active RSS fixtures
+only. NFR-REL-004 is not weakened.
+
+Retention and secret-bearing telemetry are unchanged. No Threat Model
+section 18 redesign trigger beyond this review note.

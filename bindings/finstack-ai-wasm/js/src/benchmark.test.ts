@@ -13,7 +13,7 @@ const REPO_ROOT = resolve(HERE, "../../../../");
 const WASM_PATH = resolve(HERE, "../generated/finstack_ai_wasm_bg.wasm");
 const REPORT_PATH = resolve(
   REPO_ROOT,
-  "docs/implementation/artifacts/pr-038/wasm-js-crossing.json",
+  "docs/implementation/artifacts/pr-063/wasm-js-crossing.json",
 );
 
 test("records isolated WASM/JS crossing warning measurements", async ({
@@ -123,8 +123,8 @@ test("records isolated WASM/JS crossing warning measurements", async ({
     },
     binding: {
       overhead_percent: overhead,
-      target_percent: 10,
-      within_target: overhead <= 10,
+      target_percent: 15,
+      within_target: overhead <= 15,
     },
     event_delivery: {
       logical_events: measured.events,

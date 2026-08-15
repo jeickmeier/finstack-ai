@@ -3,9 +3,9 @@
 Date: 2026-08-15
 Owner: me@jeickmeier.com
 Intended branch (when admitted): `codex/pr-063-perf-memory-startup-budgets`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
-Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
-`555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
+Intended baseline: local `main` at `dd3557d8742805d003023f9fd8bf628672f3e33f`
+Plan baseline: documentation pack v0.21 / PLAN-0.19 / Implementation Plan SHA-256
+`86d2430860b12ab947638052b97ea2403c2e53b218a66977a4258defeb18fc3f`
 
 This file is the execution contract for PR-063. The closed PR-054
 envelope is not reused. The PR-055–PR-062 envelopes are not reused.
@@ -15,18 +15,15 @@ or `1.0.0`, or record G5 / G7 / G8.
 
 ## Execution envelope
 
-Not authorized. Suggested text when the owner is ready:
+Authorized 2026-08-15. Owner text `Proceed to PR-063` is recorded as
+the suggested local-only integrated envelope (same reading as prior
+Phase 9 owner proceed text). It does not authorize PR-064+, `G8-D-*`,
+or a `1.0.0` cut.
 
 ```
 Run PR-063; mode=integrated; target=main; local branch/commit/merge
 authorized; external actions=none; stop before any gate crossing.
 ```
-
-`implement the plan` is enough only if it names that same local-only
-integrated envelope **and** the admission checks below are already
-true. Do not infer authorization from this planning file, from
-`continue`, from Phase 7 `Done`, from G6 `Passed`, from Phase 8
-or Phase 9 plans existing, or from a phase name.
 
 When authorized, reuse:
 
@@ -49,7 +46,8 @@ this file does not record them.
 
 ### Phase 9 entrance is `Passed` (2/2)
 
-Implementation Plan §17 entrance. Current state is `0/2`.
+Implementation Plan §17 entrance. Current state is `Passed` (2/2).
+Do not re-record `PH9-E-entrance-*`.
 
 | Entrance bullet | Current state |
 | --- | --- |

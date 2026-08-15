@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "host": {
+    "system": "Darwin",
+    "release": "25.5.0",
+    "machine": "arm64"
+  },
+  "rustc": "1.97.1",
+  "workloads": [
+    {
+      "id": "idle-session-rss-v1",
+      "mode": "idle",
+      "sessions": 1000,
+      "baseline_kib": 2096,
+      "resident_kib": 63536,
+      "incremental_kib": 61440,
+      "bytes_per_session": 62914,
+      "run_task_owner_size_of": 96
+    },
+    {
+      "id": "idle-session-rss-v1",
+      "mode": "idle",
+      "sessions": 128,
+      "baseline_kib": 2080,
+      "resident_kib": 10224,
+      "incremental_kib": 8144,
+      "bytes_per_session": 65152,
+      "run_task_owner_size_of": 96,
+      "v0_1_0_reference_bytes_per_session": 61824
+    },
+    {
+      "id": "active-session-rss-v1",
+      "mode": "active",
+      "sessions": 100,
+      "baseline_kib": 2896,
+      "resident_kib": 36768,
+      "incremental_kib": 33872,
+      "bytes_per_session": 346849,
+      "run_task_owner_size_of": 96
+    }
+  ],
+  "nfr_perf_005": {
+    "target_framework_owned_bytes": 32768,
+    "framework_owned_handle_bytes": 96,
+    "framework_owned_within_target": true,
+    "incremental_rss_is_not_framework_owned": true,
+    "excludes": [
+      "conversation",
+      "provider clients",
+      "store caches",
+      "application data",
+      "tokio task stacks"
+    ]
+  }
+}
