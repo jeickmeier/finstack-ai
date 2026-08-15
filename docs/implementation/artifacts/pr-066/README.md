@@ -12,6 +12,8 @@ staging, soak-gap note, and G8 readiness. Admitted on
 | `run-a.SHA256SUMS` / `run-b.SHA256SUMS` | Two-run staged `1.0.0` identity |
 | `provenance.json` | Staging provenance (`staged_not_published`) |
 | `security-review.txt` | TM-18 review for GA publish/credentials/announce |
+| `candidate-validation.txt` | Local candidate commands and A02/A03 pass |
+| `integration-validation.txt` | Local `main` merge tree proof; A01/A04 still Pending |
 
 No G8 decision, hosted pull request, npm/pypi/crates.io publish,
 tag, or announce is stored here. Phase 9 entrance stays `Passed`
