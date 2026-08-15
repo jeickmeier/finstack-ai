@@ -12,7 +12,7 @@ use finstack_ai::runtime::{
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
     AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, ExternalIdentityKey,
-    ExternalIdentityMap, InstructionSpec, InteractionResolution, Lane, MemoryExternalIdentityMap,
+    ExternalIdentityMap, InstructionSpec, Lane, MemoryExternalIdentityMap,
     PrincipalRef, RunSecurityContext, Session, SessionError,
 };
 use finstack_ai_provider_anthropic::{
@@ -23,10 +23,11 @@ use finstack_ai_provider_openai_compatible::{
     EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+use pyo3::IntoPyObjectExt;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyStopAsyncIteration, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, PyList};
 
 #[cfg(feature = "benchmark-fixture")]
 mod benchmark_fixture;
@@ -101,30 +102,95 @@ fn linked_providers() -> (&'static str, &'static str, &'static str) {
     )
 }
 
+fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    if value.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    if let Ok(value) = value.extract::<bool>() {
+        return Ok(serde_json::Value::Bool(value));
+    }
+    if let Ok(value) = value.extract::<i64>() {
+        return Ok(serde_json::Value::from(value));
+    }
+    if let Ok(value) = value.extract::<u64>() {
+        return Ok(serde_json::Value::from(value));
+    }
+    if let Ok(value) = value.extract::<f64>() {
+        return serde_json::Number::from_f64(value)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| PyTypeError::new_err("JSON number is not finite"));
+    }
+    if let Ok(value) = value.extract::<String>() {
+        return Ok(serde_json::Value::String(value));
+    }
+    if let Ok(items) = value.extract::<Vec<Py<PyAny>>>() {
+        let mut array = Vec::with_capacity(items.len());
+        for item in items {
+            array.push(py_to_json(&item.bind(value.py()))?);
+        }
+        return Ok(serde_json::Value::Array(array));
+    }
+    if let Ok(map) = value.extract::<std::collections::BTreeMap<String, Py<PyAny>>>() {
+        let mut object = serde_json::Map::new();
+        for (key, item) in map {
+            object.insert(key, py_to_json(&item.bind(value.py()))?);
+        }
+        return Ok(serde_json::Value::Object(object));
+    }
+    Err(PyTypeError::new_err("value is not JSON serializable"))
+}
+
+fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> {
+    match value {
+        serde_json::Value::Null => Ok(py.None()),
+        serde_json::Value::Bool(value) => value.into_bound_py_any(py).map(Bound::unbind),
+        serde_json::Value::Number(value) => {
+            if let Some(value) = value.as_i64() {
+                value.into_bound_py_any(py).map(Bound::unbind)
+            } else if let Some(value) = value.as_u64() {
+                value.into_bound_py_any(py).map(Bound::unbind)
+            } else if let Some(value) = value.as_f64() {
+                value.into_bound_py_any(py).map(Bound::unbind)
+            } else {
+                Err(PyTypeError::new_err("unsupported JSON number"))
+            }
+        }
+        serde_json::Value::String(value) => value.into_bound_py_any(py).map(Bound::unbind),
+        serde_json::Value::Array(items) => {
+            let list = PyList::empty(py);
+            for item in items {
+                list.append(json_to_py(py, item)?)?;
+            }
+            Ok(list.into_any().unbind())
+        }
+        serde_json::Value::Object(map) => {
+            let dict = PyDict::new(py);
+            for (key, item) in map {
+                dict.set_item(key, json_to_py(py, item)?)?;
+            }
+            Ok(dict.into_any().unbind())
+        }
+    }
+}
+
 /// Compute journal known-answer hex through the one Rust engine.
 #[pyfunction]
 #[pyo3(text_signature = "(kind, value)")]
 fn journal_known_answer(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let json = py.import("json")?;
-    let encoded = json
-        .getattr("dumps")?
-        .call1((value,))?
-        .extract::<String>()?;
+    let encoded = serde_json::to_string(&py_to_json(value.bind(py))?)
+        .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
     let answer = finstack_ai_protocol::journal_known_answer(kind, &encoded)
         .map_err(|error| PyTypeError::new_err(error.to_string()))?;
-    let encoded = serde_json::to_string(&answer)
+    let value = serde_json::to_value(&answer)
         .map_err(|_| PyException::new_err("journal known-answer serialization failed"))?;
-    Ok(json.getattr("loads")?.call1((encoded,))?.unbind())
+    json_to_py(py, &value)
 }
 
 /// Normalize a pre-beta lineage or authenticated external-command shape.
 #[pyfunction]
 fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let json = py.import("json")?;
-    let encoded = json
-        .getattr("dumps")?
-        .call1((value,))?
-        .extract::<String>()?;
+    let encoded = serde_json::to_string(&py_to_json(value.bind(py))?)
+        .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
     let normalized = match kind {
         "child_run_prepared" => normalize_shape::<finstack_ai::runtime::ChildRunPrepared>(&encoded),
         "interaction_resolution" => {
@@ -139,7 +205,9 @@ fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyRe
             )));
         }
     }?;
-    Ok(json.getattr("loads")?.call1((normalized,))?.unbind())
+    let value: serde_json::Value = serde_json::from_str(&normalized)
+        .map_err(|_| PyException::new_err("pre-beta shape serialization failed"))?;
+    json_to_py(py, &value)
 }
 
 /// Normalize one generated Pydantic schema into the portable binding subset.
@@ -149,17 +217,9 @@ fn _normalize_pydantic_schema(
     schema: Py<PyAny>,
     kind: &str,
 ) -> PyResult<Py<PyAny>> {
-    let json = py.import("json")?;
-    let encoded = json
-        .getattr("dumps")?
-        .call1((schema,))?
-        .extract::<String>()?;
-    let value = serde_json::from_str(&encoded)
-        .map_err(|_| PyTypeError::new_err("Pydantic schema is not JSON serializable"))?;
+    let value = py_to_json(schema.bind(py))?;
     let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
-    let encoded = serde_json::to_string(&normalized)
-        .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
-    Ok(json.getattr("loads")?.call1((encoded,))?.unbind())
+    json_to_py(py, &normalized)
 }
 
 fn normalize_shape<T>(encoded: &str) -> PyResult<String>
@@ -363,7 +423,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None))]
     fn from_python<'py>(
         py: Python<'py>,
         model: &Bound<'py, PyPythonModel>,
@@ -372,6 +432,9 @@ impl PyAgent {
         output_type: Option<Py<PyAny>>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
@@ -380,6 +443,21 @@ impl PyAgent {
             .unwrap_or_default()
             .into_iter()
             .map(|toolset| toolset.bind(py).borrow().registration())
+            .collect::<Vec<_>>();
+        let context_providers = context_providers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|provider| provider.bind(py).borrow().registration())
+            .collect::<Vec<_>>();
+        let middleware = middleware
+            .unwrap_or_default()
+            .into_iter()
+            .map(|middleware| middleware.bind(py).borrow().registration())
+            .collect::<Vec<_>>();
+        let observers = observers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|observer| observer.bind(py).borrow().registration())
             .collect::<Vec<_>>();
         let output = output_type
             .map(|target| prepare_pydantic_output(py, target))
@@ -391,6 +469,9 @@ impl PyAgent {
                 model_name,
                 model,
                 toolsets,
+                context_providers,
+                middleware,
+                observers,
                 instruction,
                 output,
                 capabilities,
@@ -585,13 +666,10 @@ impl PyRun {
             let locator = run.locator().clone();
             match run.list_interactions().await {
                 Ok(requests) => Python::attach(|py| {
-                    let encoded = serde_json::to_string(&requests).map_err(|_| {
+                    let value = serde_json::to_value(&requests).map_err(|_| {
                         PyException::new_err("interaction list serialization failed")
                     })?;
-                    py.import("json")?
-                        .getattr("loads")?
-                        .call1((encoded,))
-                        .map(pyo3::Bound::unbind)
+                    json_to_py(py, &value)
                 }),
                 Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
             }
@@ -605,13 +683,10 @@ impl PyRun {
         py: Python<'py>,
         resolution: Py<PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let encoded = py
-            .import("json")?
-            .getattr("dumps")?
-            .call1((resolution,))?
-            .extract::<String>()?;
-        let resolution = serde_json::from_str::<InteractionResolution>(&encoded)
-            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let resolution = serde_json::from_value::<finstack_ai::InteractionResolution>(
+            py_to_json(resolution.bind(py))?,
+        )
+        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let locator = run.locator().clone();
@@ -949,13 +1024,7 @@ fn prepare_pydantic_output(py: Python<'_>, target: Py<PyAny>) -> PyResult<Prepar
 }
 
 fn raw_pydantic_schema(py: Python<'_>, schema: Py<PyAny>, kind: &str) -> PyResult<RawJson> {
-    let encoded = py
-        .import("json")?
-        .getattr("dumps")?
-        .call1((schema,))?
-        .extract::<String>()?;
-    let value = serde_json::from_str(&encoded)
-        .map_err(|_| PyTypeError::new_err("Pydantic schema is not JSON serializable"))?;
+    let value = py_to_json(schema.bind(py))?;
     let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
     let bytes = serde_json::to_vec(&normalized)
         .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
@@ -1309,6 +1378,9 @@ async fn build_python_agent(
     model_name: ModelName,
     model: (ComponentRef, Arc<dyn Model>),
     toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
+    context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
+    middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
+    observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
     instruction: Option<String>,
     output: Option<PreparedPydanticOutput>,
     capabilities: Vec<CapabilitySpec>,
@@ -1333,6 +1405,15 @@ async fn build_python_agent(
     );
     for (component, toolset) in toolsets {
         builder = builder.toolset(component, toolset);
+    }
+    for (component, provider) in context_providers {
+        builder = builder.context_provider(component, provider);
+    }
+    for (component, middleware) in middleware {
+        builder = builder.middleware(component, middleware);
+    }
+    for (component, observer) in observers {
+        builder = builder.observer(component, observer);
     }
     if let Some(instruction) = instruction {
         builder = builder.try_instruction(instruction)?;

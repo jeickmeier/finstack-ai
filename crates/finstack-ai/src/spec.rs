@@ -217,6 +217,15 @@ pub struct AgentSpec {
 }
 
 impl AgentSpec {
+    /// Start a declarative specification builder.
+    ///
+    /// This produces an [`AgentSpec`] only. Construct a live agent from ready
+    /// handles with [`crate::Agent::builder`].
+    #[must_use]
+    pub fn builder(id: AgentId, model: ComponentRef, store: ComponentRef) -> AgentBuilder {
+        AgentBuilder::new(id, model, store)
+    }
+
     /// Validate schema version, bounds, and duplicate identities.
     ///
     /// # Errors
@@ -355,7 +364,10 @@ impl<'de> Deserialize<'de> for AgentSpec {
     }
 }
 
-/// Incremental Rust builder that produces the same immutable shape as JSON.
+/// Incremental Rust builder that produces the same immutable [`AgentSpec`] as JSON.
+///
+/// Prefer [`AgentSpec::builder`] for spec data. Prefer [`crate::Agent::builder`]
+/// ([`crate::NativeAgentBuilder`]) when composing ready native port handles.
 #[derive(Debug, Clone)]
 pub struct AgentBuilder {
     spec: AgentSpec,

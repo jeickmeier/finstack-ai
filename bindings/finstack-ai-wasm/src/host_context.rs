@@ -104,6 +104,15 @@ impl HostContextProvider {
         let collect = crate::host::extract_method(&adapter, "collect").map_err(context_failure)?;
         Self::from_parts(&options, adapter, collect)
     }
+
+    /// Exact registered component identity.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn component_ref(&self) -> ComponentRef {
+        ComponentRef::new(
+            self.descriptor.invocation.component.clone(),
+            Some(self.descriptor.invocation.version),
+        )
+    }
 }
 
 impl ContextProvider for HostContextProvider {

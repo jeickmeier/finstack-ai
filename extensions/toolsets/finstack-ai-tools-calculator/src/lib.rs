@@ -271,8 +271,7 @@ fn validate_call_context(
 }
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
-    ToolError::try_new(code, category, false, message, Metadata::empty())
-        .unwrap_or_else(|error| error)
+    ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

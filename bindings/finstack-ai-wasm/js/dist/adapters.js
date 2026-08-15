@@ -7,6 +7,9 @@ function assertInitialized(flag) {
 let initialized = false;
 const wasmModels = new WeakMap();
 const wasmToolsets = new WeakMap();
+const wasmContextProviders = new WeakMap();
+const wasmMiddleware = new WeakMap();
+const wasmObservers = new WeakMap();
 const wasmStores = new WeakMap();
 /**
  * Throw when the generated wasm module has not been initialized.
@@ -41,6 +44,48 @@ export function wasmToolsetHandle(toolset) {
     const handle = wasmToolsets.get(toolset);
     if (handle === undefined) {
         throw new TypeError("JsToolset is not a live wasm handle");
+    }
+    return handle;
+}
+/**
+ * Return the crate-private wasm-bindgen context-provider handle.
+ *
+ * @param provider - Public {@link JsContextProvider} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmContextProviderHandle(provider) {
+    const handle = wasmContextProviders.get(provider);
+    if (handle === undefined) {
+        throw new TypeError("JsContextProvider is not a live wasm handle");
+    }
+    return handle;
+}
+/**
+ * Return the crate-private wasm-bindgen middleware handle.
+ *
+ * @param middleware - Public {@link JsMiddleware} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmMiddlewareHandle(middleware) {
+    const handle = wasmMiddleware.get(middleware);
+    if (handle === undefined) {
+        throw new TypeError("JsMiddleware is not a live wasm handle");
+    }
+    return handle;
+}
+/**
+ * Return the crate-private wasm-bindgen observer handle.
+ *
+ * @param observer - Public {@link JsObserver} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmObserverHandle(observer) {
+    const handle = wasmObservers.get(observer);
+    if (handle === undefined) {
+        throw new TypeError("JsObserver is not a live wasm handle");
     }
     return handle;
 }
@@ -132,6 +177,7 @@ export class JsContextProvider {
     constructor(adapter, options) {
         assertInitialized(initialized);
         this.#handle = new WasmJsContextProvider(adapter, options);
+        wasmContextProviders.set(this, this.#handle);
     }
 }
 /**
@@ -149,6 +195,7 @@ export class JsMiddleware {
     constructor(adapter, options) {
         assertInitialized(initialized);
         this.#handle = new WasmJsMiddleware(adapter, options);
+        wasmMiddleware.set(this, this.#handle);
     }
 }
 /**
@@ -166,6 +213,7 @@ export class JsObserver {
     constructor(adapter, options) {
         assertInitialized(initialized);
         this.#handle = new WasmJsObserver(adapter, options);
+        wasmObservers.set(this, this.#handle);
     }
 }
 /**

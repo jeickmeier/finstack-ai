@@ -32,7 +32,8 @@ and Ollama/local paths into the same extension module.
 `Agent.openai_compatible()`, `Agent.anthropic()`, and `Agent.ollama()` construct
 those clients explicitly; importing `finstack_ai` still does not create a
 provider client, initialize Tokio, read credentials, or open network resources.
-Lazy `finstack_ai.providers.*` facades stay unloaded until attribute access.
+`finstack_ai.providers` exposes in-package availability probes and does not
+construct provider clients.
 Dropping a `Run` detaches observation rather than cancelling durable execution;
 call `await run.cancel()` for explicit cancellation. Classic `abi3` wheels are
 not part of the launch strategy.

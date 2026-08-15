@@ -5,10 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_kernel::{Digest, Timestamp};
 use finstack_ai_protocol::{
-    POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, PayloadFamily,
-    ProtocolEnvelope, RemoteAuthMethod, RemoteCommand, RemoteEventView, RemotePostAuth,
-    RemotePreAuth, VersionOffer, decode_envelope, encode_envelope, require_features,
-    select_version,
+    POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand,
+    RemoteEventView, RemotePostAuth, RemotePreAuth, VersionOffer, require_features, select_version,
 };
 use finstack_ai_runtime::{SecurityAuditCategory, SecurityAuditEvent, SecurityAuditGate};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -17,7 +15,7 @@ use uuid::Uuid;
 
 use crate::ServerError;
 use crate::auth::{AuthContext, AuthVerifier, TransportKind};
-use crate::io::{read_frame, write_frame};
+use crate::io::{read_post_auth, read_pre_auth, write_post_auth, write_pre_auth};
 use crate::replica::{CreditWindow, SessionHub};
 
 /// Connection-level limits.
@@ -497,40 +495,6 @@ async fn apply_command(
             })
         }
     }
-}
-
-async fn read_pre_auth<S: AsyncRead + Unpin>(stream: &mut S) -> Result<RemotePreAuth, ServerError> {
-    let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await?;
-    let envelope: ProtocolEnvelope<RemotePreAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
-    Ok(envelope.into_body())
-}
-
-async fn write_pre_auth<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    body: &RemotePreAuth,
-) -> Result<(), ServerError> {
-    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
-    write_frame(stream, &payload, PRE_AUTH_FRAME_MAX_BYTES).await
-}
-
-async fn read_post_auth<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    ceiling: usize,
-) -> Result<RemotePostAuth, ServerError> {
-    let payload = read_frame(stream, ceiling).await?;
-    let envelope: ProtocolEnvelope<RemotePostAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
-    Ok(envelope.into_body())
-}
-
-async fn write_post_auth<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    ceiling: usize,
-    body: &RemotePostAuth,
-) -> Result<(), ServerError> {
-    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
-    write_frame(stream, &payload, ceiling).await
 }
 
 async fn audit_only(

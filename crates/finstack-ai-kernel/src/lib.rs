@@ -142,6 +142,7 @@ pub use capabilities::{ActiveCapability, CapabilitiesActivated, CapabilityActiva
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,
+    hex_nibble, label_is_valid,
 };
 pub use conversation::{
     ConversationEntry, ConversationError, EntryBody, LaneProjection, OperationSummary,

@@ -2,14 +2,15 @@
 
 #![warn(missing_docs)]
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_runtime::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ComponentId, ComponentInvocation,
-    ContentBlock, ContextAuthority, ContextCallContext, ContextContribution, ContextError,
-    ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, Digest, InvocationRecovery, Metadata, PortFuture,
-    Sensitivity, TextBlock, Version, stage_required_artifact,
+    ArtifactId, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ComponentId,
+    ComponentInvocation, ContentBlock, ContextAuthority, ContextCallContext, ContextContribution,
+    ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
+    ContextProvider, ContextProviderDescriptor, ContextRequest, Digest, InvocationRecovery,
+    Metadata, PortFuture, Sensitivity, TextBlock, Version, stage_required_artifact,
 };
 use thiserror::Error;
 
@@ -42,7 +43,7 @@ pub struct MemoryIndex {
 /// In-process [`ArtifactStore`] used only by this reference provider.
 #[derive(Debug, Default)]
 pub struct InProcessArtifactStore {
-    bodies: Mutex<Vec<Bytes>>,
+    bodies: Mutex<BTreeMap<ArtifactId, Bytes>>,
 }
 
 impl ArtifactStore for InProcessArtifactStore {
@@ -53,22 +54,24 @@ impl ArtifactStore for InProcessArtifactStore {
         metadata: ArtifactMetadata,
     ) -> PortFuture<Result<finstack_ai_runtime::ArtifactRef, finstack_ai_runtime::ArtifactError>>
     {
+        let digest = Digest::blob_content(&content);
+        let mut artifact_id = [0_u8; 16];
+        artifact_id.copy_from_slice(&digest.as_bytes()[..16]);
+        let artifact_id = ArtifactId::from_bytes(artifact_id);
         let stored = self
             .bodies
             .lock()
             .map(|mut guard| {
-                guard.push(content.clone());
-                guard.len()
+                guard.insert(artifact_id, content.clone());
             })
             .map_err(|_| ());
         Box::pin(async move {
-            let count = stored.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
+            stored.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
                 code: finstack_ai_runtime::ARTIFACT_UNAVAILABLE,
                 message: Arc::from("memory artifact lock failed"),
             })?;
-            let digest = Digest::blob_content(&content);
             let blob = finstack_ai_runtime::BlobRef::try_new(
-                format!("memory-{count}"),
+                digest.to_hex(),
                 metadata.media_type.as_ref(),
                 u64::try_from(content.len()).unwrap_or(0),
                 Some(digest),
@@ -81,7 +84,7 @@ impl ArtifactStore for InProcessArtifactStore {
                 },
             )?;
             finstack_ai_runtime::ArtifactRef::try_new(
-                finstack_ai_runtime::ArtifactId::from_bytes([u8::try_from(count).unwrap_or(1); 16]),
+                artifact_id,
                 metadata.kind.as_ref(),
                 blob,
                 digest,
@@ -100,10 +103,19 @@ impl ArtifactStore for InProcessArtifactStore {
     fn get(
         &self,
         _scope: ArtifactScope,
-        _artifact: finstack_ai_runtime::ArtifactRef,
+        artifact: finstack_ai_runtime::ArtifactRef,
     ) -> PortFuture<Result<Bytes, finstack_ai_runtime::ArtifactError>> {
-        Box::pin(async {
-            Err(finstack_ai_runtime::ArtifactError::NotFound {
+        let bodies = self
+            .bodies
+            .lock()
+            .map(|guard| guard.get(&artifact.id()).cloned())
+            .map_err(|_| ());
+        Box::pin(async move {
+            let stored = bodies.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
+                code: finstack_ai_runtime::ARTIFACT_UNAVAILABLE,
+                message: Arc::from("memory artifact lock failed"),
+            })?;
+            stored.ok_or(finstack_ai_runtime::ArtifactError::NotFound {
                 code: finstack_ai_runtime::ARTIFACT_NOT_FOUND,
             })
         })
@@ -336,7 +348,7 @@ fn apply_budget(
                     "memory contribution exceeds the committed budget",
                     Metadata::empty(),
                 )
-                .unwrap_or_else(|error| error)),
+                .unwrap_or_else(Into::into)),
                 ContextOverflowPolicy::TruncateWithDiagnostic => break,
             };
         }
@@ -359,7 +371,7 @@ fn contribution_invalid(message: &'static str) -> ContextError {
         message,
         Metadata::empty(),
     )
-    .unwrap_or_else(|error| error)
+    .unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

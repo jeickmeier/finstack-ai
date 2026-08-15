@@ -8,16 +8,17 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{
     ActiveToolCallStatus, ComponentInvocation, ContentBlock, Digest, EffectId,
-    EffectOutputContract, EffectOutputKind, EffectRequested, ErrorCategory, ErrorCode,
-    ErrorDescriptor, ExternalHandleRef, JsonBlock, KernelState, Metadata, RawJson,
-    ReconciliationPolicy, RetrySafety, SyntheticToolClosure, Timestamp, ToolBatchId, ToolCallBlock,
-    ToolCallId, ToolCallPlan, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage,
+    EffectOutputContract, EffectOutputKind, EffectRequested, ErrorCategory, ErrorDescriptor,
+    ExternalHandleRef, JsonBlock, KernelState, Metadata, RawJson, ReconciliationPolicy,
+    RetrySafety, SyntheticToolClosure, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolCallPlan, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock, Usage,
     ValidatedToolCall, ValidationIssue, ValidationOutcome,
 };
 use jsonschema::{Draft, Resource, Retrieve, Uri};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{PortErrorData, PortErrorInvalid};
 use crate::{
     PortFuture, PortObject, PortStream, RunCallContext, SideEffectClass, ToolSpec, UsageDelta,
 };
@@ -300,13 +301,21 @@ pub trait Toolset: PortObject {
 
 /// Stable Toolset adapter error.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{code}: {message}")]
+#[error("{data}")]
 pub struct ToolError {
-    code: ErrorCode,
-    category: ErrorCategory,
-    retryable: bool,
-    message: Arc<str>,
-    metadata: Metadata,
+    data: PortErrorData,
+}
+
+impl From<PortErrorInvalid> for ToolError {
+    fn from(error: PortErrorInvalid) -> Self {
+        match error {
+            PortErrorInvalid::InvalidCode => Self::registration("invalid tool error code"),
+            PortErrorInvalid::InvalidMessage => Self::registration("invalid tool error message"),
+            PortErrorInvalid::InvalidClassification => {
+                Self::registration("reserved tool adapter code has an invalid classification")
+            }
+        }
+    }
 }
 
 impl ToolError {
@@ -314,46 +323,38 @@ impl ToolError {
     ///
     /// # Errors
     ///
-    /// Returns a registration error when the supplied error representation is invalid.
+    /// Returns [`PortErrorInvalid`] when the supplied error representation is invalid.
     pub fn try_new(
         code: impl AsRef<str>,
         category: ErrorCategory,
         retryable: bool,
         message: impl AsRef<str>,
         metadata: Metadata,
-    ) -> Result<Self, Self> {
-        let code =
-            ErrorCode::new(code).map_err(|_| Self::registration("invalid tool error code"))?;
-        if let Some(expected) = reserved_category(code.as_str())
-            && (category != expected || retryable)
-        {
-            return Err(Self::registration(
-                "reserved tool adapter code has an invalid classification",
-            ));
-        }
-        let message = message.as_ref();
-        if message.is_empty()
-            || message.len() > TOOL_TEXT_MAX_BYTES
-            || message.as_bytes().contains(&0)
-        {
-            return Err(Self::registration("invalid tool error message"));
-        }
-        Ok(Self {
+    ) -> Result<Self, PortErrorInvalid> {
+        let data = PortErrorData::try_from_parts(
             code,
             category,
             retryable,
-            message: Arc::from(message),
+            message,
             metadata,
-        })
+            TOOL_TEXT_MAX_BYTES,
+        )?;
+        if let Some(expected) = reserved_category(data.code.as_str())
+            && (data.category != expected || data.retryable)
+        {
+            return Err(PortErrorInvalid::InvalidClassification);
+        }
+        Ok(Self { data })
     }
 
     pub(crate) fn stable(code: &'static str, message: &'static str) -> Self {
         Self {
-            code: ErrorCode::new(code).expect("frozen tool error code is valid"),
-            category: reserved_category(code).unwrap_or(ErrorCategory::Tool),
-            retryable: false,
-            message: Arc::from(message),
-            metadata: Metadata::empty(),
+            data: PortErrorData::frozen(
+                code,
+                reserved_category(code).unwrap_or(ErrorCategory::Tool),
+                false,
+                message,
+            ),
         }
     }
 
@@ -364,31 +365,31 @@ impl ToolError {
     /// Stable adapter code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.code.as_str()
+        self.data.code.as_str()
     }
 
     /// Stable framework category.
     #[must_use]
     pub const fn category(&self) -> ErrorCategory {
-        self.category
+        self.data.category
     }
 
     /// Retryability classification.
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        self.retryable
+        self.data.retryable
     }
 
     /// Safe bounded message.
     #[must_use]
     pub fn message(&self) -> &str {
-        &self.message
+        &self.data.message
     }
 
     /// Bounded namespaced safe metadata.
     #[must_use]
     pub const fn metadata(&self) -> &Metadata {
-        &self.metadata
+        &self.data.metadata
     }
 
     /// Convert to a source-free durable kernel descriptor.
@@ -398,13 +399,13 @@ impl ToolError {
     /// Returns a registration error only if an internal invariant is violated.
     pub fn to_descriptor(&self) -> Result<ErrorDescriptor, Self> {
         let mut descriptor = ErrorDescriptor::new(
-            self.code.as_str(),
-            self.message.as_ref(),
-            self.category,
-            self.retryable,
+            self.data.code.as_str(),
+            self.data.message.as_ref(),
+            self.data.category,
+            self.data.retryable,
         )
         .map_err(|_| Self::registration("tool error descriptor is invalid"))?;
-        descriptor.safe_details = self.metadata.clone();
+        descriptor.safe_details = self.data.metadata.clone();
         Ok(descriptor)
     }
 }

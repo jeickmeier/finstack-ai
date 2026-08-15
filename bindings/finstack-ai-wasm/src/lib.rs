@@ -29,6 +29,7 @@ mod host_store;
 mod host_toolset;
 #[cfg(feature = "scripted-trace")]
 mod noop_trace;
+#[cfg(any(test, feature = "scripted-trace"))]
 mod port_proxies;
 mod prebeta;
 #[cfg(all(target_arch = "wasm32", feature = "scripted-trace"))]
@@ -70,6 +71,9 @@ pub fn build_metadata() -> Result<JsValue, JsValue> {
 }
 
 /// Construct the six-port compile fixtures for the current target.
+///
+/// Test-only: compiled for `cargo test` and the `scripted-trace` wasm harness.
+#[cfg(any(test, feature = "scripted-trace"))]
 #[wasm_bindgen(js_name = compilePortProxies)]
 pub fn compile_port_proxies() {
     #[cfg(not(target_arch = "wasm32"))]
@@ -242,7 +246,7 @@ impl JsToolset {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsContextProvider)]
 pub struct JsContextProvider {
-    _inner: host_context::HostContextProvider,
+    inner: Arc<host_context::HostContextProvider>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -257,9 +261,24 @@ impl JsContextProvider {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsContextProvider, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_context::HostContextProvider::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: Arc::new(
+                host_context::HostContextProvider::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsContextProvider {
+    /// Borrow the trusted context-provider port.
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::ContextProvider> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::ContextProvider>
+    }
+
+    /// Exact registered component identity.
+    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+        self.inner.component_ref()
     }
 }
 
@@ -267,7 +286,7 @@ impl JsContextProvider {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsMiddleware)]
 pub struct JsMiddleware {
-    _inner: host_middleware::HostMiddleware,
+    inner: Arc<host_middleware::HostMiddleware>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -282,9 +301,24 @@ impl JsMiddleware {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsMiddleware, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_middleware::HostMiddleware::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: Arc::new(
+                host_middleware::HostMiddleware::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsMiddleware {
+    /// Borrow the trusted middleware port.
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Middleware> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Middleware>
+    }
+
+    /// Exact registered component identity.
+    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+        self.inner.component_ref()
     }
 }
 
@@ -292,7 +326,7 @@ impl JsMiddleware {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = JsObserver)]
 pub struct JsObserver {
-    _inner: host_observer::HostObserver,
+    inner: Arc<host_observer::HostObserver>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -307,9 +341,24 @@ impl JsObserver {
     pub fn new(adapter: JsValue, options: JsValue) -> Result<JsObserver, JsValue> {
         let options = parse_js_options(&options)?;
         Ok(Self {
-            _inner: host_observer::HostObserver::from_js(adapter, options)
-                .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            inner: Arc::new(
+                host_observer::HostObserver::from_js(adapter, options)
+                    .map_err(|_| js_sys::TypeError::new("invalid host options"))?,
+            ),
         })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl JsObserver {
+    /// Borrow the trusted observer port.
+    pub(crate) fn port(&self) -> Arc<dyn finstack_ai::runtime::Observer> {
+        Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Observer>
+    }
+
+    /// Exact registered component identity.
+    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+        self.inner.component_ref()
     }
 }
 

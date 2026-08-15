@@ -1,4 +1,4 @@
-import { JsJournalStore as WasmJsJournalStore, JsModel as WasmJsModel, JsToolset as WasmJsToolset } from "../generated/finstack_ai_wasm.js";
+import { JsContextProvider as WasmJsContextProvider, JsJournalStore as WasmJsJournalStore, JsMiddleware as WasmJsMiddleware, JsModel as WasmJsModel, JsObserver as WasmJsObserver, JsToolset as WasmJsToolset } from "../generated/finstack_ai_wasm.js";
 import type { HostArtifactStore, HostClock, HostContextProvider, HostJournalStore, HostMiddleware, HostModel, HostObserver, HostRandomSource, HostToolset } from "./host.js";
 /**
  * Constructor options for {@link JsModel}.
@@ -86,6 +86,30 @@ export declare function wasmModelHandle(model: JsModel): WasmJsModel;
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export declare function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset;
+/**
+ * Return the crate-private wasm-bindgen context-provider handle.
+ *
+ * @param provider - Public {@link JsContextProvider} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmContextProviderHandle(provider: JsContextProvider): WasmJsContextProvider;
+/**
+ * Return the crate-private wasm-bindgen middleware handle.
+ *
+ * @param middleware - Public {@link JsMiddleware} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmMiddlewareHandle(middleware: JsMiddleware): WasmJsMiddleware;
+/**
+ * Return the crate-private wasm-bindgen observer handle.
+ *
+ * @param observer - Public {@link JsObserver} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export declare function wasmObserverHandle(observer: JsObserver): WasmJsObserver;
 /**
  * Return the crate-private wasm-bindgen journal-store handle.
  *

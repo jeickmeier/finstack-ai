@@ -1,15 +1,13 @@
 //! Rust reconnect helper that enforces snapshot-tail-barrier-live order.
 
 use finstack_ai_protocol::{
-    POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, PayloadFamily,
-    ProtocolEnvelope, RemoteAuthMethod, RemoteCommand, RemoteCommandResult, RemoteEventView,
-    RemoteLocator, RemotePostAuth, RemotePreAuth, RemoteSnapshot, VersionOffer, decode_envelope,
-    encode_envelope,
+    POST_AUTH_FRAME_MAX_BYTES, RemoteAuthMethod, RemoteCommand, RemoteCommandResult,
+    RemoteEventView, RemoteLocator, RemotePostAuth, RemotePreAuth, RemoteSnapshot, VersionOffer,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::ServerError;
-use crate::io::{read_frame, write_frame};
+use crate::io::{read_post_auth, read_pre_auth, write_post_auth, write_pre_auth};
 
 /// Messages received after a successful reconnect barrier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,22 +60,23 @@ where
         last_known_durable_sequence: Option<u64>,
     ) -> Result<ReconnectView, ServerError> {
         self.barrier_seen = false;
-        write_pre(
+        write_pre_auth(
             &mut self.stream,
             &RemotePreAuth::ClientHello {
                 offer: offer.clone(),
             },
         )
         .await?;
-        let RemotePreAuth::ServerHello { .. } = read_pre(&mut self.stream).await? else {
+        let RemotePreAuth::ServerHello { .. } = read_pre_auth(&mut self.stream).await? else {
             return Err(ServerError::AuthenticationFailure);
         };
-        write_pre(&mut self.stream, &RemotePreAuth::Authenticate { method }).await?;
-        let RemotePreAuth::AuthResult { accepted: true, .. } = read_pre(&mut self.stream).await?
+        write_pre_auth(&mut self.stream, &RemotePreAuth::Authenticate { method }).await?;
+        let RemotePreAuth::AuthResult { accepted: true, .. } =
+            read_pre_auth(&mut self.stream).await?
         else {
             return Err(ServerError::AuthenticationFailure);
         };
-        write_post(
+        write_post_auth(
             &mut self.stream,
             self.post_auth_ceiling,
             &RemotePostAuth::OpenSession {
@@ -92,7 +91,7 @@ where
         let mut snapshot_sequence = 0;
         let mut tail = Vec::new();
         loop {
-            match read_post(&mut self.stream, self.post_auth_ceiling).await? {
+            match read_post_auth(&mut self.stream, self.post_auth_ceiling).await? {
                 RemotePostAuth::Snapshot {
                     sequence,
                     snapshot: value,
@@ -132,7 +131,7 @@ where
     ///
     /// Returns protocol or I/O failures.
     pub async fn next_post_auth(&mut self) -> Result<RemotePostAuth, ServerError> {
-        read_post(&mut self.stream, self.post_auth_ceiling).await
+        read_post_auth(&mut self.stream, self.post_auth_ceiling).await
     }
 
     /// Send a command and wait for its result.
@@ -144,7 +143,7 @@ where
         &mut self,
         command: RemoteCommand,
     ) -> Result<RemoteCommandResult, ServerError> {
-        write_post(
+        write_post_auth(
             &mut self.stream,
             self.post_auth_ceiling,
             &RemotePostAuth::Command { command },
@@ -172,7 +171,7 @@ where
     ///
     /// Returns protocol or I/O failures.
     pub async fn ack(&mut self, cursor: u64, items: u32, bytes: u32) -> Result<(), ServerError> {
-        write_post(
+        write_post_auth(
             &mut self.stream,
             self.post_auth_ceiling,
             &RemotePostAuth::Ack {
@@ -199,38 +198,4 @@ fn message_kind(message: &RemotePostAuth) -> &'static str {
         RemotePostAuth::Ack { .. } => "ack",
         RemotePostAuth::Close { .. } => "close",
     }
-}
-
-async fn read_pre<S: AsyncRead + Unpin>(stream: &mut S) -> Result<RemotePreAuth, ServerError> {
-    let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await?;
-    let envelope: ProtocolEnvelope<RemotePreAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
-    Ok(envelope.into_body())
-}
-
-async fn write_pre<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    body: &RemotePreAuth,
-) -> Result<(), ServerError> {
-    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
-    write_frame(stream, &payload, PRE_AUTH_FRAME_MAX_BYTES).await
-}
-
-async fn read_post<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    ceiling: usize,
-) -> Result<RemotePostAuth, ServerError> {
-    let payload = read_frame(stream, ceiling).await?;
-    let envelope: ProtocolEnvelope<RemotePostAuth> =
-        decode_envelope(&payload, PayloadFamily::Remote)?;
-    Ok(envelope.into_body())
-}
-
-async fn write_post<S: AsyncWrite + Unpin>(
-    stream: &mut S,
-    ceiling: usize,
-    body: &RemotePostAuth,
-) -> Result<(), ServerError> {
-    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
-    write_frame(stream, &payload, ceiling).await
 }

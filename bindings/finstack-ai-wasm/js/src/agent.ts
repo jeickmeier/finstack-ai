@@ -12,11 +12,21 @@ import {
 
 import {
   requireWasm,
+  wasmContextProviderHandle,
   wasmJournalStoreHandle,
+  wasmMiddlewareHandle,
   wasmModelHandle,
+  wasmObserverHandle,
   wasmToolsetHandle,
 } from "./adapters.js";
-import type { JsJournalStore, JsModel, JsToolset } from "./adapters.js";
+import type {
+  JsContextProvider,
+  JsJournalStore,
+  JsMiddleware,
+  JsModel,
+  JsObserver,
+  JsToolset,
+} from "./adapters.js";
 import { FinstackError } from "./errors.js";
 import type {
   EventOptions,
@@ -98,6 +108,12 @@ export interface AgentOptions {
    * Application-activated capability IDs. Model-activation IDs fail closed.
    */
   activeCapabilities?: string[];
+  /** Optional trusted context-provider wrappers. */
+  contextProviders?: JsContextProvider[];
+  /** Optional trusted middleware wrappers. */
+  middleware?: JsMiddleware[];
+  /** Optional trusted observer wrappers. */
+  observers?: JsObserver[];
 }
 
 /**
@@ -183,6 +199,13 @@ export class Agent {
         options.activeCapabilities === undefined
           ? undefined
           : JSON.stringify(options.activeCapabilities),
+        (options.contextProviders ?? []).map((provider) =>
+          wasmContextProviderHandle(provider),
+        ),
+        (options.middleware ?? []).map((middleware) =>
+          wasmMiddlewareHandle(middleware),
+        ),
+        (options.observers ?? []).map((observer) => wasmObserverHandle(observer)),
       );
       return new Agent(handle);
     } catch (error) {

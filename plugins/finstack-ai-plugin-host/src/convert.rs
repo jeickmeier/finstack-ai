@@ -1,8 +1,7 @@
 //! Map Wasmtime bindgen values onto `finstack-ai-wit` mapping types.
 
 use finstack_ai_wit::generated::{
-    BlobRef, CallContext, ContextBudget, ContextItem, ContextQuery, PluginError, ToolCatalog,
-    ToolResult, ToolSpec,
+    BlobRef, CallContext, ContextItem, ContextQuery, PluginError, ToolCatalog, ToolResult, ToolSpec,
 };
 
 use crate::bindings::context::exports::finstack::ai_context::context_provider as ctx;
@@ -98,15 +97,6 @@ fn wit_blob_ref(reference: ty::BlobRef) -> BlobRef {
         media_type: reference.media_type,
         length: reference.length,
         digest: reference.digest,
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn wit_context_budget(budget: ctx::ContextBudget) -> ContextBudget {
-    ContextBudget {
-        max_tokens: budget.max_tokens,
-        max_bytes: budget.max_bytes,
-        max_items: budget.max_items,
     }
 }
 

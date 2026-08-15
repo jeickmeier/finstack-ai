@@ -27,7 +27,7 @@ export class Agent {
      *
      * Returns a structured host error when configuration is invalid.
      */
-    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null): Promise<any>;
+    static create(model: JsModel, toolsets: JsToolset[], instruction?: string | null, store?: JsJournalStore | null, capabilities_json?: string | null, active_capabilities_json?: string | null, context_providers?: JsContextProvider[] | null, middleware?: JsMiddleware[] | null, observers?: JsObserver[] | null): Promise<any>;
     /**
      * Create a live session on this agent's journal store.
      *
@@ -389,6 +389,9 @@ export class MemoryExternalIdentityMap {
 
 /**
  * Detached run control handle. Drop detaches observation and does not cancel.
+ *
+ * `list_interactions` / `resolve_interaction` remain native-only
+ * (`native-tokio`). Browser WASM uses the host session/inbox path.
  */
 export class Run {
     private constructor();
@@ -549,6 +552,8 @@ export function buildMetadata(): any;
 
 /**
  * Construct the six-port compile fixtures for the current target.
+ *
+ * Test-only: compiled for `cargo test` and the `scripted-trace` wasm harness.
  */
 export function compilePortProxies(): void;
 
@@ -642,7 +647,7 @@ export interface InitOutput {
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly agent_capabilityCatalog: (a: number, b: number) => void;
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
-    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
     readonly agent_createSession: (a: number, b: number, c: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -712,9 +717,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1517: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1531: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_373: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1664: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1678: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_390: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

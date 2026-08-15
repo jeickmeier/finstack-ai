@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use finstack_ai_runtime::{
     InputCapabilities, ModelCapabilities, ModelContextProfile, ModelError, ModelName,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, secret_is_valid,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -19,8 +19,6 @@ const DEFAULT_CHAT_PATH: &str = "/v1/chat/completions";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
-const SECRET_MAX_BYTES: usize = 16 * 1_024;
-
 /// Opaque configured secret whose formatting is always redacted.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretString(Arc<str>);
@@ -33,7 +31,7 @@ impl SecretString {
     /// Returns `openai_config_invalid` for an empty, oversized, or NUL-bearing value.
     pub fn try_new(value: impl AsRef<str>) -> Result<Self, ModelError> {
         let value = value.as_ref();
-        if value.is_empty() || value.len() > SECRET_MAX_BYTES || value.as_bytes().contains(&0) {
+        if !secret_is_valid(value) {
             return Err(config_error("provider secret is invalid"));
         }
         Ok(Self(Arc::from(value)))

@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{
     CapabilityId, ComponentId, ComponentInvocation, ContentBlock, Digest, EffectCompleted,
-    EffectInput, EffectKind, EffectOutputKind, EffectRequested, ErrorCategory, ErrorCode,
-    ErrorDescriptor, InvocationRecovery, LaneId, Message, Metadata, PipelinePosition, RawJson,
-    RecordBody, RecordEnvelope, RetrySafety, RunId, SEMANTIC_ARRAY_MAX_ITEMS, Sensitivity,
-    SessionId,
+    EffectInput, EffectKind, EffectOutputKind, EffectRequested, ErrorCategory, ErrorDescriptor,
+    InvocationRecovery, LaneId, Message, Metadata, PipelinePosition, RawJson, RecordBody,
+    RecordEnvelope, RetrySafety, RunId, SEMANTIC_ARRAY_MAX_ITEMS, Sensitivity, SessionId,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{PortErrorData, PortErrorInvalid};
 use crate::{PortFuture, PortObject, ReconcileContext, RunCallContext};
 
 /// Stable invalid-context-configuration code.
@@ -946,12 +946,28 @@ pub fn assemble_context(
 
 /// Stable context-port error.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{code}: {message}")]
+#[error("{data}")]
 pub struct ContextError {
-    code: ErrorCode,
-    category: ErrorCategory,
-    message: Arc<str>,
-    metadata: Metadata,
+    data: PortErrorData,
+}
+
+impl From<PortErrorInvalid> for ContextError {
+    fn from(error: PortErrorInvalid) -> Self {
+        match error {
+            PortErrorInvalid::InvalidCode => Self::stable(
+                CONTEXT_CONTRIBUTION_INVALID,
+                "context error code is invalid",
+            ),
+            PortErrorInvalid::InvalidMessage => Self::stable(
+                CONTEXT_CONTRIBUTION_INVALID,
+                "context error message is invalid",
+            ),
+            PortErrorInvalid::InvalidClassification => Self::stable(
+                CONTEXT_CONTRIBUTION_INVALID,
+                "context error classification is invalid",
+            ),
+        }
+    }
 }
 
 impl ContextError {
@@ -959,44 +975,29 @@ impl ContextError {
     ///
     /// # Errors
     ///
-    /// Returns `context_contribution_invalid` when the code or message is invalid.
+    /// Returns [`PortErrorInvalid`] when the code or message is invalid.
     pub fn try_new(
         code: impl AsRef<str>,
         category: ErrorCategory,
         message: impl AsRef<str>,
         metadata: Metadata,
-    ) -> Result<Self, Self> {
-        let code = ErrorCode::new(code).map_err(|_| {
-            Self::stable(
-                CONTEXT_CONTRIBUTION_INVALID,
-                "context error code is invalid",
-            )
-        })?;
-        let message = message.as_ref();
-        if message.is_empty() || message.len() > 1_048_576 || message.as_bytes().contains(&0) {
-            return Err(Self::stable(
-                CONTEXT_CONTRIBUTION_INVALID,
-                "context error message is invalid",
-            ));
-        }
-        Ok(Self {
-            code,
-            category,
-            message: Arc::from(message),
-            metadata,
-        })
+    ) -> Result<Self, PortErrorInvalid> {
+        PortErrorData::try_from_parts(code, category, false, message, metadata, 1_048_576)
+            .map(|data| Self { data })
     }
 
     fn stable(code: &'static str, message: &'static str) -> Self {
         Self {
-            code: ErrorCode::new(code).expect("frozen context error code is valid"),
-            category: if code == CONTEXT_BUDGET_EXCEEDED {
-                ErrorCategory::Limit
-            } else {
-                ErrorCategory::Validation
-            },
-            message: Arc::from(message),
-            metadata: Metadata::empty(),
+            data: PortErrorData::frozen(
+                code,
+                if code == CONTEXT_BUDGET_EXCEEDED {
+                    ErrorCategory::Limit
+                } else {
+                    ErrorCategory::Validation
+                },
+                false,
+                message,
+            ),
         }
     }
 
@@ -1010,19 +1011,19 @@ impl ContextError {
     /// Stable error code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.code.as_str()
+        self.data.code.as_str()
     }
 
     /// Safe error descriptor suitable for durable failure records.
     #[must_use]
     pub fn descriptor(&self) -> ErrorDescriptor {
         ErrorDescriptor {
-            code: self.code.clone(),
-            message: Arc::clone(&self.message),
-            category: self.category,
+            code: self.data.code.clone(),
+            message: Arc::clone(&self.data.message),
+            category: self.data.category,
             retryable: false,
             identifiers: finstack_ai_kernel::ErrorIdentifiers::default(),
-            safe_details: self.metadata.clone(),
+            safe_details: self.data.metadata.clone(),
         }
     }
 }

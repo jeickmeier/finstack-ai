@@ -121,6 +121,9 @@ struct StructuredOutputConfig {
 
 impl Agent {
     /// Start ergonomic native composition over direct model and store handles.
+    ///
+    /// This is the live-handle constructor ([`NativeAgentBuilder`]). Use
+    /// [`crate::AgentSpec::builder`] when you only need declarative spec data.
     #[must_use]
     pub fn builder(
         agent_id: AgentId,
@@ -621,10 +624,7 @@ impl Agent {
         }
         match result {
             Ok(value) => value,
-            Err(_) => Err(AgentRunError::Timeout {
-                code: AGENT_RUN_TIMEOUT,
-                timeout,
-            }),
+            Err(_) => Err(AgentRunError::Timeout { timeout }),
         }
     }
 
@@ -1994,27 +1994,20 @@ pub enum AgentRunError {
         message: String,
     },
     /// Runtime or provider failure.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", AGENT_RUN_RUNTIME_FAILURE)]
     Runtime {
-        /// Stable error code.
-        code: &'static str,
         /// Non-secret explanation.
         message: String,
     },
     /// Operational deadline elapsed.
-    #[error("{code}: run exceeded {timeout:?}")]
+    #[error("{}: run exceeded {timeout:?}", AGENT_RUN_TIMEOUT)]
     Timeout {
-        /// Stable error code.
-        code: &'static str,
         /// Configured deadline.
         timeout: Duration,
     },
     /// Explicit durable cancellation reached its terminal state.
-    #[error("{code}: run was cancelled")]
-    Cancelled {
-        /// Stable error code.
-        code: &'static str,
-    },
+    #[error("{}: run was cancelled", AGENT_RUN_CANCELLED)]
+    Cancelled,
 }
 
 impl AgentRunError {
@@ -2022,10 +2015,10 @@ impl AgentRunError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Configuration { code, .. }
-            | Self::Runtime { code, .. }
-            | Self::Timeout { code, .. }
-            | Self::Cancelled { code } => code,
+            Self::Configuration { code, .. } => code,
+            Self::Runtime { .. } => AGENT_RUN_RUNTIME_FAILURE,
+            Self::Timeout { .. } => AGENT_RUN_TIMEOUT,
+            Self::Cancelled => AGENT_RUN_CANCELLED,
         }
     }
 
@@ -2063,7 +2056,6 @@ impl AgentRunError {
 
     fn runtime_message(message: impl Into<String>) -> Self {
         Self::Runtime {
-            code: AGENT_RUN_RUNTIME_FAILURE,
             message: message.into(),
         }
     }
@@ -2296,9 +2288,7 @@ fn ensure_nonterminal_failure(
             "run failed: {}",
             failed.error.code
         ))),
-        Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Cancelled {
-            code: AGENT_RUN_CANCELLED,
-        }),
+        Some(TerminalState::Cancelled(_)) => Err(AgentRunError::Cancelled),
         _ => Ok(()),
     }
 }
@@ -2421,9 +2411,12 @@ async fn append_lane_input(
 impl crate::Lane {
     /// Start a new root run on this idle lane.
     ///
+    /// Prefer [`Agent::start_on_lane`].
+    ///
     /// # Errors
     ///
     /// Returns a busy-lane or agent configuration/runtime failure.
+    #[deprecated(since = "1.0.0", note = "use Agent::start_on_lane")]
     pub fn run(&self, agent: &Agent, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
         agent.start_on_lane(self, request)
     }

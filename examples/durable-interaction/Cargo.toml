@@ -15,7 +15,6 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true }
-finstack-ai-workflow-local = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
 

@@ -6,7 +6,80 @@ use core::fmt;
 use std::error::Error as StdError;
 use std::sync::Arc;
 
-use finstack_ai_kernel::ErrorDescriptor;
+use finstack_ai_kernel::{ErrorCategory, ErrorCode, ErrorDescriptor, Metadata};
+use thiserror::Error;
+
+/// Shared source-free payload for primary-port adapter errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PortErrorData {
+    pub(crate) code: ErrorCode,
+    pub(crate) category: ErrorCategory,
+    pub(crate) retryable: bool,
+    pub(crate) message: Arc<str>,
+    pub(crate) metadata: Metadata,
+}
+
+impl PortErrorData {
+    pub(crate) fn try_from_parts(
+        code: impl AsRef<str>,
+        category: ErrorCategory,
+        retryable: bool,
+        message: impl AsRef<str>,
+        metadata: Metadata,
+        max_message_bytes: usize,
+    ) -> Result<Self, PortErrorInvalid> {
+        let code = ErrorCode::new(code).map_err(|_| PortErrorInvalid::InvalidCode)?;
+        let message = message.as_ref();
+        if message.is_empty()
+            || message.len() > max_message_bytes
+            || message.as_bytes().contains(&0)
+        {
+            return Err(PortErrorInvalid::InvalidMessage);
+        }
+        Ok(Self {
+            code,
+            category,
+            retryable,
+            message: Arc::from(message),
+            metadata,
+        })
+    }
+
+    pub(crate) fn frozen(
+        code: &'static str,
+        category: ErrorCategory,
+        retryable: bool,
+        message: &'static str,
+    ) -> Self {
+        Self {
+            code: ErrorCode::new(code).expect("frozen port error code is valid"),
+            category,
+            retryable,
+            message: Arc::from(message),
+            metadata: Metadata::empty(),
+        }
+    }
+}
+
+impl fmt::Display for PortErrorData {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+/// Construction failure for a primary-port adapter error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PortErrorInvalid {
+    /// The supplied adapter code is empty, oversized, or otherwise invalid.
+    #[error("port error code is invalid")]
+    InvalidCode,
+    /// The supplied adapter message is empty, oversized, or contains NUL.
+    #[error("port error message is invalid")]
+    InvalidMessage,
+    /// A reserved adapter code was constructed with the wrong category or retryability.
+    #[error("reserved adapter code has an invalid classification")]
+    InvalidClassification,
+}
 
 /// Runtime error with an optional local diagnostic source chain.
 #[derive(Clone)]

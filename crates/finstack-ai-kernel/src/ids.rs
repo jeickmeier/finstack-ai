@@ -255,22 +255,13 @@ fn parse_uuid_hyphenated(input: &str) -> Option<[u8; 16]> {
     let mut idx = 0;
     for (start, count) in groups {
         for offset in 0..count {
-            let hi = hex_nibble(bytes[start + offset * 2])?;
-            let lo = hex_nibble(bytes[start + offset * 2 + 1])?;
+            let hi = crate::hex_nibble(bytes[start + offset * 2])?;
+            let lo = crate::hex_nibble(bytes[start + offset * 2 + 1])?;
             out[idx] = (hi << 4) | lo;
             idx += 1;
         }
     }
     Some(out)
-}
-
-fn hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 /// Opaque tag distinguishing typed string keys at compile time.

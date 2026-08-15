@@ -77,7 +77,13 @@ impl Digest {
         }
         let mut bytes = [0_u8; 32];
         for (idx, chunk) in input.as_bytes().chunks_exact(2).enumerate() {
-            bytes[idx] = (hex_nibble(chunk[0])? << 4) | hex_nibble(chunk[1])?;
+            let hi = crate::hex_nibble(chunk[0]).ok_or_else(|| DigestError::InvalidHex {
+                input: input.to_owned(),
+            })?;
+            let lo = crate::hex_nibble(chunk[1]).ok_or_else(|| DigestError::InvalidHex {
+                input: input.to_owned(),
+            })?;
+            bytes[idx] = (hi << 4) | lo;
         }
         Ok(Self(bytes))
     }
@@ -322,17 +328,6 @@ fn validate_domain(domain: &str) -> Result<(), DigestError> {
         });
     }
     Ok(())
-}
-
-fn hex_nibble(byte: u8) -> Result<u8, DigestError> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(DigestError::InvalidHex {
-            input: String::from_utf8_lossy(&[byte]).into_owned(),
-        }),
-    }
 }
 
 fn serialize_hex<S>(value: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>

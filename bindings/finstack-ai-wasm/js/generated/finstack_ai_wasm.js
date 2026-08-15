@@ -75,9 +75,12 @@ export class Agent {
      * @param {JsJournalStore | null} [store]
      * @param {string | null} [capabilities_json]
      * @param {string | null} [active_capabilities_json]
+     * @param {JsContextProvider[] | null} [context_providers]
+     * @param {JsMiddleware[] | null} [middleware]
+     * @param {JsObserver[] | null} [observers]
      * @returns {Promise<any>}
      */
-    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json) {
+    static create(model, toolsets, instruction, store, capabilities_json, active_capabilities_json, context_providers, middleware, observers) {
         _assertClass(model, JsModel);
         const ptr0 = passArrayJsValueToWasm0(toolsets, wasm.__wbindgen_export);
         const len0 = WASM_VECTOR_LEN;
@@ -92,7 +95,13 @@ export class Agent {
         var len3 = WASM_VECTOR_LEN;
         var ptr4 = isLikeNone(active_capabilities_json) ? 0 : passStringToWasm0(active_capabilities_json, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len4 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4);
+        var ptr5 = isLikeNone(context_providers) ? 0 : passArrayJsValueToWasm0(context_providers, wasm.__wbindgen_export);
+        var len5 = WASM_VECTOR_LEN;
+        var ptr6 = isLikeNone(middleware) ? 0 : passArrayJsValueToWasm0(middleware, wasm.__wbindgen_export);
+        var len6 = WASM_VECTOR_LEN;
+        var ptr7 = isLikeNone(observers) ? 0 : passArrayJsValueToWasm0(observers, wasm.__wbindgen_export);
+        var len7 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_create(model.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7);
         return takeObject(ret);
     }
     /**
@@ -530,6 +539,12 @@ if (Symbol.dispose) JsClock.prototype[Symbol.dispose] = JsClock.prototype.free;
  * Trusted JS context-provider wrapper.
  */
 export class JsContextProvider {
+    static __unwrap(jsValue) {
+        if (!(jsValue instanceof JsContextProvider)) {
+            return 0;
+        }
+        return jsValue.__destroy_into_raw();
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -630,6 +645,12 @@ if (Symbol.dispose) JsJournalStore.prototype[Symbol.dispose] = JsJournalStore.pr
  * Trusted JS middleware wrapper.
  */
 export class JsMiddleware {
+    static __unwrap(jsValue) {
+        if (!(jsValue instanceof JsMiddleware)) {
+            return 0;
+        }
+        return jsValue.__destroy_into_raw();
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -716,6 +737,12 @@ if (Symbol.dispose) JsModel.prototype[Symbol.dispose] = JsModel.prototype.free;
  * Trusted JS observer wrapper.
  */
 export class JsObserver {
+    static __unwrap(jsValue) {
+        if (!(jsValue instanceof JsObserver)) {
+            return 0;
+        }
+        return jsValue.__destroy_into_raw();
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -1125,6 +1152,9 @@ if (Symbol.dispose) MemoryExternalIdentityMap.prototype[Symbol.dispose] = Memory
 
 /**
  * Detached run control handle. Drop detaches observation and does not cancel.
+ *
+ * `list_interactions` / `resolve_interaction` remain native-only
+ * (`native-tokio`). Browser WASM uses the host session/inbox path.
  */
 export class Run {
     static __wrap(ptr) {
@@ -1546,6 +1576,8 @@ export function buildMetadata() {
 
 /**
  * Construct the six-port compile fixtures for the current target.
+ *
+ * Test-only: compiled for `cargo test` and the `scripted-trace` wasm harness.
  */
 export function compilePortProxies() {
     wasm.compilePortProxies();
@@ -1832,6 +1864,18 @@ function __wbg_get_imports() {
             const ret = result;
             return ret;
         },
+        __wbg_jscontextprovider_unwrap: function(arg0) {
+            const ret = JsContextProvider.__unwrap(getObject(arg0));
+            return ret;
+        },
+        __wbg_jsmiddleware_unwrap: function(arg0) {
+            const ret = JsMiddleware.__unwrap(getObject(arg0));
+            return ret;
+        },
+        __wbg_jsobserver_unwrap: function(arg0) {
+            const ret = JsObserver.__unwrap(getObject(arg0));
+            return ret;
+        },
         __wbg_jstoolset_unwrap: function(arg0) {
             const ret = JsToolset.__unwrap(getObject(arg0));
             return ret;
@@ -1875,7 +1919,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1531(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1678(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -1957,13 +2001,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 488, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1517);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 523, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1664);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_373);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_390);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1995,14 +2039,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_373(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_373(arg0, arg1);
+function __wasm_bindgen_func_elem_390(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_390(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1517(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1664(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1517(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1664(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2013,8 +2057,8 @@ function __wasm_bindgen_func_elem_1517(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1531(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1531(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1678(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1678(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

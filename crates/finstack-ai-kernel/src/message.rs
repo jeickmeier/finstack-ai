@@ -586,7 +586,7 @@ fn validate_role_blocks(role: MessageRole, content: &[ContentBlock]) -> Result<(
 }
 
 fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, MessageError> {
-    if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+    if !crate::label_is_valid(value) {
         return Err(MessageError::InvalidLabel { field });
     }
     Ok(Arc::<str>::from(value))

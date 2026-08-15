@@ -55,6 +55,10 @@ interface WorkerScope {
   addEventListener: (type: "message", listener: (event: MessageEvent) => void) => void;
 }
 
+/**
+ * Worker-to-main `postMessage` backpressure. In-process event lag is owned by
+ * the Rust `EventHub`; this slot only bounds the dedicated-worker channel.
+ */
 interface RunSlot {
   agentId: string;
   runId: string;

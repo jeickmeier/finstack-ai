@@ -183,7 +183,7 @@ impl Middleware for CompactionMiddleware {
                     "compaction only runs at before_model",
                     Metadata::empty(),
                 )
-                .unwrap_or_else(|error| error));
+                .unwrap_or_else(Into::into));
             };
             match config.strategy {
                 CompactionStrategy::SlidingWindow => sliding_window(&descriptor, &config, &before),
@@ -660,8 +660,7 @@ fn middleware_error(
     category: ErrorCategory,
     message: &'static str,
 ) -> MiddlewareError {
-    MiddlewareError::try_new(code, category, message, Metadata::empty())
-        .unwrap_or_else(|error| error)
+    MiddlewareError::try_new(code, category, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

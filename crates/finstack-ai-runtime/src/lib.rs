@@ -66,6 +66,7 @@ mod observer;
 mod observer_export;
 mod observer_queue;
 mod ports;
+mod provider_util;
 mod session;
 mod tool;
 
@@ -146,7 +147,7 @@ pub use context::{
     context_resume_action,
 };
 
-pub use error::FrameworkError;
+pub use error::{FrameworkError, PortErrorInvalid};
 pub use event_hub::{
     EventBatch, EventBatchConfig, EventDeliveryStats, EventFilter, EventHubConfig, EventLagPolicy,
     EventSubscriptionCloseReason, EventSubscriptionConfig, EventSubscriptionError,
@@ -157,7 +158,7 @@ pub use journal::{
     AcceleratedRestore, IdempotencyHorizon, JournalStore, LoadRequest, LoadedSession,
     MetadataReceipt, OpaqueSnapshot, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage,
     ScanRequest, SnapshotReceipt, SnapshotRequest, SnapshotSchedule, StateSnapshotRequest,
-    StoreCommitTimestamp, StoreError, StoreHealth, WriteMetadataRequest,
+    StoreCommitTimestamp, StoreError, StoreHealth, StoreLimits, WriteMetadataRequest,
 };
 #[cfg(feature = "native-tokio")]
 #[doc(hidden)]
@@ -212,6 +213,7 @@ pub use observer_queue::{
     ObserverQueuePush,
 };
 pub use ports::{PortFuture, PortObject, PortStream};
+pub use provider_util::{SECRET_MAX_BYTES, SseFrameError, SseFrameParser, secret_is_valid};
 pub use tool::{
     AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
     ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
@@ -259,6 +261,10 @@ pub use workflow::{
     WorkflowCheckpoint, WorkflowDriverError, WorkflowRetryDecision, WorkflowSession, WorkflowWait,
     classify_wait, resolve_checkpoint_sequence, retry_decision,
 };
+
+/// In-process reference name for [`WorkflowSession`].
+#[cfg(feature = "native-tokio")]
+pub type LocalWorkflowDriver = WorkflowSession;
 
 #[cfg(feature = "native-tokio")]
 pub use id_generation::{OsRandomSource, SystemClock};

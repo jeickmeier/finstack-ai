@@ -19,42 +19,12 @@ use finstack_ai_protocol::{
 use finstack_ai_runtime::{
     AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, MetadataReceipt, OpaqueSnapshot,
     PortFuture, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest,
-    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth,
+    SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError, StoreHealth, StoreLimits,
     WriteMetadataRequest,
 };
 
 /// Required resource ceilings for [`MemoryJournalStore`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemoryStoreLimits {
-    /// Maximum distinct sessions.
-    pub sessions: usize,
-    /// Maximum committed batches per session.
-    pub batches_per_session: usize,
-    /// Maximum committed records per session.
-    pub records_per_session: usize,
-    /// Maximum snapshot bytes per session.
-    pub snapshot_bytes: usize,
-}
-
-impl MemoryStoreLimits {
-    /// Validate an explicit, usable set of limits.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StoreError::InvalidRequest`] when any limit is zero.
-    pub fn validate(self) -> Result<Self, StoreError> {
-        if self.sessions == 0
-            || self.batches_per_session == 0
-            || self.records_per_session == 0
-            || self.snapshot_bytes == 0
-        {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "zero_memory_store_limit",
-            });
-        }
-        Ok(self)
-    }
-}
+pub type MemoryStoreLimits = StoreLimits;
 
 /// Mutex-protected ordered-map journal intended for tests and embedded ephemeral use.
 pub struct MemoryJournalStore {

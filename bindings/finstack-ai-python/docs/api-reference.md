@@ -16,8 +16,9 @@ cancel a run.
   active_capabilities=None)` builds the keyless Ollama/local path of the
   OpenAI-compatible crate. It does not change `Agent.openai_compatible`.
 - `Agent.from_python(model, toolsets=None, instruction=None, output_type=None,
-  capabilities=None, active_capabilities=None)` accepts trusted coarse callback
-  adapters. `output_type` lazily requires the Pydantic extra.
+  capabilities=None, active_capabilities=None, context_providers=None,
+  middleware=None, observers=None)` accepts trusted coarse callback adapters.
+  `output_type` lazily requires the Pydantic extra.
 - `Agent.start(...) -> Run` starts one bounded run and returns immediately.
 - `await Agent.run(...) -> RunResult` waits for the committed terminal result.
 - `Agent.capability_catalog()` returns only compact `Model` entries.

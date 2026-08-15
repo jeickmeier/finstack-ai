@@ -103,6 +103,12 @@ impl HostObserver {
             .map_err(|_| ObserverError::Unavailable)?;
         Self::from_parts(&options, adapter, observe)
     }
+
+    /// Exact registered component identity.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn component_ref(&self) -> ComponentRef {
+        self.descriptor.component.clone()
+    }
 }
 
 impl Observer for HostObserver {

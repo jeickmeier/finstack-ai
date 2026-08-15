@@ -20,20 +20,20 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator, EventHubConfig, ExternalClock,
     IdGenerationError, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest,
-    LockedModelContextProfile, ManualDriveAction, Model, ModelContextProfile, ModelDeferral,
-    ModelError, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, RandomSource,
-    ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner, SideEffectClass, TextDelta,
-    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolExecutionPolicy, ToolFailurePolicy,
-    ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig,
-    Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait, resolve_model_context_profile,
+    LocalWorkflowDriver, LockedModelContextProfile, ManualDriveAction, Model, ModelContextProfile,
+    ModelDeferral, ModelError, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
+    ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
+    RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner, SideEffectClass,
+    TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits,
+    ToolTaskConfig, Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait,
+    resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
 };
-use finstack_ai_workflow_local::LocalWorkflowDriver;
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];

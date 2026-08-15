@@ -135,6 +135,15 @@ impl HostMiddleware {
         let invoke = crate::host::extract_method(&adapter, "invoke").map_err(middleware_failure)?;
         Self::from_parts(&options, adapter, invoke)
     }
+
+    /// Exact registered component identity.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn component_ref(&self) -> ComponentRef {
+        ComponentRef::new(
+            self.descriptor.invocation.component.clone(),
+            Some(self.descriptor.invocation.version),
+        )
+    }
 }
 
 impl Middleware for HostMiddleware {

@@ -787,7 +787,6 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
- "finstack-ai-workflow-local",
  "tempfile",
  "tokio",
 ]
@@ -1164,17 +1163,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "finstack-ai-workflow-local"
-version = "1.0.0"
-dependencies = [
- "finstack-ai-kernel",
- "finstack-ai-runtime",
- "finstack-ai-store-memory",
- "finstack-ai-test",
  "tokio",
 ]
 

@@ -436,7 +436,6 @@ impl Extension for WasmPluginExtension {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => {
                 return Err(RegistrationError::InvalidDescriptor {
-                    code: "registration_invalid_descriptor",
                     message: Arc::from("context adapter is missing lifecycle hooks"),
                 });
             }
@@ -454,14 +453,12 @@ impl Extension for WasmPluginExtension {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => {
                 return Err(RegistrationError::InvalidDescriptor {
-                    code: "registration_invalid_descriptor",
                     message: Arc::from("toolset adapter is missing lifecycle hooks"),
                 });
             }
         }
         if self.context.is_none() && self.toolset.is_none() {
             return Err(RegistrationError::InvalidDescriptor {
-                code: "registration_invalid_descriptor",
                 message: Arc::from("plugin extension registered no port"),
             });
         }
@@ -779,7 +776,7 @@ fn tool_error(error: &PluginHostError, metadata: Metadata) -> ToolError {
         error.to_string(),
         metadata,
     )
-    .unwrap_or_else(|fallback| fallback)
+    .unwrap_or_else(Into::into)
 }
 
 fn context_error(error: &PluginHostError, metadata: Metadata) -> ContextError {
@@ -789,7 +786,7 @@ fn context_error(error: &PluginHostError, metadata: Metadata) -> ContextError {
         error.to_string(),
         metadata,
     )
-    .unwrap_or_else(|fallback| fallback)
+    .unwrap_or_else(Into::into)
 }
 
 fn plugin_metadata(ready: &ReadyWasm) -> Metadata {

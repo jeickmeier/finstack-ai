@@ -297,7 +297,6 @@ impl Extension for WitPluginExtension {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => {
                 return Err(RegistrationError::InvalidDescriptor {
-                    code: "registration_invalid_descriptor",
                     message: Arc::from("context adapter is missing lifecycle hooks"),
                 });
             }
@@ -315,14 +314,12 @@ impl Extension for WitPluginExtension {
             (None, None) => {}
             (Some(_), None) | (None, Some(_)) => {
                 return Err(RegistrationError::InvalidDescriptor {
-                    code: "registration_invalid_descriptor",
                     message: Arc::from("toolset adapter is missing lifecycle hooks"),
                 });
             }
         }
         if self.context.is_none() && self.toolset.is_none() {
             return Err(RegistrationError::InvalidDescriptor {
-                code: "registration_invalid_descriptor",
                 message: Arc::from("plugin extension registered no port"),
             });
         }
@@ -383,7 +380,7 @@ fn context_error(error: &WitMapError) -> ContextError {
         error.to_string(),
         Metadata::empty(),
     )
-    .unwrap_or_else(|fallback| fallback)
+    .unwrap_or_else(Into::into)
 }
 
 fn guest_context_error(error: crate::generated::PluginError) -> ContextError {
@@ -398,7 +395,7 @@ fn guest_context_error(error: crate::generated::PluginError) -> ContextError {
         error.message,
         Metadata::empty(),
     )
-    .unwrap_or_else(|fallback| fallback)
+    .unwrap_or_else(Into::into)
 }
 
 fn tool_error(code: &str, message: &str) -> ToolError {
@@ -409,7 +406,7 @@ fn tool_error(code: &str, message: &str) -> ToolError {
         message,
         Metadata::empty(),
     )
-    .unwrap_or_else(|error| error)
+    .unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

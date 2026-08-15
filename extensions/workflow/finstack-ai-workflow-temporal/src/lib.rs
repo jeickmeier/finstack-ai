@@ -1,7 +1,8 @@
 //! Temporal-shaped mapping over the runtime workflow-driver contract.
 //!
-//! This crate does not depend on `temporalio`, a cluster, or
-//! `finstack-ai-workflow-local`. It does not plan model or tool batches.
+//! This crate does not depend on `temporalio` or a cluster. The in-process
+//! reference driver is [`finstack_ai_runtime::LocalWorkflowDriver`]. It does
+//! not plan model or tool batches.
 
 #![warn(missing_docs)]
 

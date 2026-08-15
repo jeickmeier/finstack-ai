@@ -32,6 +32,10 @@ proptest = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
+[[bin]]
+name = "generate-journal-fixtures"
+path = "src/bin/generate_journal_fixtures.rs"
+
 [[bench]]
 name = "conformance"
 harness = false

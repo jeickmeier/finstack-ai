@@ -122,6 +122,10 @@ impl Agent {
     ///
     /// Returns a structured host error when configuration is invalid.
     #[wasm_bindgen(js_name = create)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wasm-bindgen create forwards each host handle list distinctly"
+    )]
     pub fn create(
         model: &JsModel,
         toolsets: Vec<JsToolset>,
@@ -129,6 +133,9 @@ impl Agent {
         store: Option<JsJournalStore>,
         capabilities_json: Option<String>,
         active_capabilities_json: Option<String>,
+        context_providers: Option<Vec<crate::JsContextProvider>>,
+        middleware: Option<Vec<crate::JsMiddleware>>,
+        observers: Option<Vec<crate::JsObserver>>,
     ) -> js_sys::Promise {
         let model_port = model.port();
         let model_component = model.component();
@@ -139,6 +146,21 @@ impl Agent {
         let ports = toolsets
             .iter()
             .map(|toolset| (toolset.component(), toolset.port()))
+            .collect();
+        let context_providers = context_providers
+            .unwrap_or_default()
+            .iter()
+            .map(|provider| (provider.component(), provider.port()))
+            .collect();
+        let middleware = middleware
+            .unwrap_or_default()
+            .iter()
+            .map(|middleware| (middleware.component(), middleware.port()))
+            .collect();
+        let observers = observers
+            .unwrap_or_default()
+            .iter()
+            .map(|observer| (observer.component(), observer.port()))
             .collect();
         let store = store.map(|store| store.port());
         let capabilities = match parse_capabilities(capabilities_json.as_deref()) {
@@ -156,6 +178,9 @@ impl Agent {
                 model_component,
                 model_port,
                 ports,
+                context_providers,
+                middleware,
+                observers,
                 instruction,
                 store,
                 capabilities,
@@ -301,6 +326,9 @@ impl Agent {
 }
 
 /// Detached run control handle. Drop detaches observation and does not cancel.
+///
+/// `list_interactions` / `resolve_interaction` remain native-only
+/// (`native-tokio`). Browser WASM uses the host session/inbox path.
 #[wasm_bindgen(js_name = Run)]
 pub struct Run {
     inner: AgentRun,
@@ -864,6 +892,9 @@ async fn build_agent(
     model_component: ComponentRef,
     model: Arc<dyn finstack_ai::runtime::Model>,
     toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
+    context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
+    middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
+    observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
     instruction: Option<String>,
     store: Option<Arc<dyn JournalStore>>,
     capabilities: Vec<CapabilitySpec>,
@@ -895,6 +926,15 @@ async fn build_agent(
     );
     for (component, toolset) in toolsets {
         builder = builder.toolset(component, toolset);
+    }
+    for (component, provider) in context_providers {
+        builder = builder.context_provider(component, provider);
+    }
+    for (component, middleware) in middleware {
+        builder = builder.middleware(component, middleware);
+    }
+    for (component, observer) in observers {
+        builder = builder.observer(component, observer);
     }
     if let Some(instruction) = instruction {
         builder = builder

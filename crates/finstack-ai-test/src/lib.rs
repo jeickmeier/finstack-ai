@@ -15,6 +15,7 @@ mod fakes;
 mod golden_scenarios;
 mod journal_bodies;
 mod journal_fixture;
+mod journal_generate;
 mod message_fixture;
 mod paths;
 mod port_conformance;
@@ -47,8 +48,9 @@ pub use journal_bodies::{all_activated_record_bodies, draft_for_body};
 pub use journal_fixture::{
     JournalExpect, JournalFixture, JournalFixtureError, JournalRecipe,
     discover_journal_v1_fixtures, known_answer_for_body, known_answer_for_envelope,
-    load_journal_fixture, run_journal_fixture, run_journal_v1_corpus, write_journal_v1_fixtures,
+    load_journal_fixture, run_journal_fixture, run_journal_v1_corpus,
 };
+pub use journal_generate::write_journal_v1_fixtures;
 pub use paths::{compatibility_fixture, repo_root, schema_path};
 pub use port_conformance::{
     ContextConformanceCase, JournalStoreConformanceCase, MiddlewareConformanceCase,

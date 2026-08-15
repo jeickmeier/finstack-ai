@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     AgentId, AgentInvoker, ArtifactStore, BudgetLedger, BundleId, CapabilityId, ComponentId,
-    ComponentRef, Digest, PortObject, RawJson, SchemaRef, Version,
+    ComponentRef, Digest, RawJson, SchemaRef, Version,
 };
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
@@ -212,7 +212,6 @@ impl BundleSpec {
     pub fn validate(&self) -> Result<(), BundleResolutionError> {
         if self.schema_version != BUNDLE_SCHEMA_VERSION {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("unsupported_bundle_schema_version"),
             });
         }
@@ -224,14 +223,12 @@ impl BundleSpec {
         ] {
             if len > MAX_ITEMS {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(format!("{field}_too_many_items")),
                 });
             }
         }
         if self.defaults.extension_config.len() > MAX_CONFIG_ENTRIES {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("bundle_defaults_too_many_entries"),
             });
         }
@@ -240,12 +237,10 @@ impl BundleSpec {
             agent
                 .validate()
                 .map_err(|error| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 })?;
             if !agents.insert(agent.id.clone()) {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("duplicate_agent_id"),
                 });
             }
@@ -255,12 +250,10 @@ impl BundleSpec {
             capability
                 .validate()
                 .map_err(|error| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 })?;
             if !capabilities.insert(capability.id.clone()) {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("duplicate_capability_id"),
                 });
             }
@@ -272,7 +265,6 @@ impl BundleSpec {
                     if !version.validate() =>
                 {
                     return Err(BundleResolutionError::Invalid {
-                        code: BUNDLE_RESOLUTION_INVALID,
                         message: Arc::from("invalid_version_range"),
                     });
                 }
@@ -283,7 +275,6 @@ impl BundleSpec {
                             != alternatives.len() =>
                 {
                     return Err(BundleResolutionError::Invalid {
-                        code: BUNDLE_RESOLUTION_INVALID,
                         message: Arc::from("invalid_one_of_components"),
                     });
                 }
@@ -461,7 +452,6 @@ impl ResolvedAgentLock {
     pub fn validate(&self) -> Result<(), BundleResolutionError> {
         if self.schema_version != BUNDLE_SCHEMA_VERSION {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("unsupported_lock_schema_version"),
             });
         }
@@ -471,7 +461,6 @@ impl ResolvedAgentLock {
                 || !components.insert(component.component.id().clone())
             {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("lock_component_not_exact_or_duplicate"),
                 });
             }
@@ -483,7 +472,6 @@ impl ResolvedAgentLock {
             .any(|capability| !capabilities.insert(capability.id.clone()))
         {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("duplicate_locked_capability"),
             });
         }
@@ -493,7 +481,6 @@ impl ResolvedAgentLock {
             .any(|pair| pair[0] >= pair[1])
         {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("schema_digests_not_sorted_unique"),
             });
         }
@@ -508,7 +495,6 @@ impl ResolvedAgentLock {
     pub fn to_json(&self) -> Result<Vec<u8>, BundleResolutionError> {
         self.validate()?;
         serde_json_canonicalizer::to_vec(self).map_err(|error| BundleResolutionError::Invalid {
-            code: BUNDLE_RESOLUTION_INVALID,
             message: Arc::from(error.to_string()),
         })
     }
@@ -521,7 +507,6 @@ impl ResolvedAgentLock {
     pub fn from_json(bytes: &[u8]) -> Result<Self, BundleResolutionError> {
         let value: Self =
             serde_json::from_slice(bytes).map_err(|error| BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from(error.to_string()),
             })?;
         value.validate()?;
@@ -537,7 +522,6 @@ impl ResolvedAgentLock {
         let bytes = self.to_json()?;
         Digest::domain_separated("resolved-agent-lock", 1, &bytes).map_err(|error| {
             BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from(error.to_string()),
             }
         })
@@ -576,19 +560,12 @@ impl RuntimeServices {
         ] {
             if is_required && !is_present {
                 return Err(BundleResolutionError::Missing {
-                    code: BUNDLE_RESOLUTION_MISSING,
                     item: Arc::from(name),
                 });
             }
         }
         Ok(())
     }
-}
-
-/// Read-only exact installed bundle catalog.
-pub trait AgentCatalog: PortObject {
-    /// Look up one exact installed bundle identity.
-    fn bundle(&self, id: &BundleId) -> Option<Arc<BundleSpec>>;
 }
 
 /// In-memory exact-installation catalog; one bundle version per ID.
@@ -607,17 +584,16 @@ impl BundleCatalog {
         bundle.validate()?;
         if self.bundles.contains_key(&bundle.id) {
             return Err(BundleResolutionError::Conflict {
-                code: BUNDLE_RESOLUTION_CONFLICT,
                 item: Arc::from(bundle.id.as_str()),
             });
         }
         self.bundles.insert(bundle.id.clone(), Arc::new(bundle));
         Ok(())
     }
-}
 
-impl AgentCatalog for BundleCatalog {
-    fn bundle(&self, id: &BundleId) -> Option<Arc<BundleSpec>> {
+    /// Look up one exact installed bundle identity.
+    #[must_use]
+    pub fn bundle(&self, id: &BundleId) -> Option<Arc<BundleSpec>> {
         self.bundles.get(id).cloned()
     }
 }
@@ -635,7 +611,7 @@ pub(crate) struct CompositionRecipe {
 
 /// Finite resolver from exact bundle/catalog registrations to one immutable agent.
 pub struct BundleResolver<'a> {
-    catalog: &'a dyn AgentCatalog,
+    catalog: &'a BundleCatalog,
     engine_version: Version,
     host_features: BTreeSet<HostFeature>,
     services: RuntimeServices,
@@ -645,7 +621,7 @@ impl<'a> BundleResolver<'a> {
     /// Construct a resolver over one exact installed catalog.
     #[must_use]
     pub fn new(
-        catalog: &'a dyn AgentCatalog,
+        catalog: &'a BundleCatalog,
         engine_version: Version,
         host_features: BTreeSet<HostFeature>,
         services: RuntimeServices,
@@ -676,7 +652,6 @@ impl<'a> BundleResolver<'a> {
             self.catalog
                 .bundle(bundle_id)
                 .ok_or_else(|| BundleResolutionError::Missing {
-                    code: BUNDLE_RESOLUTION_MISSING,
                     item: Arc::from(bundle_id.as_str()),
                 })?;
         bundle.validate()?;
@@ -688,7 +663,6 @@ impl<'a> BundleResolver<'a> {
                 .find(|agent| &agent.id == agent_id)
                 .cloned()
                 .ok_or_else(|| BundleResolutionError::Missing {
-                    code: BUNDLE_RESOLUTION_MISSING,
                     item: Arc::from(agent_id.as_str()),
                 })?,
         );
@@ -724,7 +698,6 @@ impl<'a> BundleResolver<'a> {
             current
                 .composition()
                 .ok_or_else(|| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("agent_was_not_bundle_resolved"),
                 })?;
         let mut active = current_recipe.active_application.clone();
@@ -734,12 +707,10 @@ impl<'a> BundleResolver<'a> {
                     .capabilities
                     .get(&capability_id)
                     .ok_or_else(|| BundleResolutionError::Missing {
-                        code: BUNDLE_RESOLUTION_MISSING,
                         item: Arc::from(capability_id.as_str()),
                     })?;
             if capability.activation != CapabilityActivation::Application {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("capability_not_application_activated"),
                 });
             }
@@ -777,7 +748,6 @@ impl<'a> BundleResolver<'a> {
             current
                 .composition()
                 .ok_or_else(|| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("agent_was_not_bundle_resolved"),
                 })?;
         let mut active = current_recipe.active_model.clone();
@@ -787,12 +757,10 @@ impl<'a> BundleResolver<'a> {
                     .capabilities
                     .get(&capability_id)
                     .ok_or_else(|| BundleResolutionError::Missing {
-                        code: BUNDLE_RESOLUTION_MISSING,
                         item: Arc::from(capability_id.as_str()),
                     })?;
             if capability.activation != CapabilityActivation::Model {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("capability_not_model_activated"),
                 });
             }
@@ -825,7 +793,6 @@ impl<'a> BundleResolver<'a> {
         lock.validate()?;
         if lock.engine_version != self.engine_version {
             return Err(BundleResolutionError::LockMismatch {
-                code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                 message: Arc::from("engine_version_mismatch"),
             });
         }
@@ -833,18 +800,15 @@ impl<'a> BundleResolver<'a> {
             lock.bundle
                 .as_ref()
                 .ok_or_else(|| BundleResolutionError::LockMismatch {
-                    code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                     message: Arc::from("lock_missing_bundle"),
                 })?;
         let bundle = self.catalog.bundle(&locked_bundle.id).ok_or_else(|| {
             BundleResolutionError::Missing {
-                code: BUNDLE_RESOLUTION_MISSING,
                 item: Arc::from(locked_bundle.id.as_str()),
             }
         })?;
         if bundle.version != locked_bundle.version {
             return Err(BundleResolutionError::LockMismatch {
-                code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                 message: Arc::from("bundle_version_mismatch"),
             });
         }
@@ -853,7 +817,6 @@ impl<'a> BundleResolver<'a> {
             .iter()
             .find(|agent| agent.fingerprint().ok() == Some(lock.agent_spec_digest))
             .ok_or_else(|| BundleResolutionError::LockMismatch {
-                code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                 message: Arc::from("agent_spec_digest_missing"),
             })?;
         let resolved = self
@@ -896,12 +859,10 @@ impl<'a> BundleResolver<'a> {
         let reconstructed = resolved
             .lock()
             .ok_or_else(|| BundleResolutionError::LockMismatch {
-                code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                 message: Arc::from("reconstruction_missing_lock"),
             })?;
         if reconstructed.as_ref() != lock || reconstructed.fingerprint()? != lock.fingerprint()? {
             return Err(BundleResolutionError::LockMismatch {
-                code: BUNDLE_RESOLUTION_LOCK_MISMATCH,
                 message: Arc::from("exact_lock_reconstruction_mismatch"),
             });
         }
@@ -919,7 +880,6 @@ impl<'a> BundleResolver<'a> {
             .is_some_and(|minimum| version_tuple(self.engine_version) < version_tuple(minimum))
         {
             return Err(BundleResolutionError::Conflict {
-                code: BUNDLE_RESOLUTION_CONFLICT,
                 item: Arc::from("minimum_engine_version"),
             });
         }
@@ -931,7 +891,6 @@ impl<'a> BundleResolver<'a> {
                 BundleRequirement::RequiredComponent { component, version } => {
                     let descriptor = registry.registered_component(component).ok_or_else(|| {
                         BundleResolutionError::Missing {
-                            code: BUNDLE_RESOLUTION_MISSING,
                             item: Arc::from(component.as_str()),
                         }
                     })?;
@@ -953,7 +912,6 @@ impl<'a> BundleResolver<'a> {
                         .any(|candidate| &candidate.id == capability)
                     {
                         return Err(BundleResolutionError::Missing {
-                            code: BUNDLE_RESOLUTION_MISSING,
                             item: Arc::from(capability.as_str()),
                         });
                     }
@@ -965,7 +923,6 @@ impl<'a> BundleResolver<'a> {
                         .count();
                     if matches != 1 {
                         return Err(BundleResolutionError::Conflict {
-                            code: BUNDLE_RESOLUTION_CONFLICT,
                             item: Arc::from("one_of_components_not_exactly_one"),
                         });
                     }
@@ -977,7 +934,6 @@ impl<'a> BundleResolver<'a> {
                     if version_tuple(self.engine_version) < version_tuple(*version) =>
                 {
                     return Err(BundleResolutionError::Conflict {
-                        code: BUNDLE_RESOLUTION_CONFLICT,
                         item: Arc::from("minimum_framework_contract"),
                     });
                 }
@@ -997,7 +953,6 @@ impl<'a> BundleResolver<'a> {
             };
             if present {
                 return Err(BundleResolutionError::Conflict {
-                    code: BUNDLE_RESOLUTION_CONFLICT,
                     item: Arc::from("declared_bundle_conflict"),
                 });
             }
@@ -1011,7 +966,6 @@ impl<'a> BundleResolver<'a> {
             Ok(())
         } else {
             Err(BundleResolutionError::Missing {
-                code: BUNDLE_RESOLUTION_MISSING,
                 item: Arc::from(host_feature_name(feature)),
             })
         }
@@ -1032,7 +986,6 @@ impl<'a> BundleResolver<'a> {
                     self.catalog
                         .bundle(id)
                         .ok_or_else(|| BundleResolutionError::Missing {
-                            code: BUNDLE_RESOLUTION_MISSING,
                             item: Arc::from(id.as_str()),
                         })?
                 }
@@ -1045,7 +998,6 @@ impl<'a> BundleResolver<'a> {
                     .find(|candidate| candidate.id == reference.id)
                     .cloned()
                     .ok_or_else(|| BundleResolutionError::Missing {
-                        code: BUNDLE_RESOLUTION_MISSING,
                         item: Arc::from(reference.id.as_str()),
                     })?,
             );
@@ -1063,7 +1015,6 @@ impl<'a> BundleResolver<'a> {
                 .is_some()
             {
                 return Err(BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from("duplicate_capability_resolution"),
                 });
             }
@@ -1083,7 +1034,6 @@ impl<'a> BundleResolver<'a> {
         ensure_secret_free_config(&effective_config)?;
         let source = ComponentId::parse(recipe.base_spec.id.as_str()).map_err(|error| {
             BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from(error.to_string()),
             }
         })?;
@@ -1092,13 +1042,11 @@ impl<'a> BundleResolver<'a> {
             request = request
                 .with_configuration(component.clone(), config.clone())
                 .map_err(|error| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 })?;
         }
         let resolved = registry.resolve(request, context).await.map_err(|error| {
             BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from(error.to_string()),
             }
         })?;
@@ -1131,7 +1079,6 @@ fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, BundleResolution
                 middleware.push(
                     finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
                         |error| BundleResolutionError::Invalid {
-                            code: BUNDLE_RESOLUTION_INVALID,
                             message: Arc::from(error.to_string()),
                         },
                     )?,
@@ -1149,7 +1096,6 @@ fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, BundleResolution
                 middleware.push(
                     finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
                         |error| BundleResolutionError::Invalid {
-                            code: BUNDLE_RESOLUTION_INVALID,
                             message: Arc::from(error.to_string()),
                         },
                     )?,
@@ -1163,7 +1109,6 @@ fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, BundleResolution
     spec.middleware = middleware.into();
     spec.validate()
         .map_err(|error| BundleResolutionError::Invalid {
-            code: BUNDLE_RESOLUTION_INVALID,
             message: Arc::from(error.to_string()),
         })?;
     Ok(spec)
@@ -1181,7 +1126,6 @@ fn effective_config(
     }
     if effective.len() > MAX_CONFIG_ENTRIES {
         return Err(BundleResolutionError::Invalid {
-            code: BUNDLE_RESOLUTION_INVALID,
             message: Arc::from("effective_config_too_many_entries"),
         });
     }
@@ -1193,7 +1137,6 @@ fn selection(spec: &AgentSpec) -> Result<AgentComponentSelection, BundleResoluti
         .store
         .clone()
         .ok_or_else(|| BundleResolutionError::Missing {
-            code: BUNDLE_RESOLUTION_MISSING,
             item: Arc::from("agent journal store"),
         })?;
     Ok(AgentComponentSelection {
@@ -1264,13 +1207,11 @@ fn build_lock(
     let capabilities = locked_capabilities(recipe)?;
     let config_bytes = serde_json_canonicalizer::to_vec(effective_config).map_err(|error| {
         BundleResolutionError::Invalid {
-            code: BUNDLE_RESOLUTION_INVALID,
             message: Arc::from(error.to_string()),
         }
     })?;
     let effective_config_digest = Digest::domain_separated("effective-config", 1, &config_bytes)
         .map_err(|error| BundleResolutionError::Invalid {
-            code: BUNDLE_RESOLUTION_INVALID,
             message: Arc::from(error.to_string()),
         })?;
     let mut schema_digests = components
@@ -1296,7 +1237,6 @@ fn build_lock(
         engine_version,
         agent_spec_digest: recipe.base_spec.fingerprint().map_err(|error| {
             BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from(error.to_string()),
             }
         })?,
@@ -1322,13 +1262,11 @@ fn locked_capabilities(
         .map(|(id, (bundle, capability))| {
             let bytes = serde_json_canonicalizer::to_vec(capability.as_ref()).map_err(|error| {
                 BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 }
             })?;
             let definition_digest = Digest::domain_separated("capability-spec", 1, &bytes)
                 .map_err(|error| BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 })?;
             Ok(LockedCapability {
@@ -1374,7 +1312,6 @@ fn require_component_version(
         Ok(())
     } else {
         Err(BundleResolutionError::Conflict {
-            code: BUNDLE_RESOLUTION_CONFLICT,
             item: Arc::from(component.as_str()),
         })
     }
@@ -1387,13 +1324,11 @@ fn ensure_secret_free_config(
         let parsed: serde_json::Value =
             serde_json::from_slice(value.as_bytes()).map_err(|error| {
                 BundleResolutionError::Invalid {
-                    code: BUNDLE_RESOLUTION_INVALID,
                     message: Arc::from(error.to_string()),
                 }
             })?;
         if contains_secret(&parsed) {
             return Err(BundleResolutionError::Invalid {
-                code: BUNDLE_RESOLUTION_INVALID,
                 message: Arc::from("secret_material_in_configuration"),
             });
         }
@@ -1467,37 +1402,42 @@ fn host_feature_name(feature: &HostFeature) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum BundleResolutionError {
     /// Malformed or unsupported specification/lock.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", BUNDLE_RESOLUTION_INVALID)]
     Invalid {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable non-secret diagnostic.
         message: Arc<str>,
     },
     /// Required exact identity or service is absent.
-    #[error("{code}: missing {item}")]
+    #[error("{}: missing {item}", BUNDLE_RESOLUTION_MISSING)]
     Missing {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Missing non-secret identity.
         item: Arc<str>,
     },
     /// Finite requirement/conflict failed.
-    #[error("{code}: conflicting {item}")]
+    #[error("{}: conflicting {item}", BUNDLE_RESOLUTION_CONFLICT)]
     Conflict {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Conflicting non-secret identity.
         item: Arc<str>,
     },
     /// Imported lock could not be reconstructed exactly.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", BUNDLE_RESOLUTION_LOCK_MISMATCH)]
     LockMismatch {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable non-secret diagnostic.
         message: Arc<str>,
     },
+}
+
+impl BundleResolutionError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Invalid { .. } => BUNDLE_RESOLUTION_INVALID,
+            Self::Missing { .. } => BUNDLE_RESOLUTION_MISSING,
+            Self::Conflict { .. } => BUNDLE_RESOLUTION_CONFLICT,
+            Self::LockMismatch { .. } => BUNDLE_RESOLUTION_LOCK_MISMATCH,
+        }
+    }
 }
 
 #[cfg(test)]

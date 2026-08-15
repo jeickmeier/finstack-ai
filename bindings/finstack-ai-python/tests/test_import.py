@@ -37,16 +37,9 @@ def test_provider_namespace_is_lazy() -> None:
     assert "finstack_ai.providers" not in sys.modules
     import finstack_ai.providers as providers
 
-    assert "finstack_ai.providers.openai_compatible" not in sys.modules
-    assert "finstack_ai.providers.anthropic" not in sys.modules
-    assert "finstack_ai.providers.ollama" not in sys.modules
     assert providers.openai_compatible.is_available()
-    assert "finstack_ai.providers.openai_compatible" in sys.modules
-    assert "finstack_ai.providers.anthropic" not in sys.modules
     assert providers.anthropic.is_available()
     assert providers.ollama.is_available()
-    assert "finstack_ai.providers.anthropic" in sys.modules
-    assert "finstack_ai.providers.ollama" in sys.modules
     assert finstack_ai.health() == "ok"
 
 

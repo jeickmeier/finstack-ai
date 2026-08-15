@@ -551,8 +551,29 @@ class Agent:
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
     ) -> Agent:
-        """Build an agent from trusted callbacks and optional Pydantic output type."""
+        """Build an agent from trusted callbacks and optional Pydantic output type.
+
+        Args:
+            model: Trusted Python model callback.
+            toolsets: Optional trusted toolset callbacks.
+            instruction: Optional model instruction.
+            output_type: Optional Pydantic output type.
+            capabilities: Optional declarative capabilities.
+            active_capabilities: Application-activated capability IDs.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The callbacks or capability set are invalid.
+        """
     def capability_catalog(self) -> list[CapabilityCatalogItem]:
         """Return the bounded model-activated catalog in identity order."""
     def compact_capability_catalog(self) -> str:

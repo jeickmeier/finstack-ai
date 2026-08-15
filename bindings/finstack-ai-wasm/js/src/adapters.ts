@@ -101,6 +101,9 @@ function assertInitialized(flag: boolean): void {
 let initialized = false;
 const wasmModels = new WeakMap<JsModel, WasmJsModel>();
 const wasmToolsets = new WeakMap<JsToolset, WasmJsToolset>();
+const wasmContextProviders = new WeakMap<JsContextProvider, WasmJsContextProvider>();
+const wasmMiddleware = new WeakMap<JsMiddleware, WasmJsMiddleware>();
+const wasmObservers = new WeakMap<JsObserver, WasmJsObserver>();
 const wasmStores = new WeakMap<JsJournalStore, WasmJsJournalStore>();
 
 /**
@@ -138,6 +141,53 @@ export function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset {
   const handle = wasmToolsets.get(toolset);
   if (handle === undefined) {
     throw new TypeError("JsToolset is not a live wasm handle");
+  }
+  return handle;
+}
+
+/**
+ * Return the crate-private wasm-bindgen context-provider handle.
+ *
+ * @param provider - Public {@link JsContextProvider} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmContextProviderHandle(
+  provider: JsContextProvider,
+): WasmJsContextProvider {
+  const handle = wasmContextProviders.get(provider);
+  if (handle === undefined) {
+    throw new TypeError("JsContextProvider is not a live wasm handle");
+  }
+  return handle;
+}
+
+/**
+ * Return the crate-private wasm-bindgen middleware handle.
+ *
+ * @param middleware - Public {@link JsMiddleware} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmMiddlewareHandle(middleware: JsMiddleware): WasmJsMiddleware {
+  const handle = wasmMiddleware.get(middleware);
+  if (handle === undefined) {
+    throw new TypeError("JsMiddleware is not a live wasm handle");
+  }
+  return handle;
+}
+
+/**
+ * Return the crate-private wasm-bindgen observer handle.
+ *
+ * @param observer - Public {@link JsObserver} wrapper.
+ * @returns The generated wasm handle.
+ * @throws When the wrapper was not constructed after {@link init}.
+ */
+export function wasmObserverHandle(observer: JsObserver): WasmJsObserver {
+  const handle = wasmObservers.get(observer);
+  if (handle === undefined) {
+    throw new TypeError("JsObserver is not a live wasm handle");
   }
   return handle;
 }
@@ -237,6 +287,7 @@ export class JsContextProvider {
   constructor(adapter: HostContextProvider, options: JsContextProviderOptions) {
     assertInitialized(initialized);
     this.#handle = new WasmJsContextProvider(adapter, options);
+    wasmContextProviders.set(this, this.#handle);
   }
 }
 
@@ -256,6 +307,7 @@ export class JsMiddleware {
   constructor(adapter: HostMiddleware, options: JsMiddlewareOptions) {
     assertInitialized(initialized);
     this.#handle = new WasmJsMiddleware(adapter, options);
+    wasmMiddleware.set(this, this.#handle);
   }
 }
 
@@ -275,6 +327,7 @@ export class JsObserver {
   constructor(adapter: HostObserver, options: JsObserverOptions) {
     assertInitialized(initialized);
     this.#handle = new WasmJsObserver(adapter, options);
+    wasmObservers.set(this, this.#handle);
   }
 }
 

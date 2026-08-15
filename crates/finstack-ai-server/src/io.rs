@@ -1,6 +1,10 @@
 //! Length-prefixed async frame I/O.
 
-use finstack_ai_protocol::{FRAME_LENGTH_BYTES, decode_frame_len, encode_frame};
+use finstack_ai_protocol::{
+    FRAME_LENGTH_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, PayloadFamily,
+    ProtocolEnvelope, RemotePostAuth, RemotePreAuth, decode_envelope, decode_frame_len,
+    encode_envelope, encode_frame,
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::ServerError;
@@ -38,4 +42,60 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(
     writer.write_all(&frame).await?;
     writer.flush().await?;
     Ok(())
+}
+
+/// Read one remote pre-auth envelope.
+///
+/// # Errors
+///
+/// Returns protocol, I/O, or limit failures.
+pub async fn read_pre_auth<S: AsyncRead + Unpin>(
+    stream: &mut S,
+) -> Result<RemotePreAuth, ServerError> {
+    let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await?;
+    let envelope: ProtocolEnvelope<RemotePreAuth> =
+        decode_envelope(&payload, PayloadFamily::Remote)?;
+    Ok(envelope.into_body())
+}
+
+/// Write one remote pre-auth envelope.
+///
+/// # Errors
+///
+/// Returns protocol or I/O failures.
+pub async fn write_pre_auth<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    body: &RemotePreAuth,
+) -> Result<(), ServerError> {
+    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
+    write_frame(stream, &payload, PRE_AUTH_FRAME_MAX_BYTES).await
+}
+
+/// Read one remote post-auth envelope.
+///
+/// # Errors
+///
+/// Returns protocol, I/O, or limit failures.
+pub async fn read_post_auth<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    ceiling: usize,
+) -> Result<RemotePostAuth, ServerError> {
+    let payload = read_frame(stream, ceiling).await?;
+    let envelope: ProtocolEnvelope<RemotePostAuth> =
+        decode_envelope(&payload, PayloadFamily::Remote)?;
+    Ok(envelope.into_body())
+}
+
+/// Write one remote post-auth envelope.
+///
+/// # Errors
+///
+/// Returns protocol or I/O failures.
+pub async fn write_post_auth<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    ceiling: usize,
+    body: &RemotePostAuth,
+) -> Result<(), ServerError> {
+    let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)?;
+    write_frame(stream, &payload, ceiling).await
 }

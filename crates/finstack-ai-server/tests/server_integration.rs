@@ -1,3 +1,5 @@
+//! Reference server integration coverage.
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +15,7 @@ use finstack_ai_runtime::{
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
-use crate::{
+use finstack_ai_server::{
     CreditLimits, ListenAddr, RemoteClient, SERVER_LISTEN_INVALID, Server, ServerError,
     SessionReplica, StaticAuthVerifier, TransportKind,
 };

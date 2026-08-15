@@ -1,32 +1,28 @@
-"""Lazy provider namespace for curated Rust-backed integrations."""
+"""Availability probes for curated Rust-backed provider integrations."""
 
-from importlib import import_module
-from types import ModuleType
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from . import anthropic as anthropic
-    from . import ollama as ollama
-    from . import openai_compatible as openai_compatible
+from .. import linked_providers
 
 __all__ = ["anthropic", "ollama", "openai_compatible"]
 
 
-def __getattr__(name: str) -> ModuleType:
-    """Load a provider facade only when its public name is requested.
+class _ProviderAvailability:
+    """Availability probe for one linked provider identifier."""
 
-    Args:
-        name: Provider submodule name.
+    def __init__(self, linked_name: str) -> None:
+        self._linked_name = linked_name
 
-    Returns:
-        The requested provider module.
+    def is_available(self) -> bool:
+        """Return whether this wheel contains the provider implementation.
 
-    Raises:
-        AttributeError: If the provider name is unknown.
-    """
+        Returns:
+            ``True`` when the native module reports the linked provider name.
+        """
 
-    if name in {"openai_compatible", "anthropic", "ollama"}:
-        module = import_module(f"{__name__}.{name}")
-        globals()[name] = module
-        return module
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        return self._linked_name in linked_providers()
+
+
+openai_compatible = _ProviderAvailability("openai-compatible")
+anthropic = _ProviderAvailability("anthropic")
+ollama = _ProviderAvailability("ollama")

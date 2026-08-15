@@ -1,5 +1,5 @@
 import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession } from "../generated/finstack_ai_wasm.js";
-import type { JsJournalStore, JsModel, JsToolset } from "./adapters.js";
+import type { JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsToolset } from "./adapters.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 export { FinstackError } from "./errors.js";
 export type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./errors.js";
@@ -64,6 +64,12 @@ export interface AgentOptions {
      * Application-activated capability IDs. Model-activation IDs fail closed.
      */
     activeCapabilities?: string[];
+    /** Optional trusted context-provider wrappers. */
+    contextProviders?: JsContextProvider[];
+    /** Optional trusted middleware wrappers. */
+    middleware?: JsMiddleware[];
+    /** Optional trusted observer wrappers. */
+    observers?: JsObserver[];
 }
 /**
  * Provisional inspect phase for a stored session.

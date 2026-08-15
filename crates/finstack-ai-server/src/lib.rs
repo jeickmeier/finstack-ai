@@ -217,11 +217,12 @@ impl Server {
         self.serve(stream, TransportKind::Unix).await
     }
 
-    pub(crate) async fn serve<S>(
-        &self,
-        stream: S,
-        transport: TransportKind,
-    ) -> Result<(), ServerError>
+    /// Serve an already-accepted stream with an explicit transport kind.
+    ///
+    /// # Errors
+    ///
+    /// Returns protocol or I/O failures.
+    pub async fn serve<S>(&self, stream: S, transport: TransportKind) -> Result<(), ServerError>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
@@ -239,6 +240,3 @@ impl Server {
         .await
     }
 }
-
-#[cfg(test)]
-mod tests;

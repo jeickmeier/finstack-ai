@@ -345,7 +345,7 @@ impl ExternalCommandError {
 }
 
 fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, ExternalCommandError> {
-    if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+    if !crate::label_is_valid(value) {
         return Err(ExternalCommandError::InvalidLabel { field });
     }
     Ok(Arc::from(value))

@@ -103,7 +103,6 @@ impl ComponentAlias {
             });
         if !valid {
             return Err(RegistrationError::InvalidDescriptor {
-                code: REGISTRATION_INVALID_DESCRIPTOR,
                 message: Arc::from("component alias is invalid"),
             });
         }
@@ -176,14 +175,12 @@ impl RegistrationMetadata {
     pub fn with_alias(mut self, alias: ComponentAlias) -> Result<Self, RegistrationError> {
         if self.aliases.len() >= MAX_COMPONENT_ALIASES {
             return Err(RegistrationError::AliasLimit {
-                code: REGISTRATION_ALIAS_LIMIT,
                 component: self.id,
                 limit: MAX_COMPONENT_ALIASES,
             });
         }
         if self.aliases.contains(&alias) {
             return Err(RegistrationError::InvalidDescriptor {
-                code: REGISTRATION_INVALID_DESCRIPTOR,
                 message: Arc::from("component metadata contains a duplicate alias"),
             });
         }
@@ -537,26 +534,26 @@ pub struct RegisteredComponentDescriptor {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RegistrationError {
     /// Registration method was called outside an extension source transaction.
-    #[error("{code}: registration requires an active extension source")]
-    SourceRequired {
-        /// Stable code.
-        code: &'static str,
-    },
+    #[error(
+        "{}: registration requires an active extension source",
+        REGISTRATION_SOURCE_REQUIRED
+    )]
+    SourceRequired,
     /// An extension source identity was reused.
-    #[error("{code}: extension source {extension_source} is already registered")]
+    #[error(
+        "{}: extension source {extension_source} is already registered",
+        REGISTRATION_SOURCE_DUPLICATE
+    )]
     SourceDuplicate {
-        /// Stable code.
-        code: &'static str,
         /// Duplicate source.
         extension_source: ComponentId,
     },
     /// Component identity was reused without explicit replacement.
     #[error(
-        "{code}: {component} from {attempted_source} duplicates {kind} registered by {existing_source}"
+        "{}: {component} from {attempted_source} duplicates {kind} registered by {existing_source}",
+        REGISTRATION_DUPLICATE
     )]
     Duplicate {
-        /// Stable code.
-        code: &'static str,
         /// Duplicate component.
         component: ComponentId,
         /// Existing kind.
@@ -567,10 +564,11 @@ pub enum RegistrationError {
         attempted_source: ComponentId,
     },
     /// Explicit replacement did not match the existing source or kind.
-    #[error("{code}: replacement of {component} by {attempted_source} was rejected")]
+    #[error(
+        "{}: replacement of {component} by {attempted_source} was rejected",
+        REGISTRATION_REPLACEMENT_REJECTED
+    )]
     ReplacementRejected {
-        /// Stable code.
-        code: &'static str,
         /// Component being replaced.
         component: ComponentId,
         /// Expected existing source.
@@ -585,10 +583,11 @@ pub enum RegistrationError {
         actual_kind: Option<ComponentKind>,
     },
     /// Alias is already owned by a different component.
-    #[error("{code}: alias {alias} for {component} is already owned by {existing_component}")]
+    #[error(
+        "{}: alias {alias} for {component} is already owned by {existing_component}",
+        REGISTRATION_ALIAS_CONFLICT
+    )]
     AliasConflict {
-        /// Stable code.
-        code: &'static str,
         /// Conflicting alias.
         alias: ComponentAlias,
         /// Attempted component.
@@ -601,34 +600,31 @@ pub enum RegistrationError {
         attempted_source: ComponentId,
     },
     /// Per-component alias limit was exceeded.
-    #[error("{code}: component {component} exceeds alias limit {limit}")]
+    #[error(
+        "{}: component {component} exceeds alias limit {limit}",
+        REGISTRATION_ALIAS_LIMIT
+    )]
     AliasLimit {
-        /// Stable code.
-        code: &'static str,
         /// Component.
         component: ComponentId,
         /// Limit.
         limit: usize,
     },
     /// Registry component limit was exceeded.
-    #[error("{code}: registry exceeds component limit {limit}")]
+    #[error(
+        "{}: registry exceeds component limit {limit}",
+        REGISTRATION_COMPONENT_LIMIT
+    )]
     ComponentLimit {
-        /// Stable code.
-        code: &'static str,
         /// Limit.
         limit: usize,
     },
     /// Nested source registration was attempted.
-    #[error("{code}: extension registration cannot be nested")]
-    Reentrant {
-        /// Stable code.
-        code: &'static str,
-    },
+    #[error("{}: extension registration cannot be nested", REGISTRATION_REENTRANT)]
+    Reentrant,
     /// Descriptor or alias metadata was invalid.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", REGISTRATION_INVALID_DESCRIPTOR)]
     InvalidDescriptor {
-        /// Stable code.
-        code: &'static str,
         /// Safe diagnostic.
         message: Arc<str>,
     },
@@ -639,15 +635,15 @@ impl RegistrationError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::SourceRequired { code }
-            | Self::SourceDuplicate { code, .. }
-            | Self::Duplicate { code, .. }
-            | Self::ReplacementRejected { code, .. }
-            | Self::AliasConflict { code, .. }
-            | Self::AliasLimit { code, .. }
-            | Self::ComponentLimit { code, .. }
-            | Self::Reentrant { code }
-            | Self::InvalidDescriptor { code, .. } => code,
+            Self::SourceRequired => REGISTRATION_SOURCE_REQUIRED,
+            Self::SourceDuplicate { .. } => REGISTRATION_SOURCE_DUPLICATE,
+            Self::Duplicate { .. } => REGISTRATION_DUPLICATE,
+            Self::ReplacementRejected { .. } => REGISTRATION_REPLACEMENT_REJECTED,
+            Self::AliasConflict { .. } => REGISTRATION_ALIAS_CONFLICT,
+            Self::AliasLimit { .. } => REGISTRATION_ALIAS_LIMIT,
+            Self::ComponentLimit { .. } => REGISTRATION_COMPONENT_LIMIT,
+            Self::Reentrant => REGISTRATION_REENTRANT,
+            Self::InvalidDescriptor { .. } => REGISTRATION_INVALID_DESCRIPTOR,
         }
     }
 }
@@ -761,14 +757,11 @@ impl Registrar {
         extension: &dyn Extension,
     ) -> Result<(), RegistrationError> {
         if self.active_source.is_some() {
-            return Err(RegistrationError::Reentrant {
-                code: REGISTRATION_REENTRANT,
-            });
+            return Err(RegistrationError::Reentrant);
         }
         let source = extension.descriptor();
         if self.sources.contains_key(&source.id) {
             return Err(RegistrationError::SourceDuplicate {
-                code: REGISTRATION_SOURCE_DUPLICATE,
                 extension_source: source.id,
             });
         }
@@ -1067,14 +1060,11 @@ impl Registrar {
         let source = self
             .active_source
             .clone()
-            .ok_or(RegistrationError::SourceRequired {
-                code: REGISTRATION_SOURCE_REQUIRED,
-            })?;
+            .ok_or(RegistrationError::SourceRequired)?;
         let existing = self.entries.get(&metadata.id);
         let replaced_source = match (&metadata.duplicate_policy, existing) {
             (DuplicatePolicy::Reject, Some(existing)) => {
                 return Err(RegistrationError::Duplicate {
-                    code: REGISTRATION_DUPLICATE,
                     component: metadata.id,
                     kind: existing.descriptor().kind,
                     existing_source: existing.descriptor().source.id.clone(),
@@ -1089,7 +1079,6 @@ impl Registrar {
             }
             (DuplicatePolicy::Replace { expected_source }, existing) => {
                 return Err(RegistrationError::ReplacementRejected {
-                    code: REGISTRATION_REPLACEMENT_REJECTED,
                     component: metadata.id,
                     expected_source: expected_source.clone(),
                     actual_source: existing.map(|entry| entry.descriptor().source.id.clone()),
@@ -1102,7 +1091,6 @@ impl Registrar {
         };
         if existing.is_none() && self.entries.len() >= MAX_REGISTERED_COMPONENTS {
             return Err(RegistrationError::ComponentLimit {
-                code: REGISTRATION_COMPONENT_LIMIT,
                 limit: MAX_REGISTERED_COMPONENTS,
             });
         }
@@ -1115,7 +1103,6 @@ impl Registrar {
                     |entry| entry.descriptor().source.id.clone(),
                 );
                 return Err(RegistrationError::AliasConflict {
-                    code: REGISTRATION_ALIAS_CONFLICT,
                     alias: alias.clone(),
                     component: metadata.id,
                     existing_component: existing_component.clone(),
@@ -1253,7 +1240,6 @@ impl ResolveRequest {
                 .is_some()
         {
             return Err(AgentBuildError::DuplicateSelection {
-                code: AGENT_BUILD_DUPLICATE_SELECTION,
                 request_source: self.source,
                 component,
             });
@@ -1308,10 +1294,11 @@ pub struct ResolutionReport {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AgentBuildError {
     /// A selected component or alias was absent.
-    #[error("{code}: {request_source} could not resolve {selector} as {expected_kind}")]
+    #[error(
+        "{}: {request_source} could not resolve {selector} as {expected_kind}",
+        AGENT_BUILD_MISSING_COMPONENT
+    )]
     MissingComponent {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Requested id or alias.
@@ -1320,10 +1307,11 @@ pub enum AgentBuildError {
         expected_kind: ComponentKind,
     },
     /// A selected identity was registered under another primary kind.
-    #[error("{code}: {component} from {registration_source} is {actual_kind}, not {expected_kind}")]
+    #[error(
+        "{}: {component} from {registration_source} is {actual_kind}, not {expected_kind}",
+        AGENT_BUILD_KIND_MISMATCH
+    )]
     KindMismatch {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
@@ -1336,10 +1324,11 @@ pub enum AgentBuildError {
         actual_kind: ComponentKind,
     },
     /// An exact selected version did not match the registration.
-    #[error("{code}: {component} has version {actual:?}, not {required:?}")]
+    #[error(
+        "{}: {component} has version {actual:?}, not {required:?}",
+        AGENT_BUILD_VERSION_MISMATCH
+    )]
     VersionMismatch {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
@@ -1352,10 +1341,11 @@ pub enum AgentBuildError {
         actual: Version,
     },
     /// One exact component was selected more than once.
-    #[error("{code}: {request_source} selected {component} more than once")]
+    #[error(
+        "{}: {request_source} selected {component} more than once",
+        AGENT_BUILD_DUPLICATE_SELECTION
+    )]
     DuplicateSelection {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Duplicate component.
@@ -1363,11 +1353,10 @@ pub enum AgentBuildError {
     },
     /// A typed factory or model warmup failed before the first run.
     #[error(
-        "{code}: construction of {component} from {registration_source} failed ({failure_code}): {message}"
+        "{}: construction of {component} from {registration_source} failed ({failure_code}): {message}",
+        AGENT_BUILD_FACTORY_FAILED
     )]
     FactoryFailed {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
@@ -1380,20 +1369,22 @@ pub enum AgentBuildError {
         message: Arc<str>,
     },
     /// Construction cancellation was observed.
-    #[error("{code}: construction of {component} for {request_source} was cancelled")]
+    #[error(
+        "{}: construction of {component} for {request_source} was cancelled",
+        AGENT_BUILD_CANCELLED
+    )]
     Cancelled {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
         component: ComponentId,
     },
     /// A ready handle or cached factory was requested with conflicting configuration.
-    #[error("{code}: construction configuration conflicts for {component}")]
+    #[error(
+        "{}: construction configuration conflicts for {component}",
+        AGENT_BUILD_CONFIGURATION_CONFLICT
+    )]
     ConfigurationConflict {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
@@ -1402,10 +1393,11 @@ pub enum AgentBuildError {
         registration_source: ComponentId,
     },
     /// A ready port's immutable descriptor disagreed with its registration.
-    #[error("{code}: descriptor for {component} from {registration_source} is invalid: {message}")]
+    #[error(
+        "{}: descriptor for {component} from {registration_source} is invalid: {message}",
+        AGENT_BUILD_INVALID_DESCRIPTOR
+    )]
     InvalidDescriptor {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Selected component.
@@ -1416,10 +1408,11 @@ pub enum AgentBuildError {
         message: Arc<str>,
     },
     /// Middleware dependency/order resolution failed.
-    #[error("{code}: middleware resolution failed ({failure_code}): {message}")]
+    #[error(
+        "{}: middleware resolution failed ({failure_code}): {message}",
+        AGENT_BUILD_MIDDLEWARE_INVALID
+    )]
     MiddlewareInvalid {
-        /// Stable code.
-        code: &'static str,
         /// Request source.
         request_source: ComponentId,
         /// Runtime failure code.
@@ -1434,15 +1427,15 @@ impl AgentBuildError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::MissingComponent { code, .. }
-            | Self::KindMismatch { code, .. }
-            | Self::VersionMismatch { code, .. }
-            | Self::DuplicateSelection { code, .. }
-            | Self::FactoryFailed { code, .. }
-            | Self::Cancelled { code, .. }
-            | Self::ConfigurationConflict { code, .. }
-            | Self::InvalidDescriptor { code, .. }
-            | Self::MiddlewareInvalid { code, .. } => code,
+            Self::MissingComponent { .. } => AGENT_BUILD_MISSING_COMPONENT,
+            Self::KindMismatch { .. } => AGENT_BUILD_KIND_MISMATCH,
+            Self::VersionMismatch { .. } => AGENT_BUILD_VERSION_MISMATCH,
+            Self::DuplicateSelection { .. } => AGENT_BUILD_DUPLICATE_SELECTION,
+            Self::FactoryFailed { .. } => AGENT_BUILD_FACTORY_FAILED,
+            Self::Cancelled { .. } => AGENT_BUILD_CANCELLED,
+            Self::ConfigurationConflict { .. } => AGENT_BUILD_CONFIGURATION_CONFLICT,
+            Self::InvalidDescriptor { .. } => AGENT_BUILD_INVALID_DESCRIPTOR,
+            Self::MiddlewareInvalid { .. } => AGENT_BUILD_MIDDLEWARE_INVALID,
         }
     }
 }
@@ -1896,7 +1889,6 @@ impl Registry {
                 .collect(),
         )
         .map_err(|error| AgentBuildError::MiddlewareInvalid {
-            code: AGENT_BUILD_MIDDLEWARE_INVALID,
             request_source: request.source.clone(),
             failure_code: Arc::from(error.code()),
             message: error.descriptor().message,
@@ -1949,7 +1941,6 @@ impl Registry {
         ] {
             if selectors.len() > MAX_SELECTED_COMPONENTS {
                 return Err(AgentBuildError::DuplicateSelection {
-                    code: AGENT_BUILD_DUPLICATE_SELECTION,
                     request_source: request.source.clone(),
                     component: request.source.clone(),
                 });
@@ -1975,7 +1966,6 @@ impl Registry {
             ComponentSelector::Alias { alias, .. } => {
                 let component = self.aliases.get(alias).cloned().ok_or_else(|| {
                     AgentBuildError::MissingComponent {
-                        code: AGENT_BUILD_MISSING_COMPONENT,
                         request_source: request_source.clone(),
                         selector: selector.display_name(),
                         expected_kind,
@@ -1989,14 +1979,12 @@ impl Registry {
             .get(&component)
             .map(RegisteredEntry::descriptor)
             .ok_or_else(|| AgentBuildError::MissingComponent {
-                code: AGENT_BUILD_MISSING_COMPONENT,
                 request_source: request_source.clone(),
                 selector: selector.display_name(),
                 expected_kind,
             })?;
         if descriptor.kind != expected_kind {
             return Err(AgentBuildError::KindMismatch {
-                code: AGENT_BUILD_KIND_MISMATCH,
                 request_source: request_source.clone(),
                 component,
                 registration_source: descriptor.source.id.clone(),
@@ -2012,7 +2000,6 @@ impl Registry {
             && required != actual
         {
             return Err(AgentBuildError::VersionMismatch {
-                code: AGENT_BUILD_VERSION_MISMATCH,
                 request_source: request_source.clone(),
                 component,
                 registration_source: descriptor.source.id.clone(),
@@ -2022,7 +2009,6 @@ impl Registry {
         }
         if !selected.insert(component.clone()) {
             return Err(AgentBuildError::DuplicateSelection {
-                code: AGENT_BUILD_DUPLICATE_SELECTION,
                 request_source: request_source.clone(),
                 component,
             });
@@ -2082,7 +2068,6 @@ impl Registry {
                 }
                 Ok(Err(error)) => {
                     return Err(AgentBuildError::FactoryFailed {
-                        code: AGENT_BUILD_FACTORY_FAILED,
                         request_source: source.clone(),
                         component: id.clone(),
                         registration_source: registration.descriptor.source.id.clone(),
@@ -2092,7 +2077,6 @@ impl Registry {
                 }
                 Err(()) => {
                     return Err(AgentBuildError::Cancelled {
-                        code: AGENT_BUILD_CANCELLED,
                         request_source: source.clone(),
                         component: id.clone(),
                     });
@@ -2184,7 +2168,6 @@ async fn ensure_ready<T: ?Sized + 'static>(
         } => {
             if *cached != requested_configuration {
                 return Err(AgentBuildError::ConfigurationConflict {
-                    code: AGENT_BUILD_CONFIGURATION_CONFLICT,
                     request_source: request_source.clone(),
                     component: descriptor.component.id().clone(),
                     registration_source: descriptor.source.id.clone(),
@@ -2198,7 +2181,6 @@ async fn ensure_ready<T: ?Sized + 'static>(
         } => {
             if !matches!(requested_configuration, FactoryConfiguration::Empty) {
                 return Err(AgentBuildError::ConfigurationConflict {
-                    code: AGENT_BUILD_CONFIGURATION_CONFLICT,
                     request_source: request_source.clone(),
                     component: descriptor.component.id().clone(),
                     registration_source: descriptor.source.id.clone(),
@@ -2209,7 +2191,6 @@ async fn ensure_ready<T: ?Sized + 'static>(
         RegistrationSlot::Factory(factory) => {
             if context.cancellation.is_cancelled() {
                 return Err(AgentBuildError::Cancelled {
-                    code: AGENT_BUILD_CANCELLED,
                     request_source: request_source.clone(),
                     component: descriptor.component.id().clone(),
                 });
@@ -2231,7 +2212,6 @@ async fn ensure_ready<T: ?Sized + 'static>(
                 Ok(Ok(ready)) => ready,
                 Ok(Err(error)) => {
                     return Err(AgentBuildError::FactoryFailed {
-                        code: AGENT_BUILD_FACTORY_FAILED,
                         request_source: request_source.clone(),
                         component: descriptor.component.id().clone(),
                         registration_source: descriptor.source.id.clone(),
@@ -2241,7 +2221,6 @@ async fn ensure_ready<T: ?Sized + 'static>(
                 }
                 Err(()) => {
                     return Err(AgentBuildError::Cancelled {
-                        code: AGENT_BUILD_CANCELLED,
                         request_source: request_source.clone(),
                         component: descriptor.component.id().clone(),
                     });
@@ -2324,7 +2303,6 @@ fn invalid_descriptor(
     message: impl Into<Arc<str>>,
 ) -> AgentBuildError {
     AgentBuildError::InvalidDescriptor {
-        code: AGENT_BUILD_INVALID_DESCRIPTOR,
         request_source: request_source.clone(),
         component: descriptor.component.id().clone(),
         registration_source: descriptor.source.id.clone(),

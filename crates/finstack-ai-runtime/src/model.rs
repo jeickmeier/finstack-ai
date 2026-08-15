@@ -8,18 +8,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use finstack_ai_kernel::{
-    BudgetScopeId, ContentBlock, Digest, EffectId, ErrorCategory, ErrorCode, ErrorDescriptor,
-    ExternalHandleRef, KernelState, Message, Metadata, ModelRequestId, OperationLocator,
-    OutputSpec, PendingModelEffect, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
-    RetrySafety, RunPhase, Timestamp, ToolExecutionMode, ToolId, Usage,
+    BudgetScopeId, ContentBlock, Digest, EffectId, ErrorCategory, ErrorDescriptor,
+    ExternalHandleRef, KernelState, LABEL_MAX_BYTES, Message, Metadata, ModelRequestId,
+    OperationLocator, OutputSpec, PendingModelEffect, PrincipalRef, ProviderIds, RawJson,
+    ReconciliationPolicy, RetrySafety, RunPhase, Timestamp, ToolExecutionMode, ToolId, Usage,
+    label_is_valid,
 };
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
+use crate::error::{PortErrorData, PortErrorInvalid};
 use crate::{PortFuture, PortObject, PortStream};
 
-const LABEL_MAX_BYTES: usize = 256;
 const STREAM_TEXT_MAX_BYTES: usize = 1_048_576;
 const STREAM_REASONING_MAX_BYTES: usize = 1_048_576;
 
@@ -934,13 +935,26 @@ pub enum ModelStreamItem {
 
 /// Stable model adapter error.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{code}: {message}")]
+#[error("{data}")]
 pub struct ModelError {
-    code: ErrorCode,
-    category: ErrorCategory,
-    retryable: bool,
-    message: Arc<str>,
-    metadata: Metadata,
+    data: PortErrorData,
+}
+
+impl From<PortErrorInvalid> for ModelError {
+    fn from(error: PortErrorInvalid) -> Self {
+        match error {
+            PortErrorInvalid::InvalidCode => {
+                Self::validation(MODEL_REQUEST_INVALID, "invalid model error code")
+            }
+            PortErrorInvalid::InvalidMessage => {
+                Self::validation(MODEL_REQUEST_INVALID, "invalid model error message")
+            }
+            PortErrorInvalid::InvalidClassification => Self::validation(
+                MODEL_REQUEST_INVALID,
+                "reserved model adapter code has an invalid classification",
+            ),
+        }
+    }
 }
 
 impl ModelError {
@@ -948,91 +962,71 @@ impl ModelError {
     ///
     /// # Errors
     ///
-    /// Returns a request error when the supplied code or message is invalid.
+    /// Returns [`PortErrorInvalid`] when the supplied code, message, or reserved
+    /// classification is invalid.
     pub fn try_new(
         code: impl AsRef<str>,
         category: ErrorCategory,
         retryable: bool,
         message: impl AsRef<str>,
         metadata: Metadata,
-    ) -> Result<Self, ModelError> {
-        let code = ErrorCode::new(code)
-            .map_err(|_| Self::validation(MODEL_REQUEST_INVALID, "invalid model error code"))?;
-        if let Some(expected) = reserved_adapter_category(code.as_str())
-            && (category != expected || retryable)
-        {
-            return Err(Self::validation(
-                MODEL_REQUEST_INVALID,
-                "reserved model adapter code has an invalid classification",
-            ));
-        }
-        let message = message.as_ref();
-        if message.is_empty()
-            || message.len() > STREAM_TEXT_MAX_BYTES
-            || message.as_bytes().contains(&0)
-        {
-            return Err(Self::validation(
-                MODEL_REQUEST_INVALID,
-                "invalid model error message",
-            ));
-        }
-        Ok(Self {
+    ) -> Result<Self, PortErrorInvalid> {
+        let data = PortErrorData::try_from_parts(
             code,
             category,
             retryable,
-            message: Arc::from(message),
+            message,
             metadata,
-        })
+            STREAM_TEXT_MAX_BYTES,
+        )?;
+        if let Some(expected) = reserved_adapter_category(data.code.as_str())
+            && (data.category != expected || data.retryable)
+        {
+            return Err(PortErrorInvalid::InvalidClassification);
+        }
+        Ok(Self { data })
     }
 
     fn validation(code: &'static str, message: &'static str) -> Self {
         Self {
-            code: ErrorCode::new(code).expect("frozen model error code is valid"),
-            category: ErrorCategory::Validation,
-            retryable: false,
-            message: Arc::from(message),
-            metadata: Metadata::empty(),
+            data: PortErrorData::frozen(code, ErrorCategory::Validation, false, message),
         }
     }
 
     fn limit(code: &'static str, message: &'static str) -> Self {
         Self {
-            code: ErrorCode::new(code).expect("frozen model error code is valid"),
-            category: ErrorCategory::Limit,
-            retryable: false,
-            message: Arc::from(message),
-            metadata: Metadata::empty(),
+            data: PortErrorData::frozen(code, ErrorCategory::Limit, false, message),
         }
     }
 
     /// Stable adapter code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.code.as_str()
+        self.data.code.as_str()
     }
 
     /// Stable framework category.
     #[must_use]
     pub const fn category(&self) -> ErrorCategory {
-        self.category
+        self.data.category
     }
 
     /// Retryability classification.
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        self.retryable
+        self.data.retryable
     }
 
     /// Safe bounded message.
     #[must_use]
     pub fn message(&self) -> &str {
-        &self.message
+        &self.data.message
     }
 
     /// Bounded namespaced safe metadata.
     #[must_use]
     pub const fn metadata(&self) -> &Metadata {
-        &self.metadata
+        &self.data.metadata
     }
 
     /// Convert to the kernel's source-free durable descriptor.
@@ -1042,15 +1036,15 @@ impl ModelError {
     /// Returns a stable request error only if an internal invariant is violated.
     pub fn to_descriptor(&self) -> Result<ErrorDescriptor, ModelError> {
         let mut descriptor = ErrorDescriptor::new(
-            self.code.as_str(),
-            self.message.as_ref(),
-            self.category,
-            self.retryable,
+            self.data.code.as_str(),
+            self.data.message.as_ref(),
+            self.data.category,
+            self.data.retryable,
         )
         .map_err(|_| {
             Self::validation(MODEL_REQUEST_INVALID, "model error descriptor is invalid")
         })?;
-        descriptor.safe_details = self.metadata.clone();
+        descriptor.safe_details = self.data.metadata.clone();
         Ok(descriptor)
     }
 }
@@ -1707,7 +1701,7 @@ fn stream_limit_error() -> ModelError {
 }
 
 fn validated_label(value: &str, _field: &'static str) -> Result<Arc<str>, ModelError> {
-    if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+    if !label_is_valid(value) {
         return Err(ModelError::validation(
             MODEL_REQUEST_INVALID,
             "model label is empty, oversized, or contains NUL",
@@ -2015,7 +2009,7 @@ mod tests {
             Metadata::empty(),
         )
         .expect_err("reserved category");
-        assert_eq!(error.code(), MODEL_REQUEST_INVALID);
+        assert_eq!(ModelError::from(error).code(), MODEL_REQUEST_INVALID);
 
         let error = ModelError::try_new(
             MODEL_RESPONSE_MISMATCH,
@@ -2025,7 +2019,7 @@ mod tests {
             Metadata::empty(),
         )
         .expect_err("reserved retryability");
-        assert_eq!(error.code(), MODEL_REQUEST_INVALID);
+        assert_eq!(ModelError::from(error).code(), MODEL_REQUEST_INVALID);
 
         let exact = ModelError::try_new(
             MODEL_STREAM_LIMIT_EXCEEDED,

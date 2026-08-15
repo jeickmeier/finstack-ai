@@ -112,7 +112,7 @@ impl Middleware for VerifyMiddleware {
                     "verify only runs at before_finalize",
                     Metadata::empty(),
                 )
-                .unwrap_or_else(|error| error));
+                .unwrap_or_else(Into::into));
             }
             match decision {
                 VerifyDecision::Accept => Ok(StageOutcome::Continue),
@@ -130,7 +130,7 @@ impl Middleware for VerifyMiddleware {
                             "verifier rejected the candidate",
                             Metadata::empty(),
                         )
-                        .unwrap_or_else(|error| error)
+                        .unwrap_or_else(Into::into)
                     })?,
                 ))),
                 VerifyDecision::RequestInteraction => {
@@ -178,7 +178,7 @@ fn interaction_error() -> MiddlewareError {
         "verify interaction request is invalid",
         Metadata::empty(),
     )
-    .unwrap_or_else(|error| error)
+    .unwrap_or_else(Into::into)
 }
 
 #[cfg(test)]

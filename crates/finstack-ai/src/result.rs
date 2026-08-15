@@ -30,14 +30,12 @@ impl RunResult {
     ) -> Result<Self, ResultDecodeError> {
         if expected_schema != &committed.schema {
             return Err(ResultDecodeError::SchemaMismatch {
-                code: RESULT_DECODE_SCHEMA_MISMATCH,
                 expected: expected_schema.schema_digest,
                 committed: committed.schema.schema_digest,
             });
         }
         if committed.value_digest != committed.value.digest() {
             return Err(ResultDecodeError::ValueDigestMismatch {
-                code: RESULT_DECODE_INVALID_VALUE,
                 expected: committed.value_digest,
                 actual: committed.value.digest(),
             });
@@ -78,7 +76,6 @@ impl RunResult {
         let mut decoder = serde_json::Deserializer::from_slice(self.value.as_bytes());
         serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
             ResultDecodeError::InvalidValue {
-                code: RESULT_DECODE_INVALID_VALUE,
                 path: error.path().to_string(),
                 message: error.inner().to_string(),
             }
@@ -90,35 +87,48 @@ impl RunResult {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ResultDecodeError {
     /// Resolved and committed schemas differ.
-    #[error("{code}: expected schema {expected}, committed schema {committed}")]
+    #[error(
+        "{}: expected schema {expected}, committed schema {committed}",
+        RESULT_DECODE_SCHEMA_MISMATCH
+    )]
     SchemaMismatch {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Resolved schema digest.
         expected: Digest,
         /// Committed schema digest.
         committed: Digest,
     },
     /// Committed value bytes no longer match their durable digest.
-    #[error("{code}: expected value {expected}, actual value {actual}")]
+    #[error(
+        "{}: expected value {expected}, actual value {actual}",
+        RESULT_DECODE_INVALID_VALUE
+    )]
     ValueDigestMismatch {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Committed digest.
         expected: Digest,
         /// Digest recomputed from canonical bytes.
         actual: Digest,
     },
     /// Serde could not decode the already committed value.
-    #[error("{code} at {path}: {message}")]
+    #[error("{} at {path}: {message}", RESULT_DECODE_INVALID_VALUE)]
     InvalidValue {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable structural path.
         path: String,
         /// Serde diagnostic.
         message: String,
     },
+}
+
+impl ResultDecodeError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::SchemaMismatch { .. } => RESULT_DECODE_SCHEMA_MISMATCH,
+            Self::ValueDigestMismatch { .. } | Self::InvalidValue { .. } => {
+                RESULT_DECODE_INVALID_VALUE
+            }
+        }
+    }
 }
 
 #[cfg(test)]

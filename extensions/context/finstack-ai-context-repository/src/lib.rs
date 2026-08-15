@@ -153,7 +153,7 @@ impl ContextProvider for RepositoryContextProvider {
                     "safe repository primitives are unavailable",
                     Metadata::empty(),
                 )
-                .unwrap_or_else(|error| error))
+                .unwrap_or_else(Into::into))
             });
         }
 
@@ -220,7 +220,7 @@ fn apply_budget(
                     "repository contribution exceeds the committed budget",
                     Metadata::empty(),
                 )
-                .unwrap_or_else(|error| error)),
+                .unwrap_or_else(Into::into)),
                 ContextOverflowPolicy::TruncateWithDiagnostic => {
                     break;
                 }
@@ -245,7 +245,7 @@ fn contribution_invalid() -> ContextError {
         "repository file text is invalid",
         Metadata::empty(),
     )
-    .unwrap_or_else(|error| error)
+    .unwrap_or_else(Into::into)
 }
 
 #[cfg(unix)]

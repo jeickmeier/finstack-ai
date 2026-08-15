@@ -25,7 +25,8 @@ resume lives on the workflow driver.
 
 ## Packages
 
-- `finstack-ai-workflow-local` — in-process reference driver
+- `finstack_ai_runtime::LocalWorkflowDriver` — in-process reference alias for
+  `WorkflowSession`
 - `finstack-ai-workflow-temporal` — Temporal-shaped mapping only
   (no `temporalio`, no cluster, no network listener)
 

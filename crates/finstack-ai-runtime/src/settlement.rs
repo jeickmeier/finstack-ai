@@ -811,7 +811,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
             "tool result arrived after the committed deadline",
             Metadata::empty(),
         )
-        .map_err(|error| tool_handle_error(&error))?);
+        .map_err(|error| tool_handle_error(&ToolError::from(error)))?);
     }
     let settled = build_tool_settlement(driver_result)?;
     let input = KernelInput::ToolBatchSettled(settled.clone());
@@ -1864,7 +1864,7 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
             "model result arrived after the committed deadline",
             Metadata::empty(),
         )
-        .map_err(|error| model_handle_error(&error))?);
+        .map_err(|error| model_handle_error(&ModelError::from(error)))?);
     }
     let allocation = allocate_settlement(&driver_result, sources)?;
     let settled = build_settlement(driver_result, now, &allocation)?;

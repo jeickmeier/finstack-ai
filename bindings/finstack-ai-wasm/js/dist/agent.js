@@ -1,5 +1,5 @@
 import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, Lane as WasmLane, Locator as WasmLocator, MemoryExternalIdentityMap as WasmMemoryExternalIdentityMap, Run as WasmRun, RunResult as WasmRunResult, Session as WasmSession, } from "../generated/finstack_ai_wasm.js";
-import { requireWasm, wasmJournalStoreHandle, wasmModelHandle, wasmToolsetHandle, } from "./adapters.js";
+import { requireWasm, wasmContextProviderHandle, wasmJournalStoreHandle, wasmMiddlewareHandle, wasmModelHandle, wasmObserverHandle, wasmToolsetHandle, } from "./adapters.js";
 import { FinstackError } from "./errors.js";
 export { FinstackError } from "./errors.js";
 /**
@@ -47,7 +47,7 @@ export class Agent {
                 ? undefined
                 : JSON.stringify(options.capabilities), options.activeCapabilities === undefined
                 ? undefined
-                : JSON.stringify(options.activeCapabilities));
+                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)));
             return new Agent(handle);
         }
         catch (error) {

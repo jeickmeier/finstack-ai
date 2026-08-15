@@ -14,6 +14,39 @@ use crate::{PortFuture, PortObject};
 /// Maximum envelopes returned by one [`JournalStore::scan`] call.
 pub const SCAN_PAGE_MAX_RECORDS: u32 = 256;
 
+/// Shared resource ceilings for in-process and sqlite journal stores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreLimits {
+    /// Maximum distinct sessions.
+    pub sessions: usize,
+    /// Maximum committed batches per session.
+    pub batches_per_session: usize,
+    /// Maximum committed records per session.
+    pub records_per_session: usize,
+    /// Maximum snapshot bytes per session.
+    pub snapshot_bytes: usize,
+}
+
+impl StoreLimits {
+    /// Validate an explicit, usable set of limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] when any limit is zero.
+    pub fn validate(self) -> Result<Self, StoreError> {
+        if self.sessions == 0
+            || self.batches_per_session == 0
+            || self.records_per_session == 0
+            || self.snapshot_bytes == 0
+        {
+            return Err(StoreError::InvalidRequest {
+                reason_code: "zero_store_limit",
+            });
+        }
+        Ok(self)
+    }
+}
+
 /// Object-safe append/load/snapshot contract owned by the runtime.
 pub trait JournalStore: PortObject {
     /// Atomically append one frozen request.

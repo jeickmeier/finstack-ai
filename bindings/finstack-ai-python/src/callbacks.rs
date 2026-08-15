@@ -1171,6 +1171,19 @@ impl PyPythonContextProvider {
     }
 }
 
+impl PyPythonContextProvider {
+    /// Ready handle pair for [`finstack_ai::NativeAgentBuilder`].
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn ContextProvider>) {
+        (
+            ComponentRef::new(
+                self.inner.descriptor.invocation.component.clone(),
+                Some(self.inner.descriptor.invocation.version),
+            ),
+            Arc::clone(&self.inner) as Arc<dyn ContextProvider>,
+        )
+    }
+}
+
 struct PythonMiddlewareAdapter {
     callback: Arc<PythonCallback>,
     descriptor: MiddlewareDescriptor,
@@ -1276,6 +1289,19 @@ impl PyPythonMiddleware {
     }
 }
 
+impl PyPythonMiddleware {
+    /// Ready handle pair for [`finstack_ai::NativeAgentBuilder`].
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Middleware>) {
+        (
+            ComponentRef::new(
+                self.inner.descriptor.invocation.component.clone(),
+                Some(self.inner.descriptor.invocation.version),
+            ),
+            Arc::clone(&self.inner) as Arc<dyn Middleware>,
+        )
+    }
+}
+
 struct PythonObserverAdapter {
     callback: Arc<PythonCallback>,
     descriptor: ObserverDescriptor,
@@ -1348,6 +1374,16 @@ impl PyPythonObserver {
     #[getter]
     fn component(&self) -> String {
         self.inner.descriptor.component.id().to_string()
+    }
+}
+
+impl PyPythonObserver {
+    /// Ready handle pair for [`finstack_ai::NativeAgentBuilder`].
+    pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
+        (
+            self.inner.descriptor.component.clone(),
+            Arc::clone(&self.inner) as Arc<dyn Observer>,
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 //! Incremental, bounded Anthropic Server-Sent Events framing.
 
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::{ModelError, SseFrameParser};
 
 use crate::error::{stream_error, stream_limit_error};
 
@@ -11,69 +11,33 @@ pub(crate) struct SseEvent {
 }
 
 pub(crate) struct SseParser {
-    buffer: Vec<u8>,
-    total_bytes: usize,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
+    frames: SseFrameParser,
 }
 
 impl SseParser {
     pub(crate) fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         Self {
-            buffer: Vec::new(),
-            total_bytes: 0,
-            max_event_bytes,
-            max_stream_bytes,
+            frames: SseFrameParser::new(max_event_bytes, max_stream_bytes),
         }
     }
 
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, ModelError> {
-        self.total_bytes = self
-            .total_bytes
-            .checked_add(bytes.len())
-            .ok_or_else(stream_limit_error)?;
-        if self.total_bytes > self.max_stream_bytes {
-            return Err(stream_limit_error());
-        }
-        self.buffer.extend_from_slice(bytes);
+        let frames = self.frames.push(bytes).map_err(|_| stream_limit_error())?;
         let mut events = Vec::new();
-        while let Some((boundary, separator_len)) = event_boundary(&self.buffer) {
-            if boundary > self.max_event_bytes {
-                return Err(stream_limit_error());
-            }
-            let remainder = self.buffer.split_off(boundary + separator_len);
-            let frame = core::mem::replace(&mut self.buffer, remainder);
-            if let Some(event) = parse_frame(&frame[..boundary])? {
+        for frame in frames {
+            if let Some(event) = parse_frame(&frame)? {
                 events.push(event);
             }
-        }
-        if self.buffer.len() > self.max_event_bytes {
-            return Err(stream_limit_error());
         }
         Ok(events)
     }
 
     pub(crate) fn finish(self) -> Result<(), ModelError> {
-        if self.buffer.iter().all(u8::is_ascii_whitespace) {
+        if self.frames.finish_clean() {
             Ok(())
         } else {
             Err(stream_error("Anthropic SSE stream ended mid-event"))
         }
-    }
-}
-
-fn event_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
-    let lf = bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|position| (position, 2));
-    let crlf = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|position| (position, 4));
-    match (lf, crlf) {
-        (Some(left), Some(right)) => Some(if left.0 < right.0 { left } else { right }),
-        (left, right) => left.or(right),
     }
 }
 
