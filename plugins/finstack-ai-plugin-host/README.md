@@ -1,1 +1,1 @@
-Placeholder directory; the Wasmtime component host lands in PR-051. See docs/planning/03-finstack-ai-technical-design.md §2 and §27.6–27.7.
+Placeholder directory; the Wasmtime component host lands in PR-051. Experimental `@0.0.4` WIT types, in-process context/toolset adapters, and host-side manifests live in `finstack-ai-wit`. See docs/planning/03-finstack-ai-technical-design.md §2 and §27.6–27.7.

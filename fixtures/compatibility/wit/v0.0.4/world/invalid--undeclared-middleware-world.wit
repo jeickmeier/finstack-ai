@@ -1,0 +1,5 @@
+package finstack:ai-context@0.0.4;
+
+world middleware {
+    export middleware;
+}

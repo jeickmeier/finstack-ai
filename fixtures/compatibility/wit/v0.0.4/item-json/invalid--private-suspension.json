@@ -1,0 +1,16 @@
+{
+  "kind": "quoted_source",
+  "content": [{"kind": "text", "text": "nested"}],
+  "provenance": {
+    "source_id": "finstack.plugin.reference.context",
+    "source_ref": null,
+    "external": true
+  },
+  "authority": "untrusted",
+  "priority": 0,
+  "sensitivity": "internal",
+  "protected": false,
+  "interaction": {
+    "kind": "approval"
+  }
+}

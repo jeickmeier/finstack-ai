@@ -1,0 +1,12 @@
+[
+  {
+    "identity": "finstack.plugin.reference.context",
+    "version": "0.0.4",
+    "worlds": ["context-plugin"]
+  },
+  {
+    "identity": "finstack.plugin.reference.context",
+    "version": "0.0.4",
+    "worlds": ["context-plugin"]
+  }
+]

@@ -10,13 +10,16 @@ pub const AI_TYPES_PACKAGE: &str = "finstack:ai-types@0.0.4";
 pub const AI_HOST_PACKAGE: &str = "finstack:ai-host@0.0.4";
 /// Checked-in WIT package `finstack:ai-toolset@0.0.4`.
 pub const AI_TOOLSET_PACKAGE: &str = "finstack:ai-toolset@0.0.4";
+/// Checked-in WIT package `finstack:ai-context@0.0.4`.
+pub const AI_CONTEXT_PACKAGE: &str = "finstack:ai-context@0.0.4";
 /// Worlds published by this experimental plugin alpha.
 pub const PUBLISHED_PACKAGES: &[&str] = &[
     "finstack:ai-types@0.0.4",
     "finstack:ai-host@0.0.4",
     "finstack:ai-toolset@0.0.4",
+    "finstack:ai-context@0.0.4",
 ];
-/// Host imports granted by `toolset-plugin`. Linking them is not ambient WASI.
+/// Host imports granted by experimental plugin worlds. Linking them is not ambient WASI.
 pub const HOST_IMPORTS: &[&str] = &[
     "finstack:ai-host/logging@0.0.4",
     "finstack:ai-host/blobs@0.0.4",
@@ -25,15 +28,12 @@ pub const HOST_IMPORTS: &[&str] = &[
 pub const TOOLSET_WORLD_EXPORTS: &[&str] = &["toolset"];
 /// Functions exported by the `toolset` interface.
 pub const TOOLSET_FUNCS: &[&str] = &["list-tools", "call"];
-/// Tokens that must not appear as exported world operations.
-pub const FORBIDDEN_WORLD_TOKENS: &[&str] = &[
-    "agent",
-    "session",
-    "run",
-    "lineage",
-    "nested",
-    "context-provider",
-];
+/// Guest exports of `context-plugin`.
+pub const CONTEXT_WORLD_EXPORTS: &[&str] = &["context-provider"];
+/// Functions exported by the `context-provider` interface.
+pub const CONTEXT_FUNCS: &[&str] = &["collect"];
+/// Tokens that must not appear as nested-agent or lineage operations.
+pub const FORBIDDEN_WORLD_TOKENS: &[&str] = &["agent", "session", "run", "lineage", "nested"];
 /// WIT `call-context` record generated from the checked-in v0.0.4 packages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallContext {
@@ -126,6 +126,38 @@ pub struct ToolResult {
     /// WIT field `is-error`.
     pub is_error: bool,
 }
+/// WIT `context-budget` record generated from the checked-in v0.0.4 packages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextBudget {
+    /// WIT field `max-tokens`.
+    pub max_tokens: u64,
+    /// WIT field `max-bytes`.
+    pub max_bytes: u64,
+    /// WIT field `max-items`.
+    pub max_items: u32,
+}
+/// WIT `context-query` record generated from the checked-in v0.0.4 packages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextQuery {
+    /// WIT field `context`.
+    pub context: CallContext,
+    /// WIT field `request-json`.
+    pub request_json: Vec<u8>,
+    /// WIT field `budget`.
+    pub budget: ContextBudget,
+}
+/// WIT `context-item` record generated from the checked-in v0.0.4 packages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextItem {
+    /// WIT field `item-json`.
+    pub item_json: Vec<u8>,
+    /// WIT field `blobs`.
+    pub blobs: Vec<BlobRef>,
+    /// WIT field `estimated-tokens`.
+    pub estimated_tokens: u64,
+    /// WIT field `bytes`.
+    pub bytes: u64,
+}
 /// WIT `level` enum generated from the checked-in v0.0.4 packages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -183,4 +215,13 @@ pub trait GuestToolset {
         tool_id: &str,
         args_json: &[u8],
     ) -> Result<ToolResult, PluginError>;
+}
+/// Generated guest binding for WIT interface `context-provider`.
+pub trait GuestContextProvider {
+    /// WIT function `collect`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError`] when the binding rejects the call.
+    fn collect(&self, query: &ContextQuery) -> Result<Vec<ContextItem>, PluginError>;
 }
