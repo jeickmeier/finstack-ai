@@ -10,6 +10,9 @@ independent security review (TM §13.3). Admitted 2026-08-15 on
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
 | `findings.md` | Independent-review findings (`FIND-064-*`) |
 | `independent-review.md` | Named first-party independent review (TM §13.3) |
+| `candidate-validation.txt` | Local Darwin A01–A04 proofs at `363d52661eeb726c2f8e2d8ee103c7dc11ba4505` |
+| `security-review.txt` | TM §13.3 / FIND-064-* closeout |
+| `SHA256SUMS` | Artifact digests |
 | [threat-model-g8-review.md](../../threat-model-g8-review.md) | TM-01–TM-21 and §13.3 matrix (not `G8-D-*`) |
 
 No G8 decision, hosted pull request, npm/pypi/crates.io publish,
