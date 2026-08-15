@@ -1,0 +1,25 @@
+PR-065-E-integration-28bc92e626e1
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: f87818d5593b2110b551327ccd68c26f58d5c760
+Tree: 9574d088c27f97c171cc52b37560ddddbaa8f7e6
+Evidence head: 0b9a207e7a57870d43d3c2fa8d5915089c409bae
+Parents: c2159c79a4aedea82bb50b19f387d88b8c271052 0b9a207e7a57870d43d3c2fa8d5915089c409bae
+Result: Pass. Merge tree equals evidence-head tree. No G8-D. No tag.
+
+Commands:
+  git rev-parse evidence-head^{tree} == HEAD^{tree}
+  cargo test -p finstack-ai-test --locked --lib -- port_conformance::tests
+  cargo test -p finstack-ai-plugin-host --locked -- published_failure_names_world_contract_and_suite_version
+  uv run --no-project python tools/wasm_package/check.py graph
+  cmp artifacts/pr-065/run-a.SHA256SUMS run-b.SHA256SUMS
+  diff SHA256SUMS-B SHA256SUMS-H (non-empty)
+
+Results:
+  trees identical: 9574d088c27f97c171cc52b37560ddddbaa8f7e6
+  port failure Display: 1 passed
+  plugin failure Display: 1 passed
+  wasm graph: no Tokio, sockets, filesystem drivers, or kernel wasm-bindgen
+  two-run checksums still identical; hotfix pair still differs
+
+No hosted PR/merge, publication, yank, nightly dispatch, or 1.0.0 cut.
