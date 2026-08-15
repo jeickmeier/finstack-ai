@@ -5,7 +5,8 @@ Owner: `me@jeickmeier.com`. Adopter page:
 replace, [`SECURITY.md`](../../SECURITY.md) and
 [`preview-compatibility-policy.md`](preview-compatibility-policy.md).
 
-Status: written by PR-065. Not `G8-D-*`. Not an LTS promise.
+Status: in force at G8 via `G8-D-general-availability-a889a29a3f54`.
+Not an LTS promise. `release/1.0` is still not created.
 
 ## Windows
 
@@ -13,7 +14,7 @@ Status: written by PR-065. Not `G8-D-*`. Not an LTS promise.
 | --- | --- |
 | Current minor (`1.0.x` at GA) | Patches until the next minor |
 | Previous minor | Security-only until the next minor ships or 90 days, whichever is shorter |
-| `0.1.x` preview | Supported until `1.0.0`; then security-only for 90 days |
+| `0.1.x` preview | Security-only for 90 days after local tag `v1.0.0` (2026-08-15) |
 | Historical snapshots | Not supported |
 
 ## Maintenance-branch procedure

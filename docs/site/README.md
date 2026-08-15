@@ -1,9 +1,10 @@
 # finstack-ai public documentation
 
-Workspace version **1.0.0** is unpublished. The last public tag is
-`v0.1.0`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. crates.io /
-PyPI / npm packages are not published. Permanent WIT worlds are
-`@1.0.0`. Experimental WIT package names stay `@0.0.4`.
+Workspace version **1.0.0**. Local tag `v1.0.0` exists. The last
+pushed GitHub tag is `v0.1.0`. G8 passed via
+`G8-D-general-availability-a889a29a3f54`. crates.io / PyPI / npm
+packages are not published. Permanent WIT worlds are `@1.0.0`.
+Experimental WIT package names stay `@0.0.4`.
 
 Planning files under [`docs/planning/`](../planning/README.md) remain the
 implementation contract. Delivery status lives in

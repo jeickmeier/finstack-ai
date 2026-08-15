@@ -14,10 +14,10 @@ metadata, and undeclared exports are rejected. There is no permissive
 default for `execution-mode`, `side-effect`, `retry-safety`,
 `approval-policy-json`, or `max-result-bytes`.
 
-The workspace crate version stays unpublished lockstep `0.1.0` until
-PR-066. Plugin alpha `@0.x` guests keep loading. `@1.0.0` worlds are
-generated beside `@0.0.4`. `mise run gen-wit` emits both majors. The
-crate version `1.0.0` remains reserved for the GA cut.
+The workspace crate version is lockstep `1.0.0`. Local tag `v1.0.0`
+exists. Registries stay unpublished. Plugin alpha `@0.x` guests keep
+loading. `@1.0.0` worlds are generated beside `@0.0.4`.
+`mise run gen-wit` emits both majors.
 
 ## Deprecation
 

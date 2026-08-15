@@ -1,0 +1,34 @@
+Phase 9 exit closeout
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Reviewed commit: 6e9ec39fae89a70f696ee740de2d2094670cba3e
+Tag: v1.0.0 (local; not pushed)
+Gate: G8-D-general-availability-a889a29a3f54
+Result: Phase 9 exit Passed (4/4). Phase 9 is Done.
+
+PH9-E-exit-contracts-0da38bcce4df
+  Public contracts frozen under SemVer policy.
+  Evidence: COMP-1.0-D-contract-freeze-00b78667ecc4;
+  docs/implementation/1.0-compatibility-policy.md;
+  docs/implementation/1.0-compatibility-matrix.md.
+
+PH9-E-exit-security-161e4b14de39
+  Security and reliability reviews complete.
+  Evidence: PR-064-E-security-9ac67ca75bd7;
+  docs/implementation/threat-model-g8-review.md;
+  zero Open Critical/High.
+
+PH9-E-exit-perf-876d66292c13
+  Performance budgets enforced.
+  Evidence: PR-063-E-candidate-67d4658eab90;
+  docs/implementation/perf-budgets.md; no EX-*.
+
+PH9-E-exit-release-3ae4f465ed69
+  1.0.0 artifacts and migration guides released.
+  Local meaning: tag v1.0.0 plus in-tree migration.md,
+  compatibility matrix, support windows, and staged checksums.
+  crates.io / PyPI / npm / GitHub Release / announce remain
+  unnamed (owner: external actions=none).
+
+§21.12 residual: no named external adopter. Accepted by the
+owner G8 sentence. Not an Engineering Standards EX-*.

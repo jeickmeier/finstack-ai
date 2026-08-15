@@ -1,10 +1,11 @@
 # Public GA roadmap
 
-In-repo issue roadmap after the unpublished `1.0.0` candidate. Opening
-GitHub issues, tagging `v1.0.0`, publishing registries, and recording
-`G8-D-*` are external actions and are not claimed here.
+In-repo issue roadmap after local tag `v1.0.0`. Opening GitHub
+issues, pushing the tag, publishing registries, and announcing remain
+external actions and are not claimed here. G8 passed via
+`G8-D-general-availability-a889a29a3f54`.
 
-## In force at GA (after a later named sentence)
+## In force at GA
 
 - Lockstep crate, wheel, and npm version fields are `1.0.0`.
 - WIT permanent worlds are `finstack:ai-*@1.0.0`.
@@ -15,7 +16,7 @@ GitHub issues, tagging `v1.0.0`, publishing registries, and recording
 
 ## Post-1.0 in-repo themes
 
-These stay in-repo work. They are not this PR and are not a G8 pass.
+These stay in-repo work. They are not a later-gate claim.
 
 - Independent first-party leaf versions only after named coupling harm
   ([`1.0-leaf-versioning.md`](1.0-leaf-versioning.md)).

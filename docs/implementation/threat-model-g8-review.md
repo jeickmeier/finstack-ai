@@ -2,14 +2,16 @@
 
 Date: 2026-08-15
 Owner: me@jeickmeier.com
-Workspace: **1.0.0 unpublished** (experimental WIT package names stay `@0.0.4`; permanent worlds are `@1.0.0`)
+Workspace: **1.0.0** (local tag `v1.0.0`; registries unpublished; experimental WIT package names stay `@0.0.4`; permanent worlds are `@1.0.0`)
 
 This file is the implemented-control matrix for PR-064 / G8 evidence
 collection. It does **not** rewrite
 [`docs/planning/06-finstack-ai-security-threat-model.md`](../planning/06-finstack-ai-security-threat-model.md),
 which remains the pre-implementation design contract. It does **not**
-record `G8-D-*`. G8 remains `Not ready` until a separately named gate
-decision.
+record `G8-D-*`. G8 later passed via
+`G8-D-general-availability-a889a29a3f54` against
+`6e9ec39fae89a70f696ee740de2d2094670cba3e`. This file remains the
+review matrix, not the decision.
 
 The G7 matrix
 ([threat-model-g7-review.md](threat-model-g7-review.md)) treated

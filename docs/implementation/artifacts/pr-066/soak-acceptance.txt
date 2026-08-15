@@ -1,0 +1,11 @@
+PR-066 soak-gap acceptance
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Reviewed commit: 6e9ec39fae89a70f696ee740de2d2094670cba3e
+Decision: G8-D-general-availability-a889a29a3f54
+
+The recorded §21.12 external-adopter soak gap in
+artifacts/pr-066/soak-note.md is accepted as a G8 residual.
+
+This file does not invent adopters. It does not claim crates.io,
+PyPI, npm, GitHub Release, announce, or tag push.

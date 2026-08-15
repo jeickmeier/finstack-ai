@@ -7,18 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Semantic core crates, Python/JavaScript binding distributions, and
 bundled first-party leaf crates share one lockstep workspace version.
-The current unpublished candidate is `1.0.0`. The last public tag is
-`v0.1.0`. Named G6 and G7 have passed. G8, `git tag v1.0.0`, and
-crates.io / PyPI / npm publication remain blocked on a later named
-owner sentence.
+Local tag `v1.0.0` exists at `6e9ec39fae89a70f696ee740de2d2094670cba3e`.
+G8 passed via `G8-D-general-availability-a889a29a3f54`. The last
+pushed GitHub tag remains `v0.1.0`. crates.io / PyPI / npm stay
+unpublished.
 
 ## [Unreleased]
 
-## [1.0.0] - unpublished staged candidate
+## [1.0.0] - 2026-08-15
 
-Unpublished lockstep GA candidate. The G8 readiness pack is
-`READY FOR NAMED DECISION`. This section is not a crates.io, PyPI, or
-npm publication, git tag `v1.0.0`, or `G8-D-*`.
+Tagged lockstep general-availability cut `v1.0.0` (local; not pushed).
+G8 passed via `G8-D-general-availability-a889a29a3f54`. The §21.12
+external-soak gap is an accepted G8 residual. This section is not a
+crates.io, PyPI, or npm publication, GitHub Release, or announce.
 
 ### Added
 

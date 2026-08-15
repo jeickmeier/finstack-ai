@@ -4,9 +4,9 @@ Operational register for multi-package recreate, checksums, SBOMs,
 provenance, signing procedure, nightly/canary definitions, and
 rollback/hotfix. Owner: `me@jeickmeier.com`.
 
-This file does not publish, yank, tag, or record `G8-D-*`.
-Workspace version is unpublished `1.0.0`. Canary label default is
-`1.0.0-canary`.
+This file does not publish, yank, push a tag, or record `G8-D-*`.
+Workspace version is `1.0.0`. Local tag `v1.0.0` exists. Canary
+label default is `1.0.0-canary`.
 
 ## Local commands
 
@@ -26,17 +26,20 @@ Workspace version is unpublished `1.0.0`. Canary label default is
 Two clean staging runs from the **same commit** must produce
 byte-identical SHA-256 sets for crate package lists, wheels/sdist,
 npm stage (when `dist/` exists), WIT packages, and SBOMs. Recreate
-from the commit a future GA tag would point at. Do not `git tag`
-here.
+from the tagged local `v1.0.0` commit
+`6e9ec39fae89a70f696ee740de2d2094670cba3e`. Do not `git tag` here.
 
 ## GA tag procedure (PR-066 only)
 
-Documented now; not executed under this envelope.
+Local annotated tag `v1.0.0` was cut at
+`6e9ec39fae89a70f696ee740de2d2094670cba3e` under the owner G8
+sentence. Tag push, registry publish, GitHub Release, announce, and
+`release/1.0` remain separately named.
 
 1. Land the release commit on the authorized target.
 2. Recreate: `mise run recreate-release`. Retain
    `docs/implementation/artifacts/pr-066/run-a.SHA256SUMS`.
-3. `git tag -a v1.0.0 <commit>` (PR-066; separately named).
+3. `git tag -a v1.0.0 <commit>` (executed locally; not pushed).
 4. Publish crates, wheels, npm, and WIT only after a later sentence
    names registry credentials.
 5. Cut `release/1.0` from that tagged commit (separately named).
@@ -101,8 +104,9 @@ restore, and rollback procedure.
 | Rollback / hotfix | `mise run hotfix-rehearsal`; yank commands documented not run |
 | Least-privilege release credentials | No registry tokens in this tree; workflows use `contents: read` |
 
-This review is not `G8-D-*`. FIND-064-010 (unpublished registries)
-stays Accepted until the first named publish. FIND-064-003
+This review is not `G8-D-*`. G8 later passed via
+`G8-D-general-availability-a889a29a3f54`. FIND-064-010 (unpublished
+registries) stays Accepted until the first named publish. FIND-064-003
 (unbounded settlement map) stays Open and is not accepted here.
 
 ## Related

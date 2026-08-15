@@ -10,10 +10,11 @@ tagged `0.1.0` scope stays in
 The family table is
 [1.0-compatibility-matrix.md](../implementation/1.0-compatibility-matrix.md).
 
-This tree carries unpublished lockstep **`1.0.0`**. The last public tag
-is `v0.1.0`. Do not treat staged artifacts as a crates.io / PyPI / npm
-publication. Support windows are in [support.md](support.md). Published
-conformance suites are in [conformance.md](conformance.md).
+This tree carries lockstep **`1.0.0`**. Local tag `v1.0.0` exists.
+The last pushed GitHub tag is `v0.1.0`. Do not treat staged artifacts
+as a crates.io / PyPI / npm publication. Support windows are in
+[support.md](support.md). Published conformance suites are in
+[conformance.md](conformance.md).
 
 ## Supported 0.1.0 → 1.0.0 paths
 
@@ -69,8 +70,8 @@ mise run release-rehearsal
 Two local staging runs from the same commit must produce identical
 checksums for the existing staging paths (Python wheel/sdist, npm tarball
 when the WASM package is already generated, crate package lists). The
-**last public tag** is `v0.1.0`. Tag `v1.0.0` waits on a later named
-sentence. This rehearsal does not publish to registries.
+**last pushed GitHub tag** is `v0.1.0`. Local tag `v1.0.0` exists and
+is not pushed. This rehearsal does not publish to registries.
 
 ## License and governance
 
