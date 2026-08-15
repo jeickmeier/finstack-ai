@@ -12,15 +12,14 @@ and migration needs after G7. It is **first-party only**. It does
 
 ## Disposition
 
-| Phase 9 entrance bullet (Implementation Plan §17) | Result |
+| Phase 9 entrance bullet | Result |
 | --- | --- |
-| `0.1.0` used by external adopters | **Not satisfied.** No named external project uses this candidate. |
-| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **Reviewed here from first-party sources only.** This is not external soak. |
+| Tagged `v0.1.0` (PLAN-0.19) | **Satisfied** via `PH9-E-entrance-tag-b610b0ba93b5`. Public registries remain unpublished. |
+| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **Satisfied** via `PH9-E-entrance-feedback-ee6999c59a12` from first-party sources. |
 
-Phase 9 entrance stays **`0/2`**. Do not write `PH9-E-entrance-*`.
-Do not treat first-party starters, `docs-quickstarts`, or this file as
-external adopters. Treating first-party soak as bullet 1 requires a
-versioned PRD / Implementation Plan amendment.
+Phase 9 entrance is **`Passed` (2/2)** under PLAN-0.19 / pack v0.21.
+External adopter soak and `1.0.0` migration validation remain G8 /
+program completion criterion 12. Do not invent external adopters.
 
 ## Adopter search (2026-08-15)
 
@@ -119,20 +118,15 @@ Needed when Phase 9 is admitted; not started here.
 | Hosted matrix, cargo-deny, gitleaks, Sigstore | PR-063 / G8 | G7 accepted residuals |
 | Independent review | PR-065 / G8 | Not this review |
 
-## What would satisfy entrance later
+## Later G8 / program-completion facts
 
-1. Name one or more **external** repositories or products that depend
-   on this `0.1.0` candidate (path, git, or published package).
-2. Keep or refresh this review with those projects’ issue patterns
-   and migration needs.
-3. Then the first admitted Phase 9 PR may record
-   `PH9-E-entrance-adopters-*` and `PH9-E-entrance-feedback-*`.
-
-Alternatively, a versioned PRD / Implementation Plan amendment may
-change §17 if the owner wants first-party soak to count. Editing
-registers cannot do that.
+PLAN-0.19 moved external soak out of Phase 9 entrance. G8 and
+program completion criterion 12 still need external preview-user
+validation of the `1.0.0` migration path. Do not invent those
+users here.
 
 ## Decision
 
-Keep Phase 9 `Todo`, entrance `0/2`, PR-062–PR-066 `Todo`.
-Do not admit PR-062. Do not write `G8-D-*`. Do not cut `1.0.0`.
+Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. PR-062 is
+admitted. Do not write `G8-D-*`. Do not cut `1.0.0`. Do not
+publish to crates.io / PyPI / npm until separately named.

@@ -1,30 +1,47 @@
-//! World-surface inventory and experimental version policy.
+//! World-surface inventory and dual-major version policy.
 
 use crate::generated::{
-    AI_CONTEXT_PACKAGE, AI_HOST_PACKAGE, AI_TOOLSET_PACKAGE, AI_TYPES_PACKAGE, CONTEXT_FUNCS,
-    CONTEXT_WORLD_EXPORTS, CRATE_VERSION, FORBIDDEN_WORLD_TOKENS, HOST_IMPORTS, PUBLISHED_PACKAGES,
+    AI_CONTEXT_PACKAGE, AI_CONTEXT_PACKAGE_V1, AI_HOST_PACKAGE, AI_HOST_PACKAGE_V1,
+    AI_TOOLSET_PACKAGE, AI_TOOLSET_PACKAGE_V1, AI_TYPES_PACKAGE, AI_TYPES_PACKAGE_V1,
+    CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, CRATE_VERSION, FORBIDDEN_WORLD_TOKENS, HOST_IMPORTS,
+    HOST_IMPORTS_V1, PUBLISHED_PACKAGES, PUBLISHED_PACKAGES_V004, PUBLISHED_PACKAGES_V100,
     TOOLSET_FUNCS, TOOLSET_WORLD_EXPORTS,
 };
 
-/// Checked-in `types.wit`.
+/// Checked-in `types.wit` (`@0.0.4`).
 pub const TYPES_WIT: &str = include_str!("../wit/v0.0.4/finstack-ai-types/types.wit");
-/// Checked-in `host.wit`.
+/// Checked-in `host.wit` (`@0.0.4`).
 pub const HOST_WIT: &str = include_str!("../wit/v0.0.4/finstack-ai-host/host.wit");
-/// Checked-in `toolset.wit`.
+/// Checked-in `toolset.wit` (`@0.0.4`).
 pub const TOOLSET_WIT: &str = include_str!("../wit/v0.0.4/finstack-ai-toolset/toolset.wit");
-/// Checked-in `context.wit`.
+/// Checked-in `context.wit` (`@0.0.4`).
 pub const CONTEXT_WIT: &str = include_str!("../wit/v0.0.4/finstack-ai-context/context.wit");
+/// Checked-in `types.wit` (`@1.0.0`).
+pub const TYPES_WIT_V1: &str = include_str!("../wit/v1.0.0/finstack-ai-types/types.wit");
+/// Checked-in `host.wit` (`@1.0.0`).
+pub const HOST_WIT_V1: &str = include_str!("../wit/v1.0.0/finstack-ai-host/host.wit");
+/// Checked-in `toolset.wit` (`@1.0.0`).
+pub const TOOLSET_WIT_V1: &str = include_str!("../wit/v1.0.0/finstack-ai-toolset/toolset.wit");
+/// Checked-in `context.wit` (`@1.0.0`).
+pub const CONTEXT_WIT_V1: &str = include_str!("../wit/v1.0.0/finstack-ai-context/context.wit");
 
-/// Confirm the experimental worlds export only the coarse toolset and context operations.
+/// Confirm both majors export only the coarse toolset and context operations.
 ///
 /// # Errors
 ///
-/// Returns a static reason when the generated inventory drifts from A05/A06.
+/// Returns a static reason when the generated inventory drifts from the freeze.
 pub fn assert_experimental_surface() -> Result<(), &'static str> {
+    assert_published_packages()?;
+    assert_coarse_exports()?;
+    assert_source_versions()?;
+    Ok(())
+}
+
+fn assert_published_packages() -> Result<(), &'static str> {
     if CRATE_VERSION == "1.0.0" {
-        return Err("plugin crate version 1.0.0 is blocked until framework 1.0");
+        return Err("plugin crate version 1.0.0 is reserved for the PR-066 GA cut");
     }
-    if PUBLISHED_PACKAGES
+    if PUBLISHED_PACKAGES_V004
         != [
             AI_TYPES_PACKAGE,
             AI_HOST_PACKAGE,
@@ -32,14 +49,39 @@ pub fn assert_experimental_surface() -> Result<(), &'static str> {
             AI_CONTEXT_PACKAGE,
         ]
     {
-        return Err("published packages drifted");
+        return Err("published @0.0.4 packages drifted");
+    }
+    if PUBLISHED_PACKAGES_V100
+        != [
+            AI_TYPES_PACKAGE_V1,
+            AI_HOST_PACKAGE_V1,
+            AI_TOOLSET_PACKAGE_V1,
+            AI_CONTEXT_PACKAGE_V1,
+        ]
+    {
+        return Err("published @1.0.0 packages drifted");
     }
     if PUBLISHED_PACKAGES
-        .iter()
-        .any(|package| package.contains("@1.0.0"))
+        != [
+            AI_TYPES_PACKAGE,
+            AI_HOST_PACKAGE,
+            AI_TOOLSET_PACKAGE,
+            AI_CONTEXT_PACKAGE,
+            AI_TYPES_PACKAGE_V1,
+            AI_HOST_PACKAGE_V1,
+            AI_TOOLSET_PACKAGE_V1,
+            AI_CONTEXT_PACKAGE_V1,
+        ]
     {
-        return Err("@1.0.0 package generation is blocked until framework 1.0");
+        return Err("published dual-major packages drifted");
     }
+    if !PUBLISHED_PACKAGES.contains(&AI_TYPES_PACKAGE_V1) {
+        return Err("@1.0.0 packages must be generated at the 1.0 freeze");
+    }
+    Ok(())
+}
+
+fn assert_coarse_exports() -> Result<(), &'static str> {
     if TOOLSET_WORLD_EXPORTS != ["toolset"] {
         return Err("toolset-plugin must export only toolset");
     }
@@ -60,13 +102,22 @@ pub fn assert_experimental_surface() -> Result<(), &'static str> {
     {
         return Err("host imports must be logging and blobs only");
     }
+    if HOST_IMPORTS_V1
+        != [
+            "finstack:ai-host/logging@1.0.0",
+            "finstack:ai-host/blobs@1.0.0",
+        ]
+    {
+        return Err("@1.0.0 host imports must be logging and blobs only");
+    }
     let surface = format!(
-        "{} {} {} {} {}",
+        "{} {} {} {} {} {}",
         TOOLSET_WORLD_EXPORTS.join(" "),
         TOOLSET_FUNCS.join(" "),
         CONTEXT_WORLD_EXPORTS.join(" "),
         CONTEXT_FUNCS.join(" "),
-        HOST_IMPORTS.join(" ")
+        HOST_IMPORTS.join(" "),
+        HOST_IMPORTS_V1.join(" ")
     );
     if FORBIDDEN_WORLD_TOKENS
         .iter()
@@ -74,23 +125,44 @@ pub fn assert_experimental_surface() -> Result<(), &'static str> {
     {
         return Err("forbidden world token leaked into the export surface");
     }
+    Ok(())
+}
+
+fn assert_source_versions() -> Result<(), &'static str> {
     if TYPES_WIT.contains("@1.0.0")
         || HOST_WIT.contains("@1.0.0")
         || TOOLSET_WIT.contains("@1.0.0")
         || CONTEXT_WIT.contains("@1.0.0")
     {
-        return Err("checked-in WIT sources must stay on @0.0.4");
+        return Err("checked-in @0.0.4 WIT sources must stay on @0.0.4");
     }
-    if TOOLSET_WIT.contains("export context-provider") || TOOLSET_WIT.contains("world agent") {
-        return Err("toolset world must not export nested-agent or context surfaces");
-    }
-    if CONTEXT_WIT.contains("export toolset")
-        || CONTEXT_WIT.contains("world agent")
-        || CONTEXT_WIT.contains("initialize")
-        || CONTEXT_WIT.contains("warmup")
-        || CONTEXT_WIT.contains("shutdown")
+    if !TYPES_WIT_V1.contains("@1.0.0")
+        || !HOST_WIT_V1.contains("@1.0.0")
+        || !TOOLSET_WIT_V1.contains("@1.0.0")
+        || !CONTEXT_WIT_V1.contains("@1.0.0")
+        || TYPES_WIT_V1.contains("@0.0.4")
+        || HOST_WIT_V1.contains("@0.0.4")
+        || TOOLSET_WIT_V1.contains("@0.0.4")
+        || CONTEXT_WIT_V1.contains("@0.0.4")
     {
-        return Err("context world must not export toolset, nested-agent, or lifecycle functions");
+        return Err("checked-in @1.0.0 WIT sources must stay on @1.0.0");
+    }
+    for source in [TOOLSET_WIT, TOOLSET_WIT_V1] {
+        if source.contains("export context-provider") || source.contains("world agent") {
+            return Err("toolset world must not export nested-agent or context surfaces");
+        }
+    }
+    for source in [CONTEXT_WIT, CONTEXT_WIT_V1] {
+        if source.contains("export toolset")
+            || source.contains("world agent")
+            || source.contains("initialize")
+            || source.contains("warmup")
+            || source.contains("shutdown")
+        {
+            return Err(
+                "context world must not export toolset, nested-agent, or lifecycle functions",
+            );
+        }
     }
     Ok(())
 }
@@ -99,15 +171,17 @@ pub fn assert_experimental_surface() -> Result<(), &'static str> {
 mod tests {
     use super::assert_experimental_surface;
     use crate::generated::{
-        CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, CRATE_VERSION, TOOLSET_WORLD_EXPORTS,
+        CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, CRATE_VERSION, PUBLISHED_PACKAGES,
+        TOOLSET_WORLD_EXPORTS,
     };
 
     #[test]
-    fn experimental_surface_is_coarse_and_0x_only() {
+    fn experimental_surface_is_coarse_and_dual_major() {
         assert_experimental_surface().expect("surface");
         assert_eq!(CRATE_VERSION, "0.1.0");
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);
         assert_eq!(CONTEXT_WORLD_EXPORTS, ["context-provider"]);
         assert_eq!(CONTEXT_FUNCS, ["collect"]);
+        assert!(PUBLISHED_PACKAGES.contains(&"finstack:ai-types@1.0.0"));
     }
 }

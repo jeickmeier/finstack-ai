@@ -142,7 +142,7 @@ fn compile_cache(criterion: &mut Criterion) {
                 digest: component_digest(&bytes),
                 engine: engine_fingerprint(),
                 target: host_target(),
-                abi: abi_identity("toolset-plugin"),
+                abi: abi_identity("toolset-plugin", "0.0.4"),
             };
             let miss = host.compile_with_key(&bytes, &parts).expect("miss");
             let hit = host.compile_with_key(&bytes, &parts).expect("hit");

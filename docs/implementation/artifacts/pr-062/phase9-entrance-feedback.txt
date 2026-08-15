@@ -1,0 +1,22 @@
+PH9-E-entrance-feedback-ee6999c59a12
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Baseline: 1775eab425ef9d48f93df0f0248d77bfda706331
+Plan: PLAN-0.19 / pack v0.21
+
+Phase 9 entrance criterion 2: Preview telemetry, issue patterns, API
+pain points, and migration needs reviewed.
+
+Evidence:
+
+- docs/implementation/preview-feedback-review.md
+- PREVIEW-E-first-party-feedback-c706126bcc26
+- G7 residuals and public-preview-roadmap.md
+- public-api-change-backlog.md
+
+The review is first-party. PLAN-0.19 accepts that for Phase 9
+entrance. External soak remains a G8 / program-completion-12 fact.
+
+Result: Pass
+
+This row does not record G8. Do not invent adopter tickets.

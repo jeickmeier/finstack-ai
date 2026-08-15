@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate checked-in Rust bindings from the locked v0.0.4 WIT packages."""
+"""Generate checked-in Rust bindings from the locked v0.0.4 and v1.0.0 WIT packages."""
 
 from __future__ import annotations
 
@@ -12,15 +12,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WIT_ROOT = REPO_ROOT / "plugins" / "finstack-ai-wit" / "wit" / "v0.0.4"
+WIT_V004 = REPO_ROOT / "plugins" / "finstack-ai-wit" / "wit" / "v0.0.4"
+WIT_V100 = REPO_ROOT / "plugins" / "finstack-ai-wit" / "wit" / "v1.0.0"
 GENERATED_RS = REPO_ROOT / "plugins" / "finstack-ai-wit" / "src" / "generated.rs"
 CRATE_TOML = REPO_ROOT / "plugins" / "finstack-ai-wit" / "Cargo.toml"
-CONTEXT_WIT = WIT_ROOT / "finstack-ai-context" / "context.wit"
-ALLOWED_PACKAGES = (
+ALLOWED_V004 = (
     "finstack:ai-types@0.0.4",
     "finstack:ai-host@0.0.4",
     "finstack:ai-toolset@0.0.4",
     "finstack:ai-context@0.0.4",
+)
+ALLOWED_V100 = (
+    "finstack:ai-types@1.0.0",
+    "finstack:ai-host@1.0.0",
+    "finstack:ai-toolset@1.0.0",
+    "finstack:ai-context@1.0.0",
 )
 FORBIDDEN_WORLD_TOKENS = (
     "agent",
@@ -29,7 +35,6 @@ FORBIDDEN_WORLD_TOKENS = (
     "lineage",
     "nested",
 )
-V1_PACKAGE = re.compile(r"package\s+[^;]+@1\.0\.0\b")
 PACKAGE_RE = re.compile(r"^package\s+([^;]+);", re.MULTILINE)
 IDENT_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 
@@ -239,22 +244,14 @@ def parse_world_body(body: str) -> World:
     return world
 
 
-def parse_package(path: Path) -> Package:
+def parse_package(path: Path, allowed: tuple[str, ...]) -> Package:
     text = strip_comments(path.read_text(encoding="utf-8"))
-    if V1_PACKAGE.search(text):
-        raise WitError(
-            f"{path}: @1.0.0 package generation is blocked until framework 1.0"
-        )
     package_match = PACKAGE_RE.search(text)
     if package_match is None:
         raise WitError(f"{path}: missing package declaration")
     package_name = package_match.group(1).strip()
-    if package_name not in ALLOWED_PACKAGES:
+    if package_name not in allowed:
         raise WitError(f"{path}: unexpected package {package_name}")
-    if package_name.endswith("@1.0.0"):
-        raise WitError(
-            f"{path}: @1.0.0 package generation is blocked until framework 1.0"
-        )
     package = Package(name=package_name, path=path)
     index = package_match.end()
     while index < len(text):
@@ -295,7 +292,9 @@ def forbidden_tokens_for_world(world_name: str) -> tuple[str, ...]:
         "toolset-plugin": ("context-provider",),
         "context-plugin": ("toolset",),
     }
-    return FORBIDDEN_WORLD_TOKENS + extra.get(world_name, ("context-provider", "toolset"))
+    return FORBIDDEN_WORLD_TOKENS + extra.get(
+        world_name, ("context-provider", "toolset")
+    )
 
 
 def crate_version() -> str:
@@ -316,7 +315,7 @@ def crate_version() -> str:
 def emit_record(name: str, fields: list[Field]) -> str:
     rust_name = kebab_to_pascal(name)
     lines = [
-        f"/// WIT `{name}` record generated from the checked-in v0.0.4 packages.",
+        f"/// WIT `{name}` record generated from the checked-in dual-major packages.",
         "#[derive(Clone, Debug, PartialEq, Eq)]",
         f"pub struct {rust_name} {{",
     ]
@@ -330,7 +329,7 @@ def emit_record(name: str, fields: list[Field]) -> str:
 def emit_enum(name: str, cases: list[str]) -> str:
     rust_name = kebab_to_pascal(name)
     lines = [
-        f"/// WIT `{name}` enum generated from the checked-in v0.0.4 packages.",
+        f"/// WIT `{name}` enum generated from the checked-in dual-major packages.",
         "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
         f"pub enum {rust_name} {{",
     ]
@@ -369,15 +368,71 @@ def emit_trait(kind: str, interface: Interface) -> str:
     return "\n".join(lines)
 
 
-def emit_source(packages: list[Package]) -> str:
+def package_const_name(package_name: str) -> str:
+    name, version = package_name.split("@", 1)
+    stem = name.split(":")[1].replace("-", "_").upper() + "_PACKAGE"
+    if version == "1.0.0":
+        return f"{stem}_V1"
+    return stem
+
+
+def world_imports(packages: list[Package]) -> tuple[str, ...]:
+    imports: list[str] = []
+    for package in packages:
+        for world in package.worlds:
+            imports.extend(world.imports)
+    return tuple(dict.fromkeys(imports))
+
+
+def assert_same_shape(v004: list[Package], v100: list[Package]) -> None:
+    if len(v004) != len(v100):
+        raise WitError("v0.0.4 and v1.0.0 package counts drifted")
+    for left, right in zip(v004, v100, strict=True):
+        left_name = left.name.rsplit("@", 1)[0]
+        right_name = right.name.rsplit("@", 1)[0]
+        if left_name != right_name:
+            raise WitError(f"package order drifted: {left.name} vs {right.name}")
+        if [
+            (iface.name, sorted(iface.records), sorted(iface.enums))
+            for iface in left.interfaces
+        ] != [
+            (iface.name, sorted(iface.records), sorted(iface.enums))
+            for iface in right.interfaces
+        ]:
+            raise WitError(f"{left_name} interface/record/enum shape drifted")
+        for left_iface, right_iface in zip(
+            left.interfaces, right.interfaces, strict=True
+        ):
+            if (
+                left_iface.records != right_iface.records
+                or left_iface.enums != right_iface.enums
+            ):
+                raise WitError(f"{left_name} field shape drifted")
+            left_funcs = [
+                (func.name, [(p.name, p.ty) for p in func.params], func.result)
+                for func in left_iface.funcs
+            ]
+            right_funcs = [
+                (func.name, [(p.name, p.ty) for p in func.params], func.result)
+                for func in right_iface.funcs
+            ]
+            if left_funcs != right_funcs:
+                raise WitError(f"{left_name} function shape drifted")
+        left_worlds = [(world.name, world.exports) for world in left.worlds]
+        right_worlds = [(world.name, world.exports) for world in right.worlds]
+        if left_worlds != right_worlds:
+            raise WitError(f"{left_name} world exports drifted")
+
+
+def emit_source(v004: list[Package], v100: list[Package]) -> str:
+    assert_same_shape(v004, v100)
     version = crate_version()
     records: dict[str, list[Field]] = {}
     enums: dict[str, list[str]] = {}
     host_traits: list[Interface] = []
     guest_traits: list[Interface] = []
     worlds: list[World] = []
-    host_imports: list[str] = []
-    for package in packages:
+    for package in v004:
         for interface in package.interfaces:
             records.update(interface.records)
             enums.update(interface.enums)
@@ -386,8 +441,6 @@ def emit_source(packages: list[Package]) -> str:
             elif interface.funcs:
                 guest_traits.append(interface)
         worlds.extend(package.worlds)
-        for world in package.worlds:
-            host_imports.extend(world.imports)
 
     toolset_world = next(world for world in worlds if world.name == "toolset-plugin")
     context_world = next(world for world in worlds if world.name == "context-plugin")
@@ -395,32 +448,33 @@ def emit_source(packages: list[Package]) -> str:
         interface for interface in guest_traits if interface.name == "toolset"
     )
     context = next(
-        interface
-        for interface in guest_traits
-        if interface.name == "context-provider"
+        interface for interface in guest_traits if interface.name == "context-provider"
     )
-    unique_imports = tuple(dict.fromkeys(host_imports))
+    published = ALLOWED_V004 + ALLOWED_V100
     blocks = [
         "// @generated by tools/wit_bindgen/generate.py. Do not hand-edit.",
         "",
-        "//! Generated host and guest bindings for the experimental `@0.0.4` WIT packages.",
+        "//! Generated host and guest bindings for the dual-major `@0.0.4` and `@1.0.0` WIT packages.",
         "",
-        f"/// Workspace crate version that owns these experimental `@0.0.4` bindings (`{version}`).",
+        f"/// Workspace crate version that owns these dual-major bindings (`{version}`).",
         f'pub const CRATE_VERSION: &str = "{version}";',
     ]
-    for package in packages:
-        const_name = (
-            package.name.split(":")[1].split("@")[0].replace("-", "_").upper()
-            + "_PACKAGE"
-        )
+    for package in [*v004, *v100]:
+        const_name = package_const_name(package.name)
         blocks.append(f"/// Checked-in WIT package `{package.name}`.")
         blocks.append(f'pub const {const_name}: &str = "{package.name}";')
     blocks.extend(
         [
-            "/// Worlds published by this experimental plugin alpha.",
-            f"pub const PUBLISHED_PACKAGES: &[&str] = &{python_str_array(ALLOWED_PACKAGES)};",
-            "/// Host imports granted by experimental plugin worlds. Linking them is not ambient WASI.",
-            f"pub const HOST_IMPORTS: &[&str] = &{python_str_array(unique_imports)};",
+            "/// Worlds published by the experimental `@0.0.4` line.",
+            f"pub const PUBLISHED_PACKAGES_V004: &[&str] = &{python_str_array(ALLOWED_V004)};",
+            "/// Worlds published by the frozen `@1.0.0` line.",
+            f"pub const PUBLISHED_PACKAGES_V100: &[&str] = &{python_str_array(ALLOWED_V100)};",
+            "/// Worlds published by both majors.",
+            f"pub const PUBLISHED_PACKAGES: &[&str] = &{python_str_array(published)};",
+            "/// Host imports granted by experimental `@0.0.4` worlds. Linking them is not ambient WASI.",
+            f"pub const HOST_IMPORTS: &[&str] = &{python_str_array(world_imports(v004))};",
+            "/// Host imports granted by frozen `@1.0.0` worlds. Linking them is not ambient WASI.",
+            f"pub const HOST_IMPORTS_V1: &[&str] = &{python_str_array(world_imports(v100))};",
             "/// Guest exports of `toolset-plugin`.",
             f"pub const TOOLSET_WORLD_EXPORTS: &[&str] = &{python_str_array(tuple(toolset_world.exports))};",
             "/// Functions exported by the `toolset` interface.",
@@ -449,17 +503,21 @@ def python_str_array(values: tuple[str, ...]) -> str:
     return f"[{inner}]"
 
 
-def load_packages() -> list[Package]:
+def load_roots(root: Path, allowed: tuple[str, ...]) -> list[Package]:
     roots = (
-        WIT_ROOT / "finstack-ai-types" / "types.wit",
-        WIT_ROOT / "finstack-ai-host" / "host.wit",
-        WIT_ROOT / "finstack-ai-toolset" / "toolset.wit",
-        CONTEXT_WIT,
+        root / "finstack-ai-types" / "types.wit",
+        root / "finstack-ai-host" / "host.wit",
+        root / "finstack-ai-toolset" / "toolset.wit",
+        root / "finstack-ai-context" / "context.wit",
     )
     for path in roots:
         if not path.is_file():
             raise WitError(f"missing WIT root {path}")
-    return [parse_package(path) for path in roots]
+    return [parse_package(path, allowed) for path in roots]
+
+
+def load_packages() -> tuple[list[Package], list[Package]]:
+    return load_roots(WIT_V004, ALLOWED_V004), load_roots(WIT_V100, ALLOWED_V100)
 
 
 def rustfmt(source: str) -> str:
@@ -496,7 +554,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        source = rustfmt(emit_source(load_packages()))
+        v004, v100 = load_packages()
+        source = rustfmt(emit_source(v004, v100))
         if args.check:
             current = (
                 GENERATED_RS.read_text(encoding="utf-8")

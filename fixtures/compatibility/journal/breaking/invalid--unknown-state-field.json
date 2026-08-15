@@ -1,0 +1,31 @@
+{
+  "run_accepted": {
+    "limits": {},
+    "propagation": {
+      "budget": "shared_scope",
+      "cancellation": "cascade",
+      "deadline": "minimum_of_parent_and_child",
+      "principal": "inherit"
+    },
+    "relation": {
+      "depth": 0,
+      "kind": "root",
+      "root_run_id": "00000000-0000-7000-8000-000000000003"
+    },
+    "resolved_agent_lock_digest": "ffcab07fe5d161b06cb7b1bfce2517c652f53ae4b4822b8c01d25116b62483ce",
+    "run_id": "00000000-0000-7000-8000-000000000003",
+    "security": {
+      "assurance_level": "high",
+      "authentication_method": "oidc",
+      "authorization_decision_id": "decision-1",
+      "authorization_policy_version": "policy-1",
+      "principal": {
+        "issuer": "iss",
+        "subject": "sub",
+        "tenant_scope": "tenant-a"
+      },
+      "tenant_scope": "tenant-a"
+    },
+    "ambient_authority": true
+  }
+}

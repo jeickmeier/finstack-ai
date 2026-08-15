@@ -1,0 +1,6 @@
+{
+  "case": "durable-order-swap",
+  "canonical": ["effect_requested", "effect_completed"],
+  "swapped": ["effect_completed", "effect_requested"],
+  "expect": { "ok": false, "code": "event_order" }
+}

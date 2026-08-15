@@ -12,8 +12,10 @@ pub use wit_bindgen;
 
 /// Pinned `wit-bindgen` crate version used by the guest macros.
 pub const WIT_BINDGEN_VERSION: &str = "0.57.1";
-/// Experimental WIT package version guests must pin.
+/// Experimental WIT package version guests must pin unless they retarget.
 pub const WIT_PACKAGE_VERSION: &str = "0.0.4";
+/// Frozen WIT package version for guests that retarget to `@1.0.0`.
+pub const WIT_PACKAGE_VERSION_V1: &str = "1.0.0";
 
 /// Individual text or byte-string ceiling (TDD §6.5).
 pub const MAX_STRING_BYTES: usize = 4 * 1024 * 1024;
@@ -306,9 +308,9 @@ fn raw_json_digest_hex(canonical: &[u8]) -> String {
 mod tests {
     use super::{
         GuestError, LogLevel, MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, ToolSpecParts,
-        WIT_BINDGEN_VERSION, WIT_PACKAGE_VERSION, catalog_digest, encode_json_result,
-        fixture_decision_id, fixture_tenant_scope, parse_args, plugin_error, reject_log_message,
-        require_sanitized_context, schema_bytes,
+        WIT_BINDGEN_VERSION, WIT_PACKAGE_VERSION, WIT_PACKAGE_VERSION_V1, catalog_digest,
+        encode_json_result, fixture_decision_id, fixture_tenant_scope, parse_args, plugin_error,
+        reject_log_message, require_sanitized_context, schema_bytes,
     };
     use serde::Deserialize;
 
@@ -340,6 +342,7 @@ mod tests {
     fn versions_are_pinned() {
         assert_eq!(WIT_BINDGEN_VERSION, "0.57.1");
         assert_eq!(WIT_PACKAGE_VERSION, "0.0.4");
+        assert_eq!(WIT_PACKAGE_VERSION_V1, "1.0.0");
     }
 
     #[test]

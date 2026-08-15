@@ -1,0 +1,9 @@
+{
+  "world": "context-plugin",
+  "exports": ["context-provider"],
+  "funcs": ["collect"],
+  "imports": [
+    "finstack:ai-host/logging@1.0.0",
+    "finstack:ai-host/blobs@1.0.0"
+  ]
+}

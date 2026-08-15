@@ -1,10 +1,11 @@
-# Experimental WIT compatibility
+# Dual-major WIT compatibility
 
 Family: `wit`  
 Profile: `exact-world`  
-Stability: `experimental-0.x`  
-Packages: `finstack:ai-types@0.0.4`, `finstack:ai-host@0.0.4`,
-`finstack:ai-toolset@0.0.4`, `finstack:ai-context@0.0.4`
+Stability: `@1.0.0` frozen; `@0.0.4` experimental and still loadable  
+Packages: `finstack:ai-types@0.0.4` / `@1.0.0`, `finstack:ai-host@0.0.4` /
+`@1.0.0`, `finstack:ai-toolset@0.0.4` / `@1.0.0`,
+`finstack:ai-context@0.0.4` / `@1.0.0`
 
 ## Promise
 
@@ -13,10 +14,10 @@ metadata, and undeclared exports are rejected. There is no permissive
 default for `execution-mode`, `side-effect`, `retry-safety`,
 `approval-policy-json`, or `max-result-bytes`.
 
-The workspace crate version is staged unpublished `0.0.4`. Plugin alpha
-ships `@0.x` packages only. `@1.0.0` worlds are generated only at the
-framework 1.0 compatibility gate. `mise run gen-wit` fails if a `@1.0.0`
-package appears.
+The workspace crate version stays unpublished lockstep `0.1.0` until
+PR-066. Plugin alpha `@0.x` guests keep loading. `@1.0.0` worlds are
+generated beside `@0.0.4`. `mise run gen-wit` emits both majors. The
+crate version `1.0.0` remains reserved for the GA cut.
 
 ## Deprecation
 

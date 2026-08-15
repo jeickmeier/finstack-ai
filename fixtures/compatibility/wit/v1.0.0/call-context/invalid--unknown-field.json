@@ -1,0 +1,12 @@
+{
+  "effect-id": "effect-1",
+  "session-id": "session-1",
+  "lane-id": "lane-1",
+  "run-id": "run-1",
+  "tenant-scope": "tenant-a",
+  "principal-issuer": "iss",
+  "principal-subject": "sub",
+  "authorization-decision-id": "decision-v1",
+  "permitted-scopes": [],
+  "ambient_authority": true
+}

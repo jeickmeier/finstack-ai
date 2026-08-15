@@ -37,6 +37,20 @@ fn remote_and_process_share_frame_limits() {
 }
 
 #[test]
+fn unknown_handshake_fields_fail_closed() {
+    let remote = fs::read_to_string(
+        repo_root().join("fixtures/compatibility/remote/v1/handshake/invalid--unknown-field.json"),
+    )
+    .expect("remote unknown field");
+    assert!(serde_json::from_str::<RemotePreAuth>(&remote).is_err());
+    let process = fs::read_to_string(
+        repo_root().join("fixtures/compatibility/process/v1/handshake/invalid--unknown-field.json"),
+    )
+    .expect("process unknown field");
+    assert!(serde_json::from_str::<ProcessPreAuth>(&process).is_err());
+}
+
+#[test]
 fn fixture_vocabularies_stay_family_separate() {
     let remote = fs::read_to_string(
         repo_root().join("fixtures/compatibility/remote/v1/vocab/valid--open-session.json"),

@@ -1,0 +1,6 @@
+package finstack:ai-toolset@1.0.0;
+
+world agent-plugin {
+    import finstack:ai-host/logging@1.0.0;
+    export toolset;
+}

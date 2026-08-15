@@ -12,6 +12,9 @@ This directory is the live control surface for implementation. It answers what i
 | [Exceptions register](exceptions-register.md) | Approved, time-bounded deviations from Engineering Standards. |
 | [Public API change backlog](public-api-change-backlog.md) | Triaged public-surface deltas before `0.1.0`. Phase 8 entrance evidence; not the published preview policy. |
 | [Preview compatibility policy](preview-compatibility-policy.md) | Adopter-facing tagged `0.1.0` preview promise. Not a 1.0 SemVer guarantee. |
+| [1.0 compatibility policy](1.0-compatibility-policy.md) | Adopter-facing 1.0 SemVer promise. `READY FOR NAMED DECISION`; not `G8-D-*`. |
+| [1.0 leaf versioning](1.0-leaf-versioning.md) | Lockstep core; independent leaves only after named coupling harm. |
+| [1.0 deprecation inventory](1.0-deprecation-inventory.md) | Remaining deprecations with `since` and removal versions. |
 | [Public preview roadmap](public-preview-roadmap.md) | In-repo preview limitations and deferred Phase 9 themes. |
 | [Preview feedback review](preview-feedback-review.md) | First-party review of telemetry, issue patterns, API pain, and migration needs. Does not satisfy Phase 9 entrance. |
 
@@ -29,12 +32,12 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.20, G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, and G7-D-public-preview-f7c7e70b9e04 on 2026-08-15:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.21, G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, and G7-D-public-preview-f7c7e70b9e04 on 2026-08-15:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-021 and ADR-023 through ADR-037 are `Implemented` / `Verified` through their mapped phase evidence and named gate decisions. ADR-022 stays `In progress` / `Partial` because browser/WASM binding peers remain. SharedArrayBuffer is documented as post-preview reconsideration. ADR-024 is `Implemented` / `Verified` for governance files only (RFC/license/contribution links).
-- Phase 0 through Phase 8 are `Done`; Phase 9 is `Todo`. PR-001–PR-061 are `Done`; PR-062–PR-066 remain `Todo`. Phase 8 entrance is `Passed` (2/2) and exit is `Passed` (4/4). G0–G7 are `Passed`.
+- Phase 0 through Phase 8 are `Done`; Phase 9 is `In progress`. PR-001–PR-061 are `Done`; PR-062 is `In review` (A01–A03 Passed; A04 Pending); PR-063–PR-066 remain `Todo`. Phase 8 entrance is `Passed` (2/2) and exit is `Passed` (4/4). Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G0–G7 are `Passed`. G8 remains `Not ready`.
 - G0 is `Passed` via `G0-D-foundation-ready-bcf021e4873a`; G1 is `Passed` via `G1-D-kernel-semantics-4f52c8a91d6e`; G2 is `Passed` via `G2-D-native-runtime-7c2e9a4d1b65`; G3 is `Passed` via `G3-D-native-preview-14a386c7db24`; G4 is `Passed` via `G4-D-binding-parity-101224c5eb60`; G5 is `Passed` via `G5-D-durable-beta-a9568bd869b5`; G6 is `Passed` via `G6-D-plugin-alpha-018aaea9aa00`; G7 is `Passed` via `G7-D-public-preview-f7c7e70b9e04`; G8 remains `Not ready`.
-- PR-001–PR-061 acceptance criteria are closed at local merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` (A01–A05 Passed). Artifacts live under [`artifacts/pr-043/`](artifacts/pr-043/) through [`artifacts/pr-061/`](artifacts/pr-061/). Tag `v0.1.0` is cut. No npm/pypi/crates.io publication or SharedArrayBuffer is claimed. Phase 9 entrance remains `0/2`: a first-party preview-feedback review exists, and no external adopter evidence exists.
+- PR-001–PR-061 acceptance criteria are closed at local merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` (A01–A05 Passed). Tag `v0.1.0` is cut. Phase 9 entrance is `Passed` via `PH9-E-entrance-tag-b610b0ba93b5` and `PH9-E-entrance-feedback-ee6999c59a12`. PR-062 candidate `b76bfca8fcf7e6e7778aa9ee2acd0ca54bc54b8f` freezes 1.0 contracts and lifts WIT `@1.0.0`; A04 waits for a named `COMP-1.0-D-*`. No npm/pypi/crates.io publication, SharedArrayBuffer, `COMP-1.0-D-*`, or `G8-D-*` is claimed.
 
 Phase and gate closure is recorded only after the named gate decision against an immutable merged commit; green CI alone does not pass a gate.
 

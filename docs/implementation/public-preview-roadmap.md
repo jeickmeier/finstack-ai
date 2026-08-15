@@ -6,12 +6,14 @@ are links to the Implementation Plan, not admitted work.
 
 ## Known preview limitations
 
-- Experimental WIT `@0.0.4` worlds. `@1.0.0` generation stays blocked.
+- Experimental WIT `@0.0.4` worlds remain loadable. `@1.0.0` worlds are
+  generated beside them and are the frozen exact-world line.
 - Experimental IndexedDB adapter. It is not a durable store.
 - Session open is inspect-not-continue.
 - Delivery is at-least-once (ADR-013). Do not claim exactly-once.
 - No marketplace, native dylib ABI, or commercial support portal.
-- No 1.0 compatibility freeze and no independent leaf versioning.
+- 1.0 compatibility policy is `READY FOR NAMED DECISION`. Independent
+  leaf versioning stays lockstep; no coupling-harm evidence.
 - Process protocol is handshake-only; session vocabulary is later.
 - Live provider smokes stay `#[ignore]` unless a later sentence names
   network use.
@@ -25,7 +27,7 @@ Rows already marked `defer past preview` in
 [`public-api-change-backlog.md`](public-api-change-backlog.md):
 
 - Anthropic JavaScript adapter
-- WIT `@1.0.0` world generation
+- WIT `@1.0.0` guest retarget of published `@0.x` components
 - Process session vocabulary
 - IndexedDB durability
 - SharedArrayBuffer / cross-origin isolation
@@ -34,12 +36,9 @@ Rows already marked `defer past preview` in
 
 ## Phase 9 themes (not admitted)
 
-These stay `Todo` until Phase 9 entrance is `Passed` (2/2). G7 is
-`Passed` via `G7-D-public-preview-f7c7e70b9e04`. A first-party
-preview-feedback review exists at
-[`preview-feedback-review.md`](preview-feedback-review.md). That
-review does not satisfy “used by external adopters.” Do not infer
-Phase 9 admission from this file.
+Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
+via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is the only admitted
+Phase 9 PR. Do not infer PR-063+ or `G8-D-*` from this file.
 
 | Theme | Plan entry |
 | --- | --- |

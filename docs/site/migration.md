@@ -2,15 +2,56 @@
 
 Compatibility routing lives in
 [compatibility-governance.md](../implementation/compatibility-governance.md).
-Open public-surface deltas before `0.1.0` are triaged in
-[public-api-change-backlog.md](../implementation/public-api-change-backlog.md).
-That backlog is Phase 8 entrance evidence, not a published preview policy.
-
-Published preview compatibility policy is
+The adopter-facing 1.0 SemVer promise is
+[1.0-compatibility-policy.md](../implementation/1.0-compatibility-policy.md)
+(**READY FOR NAMED DECISION**). Historical tagged `0.1.0` scope stays in
 [preview-compatibility-policy.md](../implementation/preview-compatibility-policy.md).
-This tree is tagged lockstep **`0.1.0`** (`v0.1.0`). Do not treat staged
-artifacts as a crates.io / PyPI / npm publication. Experimental WIT
-package names stay `@0.0.4`.
+
+This tree is tagged lockstep **`0.1.0`** (`v0.1.0`). Workspace version
+fields stay `0.1.0` until PR-066. Do not treat staged artifacts as a
+crates.io / PyPI / npm publication.
+
+## Supported 0.1.0 → 1.0.0 paths
+
+Supported means in-tree starters. No external adopter is named in the
+Phase 9 entrance review.
+
+| Project | Path |
+| --- | --- |
+| `examples/rust-minimal` | Stay on lockstep crates. No journal/WIT/AgentSpec rewrite. Re-read the 1.0 policy when PR-066 cuts `1.0.0`. |
+| `examples/python-minimal/*` | Same lockstep wheel version field. `import finstack_ai` public names stay; see the Python export baseline. |
+| `examples/durable-interaction` | Journal candidate-v1 is the 1.0 durable line. No meaning change. Unknown state-bearing fields stay fatal. |
+| `examples/browser-minimal` | Uses experimental IndexedDB. **Excluded** from the permanent promise; inspect-not-continue. |
+| `examples/ts-alpha-install` | JS/WASM exports stay; SharedArrayBuffer stays post-preview. Consume from git until npm publishes. |
+| Plugin templates / reference guests | `@0.0.4` stays loadable and experimental. Retarget to `@1.0.0` with [guest MIGRATION.md](../../plugins/finstack-ai-guest-sdk/MIGRATION.md). |
+
+### Per-surface notes
+
+- **Journal / snapshots:** candidate-v1 becomes the 1.0 durable line.
+  Meaning breaks still need an ADR and a migration.
+- **AgentSpec / locks:** strict reject-unknown. Additive fields need a
+  version or default.
+- **WIT guests:** `@0.x` → `@1.0.0` is a documented retarget, not a
+  silent rewrite.
+- **Remote protocol:** inbound reject-unknown; version handshake.
+- **Process protocol:** handshake-only. Session vocabulary is later and
+  is not frozen.
+
+### Offline converters
+
+```text
+uv run --no-project python tools/migrate/migrate.py agentspec path/to/agent.json --dry-run
+uv run --no-project python tools/migrate/migrate.py journal path/to/records.jsonl --dry-run
+uv run --no-project python tools/migrate/migrate.py manifest path/to/plugin.manifest.json --out path/to/plugin.manifest.json
+mise run migrate -- agentspec path/to/agent.json --dry-run
+```
+
+Converters fail closed on unknown state-bearing fields. They are not a
+hosted migration service and not a Cargo xtask.
+
+Experimental-only projects (IndexedDB, `@0.x` WIT after freeze, process
+session vocabulary) are labeled exclusions, not a permanent migration
+promise.
 
 ## Release rehearsal
 

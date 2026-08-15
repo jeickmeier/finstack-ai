@@ -13,7 +13,7 @@ use crate::host::PluginWorld;
 
 const LOCKFILE_VERSION: u32 = 1;
 const IDENTITY_PREFIX: &str = "finstack.plugin.";
-const EXPERIMENTAL_VERSION: &str = "0.0.4";
+const ALLOWED_VERSIONS: [&str; 2] = ["0.0.4", "1.0.0"];
 
 /// One resolved lock entry. Paths are relative to the lockfile directory
 /// and also stored as joined filesystem paths.
@@ -21,7 +21,7 @@ const EXPERIMENTAL_VERSION: &str = "0.0.4";
 pub struct LockedPlugin {
     /// Published `finstack.plugin.*` identity.
     pub identity: String,
-    /// Experimental package version. Must be `0.0.4`.
+    /// Package version. Must be `0.0.4` or `1.0.0`.
     pub version: String,
     /// Whether [`crate::PluginHost::load_enabled`] should load this entry.
     pub enabled: bool,
@@ -145,9 +145,9 @@ fn resolve_entry(
             "identity must start with finstack.plugin.".into(),
         ));
     }
-    if entry.version != EXPERIMENTAL_VERSION {
+    if !ALLOWED_VERSIONS.contains(&entry.version.as_str()) {
         return Err(PluginHostError::LockInvalid(
-            "version must be experimental 0.0.4".into(),
+            "version must be 0.0.4 or 1.0.0".into(),
         ));
     }
     let component = sanitize_relative_path(&entry.component)?;

@@ -9,7 +9,11 @@ docs under `docs/planning/` remain authoritative.
 Framework `0.1.0` maps to experimental WIT package names
 `finstack:ai-toolset@0.0.4` and `finstack:ai-context@0.0.4`. Crate, wheel,
 and npm **version fields** are `0.1.0`. WIT **package names** stay `@0.0.4`
-until PR-062 / framework `1.0.0`.
+until the 1.0 freeze. PR-062 generates `@1.0.0` beside `@0.0.4`. The
+adopter-facing 1.0 promise is
+[`1.0-compatibility-policy.md`](1.0-compatibility-policy.md)
+(`READY FOR NAMED DECISION`). Workspace version fields stay `0.1.0`
+until PR-066.
 
 Tag `v0.1.0` is cut. crates.io / PyPI / npm publication remains blocked
 on owner registry credentials. Until those exist, consume this tree from
@@ -27,7 +31,7 @@ the git tag, not from a registry.
 | JS / WASM (`@finstack/ai`) | `experimental` (alpha) | Worker default; SharedArrayBuffer stays post-preview |
 | Remote protocol | `candidate` | Frame, handshake, and remote session vocabulary |
 | Process handshake | `candidate` | Family tag plus handshake only; session vocabulary is later |
-| WIT packages | `experimental` (`@0.0.4`) | Exact compiled worlds; `@1.0.0` waits for PR-062 |
+| WIT packages | `experimental` (`@0.0.4`); `@1.0.0` frozen | Exact compiled worlds; both majors load through adapters |
 | Plugin lockfile | `experimental` | Local lockfile-only discovery; no registry fetch |
 | IndexedDB adapter | `experimental` / non-durable | Not a durable store; NFR-REL-001 is not advertised |
 
@@ -42,8 +46,9 @@ Breaking changes before `1.0.0` still require classification, changelog,
 and fixtures under [`compatibility-governance.md`](compatibility-governance.md).
 Candidate or experimental labels do **not** permit silent breakage.
 
-Journal meaning breaks still need an ADR and a migration. WIT `@1.0.0` and
-independent leaf versioning wait for PR-062.
+Journal meaning breaks still need an ADR and a migration. WIT `@1.0.0`
+and the leaf-versioning *policy* are recorded by PR-062. Versions stay
+lockstep until preview feedback names coupling harm.
 
 ## Deprecation process
 

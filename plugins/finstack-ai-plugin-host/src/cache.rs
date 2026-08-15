@@ -19,7 +19,7 @@ pub struct CacheKeyParts {
     pub engine: String,
     /// Host `os` + `arch` (and cranelift ISA when exposed).
     pub target: String,
-    /// World name plus the experimental `@0.0.4` package set.
+    /// World name plus the `@0.0.4` or `@1.0.0` package set.
     pub abi: String,
 }
 
@@ -131,12 +131,20 @@ pub fn host_target() -> String {
     )
 }
 
-/// ABI identity: world plus the experimental package set for that world.
+/// ABI identity: world plus the package set for that world and major.
 #[must_use]
-pub fn abi_identity(world: &str) -> String {
-    match world {
-        "context-plugin" => {
+pub fn abi_identity(world: &str, version: &str) -> String {
+    match (world, version) {
+        ("context-plugin", "1.0.0") => {
+            "context-plugin+finstack:ai-types@1.0.0+finstack:ai-host@1.0.0+finstack:ai-context@1.0.0"
+                .to_owned()
+        }
+        ("context-plugin", _) => {
             "context-plugin+finstack:ai-types@0.0.4+finstack:ai-host@0.0.4+finstack:ai-context@0.0.4"
+                .to_owned()
+        }
+        (_, "1.0.0") => {
+            "toolset-plugin+finstack:ai-types@1.0.0+finstack:ai-host@1.0.0+finstack:ai-toolset@1.0.0"
                 .to_owned()
         }
         _ => {
@@ -197,7 +205,7 @@ mod tests {
             digest: component_digest(b"component-a"),
             engine: engine_fingerprint(),
             target: host_target(),
-            abi: abi_identity("toolset-plugin"),
+            abi: abi_identity("toolset-plugin", "0.0.4"),
         }
     }
 
@@ -212,7 +220,7 @@ mod tests {
         let mut target = parts();
         target.target = "linux-x86_64-cranelift-x86_64".to_owned();
         let mut abi = parts();
-        abi.abi = abi_identity("context-plugin");
+        abi.abi = abi_identity("context-plugin", "0.0.4");
         let keys = [
             cache_key(&digest),
             cache_key(&engine),
@@ -223,6 +231,10 @@ mod tests {
         assert_eq!(
             keys.len(),
             keys.iter().collect::<std::collections::BTreeSet<_>>().len()
+        );
+        assert_ne!(
+            abi_identity("toolset-plugin", "0.0.4"),
+            abi_identity("toolset-plugin", "1.0.0")
         );
     }
 

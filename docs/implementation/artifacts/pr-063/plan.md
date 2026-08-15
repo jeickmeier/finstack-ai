@@ -53,12 +53,11 @@ Implementation Plan §17 entrance. Current state is `0/2`.
 
 | Entrance bullet | Current state |
 | --- | --- |
-| `0.1.0` used by external adopters | **Blocked.** Unpublished lockstep `0.1.0` exists and G7 is `Passed`. No external project depends on it. First-party starters do not count. |
-| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **First-party review exists** at [`preview-feedback-review.md`](../../preview-feedback-review.md). That review is not external soak and does not make entrance `2/2`. |
+| Tagged `v0.1.0` exists; public registries not required | **Passed** via `PH9-E-entrance-tag-b610b0ba93b5` (PLAN-0.19). |
+| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **Passed** via `PH9-E-entrance-feedback-ee6999c59a12`. |
 
-Phase 8 is `Done` (entrance `2/2`, exit `4/4`). G7 is `Passed` via
-`G7-D-public-preview-f7c7e70b9e04`. Do not infer Phase 9 entrance
-from Phase 8 `Done`, from G7, or from the first-party review.
+Phase 9 entrance is `Passed` (2/2). This file does not admit PR-063
+while PR-062 is the active logical PR. Do not write `G8-D-*`.
 
 If the owner says `implement the plan` while Phase 9 entrance is
 still `0/2`, **stop**. Do not fabricate adopter usage, preview
