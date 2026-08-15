@@ -29,6 +29,7 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-protocol = { workspace = true }
+finstack-ai-provider-anthropic = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-openai-compatible = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true, optional = true }

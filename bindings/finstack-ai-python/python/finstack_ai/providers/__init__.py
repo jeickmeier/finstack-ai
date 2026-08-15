@@ -5,9 +5,11 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from . import anthropic as anthropic
+    from . import ollama as ollama
     from . import openai_compatible as openai_compatible
 
-__all__ = ["openai_compatible"]
+__all__ = ["anthropic", "ollama", "openai_compatible"]
 
 
 def __getattr__(name: str) -> ModuleType:
@@ -23,8 +25,8 @@ def __getattr__(name: str) -> ModuleType:
         AttributeError: If the provider name is unknown.
     """
 
-    if name == "openai_compatible":
-        module = import_module(f"{__name__}.openai_compatible")
+    if name in {"openai_compatible", "anthropic", "ollama"}:
+        module = import_module(f"{__name__}.{name}")
         globals()[name] = module
         return module
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -851,6 +851,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-provider-anthropic"
+version = "0.0.4"
+dependencies = [
+ "criterion",
+ "finstack-ai",
+ "finstack-ai-kernel",
+ "finstack-ai-provider-openai-compatible",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "futures-core",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-provider-openai-compatible"
 version = "0.0.4"
 dependencies = [
@@ -872,6 +891,7 @@ version = "0.0.4"
 dependencies = [
  "finstack-ai",
  "finstack-ai-protocol",
+ "finstack-ai-provider-anthropic",
  "finstack-ai-provider-openai-compatible",
  "finstack-ai-store-memory",
  "finstack-ai-test",

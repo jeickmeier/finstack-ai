@@ -1,0 +1,6 @@
+data: {"id":"ollama-text-1","choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}],"usage":null}
+
+data: {"id":"ollama-text-1","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}
+
+data: [DONE]
+

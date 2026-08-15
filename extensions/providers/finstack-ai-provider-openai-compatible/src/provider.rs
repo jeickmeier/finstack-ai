@@ -4,7 +4,7 @@ use core::fmt;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_runtime::{
     ContentBlock, ErrorCategory, JsonBlock, Metadata, Model, ModelCapabilities, ModelDescriptor,
@@ -35,8 +35,7 @@ pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
     endpoint: reqwest::Url,
     config: OpenAiCompatibleConfig,
-    models: BTreeMap<ModelName, OpenAiModelConfig>,
-    descriptor: ModelDescriptor,
+    models: RwLock<BTreeMap<ModelName, OpenAiModelConfig>>,
     quirks: EndpointQuirks,
 }
 
@@ -45,7 +44,16 @@ impl fmt::Debug for OpenAiCompatibleProvider {
         formatter
             .debug_struct("OpenAiCompatibleProvider")
             .field("config", &self.config)
-            .field("models", &self.models.keys().collect::<Vec<_>>())
+            .field(
+                "models",
+                &self
+                    .models
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
             .field("quirks", &self.quirks)
             .finish_non_exhaustive()
     }
@@ -63,25 +71,7 @@ impl OpenAiCompatibleProvider {
     ) -> Result<Self, ModelError> {
         let endpoint = config.endpoint_url()?;
         let headers = config.header_map()?;
-        let mut by_name = BTreeMap::new();
-        for model in models {
-            if by_name.insert(model.name.clone(), model).is_some() {
-                return Err(crate::error::config_error(
-                    "provider contains a duplicate model name",
-                ));
-            }
-        }
-        if by_name.is_empty() {
-            return Err(crate::error::config_error(
-                "provider requires at least one model",
-            ));
-        }
-        let descriptor = ModelDescriptor {
-            provider: Arc::from("openai-compatible"),
-            models: by_name.keys().cloned().collect::<Vec<_>>().into(),
-            metadata: Metadata::empty(),
-        };
-        descriptor.validate()?;
+        let by_name = catalog_from_models(models)?;
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(Policy::none())
@@ -92,10 +82,42 @@ impl OpenAiCompatibleProvider {
             client,
             endpoint,
             config,
-            models: by_name,
-            descriptor,
+            models: RwLock::new(by_name),
             quirks,
         })
+    }
+
+    /// Replace the in-memory model catalog from a local table.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an empty or duplicate catalog.
+    pub fn replace_model_catalog(&self, models: Vec<OpenAiModelConfig>) -> Result<(), ModelError> {
+        let by_name = catalog_from_models(models)?;
+        *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
+        Ok(())
+    }
+
+    /// Refresh advertised capabilities for one configured model from a local table.
+    ///
+    /// # Errors
+    ///
+    /// Returns `openai_request_invalid` when the model is not configured.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "leaf refresh takes the replacement capability snapshot by value"
+    )]
+    pub fn refresh_model_metadata(
+        &self,
+        model: &ModelName,
+        update: ModelCapabilities,
+    ) -> Result<(), ModelError> {
+        let mut models = self.models.write().unwrap_or_else(PoisonError::into_inner);
+        let configured = models
+            .get_mut(model)
+            .ok_or_else(|| crate::error::request_error("requested model is not configured"))?;
+        configured.apply_capabilities(&update);
+        Ok(())
     }
 
     /// Exact checked-in endpoint compatibility facts used by this provider.
@@ -104,20 +126,54 @@ impl OpenAiCompatibleProvider {
         self.quirks
     }
 
-    fn model_config(&self, name: &ModelName) -> Result<&OpenAiModelConfig, ModelError> {
+    fn model_config(&self, name: &ModelName) -> Result<OpenAiModelConfig, ModelError> {
         self.models
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .get(name)
+            .cloned()
             .ok_or_else(|| crate::error::request_error("requested model is not configured"))
     }
 }
 
+fn catalog_from_models(
+    models: Vec<OpenAiModelConfig>,
+) -> Result<BTreeMap<ModelName, OpenAiModelConfig>, ModelError> {
+    let mut by_name = BTreeMap::new();
+    for model in models {
+        if by_name.insert(model.name.clone(), model).is_some() {
+            return Err(crate::error::config_error(
+                "provider contains a duplicate model name",
+            ));
+        }
+    }
+    if by_name.is_empty() {
+        return Err(crate::error::config_error(
+            "provider requires at least one model",
+        ));
+    }
+    let descriptor = ModelDescriptor {
+        provider: Arc::from("openai-compatible"),
+        models: by_name.keys().cloned().collect::<Vec<_>>().into(),
+        metadata: Metadata::empty(),
+    };
+    descriptor.validate()?;
+    Ok(by_name)
+}
+
 impl Model for OpenAiCompatibleProvider {
     fn descriptor(&self) -> ModelDescriptor {
-        self.descriptor.clone()
+        let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
+        ModelDescriptor {
+            provider: Arc::from("openai-compatible"),
+            models: models.keys().cloned().collect::<Vec<_>>().into(),
+            metadata: Metadata::empty(),
+        }
     }
 
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
-        self.models.get(model).map_or_else(
+        let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
+        models.get(model).map_or_else(
             || ModelCapabilities {
                 input: finstack_ai_runtime::InputCapabilities {
                     text: false,
@@ -126,8 +182,7 @@ impl Model for OpenAiCompatibleProvider {
                     audio: false,
                     files: false,
                 },
-                context_profile: self
-                    .models
+                context_profile: models
                     .values()
                     .next()
                     .expect("provider model catalog is non-empty")
@@ -171,7 +226,7 @@ impl Model for OpenAiCompatibleProvider {
     ) -> finstack_ai_runtime::PortFuture<Result<ModelEventStream, ModelError>> {
         let client = self.client.clone();
         let endpoint = self.endpoint.clone();
-        let model = self.model_config(&request.draft.model).cloned();
+        let model = self.model_config(&request.draft.model);
         let quirks = self.quirks;
         let timeout = self.config.request_timeout();
         let max_event_bytes = self.config.max_event_bytes();

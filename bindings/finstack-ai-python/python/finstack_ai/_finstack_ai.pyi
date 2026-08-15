@@ -472,7 +472,77 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
     ) -> Agent:
-        """Build a keyless Rust-backed OpenAI-compatible agent."""
+        """Build a keyless Rust-backed OpenAI-compatible agent.
+
+        Args:
+            base_url: OpenAI-compatible Chat Completions base URL.
+            model: Provider model name.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The endpoint, model, or capability set is invalid.
+        """
+    @staticmethod
+    async def anthropic(
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+    ) -> Agent:
+        """Build a Rust-backed Anthropic Messages agent.
+
+        Construction of the HTTP client happens only in this factory. Importing
+        ``finstack_ai`` does not open sockets or start Tokio.
+
+        Args:
+            base_url: Anthropic Messages base URL.
+            model: Provider model name.
+            api_key: Optional ``x-api-key``. HTTPS is required when set.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The endpoint, credential, model, or capability
+                set is invalid.
+        """
+    @staticmethod
+    async def ollama(
+        base_url: str,
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+    ) -> Agent:
+        """Build a keyless Rust-backed Ollama/local agent.
+
+        Uses the OpenAI-compatible Chat Completions path with
+        ``EndpointKind.Ollama``. This does not change
+        :meth:`Agent.openai_compatible`.
+
+        Args:
+            base_url: Ollama base URL, typically ``http://127.0.0.1:11434``.
+            model: Provider model name.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The endpoint, model, or capability set is invalid.
+        """
     @staticmethod
     async def from_python(
         model: PythonModel,

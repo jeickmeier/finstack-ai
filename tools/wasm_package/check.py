@@ -26,6 +26,7 @@ FORBIDDEN_WASM = frozenset(
         "hyper",
         "native-tls",
         "finstack-ai-provider-openai-compatible",
+        "finstack-ai-provider-anthropic",
     }
 )
 SECRET_ROOTS = (
@@ -47,6 +48,7 @@ SECRET_ROOTS = (
 SECRET_PATTERNS = (
     "apiKey",
     "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
     "sk-[A-Za-z0-9]{8,}",
 )
 FORBIDDEN_KERNEL = FORBIDDEN_WASM | frozenset(
