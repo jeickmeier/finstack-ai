@@ -42,6 +42,14 @@ fn fixture_wasm(name: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"))
 }
 
+fn published_wasm(name: &str) -> Vec<u8> {
+    let path = format!(
+        "{}/../reference/{name}/component.wasm",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
 fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
     let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
@@ -330,7 +338,7 @@ async fn echo_toolset_resolves_and_calls() {
 async fn reference_context_resolves_and_collects() {
     let extension = WasmPluginExtension::context(
         host(InstancePolicy::Exclusive, 2),
-        &fixture_wasm("reference-context"),
+        &published_wasm("context-provider"),
         parse_manifest(&manifest_bytes(
             "finstack.plugin.reference.context",
             &["context-plugin"],

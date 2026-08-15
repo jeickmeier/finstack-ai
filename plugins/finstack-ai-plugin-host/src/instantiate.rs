@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use finstack_ai_runtime::{CancellationSignal, Timestamp};
 use finstack_ai_wit::{MAX_STRING_BYTES, reject_before_allocation, reject_declared_len};
-use wasmtime::component::{Component, Linker, ResourceTable};
+use wasmtime::component::{Component, HasData, Linker, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, Trap};
 use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
@@ -251,6 +251,14 @@ pub fn link_granted_wasi(
             HostState::clocks,
         )
         .map_err(|error| PluginHostError::InstantiateFailed(format!("link clock: {error}")))?;
+    } else if can_link("filesystem", granted, resources) {
+        // `wasi:filesystem/types@0.2.12` uses `wasi:clocks/wall-clock` datetime.
+        // This is an ABI dependency of a granted preopen, not a clock grant.
+        wasmtime_wasi::p2::bindings::clocks::wall_clock::add_to_linker::<_, WasiClocks>(
+            linker,
+            HostState::clocks,
+        )
+        .map_err(|error| PluginHostError::InstantiateFailed(format!("link fs clock: {error}")))?;
     }
     if can_link("random", granted, resources) {
         wasmtime_wasi::p2::bindings::random::random::add_to_linker::<_, WasiRandom>(
@@ -270,6 +278,7 @@ pub fn link_granted_wasi(
         .map_err(|error| PluginHostError::InstantiateFailed(format!("link random: {error}")))?;
     }
     if can_link("filesystem", granted, resources) {
+        link_wasi_io(linker)?;
         wasmtime_wasi::p2::bindings::filesystem::preopens::add_to_linker::<_, WasiFilesystem>(
             linker,
             HostState::filesystem,
@@ -310,6 +319,28 @@ pub fn link_granted_wasi(
         )
         .map_err(|error| PluginHostError::InstantiateFailed(format!("link net: {error}")))?;
     }
+    Ok(())
+}
+
+struct HasIo;
+
+impl HasData for HasIo {
+    type Data<'a> = &'a mut ResourceTable;
+}
+
+fn link_wasi_io(linker: &mut Linker<HostState>) -> Result<(), PluginHostError> {
+    wasmtime_wasi::p2::bindings::io::error::add_to_linker::<HostState, HasIo>(linker, |state| {
+        state.ctx().table
+    })
+    .map_err(|error| PluginHostError::InstantiateFailed(format!("link io: {error}")))?;
+    wasmtime_wasi::p2::bindings::io::poll::add_to_linker::<HostState, HasIo>(linker, |state| {
+        state.ctx().table
+    })
+    .map_err(|error| PluginHostError::InstantiateFailed(format!("link io: {error}")))?;
+    wasmtime_wasi::p2::bindings::io::streams::add_to_linker::<HostState, HasIo>(linker, |state| {
+        state.ctx().table
+    })
+    .map_err(|error| PluginHostError::InstantiateFailed(format!("link io: {error}")))?;
     Ok(())
 }
 

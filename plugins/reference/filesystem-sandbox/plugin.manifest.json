@@ -1,0 +1,14 @@
+{
+  "identity": "finstack.plugin.filesystem.sandbox",
+  "version": "0.0.4",
+  "worlds": ["toolset-plugin"],
+  "permissions": ["logging", "filesystem"],
+  "configuration_schema": {},
+  "digest": "compute-with-host-manifest_digest_hex",
+  "resource_limits": {
+    "max_output_bytes": 65536,
+    "call_timeout_ms": 5000,
+    "max_tables": 16,
+    "max_instances": 16
+  }
+}

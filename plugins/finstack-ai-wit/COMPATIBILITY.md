@@ -42,6 +42,12 @@ carries credentials, full claims, cancellation, or attempt counters.
 In-process `finstack-ai-wit` adapters inherit host authority. Isolated
 Wasmtime instantiation is the `finstack-ai-plugin-host` leaf.
 
+Guest authors should depend on `finstack-ai-guest-sdk` and the vendored
+`@0.0.4` copies it ships. Do not depend on this crate or on
+`finstack-ai-plugin-host` from a guest `Cargo.toml`. See
+[`../finstack-ai-guest-sdk/README.md`](../finstack-ai-guest-sdk/README.md)
+and [`../finstack-ai-guest-sdk/MIGRATION.md`](../finstack-ai-guest-sdk/MIGRATION.md).
+
 ## Payload ceilings
 
 TDD §6.5 ceilings are enforced before allocation:

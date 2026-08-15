@@ -13,4 +13,7 @@ instantiation lives in `finstack-ai-plugin-host`. In-process adapters
 here inherit host authority and are not a sandbox. `@1.0.0` generation
 is blocked until the framework 1.0 gate.
 
+Guest authors should use [`finstack-ai-guest-sdk`](../finstack-ai-guest-sdk/README.md)
+rather than depending on this crate.
+
 See [COMPATIBILITY.md](COMPATIBILITY.md) for exact-world rules.

@@ -45,6 +45,9 @@ pub use signature::SignaturePolicy;
 mod fixture_tests;
 
 #[cfg(test)]
+mod reference_tests;
+
+#[cfg(test)]
 mod graph_tests {
     use std::path::PathBuf;
     use std::process::Command;
@@ -80,7 +83,7 @@ mod graph_tests {
 
     #[test]
     fn default_bundles_remain_wasmtime_free() {
-        assert_bundle_free(&tree(&[
+        let default_tree = tree(&[
             "tree",
             "-p",
             "finstack-ai-kernel",
@@ -95,8 +98,13 @@ mod graph_tests {
             "{p}",
             "--edges",
             "normal",
-        ]));
-        assert_bundle_free(&tree(&[
+        ]);
+        assert_bundle_free(&default_tree);
+        assert!(
+            !has_package(&default_tree, "finstack-ai-guest-sdk"),
+            "default bundle must not depend on finstack-ai-guest-sdk:\n{default_tree}"
+        );
+        let minimal = tree(&[
             "tree",
             "-p",
             "finstack-ai",
@@ -108,7 +116,12 @@ mod graph_tests {
             "{p}",
             "--edges",
             "normal",
-        ]));
+        ]);
+        assert_bundle_free(&minimal);
+        assert!(
+            !has_package(&minimal, "finstack-ai-guest-sdk"),
+            "minimal bundle must not depend on finstack-ai-guest-sdk:\n{minimal}"
+        );
         let wit = tree(&[
             "tree",
             "-p",
@@ -130,6 +143,10 @@ mod graph_tests {
         assert!(
             !wit.contains("finstack-ai-plugin-host"),
             "wit/examples must not depend on finstack-ai-plugin-host:\n{wit}"
+        );
+        assert!(
+            !has_package(&wit, "finstack-ai-guest-sdk"),
+            "wit/examples must not depend on finstack-ai-guest-sdk:\n{wit}"
         );
         let host = tree(&[
             "tree",
@@ -155,5 +172,17 @@ mod graph_tests {
             !host.contains("libloading"),
             "plugin-host must not depend on libloading:\n{host}"
         );
+        assert!(
+            !has_package(&host, "finstack-ai-guest-sdk"),
+            "plugin-host must not depend on finstack-ai-guest-sdk:\n{host}"
+        );
+    }
+
+    fn has_package(tree: &str, name: &str) -> bool {
+        tree.lines().any(|line| {
+            line.split_whitespace()
+                .next()
+                .is_some_and(|package| package == name)
+        })
     }
 }

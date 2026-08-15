@@ -56,7 +56,7 @@ pub enum PluginHostError {
 impl PluginHostError {
     /// Stable diagnostic code.
     #[must_use]
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
             Self::CompileFailed(_) => PLUGIN_COMPILE_FAILED,
             Self::InstantiateFailed(_) => PLUGIN_INSTANTIATE_FAILED,
@@ -87,30 +87,25 @@ impl PluginHostError {
     }
 }
 
-fn mapped_code(message: &str) -> &'static str {
-    if message.starts_with("plugin_payload_too_large") {
-        "plugin_payload_too_large"
-    } else if message.starts_with("plugin_manifest_digest_mismatch") {
-        "plugin_manifest_digest_mismatch"
-    } else if message.starts_with("plugin_catalog_digest_mismatch") {
-        "plugin_catalog_digest_mismatch"
-    } else if message.starts_with("plugin_initialize_failed") {
-        "plugin_initialize_failed"
-    } else if message.starts_with("plugin_warmup_failed") {
-        "plugin_warmup_failed"
-    } else if message.starts_with("plugin_lifecycle_failed") {
-        "plugin_lifecycle_failed"
-    } else if message.starts_with("plugin_lifecycle_timeout") {
-        "plugin_lifecycle_timeout"
-    } else if message.starts_with(PLUGIN_PERMISSION_DENIED) {
-        PLUGIN_PERMISSION_DENIED
-    } else if message.starts_with(PLUGIN_RESOURCE_LIMIT) {
-        PLUGIN_RESOURCE_LIMIT
-    } else if message.starts_with(PLUGIN_SIGNATURE_UNTRUSTED) {
-        PLUGIN_SIGNATURE_UNTRUSTED
-    } else {
-        "plugin_registration_invalid"
+fn mapped_code(message: &str) -> &str {
+    if let Some(code) = message
+        .split_once(':')
+        .map(|(code, _)| code)
+        .filter(|code| is_stable_code(code))
+    {
+        return code;
     }
+    if is_stable_code(message) {
+        return message;
+    }
+    "plugin_registration_invalid"
+}
+
+fn is_stable_code(code: &str) -> bool {
+    !code.is_empty()
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
 #[cfg(test)]
@@ -142,6 +137,14 @@ mod tests {
         assert_eq!(
             PluginHostError::SignatureUntrusted("unsigned".into()).code(),
             PLUGIN_SIGNATURE_UNTRUSTED
+        );
+        assert_eq!(
+            PluginHostError::Mapped("calculator_arithmetic_error: division_by_zero".into()).code(),
+            "calculator_arithmetic_error"
+        );
+        assert_eq!(
+            PluginHostError::Mapped("plugin_catalog_digest_mismatch".into()).code(),
+            "plugin_catalog_digest_mismatch"
         );
     }
 }

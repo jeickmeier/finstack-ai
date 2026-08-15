@@ -1,0 +1,16 @@
+[package]
+name = "finstack-ai-plugin-template-toolset"
+version = "0.0.3"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+finstack-ai-guest-sdk = { path = "../../finstack-ai-guest-sdk" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"

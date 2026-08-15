@@ -1,0 +1,20 @@
+package finstack:guest-sdk-bindgen@0.0.4;
+
+/// Guest bindgen worlds. Not a published WIT package.
+world toolset-plugin {
+    import finstack:ai-host/logging@0.0.4;
+    import finstack:ai-host/blobs@0.0.4;
+    export finstack:ai-toolset/toolset@0.0.4;
+}
+
+world context-plugin {
+    import finstack:ai-host/logging@0.0.4;
+    import finstack:ai-host/blobs@0.0.4;
+    export finstack:ai-context/context-provider@0.0.4;
+}
+
+world filesystem-sandbox {
+    include toolset-plugin;
+    import wasi:filesystem/preopens@0.2.12;
+    import wasi:filesystem/types@0.2.12;
+}
