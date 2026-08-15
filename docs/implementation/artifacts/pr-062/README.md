@@ -11,6 +11,8 @@ Admitted on `codex/pr-062-1.0-contract-freeze`.
 | `phase9-entrance-feedback.txt` | `PH9-E-entrance-feedback-ee6999c59a12` |
 | `tm-08-review.md` | TM-08 review; not `G8-D-*` |
 | `readiness.md` | `READY FOR NAMED DECISION`; stop before `COMP-1.0-D-*` |
+| `candidate-validation.txt` | Local Darwin A01–A03 proofs at `b76bfca8fcf7e6e7778aa9ee2acd0ca54bc54b8f` |
+| `security-review.txt` | TM-08 review at the same candidate |
 
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19 / pack v0.21.
 No G8 decision, hosted pull request, npm/pypi/crates.io publish,
