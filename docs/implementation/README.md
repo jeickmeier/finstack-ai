@@ -12,6 +12,9 @@ This directory is the live control surface for implementation. It answers what i
 | [Exceptions register](exceptions-register.md) | Approved, time-bounded deviations from Engineering Standards. |
 | [Public API change backlog](public-api-change-backlog.md) | Triaged public-surface deltas before `0.1.0`. Phase 8 entrance evidence; not the published preview policy. |
 | [Preview compatibility policy](preview-compatibility-policy.md) | Adopter-facing tagged `0.1.0` preview promise. Not a 1.0 SemVer guarantee. |
+| [1.0 compatibility policy](1.0-compatibility-policy.md) | Adopter-facing 1.0 SemVer promise. `READY FOR NAMED DECISION`; not `G8-D-*`. |
+| [1.0 leaf versioning](1.0-leaf-versioning.md) | Lockstep core; independent leaves only after named coupling harm. |
+| [1.0 deprecation inventory](1.0-deprecation-inventory.md) | Remaining deprecations with `since` and removal versions. |
 | [Public preview roadmap](public-preview-roadmap.md) | In-repo preview limitations and deferred Phase 9 themes. |
 | [Preview feedback review](preview-feedback-review.md) | First-party review of telemetry, issue patterns, API pain, and migration needs. Does not satisfy Phase 9 entrance. |
 

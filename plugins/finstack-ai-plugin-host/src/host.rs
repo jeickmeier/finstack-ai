@@ -351,7 +351,7 @@ impl PluginHost {
             digest: digest.clone(),
             engine: engine_fingerprint(),
             target: host_target(),
-            abi: abi_identity(world.as_str()),
+            abi: abi_identity(world.as_str(), &manifest.version),
         });
         let component = if let Some(precompiled) = self.cache.get(&key) {
             deserialize_component(&self.engine, &precompiled)?
@@ -566,7 +566,7 @@ mod tests {
             digest: component_digest(&bytes),
             engine: engine_fingerprint(),
             target: host_target(),
-            abi: abi_identity("toolset-plugin"),
+            abi: abi_identity("toolset-plugin", "0.0.4"),
         };
         assert!(!host.compile_with_key(&bytes, &base).expect("miss"));
         assert!(host.compile_with_key(&bytes, &base).expect("hit"));
@@ -586,9 +586,13 @@ mod tests {
             ..base.clone()
         }));
         assert!(!host.cache_hit(&CacheKeyParts {
-            abi: abi_identity("context-plugin"),
+            abi: abi_identity("context-plugin", "0.0.4"),
             ..base
         }));
+        assert_ne!(
+            abi_identity("toolset-plugin", "0.0.4"),
+            abi_identity("toolset-plugin", "1.0.0")
+        );
     }
 
     #[test]

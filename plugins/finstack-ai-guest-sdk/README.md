@@ -10,7 +10,7 @@ guests. This crate does not depend on `finstack-ai-plugin-host`,
 rust-version: 1.97.1
 target: wasm32-unknown-unknown
 wit-bindgen: 0.57.1
-WIT packages: finstack:ai-*@0.0.4
+WIT packages: finstack:ai-*@0.0.4 (default); @1.0.0 retarget in MIGRATION.md
 encode: tools/plugin_wasm/encoder
 ```
 

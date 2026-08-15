@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::error::WitMapError;
 use crate::limits::{MAX_RAW_JSON_BYTES, reject_before_allocation};
 
-const EXPERIMENTAL_VERSION: &str = "0.0.4";
+const ALLOWED_VERSIONS: [&str; 2] = ["0.0.4", "1.0.0"];
 const ALLOWED_WORLDS: [&str; 2] = ["toolset-plugin", "context-plugin"];
 const ALLOWED_PERMISSIONS: [&str; 8] = [
     "logging",
@@ -62,7 +62,7 @@ pub struct PluginResourceLimits {
 pub struct PluginManifest {
     /// Namespaced component identity.
     pub identity: ComponentId,
-    /// Experimental package version. Must be `0.0.4`.
+    /// Package version. Must be `0.0.4` or `1.0.0`.
     pub version: String,
     /// Declared exact worlds.
     pub worlds: Vec<String>,
@@ -191,14 +191,9 @@ fn validate_wire(wire: ManifestWire) -> Result<PluginManifest, WitMapError> {
     }
     let identity = ComponentId::parse(&wire.identity)
         .map_err(|_| WitMapError::ManifestInvalid("identity is not a namespaced component id"))?;
-    if wire.version == "1.0.0" || wire.version == "@1.0.0" {
+    if !ALLOWED_VERSIONS.contains(&wire.version.as_str()) {
         return Err(WitMapError::ManifestInvalid(
-            "incompatible interface version 1.0.0",
-        ));
-    }
-    if wire.version != EXPERIMENTAL_VERSION {
-        return Err(WitMapError::ManifestInvalid(
-            "version must be experimental 0.0.4",
+            "version must be 0.0.4 or 1.0.0",
         ));
     }
     if wire.worlds.is_empty() {
@@ -342,9 +337,11 @@ mod tests {
 
     #[test]
     fn incompatible_and_undeclared_worlds_fail_closed() {
-        let v1 = br#"{"identity":"finstack.plugin.reference.context","version":"1.0.0","worlds":["context-plugin"],"digest":"00"}"#;
+        let unknown_major = br#"{"identity":"finstack.plugin.reference.context","version":"2.0.0","worlds":["context-plugin"],"digest":"00"}"#;
         assert_eq!(
-            parse_manifest(v1).expect_err("v1").code(),
+            parse_manifest(unknown_major)
+                .expect_err("unknown major")
+                .code(),
             "plugin_registration_invalid"
         );
         let middleware = valid_bytes("finstack.plugin.reference.context", &["middleware"]);
@@ -376,10 +373,31 @@ mod tests {
             parsed.identity.as_str(),
             "finstack.plugin.reference.context"
         );
-        let incompatible =
-            std::fs::read(root.join("invalid--incompatible-interface.json")).expect("v1");
+        let historical_v1 =
+            std::fs::read(root.join("invalid--incompatible-interface.json")).expect("historical");
         assert_eq!(
-            parse_manifest(&incompatible).expect_err("v1").code(),
+            parse_manifest(&historical_v1)
+                .expect_err("historical 1.0.0 fixture has a placeholder digest")
+                .code(),
+            "plugin_manifest_digest_mismatch"
+        );
+        let v1_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/compatibility/wit/v1.0.0/manifest");
+        let valid_v1 = std::fs::read(v1_root.join("valid--context-reference.json")).expect("v1");
+        let parsed_v1 = parse_manifest(&valid_v1).expect("1.0.0 is a supported major");
+        assert_eq!(parsed_v1.version, "1.0.0");
+        let unknown_major =
+            std::fs::read(v1_root.join("invalid--unknown-major.json")).expect("unknown major");
+        assert_eq!(
+            parse_manifest(&unknown_major).expect_err("2.0.0").code(),
+            "plugin_registration_invalid"
+        );
+        let unknown_field =
+            std::fs::read(v1_root.join("invalid--unknown-field.json")).expect("unknown field");
+        assert_eq!(
+            parse_manifest(&unknown_field)
+                .expect_err("unknown field")
+                .code(),
             "plugin_registration_invalid"
         );
         let duplicates: Vec<serde_json::Value> = serde_json::from_slice(

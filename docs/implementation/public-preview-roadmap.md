@@ -6,12 +6,14 @@ are links to the Implementation Plan, not admitted work.
 
 ## Known preview limitations
 
-- Experimental WIT `@0.0.4` worlds. `@1.0.0` generation stays blocked.
+- Experimental WIT `@0.0.4` worlds remain loadable. `@1.0.0` worlds are
+  generated beside them and are the frozen exact-world line.
 - Experimental IndexedDB adapter. It is not a durable store.
 - Session open is inspect-not-continue.
 - Delivery is at-least-once (ADR-013). Do not claim exactly-once.
 - No marketplace, native dylib ABI, or commercial support portal.
-- No 1.0 compatibility freeze and no independent leaf versioning.
+- 1.0 compatibility policy is `READY FOR NAMED DECISION`. Independent
+  leaf versioning stays lockstep; no coupling-harm evidence.
 - Process protocol is handshake-only; session vocabulary is later.
 - Live provider smokes stay `#[ignore]` unless a later sentence names
   network use.
@@ -25,7 +27,7 @@ Rows already marked `defer past preview` in
 [`public-api-change-backlog.md`](public-api-change-backlog.md):
 
 - Anthropic JavaScript adapter
-- WIT `@1.0.0` world generation
+- WIT `@1.0.0` guest retarget of published `@0.x` components
 - Process session vocabulary
 - IndexedDB durability
 - SharedArrayBuffer / cross-origin isolation

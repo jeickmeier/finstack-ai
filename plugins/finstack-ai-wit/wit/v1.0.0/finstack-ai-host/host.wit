@@ -1,0 +1,16 @@
+package finstack:ai-host@1.0.0;
+
+interface logging {
+    use finstack:ai-types/types@1.0.0.{call-context, plugin-error};
+
+    enum level { trace, debug, info, warn, error }
+    log: func(context: call-context, level: level, message: string)
+        -> result<_, plugin-error>;
+}
+
+interface blobs {
+    use finstack:ai-types/types@1.0.0.{call-context, blob-ref, plugin-error};
+
+    read: func(context: call-context, reference: blob-ref, offset: u64, max-bytes: u64)
+        -> result<list<u8>, plugin-error>;
+}

@@ -1,3 +1,5 @@
-# remote fixtures (reserved)
+# remote fixtures
 
-Inbound/outbound remote and process DTO compatibility fixtures land here.
+Inbound remote DTO compatibility fixtures. Handshake and session
+vocabulary stay family-separate from process. Unknown inbound fields
+fail closed.

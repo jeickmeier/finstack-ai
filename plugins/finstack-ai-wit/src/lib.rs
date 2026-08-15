@@ -1,4 +1,4 @@
-//! Experimental `@0.0.4` WIT types, host imports, and in-process guest bindings.
+//! Dual-major `@0.0.4` and `@1.0.0` WIT types, host imports, and in-process guest bindings.
 //!
 //! Bindings are generated from the checked-in WIT packages by
 //! `tools/wit_bindgen/generate.py`. This crate maps those values onto native
@@ -22,10 +22,10 @@ pub use adapters::{WitContextAdapter, WitPluginExtension, WitToolsetAdapter};
 pub use context_mapping::{encode_guest_item, map_budget, map_context_item, map_query};
 pub use error::WitMapError;
 pub use generated::{
-    AI_CONTEXT_PACKAGE, BlobRef, CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS, CRATE_VERSION, CallContext,
-    ContextBudget as WitContextBudget, ContextItem as WitContextItem, ContextQuery,
-    GuestContextProvider, GuestToolset, HOST_IMPORTS, HostBlobs, HostLogging, Level, PluginError,
-    TOOLSET_FUNCS, TOOLSET_WORLD_EXPORTS, ToolCatalog, ToolResult, ToolSpec,
+    AI_CONTEXT_PACKAGE, AI_CONTEXT_PACKAGE_V1, BlobRef, CONTEXT_FUNCS, CONTEXT_WORLD_EXPORTS,
+    CRATE_VERSION, CallContext, ContextBudget as WitContextBudget, ContextItem as WitContextItem,
+    ContextQuery, GuestContextProvider, GuestToolset, HOST_IMPORTS, HostBlobs, HostLogging, Level,
+    PluginError, TOOLSET_FUNCS, TOOLSET_WORLD_EXPORTS, ToolCatalog, ToolResult, ToolSpec,
 };
 pub use host::{CeilingBlobStore, RecordingLogger};
 pub use inventory::assert_experimental_surface;
@@ -87,10 +87,19 @@ mod tests {
                 .expect("packages fixture");
         assert!(packages.contains("finstack:ai-types@0.0.4"));
         assert!(packages.contains("finstack:ai-context@0.0.4"));
-        let blocked =
+        let historical =
             std::fs::read_to_string(root.join("packages/invalid--v1-package-blocked.wit"))
-                .expect("v1 fixture");
-        assert!(blocked.contains("@1.0.0"));
+                .expect("historical v1 fixture");
+        assert!(historical.contains("@1.0.0"));
+        let v1 = repo_root().join("fixtures/compatibility/wit/v1.0.0");
+        let packages_v1 =
+            std::fs::read_to_string(v1.join("packages/valid--published-packages.json"))
+                .expect("v1 packages");
+        assert!(packages_v1.contains("finstack:ai-types@1.0.0"));
+        assert!(packages_v1.contains("finstack:ai-context@1.0.0"));
+        let renamed = std::fs::read_to_string(v1.join("world/invalid--renamed-world.wit"))
+            .expect("renamed world");
+        assert!(renamed.contains("world agent-plugin"));
         let world = std::fs::read_to_string(root.join("world/valid--toolset-exports.json"))
             .expect("world fixture");
         assert!(world.contains("list-tools"));

@@ -38,11 +38,20 @@ type LiveContext = (Store<HostState>, ContextPlugin);
 type SerializedToolset = Arc<Mutex<Option<LiveToolset>>>;
 type SerializedContext = Arc<Mutex<Option<LiveContext>>>;
 
-const EXPERIMENTAL_VERSION: Version = Version {
-    major: 0,
-    minor: 0,
-    patch: 4,
-};
+fn adapter_version(manifest: &PluginManifest) -> Version {
+    match manifest.version.as_str() {
+        "1.0.0" => Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        _ => Version {
+            major: 0,
+            minor: 0,
+            patch: 4,
+        },
+    }
+}
 
 /// Isolated (T3) `Toolset` adapter over a compiled `toolset-plugin` component.
 pub struct WasmToolsetAdapter {
@@ -236,7 +245,7 @@ impl WasmContextAdapter {
             descriptor: ContextProviderDescriptor {
                 invocation: finstack_ai_runtime::ComponentInvocation {
                     component: ready.manifest.identity.clone(),
-                    version: EXPERIMENTAL_VERSION,
+                    version: adapter_version(&ready.manifest),
                     configuration_digest: Digest::raw_json(b"{}"),
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
@@ -392,13 +401,15 @@ impl Extension for WasmPluginExtension {
         // Isolation is a property of PluginHost, not of this descriptor.
         ExtensionDescriptor::trusted_in_process(
             self.manifest.identity.clone(),
-            EXPERIMENTAL_VERSION,
+            adapter_version(&self.manifest),
         )
     }
 
     fn register(&self, registrar: &mut Registrar) -> Result<(), RegistrationError> {
-        let metadata =
-            RegistrationMetadata::new(self.manifest.identity.clone(), EXPERIMENTAL_VERSION);
+        let metadata = RegistrationMetadata::new(
+            self.manifest.identity.clone(),
+            adapter_version(&self.manifest),
+        );
         match (&self.context, &self.context_lifecycle) {
             (Some(provider), Some(lifecycle)) => {
                 let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
@@ -447,7 +458,7 @@ impl Extension for WasmPluginExtension {
 
 fn construction_context(manifest: &PluginManifest) -> ComponentConstructionContext {
     ComponentConstructionContext {
-        component: ComponentRef::new(manifest.identity.clone(), Some(EXPERIMENTAL_VERSION)),
+        component: ComponentRef::new(manifest.identity.clone(), Some(adapter_version(manifest))),
         configuration: None,
         cancellation: finstack_ai_runtime::CancellationSignal::new(),
         deadline: None,

@@ -1,0 +1,8 @@
+{
+  "identity": "finstack.plugin.reference.context",
+  "version": "2.0.0",
+  "worlds": ["context-plugin"],
+  "permissions": ["logging"],
+  "configuration_schema": {},
+  "digest": "00"
+}

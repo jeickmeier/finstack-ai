@@ -1,0 +1,9 @@
+{
+  "identity": "finstack.plugin.reference.context",
+  "version": "1.0.0",
+  "worlds": ["context-plugin"],
+  "permissions": ["logging"],
+  "configuration_schema": {},
+  "digest": "5815204a13616b23b2d30f7cc216b1205339869b2ad8bfd5a3a2d33b327f579a",
+  "ambient_authority": true
+}

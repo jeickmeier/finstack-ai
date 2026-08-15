@@ -44,7 +44,7 @@ uv run --no-cache --isolated --no-project \
 """
 
 [tasks.gen-wit]
-description = "Regenerate experimental v0.0.4 WIT host and guest bindings"
+description = "Regenerate dual-major @0.0.4 and @1.0.0 WIT host and guest bindings"
 run = """
 set -euo pipefail
 uv run --no-project python tools/wit_bindgen/generate.py
@@ -69,6 +69,20 @@ description = "Fail when vendored guest WIT drifts from canonical @0.0.4 package
 run = """
 set -euo pipefail
 uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check
+"""
+
+[tasks.migrate]
+description = "Convert 0.1.0 journal, AgentSpec, or WIT manifest documents toward 1.0.0"
+run = """
+set -euo pipefail
+uv run --no-project python tools/migrate/migrate.py "$@"
+"""
+
+[tasks.check-public-items]
+description = "Fail when frozen public Rust/Python/JS items are removed"
+run = """
+set -euo pipefail
+uv run --no-project python tools/compat/public_items.py --check
 """
 
 [tasks.gen-plugin-wasm]

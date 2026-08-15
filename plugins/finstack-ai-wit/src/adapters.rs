@@ -22,11 +22,20 @@ use crate::manifest::PluginManifest;
 use crate::mapping::{register_catalog, sanitize_call_context};
 use crate::reference::{ReferenceContextProvider, ReferenceToolset};
 
-const EXPERIMENTAL_VERSION: Version = Version {
-    major: 0,
-    minor: 0,
-    patch: 4,
-};
+fn adapter_version(manifest: &PluginManifest) -> Version {
+    match manifest.version.as_str() {
+        "1.0.0" => Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        _ => Version {
+            major: 0,
+            minor: 0,
+            patch: 4,
+        },
+    }
+}
 
 /// `ContextProvider` adapter over an in-process `GuestContextProvider`.
 pub struct WitContextAdapter<G> {
@@ -57,7 +66,7 @@ impl<G: GuestContextProvider + Send + Sync + 'static> WitContextAdapter<G> {
             descriptor: ContextProviderDescriptor {
                 invocation: finstack_ai_runtime::ComponentInvocation {
                     component: manifest.identity.clone(),
-                    version: EXPERIMENTAL_VERSION,
+                    version: adapter_version(manifest),
                     configuration_digest: Digest::raw_json(b"{}"),
                     recovery: InvocationRecovery::RecomputeSafe,
                 },
@@ -266,13 +275,15 @@ impl Extension for WitPluginExtension {
     fn descriptor(&self) -> ExtensionDescriptor {
         ExtensionDescriptor::trusted_in_process(
             self.manifest.identity.clone(),
-            EXPERIMENTAL_VERSION,
+            adapter_version(&self.manifest),
         )
     }
 
     fn register(&self, registrar: &mut Registrar) -> Result<(), RegistrationError> {
-        let metadata =
-            RegistrationMetadata::new(self.manifest.identity.clone(), EXPERIMENTAL_VERSION);
+        let metadata = RegistrationMetadata::new(
+            self.manifest.identity.clone(),
+            adapter_version(&self.manifest),
+        );
         match (&self.context, &self.context_lifecycle) {
             (Some(provider), Some(lifecycle)) => {
                 let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
@@ -331,7 +342,7 @@ fn require_world(manifest: &PluginManifest, world: &str) -> Result<(), WitMapErr
 
 fn construction_context(manifest: &PluginManifest) -> ComponentConstructionContext {
     ComponentConstructionContext {
-        component: ComponentRef::new(manifest.identity.clone(), Some(EXPERIMENTAL_VERSION)),
+        component: ComponentRef::new(manifest.identity.clone(), Some(adapter_version(manifest))),
         configuration: None,
         cancellation: finstack_ai_runtime::CancellationSignal::new(),
         deadline: None,

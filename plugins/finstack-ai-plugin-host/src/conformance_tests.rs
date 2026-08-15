@@ -541,12 +541,12 @@ fn cache_abi_field_still_distinguishes_worlds() {
         digest: component_digest(&bytes),
         engine: engine_fingerprint(),
         target: host_target(),
-        abi: abi_identity("toolset-plugin"),
+        abi: abi_identity("toolset-plugin", "0.0.4"),
     };
     assert!(!host.compile_with_key(&bytes, &base).expect("miss"));
     assert!(host.compile_with_key(&bytes, &base).expect("hit"));
     assert!(!host.cache_hit(&CacheKeyParts {
-        abi: abi_identity("context-plugin"),
+        abi: abi_identity("context-plugin", "0.0.4"),
         ..base.clone()
     }));
     assert!(!host.cache_hit(&CacheKeyParts {

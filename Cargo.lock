@@ -1067,6 +1067,7 @@ name = "finstack-ai-test"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",

@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Experimental @0.0.4 WIT types, host, toolset, and context bindings for finstack-ai"
+description = "Dual-major @0.0.4 and @1.0.0 WIT types, host, toolset, and context bindings for finstack-ai"
 readme = "README.md"
 
 [dependencies]
