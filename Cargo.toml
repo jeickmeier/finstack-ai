@@ -14,6 +14,11 @@ members = [
     "extensions/providers/finstack-ai-provider-anthropic",
     "extensions/toolsets/finstack-ai-tools-calculator",
     "extensions/toolsets/finstack-ai-tools-filesystem",
+    "extensions/toolsets/finstack-ai-tools-shell",
+    "extensions/context/finstack-ai-context-repository",
+    "extensions/context/finstack-ai-context-memory",
+    "extensions/middleware/finstack-ai-middleware-compaction",
+    "extensions/middleware/finstack-ai-middleware-verify",
     "examples/rust-minimal",
     "fixtures/ci/model-port-leaf",
     "fixtures/ci/toolset-port-leaf",
@@ -58,6 +63,11 @@ finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack
 finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "0.0.4" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.0.4" }
 finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.0.4" }
+finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "0.0.4" }
+finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "0.0.4" }
+finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-memory", version = "0.0.4" }
+finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "0.0.4" }
+finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "0.0.4" }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "0.0.4" }
 finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "0.0.4" }
 finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "0.0.4" }

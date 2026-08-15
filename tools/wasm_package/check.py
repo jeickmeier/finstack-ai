@@ -27,6 +27,11 @@ FORBIDDEN_WASM = frozenset(
         "native-tls",
         "finstack-ai-provider-openai-compatible",
         "finstack-ai-provider-anthropic",
+        "finstack-ai-tools-shell",
+        "finstack-ai-context-repository",
+        "finstack-ai-context-memory",
+        "finstack-ai-middleware-compaction",
+        "finstack-ai-middleware-verify",
     }
 )
 SECRET_ROOTS = (

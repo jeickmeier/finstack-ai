@@ -135,13 +135,17 @@ fn component(id: &str) -> Result<ComponentRef, BoxError> {
     ))
 }
 
-fn text_response(text: &str, id: &str) -> String {
+/// One SSE text completion used by the offline loopback server.
+#[must_use]
+pub fn text_response(text: &str, id: &str) -> String {
     format!(
         "data: {{\"id\":\"{id}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{text}\"}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}}}\n\ndata: [DONE]\n\n"
     )
 }
 
-fn calculator_response() -> String {
+/// One SSE calculator tool-call used by the offline loopback server.
+#[must_use]
+pub fn calculator_response() -> String {
     concat!(
         "data: {\"id\":\"tool-call\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"calculator\",\"arguments\":\"{\\\"operation\\\":\\\"add\\\",\\\"operands\\\":[2,3]}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
         "data: [DONE]\n\n"
@@ -149,7 +153,12 @@ fn calculator_response() -> String {
     .to_owned()
 }
 
-async fn serve_sse(
+/// Serve a finite sequence of SSE bodies on a loopback listener.
+///
+/// # Errors
+///
+/// Returns a bind or address error before the accept loop starts.
+pub async fn serve_sse(
     responses: Vec<String>,
 ) -> Result<(String, tokio::task::JoinHandle<Result<(), String>>), BoxError> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;

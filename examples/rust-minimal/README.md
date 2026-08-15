@@ -4,8 +4,9 @@ This package contains four offline, secret-free binaries over the public Rust
 surface:
 
 - `minimal` completes a model-only run through the OpenAI-compatible provider.
-- `coding` completes a calculator tool loop and shows the filesystem toolset's
-  explicit-root, fail-closed platform policy.
+- `coding` composes calculator, filesystem, shell, repository/memory context,
+  sliding-window compaction, and a before_finalize verifier over a keyless
+  loopback model.
 - `service` resolves once, checks component health, and handles one request.
 - `diagnostic` prints credential-free `AgentSpec` and lock fingerprints.
 

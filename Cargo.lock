@@ -760,6 +760,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-context-memory"
+version = "0.0.4"
+dependencies = [
+ "finstack-ai-runtime",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-context-repository"
+version = "0.0.4"
+dependencies = [
+ "finstack-ai-runtime",
+ "rustix",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-extension-port-leaf-fixture"
 version = "0.0.4"
 dependencies = [
@@ -792,6 +812,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-compaction"
+version = "0.0.4"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-middleware-verify"
+version = "0.0.4"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-model-port-leaf-fixture"
 version = "0.0.4"
 dependencies = [
@@ -806,10 +850,15 @@ name = "finstack-ai-native-examples"
 version = "0.0.4"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-context-memory",
+ "finstack-ai-context-repository",
+ "finstack-ai-middleware-compaction",
+ "finstack-ai-middleware-verify",
  "finstack-ai-provider-openai-compatible",
  "finstack-ai-store-memory",
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-filesystem",
+ "finstack-ai-tools-shell",
  "tokio",
 ]
 
@@ -977,6 +1026,20 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-filesystem"
+version = "0.0.4"
+dependencies = [
+ "finstack-ai-runtime",
+ "futures-util",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-tools-shell"
 version = "0.0.4"
 dependencies = [
  "finstack-ai-runtime",

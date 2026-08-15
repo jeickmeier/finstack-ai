@@ -3,7 +3,7 @@
 Date: 2026-08-14
 Owner: me@jeickmeier.com
 Intended branch (when admitted): `codex/pr-056-coding-research-batteries`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
+Intended baseline: local `main` at `40206b1380cac0759b1f68f5fb80e343cc123bfe`
 Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
 
@@ -14,20 +14,18 @@ not admit the PR, start Phase 8, or record Phase 8 entrance.
 
 ## Execution envelope
 
-Not authorized. Suggested text when the owner is ready:
+Authorized by the owner sentence `Proceed to PR-056 through PR-066`
+on 2026-08-15, recorded as:
 
 ```
-Run PR-056; mode=integrated; target=main; local branch/commit/merge
-authorized; external actions=none; stop before any gate crossing.
+Run PR-056 through PR-066 sequentially; mode=integrated; target=main;
+local branch/commit/merge authorized; external actions=none;
+stop before any gate crossing unless a separate passing gate decision exists.
 ```
 
-`implement the plan` is enough only if it names that same local-only
-integrated envelope **and** the admission checks below are already
-true. Do not infer authorization from this planning file, from
-`continue`, from Phase 7 `Done`, from G6 `Passed`, or from the
-PR-055 plan existing.
-
-When authorized, reuse:
+PR-056 is the only active logical PR. Do not start PR-057+ until
+this PR is `Done`. Phase 9 (PR-062–PR-066) stays blocked on G7 and
+Phase 9 entrance.
 
 ```
 mode=integrated; target=main
@@ -36,9 +34,9 @@ external actions=none
 ```
 
 Forbidden: push, hosted PR/merge, npm/pypi publish, crates.io
-publish, tag, G5 inference, G7 inference. Do not write `G5-D-*` or
-`G7-D-*`. Do not start PR-055 or PR-057+. Do not cut or publish
-`0.1.0`. Do not bump the lockstep workspace version off `0.0.4`.
+publish, tag, G7 inference, G8 inference. Do not write `G7-D-*` or
+`G8-D-*`. Do not cut or publish `0.1.0`. Do not bump the lockstep
+workspace version off `0.0.4`.
 
 ## Admission (when authorized)
 
@@ -64,11 +62,9 @@ Phase 8 PR (PR-055 if it lands first). Do not re-record
 
 ### PR-055 is `Done`
 
-PR-055 is planned under `docs/implementation/artifacts/pr-055/` and
-is **not** admitted. Implementation Plan lists PR-055 then PR-056.
-Keep one active logical PR. Do not admit PR-056 while PR-055 is
-`Todo` unless the owner explicitly authorizes parallel Phase 8 work
-in the same sentence.
+PR-055 is `Done` at local `main` merge
+`bfa380340c1bf28941c9cbd21a204626d114052b`. Implementation Plan
+lists PR-055 then PR-056. Keep one active logical PR.
 
 PR-056's *code* dependencies are PR-025, the ContextProvider /
 Middleware ports (PR-018), and durability where required (PR-048
