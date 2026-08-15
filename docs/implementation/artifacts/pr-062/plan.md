@@ -2,20 +2,28 @@
 
 Date: 2026-08-14
 Owner: me@jeickmeier.com
-Intended branch (when admitted): `codex/pr-062-1.0-contract-freeze`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
-Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
-`555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
+Active branch: `codex/pr-062-1.0-contract-freeze`
+Baseline: local `main` at `1775eab425ef9d48f93df0f0248d77bfda706331`
+Plan baseline: documentation pack v0.21 / PLAN-0.19 / Implementation Plan SHA-256
+`86d2430860b12ab947638052b97ea2403c2e53b218a66977a4258defeb18fc3f`
 
 This file is the execution contract for PR-062. The closed PR-054
 envelope is not reused. The PR-055–PR-061 envelopes are not reused.
-PR-062 is the only active logical PR once admitted. This planning
-file does not admit the PR, start Phase 8 or Phase 9, cut `0.1.0`
-or `1.0.0`, or record G5 / G7 / G8.
+PR-062 is the only active logical PR. This planning file does not
+cut `1.0.0` or record G8.
 
 ## Execution envelope
 
-Not authorized. Suggested text when the owner is ready:
+Authorized 2026-08-15; **PR-062 admitted**. Owner text:
+
+```
+Skip this entrance gate, I don't want this to be at public
+registries yet. Move the phase 9
+```
+
+Interpreted as: versioned PLAN-0.19 amendment; Phase 9 entrance
+`Passed` (2/2); admit PR-062 only; no crates.io / PyPI / npm
+publish; no PR-063–PR-066 range; no `G8-D-*`.
 
 ```
 Run PR-062; mode=integrated; target=main; local branch/commit/merge
@@ -49,28 +57,17 @@ this file does not record them.
 
 ### Phase 9 entrance is `Passed` (2/2)
 
-Implementation Plan §17 entrance. Current state is `0/2`.
+Implementation Plan §17 entrance under PLAN-0.19. Recorded here.
 
 | Entrance bullet | Current state |
 | --- | --- |
-| `0.1.0` used by external adopters | **Blocked.** Unpublished lockstep `0.1.0` exists and G7 is `Passed`. No external project depends on it. First-party starters do not count. |
-| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **First-party review exists** at [`preview-feedback-review.md`](../../preview-feedback-review.md). That review is not external soak and does not make entrance `2/2`. |
+| Tagged `v0.1.0` exists; public registries not required | **Passed** via `PH9-E-entrance-tag-b610b0ba93b5` |
+| Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **Passed** via `PH9-E-entrance-feedback-ee6999c59a12` |
 
 Phase 8 is `Done` (entrance `2/2`, exit `4/4`). G7 is `Passed` via
-`G7-D-public-preview-f7c7e70b9e04`. Do not infer Phase 9 entrance
-from Phase 8 `Done`, from G7, or from the first-party review.
-
-If the owner says `implement the plan` while Phase 9 entrance is
-still `0/2`, **stop**. Do not fabricate adopter usage or preview
-feedback.
-
-Phase 9 entrance, once Passed, is recorded by the first admitted
-Phase 9 PR (this one) as `PH9-E-entrance-adopters-*` and
-`PH9-E-entrance-feedback-*`. Do not record those rows from
-planning. Cite real adopter projects and a written feedback
-review (issue patterns, API pain, migration needs). A local
-`0.1.0` candidate with no external use does **not** satisfy
-bullet 1.
+`G7-D-public-preview-f7c7e70b9e04`. Do not re-record `PH9-E-entrance-*`.
+Do not invent external adopters. Do not publish to crates.io / PyPI /
+npm. Do not write `G8-D-*`.
 
 ### Phase 8 is `Done` and G7 is `Passed`
 
@@ -301,9 +298,9 @@ types only as needed; they are not a seventh port.
 Task IDs are minted at admit, not now. Do not start these until
 admission checks pass.
 
-1. Tracking: confirm Phase 9 entrance evidence exists (adopters +
-   feedback review), Phase 8 `Done`, `G7-D-*` present; open
-   `codex/pr-062-1.0-contract-freeze` from the then-current
+1. Tracking: confirm Phase 9 entrance evidence exists (tagged
+   `v0.1.0` + feedback review), Phase 8 `Done`, `G7-D-*` present;
+   open `codex/pr-062-1.0-contract-freeze` from the then-current
    `main` tip. Record `PH9-E-entrance-*`. Mark PR-062
    `In progress`.
 2. Freeze review + 1.0 policy draft + leaf-versioning policy

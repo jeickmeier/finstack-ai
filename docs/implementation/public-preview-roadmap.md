@@ -34,12 +34,9 @@ Rows already marked `defer past preview` in
 
 ## Phase 9 themes (not admitted)
 
-These stay `Todo` until Phase 9 entrance is `Passed` (2/2). G7 is
-`Passed` via `G7-D-public-preview-f7c7e70b9e04`. A first-party
-preview-feedback review exists at
-[`preview-feedback-review.md`](preview-feedback-review.md). That
-review does not satisfy “used by external adopters.” Do not infer
-Phase 9 admission from this file.
+Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
+via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is the only admitted
+Phase 9 PR. Do not infer PR-063+ or `G8-D-*` from this file.
 
 | Theme | Plan entry |
 | --- | --- |

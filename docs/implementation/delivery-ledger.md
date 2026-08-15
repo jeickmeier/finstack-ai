@@ -4,16 +4,16 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-15 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`, PR-050 local merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`, PR-051 local merge `cf7eaebab383724fa4b7b19cb204febec41a768a`, PR-052 local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`, PR-053 local merge `3297eb44fb127ff6b36af1a705cda38442efdf95`, PR-054 local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`, PR-055 local merge `bfa380340c1bf28941c9cbd21a204626d114052b`, PR-056 local merge `cd7c725b3ab6c4f8a96661044cfe3bf7707b1aa1`, PR-057 local merge `d55c8318b1f9c47bec2a078fc12fd7acb10095c4`, and PR-058 local merge `99ac0fb69952c9e6bfe8354e9d1f930ee061b4a0`. Reconciled on 2026-08-15 through PR-061 local merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` and `G7-D-public-preview-f7c7e70b9e04`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-15 and reconciled against documentation pack v0.21 / PLAN-0.19 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, tag `v0.1.0`, and Phase 9 entrance `PH9-E-entrance-tag-b610b0ba93b5` / `PH9-E-entrance-feedback-ee6999c59a12`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
-| Phases | 10 | 9 | Phase 0–8 `Done`; Phase 9 `Todo` |
-| Logical PRs | 66 | 61 | PR-001–PR-061 `Done`; PR-062–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 330 | PR-001–PR-061 closed; PR-061 A01–A05 Passed at merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` |
-| Phase entrance and exit bullets | 62 | 56 | Phase 0–8 entrance and exit `Passed`; Phase 9 remains open |
+| Phases | 10 | 9 | Phase 0–8 `Done`; Phase 9 `In progress` |
+| Logical PRs | 66 | 61 | PR-001–PR-061 `Done`; PR-062 `In progress`; PR-063–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 330 | PR-001–PR-061 closed; PR-062 A01–A04 pending |
+| Phase entrance and exit bullets | 62 | 58 | Phase 0–8 entrance and exit `Passed`; Phase 9 entrance `Passed` (2/2); Phase 9 exit `0/4` |
 | Program gates | 9 | 8 | G0–G7 `Passed`; G8 `Not ready` |
-| Implementation tasks | 374 | 374 | PR-001–PR-061 minted tasks are `Done` at local merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f`; PR-062–PR-066 remain unminted |
+| Implementation tasks | 375 | 374 | PR-062 tracking minted; PR-063–PR-066 remain unminted |
 | Open blockers | 0 | 4 | No open blocker; all four recorded blockers are `Resolved` |
 
 PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). PR-007 is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). PR-008 is `Done` at merge `4b68a9397a8e07a581f34dfc34f0bfb96873c00d` ([#5](https://github.com/jeickmeier/finstack-ai/pull/5); A01–A08 Passed after review remediation and final hosted/merge verification). PR-009 is `Done` at local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` (A01–A05 Passed; no GitHub issue or actual PR). PR-010 is `Done` at local `main` integration `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` (A01–A04 Passed; no GitHub issue or actual PR). PR-011 is `Done` at local `main` integration `01380ead5c5ca7b9e7d28d681d84719c9bf0279e` (A01–A06 Passed; no GitHub issue or actual PR). PR-012 is `Done` at local `main` integration `dc58a11fbc871e70326d04fd9840297b5179023f` (fast-forward of `codex/pr-012-structured-output`; A01–A05 Passed; no GitHub issue or actual PR). PR-013 is `Done` at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` ([#6](https://github.com/jeickmeier/finstack-ai/pull/6); A01–A04 Passed). PR-014 is `Done` at merge `399f3a7d9d987268f4d79ab90f31b93f854084f8` ([#8](https://github.com/jeickmeier/finstack-ai/pull/8); A01–A07 Passed after hosted and immutable merge verification). PR-015 is `Done` at local `main` merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` (A01–A04 Passed; no GitHub issue or actual PR). PR-016 is `Done` at local `main` merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` (A01–A05 Passed; no GitHub issue or actual PR). Phase 0 and Phase 1 are `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`; G1 passed via `G1-D-kernel-semantics-4f52c8a91d6e`. Both Phase 2 entrance criteria are passed.
@@ -100,20 +100,20 @@ Phase 8 entrance is `Passed` via `PH8-E-entrance-gates-400228a63790` and `PH8-E-
 
 ## Active execution envelope
 
-Owner G7 closeout (2026-08-15), **PR-061 `Done` and G7 `Passed`**, plus the 2026-08-15 owner instruction to cut `v0.1.0` / publish. The prior PR-056–PR-066 range is closed for gate crossing. crates.io / PyPI / npm publish, hosted PR/merge, and G8 remain unnamed or blocked on credentials.
+Owner Phase 9 admit (2026-08-15), **PR-062 `In progress`**. PLAN-0.19 / pack v0.21 amends Phase 9 entrance. Public registries stay unpublished.
 
 ```
-Finish the PR-061 residual to Done and validate G7;
-local branch/commit authorized; external actions=none.
+Skip this entrance gate; do not publish to public registries;
+move Phase 9. Run PR-062; mode=integrated; target=main;
+local branch/commit/merge authorized; external actions=none;
+stop before any gate crossing.
 ```
 
-Baseline: local `main` at `002b615bf75c194b7d00acd6be2a036bfd614482`. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`. Decision: `G7-D-public-preview-f7c7e70b9e04`. Closed PR-055–PR-061 envelopes are not reused.
+Baseline: local `main` at `1775eab425ef9d48f93df0f0248d77bfda706331`. Plan baseline: documentation pack v0.21 / PLAN-0.19 / Implementation Plan SHA-256 `86d2430860b12ab947638052b97ea2403c2e53b218a66977a4258defeb18fc3f`. Phase 9 entrance: `PH9-E-entrance-tag-b610b0ba93b5` and `PH9-E-entrance-feedback-ee6999c59a12`. Closed PR-055–PR-061 envelopes are not reused.
 
-Forbidden unless a later sentence names them: hosted PR/merge, npm/pypi/crates.io publish, G8 inference. Do not write `G8-D-*`. Do not start PR-062+.
+Forbidden unless a later sentence names them: hosted PR/merge, npm/pypi/crates.io publish, G8 inference. Do not write `G8-D-*`. Do not start PR-063+. Do not cut `1.0.0`.
 
-Owner instruction 2026-08-15 named option 3: `git tag v0.1.0` / publish. Tag `v0.1.0` is `9d09b87108f6286918fcc436c53d195d0b6b10cc` (annotated object `b5ce06cbd03e74749b3615e5a6f7ac7a0e938926`). GitHub prerelease: https://github.com/jeickmeier/finstack-ai/releases/tag/v0.1.0 (`PREVIEW-E-tag-v010-75d652aef495`). crates.io / PyPI / npm remain blocked: no `CARGO_REGISTRY_TOKEN`, `UV_PUBLISH_TOKEN` / `PYPI_TOKEN`, or `NPM_TOKEN` on this machine, and `npm whoami` is unauthenticated. `origin/main` was not fast-forwarded.
-
-Phase 9 entrance remains unsatisfied (`0/2`). A first-party preview-feedback review exists at [`preview-feedback-review.md`](preview-feedback-review.md) (`PREVIEW-E-first-party-feedback-c706126bcc26`). Tag `v0.1.0` does not by itself satisfy “used by external adopters.” Next eligible action is named external-adopter evidence, owner registry credentials for crates.io / PyPI / npm, or a versioned planning amendment; not an inferred PR-062 start.
+Tag `v0.1.0` is `9d09b87108f6286918fcc436c53d195d0b6b10cc`. GitHub prerelease: https://github.com/jeickmeier/finstack-ai/releases/tag/v0.1.0. crates.io / PyPI / npm remain unpublished by owner instruction.
 
 Phase 8 entrance stays `Passed` (2/2) via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`. Do not re-record `PH8-E-entrance-*`. PR-055 is `Done` at local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b`. PR-056 is `Done` at local `main` merge `cd7c725b3ab6c4f8a96661044cfe3bf7707b1aa1`. PR-057 is `Done` at local `main` merge `d55c8318b1f9c47bec2a078fc12fd7acb10095c4`. PR-058 is `Done` at local `main` merge `99ac0fb69952c9e6bfe8354e9d1f930ee061b4a0`. PR-059 is `Done` at local `main` merge `a88ea65d4fc477d8ddd4b9d0979258bb92e7da0d`. PR-060 is `Done` at local `main` merge `b5266602bd77b546a65a22f91de01ab12bd652cd`. PR-061 is `Done` at local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`.
 
@@ -205,7 +205,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | [Phase 6](../planning/04-finstack-ai-implementation-plan.md#14-phase-6-durability-recovery-and-lanes) | PR-039–PR-048 | 3/3 | 4/4 | G5 | Done | me@jeickmeier.com | — | — | PH6-E-entrance-commit-loop-3728650e8935; PH6-E-entrance-journal-schema-b5a63427108e; PH6-E-entrance-handles-7618a4f500cb; PR-039-E-integration-64c54e767f53; PR-040-E-integration-dbd10d35b223; PR-041-E-integration-8a8429326429; PR-042-E-integration-4d627711632c; PR-043-E-integration-b0641b0be338; PR-044-E-integration-b0641b0be338; PR-045-E-integration-b0641b0be338; PR-046-E-integration-b0641b0be338; PR-047-E-integration-b0641b0be338; PR-048-E-integration-b0641b0be338; PH6-E-exit-sqlite-b0641b0be338; PH6-E-exit-effects-b0641b0be338; PH6-E-exit-interactions-b0641b0be338; PH6-E-exit-lanes-b0641b0be338; G5-D-durable-beta-a9568bd869b5 @ `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c` | 2026-08-15 |
 | [Phase 7](../planning/04-finstack-ai-implementation-plan.md#15-phase-7-isolated-witwasmtime-extensions) | PR-049–PR-054 | 3/3 | 4/4 | G6 | Done | me@jeickmeier.com | — | — | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4; PR-049-E-integration-5a6eeeb783be; PR-050-E-integration-5c987e379d0c; PR-051-E-integration-cf7eaebab383; PR-052-E-integration-5e531591350a; PR-053-E-integration-3297eb44fb12; PR-054-E-integration-81eb369c8f5a; PH7-E-exit-components-81eb369c8f5a; PH7-E-exit-permissions-81eb369c8f5a; PH7-E-exit-wasmtime-81eb369c8f5a; PH7-E-exit-packaging-81eb369c8f5a; G6-D-plugin-alpha-018aaea9aa00 @ `018aaea9aa00cf3f7d86207372b553f900a272b1` | 2026-08-14 |
 | [Phase 8](../planning/04-finstack-ai-implementation-plan.md#16-phase-8-ecosystem-readiness-and-public-preview) | PR-055–PR-061 | 2/2 | 4/4 | G7 | Done | me@jeickmeier.com | — | — | PH8-E-entrance-gates-400228a63790; PH8-E-entrance-api-backlog-267035e95daa; PH8-E-exit-batteries-170a85ccd4e1; PH8-E-exit-server-170a85ccd4e1; PH8-E-exit-reports-170a85ccd4e1; PH8-E-exit-preview-170a85ccd4e1; G7-D-public-preview-f7c7e70b9e04 @ `002b615bf75c194b7d00acd6be2a036bfd614482` | 2026-08-15 |
-| [Phase 9](../planning/04-finstack-ai-implementation-plan.md#17-phase-9-10-hardening-and-general-availability) | PR-062–PR-066 | 0/2 | 0/4 | G8 | Todo | — | — | — | — | — |
+| [Phase 9](../planning/04-finstack-ai-implementation-plan.md#17-phase-9-10-hardening-and-general-availability) | PR-062–PR-066 | 2/2 | 0/4 | G8 | In progress | me@jeickmeier.com | PR-062 | — | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12 | 2026-08-15 |
 
 ## Gate ledger
 
@@ -335,7 +335,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-062 | Todo | — | — | 0 | 0/4 | — | — | — | — |
+| PR-062 | In progress | me@jeickmeier.com | `codex/pr-062-1.0-contract-freeze` from `1775eab425ef9d48f93df0f0248d77bfda706331` (no issue or actual PR) | 1 | 0/4 | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12 | — | — | 2026-08-15 |
 | PR-063 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-064 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-065 | Todo | — | — | 0 | 0/4 | — | — | — | — |
@@ -734,6 +734,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-061-T-policy-d0f7124e5013 | PR-061 | Preview compatibility policy, in-repo roadmap, and deprecation process | Done | me@jeickmeier.com | PR-061-T-backlog-b8d5f02c3e91 | `8197246e58981b3ba2dd806a7036e13238cb5fb9` | PR-061-A05 | PR-061-E-candidate-8197246e5898 | 2026-08-15 | 2026-08-15 | 2026-08-15 |
 | PR-061-T-suites-e108235f6124 | PR-061 | Re-run shared traces, kernel graph, queue bounds, and three activation modes | Done | me@jeickmeier.com | PR-061-T-version-c9e6013d4f02 | `8197246e58981b3ba2dd806a7036e13238cb5fb9` | PR-061-A02; PR-061-A03; PR-061-A04 | PR-061-E-candidate-8197246e5898 | 2026-08-15 | 2026-08-15 | 2026-08-15 |
 | PR-061-T-evidence-f21934607235 | PR-061 | PRD §15 / TDD §36 checklist, 0.1.0 staging, Phase 8 exit review, G7 readiness; stop before G7-D | Done | me@jeickmeier.com | PR-061-T-policy-d0f7124e5013; PR-061-T-suites-e108235f6124 | local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` | PR-061-A01; PR-061-A05 | PR-061-E-candidate-8197246e5898; PR-061-E-security-8197246e5898; PR-061-E-integration-170a85ccd4e1 | 2026-08-15 | 2026-08-15 | 2026-08-15 |
+| PR-062-T-tracking-6fdba711ccc6 | PR-062 | Record PLAN-0.19 Phase 9 entrance and open `codex/pr-062-1.0-contract-freeze` | In progress | me@jeickmeier.com | — | `codex/pr-062-1.0-contract-freeze` from `1775eab425ef9d48f93df0f0248d77bfda706331` | PR-062-A01–A04 | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12; [`artifacts/pr-062/plan.md`](artifacts/pr-062/plan.md) | 2026-08-15 | 2026-08-15 | — |
 
 ## Blocker ledger
 

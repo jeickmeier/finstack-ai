@@ -13,9 +13,9 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.18 |
+| Version | 0.19 |
 | Status | Implementation baseline |
-| Date | 2026-08-10 |
+| Date | 2026-08-15 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
 | Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.18; Security and Threat Model v0.6 |
 
@@ -2675,13 +2675,13 @@ A separate ADR is required before merging a change that:
 
 **Outcome.** A stable, audited, performance-hardened 1.0 with migration tooling, ecosystem conformance, and explicit long-term compatibility promises.
 
-**Planning range.** 6-10 weeks after `0.1.0` feedback; planning range only
+**Planning range.** 6-10 weeks after tagged `0.1.0`; planning range only
 
 **Traceability.** PRD long-term success metrics and release criteria; Architecture evolution; all NFR families.
 
 ## Entrance criteria
 
-- `0.1.0` used by external adopters.
+- Tagged `v0.1.0` public-preview cut exists. Public registry publication (crates.io, PyPI, npm) is not required to enter Phase 9 and remains a separately named owner action. External adopter soak is deferred to G8 and program completion criterion 12.
 
 - Preview telemetry, issue patterns, API pain points, and migration needs reviewed.
 
@@ -2939,7 +2939,7 @@ The `0.1.0` public-preview scope in section 2.1 and the G7/Phase 8 exit criteria
 | Browser support expands into a second runtime | JS reimplements scheduling or history rules | Compile the same kernel; JS only fulfills effects and holds host resources |
 | Compaction silently becomes history mutation | Replay/audit drift, broken tool pairing, or removed policy context | Keep compaction in `before_model` middleware; protect required items; record versioned evidence/checkpoints; fail safely when no valid projection fits |
 | Review throughput becomes the bottleneck | Large stacked PRs and long-lived branches accumulate | Keep logical PRs small, merge test/schema foundations first, maintain main green |
-| `1.0.0` is declared before ecosystem use | APIs freeze without external feedback | Require `0.1.0` adopter soak and migration feedback before Phase 9 freeze |
+| `1.0.0` is declared before ecosystem use | APIs freeze without external feedback | Phase 9 contract freeze may start from tagged `v0.1.0` plus reviewed preview feedback; G8 and program completion criterion 12 still require external preview-user validation of the `1.0.0` migration path |
 
 # 21. Program completion criteria
 
