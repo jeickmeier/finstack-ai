@@ -3,7 +3,7 @@
 Date: 2026-08-14
 Owner: me@jeickmeier.com
 Intended branch (when admitted): `codex/pr-058-remote-session-server`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
+Intended baseline: local `main` at `834a071147ed415b794fb6e7ead8472f18094f84`
 Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
 
@@ -15,7 +15,20 @@ entrance.
 
 ## Execution envelope
 
-Not authorized. Suggested text when the owner is ready:
+Authorized by the owner sentence `Proceed to PR-056 through PR-066`
+on 2026-08-15, recorded as:
+
+```
+Run PR-056 through PR-066 sequentially; mode=integrated; target=main;
+local branch/commit/merge authorized; external actions=none;
+stop before any gate crossing unless a separate passing gate decision exists.
+```
+
+PR-058 is the only active logical PR. Do not start PR-059+ until
+this PR is `Done`. Phase 9 (PR-062–PR-066) stays blocked on G7 and
+Phase 9 entrance.
+
+Not authorized as a standalone sentence. Suggested text when the owner is ready:
 
 ```
 Run PR-058; mode=integrated; target=main; local branch/commit/merge

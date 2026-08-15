@@ -5,6 +5,7 @@ members = [
     "crates/finstack-ai-runtime",
     "crates/finstack-ai",
     "crates/finstack-ai-protocol",
+    "crates/finstack-ai-server",
     "crates/finstack-ai-test",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
@@ -58,6 +59,9 @@ finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "0.0.4" }
 finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "0.0.4", default-features = false }
 finstack-ai = { path = "crates/finstack-ai", version = "0.0.4", default-features = false }
 finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "0.0.4" }
+finstack-ai-server = { path = "crates/finstack-ai-server", version = "0.0.4" }
+rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
+tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "0.0.4" }
 finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "0.0.4" }
 finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "0.0.4" }

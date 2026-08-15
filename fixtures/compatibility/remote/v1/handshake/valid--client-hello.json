@@ -1,0 +1,11 @@
+{
+  "case": "remote-client-hello",
+  "family": "remote",
+  "kind": "client_hello",
+  "offer": {
+    "supported_versions": [1],
+    "downgrade_floor": 1,
+    "features": ["auth"]
+  },
+  "expect": { "ok": true }
+}

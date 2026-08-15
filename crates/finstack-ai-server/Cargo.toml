@@ -1,0 +1,29 @@
+[package]
+name = "finstack-ai-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Reference Unix-socket and loopback session server for finstack-ai"
+readme = "README.md"
+
+[dependencies]
+finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-kernel = { workspace = true }
+finstack-ai-protocol = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+rustls = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-rustls = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+finstack-ai-store-memory = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+[lints]
+workspace = true
