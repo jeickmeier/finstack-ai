@@ -1075,6 +1075,7 @@ dependencies = [
  "finstack-ai-store-sqlite",
  "futures-core",
  "jsonschema",
+ "proptest",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",

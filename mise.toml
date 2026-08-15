@@ -4,6 +4,7 @@ python = "3.14"
 uv = "0.10.11"
 node = "22.18.0"
 "cargo:wasm-bindgen-cli" = "0.2.127"
+"cargo:cargo-fuzz" = "0.13.2"
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
 # Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
@@ -229,6 +230,39 @@ description = "Two-run local staging checksum identity (unpublished 0.1.0)"
 run = """
 set -euo pipefail
 uv run --no-project python tools/docs/rehearse_release.py
+"""
+
+[tasks.fuzz-smoke]
+description = "Run deterministic bounded smoke campaigns for every cargo-fuzz target"
+run = """
+set -euo pipefail
+rustup toolchain install nightly-2026-08-14 --profile minimal
+cd fuzz
+for target in record_replay_json kernel_transition_json run_event_json message_json remote_frame wit_input recovery_sequence; do
+  cargo +nightly-2026-08-14 fuzz run "${target}" -- \
+    -seed=1 \
+    -runs=256 \
+    -max_total_time=5 \
+    -timeout=5 \
+    -max_len=1048576 \
+    -rss_limit_mb=2048
+done
+"""
+
+[tasks.fuzz-local]
+description = "Bounded local fuzz campaign (not a hosted soak)"
+run = """
+set -euo pipefail
+rustup toolchain install nightly-2026-08-14 --profile minimal
+cd fuzz
+for target in record_replay_json kernel_transition_json run_event_json message_json remote_frame wit_input recovery_sequence; do
+  cargo +nightly-2026-08-14 fuzz run "${target}" -- \
+    -seed=1 \
+    -max_total_time=30 \
+    -timeout=5 \
+    -max_len=1048576 \
+    -rss_limit_mb=2048
+done
 """
 
 [tasks.ci]

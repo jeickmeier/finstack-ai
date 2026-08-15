@@ -57,11 +57,25 @@ impl ComponentCache {
     }
 
     /// Return a previously stored artifact for `key`.
+    ///
+    /// Directory hits are existence/identity only. They are not safe to pass
+    /// to `Component::deserialize`.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
         match &self.inner {
             CacheInner::Memory(map) => map.lock().ok()?.get(key).cloned(),
             CacheInner::Directory(dir) => fs::read(artifact_path(dir, key)).ok(),
+        }
+    }
+
+    /// Return precompiled bytes that this process wrote into the in-memory
+    /// backend. Directory artifacts are never returned: a writable cache
+    /// directory is not an authentication boundary (TM-08).
+    #[must_use]
+    pub fn trusted_precompiled(&self, key: &str) -> Option<Vec<u8>> {
+        match &self.inner {
+            CacheInner::Memory(map) => map.lock().ok()?.get(key).cloned(),
+            CacheInner::Directory(_) => None,
         }
     }
 
@@ -259,5 +273,20 @@ mod tests {
             ..parts()
         });
         assert!(cache.get(&miss).is_none());
+        assert!(
+            cache.trusted_precompiled(&key).is_none(),
+            "directory artifacts are not trusted for deserialize"
+        );
+    }
+
+    #[test]
+    fn only_memory_artifacts_are_trusted_for_deserialize() {
+        let cache = ComponentCache::memory();
+        let key = cache_key(&parts());
+        cache.put(&key, b"precompiled").expect("put");
+        assert_eq!(
+            cache.trusted_precompiled(&key).as_deref(),
+            Some(b"precompiled".as_ref())
+        );
     }
 }
