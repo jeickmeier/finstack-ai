@@ -1,0 +1,27 @@
+PR-059-E-integration-a88ea65d4fc4
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: a88ea65d4fc477d8ddd4b9d0979258bb92e7da0d
+Parents: 894c97116a72ea88ab241439d63493a873e9ad4d
+         01c8626633cfa99df337ddd5a3b808680252b99a
+Implementation candidate: 5919e2cfe2f814cf35de7e90e34f8199e12beaa8
+Result: Pass
+
+Local `main` merge of `codex/pr-059-workflow-runtime-adapters`.
+Merge tree: `39f7f5febaa8a9915cb08b9206562df7613144eb`.
+A01–A04 remain bound to the implementation candidate.
+TM-19 / TM-10 / TM-14 review remains bound to the same candidate.
+
+Re-verified on the merge tip:
+  cargo test -p finstack-ai-workflow-local --offline --locked
+    --test reference
+    6 passed
+  default kernel/runtime/SDK tree: no workflow-local,
+    no workflow-temporal, no temporalio, no restate-sdk
+  workflow-local / workflow-temporal direct edges:
+    finstack-ai-runtime only
+
+No hosted pull request or merge, npm/pypi/crates.io publish, tag,
+or G7-D-*. Phase 8 exit stays 0/4. Feature branch is kept.
+ADR-013 is not reopened. No successor is started from this
+closeout.
