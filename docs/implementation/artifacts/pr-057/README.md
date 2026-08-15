@@ -8,6 +8,8 @@ Admitted on `codex/pr-057-observer-diagnostics` from local `main`
 | File | Owns |
 | --- | --- |
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
+| `candidate-validation.txt` | Local Darwin A01–A05 proofs at `d07ed8d15b7122160419d91996840e1c98575455` |
+| `security-review.txt` | TM-04 / TM-17 / TM-21 review at the same candidate |
 
 No G5 decision, G7 decision, hosted pull request, npm/pypi/crates.io
 publish, or tag is stored here. Phase 8 entrance is `Passed` (2/2)
