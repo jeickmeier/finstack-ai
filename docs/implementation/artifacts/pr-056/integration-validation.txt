@@ -1,0 +1,32 @@
+PR-056-E-integration-cd7c725b3ab6
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: cd7c725b3ab6c4f8a96661044cfe3bf7707b1aa1
+Parents: 40206b1380cac0759b1f68f5fb80e343cc123bfe
+         b564ad78011e2754f975eade8c0d7a1724479123
+Implementation candidate: 2ba8b86154fc821c8bea988a4d82a7db6adf483d
+Result: Pass
+
+Local `main` merge of `codex/pr-056-coding-research-batteries`.
+Merge tree: `724a015189f8c328c93bbdaaf0a18bb24fadf2a6`.
+A01–A08 remain bound to the implementation candidate.
+TM-03 / TM-21 / TM-01 / TM-20 review remains bound to the same
+candidate.
+
+Re-verified on the merge tip:
+  cargo test -p finstack-ai-tools-filesystem
+    -p finstack-ai-tools-shell
+    -p finstack-ai-context-repository
+    -p finstack-ai-context-memory
+    -p finstack-ai-middleware-compaction
+    -p finstack-ai-middleware-verify --offline --locked
+    31 passed
+  cargo test -p finstack-ai-test --test compaction_conformance
+    --offline --locked
+    1 passed
+  default kernel/runtime/SDK tree: no shell, no repository,
+    no memory-context, no compaction, no verify
+
+No hosted pull request or merge, npm/pypi/crates.io publish, tag,
+or G7-D-*. Phase 8 exit stays 0/4. Feature branch is kept.
+No successor is started from this closeout.
