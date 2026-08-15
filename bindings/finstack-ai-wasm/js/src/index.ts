@@ -20,6 +20,13 @@ export {
   RunResult,
   Session,
 } from "./agent.js";
+export {
+  POST_AUTH_FRAME_MAX_BYTES,
+  PRE_AUTH_FRAME_MAX_BYTES,
+  decodeFrame,
+  decodeFrameLength,
+  encodeFrame,
+} from "./remote.js";
 export type {
   ActiveCapability,
   AgentOptions,

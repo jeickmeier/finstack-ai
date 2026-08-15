@@ -40,6 +40,11 @@ FORBIDDEN_WASM = frozenset(
         "opentelemetry-otlp",
         "opentelemetry-http",
         "prometheus",
+        "finstack-ai-server",
+        "rustls",
+        "rustls-pki-types",
+        "rustls-webpki",
+        "tokio-rustls",
     }
 )
 SECRET_ROOTS = (

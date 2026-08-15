@@ -52,7 +52,7 @@ format = "json-schema-2020-12"
 stability = "candidate-v1"
 compatibility_profile = "strict-inbound-negotiated-outbound"
 fixture_root = "fixtures/compatibility/remote/"
-status = "reserved"
+status = "active"
 
 [families."process"]
 owner = "me@jeickmeier.com"
@@ -62,7 +62,7 @@ format = "json-schema-2020-12"
 stability = "candidate-v1"
 compatibility_profile = "strict-inbound-negotiated-outbound"
 fixture_root = "fixtures/compatibility/process/"
-status = "reserved"
+status = "active"
 
 [families."wit"]
 owner = "me@jeickmeier.com"

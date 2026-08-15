@@ -1,29 +1,51 @@
-//! Canonical-CBOR journal codec for `finstack-ai` (ADR-015 / PR-039).
+//! Canonical-CBOR journal codec and shared remote/process framing.
 //!
 //! Production encode validates a value tree, recursively RFC 8949-sorts map
 //! keys, then writes definite lengths and shortest lossless integer/float
 //! forms. `ciborium` is pinned for value interop; its writer is not treated as
-//! canonical by itself. Runtime and SDK stay protocol-free.
+//! canonical by itself. Runtime and default SDK stay protocol-free: they do
+//! not depend on this crate for in-process work.
 
 #![warn(missing_docs)]
 
 mod de;
 mod error;
+mod frame;
+mod handshake;
 mod journal;
 mod json;
+mod process;
+mod remote;
 mod ser;
 mod snapshot;
 mod value;
+
+#[cfg(test)]
+mod compat_fixtures;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use error::ProtocolError;
+pub use frame::{
+    FRAME_LENGTH_BYTES, POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, decode_frame,
+    decode_frame_len, encode_frame,
+};
+pub use handshake::{
+    PROTOCOL_VERSION_V1, PayloadFamily, ProtocolEnvelope, VersionOffer, decode_envelope,
+    encode_envelope, require_features, select_version,
+};
 pub use journal::{
     JournalKnownAnswer, batch_canonical_len, commit_record, commit_records, envelope_checksum,
     journal_known_answer, payload_digest, verify_chain, verify_chain_from, verify_envelope,
 };
 pub use json::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
+pub use process::ProcessPreAuth;
+pub use remote::{
+    DOMAIN_REMOTE_COMMAND, REMOTE_COMMAND_DIGEST_SCHEMA_VERSION, RemoteAuthMethod, RemoteCommand,
+    RemoteCommandOp, RemoteCommandResult, RemoteEventView, RemoteLocator, RemotePostAuth,
+    RemotePreAuth, RemoteSnapshot, command_digest, decode_remote_post_auth, decode_remote_pre_auth,
+};
 pub use snapshot::{
     DecodedSnapshot, SNAPSHOT_ENVELOPE_FORMAT_VERSION, decode_opaque_snapshot, decode_snapshot,
     encode_snapshot,
