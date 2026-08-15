@@ -22,6 +22,8 @@ DOC_ROOTS = (
     REPO_ROOT / "docs" / "implementation" / "README.md",
     REPO_ROOT / "docs" / "implementation" / "threat-model-g7-review.md",
     REPO_ROOT / "docs" / "implementation" / "release-rehearsal.md",
+    REPO_ROOT / "docs" / "implementation" / "release-engineering.md",
+    REPO_ROOT / "docs" / "implementation" / "support-windows.md",
     REPO_ROOT / "docs" / "implementation" / "compatibility-governance.md",
     REPO_ROOT / "examples",
     REPO_ROOT / "plugins",

@@ -1,0 +1,49 @@
+# Canary staging and starter RC. Does not publish.
+# Owner: me@jeickmeier.com
+# Dispatching this workflow is a separately named external action.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SOURCE_DATE_EPOCH: "0"
+  FINSTACK_CANARY_LABEL: "0.1.0-canary"
+
+jobs:
+  nightly:
+    name: starter-rc
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Export Python interpreter for PyO3
+        run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
+
+      - name: Starter RC against staged canary artifacts
+        run: mise run starter-rc

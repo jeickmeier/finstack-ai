@@ -17,7 +17,7 @@ asserted; none exists for this project.
 | FIND-064-001 | High | plugin | **Closed** | Closed 2026-08-15 | [§1](#find-064-001) · `plugins/finstack-ai-plugin-host/src/{cache.rs,host.rs}` |
 | FIND-064-002 | Medium | fs-shell | Open | PR-064 (recommended) | [§2](#find-064-002) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
 | FIND-064-003 | Medium | protocol | Open | PR-064 (recommended) | [§3](#find-064-003) · `crates/finstack-ai-server/src/replica.rs` |
-| FIND-064-004 | Medium | dependency/build/release provenance | Open | PR-065 (release engineering) | [§4](#find-064-004) · `mise.toml`, `.github/workflows/ci.yml` |
+| FIND-064-004 | Medium | dependency/build/release provenance | **Closed** | Closed 2026-08-15 | [§4](#find-064-004) · `deny.toml`; `mise run supply-chain` |
 | FIND-064-005 | Low | protocol | Open | PR-065 (release engineering) | [§5](#find-064-005) · `crates/finstack-ai-server/src/auth.rs` |
 | FIND-064-006 | Low | dependency/build/release provenance | Open | PR-064 (recommended) | [§6](#find-064-006) · `mise.toml`, `.github/workflows/ci.yml` |
 | FIND-064-007 | Low | fs-shell | Open | PR-065 (release engineering) | [§7](#find-064-007) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
@@ -41,9 +41,9 @@ asserted; none exists for this project.
 | --- | --- | --- | --- | --- |
 | Critical | 0 | 0 | 0 | 0 |
 | High | 0 | 1 | 5 | 6 |
-| Medium | 3 | 3 | 5 | 11 |
+| Medium | 2 | 3 | 6 | 11 |
 | Low | 3 | 0 | 0 | 3 |
-| Total | 6 | 4 | 10 | 20 |
+| Total | 5 | 4 | 11 | 20 |
 
 **PR-064-A01 status: satisfied.** Every Critical/High finding is
 `Closed` or `Accepted`. FIND-064-001 is `Closed` by the directory-cache
@@ -291,11 +291,11 @@ a single lookup instead of a scan.
 | ID | FIND-064-004 |
 | Severity | Medium |
 | Surface | dependency/build/release provenance |
-| Status | Open |
+| Status | **Closed** |
 | Owner | Release engineering |
 | Owning module | `mise.toml`, `.github/workflows/ci.yml` |
-| Remediation date | PR-065 (release engineering) |
-| Evidence | independent-review.md §3.8 |
+| Remediation date | Closed 2026-08-15 by PR-065 |
+| Evidence | `deny.toml`; `mise run supply-chain`; `.github/workflows/ci.yml` Supply chain step |
 | Threat model | TM-18, §12, §13.1 first bullet |
 
 ### Defect
@@ -326,6 +326,14 @@ licenses, sources, and bans in one tool with a checked-in `deny.toml` — as
 a `mise` task, wire it into `mise run ci` and the CI workflow, and record
 any accepted advisory in the configuration with a reason rather than
 silently.
+
+### Remediation
+
+PR-065 restored the pre-`f915cbf` `deny.toml`, pinned
+`github:EmbarkStudios/cargo-deny` `0.20.2`, added `mise run supply-chain`
+(workspace + isolated `fuzz/` manifest), wired it into `mise run ci` and
+`.github/workflows/ci.yml`, and recorded the procedure in
+`docs/implementation/release-engineering.md`.
 
 ---
 

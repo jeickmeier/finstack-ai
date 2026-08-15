@@ -54,6 +54,7 @@ credentials.
 
 ## Related documents
 
+- [Support windows](docs/site/support.md)
 - [Trust levels](docs/site/security-trust-levels.md)
 - [Security deployment gates](docs/site/security-deployment.md)
 - [Threat Model G7 review](docs/implementation/threat-model-g7-review.md)

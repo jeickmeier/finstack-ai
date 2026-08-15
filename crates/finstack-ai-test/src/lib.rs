@@ -52,9 +52,10 @@ pub use journal_fixture::{
 pub use paths::{compatibility_fixture, repo_root, schema_path};
 pub use port_conformance::{
     ContextConformanceCase, JournalStoreConformanceCase, MiddlewareConformanceCase,
-    ModelConformanceCase, PortConformanceFailure, ToolsetConformanceCase,
-    check_context_conformance, check_journal_store_conformance, check_middleware_conformance,
-    check_model_conformance, check_observer_conformance, check_toolset_conformance,
+    ModelConformanceCase, PORT_CONFORMANCE_SUITE_VERSION, PortConformanceFailure,
+    ToolsetConformanceCase, check_context_conformance, check_journal_store_conformance,
+    check_middleware_conformance, check_model_conformance, check_observer_conformance,
+    check_toolset_conformance,
 };
 pub use public_api_fixture::{
     Expect, PublicApiFixture, PublicApiFixtureError, Recipe, discover_public_api_fixtures,

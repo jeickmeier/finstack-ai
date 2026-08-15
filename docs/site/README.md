@@ -23,6 +23,8 @@ the public index and does not replace either layer.
 | [Plugins](plugin.md) | Experimental `@0.0.4` WIT |
 | [Server](server.md) | Loopback/Unix reference server |
 | [Migration](migration.md) | Compatibility policy and release rehearsal |
+| [Conformance](conformance.md) | Published suites and badge process |
+| [Support](support.md) | Support windows; not LTS |
 | [Performance](performance.md) | Framework vs model time, batching, reuse |
 | [Architecture](architecture.md) | Native composition diagram |
 | [Provider security](provider-security.md) | Endpoint and credential rules |

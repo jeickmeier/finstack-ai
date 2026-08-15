@@ -1,0 +1,21 @@
+PR-065-E-security-e9dbcf2e3baf
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Review: Threat Model §18 (dependency or release compromise)
+Result: Pass for this PR's release-engineering controls. Not G8-D.
+
+Controls reviewed:
+  Restored deny.toml + mise run supply-chain + CI Supply chain step
+    (FIND-064-004 Closed)
+  Two-run SHA-256 recreate including wheels/sdist, npm, WIT, SBOMs
+  Local checksums required; hosted Sigstore/OIDC documented not dispatched
+  Hotfix rehearsal B≠H; yank/retract commands documented not run
+  Nightly workflow file present; not dispatched
+  No registry tokens; workflows stay contents: read
+  SOURCE_DATE_EPOCH=0 reproducibility pin
+
+Residuals left open (not this PR's A01–A04):
+  FIND-064-002, FIND-064-003, FIND-064-005, FIND-064-006, FIND-064-007
+  FIND-064-010 Accepted until first named registry publish
+
+No EX-*. No marketplace. No git tag. No 1.0.0 cut.
