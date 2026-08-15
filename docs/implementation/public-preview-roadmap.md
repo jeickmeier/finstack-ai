@@ -1,8 +1,8 @@
 # Public preview roadmap
 
-In-repo issue roadmap for unpublished `0.1.0`. Opening GitHub issues is an
-external action and is not claimed here. Phase 9 themes are links to the
-Implementation Plan, not admitted work.
+In-repo issue roadmap for tagged `0.1.0` (`v0.1.0`). Opening GitHub
+issues is an external action and is not claimed here. Phase 9 themes
+are links to the Implementation Plan, not admitted work.
 
 ## Known preview limitations
 
@@ -15,8 +15,9 @@ Implementation Plan, not admitted work.
 - Process protocol is handshake-only; session vocabulary is later.
 - Live provider smokes stay `#[ignore]` unless a later sentence names
   network use.
-- G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Registries and
-  `git tag v0.1.0` wait on separately named owner actions.
+- G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Tag `v0.1.0` is
+  cut. crates.io / PyPI / npm remain unpublished until owner
+  registry credentials are supplied.
 
 ## Deferred backlog rows
 
@@ -34,8 +35,11 @@ Rows already marked `defer past preview` in
 ## Phase 9 themes (not admitted)
 
 These stay `Todo` until Phase 9 entrance is `Passed` (2/2). G7 is
-`Passed` via `G7-D-public-preview-f7c7e70b9e04`. Do not infer Phase 9
-admission from this file.
+`Passed` via `G7-D-public-preview-f7c7e70b9e04`. A first-party
+preview-feedback review exists at
+[`preview-feedback-review.md`](preview-feedback-review.md). That
+review does not satisfy “used by external adopters.” Do not infer
+Phase 9 admission from this file.
 
 | Theme | Plan entry |
 | --- | --- |

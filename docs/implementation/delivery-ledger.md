@@ -94,13 +94,13 @@ PR-059 is `Done` at local `main` merge `a88ea65d4fc477d8ddd4b9d0979258bb92e7da0d
 
 PR-060 is `Done` at local `main` merge `b5266602bd77b546a65a22f91de01ab12bd652cd` (A01–A06 Passed; no GitHub issue or actual pull request). Its public site guides, in-tree starters, RFC entry, threat-model G7 review matrix, local release rehearsal, and TM-18 review are bound under the PR-060 evidence set. Phase 8 entrance stays `Passed` (2/2). Phase 8 is `In progress`. Phase 8 exit stays `0/4`. G7 remains `Not ready`. ADR-024 is `Implemented` / `Verified` for governance files only.
 
-PR-061 is `Done` at local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` (A01–A05 Passed; no GitHub issue or actual pull request). Its unpublished lockstep `0.1.0` metadata, preview compatibility policy, in-repo roadmap, local staging rehearsal, Phase 8 exit closeout, and `G7-D-public-preview-f7c7e70b9e04` are bound under the PR-061 evidence set. Tag, registry publish, and GitHub release remain unnamed owner actions. Phase 8 entrance stays `Passed` (2/2). Phase 8 exit is `Passed` (4/4) and Phase 8 is `Done`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Do not start PR-062+; Phase 9 entrance remains unsatisfied.
+PR-061 is `Done` at local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` (A01–A05 Passed; no GitHub issue or actual pull request). Its unpublished lockstep `0.1.0` metadata, preview compatibility policy, in-repo roadmap, local staging rehearsal, Phase 8 exit closeout, and `G7-D-public-preview-f7c7e70b9e04` are bound under the PR-061 evidence set. Phase 8 entrance stays `Passed` (2/2). Phase 8 exit is `Passed` (4/4) and Phase 8 is `Done`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Post-closeout owner action 2026-08-15 cuts tag `v0.1.0`; crates.io / PyPI / npm remain unpublished. Do not start PR-062+; Phase 9 entrance remains unsatisfied.
 
 Phase 8 entrance is `Passed` via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`.
 
 ## Active execution envelope
 
-Owner G7 closeout (2026-08-15), **PR-061 `Done` and G7 `Passed`**. The prior PR-056–PR-066 range is closed for gate crossing by the separately named owner instruction to finish the PR-061 residual and validate G7. Tag, publish, push, hosted PR/merge, and G8 remain unnamed.
+Owner G7 closeout (2026-08-15), **PR-061 `Done` and G7 `Passed`**, plus the 2026-08-15 owner instruction to cut `v0.1.0` / publish. The prior PR-056–PR-066 range is closed for gate crossing. crates.io / PyPI / npm publish, hosted PR/merge, and G8 remain unnamed or blocked on credentials.
 
 ```
 Finish the PR-061 residual to Done and validate G7;
@@ -109,9 +109,11 @@ local branch/commit authorized; external actions=none.
 
 Baseline: local `main` at `002b615bf75c194b7d00acd6be2a036bfd614482`. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`. Decision: `G7-D-public-preview-f7c7e70b9e04`. Closed PR-055–PR-061 envelopes are not reused.
 
-Forbidden unless a later sentence names them: push, hosted PR/merge, npm/pypi/crates.io publish, `git tag v0.1.0`, GitHub release, G8 inference. Do not write `G8-D-*`. Do not start PR-062+.
+Forbidden unless a later sentence names them: hosted PR/merge, npm/pypi/crates.io publish, G8 inference. Do not write `G8-D-*`. Do not start PR-062+.
 
-Phase 9 entrance remains unsatisfied (no external adopter evidence, no preview-feedback review). Next eligible action is a named tag/publish or a separately authorized Phase 9 admit after entrance `Passed` (2/2), not an inferred PR-062 start.
+Owner instruction 2026-08-15 named option 3: `git tag v0.1.0` / publish. Tag and GitHub release are in this cut. crates.io / PyPI / npm remain blocked: no `CARGO_REGISTRY_TOKEN`, `UV_PUBLISH_TOKEN` / `PYPI_TOKEN`, or `NPM_TOKEN` on this machine, and `npm whoami` is unauthenticated.
+
+Phase 9 entrance remains unsatisfied (`0/2`). A first-party preview-feedback review exists at [`preview-feedback-review.md`](preview-feedback-review.md) (`PREVIEW-E-first-party-feedback-c706126bcc26`). Tag `v0.1.0` does not by itself satisfy “used by external adopters.” Next eligible action is named external-adopter evidence, owner registry credentials for crates.io / PyPI / npm, or a versioned planning amendment; not an inferred PR-062 start.
 
 Phase 8 entrance stays `Passed` (2/2) via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`. Do not re-record `PH8-E-entrance-*`. PR-055 is `Done` at local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b`. PR-056 is `Done` at local `main` merge `cd7c725b3ab6c4f8a96661044cfe3bf7707b1aa1`. PR-057 is `Done` at local `main` merge `d55c8318b1f9c47bec2a078fc12fd7acb10095c4`. PR-058 is `Done` at local `main` merge `99ac0fb69952c9e6bfe8354e9d1f930ee061b4a0`. PR-059 is `Done` at local `main` merge `a88ea65d4fc477d8ddd4b9d0979258bb92e7da0d`. PR-060 is `Done` at local `main` merge `b5266602bd77b546a65a22f91de01ab12bd652cd`. PR-061 is `Done` at local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`.
 

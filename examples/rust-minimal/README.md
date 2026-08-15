@@ -1,7 +1,7 @@
 # Native developer-preview examples
 
 Four offline, secret-free binaries over the public Rust surface.
-Workspace version is **0.1.0 unpublished**. `publish = false`.
+Workspace version is **0.1.0** (tag `v0.1.0`). `publish = false`.
 
 Trust class: [T1](../../docs/site/security-trust-levels.md). Native
 in-process providers and tools are not isolated.

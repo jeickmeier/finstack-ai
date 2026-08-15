@@ -1,8 +1,8 @@
-# Release rehearsal (unpublished 0.1.0)
+# Release rehearsal (tagged 0.1.0)
 
-This is a local preview rehearsal. It does **not** `git tag` or publish.
-G7 passed via `G7-D-public-preview-f7c7e70b9e04`. `v0.1.0` remains an
-owner decision.
+This is a local preview rehearsal. It does **not** publish to crates.io,
+PyPI, or npm. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Tag
+`v0.1.0` is cut. Registry publish remains blocked on owner credentials.
 
 ```text
 mise run release-rehearsal
@@ -27,7 +27,8 @@ across maturin/rustc embeddings; that residual is an accepted G7 residual,
 not a rehearsal failure.
 
 Provenance statement names the commit SHA, `mise.toml` toolchain pins,
-`version: 0.1.0`, and `staged_not_published: true`. Artifacts may say
-"preview rehearsal" and must not claim a public tag.
+`version: 0.1.0`, and `staged_not_published: true` for registry
+artifacts. The git tag `v0.1.0` is a separate identity from those
+staged bytes.
 
 Hosted Sigstore/OIDC is not required (`external actions=none`).

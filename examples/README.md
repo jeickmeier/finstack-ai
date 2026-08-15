@@ -1,7 +1,7 @@
 # Examples
 
 Public-API examples for finstack-ai bindings. Workspace version is
-**0.1.0 unpublished**. Trust labels:
+**0.1.0** (tag `v0.1.0`; registries unpublished). Trust labels:
 [docs/site/security-trust-levels.md](../docs/site/security-trust-levels.md).
 
 - [`rust-minimal/`](rust-minimal/) — T1 native binaries (`minimal`, `coding`,

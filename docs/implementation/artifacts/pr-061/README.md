@@ -18,8 +18,9 @@ closeout `55b3cfdfc222e3a4faa6b911fefc5be0c1e9df8b`.
 | `security-review.txt` | TM-18 review at the same candidate |
 | `rehearsal/` | Two-run comparable checksums and provenance |
 | `integration-validation.txt` | Local `main` merge `170a85ccd4e174050ae40c92d9f88bb51d8ac97f` |
+| `v0.1.0-release-notes.md` | GitHub release notes for tag `v0.1.0` |
 
 Phase 8 entrance is `Passed` (2/2) and is not re-recorded here.
 PR-055–PR-061 are `Done`. G7 passed via `G7-D-public-preview-f7c7e70b9e04`.
-Tag, registry publish, and GitHub release remain unnamed. Do not start
-PR-062+; Phase 9 entrance remains unsatisfied.
+Tag `v0.1.0` is cut. crates.io / PyPI / npm remain unpublished. Do not
+start PR-062+; Phase 9 entrance remains unsatisfied.

@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
 and bundled first-party leaf crates share one lockstep workspace version. The
-current staged unpublished candidate is `0.1.0`. Named G6 has passed.
-Named G7, publish, and tag remain owner decisions.
+current tagged candidate is `0.1.0` (`v0.1.0`). Named G6 and G7 have
+passed. crates.io / PyPI / npm publication remains blocked on owner
+registry credentials.
 
 ## [Unreleased]
 
 ## [0.1.0] - 2026-08-15
 
-Unpublished lockstep public-preview candidate. This section is not a
-named G7 decision, git tag, or registry publish.
+Tagged lockstep public-preview cut `v0.1.0`. G7 passed via
+`G7-D-public-preview-f7c7e70b9e04`. This section is not a crates.io,
+PyPI, or npm publication.
 
 ### Added
 

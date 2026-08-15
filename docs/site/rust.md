@@ -3,8 +3,8 @@
 Public crate: `finstack-ai` (SDK/facade). Kernel, runtime, and protocol
 crates are not a second constructor path; start here.
 
-Workspace version is **0.1.0 unpublished**. Named G7, tag, and publish
-remain owner decisions.
+Workspace version is **0.1.0** (tag `v0.1.0`). G7 passed. crates.io
+publication remains blocked on owner registry credentials.
 
 ## Quick start
 

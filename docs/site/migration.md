@@ -8,8 +8,8 @@ That backlog is Phase 8 entrance evidence, not a published preview policy.
 
 Published preview compatibility policy is
 [preview-compatibility-policy.md](../implementation/preview-compatibility-policy.md).
-This tree is unpublished lockstep **`0.1.0`**. Do not treat staged
-artifacts as a named G7, git tag, or registry publish. Experimental WIT
+This tree is tagged lockstep **`0.1.0`** (`v0.1.0`). Do not treat staged
+artifacts as a crates.io / PyPI / npm publication. Experimental WIT
 package names stay `@0.0.4`.
 
 ## Release rehearsal
@@ -24,7 +24,8 @@ mise run release-rehearsal
 Two local staging runs from the same commit must produce identical
 checksums for the existing staging paths (Python wheel/sdist, npm tarball
 when the WASM package is already generated, crate package lists). The
-**public tag** is PR-061. This rehearsal does not `git tag` or publish.
+**public tag** is `v0.1.0`. This rehearsal does not publish to
+registries.
 
 ## License and governance
 

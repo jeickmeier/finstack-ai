@@ -1,10 +1,10 @@
 # Native developer-preview binding surface
 
-Status: unpublished lockstep **`0.1.0`** public preview. Python and
+Status: tagged lockstep **`0.1.0`** public preview (`v0.1.0`). Python and
 WASM halves closed at G4. Durability beta closed at G5. Plugin alpha
 closed at G6. Public preview closed at G7 via
-`G7-D-public-preview-f7c7e70b9e04`. Public tag and registry publish
-remain owner decisions.
+`G7-D-public-preview-f7c7e70b9e04`. crates.io / PyPI / npm publication
+remains blocked on owner registry credentials.
 
 The candidate Rust surface is:
 
