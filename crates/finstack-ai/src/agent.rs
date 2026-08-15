@@ -17,26 +17,26 @@ use finstack_ai_kernel::{
     ComponentRef, ContentBlock, ConversationEntry, DeadlinePropagation, Digest,
     EffectOutputContract, EffectOutputKind, EventTag, JsonSchemaDraft, KernelInput, LaneCreated,
     LaneId, LaneMoved, LaneTag, Message, MessageId, MessageRole, MessageTag, Metadata,
-    ModelRequestTag, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec,
-    OutputValidated, PrincipalPropagation, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
-    RawJson, RecordBody, RecordDraft, RecordTag, ReducerStageOutcome, RetryClassification,
-    RetryDirective, RetrySafety, RunAccepted, RunPhase, RunPropagationPolicy, RunRelation,
-    RunSecurityContext, RunTag, SchemaRef, Sensitivity, SessionCreated, SessionId, SessionTag,
-    Stage, StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock, Timestamp,
-    TransitionEnv, TurnTag, Version,
+    MiddlewareRef, ModelRequestTag, OperationLocator, OutputConfiguration, OutputEndStrategy,
+    OutputSpec, OutputValidated, PrincipalPropagation, ProviderIds, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RawJson, RecordBody, RecordDraft, RecordTag, ReducerStageOutcome,
+    RetryClassification, RetryDirective, RetrySafety, RunAccepted, RunPhase, RunPropagationPolicy,
+    RunRelation, RunSecurityContext, RunTag, SchemaRef, Sensitivity, SessionCreated, SessionId,
+    SessionTag, Stage, StageCursor, StageSettled, StructuredResultSource, TerminalState, TextBlock,
+    Timestamp, TransitionEnv, TurnTag, Version,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, EventBatch, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
-    EventSubscription, EventSubscriptionConfig, IdGenerationError, JsonSchemaToolValidatorCompiler,
-    LaneAppendIds, LoadRequest, LockedModelContextProfile, Model, ModelCapabilities,
-    ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-    ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PendingModelEffect, PortFuture,
-    ProgressCoalescing, ReconcileContext, ResolvedToolCatalog, RunHandle, RunHandleError,
-    RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime, SideEffectClass,
-    StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
-    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
+    CommitCoordinator, ContextProvider, EventBatch, EventBatchConfig, EventFilter, EventHubConfig,
+    EventLagPolicy, EventSubscription, EventSubscriptionConfig, IdGenerationError,
+    JsonSchemaToolValidatorCompiler, LaneAppendIds, LoadRequest, LockedModelContextProfile,
+    Middleware, Model, ModelCapabilities, ModelContextProfileOverride, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft,
+    ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext,
+    PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext, ResolvedToolCatalog,
+    RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime,
+    SideEffectClass, StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy,
+    ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler,
+    Toolset, ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
 };
 use thiserror::Error;
 
@@ -148,13 +148,10 @@ impl Agent {
             ));
         }
         let plan = resolved.run_plan();
-        if !plan.context_providers().is_empty()
-            || !plan.middleware().is_empty()
-            || !plan.observers().is_empty()
-        {
+        if !plan.observers().is_empty() {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_UNSUPPORTED_PLAN,
-                "native preview supports model and Toolset stages only",
+                "native preview does not execute observer components",
             ));
         }
 
@@ -1424,6 +1421,8 @@ pub struct NativeAgentBuilder {
     model: (ComponentRef, Arc<dyn Model>),
     store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+    context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
+    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
@@ -1442,6 +1441,8 @@ impl NativeAgentBuilder {
             model,
             store,
             toolsets: Vec::new(),
+            context_providers: Vec::new(),
+            middleware: Vec::new(),
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
@@ -1465,6 +1466,24 @@ impl NativeAgentBuilder {
     #[must_use]
     pub fn toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
         self.toolsets.push((component, toolset));
+        self
+    }
+
+    /// Add one ordered direct [`ContextProvider`] handle.
+    #[must_use]
+    pub fn context_provider(
+        mut self,
+        component: ComponentRef,
+        provider: Arc<dyn ContextProvider>,
+    ) -> Self {
+        self.context_providers.push((component, provider));
+        self
+    }
+
+    /// Add one ordered direct Middleware handle.
+    #[must_use]
+    pub fn middleware(mut self, component: ComponentRef, middleware: Arc<dyn Middleware>) -> Self {
+        self.middleware.push((component, middleware));
         self
     }
 
@@ -1499,38 +1518,15 @@ impl NativeAgentBuilder {
             model: self.model.clone(),
             store: self.store.clone(),
             toolsets: self.toolsets.clone(),
+            context_providers: self.context_providers.clone(),
+            middleware: self.middleware.clone(),
         };
         let mut registrar = Registrar::new();
         registrar.register_extension(&extension).map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;
         let mut registry = registrar.into_registry();
-        validate_compact_catalog(&self.capabilities)?;
-        let capability_refs = self
-            .capabilities
-            .iter()
-            .map(|capability| CapabilityRef {
-                id: capability.id.clone(),
-                bundle: None,
-            })
-            .collect::<Vec<_>>();
-        let spec = AgentBuilder::new(
-            self.agent_id.clone(),
-            self.model.0.clone(),
-            self.store.0.clone(),
-        )
-        .instructions(self.instructions)
-        .toolsets(
-            self.toolsets
-                .iter()
-                .map(|(component, _)| component.clone())
-                .collect::<Vec<_>>(),
-        )
-        .capabilities(capability_refs)
-        .build()
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        let spec = builder_spec(&self)?;
         let mut catalog = BundleCatalog::default();
         catalog
             .install(BundleSpec {
@@ -1590,10 +1586,63 @@ impl NativeAgentBuilder {
     }
 }
 
+fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentRunError> {
+    validate_compact_catalog(&builder.capabilities)?;
+    let capability_refs = builder
+        .capabilities
+        .iter()
+        .map(|capability| CapabilityRef {
+            id: capability.id.clone(),
+            bundle: None,
+        })
+        .collect::<Vec<_>>();
+    let middleware = builder
+        .middleware
+        .iter()
+        .map(|(component, _)| {
+            MiddlewareRef::try_new(component.clone(), None::<&str>).map_err(|error| {
+                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    AgentBuilder::new(
+        builder.agent_id.clone(),
+        builder.model.0.clone(),
+        builder.store.0.clone(),
+    )
+    .instructions(builder.instructions.clone())
+    .toolsets(
+        builder
+            .toolsets
+            .iter()
+            .map(|(component, _)| component.clone())
+            .collect::<Vec<_>>(),
+    )
+    .context_providers(
+        builder
+            .context_providers
+            .iter()
+            .map(|(component, _)| component.clone())
+            .collect::<Vec<_>>(),
+    )
+    .middleware(middleware)
+    .capabilities(capability_refs)
+    .build()
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })
+}
+
 fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), AgentRunError> {
     validate_exact_component(&builder.model.0)?;
     validate_exact_component(&builder.store.0)?;
     for (component, _) in &builder.toolsets {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.context_providers {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.middleware {
         validate_exact_component(component)?;
     }
     Ok(())
@@ -1692,6 +1741,8 @@ struct NativeBuilderExtension {
     model: (ComponentRef, Arc<dyn Model>),
     store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
     toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+    context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
+    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
 }
 
 impl Extension for NativeBuilderExtension {
@@ -1708,6 +1759,18 @@ impl Extension for NativeBuilderExtension {
             registrar.toolset(
                 registration_metadata(component),
                 ReadyComponent::new(Arc::clone(toolset)),
+            )?;
+        }
+        for (component, provider) in &self.context_providers {
+            registrar.context_provider(
+                registration_metadata(component),
+                ReadyComponent::new(Arc::clone(provider)),
+            )?;
+        }
+        for (component, middleware) in &self.middleware {
+            registrar.middleware(
+                registration_metadata(component),
+                ReadyComponent::new(Arc::clone(middleware)),
             )?;
         }
         registrar.store(

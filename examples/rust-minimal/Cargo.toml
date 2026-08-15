@@ -16,6 +16,11 @@ finstack-ai-provider-openai-compatible = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-tools-calculator = { workspace = true }
 finstack-ai-tools-filesystem = { workspace = true }
+finstack-ai-tools-shell = { workspace = true }
+finstack-ai-context-repository = { workspace = true }
+finstack-ai-context-memory = { workspace = true }
+finstack-ai-middleware-compaction = { workspace = true }
+finstack-ai-middleware-verify = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
 
 [lints]

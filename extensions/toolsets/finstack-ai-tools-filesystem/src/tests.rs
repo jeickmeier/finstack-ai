@@ -259,6 +259,50 @@ async fn traversal_symlink_escape_and_protected_paths_fail_closed() {
 }
 
 #[cfg(unix)]
+#[tokio::test]
+async fn environment_and_protected_secret_files_do_not_leak() {
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join(".env"), "HOST_SECRET=canary-env-bytes").expect(".env");
+    std::fs::create_dir(root.path().join(".ssh")).expect(".ssh");
+    std::fs::write(root.path().join(".ssh/id_ed25519"), "canary-ssh-bytes").expect("ssh key");
+    std::fs::write(root.path().join("notes.txt"), "public notes").expect("notes");
+    let toolset = FileSystemToolset::try_new(root.path()).expect("filesystem");
+
+    let env_read = invoke(&toolset, 0, serde_json::json!({"path":".env"}))
+        .await
+        .expect_err(".env read denied");
+    assert_eq!(env_read.code(), FILESYSTEM_POLICY_DENIED);
+    assert!(!env_read.to_string().contains("canary-env-bytes"));
+
+    let ssh_read = invoke(&toolset, 0, serde_json::json!({"path":".ssh/id_ed25519"}))
+        .await
+        .expect_err(".ssh read denied");
+    assert_eq!(ssh_read.code(), FILESYSTEM_POLICY_DENIED);
+    assert!(!ssh_read.to_string().contains("canary-ssh-bytes"));
+
+    let env_search = invoke(
+        &toolset,
+        5,
+        serde_json::json!({"query":"HOST_SECRET","glob":"**/*"}),
+    )
+    .await
+    .expect("search skips protected files");
+    assert!(!env_search.output.as_str().contains("canary-env-bytes"));
+    assert!(!env_search.output.as_str().contains("canary-ssh-bytes"));
+
+    let notes = invoke(&toolset, 0, serde_json::json!({"path":"notes.txt"}))
+        .await
+        .expect("public read");
+    assert!(notes.output.as_str().contains("public notes"));
+    for (key, value) in std::env::vars() {
+        assert!(
+            !notes.output.as_str().contains(&format!("{key}={value}")),
+            "filesystem result leaked environment pair {key}"
+        );
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn symlink_root_is_rejected_at_construction() {
     use std::os::unix::fs::symlink;
