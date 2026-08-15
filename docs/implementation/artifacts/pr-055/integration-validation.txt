@@ -1,0 +1,28 @@
+PR-055-E-integration-bfa380340c1b
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: bfa380340c1bf28941c9cbd21a204626d114052b
+Parents: 0a4b477c1eb9b04d2e86294a9c01b36855ddd74c
+         de1ec761b1424e321068bca74b2d323f8e04c295
+Implementation candidate: 1000935012bfcf7e7c90d2464c87675670a6cf0e
+Result: Pass
+
+Local `main` merge of `codex/pr-055-anthropic-ollama-providers`.
+Merge tree: `cf7cce46d8b19970e7cc2e3fa9b20a06ccb09f72`.
+A01–A05 remain bound to the implementation candidate.
+TM-04 / SEC-INV-005 / SEC-INV-012 / TM-05 review remains bound
+to the same candidate.
+
+Re-verified on the merge tip:
+  cargo test -p finstack-ai-provider-anthropic --offline --locked
+    21 passed, 1 ignored
+  cargo test -p finstack-ai-provider-openai-compatible --offline --locked
+    20 passed, 1 ignored
+  cargo test -p finstack-ai --offline --locked -- capability
+    5 passed, 25 filtered out
+  default kernel/runtime/SDK tree: no anthropic, no
+    openai-compatible, no reqwest
+
+No hosted pull request or merge, npm/pypi/crates.io publish, tag,
+or G7-D-*. Phase 8 exit stays 0/4. Feature branch is kept.
+No successor is started.

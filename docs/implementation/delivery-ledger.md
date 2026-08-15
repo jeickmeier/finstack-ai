@@ -4,16 +4,16 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-15 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`, PR-050 local merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`, PR-051 local merge `cf7eaebab383724fa4b7b19cb204febec41a768a`, PR-052 local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`, PR-053 local merge `3297eb44fb127ff6b36af1a705cda38442efdf95`, and PR-054 local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-15 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`, PR-050 local merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`, PR-051 local merge `cf7eaebab383724fa4b7b19cb204febec41a768a`, PR-052 local merge `5e531591350a8838ff7da06f50a5dc2d52b31892`, PR-053 local merge `3297eb44fb127ff6b36af1a705cda38442efdf95`, PR-054 local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`, and PR-055 local merge `bfa380340c1bf28941c9cbd21a204626d114052b`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 8 | Phase 0–7 `Done`; Phase 8 `In progress`; Phase 9 `Todo` |
-| Logical PRs | 66 | 54 | PR-001–PR-054 `Done`; PR-055 `In progress` at candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e`; PR-056–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 291 | PR-001–PR-054 acceptance is closed at local merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09`; PR-055 A01–A05 `Passed` at candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e` and is not yet merge-closed; PR-056–PR-066 remain open |
+| Logical PRs | 66 | 55 | PR-001–PR-055 `Done`; PR-056–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 291 | PR-001–PR-055 acceptance is closed at local merge `bfa380340c1bf28941c9cbd21a204626d114052b`; PR-056–PR-066 remain open |
 | Phase entrance and exit bullets | 62 | 52 | Phase 0–7 entrance and exit `Passed`; Phase 8 entrance `Passed` (2/2); Phase 8 exit and Phase 9 remain open |
 | Program gates | 9 | 7 | G0–G6 `Passed`; G7–G8 `Not ready` |
-| Implementation tasks | 335 | 335 | PR-001–PR-055 tasks are `Done` at candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e`; PR-056–PR-066 remain unminted |
+| Implementation tasks | 335 | 335 | PR-001–PR-055 tasks are `Done` at local merge `bfa380340c1bf28941c9cbd21a204626d114052b`; PR-056–PR-066 remain unminted |
 | Open blockers | 0 | 4 | No open blocker; all four recorded blockers are `Resolved` |
 
 PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). PR-007 is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). PR-008 is `Done` at merge `4b68a9397a8e07a581f34dfc34f0bfb96873c00d` ([#5](https://github.com/jeickmeier/finstack-ai/pull/5); A01–A08 Passed after review remediation and final hosted/merge verification). PR-009 is `Done` at local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` (A01–A05 Passed; no GitHub issue or actual PR). PR-010 is `Done` at local `main` integration `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` (A01–A04 Passed; no GitHub issue or actual PR). PR-011 is `Done` at local `main` integration `01380ead5c5ca7b9e7d28d681d84719c9bf0279e` (A01–A06 Passed; no GitHub issue or actual PR). PR-012 is `Done` at local `main` integration `dc58a11fbc871e70326d04fd9840297b5179023f` (fast-forward of `codex/pr-012-structured-output`; A01–A05 Passed; no GitHub issue or actual PR). PR-013 is `Done` at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` ([#6](https://github.com/jeickmeier/finstack-ai/pull/6); A01–A04 Passed). PR-014 is `Done` at merge `399f3a7d9d987268f4d79ab90f31b93f854084f8` ([#8](https://github.com/jeickmeier/finstack-ai/pull/8); A01–A07 Passed after hosted and immutable merge verification). PR-015 is `Done` at local `main` merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` (A01–A04 Passed; no GitHub issue or actual PR). PR-016 is `Done` at local `main` merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` (A01–A05 Passed; no GitHub issue or actual PR). Phase 0 and Phase 1 are `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`; G1 passed via `G1-D-kernel-semantics-4f52c8a91d6e`. Both Phase 2 entrance criteria are passed.
@@ -84,11 +84,13 @@ PR-053 is `Done` at local `main` merge `3297eb44fb127ff6b36af1a705cda38442efdf95
 
 PR-054 is `Done` at local `main` merge `81eb369c8f5ad1371c026c0f970f1dd39496ac09` (A01–A04 Passed; no issue or actual pull request). Its lockfile-driven local discovery, published hostile conformance, plugin-host benches, and unpublished `0.0.4` readiness pack are bound under the PR-054 evidence set. Phase 7 entrance stays `Passed` (3/3). Phase 7 exit is `Passed` (4/4) and Phase 7 is `Done`. G6 passed via `G6-D-plugin-alpha-018aaea9aa00`. G5 passed via `G5-D-durable-beta-a9568bd869b5`.
 
-Phase 8 entrance is `Passed` via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`. Phase 8 is `In progress`. PR-055 is `In progress` on `codex/pr-055-anthropic-ollama-providers` at candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e` (A01–A05 Passed; local merge pending). Phase 8 exit stays `0/4`. G7 remains `Not ready`.
+PR-055 is `Done` at local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b` (A01–A05 Passed; no GitHub issue or actual pull request). Its Anthropic Messages leaf, Ollama/local OpenAI-compatible configuration, lazy Python linkage, catalog prefix-stability proofs, and TM-04 review are bound under the PR-055 evidence set. Phase 8 entrance stays `Passed` (2/2). Phase 8 is `In progress`. Phase 8 exit stays `0/4`. G7 remains `Not ready`.
+
+Phase 8 entrance is `Passed` via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`.
 
 ## Active execution envelope
 
-Active range envelope (2026-08-15), **PR-055 admitted**:
+Active range envelope (2026-08-15), **PR-055 Done**; successor PR-056 is eligible and not started:
 
 ```
 Run PR-055 through PR-061 sequentially; mode=integrated; target=main;
@@ -100,7 +102,7 @@ Baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`. Plan basel
 
 Forbidden by this envelope: push, hosted PR/merge, npm/pypi/crates.io publish, tag, G7 inference. Do not write `G7-D-*`. Do not start PR-062+. Do not cut or publish `0.1.0`. `G5-D-durable-beta-a9568bd869b5` was recorded by a later named owner sentence and is not inferred from this range.
 
-Phase 8 entrance is `Passed` (2/2) via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`. PR-055 is `In progress` on `codex/pr-055-anthropic-ollama-providers` from `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`. Do not start PR-056+. Do not write `G7-D-*`.
+Phase 8 entrance is `Passed` (2/2) via `PH8-E-entrance-gates-400228a63790` and `PH8-E-entrance-api-backlog-267035e95daa`. PR-055 is `Done` at local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b`. Do not start PR-056 from this closeout. Do not write `G7-D-*`.
 
 The completed PR-054 envelope used `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm/pypi/crates.io publish, tag, G5 inference, and G6 inference prohibited`. Baseline was local `main` at `5613c28408af692738cbf494d1e8ecd2c1cd947a`. The feature branch merged at `81eb369c8f5ad1371c026c0f970f1dd39496ac09`. That envelope is now closed and is not reused. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
 
@@ -306,7 +308,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-055 | In progress | me@jeickmeier.com | `codex/pr-055-anthropic-ollama-providers` candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e` from `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c` (no issue or actual PR) | 7 | 5/5 | PH8-E-entrance-gates-400228a63790; PH8-E-entrance-api-backlog-267035e95daa; PR-055-E-candidate-1000935012bf; PR-055-E-security-1000935012bf | — | — | 2026-08-15 |
+| PR-055 | Done | me@jeickmeier.com | local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b` of `codex/pr-055-anthropic-ollama-providers` (no issue or actual PR) | 7 | 5/5 | PH8-E-entrance-gates-400228a63790; PH8-E-entrance-api-backlog-267035e95daa; PR-055-E-candidate-1000935012bf; PR-055-E-security-1000935012bf; PR-055-E-integration-bfa380340c1b | — | `bfa380340c1bf28941c9cbd21a204626d114052b` / 2026-08-15 | 2026-08-15 |
 | PR-056 | Todo | — | — | 0 | 0/8 | — | — | — | — |
 | PR-057 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-058 | Todo | — | — | 0 | 0/6 | — | — | — | — |
@@ -677,7 +679,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-055-T-ollama-6ac13a08c9df | PR-055 | Ollama/local constructor and recorded Ollama fixtures on the compatible crate | Done | me@jeickmeier.com | PR-055-T-tracking-9cf7aa3ef48b | `1000935012bfcf7e7c90d2464c87675670a6cf0e` | PR-055-A01 | PR-055-E-candidate-1000935012bf | 2026-08-15 | 2026-08-15 | 2026-08-15 |
 | PR-055-T-catalog-7452df6b3dbb | PR-055 | Leaf metadata refresh and catalog prefix-stability across scripted / compatible / Anthropic / Ollama | Done | me@jeickmeier.com | PR-055-T-messages-8f738dbd2afb; PR-055-T-ollama-6ac13a08c9df | `1000935012bfcf7e7c90d2464c87675670a6cf0e` | PR-055-A04; PR-055-A05 | PR-055-E-candidate-1000935012bf | 2026-08-15 | 2026-08-15 | 2026-08-15 |
 | PR-055-T-python-4d13222686bb | PR-055 | Python lazy submodules, `Agent.anthropic` / `Agent.ollama`, and wheel-budget check | Done | me@jeickmeier.com | PR-055-T-anthropic-0e1cc33e1ced | `1000935012bfcf7e7c90d2464c87675670a6cf0e` | PR-055-A03 | PR-055-E-candidate-1000935012bf | 2026-08-15 | 2026-08-15 | 2026-08-15 |
-| PR-055-T-evidence-78f0fbe2f379 | PR-055 | Authoring README, warning-only benches, TM-04 review, and candidate evidence; stop before G7 | Done | me@jeickmeier.com | PR-055-T-catalog-7452df6b3dbb; PR-055-T-python-4d13222686bb | `1000935012bfcf7e7c90d2464c87675670a6cf0e` | PR-055-A01–A05 | PR-055-E-candidate-1000935012bf; PR-055-E-security-1000935012bf | 2026-08-15 | 2026-08-15 | 2026-08-15 |
+| PR-055-T-evidence-78f0fbe2f379 | PR-055 | Authoring README, warning-only benches, TM-04 review, and candidate evidence; stop before G7 | Done | me@jeickmeier.com | PR-055-T-catalog-7452df6b3dbb; PR-055-T-python-4d13222686bb | local `main` merge `bfa380340c1bf28941c9cbd21a204626d114052b` | PR-055-A01–A05 | PR-055-E-candidate-1000935012bf; PR-055-E-security-1000935012bf; PR-055-E-integration-bfa380340c1b | 2026-08-15 | 2026-08-15 | 2026-08-15 |
 
 ## Blocker ledger
 
