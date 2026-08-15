@@ -1,0 +1,15 @@
+package finstack:plugin-host-bindgen@0.0.4;
+
+/// Host-only worlds that re-export the checked-in experimental interfaces so
+/// Wasmtime bindgen can resolve `wit/deps`. Not a published WIT package.
+world toolset-plugin {
+    import finstack:ai-host/logging@0.0.4;
+    import finstack:ai-host/blobs@0.0.4;
+    export finstack:ai-toolset/toolset@0.0.4;
+}
+
+world context-plugin {
+    import finstack:ai-host/logging@0.0.4;
+    import finstack:ai-host/blobs@0.0.4;
+    export finstack:ai-context/context-provider@0.0.4;
+}

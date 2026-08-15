@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Partial via PR-002 wasm-host checks, PR-049/PR-050 in-process WIT leaf, and PR-051-E-candidate-36f1ce2e263b / PR-051-E-security-36f1ce2e263b (first isolated Wasmtime T3 host and host-owned compile cache). WASI grants, fuel/memory quotas, signatures, and lockfile remain PR-052–PR-054. G6 owns Implemented.

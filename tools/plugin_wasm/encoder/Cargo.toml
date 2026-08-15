@@ -1,0 +1,10 @@
+[package]
+name = "finstack-ai-plugin-wasm-encoder"
+version = "0.0.3"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+wit-component = "0.242.0"

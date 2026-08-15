@@ -18,6 +18,7 @@ members = [
     "fixtures/ci/toolset-port-leaf",
     "fixtures/ci/extension-port-leaf",
     "plugins/finstack-ai-wit",
+    "plugins/finstack-ai-plugin-host",
 ]
 
 [profile.release]
@@ -55,6 +56,10 @@ finstack-ai-provider-openai-compatible = { path = "extensions/providers/finstack
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "0.0.3" }
 finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "0.0.3" }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "0.0.3" }
+finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = "0.0.3" }
+# Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
+# filesystem `cache` feature (TM-08 / PR-051 host-owned compile cache).
+wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"

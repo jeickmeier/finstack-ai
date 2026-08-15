@@ -39,6 +39,9 @@ host-side hooks, not WIT exports. Plugin manifests are host types.
 `call-context` is a sanitized identity/scope projection. It never
 carries credentials, full claims, cancellation, or attempt counters.
 
+In-process `finstack-ai-wit` adapters inherit host authority. Isolated
+Wasmtime instantiation is the `finstack-ai-plugin-host` leaf.
+
 ## Payload ceilings
 
 TDD §6.5 ceilings are enforced before allocation:
