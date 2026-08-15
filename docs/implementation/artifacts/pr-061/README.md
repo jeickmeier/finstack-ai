@@ -11,8 +11,8 @@ closeout `55b3cfdfc222e3a4faa6b911fefc5be0c1e9df8b`.
 | `prd-15-tdd-36-review.txt` | PRD §15.1–15.4 and TDD §36 items 1–13 checklist |
 | `phase8-exit-review.txt` | Phase 8 exit bullets without `G7-D-*` |
 | `g7-readiness-review.txt` | `READY FOR NAMED DECISION` pack |
-| `candidate-validation.txt` | Local Darwin A01–A04 plus A05 step 1 proofs |
-| `security-review.txt` | TM-18 review at the candidate |
+| `candidate-validation.txt` | Local Darwin A01–A04 plus A05 step 1 proofs at `8197246e58981b3ba2dd806a7036e13238cb5fb9` |
+| `security-review.txt` | TM-18 review at the same candidate |
 | `rehearsal/` | Two-run comparable checksums and provenance |
 | `integration-validation.txt` | Local `main` merge (when recorded) |
 

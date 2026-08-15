@@ -1,0 +1,36 @@
+PR-061 Phase 8 exit review
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 8197246e58981b3ba2dd806a7036e13238cb5fb9
+Integrated commit: pending local main merge
+Result: Local exit bullets 4/4 satisfied. This is not G7.
+Do not write G7-D-*. Phase 8 stays In progress until a named
+G7 decision. PR-061 A05 steps 2–3 remain open.
+
+PH8-EXIT-A01 Core use cases have first-party examples and batteries
+  PASS  PR-055 Anthropic/Ollama; PR-056 coding/research batteries;
+        PR-057 observers; PR-059 durable-interaction; PR-060 starters
+        and docs-quickstarts (rust minimal/service, durable-interaction,
+        python-callback, rust-backed, python service).
+
+PH8-EXIT-A02 Remote protocol and reference server are usable
+  PASS  PR-058-E-integration-99ac0fb69952. Loopback/Unix reference
+        server, frame/handshake, remote session vocabulary. Process
+        session vocabulary remains deferred.
+
+PH8-EXIT-A03 Security, benchmark, SBOM, and compatibility reports
+  PASS  In-tree only. PR-060 threat-model-g7-review.md, release
+        rehearsal, trust/deployment guides. This PR adds
+        preview-compatibility-policy.md, public-preview-roadmap.md,
+        CHANGELOG [0.1.0], SECURITY supported-versions for the
+        unpublished 0.1.0 line, and two-run 0.1.0 staging checksums.
+        Registries, git tag, and hosted SBOM upload wait on named
+        external actions.
+
+PH8-EXIT-A04 0.1.0 public-preview acceptance criteria are met
+  PASS  A01–A04 locally. A05 step 1 (metadata, notes, staging,
+        policy, roadmap, readiness pack) is in this candidate.
+        A05 steps 2–3 (named G7-D-*, tag, publish) are not met
+        and are not inferred.
+
+No G7-D. Do not start PR-062+.
