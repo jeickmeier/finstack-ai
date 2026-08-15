@@ -4,7 +4,7 @@ Family: `wit`
 Profile: `exact-world`  
 Stability: `experimental-0.x`  
 Packages: `finstack:ai-types@0.0.4`, `finstack:ai-host@0.0.4`,
-`finstack:ai-toolset@0.0.4`
+`finstack:ai-toolset@0.0.4`, `finstack:ai-context@0.0.4`
 
 ## Promise
 
@@ -28,11 +28,13 @@ fields is prohibited.
 
 ## Surface
 
-`toolset-plugin` exports only `toolset` (`list-tools`, `call`). Host
+`toolset-plugin` exports only `toolset` (`list-tools`, `call`).
+`context-plugin` exports only `context-provider` (`collect`). Host
 imports grant only `logging.log` and `blobs.read`. Linking those
 interfaces is not ambient WASI, filesystem, network, clock, environment,
-or secret access. The world cannot invoke a nested agent or persist a
-competing run lineage.
+or secret access. The worlds cannot invoke a nested agent or persist a
+competing run lineage. Initialize, health, shutdown, and warmup are
+host-side hooks, not WIT exports. Plugin manifests are host types.
 
 `call-context` is a sanitized identity/scope projection. It never
 carries credentials, full claims, cancellation, or attempt counters.

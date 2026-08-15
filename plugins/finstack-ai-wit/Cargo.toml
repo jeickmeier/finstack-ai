@@ -7,14 +7,23 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Experimental @0.0.4 WIT types, host, and toolset bindings for finstack-ai"
+description = "Experimental @0.0.4 WIT types, host, toolset, and context bindings for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai = { workspace = true, default-features = false }
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
+futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-store-memory = { workspace = true }
+finstack-ai-test = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

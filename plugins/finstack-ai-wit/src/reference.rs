@@ -1,12 +1,23 @@
-//! In-process reference toolset that implements the generated `toolset` export.
+//! In-process reference guests for the generated toolset and context exports.
 
+use std::sync::Arc;
+
+use finstack_ai_runtime::{
+    ContentBlock, ContextAuthority, ContextItemKind, ContextProvenance, Sensitivity, TextBlock,
+};
+
+use crate::context_mapping::encode_guest_item;
 use crate::error::WitMapError;
-use crate::generated::{CallContext, GuestToolset, PluginError, ToolCatalog, ToolResult, ToolSpec};
+use crate::generated::{
+    CallContext, ContextItem, ContextQuery, GuestContextProvider, GuestToolset, PluginError,
+    ToolCatalog, ToolResult, ToolSpec,
+};
 use crate::limits::{MAX_RAW_JSON_BYTES, reject_before_allocation};
 use crate::mapping::catalog_digest_hex;
 
 const ADD_ID: &str = "finstack.plugin.add";
 const ECHO_ID: &str = "finstack.plugin.echo";
+const CONTEXT_SOURCE: &str = "finstack.plugin.reference.context";
 
 /// Two-tool in-process guest used to prove A02 without Wasmtime.
 #[derive(Debug, Default)]
@@ -122,6 +133,73 @@ fn map_error(error: &WitMapError) -> PluginError {
     plugin_error(error.code(), &error.to_string())
 }
 
+/// Two-item in-process context guest used to prove A01 without Wasmtime.
+#[derive(Debug, Default)]
+pub struct ReferenceContextProvider;
+
+impl ReferenceContextProvider {
+    /// Construct the reference context guest.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+}
+
+impl GuestContextProvider for ReferenceContextProvider {
+    fn collect(&self, query: &ContextQuery) -> Result<Vec<ContextItem>, PluginError> {
+        reject_before_allocation(&query.request_json, MAX_RAW_JSON_BYTES, "request-json")
+            .map_err(|error| map_error(&error))?;
+        if query.context.tenant_scope.is_empty()
+            || query.context.authorization_decision_id.is_empty()
+        {
+            return Err(plugin_error(
+                "plugin_call_context_invalid",
+                "sanitized call-context is incomplete",
+            ));
+        }
+        if query.budget.max_items == 0 {
+            return Err(plugin_error(
+                "plugin_context_item_invalid",
+                "max-items must be non-zero",
+            ));
+        }
+        Ok(vec![
+            reference_item(
+                ContextItemKind::QuotedSource,
+                "reference quoted source",
+                1,
+                8,
+            )?,
+            reference_item(ContextItemKind::Reference, "reference locator", 0, 6)?,
+        ])
+    }
+}
+
+fn reference_item(
+    kind: ContextItemKind,
+    text: &str,
+    priority: i32,
+    estimated_tokens: u64,
+) -> Result<ContextItem, PluginError> {
+    encode_guest_item(
+        kind,
+        vec![ContentBlock::Text(TextBlock::try_new(text).map_err(
+            |_| plugin_error("plugin_context_item_invalid", "reference text is invalid"),
+        )?)],
+        ContextProvenance {
+            source_id: Arc::from(CONTEXT_SOURCE),
+            source_ref: None,
+            external: true,
+        },
+        ContextAuthority::Untrusted,
+        priority,
+        estimated_tokens,
+        Sensitivity::Internal,
+        false,
+    )
+    .map_err(|error| map_error(&error))
+}
+
 fn plugin_error(code: &str, message: &str) -> PluginError {
     PluginError {
         code: code.to_owned(),
@@ -179,6 +257,25 @@ mod tests {
             .call(&context(), ECHO_ID, br#"{"text":"ok"}"#)
             .expect("echo");
         assert_eq!(echoed.content_json, br#"{"text":"ok"}"#);
+    }
+
+    #[test]
+    fn collects_two_attributed_items() {
+        use super::ReferenceContextProvider;
+        use crate::generated::{ContextBudget, ContextQuery, GuestContextProvider};
+
+        let items = ReferenceContextProvider::new()
+            .collect(&ContextQuery {
+                context: context(),
+                request_json: br#"{"ok":true}"#.to_vec(),
+                budget: ContextBudget {
+                    max_tokens: 128,
+                    max_bytes: 4096,
+                    max_items: 8,
+                },
+            })
+            .expect("collect");
+        assert_eq!(items.len(), 2);
     }
 
     #[test]
