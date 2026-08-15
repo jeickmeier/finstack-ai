@@ -2,6 +2,7 @@
 
 use core::fmt;
 use core::future::{Future, poll_fn, ready};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -448,12 +449,33 @@ pub trait ToolValidatorCompiler: PortObject {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct JsonSchemaToolValidatorCompiler;
 
+thread_local! {
+    static COMPILE_COUNT: Cell<u64> = const { Cell::new(0) };
+}
+
+impl JsonSchemaToolValidatorCompiler {
+    /// Compiles observed on this thread since the last reset.
+    ///
+    /// NFR-PERF-007 conformance uses this to prove construction compiles
+    /// schemas once and later scripted calls do not compile again.
+    #[must_use]
+    pub fn thread_compile_count() -> u64 {
+        COMPILE_COUNT.with(Cell::get)
+    }
+
+    /// Reset the thread-local compile counter to zero.
+    pub fn reset_thread_compile_count() {
+        COMPILE_COUNT.with(|count| count.set(0));
+    }
+}
+
 impl ToolValidatorCompiler for JsonSchemaToolValidatorCompiler {
     fn compile(
         &self,
         schema: &RawJson,
         resources: &BTreeMap<Arc<str>, RawJson>,
     ) -> Result<Arc<dyn ToolValidator>, ToolError> {
+        COMPILE_COUNT.with(|count| count.set(count.get().saturating_add(1)));
         let schema = parse_json(schema)?;
         let mut compiled_resources = Vec::with_capacity(resources.len());
         for (uri, resource) in resources {

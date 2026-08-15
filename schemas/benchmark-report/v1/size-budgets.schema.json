@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finstack.ai/schemas/benchmark-report/v1/size-budgets.schema.json",
+  "title": "SizeBudgets",
+  "description": "Machine-readable A03 size-budget table (PR-063).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "workload", "artifacts"],
+  "properties": {
+    "format_version": { "const": 1 },
+    "workload": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "path_glob": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "max_bytes": { "type": ["integer", "null"], "minimum": 1 },
+          "max_gzip_bytes": { "type": "integer", "minimum": 1 },
+          "required": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

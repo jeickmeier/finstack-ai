@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "workload": "size-budgets-v1",
+  "unexpected": true,
+  "artifacts": [
+    {
+      "id": "wasm-bg",
+      "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
+      "max_bytes": 6291456,
+      "required": true
+    }
+  ]
+}

@@ -21,13 +21,20 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::{
-    ContentBlock, KernelState, Message, MessageId, MessageRole, Metadata, ProviderIds, RawJson,
-    TextBlock, Timestamp, Usage,
+    AcceptRun, AllocatedIds, AppendBatchId, BudgetPropagation, CancellationPropagation,
+    CommittedBatch, ContentBlock, DeadlinePropagation, Decision, Digest, EffectId, EventId, Kernel,
+    KernelInput, KernelState, LaneId, Message, MessageId, MessageRole, Metadata, ModelRequestId,
+    OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson,
+    RecordDraft, RecordEnvelope, RecordId, RunAccepted, RunId, RunLimits, RunPropagationPolicy,
+    RunRelation, RunSecurityContext, SessionId, TextBlock, Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
-    ModelError, ModelEventStream, ModelResponse, ModelStreamAssembler, ModelStreamItem,
-    ModelStreamLimits, TextDelta, ToolError, ToolEventStream, ToolResult, ToolStreamAssembler,
-    ToolStreamItem, UsageDelta,
+    AuthorizationContext, CancellationSignal, InputCapabilities, Model, ModelCallContext,
+    ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
+    ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTokenEstimate, PortFuture,
+    RunCallContext, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    ToolError, ToolEventStream, ToolResult, ToolStreamAssembler, ToolStreamItem, UsageDelta,
 };
 use finstack_ai_test::{
     ConformanceRunner, NoOpRustAdapter, ReducerRustAdapter, compare_normalized_bytes,
@@ -261,11 +268,313 @@ fn stream_throughput(c: &mut Criterion) {
     tool_group.finish();
 }
 
+fn accept_run_input() -> (Kernel, TransitionEnv, KernelInput) {
+    let run_id = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("run");
+    let accepted = RunAccepted::try_new(
+        run_id,
+        RunRelation::root(run_id).expect("root"),
+        RunSecurityContext::try_new(
+            "tenant",
+            PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(br#"{"agent":"bench"}"#),
+        None,
+    )
+    .expect("accepted");
+    let env = TransitionEnv {
+        now: Timestamp::from_unix_ms(1_000).expect("now"),
+        ids: AllocatedIds::try_new(
+            vec![RecordId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("record")],
+            vec![EventId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("event")],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        )
+        .expect("ids"),
+    };
+    let input = KernelInput::AcceptRun(AcceptRun {
+        session_id: SessionId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("session"),
+        lane_id: LaneId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("lane"),
+        accepted,
+    });
+    (Kernel::default(), env, input)
+}
+
+fn kernel_micro(c: &mut Criterion) {
+    let mut group = c.benchmark_group("kernel_micro");
+    configure(&mut group);
+    group.bench_function("kernel_default_init", |bencher| {
+        bencher.iter(|| black_box(Kernel::default()));
+    });
+    let (kernel, env, input) = accept_run_input();
+    group.bench_function("decide_accept_run", |bencher| {
+        bencher.iter(|| {
+            let decision = kernel
+                .decide(black_box(&env), black_box(input.clone()))
+                .expect("decide");
+            black_box(decision);
+        });
+    });
+    group.bench_function("raw_json_parse_small", |bencher| {
+        bencher.iter(|| {
+            black_box(RawJson::parse(br#"{"a":1,"b":2}"#).expect("json"));
+        });
+    });
+    let decision = kernel
+        .decide(&env, input.clone())
+        .expect("decide accept-run for apply setup");
+    let batch = commit_decision(&decision);
+    group.bench_function("apply_accept_run", |bencher| {
+        bencher.iter(|| {
+            let mut apply_kernel = Kernel::default();
+            let events = apply_kernel
+                .apply(black_box(&batch), 0)
+                .expect("apply accept-run");
+            black_box(events);
+        });
+    });
+    group.bench_function("try_restore_default", |bencher| {
+        let state = KernelState::default();
+        bencher.iter(|| {
+            black_box(Kernel::try_restore(black_box(state.clone())).expect("restore"));
+        });
+    });
+    group.bench_function("record_draft_json_roundtrip", |bencher| {
+        let draft = decision
+            .records
+            .first()
+            .expect("accept-run decision has a record")
+            .clone();
+        bencher.iter(|| {
+            let encoded = serde_json::to_vec(black_box(&draft)).expect("encode");
+            let decoded: RecordDraft = serde_json::from_slice(&encoded).expect("decode");
+            black_box(decoded);
+        });
+    });
+    group.bench_function("message_history_view", |bencher| {
+        let state = state_with_messages(128);
+        bencher.iter(|| {
+            let view: usize = state
+                .messages
+                .iter()
+                .map(|message| message.content().len())
+                .sum();
+            black_box(view);
+        });
+    });
+    group.finish();
+}
+
+fn commit_decision(decision: &Decision) -> CommittedBatch {
+    let records = decision
+        .records
+        .iter()
+        .enumerate()
+        .map(|(index, draft)| {
+            let offset = u64::try_from(index).expect("index fits u64");
+            let sequence = decision.expected_sequence.saturating_add(offset);
+            RecordEnvelope::try_new(
+                draft.format_version(),
+                draft.kind_version(),
+                draft.record_id(),
+                draft.session_id(),
+                draft.lane_id(),
+                draft.run_id(),
+                sequence,
+                draft.timestamp(),
+                Some(Timestamp::from_unix_ms(1_001).expect("committed_at")),
+                Digest::raw_json(b"payload"),
+                None,
+                Digest::raw_json(b"checksum"),
+                draft.derived_event_ids().to_vec(),
+                draft.body().clone(),
+            )
+            .expect("envelope")
+        })
+        .collect::<Vec<_>>();
+    let last_sequence = decision
+        .expected_sequence
+        .saturating_add(u64::try_from(records.len().saturating_sub(1)).expect("len fits u64"));
+    CommittedBatch::try_new(
+        AppendBatchId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("batch"),
+        decision.expected_sequence,
+        last_sequence,
+        records,
+    )
+    .expect("committed batch")
+}
+
+struct InstantModel;
+
+impl Model for InstantModel {
+    fn descriptor(&self) -> ModelDescriptor {
+        ModelDescriptor {
+            provider: Arc::from("instant"),
+            models: Arc::from([ModelName::try_new("instant-1").expect("model")]),
+            metadata: Metadata::empty(),
+        }
+    }
+
+    fn capabilities(&self, _model: &ModelName) -> ModelCapabilities {
+        ModelCapabilities {
+            input: InputCapabilities {
+                text: true,
+                json: false,
+                images: false,
+                audio: false,
+                files: false,
+            },
+            context_profile: ModelContextProfile {
+                provider: Arc::from("instant"),
+                model: ModelName::try_new("instant-1").expect("model"),
+                hard_input_bytes: 1_024,
+                context_window_tokens: 1_024,
+                max_output_tokens: 16,
+                reserved_output_tokens: 8,
+                provider_overhead_tokens: 0,
+                estimator: TokenEstimatorRef {
+                    id: Arc::from("instant.bytes"),
+                    version: Arc::from("1"),
+                    source: TokenEstimatorSource::ConservativeUpperBound,
+                },
+            },
+            native_tool_calls: false,
+            parallel_tool_calls: false,
+            structured_output: StructuredOutputCapability::Unsupported,
+            reasoning: false,
+            prompt_cache: false,
+            resumable_stream: false,
+            idempotent_requests: true,
+            native_capabilities: std::collections::BTreeSet::new(),
+        }
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        _model: &ModelName,
+        _canonical_request: &[u8],
+    ) -> Result<ModelTokenEstimate, ModelError> {
+        Ok(ModelTokenEstimate {
+            input_tokens: 1,
+            estimator: TokenEstimatorRef {
+                id: Arc::from("instant.bytes"),
+                version: Arc::from("1"),
+                source: TokenEstimatorSource::ConservativeUpperBound,
+            },
+        })
+    }
+
+    fn request(&self, _request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
+        Box::pin(async {
+            Ok(Box::pin(ReadyStream {
+                items: VecDeque::from([Ok(ModelStreamItem::Completed(completed_model("ok")))]),
+            }) as ModelEventStream)
+        })
+    }
+}
+
+fn instant_model_request() -> ModelRequest {
+    let principal = PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal");
+    ModelRequest {
+        call: ModelCallContext {
+            run: RunCallContext {
+                locator: OperationLocator::try_new(
+                    "tenant",
+                    SessionId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("session"),
+                    LaneId::parse("01234567-89ab-7cde-89ab-0123456789b2").expect("lane"),
+                    RunId::parse("01234567-89ab-7cde-89ab-0123456789b3").expect("run"),
+                )
+                .expect("locator"),
+                authorization: AuthorizationContext {
+                    principal,
+                    authentication_method: Arc::from("local"),
+                    assurance_level: Arc::from("test"),
+                    roles: Arc::from([]),
+                    permitted_scopes: Arc::from([Arc::from("tenant")]),
+                    safe_claims: Metadata::empty(),
+                    policy_version: Arc::from("policy-v1"),
+                    decision_id: Arc::from("decision-v1"),
+                },
+                effect_id: EffectId::parse("01234567-89ab-7cde-89ab-0123456789b4").expect("effect"),
+                attempt: 1,
+                deadline: None,
+                budget_scope_id: None,
+                cancellation: CancellationSignal::new(),
+            },
+            request_id: ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789b5")
+                .expect("request"),
+        },
+        draft: ModelRequestDraft {
+            model: ModelName::try_new("instant-1").expect("model"),
+            messages: Arc::from([]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_024,
+                max_input_tokens: 1_024,
+                max_output_tokens: 16,
+            },
+        },
+        continuation_state: None,
+    }
+}
+
+fn resolved_dispatch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("resolved_dispatch");
+    configure(&mut group);
+    let model: Arc<dyn Model> = Arc::new(InstantModel);
+    group.bench_function("resolved_handle_descriptor", |bencher| {
+        bencher.iter(|| black_box(model.descriptor()));
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("dispatch runtime");
+    let request = instant_model_request();
+    group.bench_function("instant_model_request_poll", |bencher| {
+        bencher.iter(|| {
+            let item = runtime.block_on(async {
+                let mut stream = model
+                    .request(black_box(request.clone()))
+                    .await
+                    .expect("dispatch");
+                std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
+            });
+            black_box(item);
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     conformance_noop,
     scripted_model_reducer,
     state_scaling,
-    stream_throughput
+    stream_throughput,
+    kernel_micro,
+    resolved_dispatch
 );
 criterion_main!(benches);
