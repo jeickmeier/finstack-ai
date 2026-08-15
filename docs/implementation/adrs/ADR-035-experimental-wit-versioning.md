@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial via PR-049-E-candidate-9fbb520f2c56, PR-049-E-security-9fbb520f2c56, and PR-049-E-integration-5a6eeeb783be at local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb` (`@0.0.4` types/host/toolset, coarse `list-tools`/`call`, `@1.0.0` generation block). G6 owns Implemented.
+- Implementation evidence: Partial via PR-049-E-candidate-9fbb520f2c56, PR-049-E-security-9fbb520f2c56, PR-049-E-integration-5a6eeeb783be, PR-050-E-candidate-a02b986b284f, and PR-050-E-security-a02b986b284f (`@0.0.4` types/host/toolset/context, host-side manifest/lifecycle, coarse `list-tools`/`call`/`collect`, `@1.0.0` generation block). G6 owns Implemented.
