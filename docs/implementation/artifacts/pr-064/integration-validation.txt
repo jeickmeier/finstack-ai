@@ -1,0 +1,27 @@
+PR-064-E-integration-e1f94bcab639
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: 299888d06671d0bd6873dc3033fbaf4465ccf3c9
+Evidence head: 1fe8bf174506b14e3053b75480b6aea4bebbb5ed
+Candidate: 363d52661eeb726c2f8e2d8ee103c7dc11ba4505
+Tree: d921496baeab20b710e04678132eb821757dd813
+Result: Pass. Merge tree equals evidence-head tree. No G8-D.
+
+Commands on local main after merge:
+  git rev-parse 1fe8bf174506b14e3053b75480b6aea4bebbb5ed^{tree}
+  git rev-parse HEAD^{tree}
+  cargo test -p finstack-ai-test --test crash_prefix --test lanes --offline --locked
+    -- prefix_effect_kind_and_lane_catalog crash_prefix_catalog
+       enumerated_prefix lane_invariants lane_created
+  cargo test -p finstack-ai-plugin-host --offline --locked -- --test-threads=1
+    directory_cache_tamper only_memory_artifacts
+  uv run --no-project python tools/wasm_package/check.py graph
+
+Results:
+  trees identical: d921496baeab20b710e04678132eb821757dd813
+  crash_prefix catalog: 3 passed
+  lane properties: 2 passed
+  plugin-host cache tests: 2 passed
+  wasm graph: pass
+
+No hosted PR/merge, publication, G8-D, or 1.0.0 cut.

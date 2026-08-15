@@ -9,11 +9,11 @@ Last updated 2026-08-15 and reconciled against documentation pack v0.21 / PLAN-0
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 10 | 9 | Phase 0–8 `Done`; Phase 9 `In progress` |
-| Logical PRs | 66 | 63 | PR-001–PR-063 `Done`; PR-064 `In progress`; PR-065–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 342 | PR-001–PR-063 closed; PR-064-A01–A04 Passed at candidate `363d52661eeb726c2f8e2d8ee103c7dc11ba4505` |
+| Logical PRs | 66 | 64 | PR-001–PR-064 `Done`; PR-065–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 342 | PR-001–PR-064 closed; PR-065–PR-066 remain |
 | Phase entrance and exit bullets | 62 | 58 | Phase 0–8 entrance and exit `Passed`; Phase 9 entrance `Passed` (2/2); Phase 9 exit `0/4` |
 | Program gates | 9 | 8 | G0–G7 `Passed`; G8 `Not ready` |
-| Implementation tasks | 394 | 394 | PR-064 tasks Done at candidate; PR not merged |
+| Implementation tasks | 394 | 394 | PR-064 tasks Done |
 | Open blockers | 0 | 4 | No open blocker; all four recorded blockers are `Resolved` |
 
 PR-001 is `Done` at `73bfe88c8dbc92c4e4c6eba1a5a7814240c2e862`. PR-002 is `Done` at `ee9754fe2d0f015181dcefa97e715392aadd28ed`. PR-003 is `Done` at `9b0709a8cf2d96b418406f953e7bdc958925c274` (merge of [#1](https://github.com/jeickmeier/finstack-ai/pull/1)). PR-004 is `Done` at `9b13fe02d4cf41305daa20195eb0a537f85f9712` (merge of [#2](https://github.com/jeickmeier/finstack-ai/pull/2); A01–A05 Passed). PR-005 is `Done` at `c1108d207389a947d16e9b0dd7a76026108c01eb` (merge of [#3](https://github.com/jeickmeier/finstack-ai/pull/3); A01–A05 Passed). PR-006 is `Done` at `56d7777956df145213b03d2b0b5c1922db42b346` (merge of [#4](https://github.com/jeickmeier/finstack-ai/pull/4); A01–A05 Passed). PR-007 is `Done` at local merge `81a8706aeeca6a47ab0d64bc0bef681d6efc4621` (A01–A04 Passed). PR-008 is `Done` at merge `4b68a9397a8e07a581f34dfc34f0bfb96873c00d` ([#5](https://github.com/jeickmeier/finstack-ai/pull/5); A01–A08 Passed after review remediation and final hosted/merge verification). PR-009 is `Done` at local `main` integration `5843dce6d77498a75acdc15d816586cb26098456` (A01–A05 Passed; no GitHub issue or actual PR). PR-010 is `Done` at local `main` integration `ff2e6e7b80e34061dae4dcc5ceb4b259a34a89b5` (A01–A04 Passed; no GitHub issue or actual PR). PR-011 is `Done` at local `main` integration `01380ead5c5ca7b9e7d28d681d84719c9bf0279e` (A01–A06 Passed; no GitHub issue or actual PR). PR-012 is `Done` at local `main` integration `dc58a11fbc871e70326d04fd9840297b5179023f` (fast-forward of `codex/pr-012-structured-output`; A01–A05 Passed; no GitHub issue or actual PR). PR-013 is `Done` at merge `fa6222f20e4a4616f600e867be94afe12967dcb9` ([#6](https://github.com/jeickmeier/finstack-ai/pull/6); A01–A04 Passed). PR-014 is `Done` at merge `399f3a7d9d987268f4d79ab90f31b93f854084f8` ([#8](https://github.com/jeickmeier/finstack-ai/pull/8); A01–A07 Passed after hosted and immutable merge verification). PR-015 is `Done` at local `main` merge `16f3a865d122aac34d1df5b3dc1d7a0b44c4aa82` (A01–A04 Passed; no GitHub issue or actual PR). PR-016 is `Done` at local `main` merge `b2f678693fcd3eb2fe09aafca55c4e06c17371ec` (A01–A05 Passed; no GitHub issue or actual PR). Phase 0 and Phase 1 are `Done`. G0 passed via `G0-D-foundation-ready-bcf021e4873a`; G1 passed via `G1-D-kernel-semantics-4f52c8a91d6e`. Both Phase 2 entrance criteria are passed.
@@ -102,11 +102,11 @@ PR-062 is `Done` at local `main` merge `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31
 
 PR-063 is `Done` at local `main` merge `6ac1b5ae61b89b46195feab4f211ee10775579b3` (A01–A04 Passed; no GitHub issue or actual pull request). Candidate `0a84c8196624bdc4eeff8ec229a304fe6d69866d`. Phase 9 entrance stays `Passed` (2/2). Phase 9 exit stays `0/4`. G8 remains `Not ready`.
 
-PR-064 is `In progress` on `codex/pr-064-reliability-fuzz-security-review` from local `main` `587d01da4f900291926b290c76f1eafa487fde0b`. Do not start PR-065+. Do not write `G8-D-*`. Do not cut or publish `1.0.0`.
+PR-064 is `Done` at local `main` merge `299888d06671d0bd6873dc3033fbaf4465ccf3c9` (A01–A04 Passed; no GitHub issue or actual pull request). Candidate `363d52661eeb726c2f8e2d8ee103c7dc11ba4505`. Phase 9 entrance stays `Passed` (2/2). Phase 9 exit stays `0/4`. G8 remains `Not ready`. Do not start PR-065+. Do not write `G8-D-*`. Do not cut or publish `1.0.0`.
 
 ## Active execution envelope
 
-Owner Phase 9 admit (2026-08-15), **PR-064 `In progress`**. The PR-063 envelope is closed. Public registries stay unpublished. Do not infer PR-065+, `G8-D-*`, or a `1.0.0` cut.
+Owner Phase 9 admit (2026-08-15), **PR-064 `Done`**. The PR-064 envelope is closed. Public registries stay unpublished. Do not infer PR-065+, `G8-D-*`, or a `1.0.0` cut.
 
 ```
 Run PR-064; mode=integrated; target=main;
@@ -342,7 +342,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-062 | Done | me@jeickmeier.com | local `main` merge `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` of `codex/pr-062-closeout` after first merge `fa2923c5b57854baa81e9a9e6ea1685b8422b6f8` (no issue or actual PR) | 7 | 4/4 | PH9-E-entrance-tag-b610b0ba93b5; PH9-E-entrance-feedback-ee6999c59a12; PR-062-E-candidate-fe6b29ee4400; PR-062-E-security-1bbadf7b2adc; PR-062-E-integration-5e8cbcf0588d; PR-062-E-closeout-2b935a5bf981; PR-062-E-security-closeout-b9f5a3319ad2; COMP-1.0-D-contract-freeze-00b78667ecc4; PR-062-E-integration-5ec6101883c3 | — | `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` / 2026-08-15 | 2026-08-15 |
 | PR-063 | Done | me@jeickmeier.com | local `main` merge `6ac1b5ae61b89b46195feab4f211ee10775579b3` of `codex/pr-063-perf-memory-startup-budgets` (no issue or actual PR) | 7 | 4/4 | PR-063-E-candidate-67d4658eab90; PR-063-E-security-9d385ed9ec26; PR-063-E-integration-8254875cc81b | — | `6ac1b5ae61b89b46195feab4f211ee10775579b3` / 2026-08-15 | 2026-08-15 |
-| PR-064 | In progress | me@jeickmeier.com | `codex/pr-064-reliability-fuzz-security-review` candidate `363d52661eeb726c2f8e2d8ee103c7dc11ba4505` from `587d01da4f900291926b290c76f1eafa487fde0b` (no issue or actual PR) | 6 | 4/4 | PR-064-E-candidate-6d3d0d5ddc1e; PR-064-E-security-9ac67ca75bd7 | — | — | 2026-08-15 |
+| PR-064 | Done | me@jeickmeier.com | local `main` merge `299888d06671d0bd6873dc3033fbaf4465ccf3c9` of `codex/pr-064-reliability-fuzz-security-review` (no issue or actual PR) | 6 | 4/4 | PR-064-E-candidate-6d3d0d5ddc1e; PR-064-E-security-9ac67ca75bd7; PR-064-E-integration-e1f94bcab639 | — | `299888d06671d0bd6873dc3033fbaf4465ccf3c9` / 2026-08-15 | 2026-08-15 |
 | PR-065 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-066 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 
