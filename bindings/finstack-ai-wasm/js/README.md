@@ -4,6 +4,20 @@ Preview browser package for the Rust-owned `finstack-ai` engine. The published
 TypeScript surface is hand-authored; generated wasm-bindgen glue stays in
 `generated/` and is not a public API.
 
+## Quick start
+
+Staged, not published. Trust class for host adapters:
+[T2](../../../docs/site/security-trust-levels.md). Not isolated.
+See [docs/site/wasm.md](../../../docs/site/wasm.md).
+
+```ts
+import { buildMetadata, health, init } from "@finstack/ai";
+
+await init();
+health(); // "ok"
+buildMetadata();
+```
+
 ## Install
 
 This package is staged, not published. Consume a packed tarball from
@@ -163,3 +177,6 @@ cross-OS identical.
 
 `MIT OR Apache-2.0`. Canonical texts live under [`../../../licenses/`](../../../licenses/)
 and are copied next to this README.
+[DCO](../../../CONTRIBUTING.md). [Maintainers](../../../GOVERNANCE.md).
+[ADRs](../../../docs/implementation/adr-register.md).
+[RFCs](../../../docs/rfcs/README.md).

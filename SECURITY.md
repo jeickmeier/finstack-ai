@@ -46,10 +46,15 @@ Supported-version policy will be published with the first public release. Until 
 | Version | Supported |
 | --- | --- |
 | Default branch (`main` / trunk) | Security fixes accepted |
-| Pre-1.0 tagged releases | Not yet published — placeholder |
+| `0.1.0` preview tag | Preview support begins when PR-061 tags `0.1.0` |
 | Historical snapshots | Not supported |
 
 ## Related documents
 
+- [Trust levels](docs/site/security-trust-levels.md)
+- [Security deployment gates](docs/site/security-deployment.md)
+- [Threat Model G7 review](docs/implementation/threat-model-g7-review.md)
 - [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md)
 - [GOVERNANCE.md](GOVERNANCE.md)
+- [Public RFCs](docs/rfcs/README.md)
+- Dual-license: [MIT](licenses/LICENSE-MIT) OR [Apache-2.0](licenses/LICENSE-APACHE)

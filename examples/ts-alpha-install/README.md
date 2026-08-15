@@ -3,6 +3,13 @@
 This example typechecks against a packed `@finstack/ai` tarball. It does not
 map repository `src/` or `js/dist` paths. Do not embed provider credentials.
 
+Trust class: [T2](../../docs/site/security-trust-levels.md) when host
+adapters are registered. Not isolated.
+
+Workspace version is **0.0.4 unpublished**.
+
+## Quick start
+
 ```bash
 mise run stage-wasm
 # stage.py also installs this example from the packed tarball and runs tsc

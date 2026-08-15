@@ -17,3 +17,12 @@ start from the template.
 
 Pinned toolchain: rustc 1.97.1, `wasm32-unknown-unknown`, wit-bindgen
 0.57.1, WIT `@0.0.4`. See `plugins/finstack-ai-guest-sdk/README.md`.
+
+Trust class: [T3](../../../docs/site/security-trust-levels.md) when loaded
+by the isolated host. `@1.0.0` worlds are blocked until PR-062.
+
+## Quick start
+
+```text
+mise run check-plugin-template
+```

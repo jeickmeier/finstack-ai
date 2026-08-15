@@ -27,7 +27,7 @@ Additional maintainers may be added by the release owner and recorded in this ta
 - Architecture decisions are recorded as ADRs under [`docs/implementation/adrs/`](docs/implementation/adrs/) and indexed in [`docs/implementation/adr-register.md`](docs/implementation/adr-register.md).
 - The planning baseline in [`docs/planning/`](docs/planning/) is the implementation contract during normal coding.
 - Delivery status, evidence, and exceptions are tracked in [`docs/implementation/`](docs/implementation/).
-- Ecosystem-facing contract changes (journal schemas, event order, WIT worlds, remote protocols) require a public RFC process in addition to an ADR when those surfaces exist.
+- Ecosystem-facing contract changes (journal schemas, event order, WIT worlds, remote protocols) require a public RFC process in addition to an ADR. Start from [`docs/rfcs/README.md`](docs/rfcs/README.md) and [`docs/rfcs/0000-template.md`](docs/rfcs/0000-template.md).
 
 ## Exceptions and waivers
 

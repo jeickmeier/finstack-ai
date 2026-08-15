@@ -45,6 +45,9 @@ Before proposing substantial changes, read:
 - [Engineering Standards](docs/planning/00-finstack-ai-engineering-standards.md) — including exception and waiver rules (section 14)
 - [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md) — review triggers and controls
 - [Implementation control set](docs/implementation/README.md) — delivery ledger, evidence register, exceptions register, ADR register
+- [Public RFCs](docs/rfcs/README.md) — required in addition to an ADR for journal, event-order, WIT, and remote/process contract changes
+- [Trust levels](docs/site/security-trust-levels.md) — T0–T5; in-process code is not a sandbox
+- Dual-license texts: [MIT](licenses/LICENSE-MIT) OR [Apache-2.0](licenses/LICENSE-APACHE)
 
 Pull requests should:
 

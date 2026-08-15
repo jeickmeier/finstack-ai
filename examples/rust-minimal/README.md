@@ -1,7 +1,10 @@
 # Native developer-preview examples
 
-This package contains four offline, secret-free binaries over the public Rust
-surface:
+Four offline, secret-free binaries over the public Rust surface.
+Workspace version is **0.0.4 unpublished**. `publish = false`.
+
+Trust class: [T1](../../docs/site/security-trust-levels.md). Native
+in-process providers and tools are not isolated.
 
 - `minimal` completes a model-only run through the OpenAI-compatible provider.
 - `coding` composes calculator, filesystem, shell, repository/memory context,
@@ -10,4 +13,10 @@ surface:
 - `service` resolves once, checks component health, and handles one request.
 - `diagnostic` prints credential-free `AgentSpec` and lock fingerprints.
 
-Run one with `cargo run -p finstack-ai-native-examples --bin minimal`.
+## Quick start
+
+```bash
+cargo run -p finstack-ai-native-examples --bin minimal --offline --locked
+```
+
+See [docs/site/rust.md](../../docs/site/rust.md).

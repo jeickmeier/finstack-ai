@@ -3,6 +3,7 @@
 `finstack-ai` is a deterministic agent microkernel in Rust, with a runtime, SDK/facade, and Python/WASM bindings. The kernel owns semantic state, records, events, and effects; the runtime owns ports and effect execution; leaf providers, tools, stores, and observers stay outward-facing.
 
 Project documentation is routed through [docs/README.md](docs/README.md).
+The public guide index is [docs/site/README.md](docs/site/README.md).
 
 - The [planning baseline](docs/planning/README.md) defines product scope, architecture, engineering rules, technical design, security obligations, sequencing, and acceptance criteria.
 - The [implementation control set](docs/implementation/README.md) records delivery status, ownership, actual work, decisions, evidence, and exceptions while implementation is under way.
@@ -10,8 +11,11 @@ Project documentation is routed through [docs/README.md](docs/README.md).
 ## License and governance
 
 - Dual-licensed: [MIT](licenses/LICENSE-MIT) OR [Apache-2.0](licenses/LICENSE-APACHE)
-- Contributions: [CONTRIBUTING.md](CONTRIBUTING.md) (DCO sign-off)
+- Contributions: [CONTRIBUTING.md](CONTRIBUTING.md) (DCO sign-off; no CLA)
 - Maintainers and process: [GOVERNANCE.md](GOVERNANCE.md)
+- Architecture decisions: [docs/implementation/adr-register.md](docs/implementation/adr-register.md)
+- Public RFCs: [docs/rfcs/README.md](docs/rfcs/README.md)
+- Trust levels: [docs/site/security-trust-levels.md](docs/site/security-trust-levels.md)
 - Vulnerability reports: [SECURITY.md](SECURITY.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 
