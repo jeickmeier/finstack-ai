@@ -1,0 +1,71 @@
+PR-059-E-candidate-5919e2cfe2f8
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 5919e2cfe2f814cf35de7e90e34f8199e12beaa8
+Tree: 381e2006429e5d371eea26863906abd8efdfe26e
+Branch: codex/pr-059-workflow-runtime-adapters
+Baseline: local main 894c97116a72ea88ab241439d63493a873e9ad4d
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1 (8bab26f4f 2026-07-14)
+Result: Pass for A01–A04. No G7 inference.
+
+Commands:
+  cargo tree -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --locked --edges normal
+  cargo tree -p finstack-ai --locked --no-default-features --edges normal
+  cargo tree -p finstack-ai-native-examples -p finstack-ai-wit --locked --edges normal
+  cargo tree -p finstack-ai-workflow-local --locked -e normal --depth 1
+  cargo tree -p finstack-ai-workflow-temporal --locked -e normal --depth 1
+  cargo test -p finstack-ai-runtime --features native-tokio --offline --locked workflow
+  cargo test -p finstack-ai-workflow-local --offline --locked
+  cargo test -p finstack-ai-workflow-temporal --offline --locked
+  cargo run -p finstack-ai-example-durable-interaction --offline
+  cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+  cargo fmt --all -- --check
+  uv run --no-project python tools/wasm_package/check.py graph
+  mise run check
+
+Not run as a merge gate:
+  mise run ci / Temporal test server / Docker / Playwright / Criterion
+  Linux/Windows CI / cargo-deny / gitleaks
+
+Results:
+  kernel / runtime / default SDK / no-default SDK / native-examples / wit:
+    no finstack-ai-workflow-local, no finstack-ai-workflow-temporal,
+    no temporalio, no restate-sdk
+  workflow-local direct edges: finstack-ai-runtime only
+    (kernel is transitive via runtime; no wasmtime; no temporal sibling)
+  workflow-temporal direct edges: finstack-ai-runtime only
+    (no temporalio; no kernel direct dep; no local sibling)
+  runtime workflow tests: 6 passed
+  workflow-local tests: 6 passed
+  workflow-temporal tests: 3 passed (including rustdoc example)
+  durable-interaction example: interaction survived worker restart
+  workspace Clippy -D warnings: pass
+  rustfmt --all --check: pass
+  wasm graph: no Tokio, sockets, filesystem drivers, or kernel wasm-bindgen
+  mise run check: cargo fmt/check pass; ruff-format fails on pre-existing
+    tools/plugin_wasm/sync_guest_wit.py, tools/plugin_wasm/template_check.py,
+    and tools/wit_bindgen/generate.py (not reformatted)
+
+A01 adapter does not reimplement the model/tool loop:
+  adapter_matches_direct_owner_journal
+  temporal_worker_matches_direct_owner_journal
+  no workflow crate contains a model-request or tool-batch planner
+A02 journal remains authoritative; checkpoint is a hint:
+  conflicting_checkpoint_sequence_is_ignored
+  resolve_checkpoint_sequence always returns the journal sequence
+  restore is JournalStore load + CommitCoordinator::recover
+A03 Temporal-shaped retry cannot exceed kernel policy:
+  temporal_activity_policy_cannot_exceed_kernel_max_retries
+  policy N=5 against max_retries=1 dispatches once, then
+  retry_limit_reached with no further ExecuteEffect
+A04 interaction, deferred, and timer survive worker restart:
+  interaction_survives_worker_restart
+  deferred_survives_worker_restart
+  timer_survives_worker_restart
+  examples/durable-interaction SQLite reopen + resume
+
+TM-19 cross-tenant:
+  cross_tenant_locator_is_unknown
+
+No G7-D-*. Phase 8 exit stays 0/4. Do not start PR-060+
+from this candidate. Do not start PR-062+.
