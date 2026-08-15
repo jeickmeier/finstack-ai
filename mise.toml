@@ -57,18 +57,39 @@ set -euo pipefail
 uv run --no-project python tools/wit_bindgen/generate.py --check
 """
 
+[tasks.gen-guest-sdk]
+description = "Copy canonical @0.0.4 WIT packages into guest-sdk, templates, and references"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_wasm/sync_guest_wit.py
+"""
+
+[tasks.check-guest-sdk]
+description = "Fail when vendored guest WIT drifts from canonical @0.0.4 packages"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check
+"""
+
 [tasks.gen-plugin-wasm]
-description = "Build and encode the PR-051/PR-052 test-only plugin guests"
+description = "Build and encode test-only plugin guests and published reference components"
 run = """
 set -euo pipefail
 uv run --no-project python tools/plugin_wasm/generate.py
 """
 
 [tasks.check-plugin-wasm]
-description = "Fail when checked-in plugin guest components drift"
+description = "Fail when checked-in plugin guest or reference components drift"
 run = """
 set -euo pipefail
 uv run --no-project python tools/plugin_wasm/generate.py --check
+"""
+
+[tasks.check-plugin-template]
+description = "Copy the toolset template, build, encode, and run it through PluginHost"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_wasm/template_check.py
 """
 
 [tasks.check-wasm]

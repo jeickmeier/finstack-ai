@@ -1,0 +1,23 @@
+[package]
+name = "finstack-ai-guest-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Author-facing Rust helpers and pinned WIT macros for experimental @0.0.4 plugin guests"
+readme = "README.md"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+wit-bindgen = { workspace = true }
+
+[lints]
+workspace = true

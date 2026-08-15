@@ -1,0 +1,8 @@
+{
+  "identity": "finstack.plugin.calculator",
+  "version": "0.0.4",
+  "worlds": ["toolset-plugin"],
+  "permissions": ["logging"],
+  "configuration_schema": {},
+  "digest": "compute-with-host-manifest_digest_hex"
+}

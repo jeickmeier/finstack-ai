@@ -1,0 +1,30 @@
+package finstack:ai-types@0.0.4;
+
+interface types {
+    record call-context {
+        effect-id: string,
+        session-id: string,
+        lane-id: string,
+        run-id: string,
+        tenant-scope: string,
+        principal-issuer: string,
+        principal-subject: string,
+        authorization-decision-id: string,
+        permitted-scopes: list<string>,
+        budget-scope-id: option<string>,
+        deadline-unix-ms: option<s64>,
+    }
+
+    record blob-ref {
+        id: string,
+        media-type: string,
+        length: u64,
+        digest: option<string>,
+    }
+
+    record plugin-error {
+        code: string,
+        message: string,
+        retryable: bool,
+    }
+}

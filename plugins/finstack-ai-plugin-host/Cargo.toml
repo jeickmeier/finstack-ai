@@ -30,6 +30,7 @@ ed25519-dalek = { workspace = true }
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
+finstack-ai-tools-calculator = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 wat = "1.239.0"
