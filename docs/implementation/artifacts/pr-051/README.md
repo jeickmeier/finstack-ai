@@ -8,7 +8,8 @@ native toolset/context adapters.
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
 | `candidate-validation.txt` | Local Darwin A01–A04 proofs at `36f1ce2e263b6d20dc1ee6844848006d8722a756` |
 | `security-review.txt` | TM-07 / TM-08 / Threat Model §18 review at the same candidate |
+| `integration-validation.txt` | Local `main` merge `cf7eaebab383724fa4b7b19cb204febec41a768a` |
 
 No G5 or G6 decision, hosted pull request, npm/pypi publish, or tag is
 stored here. Phase 7 entrance was recorded in PR-049 and is not
-re-recorded. PR-051 is `In review`.
+re-recorded. PR-051 is `Done` at this merge. Phase 7 remains `In progress`.

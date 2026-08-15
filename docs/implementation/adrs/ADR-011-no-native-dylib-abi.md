@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial via PR-002 plugin-path classification, PR-049/PR-050 WIT leaf, and PR-051-E-security-36f1ce2e263b (no dylib loader or libloading on the Wasmtime host). G6 remains.
+- Implementation evidence: Partial via PR-002 plugin-path classification, PR-049/PR-050 WIT leaf, and PR-051-E-security-36f1ce2e263b / PR-051-E-integration-cf7eaebab383 (no dylib loader or libloading on the Wasmtime host). G6 remains.

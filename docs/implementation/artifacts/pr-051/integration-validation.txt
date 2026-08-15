@@ -1,0 +1,24 @@
+PR-051-E-integration-cf7eaebab383
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Merge: cf7eaebab383724fa4b7b19cb204febec41a768a
+Parents: 8539c6bafcb2c99f09ace07d2a18d98ba0390f1d
+         fed6c8c261ee456a5001f121ab5d5e5736bd9e13
+Implementation candidate: 36f1ce2e263b6d20dc1ee6844848006d8722a756
+Result: Pass
+
+Local `main` merge of `codex/pr-051-wasmtime-host-cache`.
+A01–A04 remain bound to the implementation candidate.
+TM-07/TM-08 review remains bound to the same candidate.
+
+Re-verified on the merge tree:
+  mise run check-wit: clean generated.rs
+  cargo test -p finstack-ai-plugin-host --offline --locked --lib: 21 passed
+  cargo test -p finstack-ai-wit --offline --locked: 25 passed
+  kernel/runtime/SDK tree: no wasmtime, no finstack-ai-plugin-host
+  finstack-ai-wit tree: no wasmtime
+  mise run check-wasm / wasm graph: pass
+  (pre-existing EventBatch::new dead_code warning on isolated wasm check)
+
+No hosted pull request or merge, npm/pypi publish, tag, G5-D, or G6-D.
+Phase 7 exit stays 0/4. Feature branch is kept. No successor is started.
