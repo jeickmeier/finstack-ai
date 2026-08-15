@@ -8,6 +8,8 @@ Admitted on `codex/pr-058-remote-session-server` from local `main`
 | File | Owns |
 | --- | --- |
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
+| `candidate-validation.txt` | Local Darwin A01–A06 proofs at `4e984d1267da9a76483dc22127da4a7091b7086f` |
+| `security-review.txt` | TM-09 / TM-10 / TM-11 / TM-16 / TM-19 / TM-20 review at the same candidate |
 
 No G5 decision, G7 decision, hosted pull request, npm/pypi/crates.io
 publish, or tag is stored here. Phase 8 entrance is `Passed` (2/2)
