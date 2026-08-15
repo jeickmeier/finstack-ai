@@ -32,10 +32,11 @@ do not satisfy “external adopters.”
 
 ## RC identity
 
-The local unpublished `1.0.0` candidate is this branch
-(`codex/pr-066-1.0.0-ga`) from baseline
-`04962c743d2f03d59b74feb9c71f872cccfcc003`. Staged checksums, when
-recorded, live beside this file. They are not a published RC.
+The local unpublished `1.0.0` candidate is
+`3631a416b2e495e7749317bee44d54294c928d4f` on
+`codex/pr-066-1.0.0-ga` from baseline
+`04962c743d2f03d59b74feb9c71f872cccfcc003`. Staged checksums live
+beside this file. They are not a published RC.
 
 ## Soak window
 

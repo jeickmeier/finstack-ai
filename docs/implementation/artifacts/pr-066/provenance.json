@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "ga_tag_procedure": "documented in docs/implementation/release-engineering.md; not executed",
+  "kind": "pr-066 recreate",
+  "label": "1.0.0",
+  "mise_pins": {
+    "node": "22.18.0",
+    "python": "3.14",
+    "rust": "1.97.1",
+    "uv": "0.10.11"
+  },
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "source_date_epoch": "0",
+  "source_revision": "3631a416b2e495e7749317bee44d54294c928d4f",
+  "staged_not_published": true,
+  "version": "1.0.0"
+}

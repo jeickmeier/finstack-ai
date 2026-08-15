@@ -1,0 +1,48 @@
+PR-066-E-candidate-3d690c2b54f6
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 3631a416b2e495e7749317bee44d54294c928d4f
+Tree: eb48edff5b32c24690fbd76858888d21c57381a6
+Branch: codex/pr-066-1.0.0-ga
+Baseline: local main 04962c743d2f03d59b74feb9c71f872cccfcc003
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1; mise uv Python 3.14; Node 22
+Result: Pass for A02 and A03. A01 Pending (soak / §21.12 gap). A04 Pending.
+  No EX-*. No G8 inference. No tag. No registry publish.
+
+Commands:
+  cargo tree -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --locked
+  uv run --no-project python tools/wasm_package/check.py graph
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  mise run check-wit
+  cargo test -p finstack-ai-wit --offline --locked --lib -- experimental_surface_is_coarse_and_dual_major
+  cargo test -p finstack-ai-test --offline --locked --lib -- failure_names_port_contract_and_suite_version
+  cargo test -p finstack-ai-plugin-host --offline --locked -- published_failure_names_world_contract_and_suite_version
+  uv run --isolated --no-project --with-editable bindings/finstack-ai-python --with pytest -- pytest -q bindings/finstack-ai-python/tests/test_import.py
+  mise run recreate-release
+  mise run check
+
+Not run as a merge gate:
+  mise run ci / hosted multi-OS matrix
+  hosted nightly dispatch / Sigstore publication
+  git tag / registry publish / yank
+  cargo yank / npm deprecate
+
+Results:
+  cargo tree: finstack-ai / kernel / runtime v1.0.0
+  wasm graph: no Tokio, sockets, filesystem drivers, or kernel wasm-bindgen
+  clippy -D warnings: pass after unused CRATE_VERSION import removal
+  check-wit: pass (CRATE_VERSION 1.0.0)
+  experimental_surface_is_coarse_and_dual_major: 1 passed
+  failure_names_port_contract_and_suite_version: 1 passed (suite 1.0.0)
+  published_failure_names_world_contract_and_suite_version: 1 passed
+  test_import.py: 8 passed (__version__ == 1.0.0)
+  recreate-release: two-run SHA-256 identity at source_revision 3631a416b2e495e7749317bee44d54294c928d4f
+  mise run check: pass (fmt, Clippy, wasm Clippy, ruff, mypy, size)
+
+A01 pack written (READY FOR NAMED DECISION); item 12 soak gap remains
+A02 zero Open Critical/High; no Expired EX-*; no unreviewed API change
+A03 docs and starters install unpublished 1.0.0; 0.1.0 only as from-version
+A04 not claimed
+
+No G8-D. Lockstep crate/wheel/npm versions are unpublished 1.0.0.
+Canary label default is 1.0.0-canary. Nightly file not dispatched.
