@@ -33,16 +33,15 @@ Rows already marked `defer past preview` in
 - Process session vocabulary
 - IndexedDB durability
 - SharedArrayBuffer / cross-origin isolation
-- Named Criterion performance budgets (PR-063; admitted, not Done)
+- Named Criterion performance budgets (PR-063; Done at local merge `6ac1b5ae61b89b46195feab4f211ee10775579b3`)
 - Marketplace, PostgreSQL, exactly-once delivery
 
 ## Phase 9 themes
 
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
 via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is `Done` via
-`COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-063 is admitted and
-`In progress`. Do not infer PR-064+, `G8-D-*`, or a `1.0.0` cut
-from this file.
+`COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-063 is `Done`.
+Do not infer PR-064+, `G8-D-*`, or a `1.0.0` cut from this file.
 
 | Theme | Plan entry |
 | --- | --- |

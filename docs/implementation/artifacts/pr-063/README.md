@@ -22,6 +22,7 @@ from local `main` at `dd3557d8742805d003023f9fd8bf628672f3e33f`.
 | `SHA256SUMS` | Artifact digests |
 | `candidate-validation.txt` | Local Darwin A01–A04 proofs at `0a84c8196624bdc4eeff8ec229a304fe6d69866d` |
 | `security-review.txt` | TM-04 / queue-bound review |
+| `integration-validation.txt` | Local `main` merge `6ac1b5ae61b89b46195feab4f211ee10775579b3` |
 
 No G8 decision, hosted pull request, npm/pypi/crates.io publish,
 tag, or `1.0.0` cut is stored here. Phase 8 is `Done` and G7 is

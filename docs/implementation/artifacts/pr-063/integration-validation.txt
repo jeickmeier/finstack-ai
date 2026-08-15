@@ -1,0 +1,21 @@
+PR-063-E-integration-8254875cc81b
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Merge: 6ac1b5ae61b89b46195feab4f211ee10775579b3
+Tree: d1814e5aed0af888bdecb08e4e73c31cc7ed160f
+Equals evidence head tree: df7635813946fb3991cdce8e6ff5bc67d725a12b
+Branch: main (local merge of codex/pr-063-perf-memory-startup-budgets)
+Result: Pass. A01–A04 remain Passed. No G8 inference. No 1.0.0 cut.
+
+Commands on the merge tree:
+  cargo test -p finstack-ai --offline --locked --test nfr_perf_007
+  uv run --no-project python tools/perf/check_size_budgets.py
+  cargo tree -p finstack-ai-kernel --locked -e normal
+
+Results:
+  nfr_perf_007: 1 passed
+  size budgets: wheel optional / WASM / CLI PASS
+  merge tree equals df76358
+
+No hosted PR/merge, npm/pypi/crates.io publish, tag, or G8-D.
+Phase 9 exit stays 0/4. Do not start PR-064+.
