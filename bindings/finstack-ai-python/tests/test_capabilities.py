@@ -97,6 +97,7 @@ def test_all_activation_modes_share_rust_owned_trace_and_stable_prefix() -> None
             / "valid--pr012-capabilities.json"
         ).read_text()
     )
+
     def records_in_order(trace: list[str], expected: list[str]) -> bool:
         index = 0
         for kind in trace:

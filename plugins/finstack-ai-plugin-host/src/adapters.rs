@@ -22,9 +22,13 @@ use wasmtime::Store;
 
 use crate::bindings::context::ContextPlugin;
 use crate::bindings::toolset::ToolsetPlugin;
+use crate::bindings::v1::context::ContextPlugin as ContextPluginV1;
+use crate::bindings::v1::toolset::ToolsetPlugin as ToolsetPluginV1;
 use crate::convert::{
-    format_plugin_error, wasm_call_context, wasm_context_query, wit_context_item, wit_plugin_error,
-    wit_tool_catalog, wit_tool_result,
+    format_plugin_error, wasm_call_context, wasm_call_context_v1, wasm_context_query,
+    wasm_context_query_v1, wit_context_item, wit_context_item_v1, wit_plugin_error,
+    wit_plugin_error_v1, wit_tool_catalog, wit_tool_catalog_v1, wit_tool_result,
+    wit_tool_result_v1,
 };
 use crate::error::PluginHostError;
 use crate::host::{InstancePolicy, PluginHost, PluginWorld, ReadyWasm};
@@ -33,8 +37,17 @@ use crate::instantiate::{
 };
 use crate::limits::effective_limits;
 
-type LiveToolset = (Store<HostState>, ToolsetPlugin);
-type LiveContext = (Store<HostState>, ContextPlugin);
+/// Live exclusive or serialized toolset instance for one WIT major.
+pub(crate) enum LiveToolset {
+    V004(Store<HostState>, ToolsetPlugin),
+    V100(Store<HostState>, ToolsetPluginV1),
+}
+
+enum LiveContext {
+    V004(Store<HostState>, ContextPlugin),
+    V100(Store<HostState>, ContextPluginV1),
+}
+
 type SerializedToolset = Arc<Mutex<Option<LiveToolset>>>;
 type SerializedContext = Arc<Mutex<Option<LiveContext>>>;
 
@@ -470,36 +483,56 @@ async fn instantiate_toolset(
     host: &PluginHost,
     ready: &ReadyWasm,
     cancel: &finstack_ai_runtime::CancellationSignal,
-) -> Result<(Store<HostState>, ToolsetPlugin), PluginHostError> {
+) -> Result<LiveToolset, PluginHostError> {
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
         host.engine(),
         host_state_for(limits, &ready.granted, host.grant_resources())?,
         limits.fuel,
     )?;
-    let linker = host.linker_for_world(PluginWorld::Toolset, &ready.granted)?;
+    let linker = host.linker_for_world(
+        PluginWorld::Toolset,
+        &ready.manifest.version,
+        &ready.granted,
+    )?;
+    if ready.manifest.version == "1.0.0" {
+        let bindings = ToolsetPluginV1::instantiate_async(&mut store, ready.component(), &linker)
+            .await
+            .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
+        return Ok(LiveToolset::V100(store, bindings));
+    }
     let bindings = ToolsetPlugin::instantiate_async(&mut store, ready.component(), &linker)
         .await
         .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
-    Ok((store, bindings))
+    Ok(LiveToolset::V004(store, bindings))
 }
 
 async fn instantiate_context(
     host: &PluginHost,
     ready: &ReadyWasm,
     cancel: &finstack_ai_runtime::CancellationSignal,
-) -> Result<(Store<HostState>, ContextPlugin), PluginHostError> {
+) -> Result<LiveContext, PluginHostError> {
     let limits = effective_limits(&ready.manifest, host.default_limits());
     let mut store = new_store(
         host.engine(),
         host_state_for(limits, &ready.granted, host.grant_resources())?,
         limits.fuel,
     )?;
-    let linker = host.linker_for_world(PluginWorld::Context, &ready.granted)?;
+    let linker = host.linker_for_world(
+        PluginWorld::Context,
+        &ready.manifest.version,
+        &ready.granted,
+    )?;
+    if ready.manifest.version == "1.0.0" {
+        let bindings = ContextPluginV1::instantiate_async(&mut store, ready.component(), &linker)
+            .await
+            .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
+        return Ok(LiveContext::V100(store, bindings));
+    }
     let bindings = ContextPlugin::instantiate_async(&mut store, ready.component(), &linker)
         .await
         .map_err(|error| map_wasmtime_error(&error, cancel.is_cancelled()))?;
-    Ok((store, bindings))
+    Ok(LiveContext::V004(store, bindings))
 }
 
 fn map_guest_result<T, U>(
@@ -519,6 +552,111 @@ fn map_guest_result<T, U>(
     }
 }
 
+fn map_guest_result_v1<T, U>(
+    result: Result<
+        Result<T, crate::bindings::v1::toolset::finstack::ai_types::types::PluginError>,
+        wasmtime::Error,
+    >,
+    cancel: &finstack_ai_runtime::CancellationSignal,
+    ok: impl FnOnce(T) -> U,
+) -> Result<U, PluginHostError> {
+    match result {
+        Ok(Ok(value)) => Ok(ok(value)),
+        Ok(Err(error)) => Err(PluginHostError::Mapped(format_plugin_error(
+            &wit_plugin_error_v1(error),
+        ))),
+        Err(error) => Err(map_wasmtime_error(&error, cancel.is_cancelled())),
+    }
+}
+
+async fn list_tools_on(
+    live: &mut LiveToolset,
+    cancel: &finstack_ai_runtime::CancellationSignal,
+) -> Result<finstack_ai_wit::ToolCatalog, PluginHostError> {
+    match live {
+        LiveToolset::V004(store, bindings) => map_guest_result(
+            bindings
+                .finstack_ai_toolset_toolset()
+                .call_list_tools(store)
+                .await,
+            cancel,
+            wit_tool_catalog,
+        ),
+        LiveToolset::V100(store, bindings) => map_guest_result_v1(
+            bindings
+                .finstack_ai_toolset_toolset()
+                .call_list_tools(store)
+                .await,
+            cancel,
+            wit_tool_catalog_v1,
+        ),
+    }
+}
+
+async fn call_tool_on(
+    live: &mut LiveToolset,
+    cancel: &finstack_ai_runtime::CancellationSignal,
+    context: &finstack_ai_wit::CallContext,
+    tool_id: &str,
+    args: &[u8],
+) -> Result<finstack_ai_wit::ToolResult, PluginHostError> {
+    match live {
+        LiveToolset::V004(store, bindings) => {
+            let wasm_ctx = wasm_call_context(context);
+            map_guest_result(
+                bindings
+                    .finstack_ai_toolset_toolset()
+                    .call_call(store, &wasm_ctx, tool_id, args)
+                    .await,
+                cancel,
+                wit_tool_result,
+            )
+        }
+        LiveToolset::V100(store, bindings) => {
+            let wasm_ctx = wasm_call_context_v1(context);
+            map_guest_result_v1(
+                bindings
+                    .finstack_ai_toolset_toolset()
+                    .call_call(store, &wasm_ctx, tool_id, args)
+                    .await,
+                cancel,
+                wit_tool_result_v1,
+            )
+        }
+    }
+}
+
+async fn collect_items_on(
+    live: &mut LiveContext,
+    cancel: &finstack_ai_runtime::CancellationSignal,
+    query: &finstack_ai_wit::ContextQuery,
+) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
+    match live {
+        LiveContext::V004(store, bindings) => {
+            let wasm_query = wasm_context_query(query);
+            map_guest_result(
+                bindings
+                    .finstack_ai_context_context_provider()
+                    .call_collect(store, &wasm_query)
+                    .await,
+                cancel,
+                |items| items.into_iter().map(wit_context_item).collect(),
+            )
+        }
+        LiveContext::V100(store, bindings) => {
+            let wasm_query = wasm_context_query_v1(query);
+            map_guest_result_v1(
+                bindings
+                    .finstack_ai_context_context_provider()
+                    .call_collect(store, &wasm_query)
+                    .await,
+                cancel,
+                |items| items.into_iter().map(wit_context_item_v1).collect(),
+            )
+        }
+    }
+}
+
 async fn list_tools(
     host: &PluginHost,
     ready: &ReadyWasm,
@@ -533,15 +671,8 @@ async fn list_tools(
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(host.engine(), cancel, deadline, async {
-                let (mut store, bindings) = instantiate_toolset(host, ready, cancel).await?;
-                map_guest_result(
-                    bindings
-                        .finstack_ai_toolset_toolset()
-                        .call_list_tools(&mut store)
-                        .await,
-                    cancel,
-                    wit_tool_catalog,
-                )
+                let mut live = instantiate_toolset(host, ready, cancel).await?;
+                list_tools_on(&mut live, cancel).await
             })
             .await
         }
@@ -553,15 +684,7 @@ async fn list_tools(
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
-                let (store, bindings) = slot.as_mut().expect("serialized slot");
-                map_guest_result(
-                    bindings
-                        .finstack_ai_toolset_toolset()
-                        .call_list_tools(store)
-                        .await,
-                    cancel,
-                    wit_tool_catalog,
-                )
+                list_tools_on(slot.as_mut().expect("serialized slot"), cancel).await
             })
             .await
         }
@@ -580,22 +703,14 @@ async fn call_tool(
     tool_id: &str,
     args: &[u8],
 ) -> Result<finstack_ai_wit::ToolResult, PluginHostError> {
-    let wasm_ctx = wasm_call_context(context);
     match host.instance_policy() {
         InstancePolicy::Exclusive => {
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(host.engine(), cancel, deadline, async {
-                let (mut store, bindings) = instantiate_toolset(host, ready, cancel).await?;
-                map_guest_result(
-                    bindings
-                        .finstack_ai_toolset_toolset()
-                        .call_call(&mut store, &wasm_ctx, tool_id, args)
-                        .await,
-                    cancel,
-                    wit_tool_result,
-                )
+                let mut live = instantiate_toolset(host, ready, cancel).await?;
+                call_tool_on(&mut live, cancel, context, tool_id, args).await
             })
             .await
         }
@@ -607,15 +722,14 @@ async fn call_tool(
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
-                let (store, bindings) = slot.as_mut().expect("serialized slot");
-                map_guest_result(
-                    bindings
-                        .finstack_ai_toolset_toolset()
-                        .call_call(store, &wasm_ctx, tool_id, args)
-                        .await,
+                call_tool_on(
+                    slot.as_mut().expect("serialized slot"),
                     cancel,
-                    wit_tool_result,
+                    context,
+                    tool_id,
+                    args,
                 )
+                .await
             })
             .await
         }
@@ -631,22 +745,14 @@ async fn collect_items(
     deadline: Option<Timestamp>,
     query: &finstack_ai_wit::ContextQuery,
 ) -> Result<Vec<finstack_ai_wit::generated::ContextItem>, PluginHostError> {
-    let wasm_query = wasm_context_query(query);
     match host.instance_policy() {
         InstancePolicy::Exclusive => {
             let _permit = exclusive
                 .try_acquire()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(host.engine(), cancel, deadline, async {
-                let (mut store, bindings) = instantiate_context(host, ready, cancel).await?;
-                map_guest_result(
-                    bindings
-                        .finstack_ai_context_context_provider()
-                        .call_collect(&mut store, &wasm_query)
-                        .await,
-                    cancel,
-                    |items| items.into_iter().map(wit_context_item).collect(),
-                )
+                let mut live = instantiate_context(host, ready, cancel).await?;
+                collect_items_on(&mut live, cancel, query).await
             })
             .await
         }
@@ -658,15 +764,7 @@ async fn collect_items(
                 if slot.is_none() {
                     *slot = Some(instantiate_context(host, ready, cancel).await?);
                 }
-                let (store, bindings) = slot.as_mut().expect("serialized slot");
-                map_guest_result(
-                    bindings
-                        .finstack_ai_context_context_provider()
-                        .call_collect(store, &wasm_query)
-                        .await,
-                    cancel,
-                    |items| items.into_iter().map(wit_context_item).collect(),
-                )
+                collect_items_on(slot.as_mut().expect("serialized slot"), cancel, query).await
             })
             .await
         }

@@ -36,6 +36,8 @@ components. Retarget a guest project as follows:
    `fixtures/compatibility/wit/v0.0.4/`. New `@1.0.0` fixtures live under
    `fixtures/compatibility/wit/v1.0.0/`.
 
-A host that still lists `@0.0.4` continues to load existing `@0.0.4`
-components. Silent semantic discard of unknown authorization,
-idempotency, or catalog fields is prohibited. See ADR-035.
+The isolated host links both majors. Existing `@0.0.4` components keep
+loading when the manifest stays `0.0.4`. A rebuilt `@1.0.0` component
+is required before a `1.0.0` manifest can instantiate. Silent semantic
+discard of unknown authorization, idempotency, or catalog fields is
+prohibited. See ADR-035.

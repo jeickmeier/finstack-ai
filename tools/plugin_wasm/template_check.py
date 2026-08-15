@@ -23,7 +23,9 @@ def run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> Non
 
 
 def build_template(src: Path, dest: Path, crate: str) -> Path:
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("target", "component.wasm"))
+    shutil.copytree(
+        src, dest, ignore=shutil.ignore_patterns("target", "component.wasm")
+    )
     cargo = dest / "Cargo.toml"
     text = cargo.read_text(encoding="utf-8")
     cargo.write_text(

@@ -22,7 +22,13 @@ DESTINATIONS = (
     REPO_ROOT / "plugins" / "reference" / "calculator" / "wit",
     REPO_ROOT / "plugins" / "reference" / "filesystem-sandbox" / "wit",
     REPO_ROOT / "plugins" / "reference" / "context-provider" / "wit",
-    REPO_ROOT / "plugins" / "finstack-ai-plugin-host" / "fixtures" / "guests" / "echo-toolset" / "wit",
+    REPO_ROOT
+    / "plugins"
+    / "finstack-ai-plugin-host"
+    / "fixtures"
+    / "guests"
+    / "echo-toolset"
+    / "wit",
 )
 RESOLVE_WIT = """package finstack:guest-sdk-bindgen@0.0.4;
 
@@ -91,7 +97,9 @@ def check_packages(dest: Path) -> None:
             raise SystemExit(f"missing vendored WIT: {copied}")
         if copied.read_bytes() != source.read_bytes():
             raise SystemExit(f"WIT drift: {copied}")
-    expected = SANDBOX_RESOLVE if dest.parent.name == "filesystem-sandbox" else RESOLVE_WIT
+    expected = (
+        SANDBOX_RESOLVE if dest.parent.name == "filesystem-sandbox" else RESOLVE_WIT
+    )
     resolve = dest / "resolve.wit"
     if not resolve.is_file():
         raise SystemExit(f"missing resolve.wit: {resolve}")
