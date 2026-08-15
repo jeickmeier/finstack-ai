@@ -1,0 +1,35 @@
+PR-054-E-integration-81eb369c8f5a
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Merge: 81eb369c8f5ad1371c026c0f970f1dd39496ac09
+Parents: 5613c28408af692738cbf494d1e8ecd2c1cd947a
+         6cd4d00f32de6737a5b83d477c9e8d4933f2aaf1
+Implementation candidate: 93ba5281691748eb49ac624beb94415718e94ed4
+Result: Pass
+
+Local `main` merge of `codex/pr-054-plugin-discovery-alpha`.
+Merge trees matched (`830488fe9771016414956fd397dfc98246993f74`).
+A01–A04 remain bound to the implementation candidate.
+TM-08/TM-07/TM-06 review remains bound to the same candidate.
+
+Re-verified on the merge tip:
+  mise run check-wit: clean
+  mise run check-guest-sdk: clean
+  mise run check-plugin-lock: clean
+  mise run check-plugin-template: 1 passed (template echo returns {"text":"from-template"})
+  mise run check-plugin-wasm: clean; no rustc size-delta refresh
+  cargo test -p finstack-ai-guest-sdk --offline --locked: 6 passed
+  cargo test -p finstack-ai-plugin-host --offline --locked --lib: 71 passed, 1 ignored
+  cargo test -p finstack-ai-wit --offline --locked --lib: 26 passed
+  default / minimal / wit / native-examples trees: no wasmtime, no wasmtime-wasi, no plugin-host, no guest-sdk
+  guest-sdk tree: no wasmtime, no plugin-host, no finstack-ai-wit, no kernel, no runtime, no tokio, no libloading
+  plugin-host tree: wasmtime 47.0.3; wasmtime-wasi 47.0.3; no libloading; no guest-sdk
+  plugin-host direct deps: no reqwest, ureq, hyper, or libloading
+
+A first plugin-host lib run overlapped `check-plugin-template` compile and
+hit the 5s default call timeout on 11 tests. The isolated re-run on the
+same merge tip passed 71/1 ignored. That overlap is not a product failure.
+
+No hosted pull request or merge, npm/pypi/crates.io publish, tag, G5-D, or G6-D.
+Phase 7 exit is recorded in phase7-exit-closeout.txt. Feature branch is kept.
+No successor is started.
