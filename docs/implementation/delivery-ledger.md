@@ -111,7 +111,7 @@ Baseline: local `main` at `002b615bf75c194b7d00acd6be2a036bfd614482`. Plan basel
 
 Forbidden unless a later sentence names them: hosted PR/merge, npm/pypi/crates.io publish, G8 inference. Do not write `G8-D-*`. Do not start PR-062+.
 
-Owner instruction 2026-08-15 named option 3: `git tag v0.1.0` / publish. Tag and GitHub release are in this cut. crates.io / PyPI / npm remain blocked: no `CARGO_REGISTRY_TOKEN`, `UV_PUBLISH_TOKEN` / `PYPI_TOKEN`, or `NPM_TOKEN` on this machine, and `npm whoami` is unauthenticated.
+Owner instruction 2026-08-15 named option 3: `git tag v0.1.0` / publish. Tag `v0.1.0` is `9d09b87108f6286918fcc436c53d195d0b6b10cc` (annotated object `b5ce06cbd03e74749b3615e5a6f7ac7a0e938926`). GitHub prerelease: https://github.com/jeickmeier/finstack-ai/releases/tag/v0.1.0 (`PREVIEW-E-tag-v010-75d652aef495`). crates.io / PyPI / npm remain blocked: no `CARGO_REGISTRY_TOKEN`, `UV_PUBLISH_TOKEN` / `PYPI_TOKEN`, or `NPM_TOKEN` on this machine, and `npm whoami` is unauthenticated. `origin/main` was not fast-forwarded.
 
 Phase 9 entrance remains unsatisfied (`0/2`). A first-party preview-feedback review exists at [`preview-feedback-review.md`](preview-feedback-review.md) (`PREVIEW-E-first-party-feedback-c706126bcc26`). Tag `v0.1.0` does not by itself satisfy “used by external adopters.” Next eligible action is named external-adopter evidence, owner registry credentials for crates.io / PyPI / npm, or a versioned planning amendment; not an inferred PR-062 start.
 
