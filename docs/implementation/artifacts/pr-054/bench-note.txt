@@ -1,0 +1,17 @@
+PR-054 plugin-host Criterion note
+Date: 2026-08-14
+Candidate: 93ba5281691748eb49ac624beb94415718e94ed4
+
+Command (warning-only, not a merge gate):
+  cargo bench -p finstack-ai-plugin-host --bench plugin_host
+
+Groups in plugins/finstack-ai-plugin-host/benches/plugin_host.rs:
+  plugin_host_echo_compile_cache_miss_then_hit
+  plugin_host_echo_call
+  plugin_host_calculator_add_1_2_3
+
+Benches compile under
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+They are not PR-063 and have no named budget. Criterion noise is
+not treated as a merge gate. The bench command was not executed
+as required evidence.

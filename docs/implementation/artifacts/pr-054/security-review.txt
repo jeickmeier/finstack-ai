@@ -1,0 +1,88 @@
+PR-054 TM-08 / TM-07 / TM-06 / Threat Model section 18 security review
+Date: 2026-08-14
+Candidate: 93ba5281691748eb49ac624beb94415718e94ed4
+Reviewer: me@jeickmeier.com
+Decision: Pass for lockfile-driven local discovery and published
+hostile conformance on the isolated Wasmtime (T3) path. No
+threat-model rewrite. No Implementation Plan §6.3 ADR trigger.
+G5 and G6 are not inferred.
+
+Scope reviewed:
+  resolve_lockfile / load_locked / load_enabled
+  Path sanitizer: empty, NUL, .., absolute, ://, URL scheme
+  Duplicate identity including disabled twins
+  component_digest(bytes) vs lock component_digest
+  parsed PluginManifest.digest vs lock manifest_digest
+  tools/plugin_lock/lock.py: stdlib only; no cargo; no sockets
+  Default grants remain {logging, blobs}; signature Permissive
+  Default StoreLimits / DEFAULT_INSTANCES unchanged
+  ALLOWED_WORLDS remain toolset-plugin / context-plugin
+  Filesystem-sandbox stays enabled:false in the checked-in lock
+  Conformance rows: timeout, malformed manifest, permission
+  denial, ungranted WASI, trap, fuel, unsigned/untrusted,
+  cancellation, large payload before allocation, ABI mismatch,
+  lockfile duplicate/substitution/URL, disabled not loaded,
+  cache ABI field
+  Graph: host has wasmtime 47.0.3 + wasmtime-wasi 47.0.3; no
+  libloading; no guest-sdk; no direct reqwest/ureq/hyper
+  Default SDK / kernel / runtime / wit / native-examples still
+  have no plugin-host / guest-sdk / wasmtime
+  ADR-011: no native dylib loader
+  ADR-035: packages stay @0.0.4; crate version staged 0.0.4;
+  @1.0.0 generation remains blocked
+
+Triggered controls: TM-08 primary (lockfile resolution,
+bytes↔digest binding, duplicate identity, substitution /
+downgrade), TM-07 (published hostile suite completion), TM-06
+labels, SEC-INV-006 / 007 / 011 / 012, ADR-010, ADR-011,
+ADR-035.
+
+PASS  TM-08 / lockfile binding
+      Runtime startup reads one local JSON lockfile. It does not
+      walk a plugin directory and does not fetch. A path with
+      ://, a scheme, or .. is plugin_lock_invalid. Duplicate
+      identity fails at resolve even when one entry is disabled.
+      load_locked of a disabled entry is plugin_lock_disabled.
+      Component SHA-256 or parsed manifest.digest mismatch is
+      plugin_lock_digest_mismatch. The installer copies
+      manifest.digest and hashes component bytes; it does not
+      import the host or open a network socket. ResolvedAgentLock
+      is not reused.
+
+PASS  TM-07 / hostile suite
+      conformance_tests.rs names every G6 row. Lifecycle timeout,
+      malformed manifest, permission denial, ungranted WASI,
+      trap, fuel, unsigned/untrusted signature, cancellation,
+      oversized args-json before guest allocation, calculator
+      loaded as context-plugin, lockfile duplicate/substitution/
+      URL, disabled sandbox absent from load_enabled, and cache
+      ABI miss are all present. No new WASI grant or wasi:http
+      linking was added to write these rows.
+
+PASS  TM-06 / trust labels
+      PluginHost remains isolated Wasmtime (T3). In-process
+      finstack-ai-wit adapters remain host-authority. Published
+      references stay T3 guests, not the trusted native
+      calculator or filesystem batteries. WASM alone is not
+      complete application-level safety.
+      ExtensionDescriptor still uses trusted_in_process;
+      isolation is a property of PluginHost.
+
+PASS  ADR-010 / optional isolation
+      Wasmtime stays in the plugins/ host leaf. Default bundles
+      do not depend on it. load_enabled is the discovery surface.
+
+PASS  ADR-011 / no native dylib ABI
+      No dylib loader, libloading, or native plugin path was added.
+
+PASS  ADR-035 / experimental 0.x
+      Packages stay @0.0.4. Workspace crate version is staged
+      unpublished 0.0.4. @1.0.0 generation remains blocked.
+      G6 owns Implemented.
+
+Residual already recorded:
+  Named G6-D-*, checkpoint cut, publish, and tag remain owner
+  decisions. This review does not claim that WASM alone is
+  complete application-level safety. Host grant math and default
+  resource-limit numbers are unchanged. Filesystem-sandbox still
+  requires an explicit host filesystem grant and preopen.
