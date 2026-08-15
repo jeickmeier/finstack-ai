@@ -2,15 +2,20 @@
 
 Documentation, in-tree starters, implemented-control threat-model
 review, and local security/release rehearsal.
-Not admitted.
+Admitted on `codex/pr-060-docs-security-release-artifacts` from local
+`main` closeout `30299597972206f3d350be058dfef827a161c244`.
 
 | File | Owns |
 | --- | --- |
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
+| `candidate-validation.txt` | Local Darwin A01–A06 proofs at `5c76ef0c671f7e03dfd2a67c9f8ed78fe51a145e` |
+| `security-review.txt` | TM-18 / TM-04 / TM-06 review at the same candidate |
+| `walkthrough-rust-minimal.md` | Owner fresh-user walkthrough |
+| `walkthrough-python-rust-backed.md` | Owner fresh-user walkthrough |
+| `rehearsal/` | Two-run comparable checksums and provenance |
 
-No G5 decision, G7 decision, hosted pull request, npm/pypi/crates.io
-publish, tag, or `0.1.0` cut is stored here. Phase 8 entrance is
-`Passed` (2/2) and is not re-recorded by this planning file. PR-055
-is `In progress` and PR-056–PR-059 are still `Todo`; they must be
-`Done` before this PR is admitted. The
-closed PR-054 envelope is not reused. Do not start PR-061+.
+Phase 8 entrance is `Passed` (2/2) and is not re-recorded here.
+PR-055–PR-059 are `Done`. G7 is not recorded. No hosted pull
+request, npm/pypi/crates.io publish, tag, or `0.1.0` cut is stored
+here. Do not start PR-061 until this PR is `Done`. Do not start
+PR-062+; Phase 9 entrance and G7 remain unsatisfied.

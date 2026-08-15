@@ -180,6 +180,34 @@ npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromiu
 npm --prefix bindings/finstack-ai-wasm/js exec -- playwright test src/benchmark.test.ts --project=chromium
 """
 
+[tasks.docs-links]
+description = "Check relative markdown links on the public docs set"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/links.py
+"""
+
+[tasks.docs-quickstarts]
+description = "Execute offline public-package quick starts"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/quickstarts.py
+"""
+
+[tasks.docs-license]
+description = "Sweep public package license metadata for MIT OR Apache-2.0"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/license_sweep.py
+"""
+
+[tasks.release-rehearsal]
+description = "Two-run local staging checksum identity (unpublished 0.0.4)"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/rehearse_release.py
+"""
+
 [tasks.ci]
 description = "Run every required check"
 run = """

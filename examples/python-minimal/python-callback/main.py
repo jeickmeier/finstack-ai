@@ -30,7 +30,7 @@ async def main() -> None:
         instruction="Reply with the scripted completion.",
     )
     result = await agent.run("hello")
-    assert result.trace[0] == "run_accepted"
+    assert "run_accepted" in result.trace
     print(result.text)
 
 

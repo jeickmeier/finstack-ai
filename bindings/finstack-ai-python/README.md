@@ -12,6 +12,16 @@ PR-032 completes the Python alpha candidate with shared golden traces,
 declarative capability activation, starter projects, API/migration references,
 and staged checksums/SBOM/keyless signatures.
 
+## Quick start
+
+```bash
+uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
+  python examples/python-minimal/python-callback/main.py
+```
+
+See [docs/site/python.md](../../docs/site/python.md). Callbacks are
+[T2](../../docs/site/security-trust-levels.md) and are not isolated.
+
 ```bash
 mise run test
 ```
@@ -114,6 +124,9 @@ registration with the exact keyword and JSON pointer. Call
 annotations have intentionally changed.
 
 See the repository [README](../../README.md) for project bootstrap and documentation routing. License texts are centralized under [`../../licenses/`](../../licenses/).
+[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
+[ADRs](../../docs/implementation/adr-register.md).
+[RFCs](../../docs/rfcs/README.md).
 
 The complete alpha surface is summarized in the
 [API reference](docs/api-reference.md), with

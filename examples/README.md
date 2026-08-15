@@ -1,13 +1,17 @@
 # Examples
 
-Public-API examples for finstack-ai bindings.
+Public-API examples for finstack-ai bindings. Workspace version is
+**0.0.4 unpublished**. Trust labels:
+[docs/site/security-trust-levels.md](../docs/site/security-trust-levels.md).
 
+- [`rust-minimal/`](rust-minimal/) — T1 native binaries (`minimal`, `coding`,
+  `service`, `diagnostic`).
+- [`python-minimal/`](python-minimal/) — rust-backed (T1), callback (T2),
+  and service (T2) starters pinned to `finstack-ai==0.0.4`.
 - [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
-  inspect demo. Persistence is not crash-durable and is labeled experimental
-  until PR-048. The Dedicated Worker topology is the production default.
+  inspect demo (T2 host / T5 content). Not crash-durable.
 - [`ts-alpha-install/`](ts-alpha-install/) — clean TypeScript consumer that
-  typechecks against a staged `@finstack/ai` tarball. No repository path
-  mapping and no embedded provider credentials.
+  typechecks against a staged `@finstack/ai` tarball.
 - [`durable-interaction/`](durable-interaction/) — typed interaction that
   survives a simulated worker restart on a SQLite journal via the local
   workflow driver. Not a default dependency of `finstack-ai-native-examples`.
