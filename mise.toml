@@ -92,6 +92,20 @@ set -euo pipefail
 uv run --no-project python tools/plugin_wasm/template_check.py
 """
 
+[tasks.gen-plugin-lock]
+description = "Write plugins/reference/plugin.lock.json from local component directories"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_lock/lock.py
+"""
+
+[tasks.check-plugin-lock]
+description = "Fail when the checked-in plugin lockfile drifts"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_lock/lock.py --check
+"""
+
 [tasks.check-wasm]
 description = "Type-check the wasm-host graph and reject Tokio in browser builds"
 run = """

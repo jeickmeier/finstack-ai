@@ -3,6 +3,7 @@
 Guests pin manifest `version` `0.0.4` and worlds `toolset-plugin` or
 `context-plugin`. The host is exact-world: an unknown world or a
 `@1.0.0` package version fails closed as `plugin_registration_invalid`.
+Runtime discovery is lockfile-only; the host does not search a registry.
 
 Linking `finstack:ai-host` logging and blobs is not ambient WASI,
 filesystem, network, clock, environment, or secret access.

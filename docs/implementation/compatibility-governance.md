@@ -20,6 +20,7 @@ Planning docs under `docs/planning/` remain authoritative.
 | WIT packages | Runtime/security owner (`me@jeickmeier.com`) | Security reviewer | `plugins/finstack-ai-wit/wit/v0.0.4/` | Experimental @0.x until framework 1.0; worlds are exact | Exact compiled worlds; no unknown fields | `fixtures/compatibility/wit/v0.0.4/` |
 | Golden traces / scripted inputs | Core/runtime lead (`me@jeickmeier.com`) | Bindings lead | `schemas/golden-trace/` | Candidate-v1 fixture language for conformance; opaque expected state/result/hash until Phase 1 | Reject unknown fields; reject oversized payload declarations against TDD §6.5 ceilings | `fixtures/compatibility/golden-trace/`; `cargo test -p finstack-ai-test`; `mise run conformance` |
 | Benchmark report metadata | Core/runtime lead (`me@jeickmeier.com`) | Release/CI owner | `schemas/benchmark-report/` | Candidate-v1 machine-readable Criterion metadata | Reject unknown fields; array/object bounds enforced | `fixtures/compatibility/benchmark-report/`; `mise run benchmark` / `benchmark-smoke` |
+| Plugin lockfile | Runtime/security owner (`me@jeickmeier.com`) | Security reviewer | `schemas/plugin-lock/` | Experimental 0.x local lock; no registry fetch | Reject unknown fields; relative local paths only | `fixtures/compatibility/plugin-lock/v1/`; `mise run check-plugin-lock` |
 
 Machine-readable registry: [`schemas/schema-families.toml`](../../schemas/schema-families.toml).
 

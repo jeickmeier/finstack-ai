@@ -17,6 +17,16 @@ pub const PLUGIN_PERMISSION_DENIED: &str = "plugin_permission_denied";
 pub const PLUGIN_RESOURCE_LIMIT: &str = "plugin_resource_limit";
 /// Unsigned or untrusted package under the configured signature policy.
 pub const PLUGIN_SIGNATURE_UNTRUSTED: &str = "plugin_signature_untrusted";
+/// Lockfile JSON, version, or path is invalid.
+pub const PLUGIN_LOCK_INVALID: &str = "plugin_lock_invalid";
+/// Two lockfile entries share an identity.
+pub const PLUGIN_LOCK_DUPLICATE: &str = "plugin_lock_duplicate";
+/// A disabled lock entry was asked to load.
+pub const PLUGIN_LOCK_DISABLED: &str = "plugin_lock_disabled";
+/// Component bytes or parsed manifest digest do not match the lock.
+pub const PLUGIN_LOCK_DIGEST_MISMATCH: &str = "plugin_lock_digest_mismatch";
+/// Lockfile, component, or manifest path is missing.
+pub const PLUGIN_LOCK_NOT_FOUND: &str = "plugin_lock_not_found";
 
 /// Fail-closed error for the isolated Wasmtime host.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -51,6 +61,21 @@ pub enum PluginHostError {
     /// Manifest, catalog, or payload mapping failed.
     #[error("{0}")]
     Mapped(String),
+    /// Lockfile JSON, version, or path failed closed.
+    #[error("plugin_lock_invalid: {0}")]
+    LockInvalid(String),
+    /// Duplicate identity in one lockfile.
+    #[error("plugin_lock_duplicate")]
+    LockDuplicate,
+    /// Caller asked to load a disabled lock entry.
+    #[error("plugin_lock_disabled")]
+    LockDisabled,
+    /// Component or manifest digest did not match the lock pin.
+    #[error("plugin_lock_digest_mismatch: {0}")]
+    LockDigestMismatch(String),
+    /// Lockfile or a locked path was missing.
+    #[error("plugin_lock_not_found")]
+    LockNotFound,
 }
 
 impl PluginHostError {
@@ -68,6 +93,11 @@ impl PluginHostError {
             Self::SignatureUntrusted(_) => PLUGIN_SIGNATURE_UNTRUSTED,
             Self::ConfigInvalid(_) => "plugin_registration_invalid",
             Self::Mapped(message) => mapped_code(message),
+            Self::LockInvalid(_) => PLUGIN_LOCK_INVALID,
+            Self::LockDuplicate => PLUGIN_LOCK_DUPLICATE,
+            Self::LockDisabled => PLUGIN_LOCK_DISABLED,
+            Self::LockDigestMismatch(_) => PLUGIN_LOCK_DIGEST_MISMATCH,
+            Self::LockNotFound => PLUGIN_LOCK_NOT_FOUND,
         }
     }
 
@@ -111,8 +141,9 @@ fn is_stable_code(code: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT, PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP,
-        PluginHostError,
+        PLUGIN_LOCK_DIGEST_MISMATCH, PLUGIN_LOCK_DISABLED, PLUGIN_LOCK_DUPLICATE,
+        PLUGIN_LOCK_INVALID, PLUGIN_LOCK_NOT_FOUND, PLUGIN_PERMISSION_DENIED,
+        PLUGIN_RESOURCE_LIMIT, PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP, PluginHostError,
     };
 
     #[test]
@@ -146,5 +177,16 @@ mod tests {
             PluginHostError::Mapped("plugin_catalog_digest_mismatch".into()).code(),
             "plugin_catalog_digest_mismatch"
         );
+        assert_eq!(
+            PluginHostError::LockInvalid("scheme".into()).code(),
+            PLUGIN_LOCK_INVALID
+        );
+        assert_eq!(PluginHostError::LockDuplicate.code(), PLUGIN_LOCK_DUPLICATE);
+        assert_eq!(PluginHostError::LockDisabled.code(), PLUGIN_LOCK_DISABLED);
+        assert_eq!(
+            PluginHostError::LockDigestMismatch("component".into()).code(),
+            PLUGIN_LOCK_DIGEST_MISMATCH
+        );
+        assert_eq!(PluginHostError::LockNotFound.code(), PLUGIN_LOCK_NOT_FOUND);
     }
 }

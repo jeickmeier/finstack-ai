@@ -1,9 +1,11 @@
 //! Isolated Wasmtime engine, host configuration, and compiled-component load.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
-use finstack_ai_wit::{PluginManifest, validate_manifest};
+use finstack_ai_wit::{PluginManifest, parse_manifest, validate_manifest};
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine};
 
@@ -20,6 +22,7 @@ use crate::grants::{
 };
 use crate::instantiate::HostState;
 use crate::limits::EffectiveLimits;
+use crate::lockfile::{LockedPlugin, resolve_lockfile, world_from_manifest};
 use crate::signature::{SignaturePolicy, verify_manifest};
 
 /// Per-call instance/store policy. Worlds do not declare safe reuse, so this
@@ -369,6 +372,59 @@ impl PluginHost {
         })
     }
 
+    /// Load one enabled lock entry after verifying bytes and manifest pins.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginHostError::LockDisabled`] when `entry.enabled` is
+    /// false, [`PluginHostError::LockDigestMismatch`] when component bytes
+    /// or the parsed manifest digest disagree with the lock, and the usual
+    /// [`Self::load`] failures after those checks.
+    pub fn load_locked(&self, entry: &LockedPlugin) -> Result<ReadyWasm, PluginHostError> {
+        if !entry.enabled {
+            return Err(PluginHostError::LockDisabled);
+        }
+        let bytes = read_locked_file(&entry.component_path)?;
+        if component_digest(&bytes) != entry.component_digest {
+            return Err(PluginHostError::LockDigestMismatch("component".into()));
+        }
+        let manifest_bytes = read_locked_file(&entry.manifest_path)?;
+        let manifest =
+            parse_manifest(&manifest_bytes).map_err(|error| PluginHostError::from_map(&error))?;
+        validate_manifest(&manifest).map_err(|error| PluginHostError::from_map(&error))?;
+        if manifest.digest != entry.manifest_digest {
+            return Err(PluginHostError::LockDigestMismatch("manifest".into()));
+        }
+        if manifest.identity.as_str() != entry.identity {
+            return Err(PluginHostError::LockInvalid(
+                "identity does not match manifest".into(),
+            ));
+        }
+        if manifest.version != entry.version {
+            return Err(PluginHostError::LockInvalid(
+                "version does not match manifest".into(),
+            ));
+        }
+        let world = world_from_manifest(&manifest)?;
+        self.load(&bytes, manifest, world)
+    }
+
+    /// Resolve one local lockfile and load every enabled entry in order.
+    /// Extra `component.wasm` files beside the lock are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns lockfile parse errors from [`resolve_lockfile`] or a
+    /// [`Self::load_locked`] failure for an enabled entry.
+    pub fn load_enabled(&self, lockfile: &Path) -> Result<Vec<ReadyWasm>, PluginHostError> {
+        let resolved = resolve_lockfile(lockfile)?;
+        let mut loaded = Vec::new();
+        for entry in resolved.enabled() {
+            loaded.push(self.load_locked(entry)?);
+        }
+        Ok(loaded)
+    }
+
     /// Compile `bytes` through the cache using an explicit key, for A02 tests.
     ///
     /// # Errors
@@ -436,6 +492,16 @@ fn deserialize_component(engine: &Engine, bytes: &[u8]) -> Result<Component, Plu
     // engine, stored under a host-owned digest/engine/target/ABI key.
     unsafe { Component::deserialize(engine, bytes) }
         .map_err(|error| PluginHostError::CompileFailed(format!("deserialize: {error}")))
+}
+
+fn read_locked_file(path: &Path) -> Result<Vec<u8>, PluginHostError> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) if error.kind() == ErrorKind::NotFound => Err(PluginHostError::LockNotFound),
+        Err(error) => Err(PluginHostError::LockInvalid(format!(
+            "locked path could not be read: {error}"
+        ))),
+    }
 }
 
 fn require_world(manifest: &PluginManifest, world: &str) -> Result<(), PluginHostError> {

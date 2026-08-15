@@ -1,6 +1,7 @@
 //! Calculator, context-provider, filesystem-sandbox, and template-run proofs.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use finstack_ai::ComponentConstructionContext;
@@ -24,14 +25,20 @@ use finstack_ai_wit::{
 use futures_util::StreamExt;
 
 use crate::adapters::{WasmContextAdapter, WasmToolsetAdapter};
+use crate::cache::component_digest;
 use crate::grants::FilesystemPreopen;
-use crate::host::{InstancePolicy, PluginHost, PluginHostConfig};
+use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
+use crate::lockfile::LockedPlugin;
 
 const EXPERIMENTAL: Version = Version {
     major: 0,
     minor: 0,
     patch: 4,
 };
+
+fn reference_lock() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference/plugin.lock.json")
+}
 
 fn published_wasm(name: &str) -> Vec<u8> {
     let path = format!(
@@ -233,6 +240,36 @@ async fn assemble(
         .await
 }
 
+#[test]
+fn on_disk_reference_manifests_use_host_digests() {
+    for (name, identity, worlds) in [
+        (
+            "calculator",
+            "finstack.plugin.calculator",
+            vec!["toolset-plugin".to_owned()],
+        ),
+        (
+            "context-provider",
+            "finstack.plugin.reference.context",
+            vec!["context-plugin".to_owned()],
+        ),
+        (
+            "filesystem-sandbox",
+            "finstack.plugin.filesystem.sandbox",
+            vec!["toolset-plugin".to_owned()],
+        ),
+    ] {
+        let path = format!(
+            "{}/../reference/{name}/plugin.manifest.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let manifest = parse_manifest(&std::fs::read(&path).expect("read")).expect("parse");
+        let expected = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        assert_eq!(manifest.digest, expected, "{name}");
+        assert_eq!(manifest.identity.as_str(), identity);
+    }
+}
+
 async fn calculator_adapter() -> WasmToolsetAdapter {
     WasmToolsetAdapter::try_new(
         default_host(),
@@ -248,6 +285,64 @@ async fn calculator_adapter() -> WasmToolsetAdapter {
     )
     .await
     .expect("calculator")
+}
+
+#[tokio::test]
+async fn load_enabled_reference_lock_passes_published_conformance() {
+    let host = default_host();
+    let loaded = host.load_enabled(&reference_lock()).expect("load_enabled");
+    let identities: Vec<&str> = loaded
+        .iter()
+        .map(|ready| ready.manifest().identity.as_str())
+        .collect();
+    assert_eq!(
+        identities,
+        [
+            "finstack.plugin.calculator",
+            "finstack.plugin.reference.context"
+        ]
+    );
+    assert_eq!(loaded[0].world(), PluginWorld::Toolset);
+    assert_eq!(loaded[1].world(), PluginWorld::Context);
+
+    let native = CalculatorToolset::try_new().expect("native");
+    let wasm = calculator_adapter().await;
+    let add_args = br#"{"operation":"add","operands":[1,2,3]}"#;
+    let native_add = assemble(
+        &native,
+        validated_call(
+            "finstack.tools.calculator",
+            "calculator",
+            add_args,
+            ToolExecutionMode::Parallel,
+        ),
+    )
+    .await
+    .expect("native add");
+    check_toolset_conformance(
+        &wasm,
+        ToolsetConformanceCase {
+            context: tool_ctx(),
+            call: validated_call(
+                "finstack.plugin.calculator",
+                "calculator",
+                add_args,
+                ToolExecutionMode::Parallel,
+            ),
+            expected: AssembledToolStream {
+                progress: Arc::from([]),
+                usage: None,
+                result: ToolResult {
+                    output: native_add.result.output.clone(),
+                    is_error: false,
+                },
+            },
+            stream_limits: ToolStreamLimits::default(),
+            max_result_bytes: 1_024,
+        },
+    )
+    .await
+    .expect("wasm add conformance");
 }
 
 #[tokio::test]
@@ -428,6 +523,40 @@ async fn context_provider_matches_in_process_reference() {
     )
     .await
     .expect("context conformance");
+}
+
+#[test]
+fn programmatic_enabled_sandbox_loads_with_preopen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("a.txt"), b"hello-sandbox").expect("write");
+    let host = sandbox_host(vec![FilesystemPreopen {
+        guest_path: "/".into(),
+        host_path: dir.path().to_path_buf(),
+        read: true,
+        write: false,
+    }]);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference/filesystem-sandbox");
+    let bytes = std::fs::read(root.join("component.wasm")).expect("wasm");
+    let manifest_bytes = std::fs::read(root.join("plugin.manifest.json")).expect("manifest");
+    let manifest = parse_manifest(&manifest_bytes).expect("parse");
+    let ready = host
+        .load_locked(&LockedPlugin {
+            identity: "finstack.plugin.filesystem.sandbox".into(),
+            version: "0.0.4".into(),
+            enabled: true,
+            component: "component.wasm".into(),
+            component_path: root.join("component.wasm"),
+            component_digest: component_digest(&bytes),
+            manifest: "plugin.manifest.json".into(),
+            manifest_path: root.join("plugin.manifest.json"),
+            manifest_digest: manifest.digest,
+        })
+        .expect("load_locked");
+    assert_eq!(ready.world(), PluginWorld::Toolset);
+    assert_eq!(
+        ready.manifest().identity.as_str(),
+        "finstack.plugin.filesystem.sandbox"
+    );
 }
 
 #[tokio::test]

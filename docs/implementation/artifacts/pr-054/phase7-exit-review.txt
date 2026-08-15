@@ -1,0 +1,45 @@
+Phase 7 exit review
+Date: 2026-08-14
+Reviewed revision: 93ba5281691748eb49ac624beb94415718e94ed4
+Reviewer: me@jeickmeier.com
+Result: all four exit bullets are evidenced at the candidate.
+This is not G6. Closeout may record exit Passed (4/4) and Phase 7
+Done only after local merge. Named G6-D-* is a separate owner
+action.
+
+1. Reference components load and pass conformance.
+   load_enabled on plugins/reference/plugin.lock.json loads
+   calculator and context-provider. Those adapters still pass
+   check_toolset_conformance / check_context_conformance.
+   Filesystem-sandbox is present with enabled:false.
+   Programmatic LockedPlugin { enabled: true } plus preopen
+   still loads the sandbox. Local Darwin arm64 is the supported
+   desktop proof.
+
+2. Permissions and resource limits are enforced by the host.
+   PR-052 evidence is reused. Conformance rows prove permission
+   denial without a host grant, ungranted WASI instantiate
+   (plugin_instantiate_failed), fuel-burner
+   (plugin_resource_limit), and unsigned/untrusted signature
+   (plugin_signature_untrusted). Default grants stay
+   {logging, blobs}. Default StoreLimits are unchanged.
+
+3. Wasmtime is absent from minimal/native builds unless selected.
+   cargo tree for kernel/runtime/SDK default and
+   --no-default-features, plus wit/native-examples, has no
+   wasmtime, wasmtime-wasi, or finstack-ai-plugin-host.
+   Constructing PluginHost remains the opt-in.
+
+4. Plugin packaging and compatibility diagnostics are documented.
+   Host README documents load_enabled, gen-plugin-lock /
+   check-plugin-lock, and the conformance filter.
+   plugins/README.md and guest-sdk README/MIGRATION.md state
+   that runtime discovery is lockfile-only.
+   COMPATIBILITY.md records crate 0.0.4 with packages @0.0.4.
+   The plugin-lock schema family and fixtures exist.
+   Lock errors use stable codes plugin_lock_invalid,
+   plugin_lock_duplicate, plugin_lock_disabled,
+   plugin_lock_digest_mismatch, and plugin_lock_not_found.
+
+Phase 7 entrance stays Passed (3/3) and is not re-recorded.
+G5 and G6 remain Not ready.

@@ -1,0 +1,32 @@
+{
+  "lockfile_version": 1,
+  "plugins": [
+    {
+      "identity": "finstack.plugin.calculator",
+      "version": "0.0.4",
+      "enabled": true,
+      "component": "calculator/component.wasm",
+      "component_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest": "calculator/plugin.manifest.json",
+      "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "identity": "finstack.plugin.reference.context",
+      "version": "0.0.4",
+      "enabled": true,
+      "component": "context-provider/component.wasm",
+      "component_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "manifest": "context-provider/plugin.manifest.json",
+      "manifest_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "identity": "finstack.plugin.filesystem.sandbox",
+      "version": "0.0.4",
+      "enabled": false,
+      "component": "filesystem-sandbox/component.wasm",
+      "component_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "manifest": "filesystem-sandbox/plugin.manifest.json",
+      "manifest_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ]
+}
