@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Verified through PR-049–PR-054 experimental `@0.0.4` WIT worlds (`G6-D-plugin-alpha-018aaea9aa00`) plus locally integrated PR-058 remote and process families (`PR-058-E-integration-99ac0fb69952`) at `99ac0fb69952c9e6bfe8354e9d1f930ee061b4a0`. Worlds, remote session DTOs, and process handshake kinds stay pairwise distinct.
