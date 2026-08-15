@@ -2,8 +2,8 @@
 
 //! Generated host and guest bindings for the dual-major `@0.0.4` and `@1.0.0` WIT packages.
 
-/// Workspace crate version that owns these dual-major bindings (`0.1.0`).
-pub const CRATE_VERSION: &str = "0.1.0";
+/// Workspace crate version that owns these dual-major bindings (`1.0.0`).
+pub const CRATE_VERSION: &str = "1.0.0";
 /// Checked-in WIT package `finstack:ai-types@0.0.4`.
 pub const AI_TYPES_PACKAGE: &str = "finstack:ai-types@0.0.4";
 /// Checked-in WIT package `finstack:ai-host@0.0.4`.

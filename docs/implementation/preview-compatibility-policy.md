@@ -12,8 +12,9 @@ and npm **version fields** are `0.1.0`. WIT **package names** stay `@0.0.4`
 until the 1.0 freeze. PR-062 generates `@1.0.0` beside `@0.0.4`. The
 adopter-facing 1.0 promise is
 [`1.0-compatibility-policy.md`](1.0-compatibility-policy.md)
-(`READY FOR NAMED DECISION`). Workspace version fields stay `0.1.0`
-until PR-066.
+(approved by `COMP-1.0-D-contract-freeze-00b78667ecc4`). Workspace
+version fields are now unpublished `1.0.0`. This file remains the
+historical tagged `0.1.0` promise.
 
 Tag `v0.1.0` is cut. crates.io / PyPI / npm publication remains blocked
 on owner registry credentials. Until those exist, consume this tree from

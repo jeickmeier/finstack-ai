@@ -2,7 +2,7 @@
 
 Date: 2026-08-15
 Owner: me@jeickmeier.com
-Workspace: **0.1.0 unpublished** (experimental WIT package names stay `@0.0.4`)
+Workspace: **1.0.0 unpublished** (experimental WIT package names stay `@0.0.4`; permanent worlds are `@1.0.0`)
 
 This file is the implemented-control matrix for PR-064 / G8 evidence
 collection. It does **not** rewrite

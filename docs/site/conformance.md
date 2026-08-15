@@ -1,7 +1,7 @@
 # Conformance suites and badge process
 
 Published first-party suites for the six primary ports and the
-experimental plugin host. Workspace suite version is **0.1.0**
+experimental plugin host. Workspace suite version is **1.0.0**
 (`PORT_CONFORMANCE_SUITE_VERSION` / plugin-host crate version).
 This page is not a marketplace and does not issue hosted badges.
 
@@ -38,7 +38,7 @@ A first- or third-party package may claim
 `finstack-ai <port> conformance <suite_version>` only after the
 published suite passes on a named commit. The claim must list:
 
-- the suite version (today `0.1.0`);
+- the suite version (today `1.0.0`);
 - the contract IDs that passed;
 - the commit SHA.
 

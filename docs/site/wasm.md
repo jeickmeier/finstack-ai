@@ -4,7 +4,8 @@ Public package: `@finstack/ai`. It is staged, not on npm. Consume a packed
 tarball from `mise run stage-wasm` or the checkout after
 `mise run generate-wasm`.
 
-Workspace version is **0.1.0** (tag `v0.1.0`). IndexedDB stays experimental.
+Workspace version is **1.0.0** unpublished. The last public tag is
+`v0.1.0`. IndexedDB stays experimental.
 
 ## Quick start
 

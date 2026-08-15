@@ -16,7 +16,7 @@ def test_import_finstack_ai() -> None:
     import finstack_ai
 
     assert finstack_ai.health() == "ok"
-    assert finstack_ai.__version__ == "0.1.0"
+    assert finstack_ai.__version__ == "1.0.0"
     assert finstack_ai.linked_providers() == (
         "openai-compatible",
         "anthropic",

@@ -744,7 +744,7 @@ checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
 
 [[package]]
 name = "finstack-ai"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -761,7 +761,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-context-memory"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "thiserror",
@@ -770,7 +770,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-context-repository"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "rustix",
@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-example-durable-interaction"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -794,14 +794,14 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-extension-port-leaf-fixture"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
 ]
 
 [[package]]
 name = "finstack-ai-guest-sdk"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-kernel"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "proptest",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-middleware-compaction"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-middleware-verify"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-model-port-leaf-fixture"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-native-examples"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-context-memory",
@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-observer-log"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-observer-metrics"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-observer-otel"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-plugin-host"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "ed25519-dalek",
@@ -944,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "finstack-ai-kernel",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-provider-anthropic"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-provider-openai-compatible"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai-kernel",
@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-python"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-protocol",
@@ -1008,7 +1008,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "finstack-ai-kernel",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-store-memory"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
@@ -1050,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-store-sqlite"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai-kernel",
@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-test"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-calculator"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "finstack-ai-runtime",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-filesystem"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "futures-util",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-tools-shell"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "futures-util",
@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-toolset-port-leaf-fixture"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-wit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
@@ -1169,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-workflow-local"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-workflow-temporal"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",

@@ -5,8 +5,8 @@ provenance, signing procedure, nightly/canary definitions, and
 rollback/hotfix. Owner: `me@jeickmeier.com`.
 
 This file does not publish, yank, tag, or record `G8-D-*`.
-Workspace version stays `0.1.0`. Canary label default is
-`0.1.0-canary`.
+Workspace version is unpublished `1.0.0`. Canary label default is
+`1.0.0-canary`.
 
 ## Local commands
 
@@ -35,7 +35,7 @@ Documented now; not executed under this envelope.
 
 1. Land the release commit on the authorized target.
 2. Recreate: `mise run recreate-release`. Retain
-   `docs/implementation/artifacts/pr-065/run-a.SHA256SUMS`.
+   `docs/implementation/artifacts/pr-066/run-a.SHA256SUMS`.
 3. `git tag -a v1.0.0 <commit>` (PR-066; separately named).
 4. Publish crates, wheels, npm, and WIT only after a later sentence
    names registry credentials.
@@ -46,7 +46,7 @@ Tag `v0.1.0` is already `9d09b87108f6286918fcc436c53d195d0b6b10cc`.
 ## Signing and provenance
 
 Required locally: SHA-256 over staged bytes plus a provenance
-statement naming the commit, `mise.toml` pins, version `0.1.0`,
+statement naming the commit, `mise.toml` pins, version `1.0.0`,
 and `staged_not_published: true`.
 
 Hosted keyless / Sigstore / OIDC is the existing

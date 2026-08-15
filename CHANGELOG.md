@@ -5,13 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
-and bundled first-party leaf crates share one lockstep workspace version. The
-current tagged candidate is `0.1.0` (`v0.1.0`). Named G6 and G7 have
-passed. crates.io / PyPI / npm publication remains blocked on owner
-registry credentials.
+Semantic core crates, Python/JavaScript binding distributions, and
+bundled first-party leaf crates share one lockstep workspace version.
+The current unpublished candidate is `1.0.0`. The last public tag is
+`v0.1.0`. Named G6 and G7 have passed. G8, `git tag v1.0.0`, and
+crates.io / PyPI / npm publication remain blocked on a later named
+owner sentence.
 
 ## [Unreleased]
+
+## [1.0.0] - unpublished staged candidate
+
+Unpublished lockstep GA candidate. The G8 readiness pack is
+`READY FOR NAMED DECISION`. This section is not a crates.io, PyPI, or
+npm publication, git tag `v1.0.0`, or `G8-D-*`.
+
+### Added
+
+- 1.0 compatibility matrix and post-1.0 in-repo GA roadmap.
+- Support windows written for `1.0.x`; they become in force at GA.
+
+### Changed
+
+- Lockstep crate, Python wheel, and `@finstack/ai` version fields move
+  from unpublished `0.1.0` to unpublished `1.0.0`.
+- WIT permanent worlds remain `finstack:ai-*@1.0.0` (PR-062).
+  Experimental `@0.0.4` stays loadable and labeled.
+- Plugin-crate `1.0.0` reservation in the WIT generator is lifted.
 
 ## [0.1.0] - 2026-08-15
 

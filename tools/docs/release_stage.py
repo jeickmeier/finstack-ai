@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared unpublished 0.1.0 staging for recreate and hotfix rehearsal."""
+"""Shared unpublished lockstep staging for recreate and hotfix rehearsal."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def crate_sbom() -> dict[str, object]:
             "component": {
                 "type": "application",
                 "name": "finstack-ai",
-                "version": "0.1.0",
+                "version": "1.0.0",
             }
         },
         "components": components,
@@ -112,7 +112,7 @@ def crate_sbom() -> dict[str, object]:
 
 
 def stage(
-    work: Path, *, label: str = "0.1.0", extra: dict[str, str] | None = None
+    work: Path, *, label: str = "1.0.0", extra: dict[str, str] | None = None
 ) -> None:
     if work.exists():
         shutil.rmtree(work)
@@ -246,8 +246,8 @@ def stage(
     rustc = run(["rustc", "--version"]).stdout.strip()
     statement = {
         "format_version": 1,
-        "kind": "pr-065 recreate",
-        "version": "0.1.0",
+        "kind": "pr-066 recreate",
+        "version": "1.0.0",
         "label": label,
         "staged_not_published": True,
         "source_revision": revision,

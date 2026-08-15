@@ -245,14 +245,14 @@ echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§
 """
 
 [tasks.recreate-release]
-description = "Two-run SHA-256 recreate of unpublished 0.1.0 artifacts"
+description = "Two-run SHA-256 recreate of unpublished 1.0.0 artifacts"
 run = """
 set -euo pipefail
 uv run --no-project python tools/docs/recreate_release.py
 """
 
 [tasks.release-rehearsal]
-description = "Two-run local staging checksum identity (unpublished 0.1.0)"
+description = "Two-run local staging checksum identity (unpublished 1.0.0)"
 run = """
 set -euo pipefail
 mise run recreate-release

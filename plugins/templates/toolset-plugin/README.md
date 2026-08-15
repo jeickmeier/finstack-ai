@@ -19,7 +19,9 @@ Pinned toolchain: rustc 1.97.1, `wasm32-unknown-unknown`, wit-bindgen
 0.57.1, WIT `@0.0.4`. See `plugins/finstack-ai-guest-sdk/README.md`.
 
 Trust class: [T3](../../../docs/site/security-trust-levels.md) when loaded
-by the isolated host. `@1.0.0` worlds are blocked until PR-062.
+by the isolated host. This template stays on experimental `@0.0.4`.
+Permanent `@1.0.0` worlds exist; retarget with
+[guest MIGRATION.md](../../finstack-ai-guest-sdk/MIGRATION.md).
 
 ## Quick start
 

@@ -1,0 +1,77 @@
+PR-066 G8 readiness pack
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Task: PR-066-T-g8-6fec55d4501a
+Result: READY FOR NAMED DECISION
+This file is not G8-D-*. Do not infer a gate pass, tag, or publish.
+
+Envelope
+  Run PR-066; mode=integrated; target=main;
+  local branch/commit/merge authorized; external actions=none;
+  stop before any gate crossing.
+  Baseline: 04962c743d2f03d59b74feb9c71f872cccfcc003
+  Branch: codex/pr-066-1.0.0-ga
+  Plan: pack v0.21 / PLAN-0.19 /
+    86d2430860b12ab947638052b97ea2403c2e53b218a66977a4258defeb18fc3f
+
+Admission already true
+  Phase 9 entrance Passed (2/2)
+    PH9-E-entrance-tag-b610b0ba93b5
+    PH9-E-entrance-feedback-ee6999c59a12
+  Phase 8 Done; G0-G7 Passed
+    G5-D-durable-beta-a9568bd869b5
+    G7-D-public-preview-f7c7e70b9e04
+  PR-062 Done; COMP-1.0-D-contract-freeze-00b78667ecc4
+  PR-063 Done; PR-063-E-candidate-67d4658eab90 (no EX-*)
+  PR-064 Done; PR-064-E-security-9ac67ca75bd7 (zero Open Critical/High)
+  PR-065 Done; PR-065-E-candidate-510a9fc6d169
+  Exceptions register empty; no Expired EX-*
+
+Implementation Plan §21 items 1-11 (existing evidence; not re-run)
+  1. Kernel I/O-free / no forbidden dependency
+     G1-D-kernel-semantics-4f52c8a91d6e; PR-002 architecture gate
+  2. Kernel transitions documented and tested
+     G1-D-kernel-semantics-4f52c8a91d6e; PR-009 through PR-013
+  3. Commit-before-effect; stable effect IDs
+     G2-D-native-runtime-7c2e9a4d1b65; PR-014; PR-042; PR-043
+  4. Bounded queues
+     G2-D-native-runtime-7c2e9a4d1b65; PR-017; PR-063-A04
+  5. Cancellation and crash-prefix restorable states
+     G5-D-durable-beta-a9568bd869b5; PR-048; PR-064-A03
+  6. Rust / Python / WASM common traces
+     G4-D-binding-parity-101224c5eb60
+  7. Native extensions use direct handles after one-time resolution
+     G3-D-native-preview-14a386c7db24; PR-021; PR-028
+  8. Python/JS/WIT callbacks coarse, cancellable, benchmarked
+     PR-029; PR-036; PR-063-E-candidate-67d4658eab90
+  9. Versioned compatibility tests
+     COMP-1.0-D-contract-freeze-00b78667ecc4; PR-062-E-candidate-fe6b29ee4400
+  10. Batteries, SQLite, observers, remote, one workflow
+      G5-D-durable-beta-a9568bd869b5; G7-D-public-preview-f7c7e70b9e04
+      PR-055 through PR-061
+  11. Security, provenance, SBOM, migration, release rehearsal
+      PR-064-E-security-9ac67ca75bd7; PR-065-E-candidate-510a9fc6d169
+      PR-065-E-security-e9dbcf2e3baf
+
+Implementation Plan §21 item 12
+  NOT satisfied. See artifacts/pr-066/soak-note.md.
+  No named external adopter validated the 0.1.0 → 1.0.0 path.
+  In-tree starters are first-party and do not close this item.
+
+Local candidate prepared by this PR
+  Lockstep crate/wheel/npm fields 1.0.0 (unpublished)
+  WIT permanent worlds finstack:ai-*@1.0.0 (PR-062; still in-tree)
+  Docs/examples install 1.0.0; 0.1.0 remains the from-version
+  Two-run staging checksums recorded under this directory when staged
+  FIND-064 Open residuals remain Medium/Low (002, 003, 005, 006, 007)
+  FIND-064-010 Accepted until first named publish
+  TM-18 review: artifacts/pr-066/security-review.txt
+
+Stop
+  Do not write G8-D-*.
+  Do not git tag v1.0.0.
+  Do not publish crates.io / PyPI / npm.
+  Do not announce.
+  Do not mark PR-066 Done.
+  A01 stays Pending on item 12.
+  A04 stays Pending on the named G8/tag/publish sentence.

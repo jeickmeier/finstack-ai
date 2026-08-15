@@ -12,7 +12,7 @@ cargo run -p finstack-ai-native-examples --bin minimal --offline --locked
 See [docs/site/rust.md](../../docs/site/rust.md). Trust class:
 [T1](../../docs/site/security-trust-levels.md).
 
-Workspace version is **0.1.0** (tag `v0.1.0`). Experimental WIT package names stay `@0.0.4`. crates.io publication remains blocked on owner registry credentials.
+Workspace version is **1.0.0** unpublished. The last public tag is `v0.1.0`. Permanent WIT worlds are `@1.0.0`. Experimental WIT package names stay `@0.0.4`. crates.io publication remains blocked on owner registry credentials.
 
 ## License and governance
 

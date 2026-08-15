@@ -41,15 +41,17 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 
 ## Supported versions
 
-Supported-version policy for the tagged `0.1.0` preview line. G7
-passed via `G7-D-public-preview-f7c7e70b9e04`. Tag `v0.1.0` is cut.
-crates.io / PyPI / npm publication remains blocked on owner registry
-credentials.
+Supported-version policy for the unpublished `1.0.0` candidate and the
+tagged `0.1.0` preview line. G7 passed via
+`G7-D-public-preview-f7c7e70b9e04`. Tag `v0.1.0` is cut. Tag `v1.0.0`
+and crates.io / PyPI / npm publication remain blocked on a later named
+owner sentence. This is not LTS and not `G8-D-*`.
 
 | Version | Supported |
 | --- | --- |
-| `0.1.0` preview line (tag `v0.1.0`) | Security fixes accepted on this lockstep line |
-| Default branch (`main` / trunk) | Security fixes accepted while it carries the `0.1.0` candidate |
+| `1.0.x` candidate (unpublished) | Security fixes accepted on this lockstep line |
+| Default branch (`main` / trunk) | Security fixes accepted while it carries the `1.0.0` candidate |
+| `0.1.x` preview (tag `v0.1.0`) | Supported until tagged `1.0.0`; then security-only for 90 days |
 | Historical unpublished snapshots (`0.0.4` and earlier) | Not supported |
 
 ## Related documents
