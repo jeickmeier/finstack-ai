@@ -114,3 +114,8 @@ decision. Do not restore `tools/architecture/`.
 - `uv run --no-project python tools/wasm_package/check.py graph`
 
 Do not require `mise run ci` or Playwright to close the candidate.
+
+## Closeout
+
+PR-049 is `Done` at local `main` merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`.
+The envelope is closed and is not reused. Phase 7 remains `In progress`.

@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-14 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, and PR-049 admit on `codex/pr-049-wit-toolset-world`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-14 and reconciled against documentation pack v0.20 through G4-D-binding-parity-101224c5eb60, PR-039 local merge `64c54e767f53faac240ab92c19a8447264e82ff8`, PR-040 local merge `dbd10d35b223288666b2fdc0e13d03f48b5b97c3`, PR-041 local merge `8a84293264291dbe158fae1b4e5dedcc30c74061`, PR-042 local merge `4d627711632c771d733b689e1325b2d9679ee317`, PR-043–PR-048 local merge `b0641b0be338918c1951339657ce8c04c4ccff59`, and PR-049 local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
-| Phases | 10 | 7 | Phase 0–6 `Done`; Phase 7–9 `Todo` |
-| Logical PRs | 66 | 48 | PR-001–PR-048 `Done`; PR-049–PR-066 `Todo` |
-| PR acceptance-evidence bullets | 345 | 265 | PR-001–PR-049 acceptance is closed at the PR-049 candidate; PR-050–PR-066 remain open |
+| Phases | 10 | 7 | Phase 0–6 `Done`; Phase 7 `In progress`; Phase 8–9 `Todo` |
+| Logical PRs | 66 | 49 | PR-001–PR-049 `Done`; PR-050–PR-066 `Todo` |
+| PR acceptance-evidence bullets | 345 | 265 | PR-001–PR-049 acceptance is closed at local merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`; PR-050–PR-066 remain open |
 | Phase entrance and exit bullets | 62 | 46 | Phase 0–6 entrance and exit `Passed`; Phase 7 entrance `Passed` (3/3); Phase 7 exit and Phase 8–9 remain open |
 | Program gates | 9 | 5 | G0–G4 `Passed`; G5–G8 `Not ready` |
 | Implementation tasks | 292 | 292 | PR-001–PR-049 tasks are `Done`; PR-050–PR-066 remain `Todo` |
@@ -72,11 +72,11 @@ PR-047 is `Done` at local `main` merge `b0641b0be338918c1951339657ce8c04c4ccff59
 
 PR-048 is `Done` at local `main` merge `b0641b0be338918c1951339657ce8c04c4ccff59` (A01–A11 Passed; no issue or actual pull request). Its crash-prefix matrix, optional prune/horizon, sqlite leaf ops, binding restart traces, TM-12 review, Phase 6 exit pack, and staged unpublished 0.0.3 npm tarball are bound under the PR-048 evidence set. All four Phase 6 exits pass and Phase 6 is `Done`. No hosted pull request or merge, npm/pypi publication, tag, or G5 approval occurred.
 
-PR-049 is `In progress` on `codex/pr-049-wit-toolset-world` from baseline `4e07db21b0e84e9cdb4be14a4b7d4b073904185e`. Phase 7 entrance is `Passed` (3/3). Acceptance is `0/7`. G5 and G6 remain `Not ready`.
+PR-049 is `Done` at local `main` merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb` (A01–A07 Passed; no issue or actual pull request). Its experimental `@0.0.4` types/host/toolset WIT, owned bindgen, fail-closed native mapping, in-process two-tool reference, and TM-07 review are bound under the PR-049 evidence set. Phase 7 entrance is `Passed` (3/3). Phase 7 exit stays `0/4`. G5 and G6 remain `Not ready`.
 
 ## Active execution envelope
 
-The active PR-049 envelope is `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm publish, tag, G5 inference, and G6 inference prohibited`. Baseline is local `main` at `4e07db21b0e84e9cdb4be14a4b7d4b073904185e`. Authorized 2026-08-14 by `implement the plan`. The closed PR-043–PR-048 envelope is not reused. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
+The completed PR-049 envelope used `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm publish, tag, G5 inference, and G6 inference prohibited`. Baseline was local `main` at `4e07db21b0e84e9cdb4be14a4b7d4b073904185e`. The feature branch merged at `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb`. That envelope is now closed and is not reused. Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`.
 
 The completed PR-043–PR-048 envelope used `mode=integrated; target=main; local branch/commit/merge authorized; external actions=none; hosted PR/merge, npm publish, tag, and G5 inference prohibited`. Baseline was local `main` at `a3c542446dd16a9177772097cf51803ec06081d8`. The stacked PR-043–PR-048 tip merged at `b0641b0be338918c1951339657ce8c04c4ccff59`. That envelope is now closed and is not reused.
 
@@ -150,7 +150,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | [Phase 4](../planning/04-finstack-ai-implementation-plan.md#12-phase-4-first-class-python-bindings) | PR-027–PR-032 | 2/2 | 4/4 | G4 | Done | me@jeickmeier.com | — | — | PH4-E-entrance-surface-730ca2dd317e; PH4-E-entrance-matrix-d0e3f172183e; PR-027-E-integration-729ece099e0f; PR-028-E-integration-b0c76f8fd66f; PR-029-E-integration-b79210e61af5; PR-030-E-integration-c9e0b43a21fb; PR-031-E-integration-2d46e8d966c6; PR-032-E-local-058893b85c8e; PR-032-E-wheel-matrix-bc1403f15062; PR-032-E-hosted-ci-bc1403f15062; PR-032-E-reduced-envelope-fe535966ac87; PH4-E-exit-traces-ca384aa02727; PH4-E-exit-callbacks-23a86984a585; PH4-E-exit-pydantic-0bc98c672744; PH4-E-exit-wheels-45a88cc26d0b; G4-D-binding-parity-101224c5eb60 @ `5f15210780254e27dbe0ecf665cf38f99e412b1f` | 2026-08-14 |
 | [Phase 5](../planning/04-finstack-ai-implementation-plan.md#13-phase-5-browser-and-javascript-webassembly-bindings) | PR-033–PR-038 | 2/2 | 4/4 | G4 | Done | me@jeickmeier.com | — | — | PH5-E-entrance-surface-a8c3e1d4f2b6; PH5-E-entrance-npm-b7d4f2a1c9e3; PR-033-E-integration-1781b8d4841d; PR-034-E-integration-6bd1979c7ae0; PR-035-E-integration-a7d47fad5cc0; PR-036-E-integration-ecf6d2296267; PR-037-E-integration-6aafae740847; PR-038-E-integration-04407192289c; PH5-E-exit-traces-f1ff388563df; PH5-E-exit-host-f1ff388563df; PH5-E-exit-workers-f1ff388563df; PH5-E-exit-artifacts-f1ff388563df; G4-D-binding-parity-101224c5eb60 @ `04407192289c24cbfb087357b1e2ca928a8f3b55` | 2026-08-14 |
 | [Phase 6](../planning/04-finstack-ai-implementation-plan.md#14-phase-6-durability-recovery-and-lanes) | PR-039–PR-048 | 3/3 | 4/4 | G5 | Done | me@jeickmeier.com | — | — | PH6-E-entrance-commit-loop-3728650e8935; PH6-E-entrance-journal-schema-b5a63427108e; PH6-E-entrance-handles-7618a4f500cb; PR-039-E-integration-64c54e767f53; PR-040-E-integration-dbd10d35b223; PR-041-E-integration-8a8429326429; PR-042-E-integration-4d627711632c; PR-043-E-integration-b0641b0be338; PR-044-E-integration-b0641b0be338; PR-045-E-integration-b0641b0be338; PR-046-E-integration-b0641b0be338; PR-047-E-integration-b0641b0be338; PR-048-E-integration-b0641b0be338; PH6-E-exit-sqlite-b0641b0be338; PH6-E-exit-effects-b0641b0be338; PH6-E-exit-interactions-b0641b0be338; PH6-E-exit-lanes-b0641b0be338 | 2026-08-14 |
-| [Phase 7](../planning/04-finstack-ai-implementation-plan.md#15-phase-7-isolated-witwasmtime-extensions) | PR-049–PR-054 | 3/3 | 0/4 | G6 | In progress | me@jeickmeier.com | PR-049 | — | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4 | 2026-08-14 |
+| [Phase 7](../planning/04-finstack-ai-implementation-plan.md#15-phase-7-isolated-witwasmtime-extensions) | PR-049–PR-054 | 3/3 | 0/4 | G6 | In progress | me@jeickmeier.com | — | — | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4; PR-049-E-integration-5a6eeeb783be | 2026-08-14 |
 | [Phase 8](../planning/04-finstack-ai-implementation-plan.md#16-phase-8-ecosystem-readiness-and-public-preview) | PR-055–PR-061 | 0/2 | 0/4 | G7 | Todo | — | — | — | — | — |
 | [Phase 9](../planning/04-finstack-ai-implementation-plan.md#17-phase-9-10-hardening-and-general-availability) | PR-062–PR-066 | 0/2 | 0/4 | G8 | Todo | — | — | — | — | — |
 
@@ -259,7 +259,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| PR-049 | In review | me@jeickmeier.com | `codex/pr-049-wit-toolset-world` candidate `9fbb520f2c56a3d08d080b7297a5bed78e417f03` (no issue or actual PR) | 7 | 7/7 | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4; PR-049-E-candidate-9fbb520f2c56; PR-049-E-security-9fbb520f2c56 | — | — | 2026-08-14 |
+| PR-049 | Done | me@jeickmeier.com | local `main` merge `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb` of `codex/pr-049-wit-toolset-world` (no issue or actual PR) | 7 | 7/7 | PH7-E-entrance-ports-d16eb3f550bd; PH7-E-entrance-record-context-81f85ef9d2cf; PH7-E-entrance-adr-035-3c4a20fedca4; PR-049-E-candidate-9fbb520f2c56; PR-049-E-security-9fbb520f2c56; PR-049-E-integration-5a6eeeb783be | — | `5a6eeeb783be8e243cdc72c387ac28f4b3a0e2cb` / 2026-08-14 | 2026-08-14 |
 | PR-050 | Todo | — | — | 0 | 0/5 | — | — | — | — |
 | PR-051 | Todo | — | — | 0 | 0/4 | — | — | — | — |
 | PR-052 | Todo | — | — | 0 | 0/4 | — | — | — | — |
@@ -598,7 +598,7 @@ Create a task only when a logical PR is actively decomposed. Use a merge-safe ID
 | PR-049-T-mapping-5e62a9d71836 | PR-049 | Fail-closed native ToolSpec/call-context mapping and payload ceilings | Done | me@jeickmeier.com | PR-049-T-bindgen-cf9d4f39b956 | `9fbb520f2c56a3d08d080b7297a5bed78e417f03` | PR-049-A03; PR-049-A04 | PR-049-E-candidate-9fbb520f2c56 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 | PR-049-T-reference-288789b28a1b | PR-049 | In-process two-tool reference toolset against generated toolset export | Done | me@jeickmeier.com | PR-049-T-mapping-5e62a9d71836 | `9fbb520f2c56a3d08d080b7297a5bed78e417f03` | PR-049-A02 | PR-049-E-candidate-9fbb520f2c56 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 | PR-049-T-compat-a08f6a6570b8 | PR-049 | Compatibility docs, @1.0.0 block, and world-surface inventory | Done | me@jeickmeier.com | PR-049-T-reference-288789b28a1b | `9fbb520f2c56a3d08d080b7297a5bed78e417f03` | PR-049-A05; PR-049-A06; PR-049-A07 | PR-049-E-candidate-9fbb520f2c56 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
-| PR-049-T-evidence-9268e6015deb | PR-049 | Focused validation, TM-07 review, and candidate evidence; stop before G6 | Done | me@jeickmeier.com | PR-049-T-compat-a08f6a6570b8 | `9fbb520f2c56a3d08d080b7297a5bed78e417f03` | PR-049-A01–A07 | PR-049-E-candidate-9fbb520f2c56; PR-049-E-security-9fbb520f2c56 | 2026-08-14 | 2026-08-14 | 2026-08-14 |
+| PR-049-T-evidence-9268e6015deb | PR-049 | Focused validation, TM-07 review, and candidate evidence; stop before G6 | Done | me@jeickmeier.com | PR-049-T-compat-a08f6a6570b8 | `9fbb520f2c56a3d08d080b7297a5bed78e417f03` | PR-049-A01–A07 | PR-049-E-candidate-9fbb520f2c56; PR-049-E-security-9fbb520f2c56; PR-049-E-integration-5a6eeeb783be | 2026-08-14 | 2026-08-14 | 2026-08-14 |
 
 ## Blocker ledger
 
