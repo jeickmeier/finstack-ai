@@ -41,13 +41,15 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 
 ## Supported versions
 
-Supported-version policy will be published with the first public release. Until then, treat only the default branch tip as the security contact surface:
+Supported-version policy for the unpublished `0.1.0` preview line. Tag
+`v0.1.0` and registry publish wait on a named G7 decision and separately
+named external actions.
 
 | Version | Supported |
 | --- | --- |
-| Default branch (`main` / trunk) | Security fixes accepted |
-| `0.1.0` preview tag | Preview support begins when PR-061 tags `0.1.0` |
-| Historical snapshots | Not supported |
+| `0.1.0` preview line (unpublished until named tag) | Security fixes accepted on this lockstep line |
+| Default branch (`main` / trunk) | Security fixes accepted while it carries the unpublished `0.1.0` candidate |
+| Historical unpublished snapshots (`0.0.4` and earlier) | Not supported |
 
 ## Related documents
 

@@ -7,14 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Through pre-1.0, semantic core crates, Python/JavaScript binding distributions,
 and bundled first-party leaf crates share one lockstep workspace version. The
-current staged unpublished candidate is `0.0.4`; named G6 has passed.
-The exact cross-binding checkpoint, publish, tag, and named G5 remain
-owner decisions.
+current staged unpublished candidate is `0.1.0`. Named G6 has passed.
+Named G7, publish, and tag remain owner decisions.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-15
+
+Unpublished lockstep public-preview candidate. This section is not a
+named G7 decision, git tag, or registry publish.
+
+### Added
+
+- Adopter-facing preview compatibility policy and in-repo public-preview
+  roadmap.
+- Phase 8 exit review and G7 readiness pack language
+  `READY FOR NAMED DECISION` (PR-061 local A05 step 1).
+
 ### Changed
 
+- Lockstep crate, Python wheel, and `@finstack/ai` version fields move
+  from unpublished `0.0.4` to unpublished `0.1.0`. Experimental WIT
+  package names stay `finstack:ai-*@0.0.4`.
 - Stage unpublished lockstep `0.0.4` artifacts for plugin alpha. G6 passed
   via `G6-D-plugin-alpha-018aaea9aa00`. Checkpoint cut, publish, and tag
   remain owner decisions.

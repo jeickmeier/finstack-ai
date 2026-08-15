@@ -3,7 +3,7 @@
 Install the staged `finstack-ai` wheel. Users do not need a Rust toolchain
 when they consume a built artifact.
 
-Workspace version is **0.0.4 unpublished**. The package is not on PyPI.
+Workspace version is **0.1.0 unpublished**. The package is not on PyPI.
 
 ## Quick start
 

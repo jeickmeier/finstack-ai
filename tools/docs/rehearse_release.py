@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two-run local staging checksum identity for unpublished 0.0.4."""
+"""Two-run local staging checksum identity for unpublished 0.1.0."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORK = REPO_ROOT / "target" / "pr-060-rehearsal"
-RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-060" / "rehearsal"
+WORK = REPO_ROOT / "target" / "pr-061-rehearsal"
+RECORD = REPO_ROOT / "docs" / "implementation" / "artifacts" / "pr-061" / "rehearsal"
 CRATES = (
     "finstack-ai",
     "finstack-ai-kernel",
@@ -133,10 +133,9 @@ def stage(work: Path) -> None:
     statement = {
         "format_version": 1,
         "kind": "preview rehearsal",
-        "version": "0.0.4",
-        "not_0_1_0": True,
+        "version": "0.1.0",
         "staged_not_published": True,
-        "public_tag": "PR-061",
+        "public_tag": "blocked pending named G7-D and git tag v0.1.0",
         "source_revision": revision,
         "rustc": rustc,
         "mise_pins": {

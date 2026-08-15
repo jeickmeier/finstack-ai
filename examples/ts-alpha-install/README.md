@@ -6,7 +6,7 @@ map repository `src/` or `js/dist` paths. Do not embed provider credentials.
 Trust class: [T2](../../docs/site/security-trust-levels.md) when host
 adapters are registered. Not isolated.
 
-Workspace version is **0.0.4 unpublished**.
+Workspace version is **0.1.0 unpublished**.
 
 ## Quick start
 

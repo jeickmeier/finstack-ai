@@ -1,8 +1,8 @@
 # finstack-ai public documentation
 
-Workspace version **0.0.4** is unpublished. `0.1.0` is the forthcoming
-public-preview cut (PR-061). Nothing on this site is a published package,
-a git tag, or a passed G7 decision.
+Workspace version **0.1.0** is unpublished. Nothing on this site is a
+published package, a git tag, or a passed G7 decision. Experimental WIT
+package names stay `@0.0.4`.
 
 Planning files under [`docs/planning/`](../planning/README.md) remain the
 implementation contract. Delivery status lives in

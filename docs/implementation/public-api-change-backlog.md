@@ -3,7 +3,7 @@
 Operational triage of open public-surface deltas before `0.1.0`.
 This register does not redefine compatibility policy. Planning docs
 under `docs/planning/` remain authoritative. Published preview
-compatibility scope is later Phase 8 / PR-061 / G7 work.
+compatibility scope is [`preview-compatibility-policy.md`](preview-compatibility-policy.md).
 
 Seeded 2026-08-15 from
 [`compatibility-governance.md`](compatibility-governance.md),
@@ -18,7 +18,7 @@ Disposition values: `keep` (no preview-blocking change),
 
 | Surface family | Current promise | Owner | Open deltas | 0.1.0 disposition | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| Public Rust APIs / native preview | `candidate` | Core/runtime lead (`me@jeickmeier.com`) | Additive provider/tool/observer/server leaves in PR-055–PR-058. [`native-preview-binding-surface.md`](native-preview-binding-surface.md) is stale (`0.0.2-alpha-candidate`; still excludes binding/durability work that later landed). Refresh that note in PR-061. No seventh port. | `keep` candidate; refresh the stale surface note before preview | [compatibility-governance](compatibility-governance.md); G3-D-native-preview-14a386c7db24 |
+| Public Rust APIs / native preview | `candidate` | Core/runtime lead (`me@jeickmeier.com`) | Additive provider/tool/observer/server leaves in PR-055–PR-058. Surface note refreshed to unpublished `0.1.0` in PR-061. No seventh port. | `keep` | [compatibility-governance](compatibility-governance.md); G3-D-native-preview-14a386c7db24; [`native-preview-binding-surface.md`](native-preview-binding-surface.md) |
 | Journal / snapshot | `candidate` (candidate-v1) | Durability/ecosystem lead (`me@jeickmeier.com`) | No open journal-meaning break. Staged unpublished `0.0.3` checkpoint is not a schema change. | `keep` | `fixtures/compatibility/journal/v1/`; PH6-E-exit-sqlite-b0641b0be338; G5-D-durable-beta-a9568bd869b5 |
 | Runtime events | `candidate` | Core/runtime lead (`me@jeickmeier.com`) | Schema dir remains reserved. Durable vs transient classification already recorded. No preview-blocking event-envelope rewrite. | `keep` | [compatibility-governance](compatibility-governance.md) runtime-events row |
 | AgentSpec / locks | `candidate` | Ecosystem lead (`me@jeickmeier.com`) | Strict reject-unknown stays. PR-055 does not change lock or catalog digest math. | `keep` | [compatibility-governance](compatibility-governance.md) AgentSpec row; ADR-008 / ADR-020 Verified at G5 |
@@ -32,11 +32,11 @@ Disposition values: `keep` (no preview-blocking change),
 | Golden traces / scripted inputs | `candidate` | Core/runtime lead (`me@jeickmeier.com`) | PR-055 added Anthropic and Ollama fixture families under `fixtures/compatibility/providers/v1/`. Scripted model remains the semantic reference. | `keep`; additive fixtures landed in PR-055 | [compatibility-governance](compatibility-governance.md) golden-trace row; PR-055-E-candidate-1000935012bf |
 | Benchmark report metadata | `candidate` | Core/runtime lead (`me@jeickmeier.com`) | Warning-only Anthropic benches in PR-055. Named budgets are PR-063. | `keep` | [compatibility-governance](compatibility-governance.md) benchmark-report row |
 | First-party batteries / observers | `candidate` leaves (not default SDK) | Ecosystem lead (`me@jeickmeier.com`) | PR-056 batteries and PR-057 observer adapters landed as optional leaves. Default kernel/runtime/SDK graph stays free of those crates. | `keep` after PR-056/PR-057 | PR-056-E-integration-cd7c725b3ab6; PR-057-E-integration-d55c8318b1f9 |
-| Docs / starters / security artifacts | `not yet` for preview pack | Quality/release owner (`me@jeickmeier.com`) | PR-060 owns guides, starters, SBOM, and Threat Model refresh. | `change before preview` (PR-060) | Implementation Plan Phase 8 PR-060 |
-| Preview compatibility policy | `not yet` | Quality/release owner (`me@jeickmeier.com`) | This backlog is triage, not the published `0.1.0` policy. PR-061 / G7 own that publication. | `change before preview` (PR-061) | Implementation Plan Phase 8 PR-061 |
+| Docs / starters / security artifacts | `candidate` in-tree pack | Quality/release owner (`me@jeickmeier.com`) | PR-060 landed guides, starters, SBOM rehearsal, and Threat Model G7 review. | `keep` after PR-060 | PR-060-E-integration-b5266602bd77 |
+| Preview compatibility policy | `candidate` in-tree | Quality/release owner (`me@jeickmeier.com`) | [`preview-compatibility-policy.md`](preview-compatibility-policy.md) is the adopter-facing unpublished `0.1.0` promise. Named G7 / tag / publish remain owner actions. | `keep` after PR-061 local step 1 | [`preview-compatibility-policy.md`](preview-compatibility-policy.md); [`public-preview-roadmap.md`](public-preview-roadmap.md) |
 
 Explicitly not preview-blocking and not opened as new deltas here:
 marketplace, native dylib ABI, PostgreSQL, `@1.0.0` WIT worlds,
 exactly-once delivery, IndexedDB durability, SharedArrayBuffer, and
-npm/pypi/crates.io publication of the staged `0.0.3` / `0.0.4`
-checkpoints.
+npm/pypi/crates.io publication of the staged `0.0.3` / `0.0.4` /
+unpublished `0.1.0` checkpoints.

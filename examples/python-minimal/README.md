@@ -1,7 +1,7 @@
 # Python starter projects
 
 Three deliberately small starters against the typed public `finstack_ai`
-package. Workspace pin is `finstack-ai==0.0.4` (unpublished).
+package. Workspace pin is `finstack-ai==0.1.0` (unpublished).
 
 - [`rust-backed/`](rust-backed/) — curated Rust-backed OpenAI-compatible
   provider ([T1](../../docs/site/security-trust-levels.md)). Default path

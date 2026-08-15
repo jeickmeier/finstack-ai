@@ -1,25 +1,43 @@
 # Native developer-preview binding surface
 
-Status: `0.0.2-alpha-candidate`; Python half closed at PR-032 / Phase 4; exact checkpoint waits for PR-038/G4
+Status: unpublished lockstep **`0.1.0`** preview candidate. Python and
+WASM halves closed at G4. Durability beta closed at G5. Plugin alpha
+closed at G6. Public tag, registry publish, and named G7 remain owner
+decisions.
 
 The candidate Rust surface is:
 
-- declarative `AgentSpec`, `AgentBuilder`, `BundleSpec`, `BundleCatalog`, exact
-  `ResolvedAgentLock`, and `BundleResolver`;
-- typed registry/component resolution and direct `ResolvedRunPlan` handles;
-- native `Agent`, `NativeAgentBuilder`, `AgentRunRequest`, `AgentRunOutput`, and
-  stable `AgentRunError` codes;
+- declarative `AgentSpec`, `AgentBuilder`, `BundleSpec`, `BundleCatalog`,
+  exact `ResolvedAgentLock`, and `BundleResolver`;
+- typed registry/component resolution and direct `ResolvedRunPlan`
+  handles;
+- native `Agent`, `NativeAgentBuilder`, `AgentRunRequest`,
+  `AgentRunOutput`, and stable `AgentRunError` codes;
 - provider-neutral Model/Toolset contracts through `finstack_ai::runtime`;
-- canonical `finstack-ai-provider-openai-compatible`,
-  `finstack-ai-tools-calculator`, `finstack-ai-tools-filesystem`, and
-  `finstack-ai-store-memory` packages.
+- first-party leaves: OpenAI-compatible and Anthropic providers,
+  calculator / filesystem / shell toolsets, memory and SQLite stores,
+  repository and memory context providers, compaction and verify
+  middleware, log / metrics / OpenTelemetry observers, local and
+  Temporal-shaped workflow adapters, and the loopback/Unix reference
+  server.
+
+Binding surfaces that share this lockstep version:
+
+- Python wheel `finstack-ai==0.1.0` (experimental alpha; rust-backed and
+  trusted callback paths);
+- `@finstack/ai` `0.1.0` (experimental alpha; worker default;
+  IndexedDB experimental / non-durable);
+- experimental WIT package names `finstack:ai-*@0.0.4` with crate version
+  `0.1.0`.
 
 This is a developer-preview compatibility candidate, not a 1.0 stability
-promise. An incompatible public change requires an ADR trigger assessment and
-the repository compatibility-governance workflow before implementation.
-Additive fixes remain allowed when they preserve deterministic kernel semantics,
-the six-port boundary, commit-before-effect ordering, and exact-lock behavior.
+promise. An incompatible public change requires an ADR trigger assessment
+and the repository compatibility-governance workflow before
+implementation. Additive fixes remain allowed when they preserve
+deterministic kernel semantics, the six-port boundary,
+commit-before-effect ordering, and exact-lock behavior.
 
-Excluded from this candidate are Python/WASM runtime parity, a durable database
-store, remote/plugin ABI guarantees, Model-activated capabilities, and automatic
-approval of side-effecting tools.
+Excluded from this candidate are a seventh port, `@1.0.0` WIT worlds,
+exactly-once delivery, IndexedDB durability, SharedArrayBuffer, a
+marketplace, and automatic approval of side-effecting tools. See
+[`preview-compatibility-policy.md`](preview-compatibility-policy.md).

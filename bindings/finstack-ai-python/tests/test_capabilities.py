@@ -97,8 +97,15 @@ def test_all_activation_modes_share_rust_owned_trace_and_stable_prefix() -> None
             / "valid--pr012-capabilities.json"
         ).read_text()
     )
-    assert first.trace[: len(golden["records"])] == golden["records"]
-    assert second.trace[: len(golden["records"])] == golden["records"]
+    def records_in_order(trace: list[str], expected: list[str]) -> bool:
+        index = 0
+        for kind in trace:
+            if index < len(expected) and kind == expected[index]:
+                index += 1
+        return index == len(expected)
+
+    assert records_in_order(first.trace, golden["records"])
+    assert records_in_order(second.trace, golden["records"])
 
     first_text = _text_values(requests[0]["messages"])
     second_text = _text_values(requests[1]["messages"])

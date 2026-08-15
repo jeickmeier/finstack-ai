@@ -2,8 +2,8 @@
 
 //! Generated host and guest bindings for the experimental `@0.0.4` WIT packages.
 
-/// Workspace crate version that owns these experimental `@0.0.4` bindings (`0.0.4`).
-pub const CRATE_VERSION: &str = "0.0.4";
+/// Workspace crate version that owns these experimental `@0.0.4` bindings (`0.1.0`).
+pub const CRATE_VERSION: &str = "0.1.0";
 /// Checked-in WIT package `finstack:ai-types@0.0.4`.
 pub const AI_TYPES_PACKAGE: &str = "finstack:ai-types@0.0.4";
 /// Checked-in WIT package `finstack:ai-host@0.0.4`.
