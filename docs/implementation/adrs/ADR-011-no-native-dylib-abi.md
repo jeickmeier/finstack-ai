@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial via PR-002 plugin-path classification, PR-049/PR-050 WIT leaf, PR-051-E-security-36f1ce2e263b / PR-051-E-integration-cf7eaebab383, and PR-052-E-security-4234efbcc3d9 / PR-052-E-integration-5e531591350a (no dylib loader or libloading on the Wasmtime host). G6 remains.
+- Implementation evidence: Verified — PR-002 plugin-path classification plus PR-049–PR-054 WIT/Wasmtime leaves add no native dylib loader or `libloading`. G6-D-plugin-alpha-018aaea9aa00 records that proof.

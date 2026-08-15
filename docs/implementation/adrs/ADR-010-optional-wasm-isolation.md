@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial via PR-002 wasm-host checks, PR-049/PR-050 in-process WIT leaf, PR-051-E-candidate-36f1ce2e263b / PR-051-E-security-36f1ce2e263b / PR-051-E-integration-cf7eaebab383 at local merge `cf7eaebab383724fa4b7b19cb204febec41a768a` (first isolated Wasmtime T3 host and host-owned compile cache), and PR-052-E-candidate-4234efbcc3d9 / PR-052-E-security-4234efbcc3d9 / PR-052-E-integration-5e531591350a at local merge `5e531591350a8838ff7da06f50a5dc2d52b31892` (deny-by-default WASI grants, fuel/StoreLimits, ed25519 trust-root verify). Lockfile discovery remains PR-054. G6 owns Implemented.
+- Implementation evidence: Verified — optional isolation stays outside the kernel through PR-049–PR-054 local merges and G6-D-plugin-alpha-018aaea9aa00. Wasmtime remains the `plugins/` host leaf; default bundles do not depend on it. Lockfile-driven local discovery is `PluginHost::load_enabled`.

@@ -14,7 +14,7 @@ default for `execution-mode`, `side-effect`, `retry-safety`,
 `approval-policy-json`, or `max-result-bytes`.
 
 The workspace crate version is staged unpublished `0.0.4`. Plugin alpha
-publishes `@0.x` packages only. `@1.0.0` worlds are generated only at the
+ships `@0.x` packages only. `@1.0.0` worlds are generated only at the
 framework 1.0 compatibility gate. `mise run gen-wit` fails if a `@1.0.0`
 package appears.
 
