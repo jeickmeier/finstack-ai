@@ -1,13 +1,13 @@
 # Examples
 
 Public-API examples for finstack-ai bindings. Workspace version is
-**0.0.4 unpublished**. Trust labels:
+**0.1.0 unpublished**. Trust labels:
 [docs/site/security-trust-levels.md](../docs/site/security-trust-levels.md).
 
 - [`rust-minimal/`](rust-minimal/) — T1 native binaries (`minimal`, `coding`,
   `service`, `diagnostic`).
 - [`python-minimal/`](python-minimal/) — rust-backed (T1), callback (T2),
-  and service (T2) starters pinned to `finstack-ai==0.0.4`.
+  and service (T2) starters pinned to `finstack-ai==0.1.0`.
 - [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
   inspect demo (T2 host / T5 content). Not crash-durable.
 - [`ts-alpha-install/`](ts-alpha-install/) — clean TypeScript consumer that

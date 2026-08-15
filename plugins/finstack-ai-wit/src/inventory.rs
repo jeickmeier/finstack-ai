@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn experimental_surface_is_coarse_and_0x_only() {
         assert_experimental_surface().expect("surface");
-        assert_eq!(CRATE_VERSION, "0.0.4");
+        assert_eq!(CRATE_VERSION, "0.1.0");
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);
         assert_eq!(CONTEXT_WORLD_EXPORTS, ["context-provider"]);
         assert_eq!(CONTEXT_FUNCS, ["collect"]);

@@ -1,7 +1,7 @@
-# Release rehearsal (unpublished 0.0.4)
+# Release rehearsal (unpublished 0.1.0)
 
-This is a local preview rehearsal. It does **not** cut `0.1.0`, `git tag`,
-or publish. The public tag is PR-061.
+This is a local preview rehearsal. It does **not** `git tag` or publish.
+Named G7 and `v0.1.0` remain owner decisions.
 
 ```text
 mise run release-rehearsal
@@ -25,8 +25,8 @@ and npm pack when `dist/` exists. Wheel bytes are recorded but may differ
 across maturin/rustc embeddings; that residual is **blocking for G7**, not
 this rehearsal's local pass.
 
-Provenance statement names the commit SHA, `mise.toml` toolchain pins, and
-`staged_not_published: true`. Artifacts may say "preview rehearsal" and
-must not claim `0.1.0`.
+Provenance statement names the commit SHA, `mise.toml` toolchain pins,
+`version: 0.1.0`, and `staged_not_published: true`. Artifacts may say
+"preview rehearsal" and must not claim a named G7 or public tag.
 
 Hosted Sigstore/OIDC is not required (`external actions=none`).

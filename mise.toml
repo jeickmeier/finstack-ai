@@ -202,7 +202,7 @@ uv run --no-project python tools/docs/license_sweep.py
 """
 
 [tasks.release-rehearsal]
-description = "Two-run local staging checksum identity (unpublished 0.0.4)"
+description = "Two-run local staging checksum identity (unpublished 0.1.0)"
 run = """
 set -euo pipefail
 uv run --no-project python tools/docs/rehearse_release.py

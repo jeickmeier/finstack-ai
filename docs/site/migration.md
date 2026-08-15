@@ -6,8 +6,11 @@ Open public-surface deltas before `0.1.0` are triaged in
 [public-api-change-backlog.md](../implementation/public-api-change-backlog.md).
 That backlog is Phase 8 entrance evidence, not a published preview policy.
 
-Published preview compatibility policy is PR-061. This tree stays on
-workspace **0.0.4 unpublished**. Do not treat staged artifacts as `0.1.0`.
+Published preview compatibility policy is
+[preview-compatibility-policy.md](../implementation/preview-compatibility-policy.md).
+This tree is unpublished lockstep **`0.1.0`**. Do not treat staged
+artifacts as a named G7, git tag, or registry publish. Experimental WIT
+package names stay `@0.0.4`.
 
 ## Release rehearsal
 

@@ -172,7 +172,7 @@ pub fn write_support_bundle(
         .map_err(|_| LogObserverError::BundleUnavailable)?;
     let journal_jsonl = journal_export_jsonl(records, ObserverPayloadMode::MetadataOnly)
         .map_err(|_| LogObserverError::BundleUnavailable)?;
-    let versions = support_bundle_versions("0.0.4", &["finstack.observer.log"]);
+    let versions = support_bundle_versions(env!("CARGO_PKG_VERSION"), &["finstack.observer.log"]);
     std::fs::write(root.join("events.jsonl"), events_jsonl)
         .map_err(|_| LogObserverError::BundleUnavailable)?;
     std::fs::write(root.join("journal-export.jsonl"), journal_jsonl)

@@ -11,7 +11,7 @@ Trust class: driver is [T1](../../docs/site/security-trust-levels.md);
 journal payloads are [T5](../../docs/site/security-trust-levels.md).
 In-process code is not isolated.
 
-Workspace version is **0.0.4 unpublished**.
+Workspace version is **0.1.0 unpublished**.
 
 ## Quick start
 

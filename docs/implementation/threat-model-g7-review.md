@@ -2,7 +2,7 @@
 
 Date: 2026-08-15
 Owner: me@jeickmeier.com
-Workspace: **0.0.4 unpublished**
+Workspace: **0.1.0 unpublished** (experimental WIT package names stay `@0.0.4`)
 
 This file is the implemented-control matrix for G7 evidence collection.
 It does **not** rewrite

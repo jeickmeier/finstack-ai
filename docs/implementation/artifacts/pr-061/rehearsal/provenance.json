@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "kind": "preview rehearsal",
+  "mise_pins": {
+    "node": "22.18.0",
+    "python": "3.14",
+    "rust": "1.97.1",
+    "uv": "0.10.11"
+  },
+  "notes": "uv build wheel-from-sdist fails with maturin locked=true outside the workspace; rehearsal uses uv build --sdist plus in-tree maturin build --offline --locked. Wheel bytes are recorded but excluded from two-run identity because rustc/maturin embed non-reproducible metadata. Sdist, crate lists, plugin.lock, and npm pack (when dist/ exists) must match.",
+  "public_tag": "blocked pending named G7-D and git tag v0.1.0",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "source_revision": "8197246e58981b3ba2dd806a7036e13238cb5fb9",
+  "staged_not_published": true,
+  "version": "0.1.0"
+}

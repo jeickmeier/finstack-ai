@@ -12,7 +12,7 @@ Trust class: JS host adapters are [T2](../../docs/site/security-trust-levels.md)
 They are not isolated. Stored prompts and results are
 [T5](../../docs/site/security-trust-levels.md).
 
-Workspace version is **0.0.4 unpublished**.
+Workspace version is **0.1.0 unpublished**.
 
 ## Quick start
 

@@ -19,7 +19,7 @@ an ADR.
 
 ## Status
 
-No numbered RFC is open. Workspace version is **0.0.4 unpublished**.
+No numbered RFC is open. Workspace version is **0.1.0 unpublished**.
 Preview compatibility policy is PR-061.
 
 ## License and governance

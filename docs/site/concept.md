@@ -30,4 +30,4 @@ They are not a sandbox. See [trust levels](security-trust-levels.md).
 ## Starter
 
 [Rust minimal](../../examples/rust-minimal/README.md) is the smallest public
-composition. Workspace version is **0.0.4 unpublished**.
+composition. Workspace version is **0.1.0 unpublished**.

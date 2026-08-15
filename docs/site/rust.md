@@ -3,8 +3,8 @@
 Public crate: `finstack-ai` (SDK/facade). Kernel, runtime, and protocol
 crates are not a second constructor path; start here.
 
-Workspace version is **0.0.4 unpublished**. `0.1.0` is the forthcoming
-preview cut (PR-061).
+Workspace version is **0.1.0 unpublished**. Named G7, tag, and publish
+remain owner decisions.
 
 ## Quick start
 

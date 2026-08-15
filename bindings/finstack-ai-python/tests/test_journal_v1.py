@@ -13,7 +13,7 @@ _JOURNAL_V1 = _REPO_ROOT / "fixtures/compatibility/journal/v1"
 
 def test_record_body_known_answers_match_rust_fixtures() -> None:
     payloads = sorted((_JOURNAL_V1 / "record-payload").glob("valid--*.json"))
-    assert len(payloads) == 39
+    assert len(payloads) == 40
     for path in payloads:
         fixture = json.loads(path.read_text())
         answer = finstack_ai.journal_known_answer(
@@ -25,7 +25,7 @@ def test_record_body_known_answers_match_rust_fixtures() -> None:
 
 def test_envelope_known_answers_match_rust_fixtures() -> None:
     envelopes = sorted((_JOURNAL_V1 / "envelope").glob("valid--*.json"))
-    assert len(envelopes) == 39
+    assert len(envelopes) == 40
     for path in envelopes:
         fixture = json.loads(path.read_text())
         answer = finstack_ai.journal_known_answer(

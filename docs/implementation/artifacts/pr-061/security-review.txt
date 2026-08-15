@@ -1,0 +1,56 @@
+PR-061 TM-18 security review
+Date: 2026-08-15
+Candidate: 8197246e58981b3ba2dd806a7036e13238cb5fb9
+Reviewer: me@jeickmeier.com
+Decision: Pass for unpublished 0.1.0 metadata, compatibility
+policy, roadmap, regenerated WIT/plugin artifacts, and local
+staging. No threat-model rewrite. No Implementation Plan §6.3
+ADR trigger. G7 is not inferred.
+
+Scope reviewed:
+  Cargo.toml / lockstep version fields
+  bindings/finstack-ai-python/pyproject.toml
+  bindings/finstack-ai-wasm/js/package.json
+  docs/implementation/preview-compatibility-policy.md
+  docs/implementation/public-preview-roadmap.md
+  docs/implementation/public-api-change-backlog.md
+  docs/implementation/native-preview-binding-surface.md
+  CHANGELOG.md / SECURITY.md
+  plugins/finstack-ai-wit/src/generated.rs (CRATE_VERSION 0.1.0;
+    WIT package names stay @0.0.4)
+  plugins/reference/plugin.lock.json (plugin identity versions stay 0.0.4)
+  tools/docs/rehearse_release.py
+  Graph: kernel / runtime / default SDK
+
+Triggered controls: Threat Model section 18 (release identities,
+registries, signing, provenance). Primary TM-18. Also TM-04,
+TM-06, SEC-INV-012.
+
+PASS  TM-18 identities
+      Lockstep crate/wheel/npm version fields are 0.1.0.
+      Experimental WIT package names remain finstack:ai-*@0.0.4.
+      Plugin lockfile/manifest identity versions remain 0.0.4.
+      Provenance names commit 8197246, mise pins, version 0.1.0,
+      staged_not_published, and public_tag blocked pending named
+      G7-D and git tag. No git tag. No registry publish.
+
+PASS  TM-04 secrets
+      No new provider, server, or credential path. SECURITY.md
+      keeps private reporting. Supported-versions table now names
+      the unpublished 0.1.0 line without claiming a tag.
+
+PASS  TM-06 trust labels
+      Policy and roadmap keep experimental WIT, experimental
+      IndexedDB, at-least-once, and inspect-not-continue. In-process
+      guests are not called a sandbox.
+
+PASS  SEC-INV-012 graphs
+      Version bump added no dependencies. Kernel omit-list clean.
+      Default SDK omit-list clean. wasm graph pass.
+
+No ADR. Compatibility policy publishes scope; it does not change
+journal/WIT/remote decoding rules. WIT @1.0.0 stays blocked.
+
+Residual: public tag, registry publish, hosted signing, and named
+G7-D-* stay blocking for G7. Wheel-from-sdist locked residual
+unchanged. Independent review is G8 / PR-065. No G7-D.

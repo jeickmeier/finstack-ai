@@ -9,8 +9,8 @@ Planning docs under `docs/planning/` remain authoritative.
 
 Open public-surface deltas before `0.1.0` are triaged in
 [`public-api-change-backlog.md`](public-api-change-backlog.md). That
-file is Phase 8 entrance evidence, not this family's compatibility
-promise and not the published preview policy.
+file is Phase 8 entrance evidence. The adopter-facing unpublished
+`0.1.0` promise is [`preview-compatibility-policy.md`](preview-compatibility-policy.md).
 
 ## Contract families
 

@@ -6,7 +6,7 @@ handle one offline request. Matches the Rust `service` binary shape.
 Trust class: [T2](../../../docs/site/security-trust-levels.md). This is
 trusted in-process code. It is not isolated.
 
-Workspace version is **0.0.4 unpublished**.
+Workspace version is **0.1.0 unpublished**.
 
 ## Quick start
 
