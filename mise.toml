@@ -57,6 +57,20 @@ set -euo pipefail
 uv run --no-project python tools/wit_bindgen/generate.py --check
 """
 
+[tasks.gen-plugin-wasm]
+description = "Build and encode the PR-051 test-only plugin guests"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_wasm/generate.py
+"""
+
+[tasks.check-plugin-wasm]
+description = "Fail when checked-in plugin guest components drift"
+run = """
+set -euo pipefail
+uv run --no-project python tools/plugin_wasm/generate.py --check
+"""
+
 [tasks.check-wasm]
 description = "Type-check the wasm-host graph and reject Tokio in browser builds"
 run = """

@@ -1,0 +1,36 @@
+[package]
+name = "finstack-ai-plugin-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Optional isolated Wasmtime component host and compiled-component cache for finstack-ai"
+readme = "README.md"
+publish = false
+
+[dependencies]
+finstack-ai = { workspace = true, default-features = false }
+finstack-ai-kernel = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false }
+finstack-ai-wit = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+wasmtime = { workspace = true }
+
+[dev-dependencies]
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-store-memory = { workspace = true }
+finstack-ai-test = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+wat = "1.239.0"
+
+[lints]
+workspace = true
