@@ -9,7 +9,9 @@ auditable permission grants on the isolated Wasmtime path. Admitted on
 | `plan.md` | Execution envelope, exclusions, and acceptance mapping |
 | `candidate-validation.txt` | Local Darwin A01–A04 proofs at `4234efbcc3d9fdc683da2f80a9605122f14caf1d` |
 | `security-review.txt` | TM-07 / TM-08 / TM-06 / Threat Model §18 review at the same candidate |
+| `integration-validation.txt` | Local `main` merge `5e531591350a8838ff7da06f50a5dc2d52b31892` |
 
 No G5 or G6 decision, hosted pull request, npm/pypi publish, or tag is
 stored here. Phase 7 entrance was recorded in PR-049 and is not
-re-recorded. The closed PR-051 envelope is not reused.
+re-recorded. The closed PR-051 envelope is not reused. PR-052 is `Done`
+at this merge. Phase 7 remains `In progress`.
