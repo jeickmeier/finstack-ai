@@ -3,7 +3,7 @@
 Date: 2026-08-14
 Owner: me@jeickmeier.com
 Intended branch (when admitted): `codex/pr-057-observer-diagnostics`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
+Intended baseline: local `main` at `6f4ecfcde5df1e6919c3da121f4b7d8b65df62db`
 Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
 `555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
 

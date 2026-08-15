@@ -1,1 +1,6 @@
-Trusted native leaf battery placeholder under extensions/; implementation lands in later pull requests. See docs/planning/03-finstack-ai-technical-design.md §2.
+# finstack-ai-observer-log
+
+Structured JSON observer leaf. Default payload mode is `Redacted`. Export
+queues are finite; overflow emits `observer_queue_overflow` and never fails a
+run. `write_support_bundle` writes redacted events, metadata-only journal
+export, and versions — not raw journal CBOR.

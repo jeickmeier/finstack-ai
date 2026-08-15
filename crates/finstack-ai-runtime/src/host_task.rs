@@ -65,6 +65,25 @@ impl RunHandle {
         self.shared.events.subscribe_interactive(config)
     }
 
+    /// Register a read-only observer subscription.
+    ///
+    /// The wasm-host hub has a single subscriber set; isolation is enforced on
+    /// the native Tokio hub.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid configuration, exhausted subscriber capacity, or a closed hub.
+    #[expect(
+        clippy::unused_async,
+        reason = "matches native RunHandle so Agent can await both owners"
+    )]
+    pub async fn subscribe_observer(
+        &self,
+        config: EventSubscriptionConfig,
+    ) -> Result<EventSubscription, EventSubscriptionError> {
+        self.shared.events.subscribe_observer(config)
+    }
+
     /// Submit one command, awaiting bounded-channel capacity when necessary.
     ///
     /// # Errors

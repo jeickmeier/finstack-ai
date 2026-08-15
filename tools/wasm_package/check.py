@@ -32,6 +32,14 @@ FORBIDDEN_WASM = frozenset(
         "finstack-ai-context-memory",
         "finstack-ai-middleware-compaction",
         "finstack-ai-middleware-verify",
+        "finstack-ai-observer-log",
+        "finstack-ai-observer-otel",
+        "finstack-ai-observer-metrics",
+        "opentelemetry",
+        "opentelemetry_sdk",
+        "opentelemetry-otlp",
+        "opentelemetry-http",
+        "prometheus",
     }
 )
 SECRET_ROOTS = (

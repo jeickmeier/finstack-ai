@@ -1,1 +1,6 @@
-Trusted native leaf battery placeholder under extensions/; implementation lands in later pull requests. See docs/planning/03-finstack-ai-technical-design.md §2.
+# finstack-ai-observer-otel
+
+OpenTelemetry observer leaf. Default build uses an in-process
+`SdkTracerProvider` with no network exporter. Enable the `otlp` feature only
+when an application installs an explicit OTLP exporter. Span names are
+`finstack.run`, `finstack.effect`, and `finstack.tool`.
