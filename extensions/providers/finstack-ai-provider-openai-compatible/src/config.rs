@@ -164,6 +164,27 @@ impl OpenAiCompatibleConfig {
         })
     }
 
+    /// Construct keyless Ollama/local Chat Completions configuration.
+    ///
+    /// Uses [`EndpointKind::Ollama`], no authentication, and `/v1/chat/completions`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a URL with credentials, query, fragment, or a non-HTTP scheme.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_provider_openai_compatible::{EndpointKind, OpenAiCompatibleConfig};
+    ///
+    /// let config = OpenAiCompatibleConfig::ollama_local("http://127.0.0.1:11434").expect("config");
+    /// assert!(format!("{config:?}").contains("Ollama"));
+    /// let _ = EndpointKind::Ollama;
+    /// ```
+    pub fn ollama_local(base_url: impl AsRef<str>) -> Result<Self, ModelError> {
+        Self::try_new(base_url, EndpointKind::Ollama)
+    }
+
     /// Set the Chat Completions path, including deployment-scoped Azure paths.
     ///
     /// # Errors
@@ -361,6 +382,10 @@ pub struct OpenAiModelConfig {
     pub provider_overhead_tokens: u64,
     /// Native parallel tool-call support.
     pub parallel_tool_calls: bool,
+    /// Whether the configured model advertises reasoning content.
+    pub reasoning: bool,
+    /// Whether the configured model advertises prompt-cache support.
+    pub prompt_cache: bool,
 }
 
 impl OpenAiModelConfig {
@@ -397,6 +422,8 @@ impl OpenAiModelConfig {
             reserved_output_tokens,
             provider_overhead_tokens,
             parallel_tool_calls: true,
+            reasoning: false,
+            prompt_cache: false,
         })
     }
 
@@ -404,6 +431,20 @@ impl OpenAiModelConfig {
     #[must_use]
     pub const fn with_parallel_tool_calls(mut self, enabled: bool) -> Self {
         self.parallel_tool_calls = enabled;
+        self
+    }
+
+    /// Advertise reasoning content for this model only.
+    #[must_use]
+    pub const fn with_reasoning(mut self, enabled: bool) -> Self {
+        self.reasoning = enabled;
+        self
+    }
+
+    /// Advertise prompt-cache support for this model only.
+    #[must_use]
+    pub const fn with_prompt_cache(mut self, enabled: bool) -> Self {
+        self.prompt_cache = enabled;
         self
     }
 
@@ -434,8 +475,8 @@ impl OpenAiModelConfig {
             } else {
                 StructuredOutputCapability::Prompted
             },
-            reasoning: false,
-            prompt_cache: false,
+            reasoning: self.reasoning,
+            prompt_cache: self.prompt_cache,
             resumable_stream: false,
             idempotent_requests: false,
             native_capabilities: BTreeSet::from([
@@ -443,6 +484,17 @@ impl OpenAiModelConfig {
                 Arc::from("openai.sse"),
             ]),
         }
+    }
+
+    pub(crate) fn apply_capabilities(&mut self, update: &ModelCapabilities) {
+        self.reasoning = update.reasoning;
+        self.prompt_cache = update.prompt_cache;
+        self.hard_input_bytes = update.context_profile.hard_input_bytes;
+        self.context_window_tokens = update.context_profile.context_window_tokens;
+        self.max_output_tokens = update.context_profile.max_output_tokens;
+        self.reserved_output_tokens = update.context_profile.reserved_output_tokens;
+        self.provider_overhead_tokens = update.context_profile.provider_overhead_tokens;
+        self.parallel_tool_calls = update.parallel_tool_calls;
     }
 }
 
@@ -515,5 +567,16 @@ mod tests {
                 .with_query_parameter("api-key", CANARY)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn ollama_local_is_keyless_and_uses_the_ollama_family() {
+        let config =
+            OpenAiCompatibleConfig::ollama_local("http://127.0.0.1:11434").expect("ollama");
+        assert_eq!(config.endpoint(), EndpointKind::Ollama);
+        assert!(config.header_map().is_ok());
+        let rendered = format!("{config:?}");
+        assert!(rendered.contains("Ollama"));
+        assert!(rendered.contains("None"));
     }
 }

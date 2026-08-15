@@ -32,6 +32,12 @@ const TOOL_SSE: &str = include_str!(
 const STRUCTURED_SSE: &str = include_str!(
     "../../../../fixtures/compatibility/providers/v1/openai-compatible/valid--structured.sse"
 );
+const OLLAMA_TEXT_SSE: &str =
+    include_str!("../../../../fixtures/compatibility/providers/v1/ollama/valid--text.sse");
+const OLLAMA_TOOL_SSE: &str =
+    include_str!("../../../../fixtures/compatibility/providers/v1/ollama/valid--tool.sse");
+const OLLAMA_STRUCTURED_SSE: &str =
+    include_str!("../../../../fixtures/compatibility/providers/v1/ollama/valid--structured.sse");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn keyless_local_streams_text_usage_and_reuses_the_request_contract() {
@@ -252,6 +258,103 @@ async fn openai_compatible_reconcile_is_unknown_without_retrieve() {
         .await
         .expect("reconcile");
     assert_eq!(result, ModelReconcileResult::Unknown);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ollama_local_streams_text_without_stream_usage() {
+    let (base_url, server) = serve_sse(OLLAMA_TEXT_SSE).await;
+    let provider = ollama_provider(&base_url);
+    let mut stream = provider
+        .request(request(draft(OutputSpec::PlainText, Arc::from([]))))
+        .await
+        .expect("request");
+    let mut text = String::new();
+    let mut completed = None;
+    while let Some(item) = stream.next().await {
+        match item.expect("stream item") {
+            ModelStreamItem::TextDelta(delta) => text.push_str(&delta.text),
+            ModelStreamItem::Completed(response) => completed = Some(response),
+            _ => {}
+        }
+    }
+    assert_eq!(text, "hello world");
+    assert_eq!(
+        completed.expect("terminal").completion_id.as_ref(),
+        "ollama-text-1"
+    );
+    let captured = server.await.expect("server task");
+    assert!(captured.starts_with("POST /v1/chat/completions HTTP/1.1"));
+    assert!(!captured.contains("stream_options"));
+    assert_eq!(provider.quirks().kind, EndpointKind::Ollama);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ollama_local_normalizes_tool_fragments() {
+    let (base_url, server) = serve_sse(OLLAMA_TOOL_SSE).await;
+    let provider = ollama_provider(&base_url);
+    let tools = Arc::from([tool("weather", schema())]);
+    let mut stream = provider
+        .request(request(draft(OutputSpec::PlainText, tools)))
+        .await
+        .expect("request");
+    let mut completed = None;
+    while let Some(item) = stream.next().await {
+        if let ModelStreamItem::Completed(response) = item.expect("stream item") {
+            completed = Some(response);
+        }
+    }
+    let response = completed.expect("terminal response");
+    assert_eq!(response.tool_calls[0].name.as_ref(), "weather");
+    assert_eq!(
+        response.tool_calls[0].arguments.as_str(),
+        r#"{"city":"Toronto"}"#
+    );
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ollama_local_keeps_prompted_structured_output_tool() {
+    let (base_url, server) = serve_sse(OLLAMA_STRUCTURED_SSE).await;
+    let provider = ollama_provider(&base_url);
+    let schema = schema();
+    let output = OutputSpec::JsonSchema {
+        schema: SchemaRef {
+            draft: JsonSchemaDraft::Draft202012,
+            schema_version: 1,
+            schema_digest: schema.digest(),
+        },
+    };
+    let tools = Arc::from([tool(SUBMIT_FINAL_OUTPUT_TOOL, schema)]);
+    let mut stream = provider
+        .request(request(draft(output, tools)))
+        .await
+        .expect("request");
+    let mut completed = None;
+    while let Some(item) = stream.next().await {
+        match item.expect("stream item") {
+            ModelStreamItem::TextDelta(_) => panic!("structured JSON must not emit text deltas"),
+            ModelStreamItem::Completed(response) => completed = Some(response),
+            _ => {}
+        }
+    }
+    assert!(matches!(
+        completed.expect("terminal").assistant_content[0],
+        ContentBlock::Json(_)
+    ));
+    let captured = server.await.expect("server task");
+    assert!(captured.contains(SUBMIT_FINAL_OUTPUT_TOOL));
+    assert!(!captured.contains("json_schema"));
+}
+
+fn ollama_provider(base_url: &str) -> OpenAiCompatibleProvider {
+    OpenAiCompatibleProvider::try_new(
+        OpenAiCompatibleConfig::ollama_local(base_url).expect("config"),
+        vec![
+            OpenAiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model"),
+        ],
+    )
+    .expect("provider")
 }
 
 fn provider(base_url: &str) -> OpenAiCompatibleProvider {

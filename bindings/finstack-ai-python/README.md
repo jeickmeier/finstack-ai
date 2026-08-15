@@ -16,10 +16,13 @@ and staged checksums/SBOM/keyless signatures.
 mise run test
 ```
 
-The initial distribution links the Rust-backed OpenAI-compatible provider into
-the same extension module. `Agent.openai_compatible()` constructs a keyless
-Rust-backed client explicitly; importing `finstack_ai` still does not create a
+The curated wheel links the Rust-backed OpenAI-compatible, Anthropic Messages,
+and Ollama/local paths into the same extension module.
+`linked_providers()` reports `("openai-compatible", "anthropic", "ollama")`.
+`Agent.openai_compatible()`, `Agent.anthropic()`, and `Agent.ollama()` construct
+those clients explicitly; importing `finstack_ai` still does not create a
 provider client, initialize Tokio, read credentials, or open network resources.
+Lazy `finstack_ai.providers.*` facades stay unloaded until attribute access.
 Dropping a `Run` detaches observation rather than cancelling durable execution;
 call `await run.cancel()` for explicit cancellation. Classic `abi3` wheels are
 not part of the launch strategy.

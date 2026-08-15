@@ -75,4 +75,5 @@ May change only through a new superseding ADR and reconciliation of every affect
   PR-045 candidate `e58ff33138dd1c4d5c1be9e611575b12cd3a4ac5` adds
   timer/cancel commit-before-effect on same-run restore
   (PR-045-E-cancel-e58ff33138dd; PR-045-E-security-e58ff33138dd).
-  PR-048/G5 remain.
+  Verified — PR-048 crash-prefix recover and
+  G5-D-durable-beta-a9568bd869b5 close the mapped durability work.

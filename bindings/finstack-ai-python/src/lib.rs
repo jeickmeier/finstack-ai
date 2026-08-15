@@ -15,6 +15,10 @@ use finstack_ai::{
     ExternalIdentityMap, InstructionSpec, InteractionResolution, Lane, MemoryExternalIdentityMap,
     PrincipalRef, RunSecurityContext, Session, SessionError,
 };
+use finstack_ai_provider_anthropic::{
+    AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
+    Authentication as AnthropicAuthentication, SecretString as AnthropicSecret,
+};
 use finstack_ai_provider_openai_compatible::{
     EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
 };
@@ -37,6 +41,8 @@ use callbacks::{
 
 const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const OPENAI_COMPATIBLE_PROVIDER: &str = "openai-compatible";
+const ANTHROPIC_PROVIDER: &str = "anthropic";
+const OLLAMA_PROVIDER: &str = "ollama";
 const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
 const DEFAULT_MAX_CYCLES: u64 = 16;
 const MAX_TIMEOUT_SECONDS: f64 = 86_400.0;
@@ -85,9 +91,14 @@ fn health() -> &'static str {
 
 #[pyfunction]
 #[pyo3(text_signature = "()")]
-fn linked_providers() -> (&'static str,) {
+fn linked_providers() -> (&'static str, &'static str, &'static str) {
     let _ = finstack_ai_provider_openai_compatible::ENDPOINT_QUIRKS_VERSION;
-    (OPENAI_COMPATIBLE_PROVIDER,)
+    let _ = finstack_ai_provider_anthropic::ANTHROPIC_MESSAGES_VERSION;
+    (
+        OPENAI_COMPATIBLE_PROVIDER,
+        ANTHROPIC_PROVIDER,
+        OLLAMA_PROVIDER,
+    )
 }
 
 /// Compute journal known-answer hex through the one Rust engine.
@@ -276,6 +287,66 @@ impl PyAgent {
             capability_configuration(py, capabilities, active_capabilities)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_openai_compatible_agent(
+                base_url,
+                model,
+                instruction,
+                capabilities,
+                active_capabilities,
+            )
+            .await;
+            Python::attach(|py| match built {
+                Ok(value) => Py::new(py, value),
+                Err(error) => Err(agent_error(py, &error, None)),
+            })
+        })
+    }
+
+    /// Construct a Rust-backed Anthropic Messages agent.
+    #[staticmethod]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None))]
+    fn anthropic(
+        py: Python<'_>,
+        base_url: String,
+        model: String,
+        api_key: Option<String>,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let built = build_anthropic_agent(
+                base_url,
+                model,
+                api_key,
+                instruction,
+                capabilities,
+                active_capabilities,
+            )
+            .await;
+            Python::attach(|py| match built {
+                Ok(value) => Py::new(py, value),
+                Err(error) => Err(agent_error(py, &error, None)),
+            })
+        })
+    }
+
+    /// Construct a keyless Rust-backed Ollama/local agent.
+    #[staticmethod]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None))]
+    fn ollama(
+        py: Python<'_>,
+        base_url: String,
+        model: String,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let built = build_ollama_agent(
                 base_url,
                 model,
                 instruction,
@@ -1119,6 +1190,113 @@ async fn build_openai_compatible_agent(
     Ok(PyAgent {
         inner: Arc::new(agent),
         model: model_name,
+        output_adapter: None,
+    })
+}
+
+async fn build_anthropic_agent(
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+    instruction: Option<String>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
+) -> Result<PyAgent, AgentRunError> {
+    let mut config = AnthropicConfig::try_new(base_url).map_err(model_configuration_error)?;
+    if let Some(api_key) = api_key {
+        config = config.with_authentication(AnthropicAuthentication::ApiKey(
+            AnthropicSecret::try_new(api_key).map_err(model_configuration_error)?,
+        ));
+    }
+    let model_config = AnthropicModelConfig::try_new(&model, 1_048_576, 1_048_576, 512, 512, 64)
+        .map_err(model_configuration_error)?;
+    let model_name = model_config.name.clone();
+    let provider: Arc<dyn Model> = Arc::new(
+        AnthropicProvider::try_new(config, vec![model_config])
+            .map_err(model_configuration_error)?,
+    );
+    finish_linked_agent(LinkedAgentSpec {
+        agent_id: "python.agent.anthropic",
+        bundle_id: "python.bundle.anthropic",
+        model_id: "python.model.anthropic",
+        model_name,
+        provider,
+        instruction,
+        capabilities,
+        active_capabilities,
+    })
+    .await
+}
+
+async fn build_ollama_agent(
+    base_url: String,
+    model: String,
+    instruction: Option<String>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
+) -> Result<PyAgent, AgentRunError> {
+    let config =
+        OpenAiCompatibleConfig::ollama_local(base_url).map_err(model_configuration_error)?;
+    let model_config = OpenAiModelConfig::try_new(&model, 1_048_576, 1_048_576, 512, 512, 64)
+        .map_err(model_configuration_error)?;
+    let model_name = model_config.name.clone();
+    let provider: Arc<dyn Model> = Arc::new(
+        OpenAiCompatibleProvider::try_new(config, vec![model_config])
+            .map_err(model_configuration_error)?,
+    );
+    finish_linked_agent(LinkedAgentSpec {
+        agent_id: "python.agent.ollama",
+        bundle_id: "python.bundle.ollama",
+        model_id: "python.model.ollama",
+        model_name,
+        provider,
+        instruction,
+        capabilities,
+        active_capabilities,
+    })
+    .await
+}
+
+struct LinkedAgentSpec {
+    agent_id: &'static str,
+    bundle_id: &'static str,
+    model_id: &'static str,
+    model_name: ModelName,
+    provider: Arc<dyn Model>,
+    instruction: Option<String>,
+    capabilities: Vec<CapabilitySpec>,
+    active_capabilities: Vec<CapabilityId>,
+}
+
+async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunError> {
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 64,
+            batches_per_session: 256,
+            records_per_session: 4_096,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .map_err(|error| configuration_error(error.to_string()))?,
+    );
+    let mut builder = Agent::builder(
+        AgentId::parse(spec.agent_id).map_err(|error| configuration_error(error.to_string()))?,
+        BundleId::parse(spec.bundle_id).map_err(|error| configuration_error(error.to_string()))?,
+        (component(spec.model_id)?, spec.provider),
+        (component("python.store.memory")?, store),
+    );
+    if let Some(instruction) = spec.instruction {
+        builder = builder.try_instruction(instruction)?;
+    }
+    for capability in spec.capabilities {
+        builder = builder.capability(capability);
+    }
+    for capability in spec.active_capabilities {
+        builder = builder.activate_application(capability);
+    }
+    let agent = builder.build().await?;
+    Ok(PyAgent {
+        inner: Arc::new(agent),
+        model: spec.model_name,
         output_adapter: None,
     })
 }

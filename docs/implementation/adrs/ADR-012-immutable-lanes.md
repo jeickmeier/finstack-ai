@@ -78,4 +78,6 @@ May change only through a new superseding ADR and reconciliation of every affect
   `14af719a078f1cdf52382e89e0a44837ab207237` adds public concurrent
   multi-lane Session/Lane APIs and in-process `(session_id, lane_id)`
   guards (PR-047-E-lanes-14af719a078f; PR-047-E-security-14af719a078f).
-  Crash-prefix remains PR-048. Do not mark Implemented.
+  Crash-prefix and lane restart pass at PR-048 local merge
+  `b0641b0be338918c1951339657ce8c04c4ccff59`. Verified by
+  G5-D-durable-beta-a9568bd869b5.

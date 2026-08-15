@@ -7,6 +7,11 @@ and test locations for PR-004 acceptance.
 
 Planning docs under `docs/planning/` remain authoritative.
 
+Open public-surface deltas before `0.1.0` are triaged in
+[`public-api-change-backlog.md`](public-api-change-backlog.md). That
+file is Phase 8 entrance evidence, not this family's compatibility
+promise and not the published preview policy.
+
 ## Contract families
 
 | Family | Owner | Review partner | Source location | Compatibility promise | Unknown-field / evolution profile | Test location |

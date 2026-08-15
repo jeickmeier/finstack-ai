@@ -9,13 +9,19 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 
 def test_import_finstack_ai() -> None:
     import finstack_ai
 
     assert finstack_ai.health() == "ok"
     assert finstack_ai.__version__ == "0.0.4"
-    assert finstack_ai.linked_providers() == ("openai-compatible",)
+    assert finstack_ai.linked_providers() == (
+        "openai-compatible",
+        "anthropic",
+        "ollama",
+    )
 
     metadata = finstack_ai.build_metadata()
     assert metadata["version"] == finstack_ai.__version__
@@ -32,8 +38,15 @@ def test_provider_namespace_is_lazy() -> None:
     import finstack_ai.providers as providers
 
     assert "finstack_ai.providers.openai_compatible" not in sys.modules
+    assert "finstack_ai.providers.anthropic" not in sys.modules
+    assert "finstack_ai.providers.ollama" not in sys.modules
     assert providers.openai_compatible.is_available()
     assert "finstack_ai.providers.openai_compatible" in sys.modules
+    assert "finstack_ai.providers.anthropic" not in sys.modules
+    assert providers.anthropic.is_available()
+    assert providers.ollama.is_available()
+    assert "finstack_ai.providers.anthropic" in sys.modules
+    assert "finstack_ai.providers.ollama" in sys.modules
     assert finstack_ai.health() == "ok"
 
 
@@ -106,3 +119,45 @@ def test_free_threaded_build_handles_concurrent_native_calls() -> None:
     with ThreadPoolExecutor(max_workers=16) as executor:
         results = list(executor.map(lambda _: finstack_ai.health(), range(512)))
     assert results == ["ok"] * 512
+
+
+def test_anthropic_and_ollama_factories_construct_without_import_side_effects() -> None:
+    import asyncio
+
+    import finstack_ai
+
+    async def construct() -> None:
+        anthropic = await finstack_ai.Agent.anthropic(
+            "http://127.0.0.1:9",
+            "fixture-model",
+            instruction="Answer concisely.",
+        )
+        ollama = await finstack_ai.Agent.ollama(
+            "http://127.0.0.1:11434",
+            "fixture-model",
+        )
+        assert anthropic.capability_catalog() == []
+        assert ollama.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_anthropic_http_credentials_fail_closed_without_leaking_the_canary() -> None:
+    import asyncio
+
+    import finstack_ai
+
+    canary = "sk-ant-secret-canary-055"
+
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError) as caught:
+            await finstack_ai.Agent.anthropic(
+                "http://127.0.0.1:9",
+                "fixture-model",
+                api_key=canary,
+            )
+        assert caught.value.code == "agent_run_invalid_configuration"
+        assert canary not in str(caught.value)
+        assert canary not in repr(caught.value)
+
+    asyncio.run(construct())

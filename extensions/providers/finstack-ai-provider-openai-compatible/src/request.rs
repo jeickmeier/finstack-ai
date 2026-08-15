@@ -293,6 +293,54 @@ mod tests {
         assert_eq!(value["stream_options"]["include_usage"], true);
     }
 
+    #[test]
+    fn prompt_mapping_keeps_leading_system_prefix_stable() {
+        let system_a = text_message(MessageRole::System, "Stable prefix.");
+        let system_b = text_message(MessageRole::System, "Always instruction.");
+        let user = text_message(MessageRole::User, "hello");
+        let draft = ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("model"),
+            messages: Arc::from([system_a, system_b, user]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: finstack_ai_runtime::RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 100_000,
+                max_output_tokens: 1_024,
+            },
+        };
+        let request = ChatCompletionRequest::try_from_draft(
+            &draft,
+            &model(),
+            EndpointQuirks::for_kind(crate::EndpointKind::Ollama),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["messages"][0]["role"], "system");
+        assert_eq!(value["messages"][0]["content"], "Stable prefix.");
+        assert_eq!(value["messages"][1]["role"], "system");
+        assert_eq!(value["messages"][1]["content"], "Always instruction.");
+        assert_eq!(value["messages"][2]["role"], "user");
+        assert!(value.get("stream_options").is_none());
+        assert!(value.get("response_format").is_none());
+    }
+
+    fn text_message(role: MessageRole, text: &str) -> Message {
+        Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            role,
+            vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message")
+    }
+
     fn model() -> OpenAiModelConfig {
         OpenAiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
             .expect("model")

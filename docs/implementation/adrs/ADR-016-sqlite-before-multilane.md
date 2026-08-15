@@ -75,5 +75,5 @@ May change only through a new superseding ADR and reconciliation of every affect
 - Implementation evidence: Partial after PR-040 local merge
   `dbd10d35b223288666b2fdc0e13d03f48b5b97c3` and PR-047 candidate
   `14af719a078f1cdf52382e89e0a44837ab207237` (A04 SQLite parallel lane
-  appenders; PR-047-E-lanes-14af719a078f). Crash-prefix remains PR-048.
-  Do not mark Implemented.
+  appenders; PR-047-E-lanes-14af719a078f). PR-048 sqlite crash-prefix/ops
+  and G5-D-durable-beta-a9568bd869b5 close the mapped order. Verified.

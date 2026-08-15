@@ -1,0 +1,66 @@
+G5 Durable Beta gate decision
+Decision: G5-D-durable-beta-a9568bd869b5
+Date: 2026-08-15
+Approver: me@jeickmeier.com
+Result: PASSED
+
+Reviewed revisions
+
+- PR-048 implementation candidate: 8342a6b56fc7832f9e861c6c034c0c1601e58f7a
+- Phase 6 local main merge: b0641b0be338918c1951339657ce8c04c4ccff59
+- Decision target (current main tip): 0a4b477c1eb9b04d2e86294a9c01b36855ddd74c
+
+The Phase 6 merge is an ancestor of the decision target. Later Phase 7
+commits on this tip do not remove or replace the durability evidence.
+
+Reviewed evidence
+
+- PR-039 through PR-048 acceptance evidence, with PR-048 A01–A11 passed.
+- Phase 6 entrance PH6-E-entrance-commit-loop-3728650e8935,
+  PH6-E-entrance-journal-schema-b5a63427108e, and
+  PH6-E-entrance-handles-7618a4f500cb, all passed.
+- Phase 6 exits PH6-E-exit-sqlite-b0641b0be338,
+  PH6-E-exit-effects-b0641b0be338,
+  PH6-E-exit-interactions-b0641b0be338, and
+  PH6-E-exit-lanes-b0641b0be338, all passed at the Phase 6 merge.
+- Implementation Plan §7 G5 minimum evidence: SQLite, recovery
+  matrix, deferred effects, interactions, lineage, lanes, and
+  migration fixtures.
+- Engineering Standards §15 G5: compatibility/migration fixtures
+  and full crash-prefix evidence.
+- Threat Model §13.2 G5: corruption, replay, duplicate
+  completion/resolution, backup/restore, migration, and
+  cross-scope recovery tests.
+- TM-12 / Threat Model §18 review in PR-048-E-security-8342a6b56fc7.
+- PR-048 readiness pack READY FOR NAMED DECISION at candidate
+  8342a6b56fc7832f9e861c6c034c0c1601e58f7a. The pack's stacked
+  "PR-043–PR-047 remain In review / Phase 6 In progress" notes are
+  superseded by the Phase 6 exit closeout at
+  b0641b0be338918c1951339657ce8c04c4ccff59.
+- Staged unpublished lockstep 0.0.3 npm tarball under
+  artifacts/pr-048/staging/. The exact checkpoint is available and
+  not cut.
+- IndexedDB remains experimental and non-durable.
+- No open blocker, active exception, unresolved compatibility
+  finding, or incomplete Phase 6 acceptance or exit criterion.
+
+Decision
+
+G5 - Durable Beta is Passed. Phase 6 remains Done.
+SQLite persistence, crash-prefix recovery, deferred-effect
+reconciliation, typed interactions with approval as the first
+profile, run lineage, and initial multi-lane session semantics are
+evidenced on the integrated tree. ADR-004, ADR-008, ADR-012,
+ADR-013, ADR-016, ADR-020, ADR-025, ADR-026, ADR-027, ADR-028, and
+ADR-034 are Implemented / Verified for that durable-beta scope.
+
+Residual scope
+
+The 0.0.3 checkpoint is staged and not published. npm/pypi/crates.io
+publish, tag, hosted pull-request merge, and GitHub release remain
+owner decisions. G7 remains Not ready and is not inferred. Phase 8
+entrance stays 0/2 until the public API change backlog is triaged
+and both entrance rows are recorded. ADR-037 stays Partial because
+PR-056 remains. Relaxed sqlite mode does not advertise NFR-REL-001.
+IndexedDB is not a durable store. Exactly-once delivery is not
+claimed.

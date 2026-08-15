@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through locally integrated PR-018 exact committed context/middleware guards, recorded output reconstruction, reuse/reconcile/recompute classification, and explicit non-repeatable uncertainty evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-048 end-to-end recovery remains
+- Implementation evidence: Partial through locally integrated PR-018 exact committed context/middleware guards, recorded output reconstruction, reuse/reconcile/recompute classification, and explicit non-repeatable uncertainty evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-048 recorded-outcome replay and G5-D-durable-beta-a9568bd869b5 close the mapped durability work. Verified

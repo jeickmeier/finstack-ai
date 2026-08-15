@@ -1,0 +1,19 @@
+PH8-E-entrance-gates-400228a63790
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Baseline: 0a4b477c1eb9b04d2e86294a9c01b36855ddd74c
+
+Phase 8 entrance criterion 1: Native preview, Python alpha, WASM
+alpha, durability beta, and plugin alpha gates passed.
+
+Evidence:
+
+- G3-D-native-preview-14a386c7db24 Passed
+- G4-D-binding-parity-101224c5eb60 Passed
+- G5-D-durable-beta-a9568bd869b5 Passed against this baseline
+- G6-D-plugin-alpha-018aaea9aa00 Passed
+
+Result: Pass
+
+This row does not record G7. Phase 8 exit remains 0/4.
+Do not re-record G3, G4, G5, or G6.

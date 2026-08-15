@@ -1,0 +1,20 @@
+PH8-E-entrance-api-backlog-267035e95daa
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Baseline: 0a4b477c1eb9b04d2e86294a9c01b36855ddd74c
+
+Phase 8 entrance criterion 2: Public API change backlog triaged.
+
+Evidence:
+
+- docs/implementation/public-api-change-backlog.md exists
+- Rows are seeded from compatibility-governance.md,
+  native-preview-binding-surface.md, G3–G6, and the already-mapped
+  PR-055–PR-061 sequence
+- No newly invented breaking change is opened
+- Published 0.1.0 compatibility policy remains PR-061 / G7
+
+Result: Pass
+
+This triage is an operational register. It is not G7 and not the
+published preview compatibility policy.
