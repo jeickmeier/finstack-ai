@@ -5,6 +5,10 @@
 //! in-process guests are not a sandbox. Constructing [`PluginHost`] is the
 //! opt-in; the default SDK bundle does not depend on this crate.
 //!
+//! WASI is deny-by-default: filesystem and network imports are not linked
+//! unless the host offers the grant and the concrete resource. Fuel and store
+//! limits contain exhaustion. Signature policy is host configuration.
+//!
 //! Registration still uses [`finstack_ai::ExtensionDescriptor::trusted_in_process`]
 //! because [`finstack_ai::ExtensionTrust`] has no isolated variant in this
 //! preview. Isolation is a property of this host, not of that descriptor.
@@ -16,19 +20,26 @@ mod bindings;
 mod cache;
 mod convert;
 mod error;
+mod grants;
 mod host;
 mod instantiate;
+mod limits;
+mod signature;
 
 pub use adapters::{WasmContextAdapter, WasmPluginExtension, WasmToolsetAdapter};
 pub use cache::{
     CacheKeyParts, abi_identity, cache_key, component_digest, engine_fingerprint, host_target,
 };
 pub use error::{
-    PLUGIN_COMPILE_FAILED, PLUGIN_INSTANCE_LIMIT, PLUGIN_INSTANTIATE_FAILED, PLUGIN_TRAP,
+    PLUGIN_COMPILE_FAILED, PLUGIN_INSTANCE_LIMIT, PLUGIN_INSTANTIATE_FAILED,
+    PLUGIN_PERMISSION_DENIED, PLUGIN_RESOURCE_LIMIT, PLUGIN_SIGNATURE_UNTRUSTED, PLUGIN_TRAP,
     PluginHostError,
 };
+pub use grants::{FilesystemPreopen, GrantResources};
 pub use host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld, ReadyWasm};
 pub use instantiate::HostState;
+pub use limits::EffectiveLimits;
+pub use signature::SignaturePolicy;
 
 #[cfg(test)]
 mod fixture_tests;
@@ -137,8 +148,8 @@ mod graph_tests {
             "plugin-host must depend on wasmtime"
         );
         assert!(
-            !host.contains("wasmtime-wasi "),
-            "plugin-host must not depend on wasmtime-wasi:\n{host}"
+            host.contains("wasmtime-wasi"),
+            "plugin-host must depend on wasmtime-wasi:\n{host}"
         );
         assert!(
             !host.contains("libloading"),

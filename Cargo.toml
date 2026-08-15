@@ -60,6 +60,10 @@ finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = 
 # Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
 # filesystem `cache` feature (TM-08 / PR-051 host-owned compile cache).
 wasmtime = { version = "47.0.3", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
+# Same line as wasmtime. Host-only; deny-by-default WASI context. Do not enable
+# ambient inherit helpers as crate features (PR-052 / SEC-INV-006).
+wasmtime-wasi = { version = "47.0.3", default-features = false }
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 serde_path_to_error = "0.1.20"
@@ -82,7 +86,7 @@ futures-util = "0.3.31"
 reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "native-tls", "stream"] }
 rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
 tempfile = "3.27.0"
-tokio = { version = "=1.49.0", default-features = false, features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "=1.51.1", default-features = false, features = ["macros", "rt", "sync", "time"] }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 pyo3 = { version = "=0.29.0" }
 pyo3-build-config = { version = "=0.29.0" }

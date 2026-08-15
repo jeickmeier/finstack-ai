@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and encode the PR-051 test-only plugin guests."""
+"""Build and encode the PR-051/PR-052 test-only plugin guests."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUESTS = REPO_ROOT / "plugins" / "finstack-ai-plugin-host" / "fixtures" / "guests"
 ENCODER = REPO_ROOT / "tools" / "plugin_wasm" / "encoder"
-GUEST_NAMES = ("echo-toolset", "reference-context", "trap-toolset")
+GUEST_NAMES = ("echo-toolset", "reference-context", "trap-toolset", "fuel-burner")
 
 
 def run(command: list[str], cwd: Path) -> None:
@@ -38,6 +38,7 @@ def build_guest(name: str) -> Path:
         "echo-toolset": "finstack_ai_plugin_guest_echo_toolset",
         "reference-context": "finstack_ai_plugin_guest_reference_context",
         "trap-toolset": "finstack_ai_plugin_guest_trap_toolset",
+        "fuel-burner": "finstack_ai_plugin_guest_fuel_burner",
     }[name]
     target_dir = GUESTS / name / "target" / "wasm32-unknown-unknown" / "release"
     # Guests are not workspace members; cargo writes next to the manifest.

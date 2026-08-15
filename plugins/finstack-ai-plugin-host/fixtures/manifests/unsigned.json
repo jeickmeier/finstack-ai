@@ -1,0 +1,12 @@
+{
+  "configuration_schema": {},
+  "digest": "184e5d57e155d8a60267ff1ab834b72592ead667e1b4e30e18848a9f2860f517",
+  "identity": "finstack.plugin.echo.toolset",
+  "permissions": [
+    "logging"
+  ],
+  "version": "0.0.4",
+  "worlds": [
+    "toolset-plugin"
+  ]
+}

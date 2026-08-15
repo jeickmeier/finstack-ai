@@ -31,14 +31,15 @@ pub use host::{CeilingBlobStore, RecordingLogger};
 pub use inventory::assert_experimental_surface;
 pub use lifecycle::{
     NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginLifecycleError, honor_deadline,
+    merge_call_deadline,
 };
 pub use limits::{
     MAX_METADATA_BYTES, MAX_RAW_JSON_BYTES, MAX_STRING_BYTES, reject_before_allocation,
     reject_declared_len,
 };
 pub use manifest::{
-    PluginManifest, PluginResourceLimits, PluginSignature, parse_manifest,
-    reject_duplicate_identities, validate_manifest,
+    PluginManifest, PluginResourceLimits, PluginSignature, manifest_digest_hex,
+    manifest_signing_payload, parse_manifest, reject_duplicate_identities, validate_manifest,
 };
 pub use mapping::{catalog_digest_hex, map_tool_spec, register_catalog, sanitize_call_context};
 pub use reference::{ReferenceContextProvider, ReferenceToolset};
