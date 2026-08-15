@@ -416,24 +416,26 @@ No named budget. Not PR-063. Not a merge gate.
 ## Tasks (when admitted)
 
 Task IDs were minted at admit. Tracking is `Done`. Implementation
-tasks remain `Todo`.
+tasks 2–7 are `Done` at candidate `1000935012bfcf7e7c90d2464c87675670a6cf0e`.
 
 1. `PR-055-T-tracking-9cf7aa3ef48b` — Done. Phase 8 entrance
    `PH8-E-entrance-gates-400228a63790` and
    `PH8-E-entrance-api-backlog-267035e95daa` recorded. Branch
    `codex/pr-055-anthropic-ollama-providers` opened from
    `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`.
-2. `PR-055-T-anthropic-0e1cc33e1ced` — Anthropic crate skeleton,
-   secret-safe config, fail-closed errors, graph proofs (A03).
-3. `PR-055-T-messages-8f738dbd2afb` — Messages request mapping +
-   bounded SSE + recorded fixtures (A01, A02).
-4. `PR-055-T-ollama-6ac13a08c9df` — Ollama/local constructor +
-   recorded Ollama fixtures on the existing compatible crate (A01).
-5. `PR-055-T-catalog-7452df6b3dbb` — Leaf metadata refresh +
+2. `PR-055-T-anthropic-0e1cc33e1ced` — Done. Anthropic crate
+   skeleton, secret-safe config, fail-closed errors, graph proofs
+   (A03).
+3. `PR-055-T-messages-8f738dbd2afb` — Done. Messages request
+   mapping + bounded SSE + recorded fixtures (A01, A02).
+4. `PR-055-T-ollama-6ac13a08c9df` — Done. Ollama/local constructor
+   + recorded Ollama fixtures on the existing compatible crate
+   (A01).
+5. `PR-055-T-catalog-7452df6b3dbb` — Done. Leaf metadata refresh +
    catalog prefix-stability fixtures (A04, A05).
-6. `PR-055-T-python-4d13222686bb` — Python lazy submodules,
+6. `PR-055-T-python-4d13222686bb` — Done. Python lazy submodules,
    `Agent.anthropic` / `Agent.ollama`, wheel-budget check (A03).
-7. `PR-055-T-evidence-78f0fbe2f379` — Authoring README,
+7. `PR-055-T-evidence-78f0fbe2f379` — Done. Authoring README,
    warning-only benches, TM-04 review, candidate evidence. Stop
    before `G7-D-*`.
 

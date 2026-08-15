@@ -1,0 +1,111 @@
+PR-055-E-candidate-1000935012bf
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 1000935012bfcf7e7c90d2464c87675670a6cf0e
+Tree: 69b2708c7f21f47492d28322378d1ef7298d9983
+Branch: codex/pr-055-anthropic-ollama-providers
+Baseline: local main 0a4b477c1eb9b04d2e86294a9c01b36855ddd74c
+Environment: Darwin 25.5.0 arm64; macOS 26.5.2;
+             rustc 1.97.1 (8bab26f4f 2026-07-14);
+             mise Python 3.14.6; uv 0.10.11
+Result: Pass for A01–A05. No G7 inference.
+
+Commands:
+  cargo tree -p finstack-ai-kernel -p finstack-ai-runtime -p finstack-ai --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai --locked --no-default-features --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-wit --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-native-examples --locked --prefix none --format '{p}' --edges normal
+  cargo tree -p finstack-ai-provider-anthropic --locked --depth 1 --edges normal
+  cargo tree -p finstack-ai-provider-openai-compatible --locked --depth 1 --edges normal
+  uv run --no-project python tools/wasm_package/check.py graph
+  uv run --no-project python tools/wasm_package/check.py secrets
+  cargo test -p finstack-ai-provider-anthropic --offline --locked
+  cargo test -p finstack-ai-provider-openai-compatible --offline --locked
+  cargo test -p finstack-ai --offline --locked -- capability
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  cargo clippy -p finstack-ai-wasm --all-targets --locked --features scripted-trace -- -D warnings
+  cargo fmt --all --check
+  uv run --no-project --with ruff==0.12.11 ruff check .
+  uv run --isolated --no-project --with mypy==2.3.0 mypy --strict bindings/finstack-ai-python/python
+  uv run --no-cache --isolated --no-project --with-editable bindings/finstack-ai-python --with pytest==9.1.1 --with pydantic==2.12.5 pytest -q bindings/finstack-ai-python/tests/test_import.py bindings/finstack-ai-python/tests/test_handles.py
+  uv run --no-project --with maturin==1.14.1 maturin build --release --locked --manifest-path bindings/finstack-ai-python/Cargo.toml --out /tmp/pr055-wheel
+
+Not run as a merge gate:
+  mise run ci / Playwright / Linux/Windows CI / cargo-deny / gitleaks
+  cargo bench -p finstack-ai-provider-anthropic --bench request_overhead
+    — warning-only; the bench compiles under workspace clippy
+  live provider smokes remain #[ignore]
+
+Results:
+  kernel / runtime / default SDK / no-default SDK / wit trees:
+    no finstack-ai-provider-anthropic, no
+    finstack-ai-provider-openai-compatible, no reqwest
+  native-examples: pre-existing rust-minimal OpenAI-compatible
+    leaf retained; no Anthropic crate
+  anthropic depth-1: finstack-ai-runtime, reqwest; no direct
+    kernel, wasmtime, pyo3, or plugin-host
+  openai-compatible depth-1: same shape; no direct kernel /
+    wasmtime / pyo3
+  wasm graph: no Tokio, sockets, filesystem drivers, kernel
+    wasm-bindgen, or either provider crate
+  wasm secret scan: no credential field or provider-secret
+    pattern, including ANTHROPIC_API_KEY
+  anthropic tests: 21 passed, 1 ignored (live smoke)
+  openai-compatible tests: 20 passed, 1 ignored (live smoke)
+  finstack-ai -- capability: 5 passed, 25 filtered out
+  workspace + wasm Clippy -D warnings: pass
+  rustfmt --check: pass
+  ruff check: pass
+  mypy --strict python package: pass (7 source files)
+  focused pytest: 13 passed
+    test_import.py covers linked_providers ==
+    ("openai-compatible", "anthropic", "ollama"), lazy
+    submodule load, import thread/socket audit, factory
+    construction, and HTTP-credential canary redaction
+  release wheel:
+    finstack_ai-0.0.4-cp314-cp314-macosx_11_0_arm64.whl
+    5,155,765 bytes (< 10,485,760 budget)
+
+mise run check limit:
+  cargo fmt, both Clippy invocations, ruff check, and mypy
+  passed. `ruff format --check .` still fails on three
+  unmodified plugin-tool files that already fail on main
+  `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
+  (tools/plugin_wasm/sync_guest_wit.py,
+  tools/plugin_wasm/template_check.py,
+  tools/wit_bindgen/generate.py). Those files were not
+  reformatted. PR-055 Python sources format clean.
+
+Acceptance:
+  A01 Pass — Recorded keyless loopback fixtures cover text,
+    tool, structured-output, cancellation, and HTTP 429 for
+    Anthropic Messages; the existing OpenAI-compatible family
+    plus new Ollama text/tool/structured fixtures cover the
+    compatible and Ollama/local paths. Live smokes stay ignored.
+  A02 Pass — Anthropic thinking_delta → ReasoningDelta;
+    thinking signature → OpaqueBlock; tool_use fragments →
+    ToolCallDelta; cache counters → Usage.extension_counters
+    under anthropic.cache_* keys. No new kernel ContentBlock
+    or Usage field. Canary secrets stay out of Debug/errors.
+  A03 Pass — Rust users depend only on the leaf they need.
+    Python lazy-links all three identifiers. Import creates no
+    HTTP client, Tokio runtime, or socket audit event. Local
+    Darwin arm64 wheel stays under the 10 MiB budget.
+  A04 Pass — The same CapabilitySpec set yields identical
+    compact_capability_catalog() bytes under scripted,
+    OpenAI-compatible, Anthropic, and Ollama. Scripted
+    activation keeps the stable instruction prefix across
+    repeated runs. Anthropic cache_control marks the last
+    system block without reordering. Leaf metadata refresh
+    updates advertised flags without a network.
+  A05 Pass — Each adapter’s text/tool/usage fixtures normalize
+    to the existing ModelStreamItem / Usage / tool-call shapes
+    used by ScriptedModel. Provider wire DTOs stay crate-private
+    and were not added to the public-rust-api corpus.
+
+Exclusions remain: no provider router, no Responses API
+productization, no finstack-ai-provider-ollama crate, no
+JS/WASM Anthropic adapter, no OAuth, no live network in the
+default suite, no seventh port, no Model trait reshape, no
+journal/WIT/host-grant change, no 0.1.0 bump, no G7-D-*.
+Do not start PR-056+.
