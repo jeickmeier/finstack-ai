@@ -1,0 +1,46 @@
+PR-062-E-closeout-2b935a5bf981
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 900d84cc9ab352330b33ed5cc41d002b35419d4b
+Tree: cb8b5bd288424069d5ff87e14ea90782730dd4de
+Branch: codex/pr-062-closeout
+Baseline: local main 0329170011e62f746a145400d504b03d859ae109
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1 (8bab26f4f 2026-07-14);
+  mise Python 3.14.6
+Result: Pass for the PR-062 residuals. A04 is ready for the named
+  COMP-1.0-D recorded in compat-1.0-decision.txt. No G8 inference.
+
+Commands:
+  cargo test -p finstack-ai-plugin-host --offline --locked -- --test-threads=1
+  cargo clippy -p finstack-ai-plugin-host --all-targets --offline --locked -- -D warnings
+  cargo fmt -p finstack-ai-plugin-host -- --check
+  mise run check
+  mise run check-wit
+  uv run --no-project python tools/compat/public_items.py --check
+  cargo tree -p finstack-ai-kernel --locked -e normal
+  cargo tree -p finstack-ai-runtime --locked -e normal
+  cargo tree -p finstack-ai --locked -e normal --no-default-features
+  uv run --no-project python tools/wasm_package/check.py graph
+
+Not run as a merge gate:
+  mise run ci / hosted multi-OS matrix / Playwright / Criterion budgets
+  cargo-deny / gitleaks / git tag / registry publish
+  Isolated instantiate of a rebuilt @1.0.0 component.wasm (none in-tree)
+
+Results:
+  plugin-host tests: 74 passed, 1 ignored (2 suites)
+    including echo_toolset_resolves_and_calls and
+    echo_toolset_v1_manifest_rejects_v004_component
+  plugin-host Clippy -D warnings: pass
+  plugin-host rustfmt --check: pass
+  mise run check: pass (rustfmt, workspace Clippy, wasm Clippy,
+    ruff format --check, ruff check, mypy --strict)
+  check-wit: pass
+  public-items --check: pass
+  kernel / runtime / default SDK omit-list: clean
+    (no wasmtime / providers / server / rustls / otel)
+  wasm graph: pass
+
+Residual: no in-tree rebuilt @1.0.0 encoded guest; successful
+instantiate of that artifact is not claimed. Guest-sdk default stays
+@0.0.4. Lockstep crate/wheel/npm versions stay 0.1.0. No G8-D.

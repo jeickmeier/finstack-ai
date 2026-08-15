@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Verified — experimental `@0.0.4` types/host/toolset/context, guest-sdk vendor, and unpublished crate staging pass G6-D-plugin-alpha-018aaea9aa00. PR-062 lifts the `@1.0.0` generation block and ships dual-major adapters; crate/wheel/npm version fields stay `0.1.0` until PR-066.
+- Implementation evidence: Verified — experimental `@0.0.4` types/host/toolset/context, guest-sdk vendor, and unpublished crate staging pass G6-D-plugin-alpha-018aaea9aa00. PR-062 lifts the `@1.0.0` generation block and ships in-process plus isolated dual-major adapters; crate/wheel/npm version fields stay `0.1.0` until PR-066. Approved by `COMP-1.0-D-contract-freeze-00b78667ecc4`.

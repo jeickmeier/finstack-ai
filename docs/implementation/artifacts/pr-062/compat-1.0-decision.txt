@@ -1,0 +1,55 @@
+1.0 compatibility policy decision
+Decision: COMP-1.0-D-contract-freeze-00b78667ecc4
+Date: 2026-08-15
+Approver: me@jeickmeier.com
+Result: PASSED
+
+This decision is not G8-D-*. It does not cut or publish 1.0.0.
+
+Owner authorization
+  "Finish the residuals to close out PR-062"
+  recorded against the still-valid PR-062 integrated envelope
+  (local branch/commit/merge authorized; external actions=none;
+  stop before any gate crossing).
+
+Reviewed revisions
+
+- PR-062 first implementation candidate: b76bfca8fcf7e6e7778aa9ee2acd0ca54bc54b8f
+- PR-062 first local main merge: fa2923c5b57854baa81e9a9e6ea1685b8422b6f8
+- PR-062 residual closeout candidate: 900d84cc9ab352330b33ed5cc41d002b35419d4b
+
+Reviewed evidence
+
+- PR-062-A01 through PR-062-A03 passed at the first candidate and
+  first local merge.
+- PR-062-E-candidate-fe6b29ee4400, PR-062-E-security-1bbadf7b2adc,
+  and PR-062-E-integration-5e8cbcf0588d.
+- Residual closeout PR-062-E-closeout-2b935a5bf981:
+  isolated dual-major Wasmtime linkers, ruff-format residual closed,
+  mise run check green.
+- docs/implementation/1.0-compatibility-policy.md freeze set,
+  experimental exclusions, ADR triggers, deprecation/removal rule,
+  leaf lockstep default, and breaking-change test wiring.
+- docs/implementation/1.0-leaf-versioning.md (keep lockstep).
+- docs/implementation/1.0-deprecation-inventory.md (no first-party
+  aliases).
+- TM-08 review in artifacts/pr-062/tm-08-review.md.
+
+Decision
+
+Approve the adopter-facing 1.0 compatibility policy. PR-062-A04 is
+Passed. This is the named maintainer approval required by A04.
+
+Residual scope accepted by this decision
+
+- Workspace crate, wheel, and npm version fields stay 0.1.0 until
+  PR-066. This freeze is not a published 1.0.0 cut.
+- Published @0.x guest WIT, templates, and encoded components are
+  not rewritten. A rebuilt @1.0.0 component.wasm is still not
+  in-tree; successful isolated instantiate of that rebuilt artifact
+  is not claimed.
+- Independent security review remains PR-064.
+- External adopter soak of the 1.0.0 migration path remains G8 /
+  program completion. Do not infer G8-D-* from this decision.
+- No crates.io / PyPI / npm publish, hosted pull-request merge,
+  or 1.0.0 tag is authorized here.

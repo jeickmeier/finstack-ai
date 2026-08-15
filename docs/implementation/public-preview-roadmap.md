@@ -12,8 +12,10 @@ are links to the Implementation Plan, not admitted work.
 - Session open is inspect-not-continue.
 - Delivery is at-least-once (ADR-013). Do not claim exactly-once.
 - No marketplace, native dylib ABI, or commercial support portal.
-- 1.0 compatibility policy is `READY FOR NAMED DECISION`. Independent
-  leaf versioning stays lockstep; no coupling-harm evidence.
+- 1.0 compatibility policy is approved by
+  `COMP-1.0-D-contract-freeze-00b78667ecc4`. Independent leaf
+  versioning stays lockstep; no coupling-harm evidence. This is not
+  `G8-D-*`.
 - Process protocol is handshake-only; session vocabulary is later.
 - Live provider smokes stay `#[ignore]` unless a later sentence names
   network use.
