@@ -75,6 +75,8 @@ impl PluginHostConfig {
     ///
     /// `cache_dir` of `None` keeps compiled artifacts in memory. Directory
     /// mode is host-owned and does not use Wasmtime's implicit global cache.
+    /// A writable cache directory is not an authentication boundary: `load`
+    /// never deserializes directory artifacts (FIND-064-001 / TM-08).
     /// Default grants are `{logging, blobs}`. Signature policy is Permissive.
     ///
     /// # Errors
@@ -373,7 +375,7 @@ impl PluginHost {
             target: host_target(),
             abi: abi_identity(world.as_str(), &manifest.version),
         });
-        let component = if let Some(precompiled) = self.cache.get(&key) {
+        let component = if let Some(precompiled) = self.cache.trusted_precompiled(&key) {
             deserialize_component(&self.engine, &precompiled)?
         } else {
             let precompiled = self
@@ -508,8 +510,10 @@ impl ReadyWasm {
 
 #[allow(unsafe_code)]
 fn deserialize_component(engine: &Engine, bytes: &[u8]) -> Result<Component, PluginHostError> {
-    // SAFETY: `bytes` are `Engine::precompile_component` output from this
-    // engine, stored under a host-owned digest/engine/target/ABI key.
+    // SAFETY: `bytes` are `Engine::precompile_component` output produced by
+    // this engine in this process. Directory-cache files are never passed
+    // here; `ComponentCache::trusted_precompiled` only returns the in-memory
+    // backend that `put` filled after a successful precompile.
     unsafe { Component::deserialize(engine, bytes) }
         .map_err(|error| PluginHostError::CompileFailed(format!("deserialize: {error}")))
 }
@@ -630,6 +634,49 @@ mod tests {
             abi_identity("toolset-plugin", "0.0.4"),
             abi_identity("toolset-plugin", "1.0.0")
         );
+    }
+
+    #[test]
+    fn directory_cache_tamper_is_not_deserialized() {
+        use crate::cache::{
+            CacheKeyParts, abi_identity, cache_key, component_digest, engine_fingerprint,
+            host_target,
+        };
+        use finstack_ai_wit::{manifest_digest_hex, parse_manifest};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let host = PluginHost::try_new(
+            PluginHostConfig::try_new(Some(dir.path().to_path_buf()), InstancePolicy::Exclusive, 2)
+                .expect("cfg"),
+        )
+        .expect("host");
+        let bytes = tiny_component();
+        let parts = CacheKeyParts {
+            digest: component_digest(&bytes),
+            engine: engine_fingerprint(),
+            target: host_target(),
+            abi: abi_identity("toolset-plugin", "0.0.4"),
+        };
+        assert!(!host.compile_with_key(&bytes, &parts).expect("miss"));
+        let key = cache_key(&parts);
+        let artifact = dir.path().join(format!("{key}.cwasm"));
+        std::fs::write(&artifact, [0xFF; 32]).expect("tamper");
+        assert!(host.cache_hit(&parts), "tampered file still names a hit");
+        let identity = "finstack.plugin.echo.toolset";
+        let worlds = vec!["toolset-plugin".to_owned()];
+        let digest = manifest_digest_hex(identity, "0.0.4", &worlds).expect("digest");
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({
+            "identity": identity,
+            "version": "0.0.4",
+            "worlds": worlds,
+            "permissions": ["logging"],
+            "configuration_schema": {},
+            "digest": digest
+        }))
+        .expect("json");
+        let manifest = parse_manifest(&manifest_bytes).expect("parses");
+        host.load(&bytes, manifest, super::PluginWorld::Toolset)
+            .expect("load recompiles verified source bytes");
     }
 
     #[test]

@@ -3,9 +3,9 @@
 Date: 2026-08-15
 Owner: me@jeickmeier.com
 Intended branch (when admitted): `codex/pr-064-reliability-fuzz-security-review`
-Intended baseline: local `main` at `0a4b477c1eb9b04d2e86294a9c01b36855ddd74c`
-Plan baseline: documentation pack v0.20 / PLAN-0.18 / Implementation Plan SHA-256
-`555a150fa9eaa2de39342eabdfd3d050b19628d735adbf498a9d75fcbc1102a4`
+Intended baseline: local `main` at `587d01da4f900291926b290c76f1eafa487fde0b`
+Plan baseline: documentation pack v0.21 / PLAN-0.19 / Implementation Plan SHA-256
+`86d2430860b12ab947638052b97ea2403c2e53b218a66977a4258defeb18fc3f`
 
 This file is the execution contract for PR-064. The closed PR-054
 envelope is not reused. The PR-055–PR-063 envelopes are not reused.
@@ -15,7 +15,10 @@ or `1.0.0`, or record G5 / G7 / G8.
 
 ## Execution envelope
 
-Not authorized. Suggested text when the owner is ready:
+Authorized 2026-08-15. Owner text `Proceed to PR-064` is recorded as
+the suggested local-only integrated envelope (same reading as prior
+Phase 9 owner proceed text). It does not authorize PR-065+, `G8-D-*`,
+or a `1.0.0` cut.
 
 ```
 Run PR-064; mode=integrated; target=main; local branch/commit/merge
@@ -49,15 +52,16 @@ this file does not record them.
 
 ### Phase 9 entrance is `Passed` (2/2)
 
-Implementation Plan §17 entrance. Current state is `0/2`.
+Implementation Plan §17 entrance. Current state is `Passed` (2/2).
+Do not re-record `PH9-E-entrance-*`.
 
 | Entrance bullet | Current state |
 | --- | --- |
 | Tagged `v0.1.0` exists; public registries not required | **Passed** via `PH9-E-entrance-tag-b610b0ba93b5` (PLAN-0.19). |
 | Preview telemetry, issue patterns, API pain points, and migration needs reviewed | **Passed** via `PH9-E-entrance-feedback-ee6999c59a12`. |
 
-Phase 9 entrance is `Passed` (2/2). This file does not admit PR-064
-while an earlier Phase 9 PR is active. Do not write `G8-D-*`.
+Phase 9 entrance is `Passed` (2/2). PR-062 and PR-063 are `Done`.
+This file admits PR-064 only. Do not write `G8-D-*`.
 
 If the owner says `implement the plan` while Phase 9 entrance is
 still `0/2`, **stop**. Do not fabricate adopter usage or preview
@@ -103,9 +107,11 @@ or cut `1.0.0`.
   Do not describe T1/T2 as sandboxed.
 - Do not restore `tools/architecture/`. Do not invent
   `mise run schema-governance`.
-- `mise run fuzz-smoke` and the PR-013 cargo-fuzz workspace are
-  **absent** from current root `mise.toml` / the tree. Restoring
-  them is this PR's job once admitted. Do not invent AFL,
+- `mise run fuzz-smoke` is absent from current root `mise.toml`.
+  The isolated `fuzz/` sources were deleted at `f915cbf` and are
+  restored from `e6608b52e5838fc620492965c7575dc79638bb97`, then
+  extended. A leftover untracked `fuzz/target/` build cache is
+  not evidence that the workspace was present. Do not invent AFL,
   honggfuzz, or a second fuzzer family.
 
 ## Traceability
@@ -325,27 +331,16 @@ SDK. cargo-fuzz stays in the isolated `fuzz/` workspace.
 Workspace version stays whatever PR-061 left (`0.1.0`); do not
 bump to `1.0.0`.
 
-## Tasks (when admitted)
+## Tasks (admitted)
 
-Task IDs are minted at admit, not now. Do not start these until
-admission checks pass.
-
-1. Tracking: confirm Phase 9 entrance `Passed` (2/2), Phase 8
-   `Done`, `G7-D-*` exists, PR-061–PR-063 `Done` unless
-   parallelized; open
-   `codex/pr-064-reliability-fuzz-security-review` from the
-   then-current `main` tip. Mark PR-064 `In progress`. Do not
-   re-record Phase 9 entrance if an earlier Phase 9 PR did.
-2. Restore cargo-fuzz + `mise run fuzz-smoke`; add remote / WIT
-   / recovery targets; check in safe corpora (A02).
-3. Lane property/model tests; reducer gaps only if a bench/review
-   shows a missing invariant.
-4. Crash-prefix catalog for every `EffectKind` and public lane
-   operation (A03).
-5. Independent review report (TM §13.3). File findings. Fix or
-   explicitly accept Critical/High (A01).
-6. `threat-model-g8-review.md`, `SECURITY.md`, advisory index
-   (A04). Stop before `G8-D-*`.
+| ID | Work |
+| --- | --- |
+| `PR-064-T-tracking-7c4a91e2b0d8` | Confirm Phase 9 entrance `Passed` (2/2), Phase 8 `Done`, `G7-D-*` exists, PR-061–PR-063 `Done`; open `codex/pr-064-reliability-fuzz-security-review` from `587d01d`. Do not re-record Phase 9 entrance. |
+| `PR-064-T-fuzz-3e8f1a6c92b4` | Restore cargo-fuzz + `mise run fuzz-smoke`; add remote / WIT / recovery targets; check in safe corpora (A02). |
+| `PR-064-T-lanes-9d2b07e4c1a5` | Lane property/model tests; reducer gaps only if a missing invariant is shown. |
+| `PR-064-T-crash-5a1c8e3f0d67` | Crash-prefix catalog for every `EffectKind` and public lane operation (A03). |
+| `PR-064-T-review-b6e4d09a2c18` | Independent review report (TM §13.3). File findings. Fix or explicitly accept Critical/High (A01). |
+| `PR-064-T-docs-1f7c3a8e5b90` | `threat-model-g8-review.md`, `SECURITY.md`, advisory index (A04). Stop before `G8-D-*`. |
 
 ## Explicit exclusions
 

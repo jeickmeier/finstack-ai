@@ -41,12 +41,14 @@ Rows already marked `defer past preview` in
 Phase 9 entrance is `Passed` (2/2) under PLAN-0.19. G7 is `Passed`
 via `G7-D-public-preview-f7c7e70b9e04`. PR-062 is `Done` via
 `COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-063 is `Done`.
-Do not infer PR-064+, `G8-D-*`, or a `1.0.0` cut from this file.
+PR-064 is `In progress` with A01–A04 Passed at candidate
+`363d52661eeb726c2f8e2d8ee103c7dc11ba4505`. Do not infer PR-065+,
+`G8-D-*`, or a `1.0.0` cut from this file.
 
 | Theme | Plan entry |
 | --- | --- |
 | Contract freeze and independent leaf versioning | [PR-062](../planning/04-finstack-ai-implementation-plan.md) |
 | Performance budgets and release engineering | [PR-063](../planning/04-finstack-ai-implementation-plan.md) |
-| Migration tooling | [PR-064](../planning/04-finstack-ai-implementation-plan.md) |
+| Reliability, fuzz, and independent security review | [PR-064](../planning/04-finstack-ai-implementation-plan.md) |
 | Ecosystem conformance | [PR-065](../planning/04-finstack-ai-implementation-plan.md) |
 | 1.0 closeout | [PR-066](../planning/04-finstack-ai-implementation-plan.md) |

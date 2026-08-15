@@ -1,0 +1,70 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "finstack-ai-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+finstack-ai-kernel = { path = "../crates/finstack-ai-kernel", version = "0.1.0" }
+finstack-ai-protocol = { path = "../crates/finstack-ai-protocol", version = "0.1.0" }
+finstack-ai-wit = { path = "../plugins/finstack-ai-wit", version = "0.1.0" }
+libfuzzer-sys = "0.4.10"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[[bin]]
+name = "record_replay_json"
+path = "fuzz_targets/record_replay_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kernel_transition_json"
+path = "fuzz_targets/kernel_transition_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "run_event_json"
+path = "fuzz_targets/run_event_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "message_json"
+path = "fuzz_targets/message_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "remote_frame"
+path = "fuzz_targets/remote_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wit_input"
+path = "fuzz_targets/wit_input.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "recovery_sequence"
+path = "fuzz_targets/recovery_sequence.rs"
+test = false
+doc = false
+bench = false

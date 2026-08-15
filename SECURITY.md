@@ -57,6 +57,8 @@ credentials.
 - [Trust levels](docs/site/security-trust-levels.md)
 - [Security deployment gates](docs/site/security-deployment.md)
 - [Threat Model G7 review](docs/implementation/threat-model-g7-review.md)
+- [Threat Model G8 review](docs/implementation/threat-model-g8-review.md)
+- [Security advisories](docs/security/advisories/README.md)
 - [Security and Threat Model](docs/planning/06-finstack-ai-security-threat-model.md)
 - [GOVERNANCE.md](GOVERNANCE.md)
 - [Public RFCs](docs/rfcs/README.md)

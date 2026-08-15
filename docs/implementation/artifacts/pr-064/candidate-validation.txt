@@ -1,0 +1,52 @@
+PR-064-E-candidate-6d3d0d5ddc1e
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 363d52661eeb726c2f8e2d8ee103c7dc11ba4505
+Tree: f099f885ee9ddcdd4fbd36e2fbee227a36c72c9e
+Branch: codex/pr-064-reliability-fuzz-security-review
+Baseline: local main 587d01da4f900291926b290c76f1eafa487fde0b
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1; mise uv Python 3.14; Node 22.22.3
+Result: Pass for A01–A04. No EX-*. No G8 inference. No 1.0.0 cut.
+
+Commands:
+  cargo test -p finstack-ai-test --test crash_prefix --test lanes --offline --locked
+  cargo test -p finstack-ai-plugin-host --offline --locked -- --test-threads=1
+    (full suite once overlapped clippy and timed out three fixture tests;
+     isolated rerun of those three plus cache tests passed)
+  cargo clippy --workspace --all-targets --locked -- -D warnings
+  uv run --no-project python tools/wasm_package/check.py graph
+  mise run fuzz-smoke
+  mise run check
+
+Not run as a merge gate:
+  mise run ci / hosted multi-OS matrix / cargo-deny / gitleaks
+  hosted ten-minute fuzz soak
+  git tag / registry publish
+  commissioned external audit firm
+
+Results:
+  crash_prefix: 14 passed (PREFIX_IDS 46; T1/R1/X1/M1/K1/P1–P4 catalog)
+  lanes: 8 passed including 256-case fixed-seed sibling properties
+  plugin-host: directory_cache_tamper_is_not_deserialized passed;
+    exclusive_concurrent_calls_succeed, exclusive_overflow_fails_closed,
+    fuel_burner_trips_resource_limit_and_echo_still_runs passed isolated
+  clippy -D warnings: pass
+  wasm graph: no Tokio, sockets, filesystem drivers, or kernel wasm-bindgen
+  fuzz-smoke: seven targets, seed 1, 256 runs each, nightly-2026-08-14
+  mise run check: pass (fmt, Clippy, wasm Clippy, ruff, mypy, size)
+
+Seed SHA-256 (secret-free; rg found no password/secret/token/key/bearer):
+  2a8663c8eb33a272cd84d859d90c3f9eed6b42f5b9c24928686b24830e3845f7  kernel_transition_json/invalid-phase-configure-output.json
+  dd42521500fab2adecbb0cf148561e46c1727dd9be3e072b7465fce5b6149775  message_json/assistant-text.json
+  3fc93c9b55c36d44b32906280b7076635936544b1b658b10bc1cdad6d0c3c9f7  record_replay_json/empty-prefix.json
+  49ea3cb710a38df742f87edcaed8a7805e18068fd7439d1e44164578da19da7f  recovery_sequence/empty-envelopes.json
+  060dc63e5595dffbd161c9ec98bc06fcf67cb22e2e75ecdf0003821388aeee4d  remote_frame/one-byte-payload.bin
+  f8372215f557694dfeb282249365a26f059070d8f6b698be9a9497506d4f05e4  run_event_json/transient-model-text.json
+  2d7dfa44f78c9422223a81b52348416b2e43de8ff5f28dad7a1448a8ae33f4a8  wit_input/template-toolset.json
+
+A01 zero Open Critical/High; FIND-064-001 Closed; FIND-064-008 Accepted.
+A02 restored cargo-fuzz plus three new targets; corpora checked in.
+A03 every EffectKind and public lane op has a named LegalRestore prefix.
+A04 G8 review matrix, SECURITY.md 0.1.0 line, empty advisory index.
+
+No G8-D. Lockstep crate/wheel/npm versions stay 0.1.0.

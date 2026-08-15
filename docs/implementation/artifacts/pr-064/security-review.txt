@@ -1,0 +1,37 @@
+PR-064-E-security-9ac67ca75bd7
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Candidate: 363d52661eeb726c2f8e2d8ee103c7dc11ba4505
+Reviewer: Claude Opus 5 (independent-review subagent; not the implementer)
+Result: Pass for A01. No G8-D. No GHSA/CVE invented. No exploit PoC.
+
+Scope: Threat Model §13.3 plus TM-01–TM-21 implemented-control matrix.
+Primary artifacts:
+  artifacts/pr-064/independent-review.md
+  artifacts/pr-064/findings.md
+  threat-model-g8-review.md
+  SECURITY.md
+  docs/security/advisories/README.md
+
+Critical/High:
+  FIND-064-001 High plugin Closed — directory cache never deserialized
+  FIND-064-008 High plugin Accepted — T1/T2 trusted in-process residual
+  FIND-064-013 High protocol Closed — remote authz already enforced
+  FIND-064-014 High interaction Closed — interaction authz already enforced
+  FIND-064-015 High plugin Closed — WASI deny-by-default already enforced
+  FIND-064-017 High secret Closed — redacted export already enforced
+
+Open residuals (not A01 blockers):
+  FIND-064-002 Medium fs-shell — shell cwd re-resolve
+  FIND-064-003 Medium protocol — unbounded settlement receipt map
+  FIND-064-004 Medium provenance — continuous deny/advisory is PR-065
+  FIND-064-005 Low protocol — non-constant-time bearer compare
+  FIND-064-006 Low provenance — fuzz-smoke not in mise run ci
+  FIND-064-007 Low fs-shell — output ceiling after both pipes drain
+
+Accepted residuals (no EX-*):
+  FIND-064-009 Medium TM-12 checksums ≠ authentication
+  FIND-064-010 Medium TM-18 unpublished registries
+  FIND-064-011 Medium ADR-013 at-least-once
+
+No exceptions-register row. No planning TM edit. No G8-D.
