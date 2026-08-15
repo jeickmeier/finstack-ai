@@ -1,0 +1,23 @@
+PR-050-E-integration-5c987e379d0c
+Date: 2026-08-14
+Owner: me@jeickmeier.com
+Merge: 5c987e379d0cd5a8e63f734eda26b69b07c4b337
+Parents: 972591d77abecad635276cdc6d247aba489e91b5
+         e4f83d5c07d2afc9de2aac2f8f9b113a3973785e
+Implementation candidate: a02b986b284f6fed834f8bd42259bae90fa72a71
+Result: Pass
+
+Local `main` merge of `codex/pr-050-context-manifest-lifecycle`.
+A01–A05 remain bound to the implementation candidate.
+TM-08 review remains bound to the same candidate.
+
+Re-verified on the merge tree:
+  mise run check-wit: clean generated.rs
+  cargo test -p finstack-ai-wit --offline --locked: 25 passed
+  kernel/runtime/SDK tree: no wasmtime, no finstack-ai-wit
+  finstack-ai-wit tree: no wasmtime
+  mise run check-wasm / wasm graph: pass
+  (pre-existing EventBatch::new dead_code warning on isolated wasm check)
+
+No hosted pull request or merge, npm/pypi publish, tag, G5-D, or G6-D.
+Phase 7 exit stays 0/4. Feature branch is kept.

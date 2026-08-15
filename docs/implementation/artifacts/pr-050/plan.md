@@ -328,6 +328,11 @@ Isolated `cargo clippy -p finstack-ai-wit` can hit the pre-existing
 runtime `EventBatch::new` dead_code warning when `native-tokio` is
 off; workspace clippy remains the gate.
 
+## Closeout
+
+PR-050 is `Done` at local `main` merge `5c987e379d0cd5a8e63f734eda26b69b07c4b337`.
+The envelope is closed and is not reused. Phase 7 remains `In progress`.
+
 ## Suggested authorization sentence
 
 When ready to admit and implement, authorize an envelope explicitly.
