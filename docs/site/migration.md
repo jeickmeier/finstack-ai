@@ -9,7 +9,9 @@ The adopter-facing 1.0 SemVer promise is
 
 This tree is tagged lockstep **`0.1.0`** (`v0.1.0`). Workspace version
 fields stay `0.1.0` until PR-066. Do not treat staged artifacts as a
-crates.io / PyPI / npm publication.
+crates.io / PyPI / npm publication. Support windows are in
+[support.md](support.md). Published conformance suites are in
+[conformance.md](conformance.md).
 
 ## Supported 0.1.0 → 1.0.0 paths
 

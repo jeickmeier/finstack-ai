@@ -14,7 +14,8 @@ The six primary-port entry points are:
 - `check_journal_store_conformance`
 
 Each failure is a `PortConformanceFailure` containing the port name, a stable
-contract label, and a safe detail message suitable for CI output.
+contract label, the published suite version (`PORT_CONFORMANCE_SUITE_VERSION`),
+and a safe detail message suitable for CI output.
 
 Copyable examples live in the leaf fixtures:
 

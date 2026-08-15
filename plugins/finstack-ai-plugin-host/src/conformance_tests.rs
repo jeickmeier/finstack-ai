@@ -1,5 +1,6 @@
 //! Published G6 hostile and lockfile conformance index.
 
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,6 +31,41 @@ const EXPERIMENTAL: Version = Version {
     minor: 0,
     patch: 4,
 };
+
+const PLUGIN_CONFORMANCE_SUITE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PluginConformanceFailure {
+    world: &'static str,
+    contract: &'static str,
+    suite_version: &'static str,
+    detail: String,
+}
+
+impl PluginConformanceFailure {
+    fn new(world: &'static str, contract: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            world,
+            contract,
+            suite_version: PLUGIN_CONFORMANCE_SUITE_VERSION,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl fmt::Display for PluginConformanceFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "plugin world `{}` contract `{}` suite {} violated: {}",
+            self.world, self.contract, self.suite_version, self.detail
+        )
+    }
+}
+
+fn unexpected_success(world: &'static str, contract: &'static str, detail: &'static str) -> ! {
+    panic!("{}", PluginConformanceFailure::new(world, contract, detail));
+}
 
 fn published_wasm(name: &str) -> Vec<u8> {
     let path = format!(
@@ -170,7 +206,11 @@ async fn lifecycle_fired_deadline_is_timeout() {
     )
     .await
     else {
-        panic!("deadline");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.lifecycle.deadline",
+            "fired deadline constructed an adapter",
+        );
     };
     assert_eq!(error.code(), "plugin_lifecycle_timeout");
 }
@@ -222,7 +262,11 @@ fn permission_denial_without_host_grant() {
     )
     .expect("manifest");
     let Err(error) = host.load(b"(component)", manifest, PluginWorld::Toolset) else {
-        panic!("denied");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.permission.granted",
+            "filesystem permission loaded without a host grant",
+        );
     };
     assert_eq!(error.code(), "plugin_permission_denied");
 }
@@ -255,7 +299,11 @@ async fn ungranted_wasi_instantiate_fails_closed() {
     )
     .await
     else {
-        panic!("unlinked filesystem");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.wasi.ungranted",
+            "ungranted WASI filesystem instantiated",
+        );
     };
     assert_eq!(error.code(), "plugin_instantiate_failed");
 }
@@ -279,7 +327,11 @@ async fn trap_guest_is_contained() {
         .call(tool_ctx(), validated_call("finstack.plugin.trap", b"{}"))
         .await
     else {
-        panic!("trap");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.call.trap",
+            "trap guest returned success",
+        );
     };
     assert_eq!(error.code(), "plugin_trap");
 }
@@ -303,7 +355,11 @@ async fn fuel_burner_trips_resource_limit() {
         .call(tool_ctx(), validated_call("finstack.plugin.burn", b"{}"))
         .await
     else {
-        panic!("fuel");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.resource.fuel",
+            "fuel burner returned success",
+        );
     };
     assert_eq!(error.code(), "plugin_resource_limit");
 }
@@ -349,7 +405,11 @@ async fn cancellation_during_echo_call_is_timeout() {
         )
         .await
     else {
-        panic!("cancel");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.call.cancelled",
+            "cancelled echo call returned success",
+        );
     };
     assert_eq!(error.code(), "plugin_lifecycle_timeout");
 }
@@ -402,7 +462,11 @@ fn abi_mismatch_calculator_as_context_fails() {
         manifest,
         PluginWorld::Context,
     ) else {
-        panic!("world");
+        unexpected_success(
+            "context-plugin",
+            "plugin.world.abi",
+            "toolset guest loaded as a context world",
+        );
     };
     assert_eq!(error.code(), "plugin_registration_invalid");
 }
@@ -472,7 +536,11 @@ fn lockfile_substitution_is_digest_mismatch() {
         manifest_digest: "00".repeat(32),
     };
     let Err(error) = host.load_locked(&entry) else {
-        panic!("swap");
+        unexpected_success(
+            "toolset-plugin",
+            "plugin.lock.digest",
+            "substituted component loaded against the lock digest",
+        );
     };
     assert_eq!(error.code(), "plugin_lock_digest_mismatch");
 }
@@ -553,6 +621,20 @@ fn cache_abi_field_still_distinguishes_worlds() {
         engine: engine_fingerprint_parts("0.0.0-test", CONFIG_FINGERPRINT),
         ..base
     }));
+}
+
+#[test]
+fn published_failure_names_world_contract_and_suite_version() {
+    let failure = PluginConformanceFailure::new(
+        "toolset-plugin",
+        "plugin.call.trap",
+        "deliberate suite failure",
+    );
+    let text = failure.to_string();
+    assert!(text.contains("toolset-plugin"), "{text}");
+    assert!(text.contains("plugin.call.trap"), "{text}");
+    assert!(text.contains(PLUGIN_CONFORMANCE_SUITE_VERSION), "{text}");
+    assert!(!text.contains("assert failed"), "{text}");
 }
 
 fn hex_to_32(input: &str) -> [u8; 32] {

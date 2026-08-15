@@ -50,7 +50,7 @@ Disposition vocabulary:
 | TM-15 Child-run policy evasion | PR-011, PR-046, PR-047 | — | evidenced |
 | TM-16 Parser/size DoS | PR-013, PR-020, PR-039, PR-058; `fuzz/` seven targets | FIND-064-006 Low: smoke not in `mise run ci` | evidenced |
 | TM-17 Observer leak or blockage | PR-017, PR-057; FIND-064-019 Closed | — | evidenced |
-| TM-18 Release/dependency compromise | [release-rehearsal.md](release-rehearsal.md); FIND-064-010 Accepted; FIND-064-004 Open | Public tag exists; registry publish and continuous deny/advisory are later | finding ([FIND-064-004](artifacts/pr-064/findings.md#find-064-004)); accepted residual for unpublished registries |
+| TM-18 Release/dependency compromise | [release-engineering.md](release-engineering.md); FIND-064-010 Accepted; FIND-064-004 Closed | Public tag exists; continuous deny/advisory restored; registry publish remains later | closed finding ([FIND-064-004](artifacts/pr-064/findings.md#find-064-004)); accepted residual for unpublished registries |
 | TM-19 Tenant/session swap | PR-058, PR-059 | — | evidenced |
 | TM-20 Artifact reference confusion | PR-022, PR-037, PR-056 | Scanning is a deployment gate | evidenced |
 | TM-21 Compaction safety/provenance | PR-018, PR-023, PR-056, PR-057 | — | evidenced |
@@ -66,7 +66,7 @@ Disposition vocabulary:
 | WIT / Wasmtime permissions, limits, signatures, cache identity | §3.5; FIND-064-001 Closed; FIND-064-008 Accepted; FIND-064-015 Closed | evidenced, with accepted residual |
 | Python / JavaScript callback lifecycle and browser credential guidance | §3.6; FIND-064-020 Closed | evidenced |
 | Secret / redaction behaviour | §3.7; FIND-064-017 Closed | evidenced |
-| Dependency / build / release provenance | §3.8; FIND-064-010 Accepted; FIND-064-004 Open; FIND-064-006 Open | finding ([FIND-064-004](artifacts/pr-064/findings.md#find-064-004), [FIND-064-006](artifacts/pr-064/findings.md#find-064-006)); accepted residual for unpublished registries |
+| Dependency / build / release provenance | §3.8; FIND-064-010 Accepted; FIND-064-004 Closed; FIND-064-006 Open | closed finding ([FIND-064-004](artifacts/pr-064/findings.md#find-064-004)); open Low ([FIND-064-006](artifacts/pr-064/findings.md#find-064-006)); accepted residual for unpublished registries |
 
 ## Threat Model §14 (advisory process)
 

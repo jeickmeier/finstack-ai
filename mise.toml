@@ -5,6 +5,7 @@ uv = "0.10.11"
 node = "22.18.0"
 "cargo:wasm-bindgen-cli" = "0.2.127"
 "cargo:cargo-fuzz" = "0.13.2"
+"github:EmbarkStudios/cargo-deny" = "0.20.2"
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
 # Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
@@ -225,11 +226,53 @@ set -euo pipefail
 uv run --no-project python tools/docs/license_sweep.py
 """
 
+[tasks.conformance]
+description = "Run published port and plugin conformance suites"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-test --locked --lib -- port_conformance::tests
+cargo test -p finstack-ai-test --locked --test port_helpers --test compaction_conformance
+cargo test -p finstack-ai-plugin-host --locked -- conformance -- --test-threads=1
+"""
+
+[tasks.supply-chain]
+description = "Run cargo-deny supply-chain policy (Eng Standards §9; TM-18)"
+run = """
+set -euo pipefail
+echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13"
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --manifest-path fuzz/Cargo.toml check
+"""
+
+[tasks.recreate-release]
+description = "Two-run SHA-256 recreate of unpublished 0.1.0 artifacts"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/recreate_release.py
+"""
+
 [tasks.release-rehearsal]
 description = "Two-run local staging checksum identity (unpublished 0.1.0)"
 run = """
 set -euo pipefail
-uv run --no-project python tools/docs/rehearse_release.py
+mise run recreate-release
+"""
+
+[tasks.starter-rc]
+description = "Run in-tree starters against staged RC artifacts"
+run = """
+set -euo pipefail
+if [ ! -f bindings/finstack-ai-wasm/js/dist/index.js ]; then
+  mise run generate-wasm
+fi
+uv run --no-project python tools/docs/starter_rc.py
+"""
+
+[tasks.hotfix-rehearsal]
+description = "Baseline vs patch-line checksum pair (unpublished)"
+run = """
+set -euo pipefail
+uv run --no-project python tools/docs/hotfix_rehearsal.py
 """
 
 [tasks.fuzz-smoke]
@@ -272,4 +315,5 @@ set -euo pipefail
 mise run check
 mise run test
 mise run check-wasm
+mise run supply-chain
 """

@@ -60,6 +60,9 @@ jobs:
       - name: Check wasm graph
         run: mise run check-wasm
 
+      - name: Supply chain
+        run: mise run supply-chain
+
       - name: Generate wasm package
         env:
           FINSTACK_WASM_REPRO: "1"

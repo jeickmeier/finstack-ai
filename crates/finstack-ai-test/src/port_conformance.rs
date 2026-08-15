@@ -16,13 +16,21 @@ use finstack_ai_runtime::{
     validate_stage_outcome,
 };
 
+/// Published suite version printed on every port-conformance failure.
+pub const PORT_CONFORMANCE_SUITE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// One precise extension-contract failure.
+///
+/// Display names the port, stable contract id, and suite version so a
+/// failed run is enough to identify the violated contract (PR-065-A03).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortConformanceFailure {
     /// Stable primary-port name.
     pub port: &'static str,
     /// Stable contract label suitable for assertions and CI diagnostics.
     pub contract: &'static str,
+    /// Suite version that defined `contract`.
+    pub suite_version: &'static str,
     /// Safe human-readable explanation.
     pub detail: String,
 }
@@ -32,6 +40,7 @@ impl PortConformanceFailure {
         Self {
             port,
             contract,
+            suite_version: PORT_CONFORMANCE_SUITE_VERSION,
             detail: detail.into(),
         }
     }
@@ -41,8 +50,8 @@ impl fmt::Display for PortConformanceFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{} contract `{}` violated: {}",
-            self.port, self.contract, self.detail
+            "{} contract `{}` suite {} violated: {}",
+            self.port, self.contract, self.suite_version, self.detail
         )
     }
 }
@@ -432,5 +441,24 @@ fn ensure(
         Ok(())
     } else {
         Err(PortConformanceFailure::new(port, contract, detail))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PORT_CONFORMANCE_SUITE_VERSION, PortConformanceFailure};
+
+    #[test]
+    fn failure_names_port_contract_and_suite_version() {
+        let failure = PortConformanceFailure::new(
+            "Model",
+            "model.descriptor.lists_model",
+            "deliberate suite failure",
+        );
+        let text = failure.to_string();
+        assert!(text.contains("Model"), "{text}");
+        assert!(text.contains("model.descriptor.lists_model"), "{text}");
+        assert!(text.contains(PORT_CONFORMANCE_SUITE_VERSION), "{text}");
+        assert!(!text.contains("assert failed"), "{text}");
     }
 }
