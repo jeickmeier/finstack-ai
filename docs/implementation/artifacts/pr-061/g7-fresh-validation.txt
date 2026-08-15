@@ -1,0 +1,61 @@
+PR-061-E-g7-002b615bf75c
+Date: 2026-08-15
+Owner: me@jeickmeier.com
+Reviewed tip: 002b615bf75c194b7d00acd6be2a036bfd614482
+Merge: 170a85ccd4e174050ae40c92d9f88bb51d8ac97f
+Candidate: 8197246e58981b3ba2dd806a7036e13238cb5fb9
+Environment: Darwin 25.5.0 arm64; rustc 1.97.1 (8bab26f4f 2026-07-14)
+Result: Pass for G7 minimums on the unpublished 0.1.0 tree.
+This file is not G7-D-*. The named decision is g7-decision.txt.
+
+Commands
+  cargo tree -p finstack-ai-kernel --locked -e normal
+  cargo tree -p finstack-ai --locked -e normal --no-default-features
+  uv run --no-project python tools/wasm_package/check.py graph
+  cargo test -p finstack-ai --locked --offline --test capability_catalog
+  cargo test -p finstack-ai-runtime --locked --offline --features native-tokio
+    --lib every_lag_policy_is_bounded
+  cargo test -p finstack-ai-runtime --locked --offline --features native-tokio
+    --lib direct_hub_keeps_one_hundred_thousand
+  cargo test -p finstack-ai-test --locked --offline
+    --test conformance --test golden_trace --test golden_scenarios
+    --test reducer --test crash_prefix --test compaction_conformance
+  cargo test -p finstack-ai-wasm --locked --offline --features scripted-trace
+  uv run --isolated --no-project --with-editable bindings/finstack-ai-python
+    --with pytest==9.1.1 --with pydantic==2.12.5
+    pytest -q bindings/finstack-ai-python/tests/test_import.py
+    bindings/finstack-ai-python/tests/test_capabilities.py
+  mise run docs-quickstarts
+  cmp rehearsal/run-a.comparable rehearsal/run-b.comparable
+
+Not run
+  mise run conformance / mise run benchmark-smoke (tasks do not exist)
+  mise run supply-chain / cargo deny (deny.toml is absent)
+  mise run secret-scan / gitleaks (no task; gitleaks not on PATH)
+  mise run ci / hosted Linux/macOS/Windows matrix
+  git tag v0.1.0 / crates.io / PyPI / npm / GitHub release
+  live provider smokes (#[ignore])
+
+Results
+  kernel omit-list: clean (38 package lines; no tokio, reqwest,
+    rusqlite, pyo3, wasmtime, hyper, native-tls, opentelemetry,
+    provider, server, or workflow leaves)
+  default SDK omit-list: clean
+  wasm graph: pass (117 wasm / 102 sdk / 100 runtime / 24 kernel nodes)
+  capability_catalog Always/Application/Model prefix: 2 passed
+  bounded event-hub tests: 2 passed
+  golden-trace / crash / compaction / reducer: 35 passed
+  wasm scripted-trace: 22 passed
+  python import + capabilities: 10 passed
+  docs-quickstarts: rust minimal/service, durable-interaction,
+    python-callback, rust-backed, python service
+  two-run rehearsal identity: pass
+    comparable sha256 c41a0fdd5d4fd0592af64a2e475ecfd5258bda45993df46ad120efa6a4c14de0
+  lockstep crate/wheel/npm version fields: 0.1.0
+  WIT package names: finstack:ai-*@0.0.4
+  no git tag v0.1.0
+
+G7 files present: threat-model-g7-review.md, preview-compatibility-policy.md,
+public-preview-roadmap.md, security-deployment.md, security-trust-levels.md,
+SECURITY.md, rehearsal/provenance.json (version 0.1.0,
+staged_not_published true, source_revision 8197246e58981b3ba2dd806a7036e13238cb5fb9).

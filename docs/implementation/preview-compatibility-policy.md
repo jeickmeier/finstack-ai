@@ -1,8 +1,9 @@
 # Preview compatibility policy
 
 Adopter-facing promise for unpublished lockstep **`0.1.0`**. This is not a
-1.0 SemVer guarantee and not a named G7 decision. Operational routing stays
-in [`compatibility-governance.md`](compatibility-governance.md). Planning
+1.0 SemVer guarantee. G7 passed via `G7-D-public-preview-f7c7e70b9e04`.
+Operational routing stays in
+[`compatibility-governance.md`](compatibility-governance.md). Planning
 docs under `docs/planning/` remain authoritative.
 
 Framework `0.1.0` maps to experimental WIT package names
@@ -10,9 +11,9 @@ Framework `0.1.0` maps to experimental WIT package names
 and npm **version fields** are `0.1.0`. WIT **package names** stay `@0.0.4`
 until PR-062 / framework `1.0.0`.
 
-Tag `v0.1.0`, registry publish, and `G7-D-*` are separately named owner
-actions. Until those exist, treat this file as the in-tree preview scope
-for the unpublished candidate.
+Tag `v0.1.0` and registry publish remain separately named owner actions.
+Until those exist, treat this file as the in-tree preview scope for the
+unpublished candidate.
 
 ## Supported families
 
@@ -32,9 +33,9 @@ for the unpublished candidate.
 
 ## Promise
 
-Preview is supported for security fixes on the `0.1.0` line once a named
-tag exists. Until then, security contact is the default-branch tip of this
-unpublished candidate.
+Preview is supported for security fixes on the unpublished `0.1.0` line
+at the default-branch tip. Tagged registry support begins when `v0.1.0`
+is a separately named external action.
 
 Breaking changes before `1.0.0` still require classification, changelog,
 and fixtures under [`compatibility-governance.md`](compatibility-governance.md).

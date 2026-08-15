@@ -41,9 +41,9 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 
 ## Supported versions
 
-Supported-version policy for the unpublished `0.1.0` preview line. Tag
-`v0.1.0` and registry publish wait on a named G7 decision and separately
-named external actions.
+Supported-version policy for the unpublished `0.1.0` preview line. G7
+passed via `G7-D-public-preview-f7c7e70b9e04`. Tag `v0.1.0` and registry
+publish remain separately named external actions.
 
 | Version | Supported |
 | --- | --- |

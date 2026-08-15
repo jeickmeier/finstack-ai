@@ -69,4 +69,4 @@ Additionally requires a superseding ADR and primary-document reconciliation.
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Missing until mapped delivery work completes and evidence is verified
+- Implementation evidence: Verified — PR-007 BlobRef, PR-022 scoped ArtifactStore, PR-037 experimental IndexedDB artifact adapter, and PR-056 memory/shell ArtifactStore spill. G7-D-public-preview-f7c7e70b9e04 closes the preview-mapped delivery. Blob storage is not a seventh kernel port.

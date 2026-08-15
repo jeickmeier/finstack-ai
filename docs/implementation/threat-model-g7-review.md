@@ -9,9 +9,10 @@ It does **not** rewrite
 [`docs/planning/06-finstack-ai-security-threat-model.md`](../planning/06-finstack-ai-security-threat-model.md),
 which remains the pre-implementation design contract.
 
-This review is **not** a `G7-D-*` decision. Rows that wait on a public
-tag, registry publish, or named gate stay **blocking for G7**. Independent
-review (Threat Model §13.3) is G8 / PR-065 and is out of scope.
+Cited by `G7-D-public-preview-f7c7e70b9e04`. Rows that wait on a public
+tag or registry publish are **accepted residuals** for the unpublished
+`0.1.0` preview, matching the G6 unpublished-checkpoint precedent.
+Independent review (Threat Model §13.3) is G8 / PR-065 and is out of scope.
 
 Trust labels: [docs/site/security-trust-levels.md](../site/security-trust-levels.md).
 Deployment gates: [docs/site/security-deployment.md](../site/security-deployment.md).
@@ -55,7 +56,7 @@ Deployment gates: [docs/site/security-deployment.md](../site/security-deployment
 | TM-15 Child-run policy evasion | PR-011, PR-046, PR-047 | — | evidenced |
 | TM-16 Parser/size DoS | PR-013, PR-020, PR-039, PR-058 | — | evidenced |
 | TM-17 Observer leak or blockage | PR-017, PR-057 | — | evidenced |
-| TM-18 Release/dependency compromise | [release-rehearsal.md](release-rehearsal.md); PR-003 deny/secret scan | Public tag, registry publish, hosted provenance | blocking for G7 |
+| TM-18 Release/dependency compromise | [release-rehearsal.md](release-rehearsal.md); PR-061 rehearsal provenance; `G7-D-public-preview-f7c7e70b9e04` | Public tag, registry publish, hosted provenance | accepted residual |
 | TM-19 Tenant/session swap | PR-058, PR-059 | — | evidenced |
 | TM-20 Artifact reference confusion | PR-022, PR-037, PR-056 | Scanning is a deployment gate | evidenced |
 | TM-21 Compaction safety/provenance | PR-018, PR-023, PR-056, PR-057 | — | evidenced |
@@ -64,19 +65,18 @@ Deployment gates: [docs/site/security-deployment.md](../site/security-deployment
 
 | Bullet | Evidence | G7 disposition |
 | --- | --- | --- |
-| §12 release rehearsal of contents, feature sets, ownership, reproducibility | [release-rehearsal.md](release-rehearsal.md); `mise run release-rehearsal` | evidenced locally; public tag **blocking for G7** |
-| §13.2 updated threat model | This file (implemented-control). Planning TM stays design-time | evidenced for review; named `G7-D-*` **blocking for G7** |
+| §12 release rehearsal of contents, feature sets, ownership, reproducibility | [release-rehearsal.md](release-rehearsal.md); PR-061 two-run comparable sha256 `c41a0fdd5d4fd0592af64a2e475ecfd5258bda45993df46ad120efa6a4c14de0` | evidenced locally; public tag **accepted residual** |
+| §13.2 updated threat model | This file (implemented-control). Planning TM stays design-time | evidenced; named `G7-D-public-preview-f7c7e70b9e04` |
 | §13.2 external surface review | [docs/site](../site/README.md) guides + trust/deployment pages | evidenced |
-| §13.2 SBOM / provenance | Local rehearsal checksums/SBOMs; not published | local evidenced; tagged provenance **blocking for G7** |
-| §13.2 vulnerability process | [SECURITY.md](../../SECURITY.md) | evidenced; supported-version table waits on `0.1.0` tag (**blocking for G7**) |
+| §13.2 SBOM / provenance | Local rehearsal checksums/SBOMs; not published | local evidenced; tagged provenance **accepted residual** |
+| §13.2 vulnerability process | [SECURITY.md](../../SECURITY.md) | evidenced; supported-version table covers unpublished `0.1.0`; tag **accepted residual** |
 | §13.2 security deployment guide | [security-deployment.md](../site/security-deployment.md) | evidenced |
 | §13.3 independent review | G8 / PR-065 | out of scope |
-| §14 revoke releases / issue advisories across registries | Requires published artifacts | **blocking for G7** |
+| §14 revoke releases / issue advisories across registries | Process exists; requires published artifacts to exercise | **accepted residual** |
 | §14 logs have stable identifiers without sensitive payloads | PR-057 redacted export | evidenced |
 
 ## Out of scope
 
 - Independent security audit (G8 / PR-065)
-- Named `G7-D-*`
-- `0.1.0` tag or registry publish (PR-061)
+- `0.1.0` tag or registry publish (separately named external actions)
 - `@1.0.0` WIT worlds (PR-062)

@@ -1,7 +1,8 @@
 # Release rehearsal (unpublished 0.1.0)
 
 This is a local preview rehearsal. It does **not** `git tag` or publish.
-Named G7 and `v0.1.0` remain owner decisions.
+G7 passed via `G7-D-public-preview-f7c7e70b9e04`. `v0.1.0` remains an
+owner decision.
 
 ```text
 mise run release-rehearsal
@@ -22,11 +23,11 @@ The runner executes two clean staging passes from the same tree with
 
 Two-run identity is required for sdist, crate package lists, `plugin.lock.json`,
 and npm pack when `dist/` exists. Wheel bytes are recorded but may differ
-across maturin/rustc embeddings; that residual is **blocking for G7**, not
-this rehearsal's local pass.
+across maturin/rustc embeddings; that residual is an accepted G7 residual,
+not a rehearsal failure.
 
 Provenance statement names the commit SHA, `mise.toml` toolchain pins,
 `version: 0.1.0`, and `staged_not_published: true`. Artifacts may say
-"preview rehearsal" and must not claim a named G7 or public tag.
+"preview rehearsal" and must not claim a public tag.
 
 Hosted Sigstore/OIDC is not required (`external actions=none`).

@@ -15,8 +15,8 @@ Implementation Plan, not admitted work.
 - Process protocol is handshake-only; session vocabulary is later.
 - Live provider smokes stay `#[ignore]` unless a later sentence names
   network use.
-- Registries, `git tag v0.1.0`, and `G7-D-*` wait on separately named
-  owner actions.
+- G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Registries and
+  `git tag v0.1.0` wait on separately named owner actions.
 
 ## Deferred backlog rows
 
@@ -33,8 +33,9 @@ Rows already marked `defer past preview` in
 
 ## Phase 9 themes (not admitted)
 
-These stay `Todo` until Phase 9 entrance is `Passed` (2/2) and G7 is
-`Passed` by a named decision. Do not infer admission from this file.
+These stay `Todo` until Phase 9 entrance is `Passed` (2/2). G7 is
+`Passed` via `G7-D-public-preview-f7c7e70b9e04`. Do not infer Phase 9
+admission from this file.
 
 | Theme | Plan entry |
 | --- | --- |

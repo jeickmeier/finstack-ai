@@ -18,8 +18,10 @@ disabled. Source: Threat Model §15.
 ## Vulnerability process
 
 Private reports go to `me@jeickmeier.com`. See [SECURITY.md](../../SECURITY.md).
-Preview support begins when PR-061 tags `0.1.0`. Until then, only the
-default-branch tip is the security contact surface.
+G7 passed for unpublished `0.1.0` via `G7-D-public-preview-f7c7e70b9e04`.
+Tagged registry support begins when `v0.1.0` is a separately named
+external action. Until then, the default-branch tip of this unpublished
+candidate is the security contact surface.
 
 ## Trust
 
