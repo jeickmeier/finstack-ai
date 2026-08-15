@@ -66,4 +66,4 @@ May change only through a new superseding ADR and reconciliation of every affect
 ## Approval and implementation-evidence links
 
 - Approval: accepted in the planning baseline (Architecture Specification §25); recorded as standalone under PR-004
-- Implementation evidence: Partial through locally integrated PR-017 bounded observer routing plus locally integrated PR-018 read-only `Observer`, separate typed `Middleware`, and TM-17 evidence (`PR-018-E-integration-3fe0314c6434`) at `3fe0314c6434211e1c8f493f24401888f9609050`; PR-020 and PR-057 remain
+- Implementation evidence: Verified through locally integrated PR-017 bounded observer routing, PR-018 read-only `Observer` and separate typed `Middleware`, PR-020 slow-observer/stress isolation, and PR-057 redacted observer adapters plus export projections (`PR-057-E-integration-d55c8318b1f9`) at `d55c8318b1f9c47bec2a078fc12fd7acb10095c4`
