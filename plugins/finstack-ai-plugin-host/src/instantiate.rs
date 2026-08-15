@@ -19,6 +19,9 @@ use crate::bindings::toolset::finstack::ai_host::logging::{self, Level};
 use crate::bindings::toolset::finstack::ai_types::types::{
     self as types, BlobRef, CallContext, PluginError,
 };
+use crate::bindings::v1::toolset::finstack::ai_host::blobs as blobs_v1;
+use crate::bindings::v1::toolset::finstack::ai_host::logging as logging_v1;
+use crate::bindings::v1::toolset::finstack::ai_types::types as types_v1;
 use crate::error::PluginHostError;
 use crate::grants::{GrantResources, can_link};
 use crate::limits::{EffectiveLimits, store_limits};
@@ -125,6 +128,52 @@ impl blobs::Host for HostState {
     ) -> Result<Vec<u8>, PluginError> {
         reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
             PluginError {
+                code: error.code().to_owned(),
+                message: error.to_string(),
+                retryable: false,
+            }
+        })?;
+        let start = usize::try_from(offset).unwrap_or(self.blob.len());
+        let take = usize::try_from(max_bytes).unwrap_or(0);
+        if start >= self.blob.len() {
+            return Ok(Vec::new());
+        }
+        let end = start.saturating_add(take).min(self.blob.len());
+        Ok(self.blob[start..end].to_vec())
+    }
+}
+
+impl types_v1::Host for HostState {}
+
+impl logging_v1::Host for HostState {
+    fn log(
+        &mut self,
+        _context: types_v1::CallContext,
+        level: logging_v1::Level,
+        message: String,
+    ) -> Result<(), types_v1::PluginError> {
+        reject_before_allocation(message.as_bytes(), MAX_STRING_BYTES, "log.message").map_err(
+            |error| types_v1::PluginError {
+                code: error.code().to_owned(),
+                message: error.to_string(),
+                retryable: false,
+            },
+        )?;
+        self.logs.push((format!("{level:?}"), message));
+        Ok(())
+    }
+}
+
+impl blobs_v1::Host for HostState {
+    fn read(
+        &mut self,
+        _context: types_v1::CallContext,
+        _reference: types_v1::BlobRef,
+        offset: u64,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, types_v1::PluginError> {
+        reject_declared_len(max_bytes, MAX_STRING_BYTES, "blobs.read").map_err(|error| {
+            types_v1::PluginError {
                 code: error.code().to_owned(),
                 message: error.to_string(),
                 retryable: false,
@@ -705,7 +754,7 @@ mod tests {
             "#;
         let component = compile(&host, wat);
         let linker = host
-            .linker_for_world(crate::host::PluginWorld::Toolset, &grants)
+            .linker_for_world(crate::host::PluginWorld::Toolset, "0.0.4", &grants)
             .expect("link");
         instantiate_with_host_imports(host.engine(), &linker, &component)
             .await
@@ -719,7 +768,7 @@ mod tests {
         )
         .expect("host");
         let unlinked = offered_only
-            .linker_for_world(crate::host::PluginWorld::Toolset, &grants)
+            .linker_for_world(crate::host::PluginWorld::Toolset, "0.0.4", &grants)
             .expect("link");
         let Err(error) =
             instantiate_with_host_imports(offered_only.engine(), &unlinked, &component).await

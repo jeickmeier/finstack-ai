@@ -20,11 +20,12 @@ This review is not `G8-D-*` and is not `COMP-1.0-D-*`.
 
 ## Residual
 
-Isolated Wasmtime bindgen remains generated from the published `@0.0.4`
-guest path so existing encoded components keep linking. A `@1.0.0`
-component must be rebuilt against the frozen worlds; the cache ABI key
-already distinguishes the majors. Resource-based streaming and observer
-WIT worlds stay deferred (ADR-035). Delivery stays at-least-once
+Isolated Wasmtime now generates and links both `@0.0.4` and `@1.0.0`
+worlds. Existing encoded `@0.0.4` components keep loading. A `@1.0.0`
+manifest plus a `@0.0.4` `component.wasm` fails instantiate. A rebuilt
+`@1.0.0` encoded guest is still not in-tree; successful instantiate of
+that rebuilt artifact is not claimed. Resource-based streaming and
+observer WIT worlds stay deferred (ADR-035). Delivery stays at-least-once
 (ADR-013).
 
 ## Decision

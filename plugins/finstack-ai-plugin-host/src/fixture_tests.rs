@@ -51,11 +51,15 @@ fn published_wasm(name: &str) -> Vec<u8> {
 }
 
 fn manifest_bytes(identity: &str, worlds: &[&str]) -> Vec<u8> {
+    manifest_bytes_for(identity, "0.0.4", worlds)
+}
+
+fn manifest_bytes_for(identity: &str, version: &str, worlds: &[&str]) -> Vec<u8> {
     let owned: Vec<String> = worlds.iter().map(|world| (*world).to_owned()).collect();
-    let digest = manifest_digest_hex(identity, "0.0.4", &owned).expect("digest");
+    let digest = manifest_digest_hex(identity, version, &owned).expect("digest");
     serde_json::to_vec(&serde_json::json!({
         "identity": identity,
-        "version": "0.0.4",
+        "version": version,
         "worlds": worlds,
         "permissions": ["logging"],
         "configuration_schema": {},
@@ -332,6 +336,25 @@ async fn echo_toolset_resolves_and_calls() {
     assert!(metadata.contains("plugin.granted_permissions"));
     assert!(metadata.contains("logging"));
     assert!(!metadata.contains("signature"));
+}
+
+#[tokio::test]
+async fn echo_toolset_v1_manifest_rejects_v004_component() {
+    let Err(error) = WasmPluginExtension::toolset(
+        host(InstancePolicy::Exclusive, 2),
+        &fixture_wasm("echo-toolset"),
+        parse_manifest(&manifest_bytes_for(
+            "finstack.plugin.echo.toolset",
+            "1.0.0",
+            &["toolset-plugin"],
+        ))
+        .expect("manifest"),
+    )
+    .await
+    else {
+        panic!("0.0.4 component must not instantiate against 1.0.0 linker");
+    };
+    assert_eq!(error.code(), "plugin_instantiate_failed");
 }
 
 #[tokio::test]

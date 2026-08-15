@@ -5,7 +5,9 @@ cache. Constructing `PluginHost` is the opt-in; the default `finstack-ai` bundle
 does not depend on this crate or on Wasmtime.
 
 This path instantiates `toolset-plugin` and `context-plugin` guests compiled
-against experimental `@0.0.4` WIT. In-process adapters in `finstack-ai-wit`
+against experimental `@0.0.4` or frozen `@1.0.0` WIT. Manifest `version`
+selects the linker; a `@0.0.4` component against a `@1.0.0` manifest fails
+closed. In-process adapters in `finstack-ai-wit`
 inherit host authority and are not a sandbox. WASI is deny-by-default: a
 permission name is not a linked capability. Fuel, memory, table, and instance
 ceilings contain exhaustion. Signature policy is host configuration. This crate

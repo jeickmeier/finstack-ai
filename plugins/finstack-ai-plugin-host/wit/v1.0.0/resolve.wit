@@ -1,0 +1,15 @@
+package finstack:plugin-host-bindgen@1.0.0;
+
+/// Host-only worlds that re-export the frozen `@1.0.0` interfaces so
+/// Wasmtime bindgen can resolve `wit/v1.0.0/deps`. Not a published WIT package.
+world toolset-plugin {
+    import finstack:ai-host/logging@1.0.0;
+    import finstack:ai-host/blobs@1.0.0;
+    export finstack:ai-toolset/toolset@1.0.0;
+}
+
+world context-plugin {
+    import finstack:ai-host/logging@1.0.0;
+    import finstack:ai-host/blobs@1.0.0;
+    export finstack:ai-context/context-provider@1.0.0;
+}

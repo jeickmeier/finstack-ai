@@ -11,6 +11,8 @@ use wasmtime::{Config, Engine};
 
 use crate::bindings::context::ContextPlugin;
 use crate::bindings::toolset::ToolsetPlugin;
+use crate::bindings::v1::context::ContextPlugin as ContextPluginV1;
+use crate::bindings::v1::toolset::ToolsetPlugin as ToolsetPluginV1;
 use crate::cache::{
     CacheKeyParts, ComponentCache, abi_identity, cache_key, component_digest, engine_fingerprint,
     host_target,
@@ -35,7 +37,7 @@ pub enum InstancePolicy {
     Serialized,
 }
 
-/// Which experimental world a compiled component implements.
+/// Which toolset or context world a compiled component implements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginWorld {
     /// `toolset-plugin`.
@@ -187,6 +189,8 @@ pub struct PluginHost {
     engine: Engine,
     toolset_linker: Linker<HostState>,
     context_linker: Linker<HostState>,
+    toolset_linker_v1: Linker<HostState>,
+    context_linker_v1: Linker<HostState>,
     cache: ComponentCache,
     instance_policy: InstancePolicy,
     max_concurrent_instances: u32,
@@ -243,6 +247,16 @@ impl PluginHost {
         ContextPlugin::add_to_linker::<_, HasSelf<_>>(&mut context_linker, |state| state).map_err(
             |error| PluginHostError::InstantiateFailed(format!("link context: {error}")),
         )?;
+        let mut toolset_linker_v1 = Linker::new(&engine);
+        ToolsetPluginV1::add_to_linker::<_, HasSelf<_>>(&mut toolset_linker_v1, |state| state)
+            .map_err(|error| {
+                PluginHostError::InstantiateFailed(format!("link toolset v1: {error}"))
+            })?;
+        let mut context_linker_v1 = Linker::new(&engine);
+        ContextPluginV1::add_to_linker::<_, HasSelf<_>>(&mut context_linker_v1, |state| state)
+            .map_err(|error| {
+                PluginHostError::InstantiateFailed(format!("link context v1: {error}"))
+            })?;
         let cache = match config.cache_dir {
             Some(dir) => ComponentCache::directory(dir)?,
             None => ComponentCache::memory(),
@@ -251,6 +265,8 @@ impl PluginHost {
             engine,
             toolset_linker,
             context_linker,
+            toolset_linker_v1,
+            context_linker_v1,
             cache,
             instance_policy: config.instance_policy,
             max_concurrent_instances: config.max_concurrent_instances,
@@ -310,7 +326,8 @@ impl PluginHost {
         self.default_limits
     }
 
-    /// Clone the world linker and add only granted WASI interfaces.
+    /// Clone the world linker for `version` (`0.0.4` or `1.0.0`) and add
+    /// only granted WASI interfaces.
     ///
     /// # Errors
     ///
@@ -319,11 +336,14 @@ impl PluginHost {
     pub fn linker_for_world(
         &self,
         world: PluginWorld,
+        version: &str,
         granted: &BTreeSet<String>,
     ) -> Result<Linker<HostState>, PluginHostError> {
-        let mut linker = match world {
-            PluginWorld::Toolset => self.toolset_linker.clone(),
-            PluginWorld::Context => self.context_linker.clone(),
+        let mut linker = match (world, version) {
+            (PluginWorld::Toolset, "1.0.0") => self.toolset_linker_v1.clone(),
+            (PluginWorld::Context, "1.0.0") => self.context_linker_v1.clone(),
+            (PluginWorld::Toolset, _) => self.toolset_linker.clone(),
+            (PluginWorld::Context, _) => self.context_linker.clone(),
         };
         crate::instantiate::link_granted_wasi(&mut linker, granted, &self.resources)?;
         Ok(linker)
@@ -516,8 +536,25 @@ fn require_world(manifest: &PluginManifest, world: &str) -> Result<(), PluginHos
 
 #[cfg(test)]
 mod tests {
-    use super::{InstancePolicy, PluginHost, PluginHostConfig};
+    use super::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
     use crate::error::PluginHostError;
+
+    #[test]
+    fn v1_linkers_construct() {
+        use std::collections::BTreeSet;
+
+        let host = PluginHost::try_new(
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 1).expect("cfg"),
+        )
+        .expect("host");
+        let grants = BTreeSet::new();
+        host.linker_for_world(PluginWorld::Toolset, "1.0.0", &grants)
+            .expect("toolset v1");
+        host.linker_for_world(PluginWorld::Context, "1.0.0", &grants)
+            .expect("context v1");
+        host.linker_for_world(PluginWorld::Toolset, "0.0.4", &grants)
+            .expect("toolset experimental");
+    }
 
     #[test]
     fn zero_concurrency_is_rejected() {
