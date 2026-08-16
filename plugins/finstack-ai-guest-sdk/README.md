@@ -44,7 +44,7 @@ cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```
 
-See [MIGRATION.md](MIGRATION.md) for exact-world pinning and a
-hypothetical `@0.0.5` retarget. Compatibility policy lives in
+See [MIGRATION.md](MIGRATION.md) for exact-world pinning and the
+`@0.0.4` → `@1.0.0` retarget. Compatibility policy lives in
 [`../finstack-ai-wit/COMPATIBILITY.md`](../finstack-ai-wit/COMPATIBILITY.md)
 and ADR-035.

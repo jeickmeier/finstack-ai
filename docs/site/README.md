@@ -1,10 +1,9 @@
 # finstack-ai public documentation
 
 Workspace version **1.0.0**. Local tag `v1.0.0` exists. The last
-pushed GitHub tag is `v0.1.0`. G8 passed via
-`G8-D-general-availability-a889a29a3f54`. crates.io / PyPI / npm
-packages are not published. Permanent WIT worlds are `@1.0.0`.
-Experimental WIT package names stay `@0.0.4`.
+pushed GitHub tag is `v0.1.0`. crates.io / PyPI / npm packages are not
+published. Permanent WIT worlds are `@1.0.0`. Experimental WIT package
+names stay `@0.0.4`.
 
 Planning files under [`docs/planning/`](../planning/README.md) remain the
 implementation contract. Delivery status lives in
@@ -16,6 +15,8 @@ the public index and does not replace either layer.
 | Guide | Topic |
 | --- | --- |
 | [Concept](concept.md) | Kernel, runtime, SDK, leaves, six ports, commit-before-effect |
+| [FAQ](faq.md) | Install, capabilities, sessions, secrets, support |
+| [Troubleshooting](troubleshooting.md) | Stable error codes and common failures |
 | [Rust](rust.md) | Native SDK quick start |
 | [Python](python.md) | Staged wheel, rust-backed vs callback |
 | [WASM](wasm.md) | `@finstack/ai` worker default |
@@ -42,6 +43,7 @@ the public index and does not replace either layer.
 
 - Dual-licensed [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE)
 - [DCO / contributing](../../CONTRIBUTING.md)
+- [Code of Conduct](../../CODE_OF_CONDUCT.md)
 - [Maintainers](../../GOVERNANCE.md)
 - [ADRs](../implementation/adr-register.md)
 - [Public RFCs](../rfcs/README.md)

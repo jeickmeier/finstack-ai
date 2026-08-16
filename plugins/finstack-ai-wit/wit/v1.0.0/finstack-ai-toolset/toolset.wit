@@ -1,5 +1,6 @@
 package finstack:ai-toolset@1.0.0;
 
+/// Frozen `@1.0.0` toolset guest world.
 world toolset-plugin {
     import finstack:ai-host/logging@1.0.0;
     import finstack:ai-host/blobs@1.0.0;
@@ -7,35 +8,57 @@ world toolset-plugin {
     export toolset;
 }
 
+/// Guest-exported Toolset contract.
 interface toolset {
     use finstack:ai-types/types@1.0.0.{call-context, plugin-error};
 
+    /// Data-only tool specification. Schemas are JSON UTF-8 bytes.
     record tool-spec {
+        /// Tool identity unique within this Toolset.
         id: string,
+        /// Model-facing name.
         model-name: string,
+        /// Short title.
         title: string,
+        /// Model-facing description.
         description: string,
+        /// Draft 2020-12 input schema JSON.
         input-schema-json: list<u8>,
+        /// Optional output schema JSON.
         output-schema-json: option<list<u8>>,
+        /// Execution mode label owned by the host contract.
         execution-mode: string,
+        /// Side-effect class label.
         side-effect: string,
+        /// Retry-safety label.
         retry-safety: string,
+        /// Approval-policy JSON.
         approval-policy-json: list<u8>,
+        /// Maximum serialized result bytes.
         max-result-bytes: u64,
+        /// Additional metadata JSON. Never credentials.
         metadata-json: list<u8>,
     }
 
+    /// Catalog returned by `list-tools`.
     record tool-catalog {
+        /// Digest of the tool list.
         digest: string,
+        /// Ordered tool specifications.
         tools: list<tool-spec>,
     }
 
+    /// Result of one `call`.
     record tool-result {
+        /// Canonical JSON object or array bytes.
         content-json: list<u8>,
+        /// Application-level error flag.
         is-error: bool,
     }
 
+    /// Return the immutable tool catalog.
     list-tools: func() -> result<tool-catalog, plugin-error>;
+    /// Execute one validated tool. `args-json` is already schema-checked by the host.
     call: func(context: call-context, tool-id: string, args-json: list<u8>)
         -> result<tool-result, plugin-error>;
 }

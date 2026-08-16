@@ -15,8 +15,7 @@ See [crates/finstack-ai-server](../../crates/finstack-ai-server/README.md)
 and [compatibility governance](../implementation/compatibility-governance.md)
 for the remote and process families.
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

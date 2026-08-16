@@ -5,13 +5,6 @@
 //! `wasm-host` selects the local `PortObject`, `PortFuture`, and `PortStream`
 //! aliases. The browser executor and wasm-bindgen surface live in the
 //! `finstack-ai-wasm` binding crate.
-//!
-//! PR-014 adds the journal-store boundary and the authoritative commit loop.
-//! PR-015 adds the provider-neutral model port and deterministic stream driver.
-//! PR-017 adds bounded native event delivery, batching, and backpressure.
-//! PR-018 completes the six-port surface with context, middleware, and observer contracts.
-//! PR-019 connects durable cancellation, deadlines, retry timers, and task shutdown.
-//! PR-020 adds deterministic pre-dispatch manual drive and the native runtime gate proofs.
 
 #![warn(missing_docs)]
 

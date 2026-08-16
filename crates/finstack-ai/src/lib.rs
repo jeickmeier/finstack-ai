@@ -4,6 +4,9 @@
 //! over the runtime. The default `native-tokio` feature selects the runtime
 //! Tokio driver; browser WASM consumers disable defaults and enable
 //! `wasm-host`.
+//!
+//! Start at [`Agent::builder`]. Kernel, runtime, and protocol crates are not a
+//! second constructor path.
 
 #![warn(missing_docs)]
 

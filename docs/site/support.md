@@ -1,11 +1,8 @@
 # Support windows
 
-Adopter-facing support windows for finstack-ai. Operational detail
-lives in
+Adopter-facing support windows for finstack-ai. This is not an LTS
+program. Operational detail lives in
 [support-windows.md](../implementation/support-windows.md).
-This is not an LTS program. G8 passed via
-`G8-D-general-availability-a889a29a3f54`; this page is not that
-decision.
 
 Workspace crate, wheel, and npm version fields are **1.0.0**.
 Local tag `v1.0.0` exists. The last pushed GitHub tag is `v0.1.0`.

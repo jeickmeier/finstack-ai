@@ -30,8 +30,7 @@ continue-the-run.
 Host callbacks are [T2](security-trust-levels.md). They inherit page
 authority and are not isolated.
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

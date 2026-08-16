@@ -36,7 +36,7 @@ Severity may be raised or lowered after triage when impact, exploitability, or d
 ## Acknowledgement and disclosure
 
 - The response owner aims to acknowledge private reports within **three business days**, and sooner for Critical/High issues per the rubric above.
-- Coordinated disclosure and embargo details are agreed case by case until a public preview release process lands. Default embargo expectation is **90 days** from acknowledgement, or until a patched release is available, whichever comes first; Critical issues may use a shorter embargo when users remain exposed.
+- Coordinated disclosure and embargo details are agreed case by case. Default embargo expectation is **90 days** from acknowledgement, or until a patched release is available, whichever comes first; Critical issues may use a shorter embargo when users remain exposed.
 - Security fixes that alter durable meaning or public protocols still require compatibility handling under project governance.
 
 ## Supported versions

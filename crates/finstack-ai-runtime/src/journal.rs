@@ -48,11 +48,23 @@ impl StoreLimits {
 }
 
 /// Object-safe append/load/snapshot contract owned by the runtime.
+///
+/// Records are append-only and authoritative. Snapshots are a disposable
+/// replay cache, not a second semantic model. `health().durable` is `true`
+/// only when the leaf actually flushed under its documented pragmas.
 pub trait JournalStore: PortObject {
     /// Atomically append one frozen request.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Idempotent append batch. Duplicate identity must not fork history.
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>>;
 
     /// Load one session without any target-ID lookup side channel.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Session identity plus optional snapshot acceleration.
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>>;
 
     /// Replace the disposable replay snapshot for one session.

@@ -73,8 +73,7 @@ when the WASM package is already generated, crate package lists). The
 **last pushed GitHub tag** is `v0.1.0`. Local tag `v1.0.0` exists and
 is not pushed. This rehearsal does not publish to registries.
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

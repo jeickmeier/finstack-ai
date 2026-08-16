@@ -12,8 +12,8 @@ use finstack_ai::runtime::{
 use finstack_ai::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_TIMEOUT, Agent, AgentRunError,
     AgentRunOutput, AgentRunRequest, CapabilityActivation, CapabilitySpec, ExternalIdentityKey,
-    ExternalIdentityMap, InstructionSpec, Lane, MemoryExternalIdentityMap,
-    PrincipalRef, RunSecurityContext, Session, SessionError,
+    ExternalIdentityMap, InstructionSpec, Lane, MemoryExternalIdentityMap, PrincipalRef,
+    RunSecurityContext, Session, SessionError,
 };
 use finstack_ai_provider_anthropic::{
     AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
@@ -27,9 +27,7 @@ use pyo3::IntoPyObjectExt;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyStopAsyncIteration, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{
-    PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PySequence, PyString,
-};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PySequence, PyString};
 
 #[cfg(feature = "benchmark-fixture")]
 mod benchmark_fixture;
@@ -709,10 +707,9 @@ impl PyRun {
         py: Python<'py>,
         resolution: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let resolution = serde_json::from_value::<finstack_ai::InteractionResolution>(
-            py_to_json(resolution)?,
-        )
-        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let resolution =
+            serde_json::from_value::<finstack_ai::InteractionResolution>(py_to_json(resolution)?)
+                .map_err(|error| PyTypeError::new_err(error.to_string()))?;
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let locator = run.locator().clone();

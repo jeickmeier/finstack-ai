@@ -1,8 +1,11 @@
-# Python alpha API reference
+# Python API reference
 
 The `finstack_ai` package is a typed facade over the Rust-owned semantic engine.
 Async APIs are primary. Dropping a handle detaches observation and does not
-cancel a run.
+cancel a run. Hover docs live on the `_finstack_ai.pyi` stub; this page is the
+narrative index.
+
+Workspace version is **1.0.0**. The package is not on PyPI.
 
 ## Agent composition
 
@@ -19,22 +22,28 @@ cancel a run.
   capabilities=None, active_capabilities=None, context_providers=None,
   middleware=None, observers=None)` accepts trusted coarse callback adapters.
   `output_type` lazily requires the Pydantic extra.
-- `Agent.start(...) -> Run` starts one bounded run and returns immediately.
-- `await Agent.run(...) -> RunResult` waits for the committed terminal result.
-- `Agent.capability_catalog()` returns only compact `Model` entries.
+- `Agent.start(..., capability=None) -> Run` starts one bounded run and returns
+  immediately.
+- `await Agent.run(..., capability=None) -> RunResult` waits for the committed
+  terminal result.
+- `Agent.capability_catalog()` returns only compact `model` entries.
 - `Agent.compact_capability_catalog()` renders `id: description` lines under the
   shared 8 KiB registration ceiling.
+- `await Agent.create_session(tenant_scope="default")` bootstraps a `main` lane.
+- `await Agent.open_session(session_id, tenant_scope)` rebuilds a handle from
+  the journal and does not respawn parked runs.
 
 ## Capabilities
 
 `Capability(id, description, instructions, activation=...)` is declarative.
-Python alpha capabilities contribute instructions; native bundle definitions
-may also reference registered toolsets, context providers, and middleware.
+Python capabilities contribute instructions; native bundle definitions may also
+reference registered toolsets, context providers, and middleware.
 
 - `always` enters every resolved plan.
 - `application` enters only when its ID is in `active_capabilities`.
-- `model` is selected by the shared bounded token-overlap policy and rebuilt as
-  a complete immutable plan before run execution.
+- `model` entries are listed in the compact catalog. Pass `capability=` on
+  `start` / `run` to execute that variant. `None` runs this agent. A missing
+  catalog id raises `ConfigurationError`. User-input token overlap is not used.
 - `disabled` cannot activate.
 
 Activation never broadens permissions. The kernel commits the complete sorted
@@ -57,8 +66,9 @@ instruction prefix.
 `PythonModel`, `PythonToolset`, `PythonContextProvider`, `PythonMiddleware`, and
 `PythonObserver` are trusted in-process adapters. Each invocation is coarse,
 bounded by timeout, cancellation-aware, and supplied an invocation-scoped
-`CallbackContext`. Retained contexts reject access after settlement. There is
-no per-token callback.
+`CallbackContext`. Retained contexts reject access after settlement
+(`RuntimeError`, code `python_callback_context_settled`). There is no per-token
+callback.
 
 ## Pydantic extra
 
@@ -72,5 +82,12 @@ complete example and unsupported-schema behavior.
 All public imports ship through `finstack_ai.__all__`, `py.typed`, and the
 native `_finstack_ai.pyi` facade. Runtime failures derive from `FinstackError`
 and expose `code`, `retryable`, and safe locator `context` where available.
-`ConfigurationError`, `RuntimeError`, `CancelledError`, and `TimeoutError` are
-the current alpha subclasses.
+
+| Type | Typical `code` |
+| --- | --- |
+| `ConfigurationError` | `agent_run_invalid_configuration` |
+| `RuntimeError` | runtime / callback-settled failures |
+| `CancelledError` | `agent_run_cancelled` |
+| `TimeoutError` | `agent_run_timeout` |
+
+See [troubleshooting](../../../docs/site/troubleshooting.md).

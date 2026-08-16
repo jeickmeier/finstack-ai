@@ -19,11 +19,13 @@ an ADR.
 
 ## Status
 
-No numbered RFC is open. Workspace version is **0.1.0** (tag `v0.1.0`).
-Preview compatibility policy is PR-061.
+No numbered RFC is open. Workspace version is **1.0.0** (local tag
+`v1.0.0`). The last pushed GitHub tag is `v0.1.0`. The adopter-facing 1.0
+SemVer promise is
+[1.0-compatibility-policy.md](../implementation/1.0-compatibility-policy.md).
 
 ## License and governance
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[SECURITY.md](../../SECURITY.md).
+[DCO](../../CONTRIBUTING.md). [Code of Conduct](../../CODE_OF_CONDUCT.md).
+[Maintainers](../../GOVERNANCE.md). [SECURITY.md](../../SECURITY.md).

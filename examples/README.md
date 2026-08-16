@@ -10,7 +10,7 @@ Public-API examples for finstack-ai bindings. Workspace version is
   and service (T2) starters pinned to `finstack-ai==1.0.0`.
 - [`browser-minimal/`](browser-minimal/) — experimental same-origin IndexedDB
   inspect demo (T2 host / T5 content). Not crash-durable.
-- [`ts-alpha-install/`](ts-alpha-install/) — clean TypeScript consumer that
+- [`ts-alpha-install/`](ts-alpha-install/) — TypeScript consumer that
   typechecks against a staged `@finstack/ai` tarball.
 - [`durable-interaction/`](durable-interaction/) — typed interaction that
   survives a simulated worker restart on a SQLite journal via the local

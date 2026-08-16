@@ -4,8 +4,8 @@ Public crate: `finstack-ai` (SDK/facade). Kernel, runtime, and protocol
 crates are not a second constructor path; start here.
 
 Workspace version is **1.0.0** unpublished. The last public tag is
-`v0.1.0`. G7 passed. crates.io publication remains blocked on owner
-registry credentials.
+`v0.1.0`. crates.io publication remains blocked on owner registry
+credentials.
 
 ## Quick start
 
@@ -17,8 +17,10 @@ That binary builds an `Agent` over a process-local loopback OpenAI-compatible
 provider, calls `run`, and prints the completion. No credential is required.
 
 `Agent::builder` registers the model and journal store, then `build().await`
-resolves once. `Agent::run` / `start` execute one run. `open_session`
-inspects an existing journal and does not continue a parked run.
+resolves once. `Agent::run` / `start` execute one run. `request.capability`
+selects a model-activated variant; `None` runs the `Agent` that was called.
+`Session::open` inspects an existing journal and does not continue a parked
+run. Python and WASM expose the same inspect path as `Agent.open_session`.
 
 ## Starters
 
@@ -32,8 +34,7 @@ inspects an existing journal and does not continue a parked run.
 See [examples/rust-minimal](../../examples/rust-minimal/README.md).
 Trust class: [T1](security-trust-levels.md).
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

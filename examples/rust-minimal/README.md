@@ -1,4 +1,4 @@
-# Native developer-preview examples
+# Native examples
 
 Four offline, secret-free binaries over the public Rust surface.
 Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`). `publish = false`.

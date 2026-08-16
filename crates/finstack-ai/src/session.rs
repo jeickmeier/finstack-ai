@@ -33,6 +33,11 @@ pub struct Session {
 impl Session {
     /// Create a session and persist `SessionCreated` plus `LaneCreated("main")`.
     ///
+    /// # Arguments
+    ///
+    /// * `store` - Journal that will own the new session envelopes.
+    /// * `tenant_scope` - Host-captured tenant scope stored on every record.
+    ///
     /// # Errors
     ///
     /// Returns a configuration or store failure.
@@ -52,6 +57,15 @@ impl Session {
 
     /// Open an existing session without respawning non-terminal runs.
     ///
+    /// This is inspect-not-continue. Resume belongs to an explicit workflow
+    /// driver when one is composed.
+    ///
+    /// # Arguments
+    ///
+    /// * `store` - Journal that already contains `session_id`.
+    /// * `session_id` - Durable session identity to rebuild.
+    /// * `tenant_scope` - Host-captured tenant scope; mismatch fails closed.
+    ///
     /// # Errors
     ///
     /// Returns a recover failure when the journal cannot be loaded.
@@ -70,6 +84,12 @@ impl Session {
     /// Intern-table poison is treated as absence so construction stays
     /// infallible. The first mutation fail-closes through
     /// [`SessionRuntime::open`].
+    ///
+    /// # Arguments
+    ///
+    /// * `store` - Journal backing this session.
+    /// * `session_id` - Durable session identity.
+    /// * `tenant_scope` - Host-captured tenant scope.
     #[must_use]
     pub fn pending(
         store: Arc<dyn JournalStore>,
@@ -87,6 +107,10 @@ impl Session {
     }
 
     /// Wrap an already-constructed runtime.
+    ///
+    /// # Arguments
+    ///
+    /// * `runtime` - Session runtime recovered or created by the caller.
     #[must_use]
     pub fn from_runtime(runtime: Arc<SessionRuntime>) -> Self {
         Self {

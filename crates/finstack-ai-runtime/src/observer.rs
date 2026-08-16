@@ -112,11 +112,18 @@ impl ObserverEventView {
 }
 
 /// Object-safe read-only observer port.
+///
+/// Observers never change behavior or terminal state. Delivery is batched.
+/// Failures are isolated from the run.
 pub trait Observer: PortObject {
     /// Immutable descriptor.
     fn descriptor(&self) -> ObserverDescriptor;
 
     /// Observe one immutable, logically ordered event batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - Events already committed or emitted for observation. Do not mutate them.
     fn observe(&self, batch: Arc<[RunEvent]>) -> PortFuture<Result<(), ObserverError>>;
 }
 

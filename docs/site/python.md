@@ -39,8 +39,10 @@ until attribute access.
 
 Never put secrets in `AgentSpec`. See [provider security](provider-security.md).
 
-## License and governance
+`Agent.start` / `run` take optional `capability=` to select a model-activated
+variant. `None` runs this agent. See [FAQ](faq.md).
+
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

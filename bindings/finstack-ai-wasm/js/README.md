@@ -1,6 +1,6 @@
 # `@finstack/ai`
 
-Preview browser package for the Rust-owned `finstack-ai` engine. The published
+Browser package for the Rust-owned `finstack-ai` engine. The published
 TypeScript surface is hand-authored; generated wasm-bindgen glue stays in
 `generated/` and is not a public API.
 
@@ -76,9 +76,8 @@ and consume transferable event-batch snapshots with `connectWorker` on the UI
 thread. Construct `JsModel` / `JsToolset` inside the worker; do not post host
 objects across the boundary. Main-thread `Agent.create` remains the documented
 host-compatible mode with the same bounds. The default worker lag policy is
-`drop-progress` (queue 32, 2s durable wait). SharedArrayBuffer and threaded
-WASM are a post-preview opt-in that requires cross-origin isolation and a new
-ADR-031 reconsideration.
+`drop-progress` (queue 32, 2s durable wait). SharedArrayBuffer and threaded WASM stay opt-in. They require
+cross-origin isolation and a new ADR-031 reconsideration.
 
 ```ts
 import { Agent, JsModel, init } from "@finstack/ai";
@@ -135,7 +134,7 @@ TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
 bundles, headers, or examples. Terminate secrets at a trusted same-origin
 proxy. Optional application `headers` are not a credential helper.
 
-## Public surface (PR-035 / PR-038)
+## Public surface
 
 - `init(): Promise<void>`
 - `health(): string`
@@ -156,9 +155,9 @@ proxy. Optional application `headers` are not a credential helper.
   `inspectSession`)
 
 Default journal is the Rust in-memory store. JS `createMemoryJournalStore()`
-remains a pre-beta health stub. IndexedDB persistence is experimental until
-PR-048. npm artifacts may be staged; they are not published. G4 is a separate
-named decision. Dropping a `Run` or `WorkerRun` detaches observation and does
+remains a health stub, not a durable store. IndexedDB persistence is
+experimental after PR-048. npm artifacts may be staged; they are not
+published. Dropping a `Run` or `WorkerRun` detaches observation and does
 not cancel. Applicable goldens run in Chromium, Firefox, and WebKit.
 
 ## Regenerate

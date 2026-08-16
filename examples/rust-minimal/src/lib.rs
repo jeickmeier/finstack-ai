@@ -1,4 +1,4 @@
-//! Shared offline support for the native developer-preview binaries.
+//! Shared offline support for the native example binaries.
 
 use std::error::Error;
 use std::sync::Arc;

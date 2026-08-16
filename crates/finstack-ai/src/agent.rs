@@ -1,4 +1,4 @@
-//! Native developer-preview execution facade.
+//! Public native execution facade.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -105,6 +105,10 @@ struct ModelCapabilityVariant {
 }
 
 /// Immutable native facade over one fully resolved agent.
+///
+/// Construct with [`Agent::builder`] then [`NativeAgentBuilder::build`].
+/// `start` / `run` execute one bounded turn. Dropping an [`AgentRun`]
+/// detaches observation; it does not cancel the durable run.
 #[derive(Clone)]
 pub struct Agent {
     resolved: Arc<ResolvedAgent>,
@@ -124,6 +128,25 @@ impl Agent {
     ///
     /// This is the live-handle constructor ([`NativeAgentBuilder`]). Use
     /// [`crate::AgentSpec::builder`] when you only need declarative spec data.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent_id` - Stable agent identity recorded in the bundle spec and lock.
+    /// * `bundle_id` - Bundle identity that owns this agent.
+    /// * `model` - Exact-version component ref plus a ready [`Model`] handle.
+    /// * `store` - Exact-version component ref plus a ready journal-store handle.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn compose(
+    /// #     builder: finstack_ai::NativeAgentBuilder,
+    /// # ) -> Result<(), finstack_ai::AgentRunError> {
+    /// let agent = builder.build().await?;
+    /// let _ = agent;
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn builder(
         agent_id: AgentId,
@@ -136,9 +159,12 @@ impl Agent {
 
     /// Validate and retain one resolved, no-lookup execution plan.
     ///
-    /// The developer preview supports direct model, Toolset, context-provider,
-    /// middleware, and observer handles. Observer failures are isolated from
-    /// run semantics.
+    /// Supports direct model, Toolset, context-provider, middleware, and
+    /// observer handles. Observer failures are isolated from run semantics.
+    ///
+    /// # Arguments
+    ///
+    /// * `resolved` - Agent produced by a bundle resolver with a spec and lock.
     ///
     /// # Errors
     ///
@@ -203,6 +229,10 @@ impl Agent {
 
     /// Return an agent configured for one compile-once Draft 2020-12 output schema.
     ///
+    /// # Arguments
+    ///
+    /// * `schema` - Canonical JSON Schema document compiled by the offline Rust validator.
+    ///
     /// # Errors
     ///
     /// Returns a stable configuration error when the schema cannot be compiled
@@ -264,11 +294,28 @@ impl Agent {
     /// The caller must already be inside the selected runtime driver. Dropping the returned
     /// handle detaches frontend observation; it does not cancel the durable run.
     /// `request.capability` selects a model-activated variant; `None` runs `self`.
+    /// An unknown catalog id fails closed. User-input word overlap is not used.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Bounded run input, security context, limits, and optional capability id.
     ///
     /// # Errors
     ///
     /// Returns a stable configuration or runtime error before the background
     /// run task is accepted.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn demo(agent: &finstack_ai::Agent, request: finstack_ai::AgentRunRequest)
+    /// #     -> Result<(), finstack_ai::AgentRunError> {
+    /// let run = agent.start(request)?;
+    /// let output = run.result().await?;
+    /// let _ = output.text();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
         let selected = self.select_for_request(&request)?.clone();
         let prepared = selected.prepare(request)?;
@@ -299,6 +346,11 @@ impl Agent {
     }
 
     /// Start a new root run on an existing idle lane.
+    ///
+    /// # Arguments
+    ///
+    /// * `lane` - Idle lane that already belongs to this agent's journal store.
+    /// * `request` - Bounded run input; `capability` selects a model-activated variant.
     ///
     /// # Errors
     ///
@@ -359,6 +411,13 @@ impl Agent {
     }
 
     /// Execute one bounded native run through the commit-before-effect runtime.
+    ///
+    /// Equivalent to [`Self::start`] followed by [`AgentRun::result`].
+    /// `request.capability` selects a model-activated variant; `None` runs `self`.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Bounded run input, security context, limits, and optional capability id.
     ///
     /// # Errors
     ///
@@ -1134,7 +1193,7 @@ impl AgentRun {
 
     /// List the outstanding typed interaction for this run (0 or 1).
     ///
-    /// Native-only. Browser WASM list/resolve remains PR-048.
+    /// Native-only. Browser WASM list/resolve stays on the worker client.
     ///
     /// The owned handle treats an unpublished or not-yet-accepted journal as
     /// empty. After accept, listing goes through [`InteractionRouter`].
@@ -1181,7 +1240,11 @@ impl AgentRun {
 
     /// Resolve the outstanding interaction through the live run handle.
     ///
-    /// Native-only. Browser WASM list/resolve remains PR-048.
+    /// Native-only. Browser WASM list/resolve stays on the worker client.
+    ///
+    /// # Arguments
+    ///
+    /// * `resolution` - Binding-neutral settlement for the outstanding interaction.
     ///
     /// # Errors
     ///
@@ -1498,6 +1561,10 @@ impl NativeAgentBuilder {
 
     /// Add one ordered model instruction.
     ///
+    /// # Arguments
+    ///
+    /// * `text` - Non-empty instruction prefix appended in registration order.
+    ///
     /// # Errors
     ///
     /// Rejects empty, NUL-bearing, or oversized instruction text.
@@ -1510,6 +1577,11 @@ impl NativeAgentBuilder {
     }
 
     /// Add one ordered direct Toolset handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `component` - Exact-version component identity for the lock.
+    /// * `toolset` - Ready in-process Toolset implementation.
     #[must_use]
     pub fn toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
         self.toolsets.push((component, toolset));
@@ -1517,6 +1589,11 @@ impl NativeAgentBuilder {
     }
 
     /// Add one ordered direct [`ContextProvider`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `component` - Exact-version component identity for the lock.
+    /// * `provider` - Ready in-process context provider.
     #[must_use]
     pub fn context_provider(
         mut self,
@@ -1528,6 +1605,11 @@ impl NativeAgentBuilder {
     }
 
     /// Add one ordered direct Middleware handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `component` - Exact-version component identity for the lock.
+    /// * `middleware` - Ready in-process middleware component.
     #[must_use]
     pub fn middleware(mut self, component: ComponentRef, middleware: Arc<dyn Middleware>) -> Self {
         self.middleware.push((component, middleware));
@@ -1535,6 +1617,11 @@ impl NativeAgentBuilder {
     }
 
     /// Add one ordered direct [`Observer`] handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `component` - Exact-version component identity for the lock.
+    /// * `observer` - Ready read-only observer. Failures are isolated from run semantics.
     #[must_use]
     pub fn observer(mut self, component: ComponentRef, observer: Arc<dyn Observer>) -> Self {
         self.observers.push((component, observer));
@@ -1542,6 +1629,11 @@ impl NativeAgentBuilder {
     }
 
     /// Add one validated declarative capability to the finite catalog.
+    ///
+    /// # Arguments
+    ///
+    /// * `capability` - Catalog entry. `model` activation is selected later via
+    ///   [`AgentRunRequest::capability`], not by user-input overlap.
     #[must_use]
     pub fn capability(mut self, capability: CapabilitySpec) -> Self {
         self.capabilities.push(capability);
@@ -1549,6 +1641,10 @@ impl NativeAgentBuilder {
     }
 
     /// Select one application capability for the initial immutable plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `capability` - Catalog id whose activation is `application`.
     #[must_use]
     pub fn activate_application(mut self, capability: CapabilityId) -> Self {
         self.active_application.insert(capability);
@@ -1880,7 +1976,16 @@ pub struct AgentRunRequest {
 }
 
 impl AgentRunRequest {
-    /// Construct a request with conservative preview defaults.
+    /// Construct a request with conservative defaults.
+    ///
+    /// `capability` defaults to `None` (run the `Agent` that was called).
+    /// Timeout is 30 seconds, `max_cycles` is 16, and `max_output_retries` is 1.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - Provider model name advertised by the resolved model descriptor.
+    /// * `input` - Non-empty plain-text user input. NUL bytes are rejected.
+    /// * `security` - Explicit validated security context captured durably at acceptance.
     ///
     /// # Errors
     ///

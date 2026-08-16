@@ -825,11 +825,28 @@ pub fn map_model_reconcile_result(
 }
 
 /// Object-safe provider-neutral model port.
+///
+/// Implementors fulfill one committed model request after the runtime has
+/// recorded intent. Native objects are `Send + Sync`. Browser-WASM hosts stay
+/// local and must not be marked thread-safe.
+///
+/// # Required methods
+///
+/// - [`descriptor`](Self::descriptor): immutable provider/model identity
+/// - [`capabilities`](Self::capabilities): flags for one model name
+/// - [`estimate_input_tokens`](Self::estimate_input_tokens): synchronous estimate, no I/O
+/// - [`request`](Self::request): start one normalized event stream
+///
+/// `warmup` and `reconcile` have default implementations.
 pub trait Model: PortObject {
     /// Immutable provider/model descriptor.
     fn descriptor(&self) -> ModelDescriptor;
 
     /// Capabilities for one descriptor model name.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - Name advertised by [`Self::descriptor`].
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities;
 
     /// Perform one-time construction warmup.
@@ -838,6 +855,11 @@ pub trait Model: PortObject {
     }
 
     /// Estimate canonical request input synchronously without I/O.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - Name whose estimator is bound at warmup.
+    /// * `canonical_request` - Canonical UTF-8 request bytes, not provider JSON.
     ///
     /// # Errors
     ///
@@ -850,6 +872,10 @@ pub trait Model: PortObject {
     ) -> Result<ModelTokenEstimate, ModelError>;
 
     /// Start one normalized model stream.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Committed, immutable model request. Do not mutate caller state.
     fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>>;
 
     /// Reconcile one previously committed outstanding effect.

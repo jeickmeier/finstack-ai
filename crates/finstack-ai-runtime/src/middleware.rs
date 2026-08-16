@@ -525,6 +525,10 @@ pub enum MiddlewareReconcileResult {
 }
 
 /// Object-safe single-invocation middleware port.
+///
+/// Stages are coarse boundaries (`before_model`, `before_finalize`, …).
+/// There is no per-token hook. At most one late-tier `before_model`
+/// compaction owner may be active per resolved agent.
 pub trait Middleware: PortObject {
     /// Immutable descriptor.
     fn descriptor(&self) -> MiddlewareDescriptor;
@@ -535,6 +539,11 @@ pub trait Middleware: PortObject {
     }
 
     /// Invoke one committed stage boundary.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - Stage identity, locator, and cancellation.
+    /// * `input` - Immutable stage payload. Return a replacement or continue.
     fn invoke(
         &self,
         ctx: MiddlewareContext,

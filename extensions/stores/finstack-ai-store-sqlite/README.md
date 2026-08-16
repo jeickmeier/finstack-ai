@@ -1,6 +1,6 @@
 # finstack-ai-store-sqlite
 
-Trusted native SQLite [`JournalStore`](https://docs.rs/finstack-ai-runtime) leaf.
+Trusted native SQLite `JournalStore` leaf.
 This crate is opt-in. Do not treat it as the Agent, Python, or WASM default.
 
 Records are append-only and authoritative. Optional `JournalStore::prune`

@@ -14,6 +14,8 @@ ROOT_FILES = (
     "CONTRIBUTING.md",
     "GOVERNANCE.md",
     "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CHANGELOG.md",
 )
 DOC_ROOTS = (
     REPO_ROOT / "docs" / "README.md",
@@ -27,6 +29,9 @@ DOC_ROOTS = (
     REPO_ROOT / "docs" / "implementation" / "compatibility-governance.md",
     REPO_ROOT / "examples",
     REPO_ROOT / "plugins",
+    REPO_ROOT / "crates",
+    REPO_ROOT / "bindings",
+    REPO_ROOT / "extensions",
 )
 
 
@@ -36,8 +41,20 @@ def markdown_files() -> list[Path]:
         if root.is_file():
             files.append(root)
         elif root.is_dir():
+            files.extend(sorted(root.rglob("README.md")))
             files.extend(sorted(root.rglob("*.md")))
-    return files
+    # Preserve order while dropping duplicates from README + *.md overlap.
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    skip_parts = {"node_modules", "target", "dist", "generated"}
+    for path in files:
+        if path in seen:
+            continue
+        if any(part in skip_parts for part in path.parts):
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
 
 
 def targets(raw: str) -> list[str]:

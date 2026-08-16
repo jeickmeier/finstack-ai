@@ -221,7 +221,28 @@ def tool(
     retry_safety: str = "safe_to_retry",
     max_result_bytes: int = 1_048_576,
 ) -> PydanticTool | Callable[[Function], PydanticTool]:
-    """Decorate one fully annotated sync or async Python tool."""
+    """Decorate one fully annotated sync or async Python tool.
+
+    Caches a validation-mode input adapter and a serialization-mode output
+    adapter at decoration time. Rust still owns schema outcomes.
+
+    Args:
+        function: Annotated callable when used as ``@tool`` without arguments.
+        name: Tool name. Defaults to ``function.__name__``.
+        title: Human-readable title.
+        description: Model-facing description. Defaults to the function docstring.
+        component_id: Component identity recorded on the Toolset.
+        side_effect: ``read_only``, ``idempotent_write``, or ``non_idempotent_write``.
+        retry_safety: ``safe_to_retry`` or ``unsafe_to_retry``.
+        max_result_bytes: Maximum serialized result size.
+
+    Returns:
+        A :class:`PydanticTool`, or a decorator that produces one.
+
+    Raises:
+        TypeError: The target is not callable, Pydantic is missing, or the
+            annotation set is unsupported.
+    """
 
     def decorate(target: Function) -> PydanticTool:
         return PydanticTool(
@@ -244,7 +265,22 @@ def pydantic_toolset(
     name: str,
     callback_timeout_seconds: float = 30.0,
 ) -> _native.PythonToolset:
-    """Register cached decorated tools through the Rust Toolset port."""
+    """Register cached decorated tools through the Rust Toolset port.
+
+    Args:
+        *tools: One or more :func:`tool` values. Names must be unique.
+        component: Component identity for the Toolset registration.
+        name: Toolset name shown in descriptors.
+        callback_timeout_seconds: Per-invocation timeout for the Python callback.
+
+    Returns:
+        A trusted :class:`finstack_ai.PythonToolset` ready for
+        :meth:`Agent.from_python`.
+
+    Raises:
+        TypeError: No tools, a non-``@tool`` value, a duplicate name, or a
+            missing Pydantic extra.
+    """
 
     if not tools:
         raise TypeError("pydantic_toolset requires at least one @tool")

@@ -2,6 +2,8 @@
 
 Thanks for your interest in `finstack-ai`.
 
+By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Bootstrap
 
 This repository uses [mise](https://mise.jdx.dev/) for pinned tools and tasks.
@@ -9,7 +11,9 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tools and tasks.
 1. Install mise: <https://mise.jdx.dev/getting-started.html>
 2. From the repository root: `mise install`
 
-The repository defines four tasks: `format`, `check`, `test`, and `ci`. Prefer `mise run <task>` over ad-hoc wrappers. See [`mise.toml`](mise.toml), [`README.md`](README.md), and [`.github/ci/README.md`](.github/ci/README.md).
+Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
+[`mise.toml`](mise.toml). See [`README.md`](README.md) and
+[`.github/ci/README.md`](.github/ci/README.md).
 
 Before opening a pull request, run at least:
 
@@ -17,7 +21,24 @@ Before opening a pull request, run at least:
 mise run ci
 ```
 
-The hosted `ci.yml` workflow invokes the same task names. Do not reimplement checks in workflow YAML.
+When the change touches public docs or starters, also run:
+
+```bash
+mise run docs-links
+mise run docs-quickstarts
+```
+
+The hosted `ci.yml` workflow invokes the same task names. Do not reimplement
+checks in workflow YAML.
+
+Other tasks used by public docs:
+
+- `mise run check` — formatting, Clippy, Ruff, mypy
+- `mise run test` — Rust and Python tests
+- `mise run conformance` — published port and plugin suites
+- `mise run generate-wasm` / `mise run stage-wasm` — JS/WASM package
+- `mise run check-plugin-template` — plugin guest templates
+- `mise run migrate` — 0.1.0 → 1.0.0 in-tree migration helpers
 
 ## Developer Certificate of Origin (DCO)
 

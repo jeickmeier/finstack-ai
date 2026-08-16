@@ -1,4 +1,4 @@
-//! Host-owned external identity mapping hooks (PR-047).
+//! Host-owned external identity mapping hooks.
 //!
 //! The map is not a port, not a journal family, and never grants authority.
 
@@ -43,7 +43,7 @@ impl ExternalIdentityKey {
     /// # Errors
     ///
     /// Returns [`IdentityMapError::InvalidKey`] when any field is empty, longer
-    /// than [`LABEL_MAX_BYTES`], or contains a NUL byte.
+    /// than the kernel label byte limit, or contains a NUL byte.
     pub fn try_new(
         channel: impl Into<Arc<str>>,
         account: impl Into<Arc<str>>,

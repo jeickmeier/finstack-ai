@@ -18,10 +18,10 @@ disabled. Source: Threat Model §15.
 ## Vulnerability process
 
 Private reports go to `me@jeickmeier.com`. See [SECURITY.md](../../SECURITY.md).
-G7 passed for tagged `0.1.0` via `G7-D-public-preview-f7c7e70b9e04`.
-Tag `v0.1.0` is cut. Tagged registry support begins when crates.io /
-PyPI / npm publication is completed. Until then, the git tag and the
-default-branch tip of this candidate are the security contact surface.
+Local tag `v1.0.0` exists. The last pushed GitHub tag is `v0.1.0`.
+Tagged registry support begins when crates.io / PyPI / npm publication
+is completed. Until then, the local tag, the last pushed GitHub tag, and
+the default-branch tip are the security contact surface.
 
 ## Trust
 

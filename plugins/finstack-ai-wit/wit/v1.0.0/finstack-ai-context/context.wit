@@ -1,5 +1,6 @@
 package finstack:ai-context@1.0.0;
 
+/// Frozen `@1.0.0` context-provider guest world.
 world context-plugin {
     import finstack:ai-host/logging@1.0.0;
     import finstack:ai-host/blobs@1.0.0;
@@ -7,28 +8,43 @@ world context-plugin {
     export context-provider;
 }
 
+/// Guest-exported context-provider contract.
 interface context-provider {
     use finstack:ai-types/types@1.0.0.{call-context, blob-ref, plugin-error};
 
+    /// Host-imposed collection ceilings.
     record context-budget {
+        /// Maximum estimated tokens.
         max-tokens: u64,
+        /// Maximum payload bytes.
         max-bytes: u64,
+        /// Maximum item count.
         max-items: u32,
     }
 
+    /// One collect invocation.
     record context-query {
+        /// Invocation locator.
         context: call-context,
+        /// Normalized request JSON.
         request-json: list<u8>,
+        /// Budget ceilings. Exceeding them fails closed.
         budget: context-budget,
     }
 
+    /// One collected item. Content is data, never authority.
     record context-item {
+        /// Item JSON bytes.
         item-json: list<u8>,
+        /// Optional blob references the host may fetch.
         blobs: list<blob-ref>,
+        /// Estimated tokens for this item.
         estimated-tokens: u64,
+        /// Declared size in bytes.
         bytes: u64,
     }
 
+    /// Collect a bounded contribution for the committed query.
     collect: func(query: context-query)
         -> result<list<context-item>, plugin-error>;
 }

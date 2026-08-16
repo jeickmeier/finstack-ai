@@ -275,6 +275,10 @@ pub fn map_tool_reconcile_result(
 }
 
 /// Object-safe executable Toolset port.
+///
+/// Implementors run only after the matching tool-call records commit.
+/// Side-effecting tools still require a durable approval decision from the
+/// host policy. Native objects are `Send + Sync`.
 pub trait Toolset: PortObject {
     /// Immutable Toolset descriptor.
     fn descriptor(&self) -> ToolsetDescriptor;
@@ -283,6 +287,11 @@ pub trait Toolset: PortObject {
     fn tools(&self) -> Arc<[ToolSpec]>;
 
     /// Start one committed direct tool call.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - Invocation locator, cancellation, and deadline.
+    /// * `call` - Validated tool name and arguments. Schemas are already checked.
     fn call(
         &self,
         ctx: ToolCallContext,

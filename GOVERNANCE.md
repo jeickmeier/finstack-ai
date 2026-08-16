@@ -6,7 +6,7 @@
 
 ## Contribution license
 
-Contributions use the [Developer Certificate of Origin](https://developercertificate.org/) (DCO) sign-off. The project does **not** require a Contributor License Agreement (CLA). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for sign-off instructions.
+Contributions use the [Developer Certificate of Origin](https://developercertificate.org/) (DCO) sign-off. The project does **not** require a Contributor License Agreement (CLA). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for sign-off instructions. Participants agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Maintainer group
 

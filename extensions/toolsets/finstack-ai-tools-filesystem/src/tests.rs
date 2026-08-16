@@ -436,9 +436,7 @@ impl ArtifactStore for CaptureArtifactStore {
         _scope: ArtifactScope,
         _artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>> {
-        Box::pin(async {
-            Err(ArtifactError::NotFound)
-        })
+        Box::pin(async { Err(ArtifactError::NotFound) })
     }
 }
 

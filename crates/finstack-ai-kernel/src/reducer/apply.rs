@@ -228,10 +228,8 @@ fn validate_model_digests(
     if let Some(pending) = state.pending_model_effect.as_ref() {
         match records {
             [completed_record, entry_record] => {
-                if let (
-                    RecordBody::EffectCompleted(completed),
-                    RecordBody::EntryAppended(entry),
-                ) = (completed_record.body(), entry_record.body())
+                if let (RecordBody::EffectCompleted(completed), RecordBody::EntryAppended(entry)) =
+                    (completed_record.body(), entry_record.body())
                     && completed.output_contract().kind == EffectOutputKind::ModelResponse
                 {
                     completed_record_digest(pending, completed, &entry.message)?;

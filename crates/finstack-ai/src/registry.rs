@@ -1671,7 +1671,10 @@ impl ResolvedAgent {
     }
 }
 
-/// Reusable deterministic registry. Successful factory outputs are cached.
+/// Reusable deterministic registry.
+///
+/// Successful factory outputs are cached. Ordinary run paths retain direct
+/// typed handles and do not look up components again.
 pub struct Registry {
     entries: BTreeMap<ComponentId, RegisteredEntry>,
     aliases: BTreeMap<ComponentAlias, ComponentId>,

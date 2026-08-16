@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use finstack_ai::runtime::{
-    ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope,
-    ArtifactStore, BlobRef, Bytes, Digest, PortFuture,
+    ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope, ArtifactStore,
+    BlobRef, Bytes, Digest, PortFuture,
 };
 
 use crate::host::HostFailure;

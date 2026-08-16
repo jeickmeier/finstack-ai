@@ -413,11 +413,19 @@ pub enum ContextReconcileResult {
 }
 
 /// Object-safe context-provider port.
+///
+/// Collects one bounded contribution after the matching request record
+/// commits. Contributions are data, never authority.
 pub trait ContextProvider: PortObject {
     /// Immutable descriptor.
     fn descriptor(&self) -> ContextProviderDescriptor;
 
     /// Collect one committed bounded contribution.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - Invocation locator, cancellation, and deadline.
+    /// * `request` - Normalized query plus budget ceilings.
     fn collect(
         &self,
         ctx: ContextCallContext,

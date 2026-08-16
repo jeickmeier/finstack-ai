@@ -1,16 +1,22 @@
 package finstack:ai-host@1.0.0;
 
+/// Host logging imported by frozen `@1.0.0` guests.
 interface logging {
     use finstack:ai-types/types@1.0.0.{call-context, plugin-error};
 
+    /// Severity for one log line.
     enum level { trace, debug, info, warn, error }
+
+    /// Emit one secret-free log line for this invocation.
     log: func(context: call-context, level: level, message: string)
         -> result<_, plugin-error>;
 }
 
+/// Host blob reads imported by frozen `@1.0.0` guests.
 interface blobs {
     use finstack:ai-types/types@1.0.0.{call-context, blob-ref, plugin-error};
 
+    /// Read a bounded slice of a host-owned blob. Offset is bytes from the start.
     read: func(context: call-context, reference: blob-ref, offset: u64, max-bytes: u64)
         -> result<list<u8>, plugin-error>;
 }

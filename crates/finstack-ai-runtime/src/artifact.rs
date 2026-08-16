@@ -205,7 +205,10 @@ pub enum ArtifactError {
     #[error("{}: artifact is missing", ARTIFACT_NOT_FOUND)]
     NotFound,
     /// Requested scope differs from the artifact's frozen binding.
-    #[error("{}: expected scope {expected}, actual scope {actual}", ARTIFACT_SCOPE_MISMATCH)]
+    #[error(
+        "{}: expected scope {expected}, actual scope {actual}",
+        ARTIFACT_SCOPE_MISMATCH
+    )]
     ScopeMismatch {
         /// Requested scope digest.
         expected: Digest,

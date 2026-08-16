@@ -1,30 +1,52 @@
 package finstack:ai-types@1.0.0;
 
+/// Shared records for frozen `@1.0.0` toolset and context worlds.
 interface types {
+    /// Invocation locator supplied by the host. Guests treat these fields as data.
     record call-context {
+        /// Committed effect identity.
         effect-id: string,
+        /// Durable session identity.
         session-id: string,
+        /// Durable lane identity.
         lane-id: string,
+        /// Durable run identity.
         run-id: string,
+        /// Host-captured tenant scope.
         tenant-scope: string,
+        /// Principal issuer. Empty when the host did not bind a principal.
         principal-issuer: string,
+        /// Principal subject. Empty when the host did not bind a principal.
         principal-subject: string,
+        /// Authorization decision identity. Empty when unset.
         authorization-decision-id: string,
+        /// Permitted scopes copied from the host decision.
         permitted-scopes: list<string>,
+        /// Optional budget scope for this invocation.
         budget-scope-id: option<string>,
+        /// Optional Unix-epoch deadline in milliseconds.
         deadline-unix-ms: option<s64>,
     }
 
+    /// Host-owned blob reference. Guests read through `blobs.read`.
     record blob-ref {
+        /// Host blob identity.
         id: string,
+        /// IANA media type.
         media-type: string,
+        /// Declared length in bytes.
         length: u64,
+        /// Optional content digest.
         digest: option<string>,
     }
 
+    /// Guest-visible failure. `code` is stable; `message` is diagnostic.
     record plugin-error {
+        /// Stable error code.
         code: string,
+        /// Secret-free diagnostic message.
         message: string,
+        /// Whether the host may retry the same invocation.
         retryable: bool,
     }
 }

@@ -7,7 +7,7 @@ a client on import.
 | --- | --- |
 | `finstack-ai-provider-openai-compatible` | HTTPS or explicit loopback; Ollama/local constructor |
 | `finstack-ai-provider-anthropic` | Anthropic Messages leaf |
-| `finstack-ai-provider-test` | Scripted tests |
+| `finstack-ai-test` (`ScriptedModel`) | Semantic scripted tests; no HTTP |
 
 Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
 `Agent.openai_compatible()`, `Agent.anthropic()`, and `Agent.ollama()` are
@@ -19,8 +19,7 @@ wrappers. See [provider security](provider-security.md).
 
 Native providers are [T1](security-trust-levels.md). They are not isolated.
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

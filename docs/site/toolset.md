@@ -17,8 +17,7 @@ Native toolsets are [T1](security-trust-levels.md). They inherit process
 authority. Do not call them a sandbox. Untrusted code belongs on the
 [plugin](plugin.md) path.
 
-## License and governance
+## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../implementation/adr-register.md). [RFCs](../rfcs/README.md).
+[Contributing](../../CONTRIBUTING.md). [Security](../../SECURITY.md).

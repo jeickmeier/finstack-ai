@@ -1,16 +1,11 @@
 # finstack-ai Python bindings
 
-PR-027 establishes the `finstack_ai` PyO3 extension package, typed facade,
-editable development, and per-version wheel pipeline. PR-028 adds immutable
-Rust-owned `Agent`, `Run`, `Session`, `RunResult`, `Event`, and `EventBatch`
-handles, async result/cancellation, and batch-first event observation.
-PR-030 adds trusted coarse Python adapters for Model, Toolset,
-ContextProvider, Middleware, and batched Observer ports.
-PR-031 adds optional Pydantic tool and structured-output ergonomics while the
-Rust validator and kernel continue to own schema outcomes and retries.
-PR-032 completes the Python alpha candidate with shared golden traces,
-declarative capability activation, starter projects, API/migration references,
-and staged checksums/SBOM/keyless signatures.
+Typed PyO3 facade over the Rust-owned `finstack-ai` engine. Async APIs are
+primary. Dropping a `Run` detaches observation; it does not cancel durable
+execution.
+
+Workspace version is **1.0.0**. The package is not on PyPI. Consume a
+staged wheel or an editable checkout.
 
 ## Quick start
 
@@ -22,10 +17,6 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
 See [docs/site/python.md](../../docs/site/python.md). Callbacks are
 [T2](../../docs/site/security-trust-levels.md) and are not isolated.
 
-```bash
-mise run test
-```
-
 The curated wheel links the Rust-backed OpenAI-compatible, Anthropic Messages,
 and Ollama/local paths into the same extension module.
 `linked_providers()` reports `("openai-compatible", "anthropic", "ollama")`.
@@ -34,9 +25,20 @@ those clients explicitly; importing `finstack_ai` still does not create a
 provider client, initialize Tokio, read credentials, or open network resources.
 `finstack_ai.providers` exposes in-package availability probes and does not
 construct provider clients.
-Dropping a `Run` detaches observation rather than cancelling durable execution;
-call `await run.cancel()` for explicit cancellation. Classic `abi3` wheels are
+Call `await run.cancel()` for explicit cancellation. Classic `abi3` wheels are
 not part of the launch strategy.
+
+## Capabilities
+
+`Capability(id, description, instructions, activation=...)` is declarative.
+`always` enters every resolved plan. `application` enters only when its ID is
+in `active_capabilities`. `model` entries appear in the compact catalog;
+`Agent.start` / `run` select one with the optional `capability` keyword.
+`None` runs this agent. A missing catalog id fails closed. User-input word
+overlap does not select a capability. `disabled` cannot activate.
+
+Activation never broadens permissions. `RunResult.trace` exposes stable
+record-kind names; `active_capabilities` exposes the committed set.
 
 ## Trusted Python callbacks
 
@@ -67,10 +69,10 @@ Python.
 
 `normalize_prebeta_shape()` exposes data-only Rust validation for child-lineage,
 interaction-resolution, and authenticated external-completion shapes. It does
-not route those commands. PR-048 proves session/lane open after drop and
-inspect of a completed run. Interaction resolve-after-open and live
-external-completion routing stay Rust-owned because `open_session` does not
-respawn parked runs. IndexedDB remains experimental and non-durable.
+not route those commands. `Agent.open_session` inspects a journal and does not
+respawn parked runs. Interaction resolve-after-open and live
+external-completion routing stay Rust-owned. IndexedDB remains experimental
+and non-durable.
 
 ## Optional Pydantic adapters
 
@@ -124,14 +126,12 @@ registration with the exact keyword and JSON pointer. Call
 `decorated_tool.refresh_schema()` before constructing a new toolset only when
 annotations have intentionally changed.
 
-See the repository [README](../../README.md) for project bootstrap and documentation routing. License texts are centralized under [`../../licenses/`](../../licenses/).
-[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
-[ADRs](../../docs/implementation/adr-register.md).
-[RFCs](../../docs/rfcs/README.md).
+## Docs
 
-The complete alpha surface is summarized in the
-[API reference](docs/api-reference.md), with
-[0.0.2 migration notes](docs/migration-0.0.2.md) and
-[benchmark evidence](docs/benchmarks.md). The two
-[Python starter projects](../../examples/python-minimal/) are checked against
-the installed wheel without a compiler.
+- [API reference](docs/api-reference.md)
+- [0.1.0 → 1.0.0 migration](docs/migration-1.0.0.md)
+- [0.0.2 migration notes](docs/migration-0.0.2.md)
+- [Python starters](../../examples/python-minimal/)
+
+[MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
+[DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).

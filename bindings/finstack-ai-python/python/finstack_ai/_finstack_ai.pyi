@@ -7,23 +7,41 @@ __version__: str
 __engine_version__: str
 
 class FinstackError(Exception):
-    """Base error raised by the Rust-owned semantic engine."""
+    """Base error raised by the Rust-owned semantic engine.
+
+    Attributes:
+        code: Stable error code string shared with Rust and JavaScript.
+        retryable: Whether the caller may retry the same operation.
+        context: Optional secret-free locator fields.
+    """
 
     code: str
     retryable: bool
     context: dict[str, str] | None
 
 class ConfigurationError(FinstackError):
-    """Invalid immutable agent or run configuration."""
+    """Invalid immutable agent or run configuration.
+
+    Typical ``code`` is ``agent_run_invalid_configuration``.
+    """
 
 class RuntimeError(FinstackError):
-    """Rust runtime execution failure."""
+    """Rust runtime execution failure.
+
+    Includes callback-context settlement (``python_callback_context_settled``).
+    """
 
 class CancelledError(FinstackError):
-    """Run reached its durable cancelled terminal state."""
+    """Run reached its durable cancelled terminal state.
+
+    Typical ``code`` is ``agent_run_cancelled``.
+    """
 
 class TimeoutError(FinstackError):
-    """Run exceeded its configured operational deadline."""
+    """Run exceeded its configured operational deadline.
+
+    Typical ``code`` is ``agent_run_timeout``.
+    """
 
 class CallbackContext:
     """Immutable identity and cancellation view for one callback invocation.
@@ -34,23 +52,42 @@ class CallbackContext:
     """
 
     @property
-    def kind(self) -> str: ...
+    def kind(self) -> str:
+        """Port kind for this invocation (``model``, ``toolset``, …)."""
     @property
-    def tenant_scope(self) -> str: ...
+    def tenant_scope(self) -> str:
+        """Host-captured tenant scope."""
     @property
-    def session_id(self) -> str: ...
+    def session_id(self) -> str:
+        """Durable session identity."""
     @property
-    def lane_id(self) -> str: ...
+    def lane_id(self) -> str:
+        """Durable lane identity."""
     @property
-    def run_id(self) -> str: ...
+    def run_id(self) -> str:
+        """Durable run identity."""
     @property
-    def effect_id(self) -> str: ...
+    def effect_id(self) -> str:
+        """Committed effect identity for this invocation."""
     @property
-    def cancelled(self) -> bool: ...
+    def cancelled(self) -> bool:
+        """Whether cooperative cancellation has been observed."""
     async def wait_cancelled(self) -> None:
-        """Wait until cooperative cancellation reaches this invocation."""
+        """Wait until cooperative cancellation reaches this invocation.
+
+        Raises:
+            RuntimeError: The context is already settled
+                (``python_callback_context_settled``).
+        """
     def to_dict(self) -> dict[str, str | bool]:
-        """Copy the active invocation context into ordinary Python values."""
+        """Copy the active invocation context into ordinary Python values.
+
+        Returns:
+            Identity and cancellation fields valid at copy time.
+
+        Raises:
+            RuntimeError: The context is already settled.
+        """
 
 Callback = Callable[
     [CallbackContext, dict[str, Any]], dict[str, Any] | Awaitable[dict[str, Any]]
@@ -73,9 +110,9 @@ class ActiveCapability(TypedDict):
 class Capability:
     """Bounded declarative capability composed by the Rust SDK.
 
-    Python capabilities in the alpha surface contribute instructions. Native
-    bundle specifications may additionally contribute registered Toolset,
-    ContextProvider, and Middleware references.
+    Python capabilities contribute instructions. Native bundle specifications
+    may additionally contribute registered Toolset, ContextProvider, and
+    Middleware references.
     """
 
     def __init__(
@@ -423,7 +460,17 @@ class Run:
     @property
     def locator(self) -> Locator: ...
     async def result(self) -> RunResult:
-        """Wait for the retained terminal result."""
+        """Wait for the retained terminal result.
+
+        Returns:
+            An immutable snapshot. Structured ``output`` is present when
+            ``output_type`` was configured.
+
+        Raises:
+            RuntimeError: The runtime failed after accept.
+            CancelledError: The run reached its durable cancelled terminal.
+            TimeoutError: The operational deadline elapsed.
+        """
     async def list_interactions(self) -> list[dict[str, object]]:
         """List the outstanding typed interaction for this run.
 
@@ -455,9 +502,19 @@ class Run:
             TypeError: ``resolution`` is not a valid resolution shape.
         """
     async def cancel(self) -> None:
-        """Submit idempotent durable cancellation."""
+        """Submit idempotent durable cancellation.
+
+        Dropping this handle does not cancel. This method records intent.
+
+        Raises:
+            RuntimeError: Cancellation cannot be recorded.
+        """
     def events(self) -> EventBatchIterator:
-        """Return the batch-first asynchronous event iterator."""
+        """Return the batch-first asynchronous event iterator.
+
+        Returns:
+            A single-consumer iterator of :class:`EventBatch` values.
+        """
     async def close_events(self) -> None:
         """Close event observation without cancelling execution."""
 
@@ -575,9 +632,18 @@ class Agent:
             ConfigurationError: The callbacks or capability set are invalid.
         """
     def capability_catalog(self) -> list[CapabilityCatalogItem]:
-        """Return the bounded model-activated catalog in identity order."""
+        """Return the bounded model-activated catalog in identity order.
+
+        Returns:
+            Compact ``id`` / ``description`` entries. Empty when no ``model``
+            capabilities were registered.
+        """
     def compact_capability_catalog(self) -> str:
-        """Render the compact model-facing catalog without activation."""
+        """Render the compact model-facing catalog without activation.
+
+        Returns:
+            ``id: description`` lines under the 8 KiB registration ceiling.
+        """
     def create_session(self, tenant_scope: str = "default") -> Awaitable[Session]:
         """Create a live session on this agent's journal store.
 
@@ -615,13 +681,31 @@ class Agent:
     ) -> Run:
         """Start a run and return its shared handle immediately.
 
+        Dropping the returned handle detaches observation; it does not cancel
+        the durable run. Call :meth:`Run.cancel` for explicit cancellation.
+
         Args:
-            input: Plain-text user input.
-            timeout_seconds: Operational deadline in seconds.
+            input: Non-empty plain-text user input.
+            timeout_seconds: Operational deadline in seconds. Must be positive.
             max_cycles: Maximum model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id. ``None``
-                runs this agent; a missing catalog id fails closed.
+                runs this agent; a missing catalog id fails closed. User-input
+                word overlap is not used.
+
+        Returns:
+            A shared :class:`Run` handle.
+
+        Raises:
+            ConfigurationError: Input, limits, or ``capability`` are invalid.
+            RuntimeError: The background task cannot be accepted.
+
+        Examples:
+            >>> import asyncio
+            >>> async def demo(agent: Agent) -> str:
+            ...     run = agent.start("hello")
+            ...     result = await run.result()
+            ...     return result.text
         """
     async def run(
         self,
@@ -634,29 +718,84 @@ class Agent:
     ) -> RunResult:
         """Execute one run and await its committed result.
 
+        Equivalent to :meth:`start` followed by :meth:`Run.result`.
+
         Args:
-            input: Plain-text user input.
-            timeout_seconds: Operational deadline in seconds.
+            input: Non-empty plain-text user input.
+            timeout_seconds: Operational deadline in seconds. Must be positive.
             max_cycles: Maximum model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id. ``None``
                 runs this agent; a missing catalog id fails closed.
+
+        Returns:
+            An immutable terminal snapshot.
+
+        Raises:
+            ConfigurationError: Input, limits, or ``capability`` are invalid.
+            RuntimeError: The runtime failed after accept.
+            CancelledError: The run reached its durable cancelled terminal.
+            TimeoutError: The operational deadline elapsed.
+
+        Examples:
+            >>> import asyncio
+            >>> async def demo(agent: Agent) -> str:
+            ...     result = await agent.run("hello")
+            ...     return result.text
         """
 
 def health() -> str:
-    """Return ``\"ok\"`` without initializing runtime or network resources."""
+    """Return ``\"ok\"`` without initializing runtime or network resources.
+
+    Returns:
+        The literal ``ok``.
+    """
 
 def build_metadata() -> dict[str, str | bool | int]:
-    """Return native build and compatibility metadata."""
+    """Return native build and compatibility metadata.
+
+    Returns:
+        Version, engine, and feature flags. No secrets.
+    """
 
 def linked_providers() -> tuple[str, ...]:
-    """Return curated Rust-backed providers linked into this extension."""
+    """Return curated Rust-backed providers linked into this extension.
+
+    Returns:
+        A tuple such as ``(\"openai-compatible\", \"anthropic\", \"ollama\")``.
+    """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:
-    """Return payload digest, checksum, and canonical-CBOR hex from Rust."""
+    """Return payload digest, checksum, and canonical-CBOR hex from Rust.
+
+    Args:
+        kind: Known-answer fixture kind owned by the protocol crate.
+        value: Binding-neutral mapping for that kind.
+
+    Returns:
+        Digest, checksum, and hex fields computed by Rust.
+
+    Raises:
+        ConfigurationError: ``kind`` or ``value`` is not a known fixture.
+    """
 
 def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, object]:
-    """Validate one Rust-owned pre-beta lineage or external-command shape."""
+    """Validate one Rust-owned pre-beta lineage or external-command shape.
+
+    This does not route a live agent command.
+
+    Args:
+        kind: ``child_lineage``, ``interaction_resolution``, or
+            ``external_completion``.
+        value: Binding-neutral mapping for that kind.
+
+    Returns:
+        The normalized mapping when valid.
+
+    Raises:
+        ConfigurationError: The shape is rejected.
+        TypeError: ``value`` is not a mapping.
+    """
 
 def _normalize_pydantic_schema(schema: dict[str, Any], kind: str) -> dict[str, Any]:
     """Normalize one generated schema into the portable Pydantic subset."""
