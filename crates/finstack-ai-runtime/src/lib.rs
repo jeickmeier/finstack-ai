@@ -171,8 +171,8 @@ pub use middleware::{
     RecordedMiddlewareOutcome, ResolvedMiddleware, ResolvedMiddlewareChain, StageInput, StageMask,
     StageOutcome, compaction_checkpoint_compatible, compaction_projection_digest,
     compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
-    middleware_resume_action, validate_compaction_model_effect, validate_compaction_result,
-    validate_stage_outcome,
+    middleware_resume_action, stage_name as middleware_stage_name,
+    validate_compaction_model_effect, validate_compaction_result, validate_stage_outcome,
 };
 pub use model::{
     ApprovalMetadata, ApprovalRequirement, AssembledModelStream, AuthorizationContext,

@@ -775,6 +775,7 @@ finstack-ai-runtime::journal_export_jsonl
 finstack-ai-runtime::map_model_reconcile_result
 finstack-ai-runtime::map_tool_reconcile_result
 finstack-ai-runtime::middleware_resume_action
+finstack-ai-runtime::middleware_stage_name
 finstack-ai-runtime::model_resume_action
 finstack-ai-runtime::model_retry_allowed
 finstack-ai-runtime::normalize_tool_result
