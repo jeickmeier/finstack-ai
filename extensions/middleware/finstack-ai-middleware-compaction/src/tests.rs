@@ -181,19 +181,32 @@ async fn below_threshold_continues_without_rewrite() {
 
 #[tokio::test]
 async fn middleware_satisfies_the_published_port_conformance_suite() {
-    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(50_000, 0))
+    // Use the same low-threshold config as `sliding_window_preserves_protected_bytes_and_passes_conformance`
+    // so the middleware actually emits `StageOutcome::CompactContext`, not `Continue`.
+    // `Continue` lands in `validate_stage_outcome`'s universally-legal arm and would leave
+    // the `CompactContext`/`ContextCompactor`-role stage gating and the deep
+    // `validate_compaction_result` evidence/attribution check entirely unexercised.
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(250, 0))
         .expect("middleware");
+    let input = history();
+    let expected = invoke(&middleware, input.clone(), None)
+        .await
+        .expect("invoke");
+    assert!(
+        matches!(expected, StageOutcome::CompactContext(_)),
+        "fixture must exercise the stage-gated CompactContext outcome"
+    );
     let outcome = check_middleware_conformance(
         &middleware,
         MiddlewareConformanceCase {
             context: middleware_ctx(None),
-            input: StageInput::BeforeModel(Box::new(history())),
-            expected: StageOutcome::Continue,
+            input: StageInput::BeforeModel(Box::new(input)),
+            expected: expected.clone(),
         },
     )
     .await
     .expect("published middleware conformance suite");
-    assert_eq!(outcome, StageOutcome::Continue);
+    assert_eq!(outcome, expected);
 }
 
 #[tokio::test]
