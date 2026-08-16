@@ -12,7 +12,8 @@ use finstack_ai_runtime::{
     StageOutcome, Usage, compaction_checkpoint_compatible, validate_stage_outcome,
 };
 use finstack_ai_test::{
-    CompactionConformanceCase, SharedCompactionProjection, check_compaction_conformance,
+    CompactionConformanceCase, MiddlewareConformanceCase, SharedCompactionProjection,
+    check_compaction_conformance, check_middleware_conformance,
 };
 
 use super::*;
@@ -175,6 +176,23 @@ async fn below_threshold_continues_without_rewrite() {
     let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(50_000, 0))
         .expect("middleware");
     let outcome = invoke(&middleware, history(), None).await.expect("invoke");
+    assert_eq!(outcome, StageOutcome::Continue);
+}
+
+#[tokio::test]
+async fn middleware_satisfies_the_published_port_conformance_suite() {
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(50_000, 0))
+        .expect("middleware");
+    let outcome = check_middleware_conformance(
+        &middleware,
+        MiddlewareConformanceCase {
+            context: middleware_ctx(None),
+            input: StageInput::BeforeModel(Box::new(history())),
+            expected: StageOutcome::Continue,
+        },
+    )
+    .await
+    .expect("published middleware conformance suite");
     assert_eq!(outcome, StageOutcome::Continue);
 }
 

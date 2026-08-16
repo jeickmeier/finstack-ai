@@ -843,6 +843,7 @@ version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-test",
  "thiserror",
  "tokio",
 ]

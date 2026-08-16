@@ -16,6 +16,7 @@ finstack-ai-runtime = { workspace = true, default-features = false }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lints]

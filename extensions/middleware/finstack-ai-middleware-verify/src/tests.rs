@@ -5,6 +5,7 @@ use finstack_ai_runtime::{
     MiddlewareContext, OperationLocator, PrincipalRef, RawJson, RunCallContext, RunId, SessionId,
     StageInput, StageOutcome, validate_stage_outcome,
 };
+use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};
 
 use super::*;
 
@@ -78,6 +79,22 @@ async fn fail_and_interaction_are_allowed_before_finalize() {
     assert!(matches!(outcome, StageOutcome::RequestInteraction(_)));
     validate_stage_outcome(&interact.descriptor(), &finalize_input(), &outcome)
         .expect("interact allowed");
+}
+
+#[tokio::test]
+async fn middleware_satisfies_the_published_port_conformance_suite() {
+    let middleware = VerifyMiddleware::try_accept().expect("verify");
+    let outcome = check_middleware_conformance(
+        &middleware,
+        MiddlewareConformanceCase {
+            context: ctx(),
+            input: finalize_input(),
+            expected: StageOutcome::Continue,
+        },
+    )
+    .await
+    .expect("published middleware conformance suite");
+    assert_eq!(outcome, StageOutcome::Continue);
 }
 
 #[tokio::test]
