@@ -21,6 +21,7 @@ use crate::coordinator::{
 };
 use crate::event_hub::{EventHubHandle, event_hub};
 use crate::host_driver::{self, Signal};
+use crate::middleware_driver::StageDriver;
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
     TimerDiagnostics, ToolTaskConfig,
@@ -31,6 +32,7 @@ use crate::settlement::{
     process_model_progress, process_model_result, process_tool_progress, process_tool_result,
     resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
+use crate::stage_settlement::submit_command;
 use crate::tool::AssembledToolTerminal;
 use crate::{
     CancellationSignal, Clock, CommitCoordinatorError, CommitOutcome, EventSubscription,
@@ -422,6 +424,7 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::IntakeClosed)?
             .clone()
             .ok_or(RunHandleError::InvalidConfiguration)?;
+        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         host_driver::spawn(Box::pin(run_worker_with_effects(
             coordinator,
             intake,
@@ -433,6 +436,7 @@ impl RunTaskOwner {
             pending,
             active,
             sources,
+            stage_driver,
         )))
         .map_err(|_| RunHandleError::InvalidConfiguration)?;
         Ok(Self {
@@ -917,6 +921,7 @@ async fn run_worker_with_effects<C, R>(
     pending: Arc<Mutex<VecDeque<HostWork>>>,
     active: Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>,
     sources: SettlementSources<C, R>,
+    stage_driver: Option<StageDriver>,
 ) where
     C: Clock + crate::PortObject,
     R: RandomSource + crate::PortObject,
@@ -932,7 +937,15 @@ async fn run_worker_with_effects<C, R>(
             command.reply.send(Err(RunHandleError::ShuttingDown));
             continue;
         }
-        if submit_and_reply(&mut coordinator, &shared, command).await {
+        if submit_and_reply(
+            &mut coordinator,
+            &shared,
+            stage_driver.as_ref(),
+            &sources,
+            command,
+        )
+        .await
+        {
             break;
         }
         if let Err(error) = drain_idle_cancellation(&mut coordinator, &sources, false).await {
@@ -957,6 +970,7 @@ async fn run_worker_with_effects<C, R>(
             &pending,
             &active,
             &sources,
+            stage_driver.as_ref(),
         )
         .await
         {
@@ -977,17 +991,21 @@ async fn run_worker_with_effects<C, R>(
     finish_worker(&shared);
 }
 
-async fn submit_and_reply(
+async fn submit_and_reply<C, R>(
     coordinator: &mut CommitCoordinator,
     shared: &Arc<Shared>,
+    stage_driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
     command: RunCommand,
-) -> bool {
-    let result = coordinator
-        .submit(command.env, command.input)
-        .await
-        .map_err(RunHandleError::Coordinator);
+) -> bool
+where
+    C: Clock + crate::PortObject,
+    R: RandomSource + crate::PortObject,
+{
+    let RunCommand { env, input, reply } = command;
+    let result = submit_command(coordinator, stage_driver, sources, env, input).await;
     let fault_code = result_fault_code(&result);
-    command.reply.send(result);
+    reply.send(result);
     if let Some(code) = fault_code {
         fault_shared(shared, code);
         return true;
@@ -1015,6 +1033,7 @@ async fn drain_effects_accepting_commands<C, R>(
     pending: &Mutex<VecDeque<HostWork>>,
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
+    stage_driver: Option<&StageDriver>,
 ) -> Result<(), RunHandleError>
 where
     C: Clock + crate::PortObject,
@@ -1050,6 +1069,7 @@ where
                     catalog,
                     active,
                     sources,
+                    stage_driver,
                     seed,
                     request,
                 )
@@ -1067,6 +1087,7 @@ where
                     tool_assembler,
                     active,
                     sources,
+                    stage_driver,
                     seed,
                     context,
                     resolved,
@@ -1091,6 +1112,7 @@ async fn settle_driven_model<C, R>(
     catalog: Option<&ResolvedToolCatalog>,
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
+    stage_driver: Option<&StageDriver>,
     seed: ModelDispatchSeed,
     request: ModelRequest,
 ) -> Result<(), RunHandleError>
@@ -1105,6 +1127,8 @@ where
         coordinator,
         intake,
         shared,
+        stage_driver,
+        sources,
         drive_model(model, model_assembler, request),
     )
     .await
@@ -1152,6 +1176,7 @@ async fn settle_driven_tool<C, R>(
     tool_assembler: Option<ToolStreamAssembler>,
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
+    stage_driver: Option<&StageDriver>,
     seed: ToolDispatchSeed,
     context: ToolCallContext,
     resolved: Arc<ResolvedTool>,
@@ -1169,6 +1194,8 @@ where
         coordinator,
         intake,
         shared,
+        stage_driver,
+        sources,
         drive_tool(resolved, context, call, assembler),
     )
     .await
@@ -1193,12 +1220,18 @@ where
     Ok(())
 }
 
-async fn drive_accepting_commands<T>(
+async fn drive_accepting_commands<C, R, T>(
     coordinator: &mut CommitCoordinator,
     intake: &CommandIntake,
     shared: &Arc<Shared>,
+    stage_driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
     drive: impl Future<Output = T>,
-) -> Result<T, RunHandleError> {
+) -> Result<T, RunHandleError>
+where
+    C: Clock + crate::PortObject,
+    R: RandomSource + crate::PortObject,
+{
     let mut drive = std::pin::pin!(drive);
     loop {
         let mut recv = std::pin::pin!(intake.recv());
@@ -1215,7 +1248,7 @@ async fn drive_accepting_commands<T>(
         match outcome {
             DrivePoll::Command(None) => return Err(RunHandleError::IntakeClosed),
             DrivePoll::Command(Some(command)) => {
-                if submit_and_reply(coordinator, shared, *command).await {
+                if submit_and_reply(coordinator, shared, stage_driver, sources, *command).await {
                     return Err(RunHandleError::Faulted {
                         code: "host_run_faulted_during_effect",
                     });

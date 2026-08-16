@@ -207,4 +207,17 @@ pub enum RunHandleError {
         /// Stable event-delivery code.
         code: &'static str,
     },
+    /// A middleware stage chain failed, or its aggregate fold had no kernel
+    /// landing at the settled cursor.
+    ///
+    /// Peer of [`Self::Model`] and [`Self::Tool`]: an owned `Arc<str>` because
+    /// the code can come from a component's own `MiddlewareError::code()`, not
+    /// only from a runtime literal. Deliberately not a worker fault — a
+    /// middleware failure aborts the run that submitted it, exactly like an
+    /// invalid stage settlement, and leaves the run task healthy.
+    #[error("middleware stage failed: {code}")]
+    Middleware {
+        /// Stable middleware or driver code.
+        code: Arc<str>,
+    },
 }

@@ -763,6 +763,7 @@ fn spawn_code(error: &crate::RunHandleError) -> &'static str {
         crate::RunHandleError::Timer { .. } => "timer",
         crate::RunHandleError::CancellationSettlement { .. } => "cancellation",
         crate::RunHandleError::EventDelivery { .. } => "event_delivery",
+        crate::RunHandleError::Middleware { .. } => "middleware",
     }
 }
 

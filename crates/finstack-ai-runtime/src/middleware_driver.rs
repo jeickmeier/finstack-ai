@@ -175,6 +175,12 @@ pub fn derived_stage_effect_id(locator: &OperationLocator, cycle: u64, stage: St
 /// Each outcome is validated against the stage matrix before it is returned.
 /// The caller folds the ordered results into one `ReducerStageOutcome`.
 ///
+/// `ctx.stage()` and `input.stage()` are two independent sources of truth for
+/// the same stage — the cursor this invocation settles, and the variant of the
+/// payload it hands each component. A mismatched pair would correlate one
+/// stage's components under another stage's derived id, so it is asserted in
+/// debug builds rather than left to chance.
+///
 /// # Errors
 ///
 /// Returns the component's own `MiddlewareError`, or a stable
@@ -184,6 +190,11 @@ pub async fn invoke_middleware_stage(
     ctx: &MiddlewareStageContext,
     input: StageInput,
 ) -> Result<Vec<StageOutcome>, MiddlewareError> {
+    debug_assert_eq!(
+        ctx.stage(),
+        input.stage(),
+        "stage context cursor and stage input must describe the same stage"
+    );
     let stage = input.stage();
     let components: &[ResolvedMiddleware] = chain.stage(stage);
     let mut outcomes = Vec::with_capacity(components.len());
@@ -404,9 +415,9 @@ fn bounds_exceeded(reason: &'static str) -> MiddlewareError {
 /// Handle for one resolved middleware chain's stage boundaries.
 ///
 /// Holds the locked chain and the run-scoped cancellation signal shared by
-/// every component invocation in the run. Pure and synchronous: it answers
-/// whether a stage has any component to run at all; it does not run one
-/// (that is `StageDriver::run_stage`, delegated to a later task).
+/// every component invocation in the run. [`StageDriver::is_active`] answers
+/// whether a stage has any component to run at all; [`StageDriver::run_stage`]
+/// runs one.
 #[derive(Clone)]
 pub struct StageDriver {
     chain: Arc<ResolvedMiddlewareChain>,
@@ -443,6 +454,31 @@ impl StageDriver {
     #[must_use]
     pub fn cancellation(&self) -> &CancellationSignal {
         &self.cancellation
+    }
+
+    /// Invoke `stage`'s ordered chain against this driver's locked chain.
+    ///
+    /// Thin binding of [`invoke_middleware_stage`] to the chain and
+    /// cancellation this driver owns, plus one behaviour of its own: a run that
+    /// is already cancelled runs **no** component and returns an empty outcome
+    /// list, which folds to the identity and leaves the caller's base outcome
+    /// byte-for-byte unchanged. Cancellation must be able to skip optional
+    /// work; it must never be able to *change* what a stage settles, because
+    /// the kernel — not the driver — owns cancellation's effect on the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns the component's own `MiddlewareError`, or a stable
+    /// `middleware_outcome_not_allowed` when an outcome fails the stage matrix.
+    pub async fn run_stage(
+        &self,
+        ctx: &MiddlewareStageContext,
+        input: StageInput,
+    ) -> Result<Vec<StageOutcome>, MiddlewareError> {
+        if self.cancellation.is_cancelled() {
+            return Ok(Vec::new());
+        }
+        invoke_middleware_stage(&self.chain, ctx, input).await
     }
 }
 
@@ -1064,6 +1100,108 @@ mod tests {
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
         }
+    }
+
+    /// A component that counts its invocations, so a test can distinguish
+    /// "ran and returned Continue" from "never ran".
+    struct Counting {
+        descriptor: MiddlewareDescriptor,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl crate::middleware::Middleware for Counting {
+        fn descriptor(&self) -> MiddlewareDescriptor {
+            self.descriptor.clone()
+        }
+
+        fn invoke(
+            &self,
+            _ctx: crate::middleware::MiddlewareContext,
+            _input: crate::middleware::StageInput,
+        ) -> crate::PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async { Ok(StageOutcome::Continue) })
+        }
+    }
+
+    fn counting_chain(calls: &Arc<std::sync::atomic::AtomicUsize>) -> Arc<ResolvedMiddlewareChain> {
+        let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(Counting {
+            descriptor: standard_descriptor("fixture.counting", Stage::BeforeRun),
+            calls: Arc::clone(calls),
+        });
+        Arc::new(
+            ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                .expect("chain"),
+        )
+    }
+
+    fn before_run_input() -> crate::middleware::StageInput {
+        crate::middleware::StageInput::BeforeRun {
+            value: RawJson::parse(b"[]").expect("value"),
+        }
+    }
+
+    fn before_run_context() -> MiddlewareStageContext {
+        MiddlewareStageContext::new(
+            test_run_call_context(),
+            finstack_ai_kernel::Digest::raw_json(b"{}"),
+            StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeRun,
+            },
+        )
+    }
+
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(value) => return value,
+                std::task::Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
+
+    #[test]
+    fn run_stage_invokes_every_component_registered_for_the_stage() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let driver = super::StageDriver::new(counting_chain(&calls), CancellationSignal::new());
+
+        let outcomes = block_on(driver.run_stage(&before_run_context(), before_run_input()))
+            .expect("chain runs");
+
+        assert_eq!(outcomes, vec![StageOutcome::Continue]);
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the registered component must actually have been invoked"
+        );
+    }
+
+    #[test]
+    fn run_stage_on_a_cancelled_run_invokes_no_component_and_folds_to_identity() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let signal = CancellationSignal::new();
+        signal.cancel();
+        let driver = super::StageDriver::new(counting_chain(&calls), signal);
+
+        let outcomes = block_on(driver.run_stage(&before_run_context(), before_run_input()))
+            .expect("cancellation is not an error");
+
+        assert!(outcomes.is_empty());
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a cancelled run must not invoke any component"
+        );
+        assert!(
+            StageFold::accumulate(Stage::BeforeRun, &outcomes)
+                .expect("fold")
+                .is_identity(),
+            "the skipped chain must leave the base outcome untouched"
+        );
     }
 
     #[test]

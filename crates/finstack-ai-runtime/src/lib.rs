@@ -68,6 +68,8 @@ mod tool;
 mod run_types;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod settlement;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+mod stage_settlement;
 
 #[cfg(feature = "native-tokio")]
 mod task;

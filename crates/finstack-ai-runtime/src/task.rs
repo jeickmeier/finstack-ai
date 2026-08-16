@@ -13,6 +13,7 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::event_hub::{EventHubHandle, event_hub};
+use crate::middleware_driver::StageDriver;
 use crate::model_runtime::{ModelDispatcher, ModelDriverMessage, run_model_jobs};
 use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
@@ -24,6 +25,7 @@ use crate::settlement::{
     process_tool_progress, process_tool_result, reconcile_cancelled_effect,
     resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
+use crate::stage_settlement::submit_command;
 use crate::timer_runtime::{
     TimerDispatcher, TimerDriverMessage, TimerDriverResult, run_timer_jobs,
 };
@@ -416,6 +418,7 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
+        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model(
             coordinator,
             receiver,
@@ -423,6 +426,7 @@ impl RunTaskOwner {
             timer_result_receiver,
             Arc::clone(&shared),
             sources,
+            stage_driver,
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -622,6 +626,7 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
+        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
             receiver,
@@ -631,6 +636,7 @@ impl RunTaskOwner {
             Arc::clone(&shared),
             sources,
             catalog,
+            stage_driver,
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -809,6 +815,7 @@ async fn run_worker_with_model<C, R>(
     mut timers: mpsc::Receiver<TimerDriverMessage>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
+    stage_driver: Option<StageDriver>,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -872,10 +879,14 @@ async fn run_worker_with_model<C, R>(
                     let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
                     continue;
                 }
-                let result = coordinator
-                    .submit(command.env, command.input)
-                    .await
-                    .map_err(RunHandleError::Coordinator);
+                let RunCommand { env, input, reply } = command;
+                let result = submit_command(
+                    &mut coordinator,
+                    stage_driver.as_ref(),
+                    &sources,
+                    env,
+                    input,
+                ).await;
                 let fault_code = result_fault_code(&result);
                 let drain = if result.is_ok() {
                     drain_idle_cancellation(&mut coordinator, &sources, false)
@@ -884,7 +895,7 @@ async fn run_worker_with_model<C, R>(
                 } else {
                     None
                 };
-                let _ = command.reply.send(result);
+                let _ = reply.send(result);
                 if let Some(code) = fault_code {
                     fault_worker(&shared, &mut receiver, code);
                     break;
@@ -916,6 +927,7 @@ async fn run_worker_with_model_and_tools<C, R>(
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
+    stage_driver: Option<StageDriver>,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -1013,10 +1025,14 @@ async fn run_worker_with_model_and_tools<C, R>(
                     let _ = command.reply.send(Err(RunHandleError::ShuttingDown));
                     continue;
                 }
-                let mut result = coordinator
-                    .submit(command.env, command.input)
-                    .await
-                    .map_err(RunHandleError::Coordinator);
+                let RunCommand { env, input, reply } = command;
+                let mut result = submit_command(
+                    &mut coordinator,
+                    stage_driver.as_ref(),
+                    &sources,
+                    env,
+                    input,
+                ).await;
                 if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
                     && let Err(error) = prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await
                 {
@@ -1029,7 +1045,7 @@ async fn run_worker_with_model_and_tools<C, R>(
                     result = Err(error);
                 }
                 let fault_code = result_fault_code(&result);
-                let _ = command.reply.send(result);
+                let _ = reply.send(result);
                 if let Some(code) = fault_code {
                     fault_worker(&shared, &mut receiver, code);
                     break;
