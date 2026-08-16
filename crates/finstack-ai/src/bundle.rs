@@ -59,10 +59,7 @@ impl VersionRequirement {
             Self::Range {
                 min_inclusive,
                 max_exclusive,
-            } => {
-                version_tuple(version) >= version_tuple(*min_inclusive)
-                    && version_tuple(version) < version_tuple(*max_exclusive)
-            }
+            } => version >= *min_inclusive && version < *max_exclusive,
         }
     }
 
@@ -71,7 +68,7 @@ impl VersionRequirement {
             Self::Range {
                 min_inclusive,
                 max_exclusive,
-            } => version_tuple(*min_inclusive) < version_tuple(*max_exclusive),
+            } => min_inclusive < max_exclusive,
             Self::Exact { .. } | Self::CompatibleMajor { .. } => true,
         }
     }
@@ -877,7 +874,7 @@ impl<'a> BundleResolver<'a> {
         if bundle
             .compatibility
             .minimum_engine_version
-            .is_some_and(|minimum| version_tuple(self.engine_version) < version_tuple(minimum))
+            .is_some_and(|minimum| self.engine_version < minimum)
         {
             return Err(BundleResolutionError::Conflict {
                 item: Arc::from("minimum_engine_version"),
@@ -931,7 +928,7 @@ impl<'a> BundleResolver<'a> {
                     self.require_feature(feature)?;
                 }
                 BundleRequirement::MinimumFrameworkContract { version }
-                    if version_tuple(self.engine_version) < version_tuple(*version) =>
+                    if self.engine_version < *version =>
                 {
                     return Err(BundleResolutionError::Conflict {
                         item: Arc::from("minimum_framework_contract"),
@@ -1383,10 +1380,6 @@ fn key_looks_secret(key: &str) -> bool {
         || tokens
             .windows(2)
             .any(|pair| SECRET_COMPOUNDS.contains(&pair))
-}
-
-fn version_tuple(version: Version) -> (u16, u16, u16) {
-    (version.major, version.minor, version.patch)
 }
 
 fn host_feature_name(feature: &HostFeature) -> &str {

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{LABEL_MAX_BYTES, LaneId, SessionId};
+use finstack_ai_kernel::{LaneId, SessionId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -64,7 +64,7 @@ impl ExternalIdentityKey {
             ("account", self.account.as_ref()),
             ("thread", self.thread.as_ref()),
         ] {
-            if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+            if !finstack_ai_kernel::label_is_valid(value) {
                 return Err(IdentityMapError::InvalidKey { field });
             }
         }

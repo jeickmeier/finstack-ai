@@ -82,23 +82,16 @@ fn decode_hex(input: &str) -> Result<Vec<u8>, PluginHostError> {
     let bytes = input.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        let hi = hex_nibble(bytes[index])?;
-        let lo = hex_nibble(bytes[index + 1])?;
+        let hi = finstack_ai_kernel::hex_nibble(bytes[index]).ok_or_else(|| {
+            PluginHostError::SignatureUntrusted("signature hex is malformed".into())
+        })?;
+        let lo = finstack_ai_kernel::hex_nibble(bytes[index + 1]).ok_or_else(|| {
+            PluginHostError::SignatureUntrusted("signature hex is malformed".into())
+        })?;
         out.push((hi << 4) | lo);
         index += 2;
     }
     Ok(out)
-}
-
-fn hex_nibble(byte: u8) -> Result<u8, PluginHostError> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err(PluginHostError::SignatureUntrusted(
-            "signature hex is malformed".into(),
-        )),
-    }
 }
 
 #[cfg(test)]

@@ -81,9 +81,11 @@ impl ValidationIssue {
         {
             return Err("invalid_validation_issue_text");
         }
-        if self.keyword.as_ref().is_some_and(|keyword| {
-            keyword.is_empty() || keyword.len() > LABEL_MAX_BYTES || keyword.as_bytes().contains(&0)
-        }) {
+        if self
+            .keyword
+            .as_ref()
+            .is_some_and(|keyword| !crate::label_is_valid(keyword))
+        {
             return Err("invalid_validation_keyword");
         }
         Ok(())

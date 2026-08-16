@@ -115,6 +115,18 @@ export function requireWasm(): void {
   assertInitialized(initialized);
 }
 
+function getWasmHandle<TWrapper extends object, TWasm>(
+  map: WeakMap<TWrapper, TWasm>,
+  wrapper: TWrapper,
+  name: string,
+): TWasm {
+  const handle = map.get(wrapper);
+  if (handle === undefined) {
+    throw new TypeError(`${name} is not a live wasm handle`);
+  }
+  return handle;
+}
+
 /**
  * Return the crate-private wasm-bindgen model handle.
  *
@@ -123,11 +135,7 @@ export function requireWasm(): void {
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export function wasmModelHandle(model: JsModel): WasmJsModel {
-  const handle = wasmModels.get(model);
-  if (handle === undefined) {
-    throw new TypeError("JsModel is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmModels, model, "JsModel");
 }
 
 /**
@@ -138,11 +146,7 @@ export function wasmModelHandle(model: JsModel): WasmJsModel {
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset {
-  const handle = wasmToolsets.get(toolset);
-  if (handle === undefined) {
-    throw new TypeError("JsToolset is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmToolsets, toolset, "JsToolset");
 }
 
 /**
@@ -155,11 +159,7 @@ export function wasmToolsetHandle(toolset: JsToolset): WasmJsToolset {
 export function wasmContextProviderHandle(
   provider: JsContextProvider,
 ): WasmJsContextProvider {
-  const handle = wasmContextProviders.get(provider);
-  if (handle === undefined) {
-    throw new TypeError("JsContextProvider is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmContextProviders, provider, "JsContextProvider");
 }
 
 /**
@@ -170,11 +170,7 @@ export function wasmContextProviderHandle(
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export function wasmMiddlewareHandle(middleware: JsMiddleware): WasmJsMiddleware {
-  const handle = wasmMiddleware.get(middleware);
-  if (handle === undefined) {
-    throw new TypeError("JsMiddleware is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmMiddleware, middleware, "JsMiddleware");
 }
 
 /**
@@ -185,11 +181,7 @@ export function wasmMiddlewareHandle(middleware: JsMiddleware): WasmJsMiddleware
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export function wasmObserverHandle(observer: JsObserver): WasmJsObserver {
-  const handle = wasmObservers.get(observer);
-  if (handle === undefined) {
-    throw new TypeError("JsObserver is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmObservers, observer, "JsObserver");
 }
 
 /**
@@ -200,11 +192,7 @@ export function wasmObserverHandle(observer: JsObserver): WasmJsObserver {
  * @throws When the wrapper was not constructed after {@link init}.
  */
 export function wasmJournalStoreHandle(store: JsJournalStore): WasmJsJournalStore {
-  const handle = wasmStores.get(store);
-  if (handle === undefined) {
-    throw new TypeError("JsJournalStore is not a live wasm handle");
-  }
-  return handle;
+  return getWasmHandle(wasmStores, store, "JsJournalStore");
 }
 
 /**

@@ -17,7 +17,7 @@ use crate::ids::{
 use crate::raw_json::{Metadata, RawJson};
 
 /// Semantic version triple for durable component references.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Version {
     /// Major version component.

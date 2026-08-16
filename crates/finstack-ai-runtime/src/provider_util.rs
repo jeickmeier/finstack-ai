@@ -45,13 +45,16 @@ impl SseFrameParser {
         }
         self.buffer.extend_from_slice(bytes);
         let mut frames = Vec::new();
-        while let Some((boundary, separator_len)) = event_boundary(&self.buffer) {
+        let mut cursor = 0;
+        while let Some((boundary, separator_len)) = event_boundary(&self.buffer[cursor..]) {
             if boundary > self.max_event_bytes {
                 return Err(SseFrameError::Limit);
             }
-            let remainder = self.buffer.split_off(boundary + separator_len);
-            let frame = core::mem::replace(&mut self.buffer, remainder);
-            frames.push(frame[..boundary].to_vec());
+            frames.push(self.buffer[cursor..cursor + boundary].to_vec());
+            cursor += boundary + separator_len;
+        }
+        if cursor > 0 {
+            self.buffer.drain(..cursor);
         }
         if self.buffer.len() > self.max_event_bytes {
             return Err(SseFrameError::Limit);

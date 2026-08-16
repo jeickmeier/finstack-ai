@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[cfg(feature = "native-tokio")]
 use std::time::Duration;
 
-use finstack_ai_kernel::{Digest, LABEL_MAX_BYTES, PrincipalRef, Timestamp};
+use finstack_ai_kernel::{Digest, PrincipalRef, Timestamp};
 use thiserror::Error;
 
 use crate::{PortFuture, PortObject};
@@ -278,7 +278,7 @@ pub enum SecurityAuditGateError {
 }
 
 fn audit_label(value: &str) -> Result<Arc<str>, SecurityAuditError> {
-    if value.is_empty() || value.len() > LABEL_MAX_BYTES || value.as_bytes().contains(&0) {
+    if !finstack_ai_kernel::label_is_valid(value) {
         return Err(SecurityAuditError::InvalidEvent);
     }
     Ok(Arc::from(value))

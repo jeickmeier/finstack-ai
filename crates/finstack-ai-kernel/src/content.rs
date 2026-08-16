@@ -53,81 +53,7 @@ pub const fn hex_nibble(byte: u8) -> Option<u8> {
 
 pub(crate) use crate::bounds::BoundedString;
 
-pub(crate) struct ContentItems(Vec<ContentBlock>);
-
-impl ContentItems {
-    pub(crate) fn into_inner(self) -> Vec<ContentBlock> {
-        self.0
-    }
-}
-
-fn reject_oversized_content_hint<E>(hint: Option<usize>) -> Result<(), E>
-where
-    E: de::Error,
-{
-    if let Some(length) = hint
-        && length > CONTENT_MAX_ITEMS
-    {
-        return Err(E::custom(ContentError::TooManyItems {
-            len: length,
-            max: CONTENT_MAX_ITEMS,
-        }));
-    }
-    Ok(())
-}
-
-fn reject_trailing_content<'de, A>(sequence: &mut A) -> Result<(), A::Error>
-where
-    A: SeqAccess<'de>,
-{
-    if sequence.next_element::<IgnoredAny>()?.is_some() {
-        return Err(de::Error::custom(ContentError::TooManyItems {
-            len: CONTENT_MAX_ITEMS + 1,
-            max: CONTENT_MAX_ITEMS,
-        }));
-    }
-    Ok(())
-}
-
-impl<'de> Deserialize<'de> for ContentItems {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct ContentItemsVisitor;
-
-        impl<'de> Visitor<'de> for ContentItemsVisitor {
-            type Value = ContentItems;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    formatter,
-                    "an array containing at most {CONTENT_MAX_ITEMS} content blocks"
-                )
-            }
-
-            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                reject_oversized_content_hint::<A::Error>(sequence.size_hint())?;
-
-                let capacity = sequence.size_hint().unwrap_or(0).min(CONTENT_MAX_ITEMS);
-                let mut content = Vec::with_capacity(capacity);
-                while content.len() < CONTENT_MAX_ITEMS {
-                    let Some(block) = sequence.next_element()? else {
-                        return Ok(ContentItems(content));
-                    };
-                    content.push(block);
-                }
-                reject_trailing_content(&mut sequence)?;
-                Ok(ContentItems(content))
-            }
-        }
-
-        deserializer.deserialize_seq(ContentItemsVisitor)
-    }
-}
+pub(crate) type ContentItems = crate::bounds::BoundedVec<ContentBlock, CONTENT_MAX_ITEMS>;
 
 /// Reference to externally stored media bytes.
 ///
@@ -805,6 +731,34 @@ struct TaggedOpaqueBlock {
     payload: StrictOpaquePayload,
 }
 
+fn reject_oversized_content_hint<E>(hint: Option<usize>) -> Result<(), E>
+where
+    E: de::Error,
+{
+    if let Some(length) = hint
+        && length > CONTENT_MAX_ITEMS
+    {
+        return Err(E::custom(ContentError::TooManyItems {
+            len: length,
+            max: CONTENT_MAX_ITEMS,
+        }));
+    }
+    Ok(())
+}
+
+fn reject_trailing_content<'de, A>(sequence: &mut A) -> Result<(), A::Error>
+where
+    A: SeqAccess<'de>,
+{
+    if sequence.next_element::<IgnoredAny>()?.is_some() {
+        return Err(de::Error::custom(ContentError::TooManyItems {
+            len: CONTENT_MAX_ITEMS + 1,
+            max: CONTENT_MAX_ITEMS,
+        }));
+    }
+    Ok(())
+}
+
 struct ToolResultContentItems(Vec<ContentBlock>);
 
 impl ToolResultContentItems {
@@ -1316,7 +1270,7 @@ mod tests {
         let Err(error) = ContentItems::deserialize(deserializer) else {
             panic!("oversized sequence unexpectedly succeeded");
         };
-        assert!(error.to_string().contains("content item count"));
+        assert!(error.to_string().contains("item count"));
     }
 
     #[test]
