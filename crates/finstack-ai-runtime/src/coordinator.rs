@@ -2109,7 +2109,6 @@ mod tests {
             Box::pin(async move {
                 if fail {
                     Err(BudgetError::Unavailable {
-                        code: crate::BUDGET_UNAVAILABLE,
                         message: Arc::from("ambiguous reserve acknowledgement"),
                     })
                 } else {
@@ -2147,7 +2146,6 @@ mod tests {
                 receipt.map_or_else(
                     || {
                         Err(BudgetError::InvalidRequest {
-                            code: crate::BUDGET_INVALID_RECEIPT,
                             message: Arc::from("charge not configured"),
                         })
                     },
@@ -2169,7 +2167,6 @@ mod tests {
                 receipt.map_or_else(
                     || {
                         Err(BudgetError::InvalidRequest {
-                            code: crate::BUDGET_INVALID_RECEIPT,
                             message: Arc::from("release not configured"),
                         })
                     },
@@ -2203,7 +2200,6 @@ mod tests {
                     let submitted = request.request_digest;
                     return Box::pin(async move {
                         Err(AgentInvokeError::Conflict {
-                            code: crate::AGENT_INVOKE_CONFLICT,
                             existing,
                             submitted,
                         })

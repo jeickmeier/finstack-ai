@@ -126,14 +126,16 @@ fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(items) = value.extract::<Vec<Py<PyAny>>>() {
         let mut array = Vec::with_capacity(items.len());
         for item in items {
-            array.push(py_to_json(&item.bind(value.py()))?);
+            let bound = item.bind(value.py());
+            array.push(py_to_json(bound)?);
         }
         return Ok(serde_json::Value::Array(array));
     }
     if let Ok(map) = value.extract::<std::collections::BTreeMap<String, Py<PyAny>>>() {
         let mut object = serde_json::Map::new();
         for (key, item) in map {
-            object.insert(key, py_to_json(&item.bind(value.py()))?);
+            let bound = item.bind(value.py());
+            object.insert(key, py_to_json(bound)?);
         }
         return Ok(serde_json::Value::Object(object));
     }
@@ -176,8 +178,12 @@ fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<Py<PyAny>> 
 /// Compute journal known-answer hex through the one Rust engine.
 #[pyfunction]
 #[pyo3(text_signature = "(kind, value)")]
-fn journal_known_answer(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let encoded = serde_json::to_string(&py_to_json(value.bind(py))?)
+fn journal_known_answer(
+    py: Python<'_>,
+    kind: &str,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let encoded = serde_json::to_string(&py_to_json(value)?)
         .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
     let answer = finstack_ai_protocol::journal_known_answer(kind, &encoded)
         .map_err(|error| PyTypeError::new_err(error.to_string()))?;
@@ -188,8 +194,12 @@ fn journal_known_answer(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResul
 
 /// Normalize a pre-beta lineage or authenticated external-command shape.
 #[pyfunction]
-fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let encoded = serde_json::to_string(&py_to_json(value.bind(py))?)
+fn normalize_prebeta_shape(
+    py: Python<'_>,
+    kind: &str,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
+    let encoded = serde_json::to_string(&py_to_json(value)?)
         .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
     let normalized = match kind {
         "child_run_prepared" => normalize_shape::<finstack_ai::runtime::ChildRunPrepared>(&encoded),
@@ -214,10 +224,10 @@ fn normalize_prebeta_shape(py: Python<'_>, kind: &str, value: Py<PyAny>) -> PyRe
 #[pyfunction]
 fn _normalize_pydantic_schema(
     py: Python<'_>,
-    schema: Py<PyAny>,
+    schema: &Bound<'_, PyAny>,
     kind: &str,
 ) -> PyResult<Py<PyAny>> {
-    let value = py_to_json(schema.bind(py))?;
+    let value = py_to_json(schema)?;
     let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
     json_to_py(py, &normalized)
 }
@@ -424,6 +434,10 @@ impl PyAgent {
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
     #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Python callback factory forwards all primary port components distinctly"
+    )]
     fn from_python<'py>(
         py: Python<'py>,
         model: &Bound<'py, PyPythonModel>,
@@ -681,10 +695,10 @@ impl PyRun {
     fn resolve_interaction<'py>(
         &self,
         py: Python<'py>,
-        resolution: Py<PyAny>,
+        resolution: &Bound<'py, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let resolution = serde_json::from_value::<finstack_ai::InteractionResolution>(
-            py_to_json(resolution.bind(py))?,
+            py_to_json(resolution)?,
         )
         .map_err(|error| PyTypeError::new_err(error.to_string()))?;
         let run = self.inner.clone();
@@ -1017,14 +1031,16 @@ fn prepare_pydantic_output(py: Python<'_>, target: Py<PyAny>) -> PyResult<Prepar
     kwargs.set_item("mode", "validation")?;
     let schema = adapter
         .bind(py)
-        .call_method("json_schema", (), Some(&kwargs))?
-        .unbind();
-    let schema = raw_pydantic_schema(py, schema, "structured_output")?;
-    Ok(PreparedPydanticOutput { adapter, schema })
+        .call_method("json_schema", (), Some(&kwargs))?;
+    let raw = raw_pydantic_schema(&schema, "structured_output")?;
+    Ok(PreparedPydanticOutput {
+        adapter,
+        schema: raw,
+    })
 }
 
-fn raw_pydantic_schema(py: Python<'_>, schema: Py<PyAny>, kind: &str) -> PyResult<RawJson> {
-    let value = py_to_json(schema.bind(py))?;
+fn raw_pydantic_schema(schema: &Bound<'_, PyAny>, kind: &str) -> PyResult<RawJson> {
+    let value = py_to_json(schema)?;
     let normalized = normalize_pydantic_schema(value, kind).map_err(PyTypeError::new_err)?;
     let bytes = serde_json::to_vec(&normalized)
         .map_err(|_| PyException::new_err("Pydantic schema normalization failed"))?;
@@ -1374,6 +1390,10 @@ async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunE
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Python callback builder forwards all primary port components distinctly"
+)]
 async fn build_python_agent(
     model_name: ModelName,
     model: (ComponentRef, Arc<dyn Model>),

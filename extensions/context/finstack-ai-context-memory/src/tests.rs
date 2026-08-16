@@ -108,9 +108,7 @@ impl ArtifactStore for CaptureArtifactStore {
         _artifact: ArtifactRef,
     ) -> PortFuture<Result<Bytes, ArtifactError>> {
         Box::pin(async {
-            Err(ArtifactError::NotFound {
-                code: finstack_ai_runtime::ARTIFACT_NOT_FOUND,
-            })
+            Err(ArtifactError::NotFound)
         })
     }
 }

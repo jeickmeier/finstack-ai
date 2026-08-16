@@ -67,7 +67,6 @@ impl ArtifactStore for InProcessArtifactStore {
             .map_err(|_| ());
         Box::pin(async move {
             stored.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
-                code: finstack_ai_runtime::ARTIFACT_UNAVAILABLE,
                 message: Arc::from("memory artifact lock failed"),
             })?;
             let blob = finstack_ai_runtime::BlobRef::try_new(
@@ -79,7 +78,6 @@ impl ArtifactStore for InProcessArtifactStore {
             )
             .map_err(
                 |error| finstack_ai_runtime::ArtifactError::InvalidMetadata {
-                    code: finstack_ai_runtime::ARTIFACT_INVALID_METADATA,
                     message: Arc::from(error.to_string()),
                 },
             )?;
@@ -93,7 +91,6 @@ impl ArtifactStore for InProcessArtifactStore {
             )
             .map_err(
                 |error| finstack_ai_runtime::ArtifactError::InvalidMetadata {
-                    code: finstack_ai_runtime::ARTIFACT_INVALID_METADATA,
                     message: Arc::from(error.to_string()),
                 },
             )
@@ -112,12 +109,9 @@ impl ArtifactStore for InProcessArtifactStore {
             .map_err(|_| ());
         Box::pin(async move {
             let stored = bodies.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
-                code: finstack_ai_runtime::ARTIFACT_UNAVAILABLE,
                 message: Arc::from("memory artifact lock failed"),
             })?;
-            stored.ok_or(finstack_ai_runtime::ArtifactError::NotFound {
-                code: finstack_ai_runtime::ARTIFACT_NOT_FOUND,
-            })
+            stored.ok_or(finstack_ai_runtime::ArtifactError::NotFound)
         })
     }
 }

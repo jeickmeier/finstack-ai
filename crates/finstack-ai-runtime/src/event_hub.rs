@@ -169,6 +169,7 @@ pub struct EventBatch {
 }
 
 impl EventBatch {
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     pub(crate) fn new(events: Vec<RunEvent>, dropped_progress: u64) -> Option<Self> {
         let first_sequence = events.first()?.transient_sequence();
         let last_sequence = events.last()?.transient_sequence();

@@ -66,37 +66,41 @@ pub trait BudgetLedger: PortObject {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum BudgetError {
     /// Service unavailable or outcome cannot be known safely.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", BUDGET_UNAVAILABLE)]
     Unavailable {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Bounded diagnostic.
         message: Arc<str>,
     },
     /// Idempotency key reused with a different normalized request.
-    #[error("{code}: budget operation digest conflict")]
+    #[error("{}: budget operation digest conflict", BUDGET_CONFLICT)]
     Conflict {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Existing request digest.
         existing: Digest,
         /// Submitted request digest.
         submitted: Digest,
     },
     /// Backend explicitly reports an unsafe unknown outcome.
-    #[error("{code}: budget outcome unknown")]
-    Unknown {
-        /// Stable machine-readable code.
-        code: &'static str,
-    },
+    #[error("{}: budget outcome unknown", BUDGET_UNKNOWN)]
+    Unknown,
     /// Request or receipt violates the normalized contract.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", BUDGET_INVALID_RECEIPT)]
     InvalidRequest {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable diagnostic.
         message: Arc<str>,
     },
+}
+
+impl BudgetError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable { .. } => BUDGET_UNAVAILABLE,
+            Self::Conflict { .. } => BUDGET_CONFLICT,
+            Self::Unknown => BUDGET_UNKNOWN,
+            Self::InvalidRequest { .. } => BUDGET_INVALID_RECEIPT,
+        }
+    }
 }
 
 #[cfg(test)]

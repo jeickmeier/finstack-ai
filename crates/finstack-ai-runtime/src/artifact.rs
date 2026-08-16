@@ -49,19 +49,16 @@ impl ArtifactScope {
     pub fn digest(&self) -> Result<Digest, ArtifactError> {
         if self.tenant_scope.is_empty() || self.tenant_scope.as_bytes().contains(&0) {
             return Err(ArtifactError::InvalidMetadata {
-                code: ARTIFACT_INVALID_METADATA,
                 message: Arc::from("invalid_tenant_scope"),
             });
         }
         let canonical = serde_json_canonicalizer::to_vec(self).map_err(|error| {
             ArtifactError::InvalidMetadata {
-                code: ARTIFACT_INVALID_METADATA,
                 message: Arc::from(error.to_string()),
             }
         })?;
         Digest::domain_separated("artifact-scope", 1, &canonical).map_err(|error| {
             ArtifactError::InvalidMetadata {
-                code: ARTIFACT_INVALID_METADATA,
                 message: Arc::from(error.to_string()),
             }
         })
@@ -141,7 +138,6 @@ pub fn validate_staged_artifact(
     let expected_scope = scope.digest()?;
     if artifact.scope_digest() != expected_scope {
         return Err(ArtifactError::ScopeMismatch {
-            code: ARTIFACT_SCOPE_MISMATCH,
             expected: expected_scope,
             actual: artifact.scope_digest(),
         });
@@ -153,7 +149,6 @@ pub fn validate_staged_artifact(
         || blob.length() != u64::try_from(content.len()).unwrap_or(u64::MAX)
     {
         return Err(ArtifactError::Integrity {
-            code: ARTIFACT_INTEGRITY_FAILURE,
             message: Arc::from("content_reference_mismatch"),
         });
     }
@@ -163,7 +158,6 @@ pub fn validate_staged_artifact(
         || artifact.metadata() != &metadata.attributes
     {
         return Err(ArtifactError::InvalidMetadata {
-            code: ARTIFACT_INVALID_METADATA,
             message: Arc::from("metadata_mapping_mismatch"),
         });
     }
@@ -178,7 +172,6 @@ fn validate_artifact_input(
     scope.digest()?;
     if content.len() > MAX_ARTIFACT_BYTES {
         return Err(ArtifactError::TooLarge {
-            code: ARTIFACT_TOO_LARGE,
             len: content.len(),
             max: MAX_ARTIFACT_BYTES,
         });
@@ -193,7 +186,6 @@ fn validate_artifact_input(
             .is_some_and(|value| value.is_empty() || value.as_bytes().contains(&0))
     {
         return Err(ArtifactError::InvalidMetadata {
-            code: ARTIFACT_INVALID_METADATA,
             message: Arc::from("metadata_field_invalid"),
         });
     }
@@ -204,55 +196,57 @@ fn validate_artifact_input(
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ArtifactError {
     /// Service unavailable.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", ARTIFACT_UNAVAILABLE)]
     Unavailable {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Bounded diagnostic.
         message: Arc<str>,
     },
     /// Required artifact is missing.
-    #[error("{code}: artifact is missing")]
-    NotFound {
-        /// Stable machine-readable code.
-        code: &'static str,
-    },
+    #[error("{}: artifact is missing", ARTIFACT_NOT_FOUND)]
+    NotFound,
     /// Requested scope differs from the artifact's frozen binding.
-    #[error("{code}: expected scope {expected}, actual scope {actual}")]
+    #[error("{}: expected scope {expected}, actual scope {actual}", ARTIFACT_SCOPE_MISMATCH)]
     ScopeMismatch {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Requested scope digest.
         expected: Digest,
         /// Artifact scope digest.
         actual: Digest,
     },
     /// Required content/reference integrity check failed.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", ARTIFACT_INTEGRITY_FAILURE)]
     Integrity {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable diagnostic.
         message: Arc<str>,
     },
     /// Content exceeds the v1 byte-string ceiling.
-    #[error("{code}: artifact has {len} bytes; maximum is {max}")]
+    #[error("{}: artifact has {len} bytes; maximum is {max}", ARTIFACT_TOO_LARGE)]
     TooLarge {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Submitted bytes.
         len: usize,
         /// Maximum bytes.
         max: usize,
     },
     /// Metadata is malformed or was rewritten/dropped.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", ARTIFACT_INVALID_METADATA)]
     InvalidMetadata {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable diagnostic.
         message: Arc<str>,
     },
+}
+
+impl ArtifactError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable { .. } => ARTIFACT_UNAVAILABLE,
+            Self::NotFound => ARTIFACT_NOT_FOUND,
+            Self::ScopeMismatch { .. } => ARTIFACT_SCOPE_MISMATCH,
+            Self::Integrity { .. } => ARTIFACT_INTEGRITY_FAILURE,
+            Self::TooLarge { .. } => ARTIFACT_TOO_LARGE,
+            Self::InvalidMetadata { .. } => ARTIFACT_INVALID_METADATA,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -414,17 +408,12 @@ mod tests {
                 .expect("entries")
                 .get(&artifact.id())
                 .map_or_else(
-                    || {
-                        Err(ArtifactError::NotFound {
-                            code: ARTIFACT_NOT_FOUND,
-                        })
-                    },
+                    || Err(ArtifactError::NotFound),
                     |stored| {
                         let expected = stored.scope.digest()?;
                         let submitted = scope.digest()?;
                         if expected != submitted || artifact.scope_digest() != submitted {
                             return Err(ArtifactError::ScopeMismatch {
-                                code: ARTIFACT_SCOPE_MISMATCH,
                                 expected,
                                 actual: submitted,
                             });
@@ -433,7 +422,6 @@ mod tests {
                             || Digest::blob_content(&stored.content) != artifact.content_digest()
                         {
                             return Err(ArtifactError::Integrity {
-                                code: ARTIFACT_INTEGRITY_FAILURE,
                                 message: Arc::from("stored_reference_mismatch"),
                             });
                         }
@@ -513,7 +501,7 @@ mod tests {
         );
         assert!(matches!(
             block_on(store.get(scope.clone(), orphan)),
-            Err(ArtifactError::NotFound { .. })
+            Err(ArtifactError::NotFound)
         ));
 
         let other_scope = ArtifactScope {

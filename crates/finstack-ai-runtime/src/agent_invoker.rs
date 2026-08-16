@@ -73,14 +73,12 @@ impl ChildRunRequest {
     pub fn validate(&self) -> Result<(), AgentInvokeError> {
         self.locator.validate_for(self.placement).map_err(|error| {
             AgentInvokeError::InvalidRequest {
-                code: AGENT_INVOKE_INVALID_ACCEPTANCE,
                 message: Arc::from(error.to_string()),
             }
         })?;
         self.requested_budget
             .validate()
             .map_err(|error| AgentInvokeError::InvalidRequest {
-                code: AGENT_INVOKE_INVALID_ACCEPTANCE,
                 message: Arc::from(error.to_string()),
             })?;
         if self
@@ -89,7 +87,6 @@ impl ChildRunRequest {
             .is_some_and(|value| value.is_empty() || value.as_bytes().contains(&0))
         {
             return Err(AgentInvokeError::InvalidRequest {
-                code: AGENT_INVOKE_INVALID_ACCEPTANCE,
                 message: Arc::from("invalid_delegation_id"),
             });
         }
@@ -121,31 +118,37 @@ pub trait AgentInvoker: PortObject {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AgentInvokeError {
     /// Service unavailable or outcome cannot be known safely.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", AGENT_INVOKE_UNAVAILABLE)]
     Unavailable {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Bounded diagnostic.
         message: Arc<str>,
     },
     /// The same prepared identity was reused with a different request digest.
-    #[error("{code}: prepared request digest conflict")]
+    #[error("{}: prepared request digest conflict", AGENT_INVOKE_CONFLICT)]
     Conflict {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Previously accepted digest.
         existing: Digest,
         /// Submitted digest.
         submitted: Digest,
     },
     /// Request or returned acceptance is incomplete or inconsistent.
-    #[error("{code}: {message}")]
+    #[error("{}: {message}", AGENT_INVOKE_INVALID_ACCEPTANCE)]
     InvalidRequest {
-        /// Stable machine-readable code.
-        code: &'static str,
         /// Stable diagnostic.
         message: Arc<str>,
     },
+}
+
+impl AgentInvokeError {
+    /// Stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable { .. } => AGENT_INVOKE_UNAVAILABLE,
+            Self::Conflict { .. } => AGENT_INVOKE_CONFLICT,
+            Self::InvalidRequest { .. } => AGENT_INVOKE_INVALID_ACCEPTANCE,
+        }
+    }
 }
 
 #[cfg(test)]

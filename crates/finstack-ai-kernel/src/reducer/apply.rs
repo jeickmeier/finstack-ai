@@ -75,6 +75,7 @@ pub(super) fn apply(
     validate_batch_shape(original, &committed.records)?;
     validate_stage_digests(&committed.records)?;
     validate_tool_digests(&committed.records)?;
+    validate_model_digests(original, &committed.records)?;
     capacity::preflight_batch(original, &committed.records)?;
     let applied = apply_semantic_records(original, &committed.records)?;
     applied
@@ -213,6 +214,35 @@ fn validate_tool_digests(records: &[RecordEnvelope]) -> Result<(), KernelError> 
                 )? != closed.close_digest =>
             {
                 return Err(KernelError::SettlementDigestMismatch);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_model_digests(
+    state: &KernelState,
+    records: &[RecordEnvelope],
+) -> Result<(), KernelError> {
+    if let Some(pending) = state.pending_model_effect.as_ref() {
+        match records {
+            [completed_record, entry_record] => {
+                if let (
+                    RecordBody::EffectCompleted(completed),
+                    RecordBody::EntryAppended(entry),
+                ) = (completed_record.body(), entry_record.body())
+                    && completed.output_contract().kind == EffectOutputKind::ModelResponse
+                {
+                    completed_record_digest(pending, completed, &entry.message)?;
+                }
+            }
+            [failed_record] => {
+                if let RecordBody::EffectFailed(failed) = failed_record.body()
+                    && failed.output_contract().kind == EffectOutputKind::ModelResponse
+                {
+                    failed_record_digest(pending, failed)?;
+                }
             }
             _ => {}
         }

@@ -51,68 +51,7 @@ pub const fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
-pub(crate) struct BoundedString<const MAX: usize>(String);
-
-impl<const MAX: usize> BoundedString<MAX> {
-    pub(crate) fn into_inner(self) -> String {
-        self.0
-    }
-}
-
-impl<'de, const MAX: usize> Deserialize<'de> for BoundedString<MAX> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct BoundedStringVisitor<const MAX: usize>;
-
-        impl<const MAX: usize> Visitor<'_> for BoundedStringVisitor<MAX> {
-            type Value = BoundedString<MAX>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(formatter, "a UTF-8 string no longer than {MAX} bytes")
-            }
-
-            fn visit_borrowed_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                self.visit_str(value)
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value.len() > MAX {
-                    return Err(E::custom(format_args!(
-                        "string length {} exceeds max {MAX}",
-                        value.len()
-                    )));
-                }
-                Ok(BoundedString(value.to_owned()))
-            }
-
-            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if value.len() > MAX {
-                    return Err(E::custom(format_args!(
-                        "string length {} exceeds max {MAX}",
-                        value.len()
-                    )));
-                }
-                Ok(BoundedString(value))
-            }
-        }
-
-        // Internally tagged content uses serde's ContentDeserializer, which
-        // reports `is_human_readable() == true` even on canonical CBOR. Accept
-        // a decoded string from either JSON or CBOR.
-        deserializer.deserialize_any(BoundedStringVisitor::<MAX>)
-    }
-}
+pub(crate) use crate::bounds::BoundedString;
 
 pub(crate) struct ContentItems(Vec<ContentBlock>);
 

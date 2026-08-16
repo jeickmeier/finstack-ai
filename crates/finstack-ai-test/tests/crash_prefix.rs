@@ -1833,7 +1833,7 @@ fn prefix_c1_through_c5() {
         validate_staged_artifact(&scope, b"corrupt", &metadata, &artifact).expect_err("C4 corrupt");
     assert_eq!(
         match err {
-            finstack_ai_runtime::ArtifactError::Integrity { code, .. } => code,
+            finstack_ai_runtime::ArtifactError::Integrity { .. } => err.code(),
             other => panic!("expected integrity, got {other:?}"),
         },
         ARTIFACT_INTEGRITY_FAILURE

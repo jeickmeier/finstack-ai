@@ -5,8 +5,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AppendBatchId,
-    BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetError, BudgetLedger,
+    AgentInvokeError, AgentInvoker, AppendBatchId, BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetError, BudgetLedger,
     BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest, BudgetReservationReleased,
     BudgetReservationRequested, BudgetReservationSettled, BudgetReservationState,
     BudgetReserveRequest, ChildRunContext, ChildRunHandle, ChildRunPrepared, ChildRunRequest,
@@ -157,7 +156,6 @@ impl ChildRunCoordinator {
             .map_err(CompositionError::Agent)?;
         if handle.locator != request.locator || handle.relation_digest != expected_relation {
             return Err(CompositionError::Agent(AgentInvokeError::InvalidRequest {
-                code: AGENT_INVOKE_INVALID_ACCEPTANCE,
                 message: Arc::from("child acceptance does not match committed relation"),
             }));
         }

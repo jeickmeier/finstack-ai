@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use finstack_ai::runtime::{
-    ARTIFACT_UNAVAILABLE, ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope,
+    ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope,
     ArtifactStore, BlobRef, Bytes, Digest, PortFuture,
 };
 
@@ -30,7 +30,6 @@ pub struct HostArtifactStore {
 
 fn artifact_unavailable(failure: HostFailure) -> ArtifactError {
     ArtifactError::Unavailable {
-        code: ARTIFACT_UNAVAILABLE,
         message: Arc::from(failure.message()),
     }
 }
@@ -45,14 +44,12 @@ fn build_artifact(
         digest.to_hex(),
         metadata.media_type.as_ref(),
         u64::try_from(content.len()).map_err(|_| ArtifactError::InvalidMetadata {
-            code: finstack_ai::runtime::ARTIFACT_INVALID_METADATA,
             message: Arc::from("invalid_length"),
         })?,
         Some(digest),
         metadata.name.as_deref(),
     )
     .map_err(|_| ArtifactError::InvalidMetadata {
-        code: finstack_ai::runtime::ARTIFACT_INVALID_METADATA,
         message: Arc::from("invalid_blob"),
     })?;
     let mut artifact_id = [0_u8; 16];
@@ -66,7 +63,6 @@ fn build_artifact(
         metadata.attributes.clone(),
     )
     .map_err(|_| ArtifactError::InvalidMetadata {
-        code: finstack_ai::runtime::ARTIFACT_INVALID_METADATA,
         message: Arc::from("invalid_artifact"),
     })
 }
@@ -164,9 +160,7 @@ impl ArtifactStore for HostArtifactStore {
                 entries
                     .get(&key)
                     .map(|(_, bytes)| bytes.clone())
-                    .ok_or(ArtifactError::NotFound {
-                        code: finstack_ai::runtime::ARTIFACT_NOT_FOUND,
-                    })
+                    .ok_or(ArtifactError::NotFound)
             })
         }
         #[cfg(target_arch = "wasm32")]
