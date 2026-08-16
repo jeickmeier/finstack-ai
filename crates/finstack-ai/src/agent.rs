@@ -609,6 +609,8 @@ impl Agent {
                 }
             };
         }
+        coordinator
+            .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
         let observer_count = self.resolved.run_plan().observers().len();
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(
