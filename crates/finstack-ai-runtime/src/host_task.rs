@@ -381,12 +381,21 @@ impl RunTaskOwner {
             }
         }
         coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);
+        // Built before the resume-path tool batch, not after it: a resumed run
+        // must route `BeforeToolBatch` through the same chain a steady-state
+        // one does, or middleware would apply on some resume paths only.
+        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         if !cancelling {
             apply_interaction_resume(&mut coordinator, &sources).await?;
         }
         if !cancelling && let Some(catalog) = catalog.as_ref() {
-            let opened_tool_batch =
-                prepare_tool_batch_if_ready(&mut coordinator, catalog, &sources).await?;
+            let opened_tool_batch = prepare_tool_batch_if_ready(
+                &mut coordinator,
+                catalog,
+                &sources,
+                stage_driver.as_ref(),
+            )
+            .await?;
             let action = if opened_tool_batch {
                 ToolResumeAction::NoOutstanding
             } else {
@@ -424,7 +433,6 @@ impl RunTaskOwner {
             .map_err(|_| RunHandleError::IntakeClosed)?
             .clone()
             .ok_or(RunHandleError::InvalidConfiguration)?;
-        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         host_driver::spawn(Box::pin(run_worker_with_effects(
             coordinator,
             intake,
@@ -1046,7 +1054,7 @@ where
             .pop_front();
         let Some(work) = work else {
             if let Some(catalog) = catalog {
-                prepare_tool_batch_if_ready(coordinator, catalog, sources).await?;
+                prepare_tool_batch_if_ready(coordinator, catalog, sources, stage_driver).await?;
                 let more = pending
                     .lock()
                     .map_err(|_| RunHandleError::IntakeClosed)?
@@ -1160,7 +1168,7 @@ where
     )
     .await?;
     if let Some(catalog) = catalog {
-        prepare_tool_batch_if_ready(coordinator, catalog, sources).await?;
+        prepare_tool_batch_if_ready(coordinator, catalog, sources, stage_driver).await?;
     }
     Ok(())
 }

@@ -596,10 +596,19 @@ impl RunTaskOwner {
             Arc::clone(&tool_dispatcher),
             timer_dispatcher,
         )));
+        // Built before the resume-path tool batch, not after it: a resumed run
+        // must route `BeforeToolBatch` through the same chain a steady-state
+        // one does, or middleware would apply on some resume paths only.
+        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         if !cancelling {
             apply_interaction_resume(&mut coordinator, &sources).await?;
-            let opened_tool_batch =
-                prepare_tool_batch_if_ready(&mut coordinator, catalog.as_ref(), &sources).await?;
+            let opened_tool_batch = prepare_tool_batch_if_ready(
+                &mut coordinator,
+                catalog.as_ref(),
+                &sources,
+                stage_driver.as_ref(),
+            )
+            .await?;
             if !opened_tool_batch {
                 resume_tool_effects(
                     &mut coordinator,
@@ -626,7 +635,6 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
-        let stage_driver = crate::stage_settlement::stage_driver(&coordinator, &run_cancellation);
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
             receiver,
@@ -961,7 +969,12 @@ async fn run_worker_with_model_and_tools<C, R>(
                         }
                         let processed = process_model_result(&mut coordinator, *result, &sources).await;
                         let processed = match processed {
-                            Ok(()) => prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await,
+                            Ok(()) => prepare_tool_batch_if_ready(
+                                &mut coordinator,
+                                &catalog,
+                                &sources,
+                                stage_driver.as_ref(),
+                            ).await,
                             Err(error) => Err(error),
                         };
                         if let Err(error) = processed {
@@ -1034,7 +1047,12 @@ async fn run_worker_with_model_and_tools<C, R>(
                     input,
                 ).await;
                 if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
-                    && let Err(error) = prepare_tool_batch_if_ready(&mut coordinator, &catalog, &sources).await
+                    && let Err(error) = prepare_tool_batch_if_ready(
+                        &mut coordinator,
+                        &catalog,
+                        &sources,
+                        stage_driver.as_ref(),
+                    ).await
                 {
                     result = Err(error);
                 }

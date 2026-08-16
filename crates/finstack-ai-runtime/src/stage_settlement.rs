@@ -25,15 +25,24 @@
 //! passthrough here: its [`StageInput`] is the typed
 //! `StageInput::BeforeModel(Box<BeforeModelInput>)`, whose assembly needs the
 //! run's `LockedModelContextProfile` and is owned by a later task.
+//!
 //! `BeforeToolBatch` never reaches this choke point at all — the facade never
-//! settles it; `settlement::prepare_tool_batch_if_ready` does.
+//! settles it; `settlement::prepare_tool_batch_if_ready` does, and it is the
+//! only stage whose fold is *not* an aggregate `ReducerStageOutcome`. Its
+//! chain runs through [`run_tool_batch_chain`], which reduces the fold to a
+//! [`ToolBatchPolicy`] the tool-planning loop consumes through
+//! `ResolvedToolCatalog::decide_plan`'s existing `middleware` parameter. That
+//! keeps the *one settlement per cursor* invariant intact: the batch still
+//! settles exactly once, as the `ToolBatchPrepared` the planning loop builds.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchTag, EventTag, KernelError, KernelInput, KernelState, Message,
-    MessageRole, MessageTag, Metadata, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
-    SEMANTIC_ARRAY_MAX_ITEMS, Stage, StageCursor, StageSettled, TransitionEnv,
+    AllocatedIds, AppendBatchTag, ErrorDescriptor, EventTag, KernelError, KernelInput, KernelState,
+    Message, MessageRole, MessageTag, Metadata, ProviderIds, RawJson, RecordTag,
+    ReducerStageOutcome, SEMANTIC_ARRAY_MAX_ITEMS, Stage, StageCursor, StageSettled, ToolCallBlock,
+    ToolId, TransitionEnv,
 };
 
 use crate::context::ContextItem;
@@ -248,6 +257,94 @@ pub(crate) async fn run_stage_chain(
     StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))
 }
 
+/// The `BeforeToolBatch` chain's aggregate fold, reduced to what tool planning
+/// can actually consume.
+///
+/// Unlike every other stage, `BeforeToolBatch` does not land an aggregate
+/// [`ReducerStageOutcome`] of its own: the batch settles exactly once, as the
+/// `ToolBatchPrepared` that `settlement::prepare_tool_batch_if_ready` builds
+/// from the per-call catalog decisions. This enum is therefore the whole
+/// vocabulary the fold can express at that cursor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ToolBatchPolicy {
+    /// No component narrowed the tool set and none failed the stage: plan the
+    /// batch exactly as it would be planned with no chain installed at all.
+    Unchanged,
+    /// Only these tool ids may execute. Every source call whose tool is absent
+    /// is denied — and therefore becomes a
+    /// [`finstack_ai_kernel::ToolCallPlan::SyntheticClosure`], never a dropped
+    /// call.
+    Retain(BTreeSet<ToolId>),
+    /// A component failed the stage. The caller settles
+    /// `ReducerStageOutcome::Fail` at the cursor instead of opening a batch.
+    Fail(Box<ErrorDescriptor>),
+}
+
+/// Run the `BeforeToolBatch` chain over the batch's source calls.
+///
+/// The `BeforeToolBatch` peer of [`settle_facade_stage`]. Read-only in the
+/// coordinator, and a strict passthrough — the source calls are not even
+/// canonicalized — whenever no component is registered for the stage, so a run
+/// with no `BeforeToolBatch` middleware plans its batch byte for byte as it did
+/// before this hook existed.
+///
+/// # Errors
+///
+/// Forwards [`run_stage_chain`]'s errors, or returns
+/// [`MIDDLEWARE_STAGE_UNLANDABLE`] for a fold carrying a contribution that has
+/// no expression in [`ToolBatchPolicy`] — rejected rather than silently
+/// dropped, exactly as [`apply_fold`] rejects one it cannot land.
+pub(crate) async fn run_tool_batch_chain(
+    coordinator: &CommitCoordinator,
+    driver: Option<&StageDriver>,
+    cursor: StageCursor,
+    calls: &[ToolCallBlock],
+) -> Result<ToolBatchPolicy, RunHandleError> {
+    debug_assert_eq!(
+        cursor.stage,
+        Stage::BeforeToolBatch,
+        "the tool-batch chain runs only at the BeforeToolBatch cursor"
+    );
+    let Some(driver) = driver.filter(|driver| driver.is_active(Stage::BeforeToolBatch)) else {
+        return Ok(ToolBatchPolicy::Unchanged);
+    };
+    let input = StageInput::BeforeToolBatch {
+        value: canonical(&calls)?,
+    };
+    let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
+    tool_batch_policy(&fold)
+}
+
+/// Reduce a `BeforeToolBatch` fold to the policy tool planning consumes.
+///
+/// `validate_stage_outcome` already refuses `AddInstructions`/`AddContext`,
+/// `CompactContext`, `RequestCompactionModel`, `Complete`, and `Retry` at this
+/// stage, and [`StageFold::accumulate`] refuses `Replace`, `Suspend`, and
+/// `RequestInteraction` here, so only `FilterTools` and `Fail` can reach this
+/// function. The remaining arms are therefore unreachable through the port —
+/// but they are rejected rather than ignored, because a fold field this
+/// reducer silently skipped would be a component's contribution vanishing
+/// without trace.
+fn tool_batch_policy(fold: &StageFold) -> Result<ToolBatchPolicy, RunHandleError> {
+    if let Some(terminal) = fold.terminal.as_ref() {
+        return match terminal {
+            StageTerminal::Fail(descriptor) => Ok(ToolBatchPolicy::Fail(descriptor.clone())),
+            StageTerminal::Retry(_) => Err(stage_error(MIDDLEWARE_STAGE_UNLANDABLE)),
+        };
+    }
+    if !fold.instructions.is_empty()
+        || !fold.context.is_empty()
+        || fold.replacement.is_some()
+        || fold.compaction.is_some()
+    {
+        return Err(stage_error(MIDDLEWARE_STAGE_UNLANDABLE));
+    }
+    Ok(match fold.retained_tools.as_ref() {
+        Some(retained) => ToolBatchPolicy::Retain(retained.clone()),
+        None => ToolBatchPolicy::Unchanged,
+    })
+}
+
 /// Build the [`StageInput`] one stage's chain observes.
 ///
 /// Every payload is JCS-canonical JSON over live `coordinator.state()`, not a
@@ -458,7 +555,7 @@ fn message_from_item<C: Clock, R: RandomSource>(
 ///
 /// Forwards `stage_allocation`'s admissibility rejection, the coordinator's
 /// error, or `middleware_stage_payload_invalid` when an id bag is invalid.
-async fn submit_folded<C: Clock, R: RandomSource>(
+pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
     now: finstack_ai_kernel::Timestamp,
@@ -1426,6 +1523,99 @@ mod tests {
         )
         .expect("identity");
         assert_eq!(outcome, ReducerStageOutcome::Continue);
+    }
+
+    // ---- BeforeToolBatch fold reduction ----------------------------------
+
+    #[test]
+    fn an_empty_tool_batch_fold_is_unchanged_not_an_empty_retain_set() {
+        // `Unchanged` and `Retain({})` are not the same instruction: the first
+        // plans the batch exactly as an un-middlewared run would, the second
+        // denies every call. Collapsing them would turn a chain of pure
+        // observers into a total tool ban.
+        assert_eq!(
+            tool_batch_policy(&StageFold::default()).expect("identity"),
+            ToolBatchPolicy::Unchanged
+        );
+        assert_eq!(
+            tool_batch_policy(&StageFold {
+                retained_tools: Some(std::collections::BTreeSet::new()),
+                ..StageFold::default()
+            })
+            .expect("empty retain"),
+            ToolBatchPolicy::Retain(std::collections::BTreeSet::new())
+        );
+    }
+
+    #[test]
+    fn a_tool_batch_fail_terminal_becomes_the_stage_failure() {
+        let policy = tool_batch_policy(&StageFold {
+            terminal: Some(StageTerminal::Fail(Box::new(
+                ErrorDescriptor::new("boom", "fixture", ErrorCategory::Middleware, false)
+                    .expect("descriptor"),
+            ))),
+            // A terminal wins over a narrowing produced earlier in the chain.
+            retained_tools: Some(std::collections::BTreeSet::new()),
+            ..StageFold::default()
+        })
+        .expect("fail terminal");
+        assert!(
+            matches!(policy, ToolBatchPolicy::Fail(descriptor) if descriptor.code.as_str() == "boom")
+        );
+    }
+
+    #[test]
+    fn a_tool_batch_fold_with_no_policy_expression_is_rejected_not_dropped() {
+        // Neither case is reachable through the port — `validate_stage_outcome`
+        // refuses AddContext at BeforeToolBatch and `StageFold::accumulate`
+        // refuses Replace there — but the reducer must still refuse a fold it
+        // cannot express rather than silently discard the contribution.
+        for fold in [
+            StageFold {
+                context: vec![item("nowhere-to-land")],
+                ..StageFold::default()
+            },
+            StageFold {
+                replacement: Some(RawJson::parse(b"[]").expect("replacement")),
+                ..StageFold::default()
+            },
+            StageFold {
+                terminal: Some(StageTerminal::Retry(
+                    finstack_ai_kernel::RetryDirective::try_new(
+                        finstack_ai_kernel::RetryClassification::Framework,
+                        finstack_ai_kernel::Duration::from_millis(1),
+                        "fixture-policy-v1",
+                    )
+                    .expect("directive"),
+                )),
+                ..StageFold::default()
+            },
+        ] {
+            let error = tool_batch_policy(&fold)
+                .expect_err("a BeforeToolBatch fold has nowhere to land this");
+            assert!(matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == crate::middleware_driver::MIDDLEWARE_STAGE_UNLANDABLE));
+        }
+    }
+
+    #[test]
+    fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
+        let coordinator = accepted_coordinator(RunLimits::empty());
+        let driver = driver_for(
+            "fixture.prepare-only",
+            Stage::PrepareContext,
+            StageOutcome::AddContext(Arc::from([item("never-runs")])),
+        );
+        let cursor = StageCursor {
+            cycle: 0,
+            stage: Stage::BeforeToolBatch,
+        };
+
+        for driver in [None, Some(&driver)] {
+            let policy = block_on(run_tool_batch_chain(&coordinator, driver, cursor, &[]))
+                .expect("passthrough");
+            assert_eq!(policy, ToolBatchPolicy::Unchanged);
+        }
     }
 
     // ---- decide_limit interception ---------------------------------------

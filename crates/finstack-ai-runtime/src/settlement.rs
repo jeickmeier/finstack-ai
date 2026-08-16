@@ -1,5 +1,6 @@
 //! Shared commit-settlement helpers for native and host-driven run owners.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,22 +17,24 @@ use finstack_ai_kernel::{
     OutputConfiguration, OutputSpec, ProviderIds, RawJson, RecordExternalCommandRejected, RecordId,
     RecordTag, ReducerStageOutcome, RequestInteraction, RetrySafety, RunPhase, Stage, StageCursor,
     StageSettled, TerminalCandidate, TextBlock, ToolBatchContinuation, ToolBatchSettled,
-    ToolBatchTag, ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy,
+    ToolBatchTag, ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolId,
     ToolSettlement, TransitionEnv, TurnTag, Version,
 };
 
 use crate::coordinator::{
     CommitCoordinator, CommitCoordinatorError, ModelDispatchSeed, ToolDispatchSeed,
 };
+use crate::middleware_driver::StageDriver;
 use crate::run_types::RunHandleError;
+use crate::stage_settlement::{ToolBatchPolicy, run_tool_batch_chain, submit_folded};
 use crate::tool::AssembledToolTerminal;
 use crate::{
     CancellationSignal, Clock, IdGenerationError, InteractionResumeAction,
     LockedModelContextProfile, Model, ModelContextProfileOverride, ModelDeferral, ModelError,
     ModelProgress, ModelReconcileResult, ModelRequestDraft, ModelResponse, ModelResumeAction,
     ModelTerminal, PendingToolEffect, RandomSource, ReconcileContext, ResolvedToolCatalog,
-    RunCallContext, ToolCatalogPlan, ToolDeferral, ToolError, ToolProgress, ToolReconcileResult,
-    ToolResult, ToolResumeAction, UuidV7Generator, interaction_resume_action,
+    RunCallContext, ToolCatalogPlan, ToolDeferral, ToolError, ToolPolicyDecision, ToolProgress,
+    ToolReconcileResult, ToolResult, ToolResumeAction, UuidV7Generator, interaction_resume_action,
     map_model_reconcile_result, map_tool_reconcile_result, model_resume_action,
     model_retry_allowed, normalize_tool_result, resolve_model_context_profile, tool_resume_action,
     tool_retry_allowed,
@@ -129,10 +132,39 @@ impl RandomSource for ProgressRandom {
 }
 
 // --- extracted from task.rs 1088-1161 ---
+/// Settle `Stage::BeforeToolBatch` when the run is parked at that cursor.
+///
+/// The one facade stage the facade itself never settles, and therefore the one
+/// stage whose middleware chain does not run at the `submit_command` choke
+/// point. Its chain runs here instead, between collecting the source
+/// `ToolCallBlock`s and deciding their plans, so the folded `FilterTools` set
+/// feeds `ResolvedToolCatalog::decide_plan`'s existing `middleware` parameter.
+/// The batch still settles exactly once, as the `ToolBatchPrepared` built from
+/// the resulting plans.
+///
+/// # Fail closed
+///
+/// The cancellation and run-deadline guards precede the chain and return
+/// before it: a run that is already cancelled or already out of budget must
+/// not spend more of either on middleware.
+///
+/// `now` is read once, before the chain runs, and is the `now` every
+/// settlement below uses — so a slow chain cannot move the run's semantic
+/// transition instant, and a chain that runs past the deadline still settles
+/// against the instant at which the batch was found ready. This mirrors
+/// `stage_settlement::settle_facade_stage` keeping the facade's `env.now`
+/// across its own fold.
+///
+/// # Coverage
+///
+/// The plan array is checked against the source calls by
+/// [`assert_plan_coverage`] before submission. A denied call is a
+/// [`ToolCallPlan::SyntheticClosure`] in place, never a shorter batch.
 pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
     sources: &SettlementSources<C, R>,
+    driver: Option<&StageDriver>,
 ) -> Result<bool, RunHandleError> {
     if coordinator.state().phase != Some(RunPhase::BeforeToolBatch) {
         return Ok(false);
@@ -181,26 +213,94 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         .and_then(finstack_ai_kernel::RunAccepted::effective_deadline);
     let granted = approval_released_for_current_cursor(state);
     let refused = approval_refused_for_current_cursor(state);
-    let mut plans = Vec::with_capacity(calls.len());
-    for call in calls {
-        match catalog.decide_plan(call, deadline, None, granted, refused) {
-            ToolCatalogPlan::Ready(plan) => plans.push(plan),
-            ToolCatalogPlan::RequireApproval => {
-                request_approval_interaction(coordinator, sources).await?;
-                return Ok(false);
-            }
-        }
-    }
     let continuation = if state.final_result.is_some() {
         ToolBatchContinuation::Finalize
     } else {
         ToolBatchContinuation::ContinueModel
     };
+    let cursor = StageCursor {
+        cycle: state.cycle,
+        stage: Stage::BeforeToolBatch,
+    };
+    let retained = match run_tool_batch_chain(coordinator, driver, cursor, &calls).await? {
+        ToolBatchPolicy::Unchanged => None,
+        ToolBatchPolicy::Retain(retained) => Some(retained),
+        ToolBatchPolicy::Fail(descriptor) => {
+            settle_tool_batch_failure(coordinator, sources, now, cursor, *descriptor).await?;
+            return Ok(false);
+        }
+    };
+    let plans = match plan_source_calls(
+        catalog,
+        calls,
+        deadline,
+        retained.as_ref(),
+        granted,
+        refused,
+    )? {
+        PlannedBatch::Ready(plans) => plans,
+        PlannedBatch::ApprovalRequired => {
+            request_approval_interaction(coordinator, sources).await?;
+            return Ok(false);
+        }
+    };
+    submit_tool_batch_opening(coordinator, sources, now, cursor, plans, continuation).await
+}
+
+/// The planning loop's two outcomes for one batch.
+enum PlannedBatch {
+    /// One plan per source call, in source order.
+    Ready(Vec<ToolCallPlan>),
+    /// A call needs durable approval evidence the run does not have yet, so
+    /// no batch is planned at this cursor.
+    ApprovalRequired,
+}
+
+/// Decide one plan per source call, then check the coverage invariant.
+///
+/// `retained` is the folded `BeforeToolBatch` `FilterTools` narrowing, or
+/// `None` when the chain did not narrow anything — see
+/// [`middleware_tool_policy`].
+///
+/// # Errors
+///
+/// Returns [`TOOL_PLAN_COVERAGE_MISMATCH`] when the plans do not cover the
+/// source calls exactly once each, in source order.
+fn plan_source_calls(
+    catalog: &ResolvedToolCatalog,
+    calls: Vec<ToolCallBlock>,
+    deadline: Option<finstack_ai_kernel::Timestamp>,
+    retained: Option<&BTreeSet<ToolId>>,
+    granted: bool,
+    refused: bool,
+) -> Result<PlannedBatch, RunHandleError> {
+    let source_call_ids = calls
+        .iter()
+        .map(|call| *call.tool_call_id())
+        .collect::<Vec<_>>();
+    let mut plans = Vec::with_capacity(calls.len());
+    for call in calls {
+        let policy = middleware_tool_policy(catalog, &call, retained);
+        match catalog.decide_plan(call, deadline, policy, granted, refused) {
+            ToolCatalogPlan::Ready(plan) => plans.push(plan),
+            ToolCatalogPlan::RequireApproval => return Ok(PlannedBatch::ApprovalRequired),
+        }
+    }
+    assert_plan_coverage(&plans, &source_call_ids)?;
+    Ok(PlannedBatch::Ready(plans))
+}
+
+/// Settle the cursor as `ToolBatchPrepared`, opening the batch.
+async fn submit_tool_batch_opening<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    now: finstack_ai_kernel::Timestamp,
+    cursor: StageCursor,
+    plans: Vec<ToolCallPlan>,
+    continuation: ToolBatchContinuation,
+) -> Result<bool, RunHandleError> {
     let input = KernelInput::StageSettled(StageSettled {
-        cursor: StageCursor {
-            cycle: state.cycle,
-            stage: Stage::BeforeToolBatch,
-        },
+        cursor,
         outcome: ReducerStageOutcome::ToolBatchPrepared {
             calls: plans.clone().into(),
             continuation,
@@ -223,6 +323,91 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
         return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(true)
+}
+
+/// Settle the cursor as `Fail` when the `BeforeToolBatch` chain fails the
+/// stage, so no batch opens.
+///
+/// `Fail` is admissible at `BeforeToolBatch` (`decide.rs:1165-1177`) and
+/// normalizes the stage as failed, driving the run to `BeforeFinalize` with
+/// the component's own descriptor as the terminal candidate. Allocation goes
+/// through [`submit_folded`], not [`stage_allocation`] directly, because a
+/// middleware-authored outcome can itself be the input that crosses a run
+/// limit and flips the kernel to `decide_limit`'s fixed id requirement.
+async fn settle_tool_batch_failure<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    now: finstack_ai_kernel::Timestamp,
+    cursor: StageCursor,
+    descriptor: ErrorDescriptor,
+) -> Result<(), RunHandleError> {
+    let outcome = ReducerStageOutcome::Fail(descriptor);
+    let committed = submit_folded(coordinator, sources, now, cursor, outcome).await?;
+    if let Some(fault) = committed.fault {
+        return Err(RunHandleError::Faulted { code: fault.code });
+    }
+    Ok(())
+}
+
+/// The planned batch does not cover every source `ToolCallBlock` exactly once,
+/// in source order.
+const TOOL_PLAN_COVERAGE_MISMATCH: &str = "tool_plan_coverage_mismatch";
+
+/// Translate the folded `BeforeToolBatch` `FilterTools` set into
+/// `ResolvedToolCatalog::decide_plan`'s per-call `middleware` argument.
+///
+/// Returns `None` — literally the argument `decide_plan` received before this
+/// hook existed — both when no component narrowed the tool set and when this
+/// call's tool survived the narrowing, so a run whose chain retains everything
+/// plans byte for byte like a run with no chain at all. (`Some(Allow)` would
+/// be equivalent under `decide_plan`'s `max`, but `None` is identical.)
+///
+/// A call whose tool is absent from the retained set is denied. An
+/// unregistered tool name is denied too, since it has no [`ToolId`] that could
+/// be retained — a distinction without a difference in practice, because
+/// `decide_plan` closes an unknown tool synthetically before it ever consults
+/// this argument.
+fn middleware_tool_policy(
+    catalog: &ResolvedToolCatalog,
+    call: &ToolCallBlock,
+    retained: Option<&BTreeSet<ToolId>>,
+) -> Option<ToolPolicyDecision> {
+    let retained = retained?;
+    let survives = catalog
+        .by_name(call.tool_name())
+        .is_some_and(|tool| retained.contains(&tool.spec.id));
+    (!survives).then_some(ToolPolicyDecision::Deny)
+}
+
+/// Enforce the plan-coverage invariant: the `ToolBatchPrepared` plan array
+/// covers every source `ToolCallBlock` exactly once, in source order.
+///
+/// A middleware-denied call is present as a
+/// [`ToolCallPlan::SyntheticClosure`], never absent — dropping it would settle
+/// a batch the model never asked for and leave the denied call unanswered.
+/// The check is positional on [`ToolCallId`] rather than a length comparison,
+/// because a length check alone would accept a reordered or duplicated plan
+/// array just as happily as the correct one.
+///
+/// # Errors
+///
+/// Returns [`TOOL_PLAN_COVERAGE_MISMATCH`] rather than submitting a batch that
+/// does not answer every source call.
+fn assert_plan_coverage(
+    plans: &[ToolCallPlan],
+    source_call_ids: &[ToolCallId],
+) -> Result<(), RunHandleError> {
+    if plans.len() == source_call_ids.len()
+        && plans
+            .iter()
+            .zip(source_call_ids)
+            .all(|(plan, source)| plan.call().tool_call_id() == source)
+    {
+        return Ok(());
+    }
+    Err(RunHandleError::ToolSettlement {
+        code: TOOL_PLAN_COVERAGE_MISMATCH,
+    })
 }
 
 /// The outcome `fail_closed_on_run_deadline` submits at `Stage::BeforeToolBatch`.
@@ -2435,8 +2620,12 @@ mod tests {
     }
 
     fn test_sources() -> SettlementSources<ExternalClock, CountingRandom> {
+        sources_at(1_000)
+    }
+
+    fn sources_at(now_ms: i64) -> SettlementSources<ExternalClock, CountingRandom> {
         SettlementSources::try_new(
-            ExternalClock::new(fixed_timestamp(1_000)),
+            ExternalClock::new(fixed_timestamp(now_ms)),
             CountingRandom::default(),
         )
         .expect("sources")
@@ -3078,5 +3267,850 @@ mod tests {
                 },
             }
         }
+    }
+
+    // ---- BeforeToolBatch middleware --------------------------------------
+    //
+    // The one facade stage that never settles through `submit_command`:
+    // `prepare_tool_batch_if_ready` settles it, so its chain runs here and
+    // lands through `decide_plan`'s `middleware` parameter rather than as an
+    // aggregate `ReducerStageOutcome`.
+
+    use std::collections::BTreeMap;
+    use std::future::Future;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::{Context as TaskContext, Poll, Waker};
+
+    use finstack_ai_kernel::{
+        AcceptRun, AppendRequest, AssignedToolCall, CommittedBatch, ComponentInvocation,
+        EffectOutputContract, InvocationRecovery, RecordBody, RecordDraft, RecordEnvelope,
+        ToolBatchOpened, ToolExecutionMode, ToolId,
+    };
+
+    use crate::middleware::{
+        Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+        MiddlewareRegistration, MiddlewareRole, OrderTier, ResolvedMiddlewareChain, StageInput,
+        StageMask, StageOutcome,
+    };
+    use crate::middleware_driver::StageDriver;
+    use crate::{
+        ApprovalMetadata, ApprovalRequirement, JournalStore, JsonSchemaToolValidatorCompiler,
+        LoadRequest, LoadedSession, PortFuture, SideEffectClass, SnapshotReceipt, SnapshotRequest,
+        StoreError, StoreHealth, ToolCallContext, ToolEventStream, ToolExecutionPolicy,
+        ToolPolicyDecision, ToolSpec, ToolsetRegistration,
+    };
+
+    fn block_on<T>(future: impl Future<Output = T>) -> T {
+        let mut context = TaskContext::from_waker(Waker::noop());
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "mirrors AllocatedIds' own bags")]
+    fn env(
+        now: i64,
+        records: &[u64],
+        events: &[u64],
+        effects: &[u64],
+        turns: &[u64],
+        model_requests: &[u64],
+        messages: &[u64],
+        append_batch: u64,
+    ) -> TransitionEnv {
+        TransitionEnv {
+            now: fixed_timestamp(now),
+            ids: AllocatedIds::try_new(
+                records.iter().copied().map(fixed_id).collect(),
+                events.iter().copied().map(fixed_id).collect(),
+                effects.iter().copied().map(fixed_id).collect(),
+                Vec::new(),
+                messages.iter().copied().map(fixed_id).collect(),
+                turns.iter().copied().map(fixed_id).collect(),
+                model_requests.iter().copied().map(fixed_id).collect(),
+                Vec::new(),
+                Vec::new(),
+                vec![fixed_id(append_batch)],
+                Vec::new(),
+            )
+            .expect("allocated ids"),
+        }
+    }
+
+    fn model_settled_env(now: i64, message: u64, tool_calls: &[u64]) -> TransitionEnv {
+        TransitionEnv {
+            now: fixed_timestamp(now),
+            ids: AllocatedIds::try_new(
+                vec![fixed_id(607), fixed_id(608)],
+                vec![fixed_id(603), fixed_id(604)],
+                Vec::new(),
+                Vec::new(),
+                vec![fixed_id(message)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                tool_calls.iter().copied().map(fixed_id).collect(),
+                vec![fixed_id(605)],
+                Vec::new(),
+            )
+            .expect("model settled ids"),
+        }
+    }
+
+    // -- in-memory journal --------------------------------------------------
+
+    struct MemoryStore {
+        inner: Mutex<MemoryInner>,
+    }
+
+    #[derive(Default)]
+    struct MemoryInner {
+        batches: Vec<CommittedBatch>,
+        drafts: Vec<RecordDraft>,
+    }
+
+    impl MemoryStore {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(MemoryInner::default()),
+            }
+        }
+
+        /// The single durable `ToolBatchOpened`, i.e. the kernel's own record
+        /// of the complete source-ordered assigned plan. Read from the journal
+        /// rather than from `state.active_tool_batch` because a batch of
+        /// nothing but synthetic closures opens and closes in one transition,
+        /// leaving no active batch behind to inspect.
+        fn opened_tool_batch(&self) -> Option<ToolBatchOpened> {
+            self.inner
+                .lock()
+                .expect("lock")
+                .drafts
+                .iter()
+                .find_map(|draft| match draft.body() {
+                    RecordBody::ToolBatchOpened(opened) => Some(opened.clone()),
+                    _ => None,
+                })
+        }
+    }
+
+    fn commit_request(request: &AppendRequest) -> CommittedBatch {
+        let records = request
+            .records()
+            .iter()
+            .enumerate()
+            .map(|(offset, draft)| {
+                let sequence = request.expected_sequence() + u64::try_from(offset).expect("offset");
+                RecordEnvelope::try_new(
+                    draft.format_version(),
+                    draft.kind_version(),
+                    draft.record_id(),
+                    draft.session_id(),
+                    draft.lane_id(),
+                    draft.run_id(),
+                    sequence,
+                    draft.timestamp(),
+                    None,
+                    Digest::raw_json(format!("payload-{sequence}").as_bytes()),
+                    None,
+                    Digest::raw_json(format!("checksum-{sequence}").as_bytes()),
+                    draft.derived_event_ids().to_vec(),
+                    draft.body().clone(),
+                )
+                .expect("envelope")
+            })
+            .collect::<Vec<_>>();
+        CommittedBatch::try_new(
+            request.batch_id(),
+            request.expected_sequence(),
+            request.expected_sequence() + u64::try_from(records.len()).expect("count") - 1,
+            records,
+        )
+        .expect("committed batch")
+    }
+
+    impl JournalStore for MemoryStore {
+        fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
+            let committed = commit_request(&request);
+            let mut inner = self.inner.lock().expect("lock");
+            inner.drafts.extend(request.records().iter().cloned());
+            inner.batches.push(committed.clone());
+            Box::pin(async move { Ok(committed) })
+        }
+
+        fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
+            let inner = self.inner.lock().expect("lock");
+            let batches = inner.batches.clone();
+            let head_sequence = batches.last().map_or(0, |batch| batch.last_sequence);
+            Box::pin(async move {
+                Ok(LoadedSession {
+                    session_id: request.session_id,
+                    head_sequence,
+                    head_checksum: batches
+                        .last()
+                        .and_then(|batch| batch.records.last().map(RecordEnvelope::checksum)),
+                    metadata: Metadata::empty(),
+                    committed_batches: batches.into(),
+                    snapshot: None,
+                    accelerated: None,
+                })
+            })
+        }
+
+        fn write_snapshot(
+            &self,
+            _request: SnapshotRequest,
+        ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+            Box::pin(async {
+                Err(StoreError::Unavailable {
+                    reason_code: "not_used",
+                })
+            })
+        }
+
+        fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
+            Box::pin(async {
+                Ok(StoreHealth {
+                    ready: true,
+                    durable: false,
+                    detail: Arc::from("test"),
+                })
+            })
+        }
+    }
+
+    /// These tests stop at batch opening, so nothing is ever executed — but a
+    /// coordinator with no dispatcher at all faults the moment the kernel
+    /// commits an effect, which would mask the behaviour under test.
+    struct NoopDispatcher;
+
+    impl crate::coordinator::PostCommitDispatcher for NoopDispatcher {
+        fn dispatch(
+            &self,
+            _dispatch: crate::coordinator::RuntimeDispatch,
+        ) -> PortFuture<Result<(), crate::coordinator::DispatchError>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    // -- tool catalog -------------------------------------------------------
+
+    const TOOL_NAMES: [&str; 3] = ["alpha", "beta", "gamma"];
+
+    fn tool_id(name: &str) -> ToolId {
+        ToolId::parse(format!("finstack.tools.{name}")).expect("tool id")
+    }
+
+    fn tool_spec(name: &str) -> ToolSpec {
+        ToolSpec {
+            id: tool_id(name),
+            model_name: Arc::from(name),
+            title: Arc::from(name),
+            description: Arc::from("fixture tool"),
+            input_schema: RawJson::parse(br#"{"type":"object"}"#).expect("input schema"),
+            output_schema: None,
+            execution: ToolExecutionMode::Sequential,
+            side_effect: SideEffectClass::ReadOnly,
+            retry_safety: RetrySafety::SafeToRetry,
+            approval: ApprovalMetadata {
+                requirement: ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+            max_result_bytes: 4_096,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    /// A registered but never-dispatched toolset: these tests stop at batch
+    /// opening, which is where the `BeforeToolBatch` decision lands.
+    struct FixtureToolset {
+        specs: Arc<[ToolSpec]>,
+    }
+
+    impl crate::Toolset for FixtureToolset {
+        fn descriptor(&self) -> crate::ToolsetDescriptor {
+            crate::ToolsetDescriptor {
+                name: Arc::from("fixture.toolset"),
+                metadata: Metadata::empty(),
+            }
+        }
+
+        fn tools(&self) -> Arc<[ToolSpec]> {
+            Arc::clone(&self.specs)
+        }
+
+        fn call(
+            &self,
+            _ctx: ToolCallContext,
+            _call: finstack_ai_kernel::ValidatedToolCall,
+        ) -> PortFuture<Result<ToolEventStream, ToolError>> {
+            Box::pin(async {
+                Err(ToolError::stable(
+                    "fixture_tool_never_dispatched",
+                    "the fixture stops at batch opening",
+                ))
+            })
+        }
+    }
+
+    fn catalog() -> ResolvedToolCatalog {
+        let specs: Arc<[ToolSpec]> = TOOL_NAMES.iter().copied().map(tool_spec).collect();
+        let policies = specs
+            .iter()
+            .map(|spec| {
+                (
+                    spec.id.clone(),
+                    ToolExecutionPolicy {
+                        failure_policy: ToolFailurePolicy::ReturnToModel,
+                        approval: ToolPolicyDecision::Allow,
+                        max_concurrency: 1,
+                    },
+                )
+            })
+            .collect();
+        ResolvedToolCatalog::try_new(
+            [ToolsetRegistration {
+                toolset: Arc::new(FixtureToolset { specs }),
+                policies,
+                components: BTreeMap::new(),
+            }],
+            &BTreeMap::new(),
+            &JsonSchemaToolValidatorCompiler,
+        )
+        .expect("catalog")
+    }
+
+    // -- middleware ---------------------------------------------------------
+
+    fn descriptor(component: &str, stage: Stage) -> MiddlewareDescriptor {
+        MiddlewareDescriptor {
+            invocation: ComponentInvocation {
+                component: ComponentId::parse(component).expect("component"),
+                version: Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+                configuration_digest: Digest::raw_json(b"{}"),
+                recovery: InvocationRecovery::RecomputeSafe,
+            },
+            stages: StageMask::from_stages([stage]),
+            order: MiddlewareOrder {
+                tier: OrderTier::Standard,
+                priority: 0,
+                before: Arc::from([]),
+                after: Arc::from([]),
+            },
+            role: MiddlewareRole::Standard,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    /// A component that returns one fixed outcome and counts its invocations,
+    /// so a test can tell "ran and contributed nothing" from "never ran".
+    struct Fixed {
+        descriptor: MiddlewareDescriptor,
+        outcome: StageOutcome,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Middleware for Fixed {
+        fn descriptor(&self) -> MiddlewareDescriptor {
+            self.descriptor.clone()
+        }
+
+        fn invoke(
+            &self,
+            _ctx: MiddlewareContext,
+            _input: StageInput,
+        ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let outcome = self.outcome.clone();
+            Box::pin(async move { Ok(outcome) })
+        }
+    }
+
+    fn driver_for(stage: Stage, outcome: StageOutcome, calls: &Arc<AtomicUsize>) -> StageDriver {
+        let middleware: Arc<dyn Middleware> = Arc::new(Fixed {
+            descriptor: descriptor("fixture.tool-policy", stage),
+            outcome,
+            calls: Arc::clone(calls),
+        });
+        StageDriver::new(
+            Arc::new(
+                ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                    .expect("chain"),
+            ),
+            CancellationSignal::new(),
+        )
+    }
+
+    fn retain(names: &[&str]) -> StageOutcome {
+        StageOutcome::FilterTools(names.iter().copied().map(tool_id).collect())
+    }
+
+    // -- driving a coordinator to BeforeToolBatch ---------------------------
+
+    fn tool_call(ordinal: u64, name: &str) -> ToolCallBlock {
+        ToolCallBlock::try_new(
+            fixed_id(ordinal),
+            name,
+            RawJson::parse(b"{}").expect("arguments"),
+        )
+        .expect("tool call")
+    }
+
+    fn model_output_contract() -> EffectOutputContract {
+        EffectOutputContract {
+            kind: EffectOutputKind::ModelResponse,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br#"{"type":"model_response"}"#),
+        }
+    }
+
+    /// Drive a fresh coordinator all the way to `RunPhase::BeforeToolBatch`
+    /// with an assistant message carrying one tool call per name in `names`.
+    fn coordinator_at_before_tool_batch(
+        store: &Arc<MemoryStore>,
+        names: &[&str],
+        deadline: Option<Timestamp>,
+    ) -> CommitCoordinator {
+        let mut coordinator = CommitCoordinator::new(Arc::clone(store) as Arc<dyn JournalStore>);
+        coordinator.install_dispatcher(Arc::new(NoopDispatcher));
+        block_on(coordinator.submit(
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            KernelInput::AcceptRun(AcceptRun {
+                session_id: fixed_id::<SessionTag>(1),
+                lane_id: fixed_id::<LaneTag>(2),
+                accepted: acceptance(deadline),
+            }),
+        ))
+        .expect("accept");
+        block_on(coordinator.submit(
+            env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+            KernelInput::StageSettled(StageSettled {
+                cursor: StageCursor {
+                    cycle: 0,
+                    stage: Stage::BeforeRun,
+                },
+                outcome: ReducerStageOutcome::Continue,
+            }),
+        ))
+        .expect("before run");
+        let user = Message::try_new(
+            fixed_id(4),
+            MessageRole::User,
+            vec![ContentBlock::Text(
+                TextBlock::try_new("call the tools").expect("text"),
+            )],
+            fixed_timestamp(900),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("user message");
+        block_on(coordinator.submit(
+            env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
+            KernelInput::StageSettled(StageSettled {
+                cursor: StageCursor {
+                    cycle: 0,
+                    stage: Stage::PrepareContext,
+                },
+                outcome: ReducerStageOutcome::ContextPrepared {
+                    messages: Arc::from([user]),
+                },
+            }),
+        ))
+        .expect("context");
+        block_on(coordinator.submit(
+            env(1_300, &[5, 6], &[2], &[103], &[], &[102], &[], 104),
+            KernelInput::StageSettled(StageSettled {
+                cursor: StageCursor {
+                    cycle: 0,
+                    stage: Stage::BeforeModel,
+                },
+                outcome: ReducerStageOutcome::ModelRequestPrepared {
+                    request: RawJson::parse(br#"{"messages":[]}"#).expect("request"),
+                    component: None,
+                    output_contract: model_output_contract(),
+                    retry_safety: RetrySafety::SafeToRetry,
+                    deadline: None,
+                },
+            }),
+        ))
+        .expect("model request");
+        settle_model_with_tool_calls(&mut coordinator, names);
+        block_on(coordinator.submit(
+            env(1_500, &[609], &[], &[], &[], &[], &[], 606),
+            KernelInput::StageSettled(StageSettled {
+                cursor: StageCursor {
+                    cycle: 0,
+                    stage: Stage::AfterModel,
+                },
+                outcome: ReducerStageOutcome::Continue,
+            }),
+        ))
+        .expect("after model");
+        assert_eq!(
+            coordinator.state().phase,
+            Some(RunPhase::BeforeToolBatch),
+            "the fixture must park the run exactly at the BeforeToolBatch cursor"
+        );
+        coordinator
+    }
+
+    /// Settle the outstanding model effect with an assistant message carrying
+    /// one tool call per name, ordinals 301, 302, ... in source order.
+    fn settle_model_with_tool_calls(coordinator: &mut CommitCoordinator, names: &[&str]) {
+        let pending = coordinator
+            .state()
+            .pending_model_effect
+            .as_ref()
+            .expect("pending model effect")
+            .clone();
+        let call_ordinals = (0..names.len())
+            .map(|index| 301 + u64::try_from(index).expect("index"))
+            .collect::<Vec<_>>();
+        let mut content = vec![ContentBlock::Text(
+            TextBlock::try_new("calling").expect("text"),
+        )];
+        content.extend(
+            names
+                .iter()
+                .zip(&call_ordinals)
+                .map(|(name, ordinal)| ContentBlock::ToolCall(tool_call(*ordinal, name))),
+        );
+        let assistant = Message::try_new(
+            fixed_id(617),
+            MessageRole::Assistant,
+            content,
+            fixed_timestamp(1_400),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("assistant message");
+        let completion = EffectCompleted::try_new(
+            pending.requested.effect_id(),
+            model_output_contract(),
+            RawJson::parse(br#"{"text":"calling"}"#).expect("output"),
+            None,
+            Vec::new(),
+            ProviderIds::empty(),
+            Some("cmpl-tool"),
+            None,
+        )
+        .expect("completion");
+        block_on(coordinator.submit(
+            model_settled_env(1_400, 617, &call_ordinals),
+            KernelInput::ModelSettled(ModelSettled {
+                turn_id: pending.turn_id,
+                model_request_id: pending.model_request_id,
+                outcome: ModelSettlement::Completed {
+                    completion,
+                    assistant_message: assistant,
+                },
+            }),
+        ))
+        .expect("model settled");
+    }
+
+    /// Drive to `BeforeToolBatch` and run `prepare_tool_batch_if_ready` with
+    /// `driver`, returning the durable source-ordered plan the kernel opened.
+    fn prepare_with(
+        names: &[&str],
+        driver: Option<&StageDriver>,
+    ) -> (Vec<AssignedToolCall>, CommitCoordinator, Arc<MemoryStore>) {
+        let store = Arc::new(MemoryStore::new());
+        let mut coordinator = coordinator_at_before_tool_batch(&store, names, None);
+        let sources = sources_at(1_600);
+        block_on(prepare_tool_batch_if_ready(
+            &mut coordinator,
+            &catalog(),
+            &sources,
+            driver,
+        ))
+        .expect("tool batch preparation");
+        let plans = store
+            .opened_tool_batch()
+            .expect("a tool batch must have been opened")
+            .calls
+            .to_vec();
+        (plans, coordinator, store)
+    }
+
+    fn planned_call_ids(plans: &[AssignedToolCall]) -> Vec<ToolCallId> {
+        plans
+            .iter()
+            .map(|assigned| *assigned.plan.call().tool_call_id())
+            .collect()
+    }
+
+    fn source_call_ids(count: usize) -> Vec<ToolCallId> {
+        (0..count)
+            .map(|index| fixed_id(301 + u64::try_from(index).expect("index")))
+            .collect()
+    }
+
+    // -- passthrough --------------------------------------------------------
+
+    #[test]
+    fn no_driver_plans_every_source_call_for_execution() {
+        let (plans, _coordinator, _store) = prepare_with(&TOOL_NAMES, None);
+        assert_eq!(plans.len(), 3);
+        assert!(
+            plans
+                .iter()
+                .all(|assigned| matches!(assigned.plan, ToolCallPlan::Execute(_))),
+            "with no chain every registered, schema-valid call must execute: {plans:?}"
+        );
+    }
+
+    #[test]
+    fn a_chain_with_no_before_tool_batch_component_is_passthrough() {
+        // The facade installs its chain unconditionally, so the driver is
+        // almost always `Some`. Passthrough must key off `is_active`, and the
+        // resulting plan must be byte-identical to the no-driver one.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::AfterModel, retain(&[]), &calls);
+        let (with_driver, _coordinator, _store) = prepare_with(&TOOL_NAMES, Some(&driver));
+        let (without_driver, _c, _s) = prepare_with(&TOOL_NAMES, None);
+
+        assert_eq!(
+            with_driver, without_driver,
+            "an inactive stage must not perturb the opened plan"
+        );
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "no BeforeToolBatch component is registered, so none may run"
+        );
+    }
+
+    #[test]
+    fn an_identity_fold_leaves_the_plan_unchanged() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, StageOutcome::Continue, &calls);
+        let (with_driver, _coordinator, _store) = prepare_with(&TOOL_NAMES, Some(&driver));
+        let (without_driver, _c, _s) = prepare_with(&TOOL_NAMES, None);
+
+        assert_eq!(calls.load(Ordering::Relaxed), 1, "the component must run");
+        assert_eq!(
+            with_driver, without_driver,
+            "an all-Continue chain must not perturb the opened plan"
+        );
+    }
+
+    // -- filtering ----------------------------------------------------------
+
+    #[test]
+    fn filtered_tool_call_becomes_a_synthetic_closure() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, retain(&[]), &calls);
+        let (plans, _coordinator, _store) = prepare_with(&["alpha"], Some(&driver));
+
+        assert_eq!(plans.len(), 1, "every source call must appear exactly once");
+        assert!(
+            matches!(plans[0].plan, ToolCallPlan::SyntheticClosure(_)),
+            "a denied call must be a synthetic closure, got {:?}",
+            plans[0].plan
+        );
+        assert_eq!(planned_call_ids(&plans), source_call_ids(1));
+    }
+
+    #[test]
+    fn fully_filtered_batch_still_commits_every_source_call() {
+        // `prepare_tool_batch_if_ready` guards on the source `calls` being
+        // empty, never on the plans, so denying every call still commits a
+        // batch of all-SyntheticClosure plans rather than short-circuiting.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, retain(&[]), &calls);
+        let (plans, coordinator, _store) = prepare_with(&TOOL_NAMES, Some(&driver));
+
+        assert_eq!(plans.len(), 3);
+        assert!(
+            plans
+                .iter()
+                .all(|assigned| matches!(assigned.plan, ToolCallPlan::SyntheticClosure(_))),
+            "every denied call must still be planned: {plans:?}"
+        );
+        assert_eq!(
+            planned_call_ids(&plans),
+            source_call_ids(3),
+            "coverage is positional: same calls, same order, no duplicates"
+        );
+        assert!(
+            coordinator.state().terminal.is_none(),
+            "a fully filtered batch is not a run failure: {:?}",
+            coordinator.state().terminal
+        );
+    }
+
+    #[test]
+    fn partial_filter_denies_only_the_calls_outside_the_retained_set() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, retain(&["beta"]), &calls);
+        let (plans, _coordinator, _store) = prepare_with(&TOOL_NAMES, Some(&driver));
+
+        let shapes = plans
+            .iter()
+            .map(|assigned| matches!(assigned.plan, ToolCallPlan::Execute(_)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shapes,
+            vec![false, true, false],
+            "only the retained tool may execute, and source order is preserved: {plans:?}"
+        );
+        assert_eq!(planned_call_ids(&plans), source_call_ids(3));
+    }
+
+    #[test]
+    fn source_order_survives_a_filter_that_denies_the_first_call() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, retain(&["gamma"]), &calls);
+        let (plans, _coordinator, _store) = prepare_with(&TOOL_NAMES, Some(&driver));
+
+        let shapes = plans
+            .iter()
+            .map(|assigned| matches!(assigned.plan, ToolCallPlan::Execute(_)))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shapes,
+            vec![false, false, true],
+            "denying the leading calls must not shift the surviving one forward: {plans:?}"
+        );
+        assert_eq!(
+            plans
+                .iter()
+                .map(|assigned| assigned.source_index)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(planned_call_ids(&plans), source_call_ids(3));
+    }
+
+    // -- the coverage invariant itself --------------------------------------
+
+    #[test]
+    fn plan_coverage_rejects_a_short_reordered_or_duplicated_plan_array() {
+        let alpha = tool_call(301, "alpha");
+        let beta = tool_call(302, "beta");
+        let plan = |call: &ToolCallBlock| {
+            ToolCallPlan::SyntheticClosure(finstack_ai_kernel::SyntheticToolClosure {
+                call: call.clone(),
+                execution: ToolExecutionMode::Sequential,
+                failure_policy: ToolFailurePolicy::ReturnToModel,
+                error: ErrorDescriptor::new(
+                    "tool_policy_denied",
+                    "denied",
+                    ErrorCategory::Validation,
+                    false,
+                )
+                .expect("descriptor"),
+            })
+        };
+        let source = vec![*alpha.tool_call_id(), *beta.tool_call_id()];
+
+        assert_plan_coverage(&[plan(&alpha), plan(&beta)], &source).expect("exact cover");
+        for (label, plans) in [
+            ("short", vec![plan(&alpha)]),
+            ("reordered", vec![plan(&beta), plan(&alpha)]),
+            ("duplicated", vec![plan(&alpha), plan(&alpha)]),
+            ("long", vec![plan(&alpha), plan(&beta), plan(&beta)]),
+        ] {
+            let Err(error) = assert_plan_coverage(&plans, &source) else {
+                panic!("a {label} plan array must be rejected");
+            };
+            assert!(
+                matches!(&error, RunHandleError::ToolSettlement { code }
+                    if *code == TOOL_PLAN_COVERAGE_MISMATCH),
+                "{label}: expected the reserved coverage code, got {error:?}"
+            );
+        }
+    }
+
+    // -- terminal folds and the deadline bypass -----------------------------
+
+    #[test]
+    fn a_middleware_failure_settles_the_stage_as_failed_instead_of_opening_a_batch() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(
+            Stage::BeforeToolBatch,
+            StageOutcome::Fail(Box::new(
+                ErrorDescriptor::new(
+                    "tool_batch_rejected",
+                    "fixture",
+                    ErrorCategory::Middleware,
+                    false,
+                )
+                .expect("descriptor"),
+            )),
+            &calls,
+        );
+        let store = Arc::new(MemoryStore::new());
+        let mut coordinator = coordinator_at_before_tool_batch(&store, &TOOL_NAMES, None);
+        let sources = sources_at(1_600);
+
+        let opened = block_on(prepare_tool_batch_if_ready(
+            &mut coordinator,
+            &catalog(),
+            &sources,
+            Some(&driver),
+        ))
+        .expect("the failed stage still settles");
+
+        assert!(!opened, "no batch may open when the chain fails the stage");
+        assert!(
+            store.opened_tool_batch().is_none(),
+            "no ToolBatchOpened record may exist"
+        );
+        // `Fail` at a non-`BeforeFinalize` stage (`decide.rs:1165-1177`)
+        // normalizes the stage as failed and drives the run to
+        // `BeforeFinalize` carrying the component's own descriptor; the
+        // facade's finalize settlement is what commits the terminal.
+        assert_eq!(coordinator.state().phase, Some(RunPhase::BeforeFinalize));
+        let Some(TerminalCandidate::Failed { error, .. }) =
+            coordinator.state().terminal_candidate.as_ref()
+        else {
+            panic!(
+                "the middleware Fail must become the terminal candidate: {:?}",
+                coordinator.state().terminal_candidate
+            );
+        };
+        assert_eq!(error.code.as_str(), "tool_batch_rejected");
+    }
+
+    #[test]
+    fn the_run_deadline_path_bypasses_the_chain_entirely() {
+        // Fail closed: a run already out of budget must not spend more of it
+        // on middleware.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let driver = driver_for(Stage::BeforeToolBatch, retain(&[]), &calls);
+        let store = Arc::new(MemoryStore::new());
+        let mut coordinator =
+            coordinator_at_before_tool_batch(&store, &TOOL_NAMES, Some(fixed_timestamp(1_550)));
+        let sources = sources_at(1_600);
+
+        let opened = block_on(prepare_tool_batch_if_ready(
+            &mut coordinator,
+            &catalog(),
+            &sources,
+            Some(&driver),
+        ))
+        .expect("the deadline path settles");
+
+        assert!(!opened);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "the deadline path must not invoke any middleware component"
+        );
+        assert!(store.opened_tool_batch().is_none());
     }
 }
