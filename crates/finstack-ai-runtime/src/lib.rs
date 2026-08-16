@@ -54,6 +54,7 @@ mod journal;
 #[cfg(feature = "native-tokio")]
 mod manual_drive;
 mod middleware;
+pub mod middleware_driver;
 mod model;
 mod observer;
 mod observer_export;

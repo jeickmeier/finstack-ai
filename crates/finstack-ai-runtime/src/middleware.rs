@@ -1154,7 +1154,7 @@ impl MiddlewareError {
             .map(|data| Self { data })
     }
 
-    fn stable(code: &'static str, message: &'static str) -> Self {
+    pub(crate) fn stable(code: &'static str, message: &'static str) -> Self {
         Self {
             data: PortErrorData::frozen(
                 code,
@@ -1506,7 +1506,10 @@ fn digest_value<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest,
     })
 }
 
-fn stage_name(stage: Stage) -> &'static str {
+/// Stable wire-format name for a stage, used to build the `PipelinePosition`
+/// stage string.
+#[must_use]
+pub fn stage_name(stage: Stage) -> &'static str {
     match stage {
         Stage::BeforeRun => "before_run",
         Stage::PrepareContext => "prepare_context",
@@ -1518,7 +1521,7 @@ fn stage_name(stage: Stage) -> &'static str {
     }
 }
 
-fn parse_stage(value: &str) -> Option<Stage> {
+pub(crate) fn parse_stage(value: &str) -> Option<Stage> {
     Some(match value {
         "before_run" => Stage::BeforeRun,
         "prepare_context" => Stage::PrepareContext,
