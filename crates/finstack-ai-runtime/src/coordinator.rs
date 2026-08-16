@@ -1685,8 +1685,7 @@ mod tests {
         BudgetReservationState, BudgetReserveRequest, ChildCoordinationIds, ChildPlacement,
         ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunLocator, ChildRunRequest,
         CompositionError, LoadedSession, OperationLocator, PortFuture, SnapshotReceipt,
-        SnapshotRequest, SnapshotSchedule, StateSnapshotRequest, StoreHealth,
-        child_relation_digest,
+        SnapshotRequest, StateSnapshotRequest, StoreHealth, child_relation_digest,
     };
 
     fn block_on<T>(future: impl Future<Output = T>) -> T {
@@ -1899,6 +1898,7 @@ mod tests {
         requests: BTreeMap<finstack_ai_kernel::AppendBatchId, AppendRequest>,
     }
 
+    #[cfg_attr(not(feature = "native-tokio"), allow(dead_code))]
     struct StallingSnapshotStore {
         inner: FakeStore,
     }
