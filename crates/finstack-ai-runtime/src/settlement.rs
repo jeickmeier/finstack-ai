@@ -6,17 +6,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use finstack_ai_kernel::{
     ActiveToolCallStatus, AllocatedIds, AppendBatchId, AppendBatchTag, AuthorizationEvidence,
     CancellationReconciledInput, CancellationRequestTag, ComponentId, ComponentRef, ContentBlock,
-    Digest, EffectCompleted, EffectDeferred, EffectFailed, EffectId, EffectInput, EffectTag,
-    ErrorCategory, EventId, EventTag, ExternalCommandKind, ExternalCommandRejected,
-    ExternalCommandTarget, ExternalEffectCompletedInput, ExternalEffectCompletion,
-    ExternalEffectOutcome, Id, IdTag, InteractionExpired, InteractionKind, InteractionRequest,
-    InteractionSettled, InteractionTag, InteractionTerminalOutcome, KernelError, KernelInput,
-    Message, MessageId, MessageRole, MessageTag, Metadata, ModelRef, ModelRequestTag, ModelSettled,
-    ModelSettlement, ProviderIds, RawJson, RecordExternalCommandRejected, RecordId, RecordTag,
-    ReducerStageOutcome, RequestInteraction, RetrySafety, RunPhase, Stage, StageCursor,
-    StageSettled, TextBlock, ToolBatchContinuation, ToolBatchSettled, ToolBatchTag, ToolCallBlock,
-    ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy, ToolSettlement, TransitionEnv,
-    TurnTag, Version,
+    Digest, EffectCompleted, EffectDeferred, EffectFailed, EffectId, EffectInput, EffectOutputKind,
+    EffectTag, ErrorCategory, ErrorDescriptor, EventId, EventTag, ExternalCommandKind,
+    ExternalCommandRejected, ExternalCommandTarget, ExternalEffectCompletedInput,
+    ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag, InteractionExpired,
+    InteractionKind, InteractionRequest, InteractionSettled, InteractionTag,
+    InteractionTerminalOutcome, KernelError, KernelInput, Message, MessageId, MessageRole,
+    MessageTag, Metadata, ModelRef, ModelRequestTag, ModelSettled, ModelSettlement,
+    OutputConfiguration, OutputSpec, ProviderIds, RawJson, RecordExternalCommandRejected, RecordId,
+    RecordTag, ReducerStageOutcome, RequestInteraction, RetrySafety, RunPhase, Stage, StageCursor,
+    StageSettled, TerminalCandidate, TextBlock, ToolBatchContinuation, ToolBatchSettled,
+    ToolBatchTag, ToolCallBlock, ToolCallId, ToolCallPlan, ToolCallTag, ToolFailurePolicy,
+    ToolSettlement, TransitionEnv, TurnTag, Version,
 };
 
 use crate::coordinator::{
@@ -224,34 +225,70 @@ pub(crate) async fn prepare_tool_batch_if_ready<C: Clock, R: RandomSource>(
     Ok(true)
 }
 
+/// The outcome `fail_closed_on_run_deadline` submits at `Stage::BeforeToolBatch`.
+///
+/// The kernel admits `ReducerStageOutcome::Continue` only at
+/// `BeforeRun`/`AfterModel`/`AfterToolBatch`
+/// (`finstack-ai-kernel/src/reducer/decide.rs:1107-1111`); `BeforeToolBatch` is
+/// not one of them. `Fail(_)`, by contrast, is admitted at every stage except
+/// `BeforeFinalize`'s own dedicated arm (`decide.rs:1165-1177`), which is
+/// exactly the fail-closed semantics this path needs: normalize the aggregate
+/// stage as failed and let the reducer drive the run toward termination,
+/// rather than pretending the (unopened) tool batch may continue.
+/// `ToolBatchPrepared` was not a candidate: it requires real `ToolCallPlan`s
+/// for calls that were never decided, and is validated by a wholly different
+/// kernel path (`tool::decide_batch_prepared`) that a deadline breach cannot
+/// satisfy.
+///
+/// In practice the kernel never even reaches the `stage_id_requirements` table
+/// for this submission (see `fail_closed_on_run_deadline`'s own comment on
+/// `decide_limit` precedence), so this choice is belt-and-suspenders rather
+/// than load-bearing today — but it keeps the submitted outcome honest and
+/// independently admissible if that precedence ever narrows.
+fn run_deadline_outcome() -> Result<ReducerStageOutcome, RunHandleError> {
+    Ok(ReducerStageOutcome::Fail(
+        ErrorDescriptor::new(
+            "deadline_exceeded",
+            "run deadline exceeded before the tool batch could open",
+            ErrorCategory::Deadline,
+            false,
+        )
+        .map_err(|_| RunHandleError::ToolSettlement {
+            code: "run_deadline_descriptor_invalid",
+        })?,
+    ))
+}
+
 async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
     now: finstack_ai_kernel::Timestamp,
 ) -> Result<(), RunHandleError> {
+    let cursor = StageCursor {
+        cycle: coordinator.state().cycle,
+        stage: Stage::BeforeToolBatch,
+    };
+    let stage_outcome = run_deadline_outcome()?;
     let input = KernelInput::StageSettled(StageSettled {
-        cursor: StageCursor {
-            cycle: coordinator.state().cycle,
-            stage: Stage::BeforeToolBatch,
-        },
-        outcome: ReducerStageOutcome::Continue,
+        cursor,
+        outcome: stage_outcome,
     });
-    let ids = AllocatedIds::try_new(
-        generate_tool_ids::<RecordTag, _, _>(2, sources)?,
-        generate_tool_ids::<EventTag, _, _>(2, sources)?,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
-        Vec::new(),
-    )
-    .map_err(|_| RunHandleError::ToolSettlement {
-        code: "deadline_ids_invalid",
-    })?;
+    // Deliberately NOT `stage_allocation`: this function's only caller
+    // (`prepare_tool_batch_if_ready`) invokes it exactly when
+    // `now >= accepted.effective_deadline()`, using the same `now`. Under that
+    // exact condition, `decide_limit` (`decide.rs:469-497`, guarded on
+    // `env.now >= deadline` at `decide.rs:660-661`) intercepts *every*
+    // non-`AcceptRun`/`InteractionSettled` input before `decide_stage` — and
+    // therefore `stage_id_requirements` — ever runs, and it always demands
+    // `IdRequirements::new(2, 2, 0, 0, 0, 0)` (`decide.rs:684`: one
+    // `LimitReached` record + one `RunFailed` record, one event each, whatever
+    // the submitted stage outcome is). Allocating via `stage_allocation`
+    // instead (which computes `(1, 0, 0, 0, 0, 0)` for `Fail` at
+    // `BeforeToolBatch`, per `stage_id_requirements`) under-allocates and the
+    // submission is rejected — confirmed by
+    // `run_deadline_fail_closed_is_admitted_by_the_kernel_at_before_tool_batch`
+    // below reproducing exactly this mismatch.
+    let ids = stage_ids(2, 2, 0, 0, 0, 0, sources)?;
     let env = TransitionEnv { now, ids };
     coordinator
         .classify(&env, input.clone())
@@ -266,6 +303,161 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
         return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
+}
+
+/// Allocate the exact [`AllocatedIds`] the kernel requires for `outcome` at
+/// `cursor`.
+///
+/// Mirrors `stage_id_requirements`
+/// (`finstack-ai-kernel/src/reducer/decide.rs:1101-1183`) arm for arm, so an
+/// inadmissible `(stage, outcome)` pair is rejected here — at allocation time —
+/// instead of later at `coordinator.classify`/`submit` with a less specific
+/// kernel error. `ReducerStageOutcome::ToolBatchPrepared` bypasses the tuple
+/// table entirely in the kernel (`decide_stage` routes it to
+/// `tool::decide_batch_prepared` before `stage_id_requirements` ever runs), so
+/// it is handled here the same way: delegated whole to
+/// [`allocate_tool_opening`], which already derives the exact counts from
+/// `tool_opening_counts`.
+///
+/// Not `fail_closed_on_run_deadline`: that call site always lands inside the
+/// kernel's `decide_limit` deadline-crossing precedence (see its own comment)
+/// and needs a different, fixed allocation this function does not compute.
+#[allow(
+    dead_code,
+    reason = "consumed by the middleware driver's stage fold (Tasks 6-7); exercised directly by this module's own tests until then"
+)]
+pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
+    state: &finstack_ai_kernel::KernelState,
+    cursor: StageCursor,
+    outcome: &ReducerStageOutcome,
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    if let ReducerStageOutcome::ToolBatchPrepared { calls, .. } = outcome {
+        return allocate_tool_opening(calls, sources);
+    }
+    match outcome {
+        // decide.rs:1107-1130 (plus the AfterModel JSON-schema guard).
+        ReducerStageOutcome::Continue
+            if matches!(
+                cursor.stage,
+                Stage::BeforeRun | Stage::AfterModel | Stage::AfterToolBatch
+            ) =>
+        {
+            if cursor.stage == Stage::AfterModel
+                && matches!(
+                    state.output_configuration,
+                    Some(OutputConfiguration {
+                        output: OutputSpec::JsonSchema { .. },
+                        ..
+                    })
+                )
+                && state.final_result.is_none()
+                && state.validation_failure.is_none()
+            {
+                return Err(RunHandleError::ToolSettlement {
+                    code: "stage_allocation_output_contract_pending",
+                });
+            }
+            stage_ids(1, 0, 0, 0, 0, 0, sources)
+        }
+        // decide.rs:1131-1133.
+        ReducerStageOutcome::ContextPrepared { .. } if cursor.stage == Stage::PrepareContext => {
+            stage_ids(2, 0, 0, 1, 0, 0, sources)
+        }
+        // decide.rs:1134-1141.
+        ReducerStageOutcome::ModelRequestPrepared {
+            output_contract, ..
+        } if cursor.stage == Stage::BeforeModel => {
+            if output_contract.kind != EffectOutputKind::ModelResponse {
+                return Err(RunHandleError::ToolSettlement {
+                    code: "stage_allocation_model_request_contract_mismatch",
+                });
+            }
+            stage_ids(2, 1, 1, 0, 1, 0, sources)
+        }
+        // decide.rs:1142-1145 (terminal_body_from_candidate's own precondition:
+        // a terminal candidate must exist).
+        ReducerStageOutcome::FinalizeAccepted if cursor.stage == Stage::BeforeFinalize => {
+            if state.terminal_candidate.is_none() {
+                return Err(RunHandleError::ToolSettlement {
+                    code: "stage_allocation_terminal_candidate_missing",
+                });
+            }
+            stage_ids(2, 1, 0, 0, 0, 0, sources)
+        }
+        // decide.rs:1146-1158.
+        ReducerStageOutcome::ContinueModel { .. }
+            if cursor.stage == Stage::BeforeFinalize
+                && matches!(
+                    state.terminal_candidate,
+                    Some(TerminalCandidate::Completed { .. })
+                ) =>
+        {
+            state
+                .cycle
+                .checked_add(1)
+                .ok_or(RunHandleError::ToolSettlement {
+                    code: "stage_allocation_cycle_overflow",
+                })?;
+            stage_ids(1, 0, 0, 0, 0, 0, sources)
+        }
+        // decide.rs:1159-1161.
+        ReducerStageOutcome::Fail(_) if cursor.stage == Stage::BeforeFinalize => {
+            stage_ids(2, 1, 0, 0, 0, 0, sources)
+        }
+        // decide.rs:1162-1164.
+        ReducerStageOutcome::Retry(_) if cursor.stage == Stage::BeforeFinalize => {
+            stage_ids(3, 1, 1, 0, 0, 0, sources)
+        }
+        // decide.rs:1165-1177.
+        ReducerStageOutcome::Fail(_)
+            if matches!(
+                cursor.stage,
+                Stage::BeforeRun
+                    | Stage::PrepareContext
+                    | Stage::BeforeModel
+                    | Stage::AfterModel
+                    | Stage::BeforeToolBatch
+                    | Stage::AfterToolBatch
+            ) =>
+        {
+            stage_ids(1, 0, 0, 0, 0, 0, sources)
+        }
+        // decide.rs:1178-1181.
+        _ => Err(RunHandleError::ToolSettlement {
+            code: "stage_allocation_outcome_not_admitted",
+        }),
+    }
+}
+
+/// Generate an [`AllocatedIds`] bag of the given cardinalities, in the six-tuple
+/// order `(records, events, effects, turns, model_requests, messages)` used by
+/// `IdRequirements::new` (`finstack-ai-kernel/src/reducer/allocated_ids.rs:22-29`).
+fn stage_ids<C: Clock, R: RandomSource>(
+    records: usize,
+    events: usize,
+    effects: usize,
+    turns: usize,
+    model_requests: usize,
+    messages: usize,
+    sources: &SettlementSources<C, R>,
+) -> Result<AllocatedIds, RunHandleError> {
+    AllocatedIds::try_new(
+        generate_tool_ids::<RecordTag, _, _>(records, sources)?,
+        generate_tool_ids::<EventTag, _, _>(events, sources)?,
+        generate_tool_ids::<EffectTag, _, _>(effects, sources)?,
+        Vec::new(),
+        generate_tool_ids::<MessageTag, _, _>(messages, sources)?,
+        generate_tool_ids::<TurnTag, _, _>(turns, sources)?,
+        generate_tool_ids::<ModelRequestTag, _, _>(model_requests, sources)?,
+        Vec::new(),
+        Vec::new(),
+        vec![generate_tool_id::<AppendBatchTag, _, _>(sources)?],
+        Vec::new(),
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "stage_allocation_ids_invalid",
+    })
 }
 
 // --- extracted from task.rs 1225-1353 ---
@@ -2131,5 +2323,280 @@ pub(crate) fn validate_model_binding(
 pub(crate) fn id_source_error(_error: IdGenerationError) -> RunHandleError {
     RunHandleError::ModelSettlement {
         code: "model_settlement_id_source_failed",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use finstack_ai_kernel::{
+        BudgetPropagation, CancellationPropagation, DeadlinePropagation, Kernel, KernelState,
+        LaneTag, PrincipalPropagation, PrincipalRef, RunAccepted, RunPropagationPolicy,
+        RunRelation, RunSecurityContext, RunTag, SessionTag, Timestamp,
+    };
+
+    use super::*;
+    use crate::ExternalClock;
+
+    fn fixed_id<T: IdTag>(ordinal: u64) -> Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        Id::from_bytes(bytes)
+    }
+
+    fn fixed_timestamp(ms: i64) -> Timestamp {
+        Timestamp::from_unix_ms(ms).expect("timestamp")
+    }
+
+    /// Mirrors `coordinator.rs`'s own `tests::acceptance()` fixture (same field
+    /// values), parameterized on `effective_deadline` so the deadline path can
+    /// exercise a run whose deadline has already passed.
+    fn acceptance(effective_deadline: Option<Timestamp>) -> RunAccepted {
+        let run_id = fixed_id::<RunTag>(3);
+        RunAccepted::try_new(
+            run_id,
+            RunRelation::root(run_id).expect("relation"),
+            RunSecurityContext::try_new(
+                "tenant-a",
+                PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                    .expect("principal"),
+                "oidc",
+                "high",
+                "policy-v1",
+                "decision-v1",
+                None,
+            )
+            .expect("security"),
+            effective_deadline,
+            finstack_ai_kernel::RunLimits::empty(),
+            RunPropagationPolicy {
+                cancellation: CancellationPropagation::Cascade,
+                deadline: DeadlinePropagation::MinimumOfParentAndChild,
+                budget: BudgetPropagation::SharedScope,
+                principal: PrincipalPropagation::Inherit,
+            },
+            Digest::raw_json(br#"{"agent":"fixture"}"#),
+            None,
+        )
+        .expect("acceptance")
+    }
+
+    /// Base fixture reused by every test below: a minimally valid accepted,
+    /// running `KernelState`. Individual tests override `phase`/`cycle`/
+    /// `accepted` via struct-update syntax where the scenario needs it.
+    fn accepted_state() -> KernelState {
+        KernelState {
+            session_id: Some(fixed_id::<SessionTag>(1)),
+            lane_id: Some(fixed_id::<LaneTag>(2)),
+            accepted: Some(acceptance(None)),
+            accepted_at: Some(fixed_timestamp(1_000)),
+            phase: Some(RunPhase::BeforeRun),
+            cycle: 0,
+            ..KernelState::default()
+        }
+    }
+
+    /// Deterministic, collision-free random source: each `fill_bytes` call
+    /// tiles the buffer with the bytes of a monotonic counter, so repeated
+    /// allocations inside one test never collide the way two calls against a
+    /// truly fixed byte pattern would.
+    #[derive(Default)]
+    struct CountingRandom(AtomicU64);
+
+    impl RandomSource for CountingRandom {
+        fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), IdGenerationError> {
+            let counter = self.0.fetch_add(1, Ordering::Relaxed);
+            let bytes = counter.to_be_bytes();
+            for (index, slot) in buf.iter_mut().enumerate() {
+                *slot = bytes[index % bytes.len()];
+            }
+            Ok(())
+        }
+    }
+
+    fn test_sources() -> SettlementSources<ExternalClock, CountingRandom> {
+        SettlementSources::try_new(
+            ExternalClock::new(fixed_timestamp(1_000)),
+            CountingRandom::default(),
+        )
+        .expect("sources")
+    }
+
+    /// The test named in the task-3 brief: allocation for the same outcome
+    /// must differ by stage. This is exactly the property `StageIds::for_outcome`
+    /// (reverted by this task) got wrong by keying allocation on the outcome
+    /// alone.
+    #[test]
+    fn fail_allocation_differs_between_before_finalize_and_other_stages() {
+        let state = accepted_state();
+        let sources = test_sources();
+        let fail = ReducerStageOutcome::Fail(
+            ErrorDescriptor::new("probe_failed", "probe", ErrorCategory::Validation, false)
+                .expect("descriptor"),
+        );
+
+        let at_finalize = stage_allocation(
+            &state,
+            StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeFinalize,
+            },
+            &fail,
+            &sources,
+        )
+        .expect("finalize allocation");
+
+        let at_before_run = stage_allocation(
+            &state,
+            StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeRun,
+            },
+            &fail,
+            &sources,
+        )
+        .expect("before_run allocation");
+
+        assert_eq!(
+            at_finalize.record_ids().len(),
+            2,
+            "BeforeFinalize Fail needs 2 records"
+        );
+        assert_eq!(
+            at_finalize.event_ids().len(),
+            1,
+            "BeforeFinalize Fail needs 1 event"
+        );
+        assert_eq!(
+            at_before_run.record_ids().len(),
+            1,
+            "BeforeRun Fail needs 1 record"
+        );
+        assert_eq!(
+            at_before_run.event_ids().len(),
+            0,
+            "BeforeRun Fail needs 0 events"
+        );
+    }
+
+    #[test]
+    fn run_deadline_fail_closed_uses_a_stage_legal_outcome() {
+        // fail_closed_on_run_deadline settles Stage::BeforeToolBatch. The kernel
+        // rejects Continue there (decide.rs:1107-1111), so the fail-closed path
+        // must not emit Continue.
+        let outcome = run_deadline_outcome().expect("run deadline outcome");
+        assert!(
+            !matches!(outcome, ReducerStageOutcome::Continue),
+            "BeforeToolBatch cannot accept Continue; got {outcome:?}"
+        );
+    }
+
+    /// `stage_allocation` in isolation (no run deadline configured, so the
+    /// kernel's own `decide_limit` deadline-crossing precedence — see the two
+    /// tests below — cannot confound the result): it must mirror
+    /// `stage_id_requirements` and refuse `Continue` at `BeforeToolBatch`,
+    /// exactly the outcome the pre-existing bug submitted.
+    #[test]
+    fn stage_allocation_rejects_continue_at_before_tool_batch() {
+        let state = KernelState {
+            phase: Some(RunPhase::BeforeToolBatch),
+            ..accepted_state()
+        };
+        let sources = test_sources();
+        let cursor = StageCursor {
+            cycle: state.cycle,
+            stage: Stage::BeforeToolBatch,
+        };
+        assert!(
+            stage_allocation(&state, cursor, &ReducerStageOutcome::Continue, &sources).is_err(),
+            "stage_allocation must reject Continue at BeforeToolBatch, matching stage_id_requirements"
+        );
+    }
+
+    /// End-to-end, with the run's deadline actually in the past — the exact
+    /// precondition `fail_closed_on_run_deadline`'s only caller
+    /// (`prepare_tool_batch_if_ready`) guarantees before invoking it.
+    ///
+    /// This is the test that caught a second, deeper issue than the one in
+    /// the brief: once `now >= effective_deadline`, `decide_limit`
+    /// (`decide.rs:469-497`) intercepts *before* `decide_stage` — and
+    /// therefore `stage_id_requirements` — ever runs, and always demands
+    /// `IdRequirements::new(2, 2, 0, 0, 0, 0)` (`decide.rs:684`), not whatever
+    /// `stage_allocation` computes for the submitted outcome. Allocating via
+    /// `stage_allocation` here (as an earlier version of this fix did)
+    /// compiles and passes every other unit test in this module, but fails an
+    /// actual deadline-expiry run end to end
+    /// (`finstack-ai-test/tests/interaction.rs::expire_if_due_on_restore_never_dispatches`,
+    /// confirmed by reproducing the failure locally before writing this
+    /// assertion). This test pins both halves of that discovery so a future
+    /// change cannot silently reintroduce it.
+    #[test]
+    fn run_deadline_fail_closed_is_admitted_by_the_kernel_at_before_tool_batch() {
+        let deadline = fixed_timestamp(1_500);
+        let now = fixed_timestamp(2_000);
+        let state = KernelState {
+            phase: Some(RunPhase::BeforeToolBatch),
+            accepted: Some(acceptance(Some(deadline))),
+            ..accepted_state()
+        };
+        let sources = test_sources();
+        let cursor = StageCursor {
+            cycle: state.cycle,
+            stage: Stage::BeforeToolBatch,
+        };
+        let outcome = run_deadline_outcome().expect("run deadline outcome");
+
+        // The wrong shape: stage_allocation's Fail@BeforeToolBatch tuple
+        // (1, 0, 0, 0, 0, 0) is the stage_id_requirements answer, but
+        // decide_limit never lets stage_id_requirements run here.
+        let wrong_ids =
+            stage_allocation(&state, cursor, &outcome, &sources).expect("stage allocation");
+        let rejected = Kernel::try_restore(state.clone())
+            .expect("restore state")
+            .decide(
+                &TransitionEnv {
+                    now,
+                    ids: wrong_ids,
+                },
+                KernelInput::StageSettled(StageSettled {
+                    cursor,
+                    outcome: outcome.clone(),
+                }),
+            );
+        assert!(
+            rejected.is_err(),
+            "stage_allocation's ids must NOT satisfy decide_limit's deadline-crossing \
+             requirement once the deadline has passed: {rejected:?}"
+        );
+
+        // The real fix's shape: matches decide_limit's own requirement.
+        let ids = stage_ids(2, 2, 0, 0, 0, 0, &sources).expect("deadline crossing ids");
+        let decision = Kernel::try_restore(state).expect("restore state").decide(
+            &TransitionEnv { now, ids },
+            KernelInput::StageSettled(StageSettled { cursor, outcome }),
+        );
+        assert!(
+            decision.is_ok(),
+            "kernel rejected the fail-closed submission at BeforeToolBatch: {decision:?}"
+        );
+    }
+
+    /// The deadline itself: `fail_closed_on_run_deadline` is reached only when
+    /// `now >= effective_deadline`. This pins that the fixture used above
+    /// actually represents an expired run, not merely a state the kernel
+    /// happens to accept.
+    #[test]
+    fn accepted_run_with_past_deadline_reports_expired() {
+        let deadline = fixed_timestamp(1_500);
+        let accepted = acceptance(Some(deadline));
+        let now = fixed_timestamp(2_000);
+        assert!(
+            accepted
+                .effective_deadline()
+                .is_some_and(|value| now >= value)
+        );
     }
 }

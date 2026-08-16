@@ -29,15 +29,15 @@ use finstack_ai_runtime::{
     CommitCoordinator, ContextProvider, EventBatch, EventBatchConfig, EventFilter, EventHubConfig,
     EventLagPolicy, EventSubscription, EventSubscriptionConfig, IdGenerationError,
     JsonSchemaToolValidatorCompiler, LaneAppendIds, LoadRequest, LockedModelContextProfile,
-    Middleware, MiddlewareDescriptor, MiddlewareError, MiddlewareRole, Model, ModelCapabilities,
-    ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-    ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, Observer, PendingModelEffect,
-    PortFuture, ProgressCoalescing, ReconcileContext, ResolvedToolCatalog, RunEvent, RunHandle,
-    RunHandleError, RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime, SideEffectClass,
-    StructuredOutputCapability, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
-    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetRegistration, UuidV7Generator, resolve_model_context_profile,
+    Middleware, Model, ModelCapabilities, ModelContextProfileOverride, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft,
+    ModelRequestLimits, ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext,
+    Observer, PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext,
+    ResolvedToolCatalog, RunEvent, RunHandle, RunHandleError, RunTaskConfig, RunTaskOwner,
+    SessionError, SessionRuntime, SideEffectClass, StructuredOutputCapability, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolStreamLimits, ToolTaskConfig, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, UuidV7Generator,
+    resolve_model_context_profile,
 };
 use thiserror::Error;
 
@@ -1019,28 +1019,6 @@ impl Agent {
         )?);
         messages.extend_from_slice(committed);
         Ok(messages.into())
-    }
-
-    /// The unique compactor's frozen descriptor.
-    #[allow(
-        dead_code,
-        reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-    )]
-    fn compactor_descriptor(&self) -> Result<MiddlewareDescriptor, AgentRunError> {
-        let plan = self.resolved.run_plan();
-        plan.middleware_chain()
-            .stage(Stage::BeforeModel)
-            .iter()
-            .find(|resolved| {
-                matches!(
-                    resolved.descriptor.role,
-                    MiddlewareRole::ContextCompactor { .. }
-                )
-            })
-            .map(|resolved| resolved.descriptor.clone())
-            .ok_or_else(|| {
-                AgentRunError::runtime_message("compact_context returned without a compactor role")
-            })
     }
 }
 
@@ -2284,7 +2262,7 @@ fn generate_many<T: finstack_ai_kernel::IdTag>(
     (0..count).map(|_| NativeIds::generate()).collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 struct StageIds {
     records: usize,
     events: usize,
@@ -2313,28 +2291,6 @@ impl StageIds {
 
     const fn retry() -> Self {
         Self::new(3, 1, 1, 0, 0, 0)
-    }
-
-    /// Id counts required for one folded aggregate outcome.
-    ///
-    /// The fold may change which `ReducerStageOutcome` a stage produces, so the
-    /// count block must be derived from the final outcome rather than from the
-    /// stage's default shape.
-    #[allow(
-        dead_code,
-        reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-    )]
-    const fn for_outcome(outcome: &ReducerStageOutcome) -> Self {
-        match outcome {
-            ReducerStageOutcome::Continue => Self::continued(),
-            ReducerStageOutcome::ContextPrepared { .. } => Self::context(),
-            ReducerStageOutcome::ModelRequestPrepared { .. } => Self::model_request(),
-            ReducerStageOutcome::ToolBatchPrepared { .. } => Self::new(2, 1, 0, 0, 0, 0),
-            ReducerStageOutcome::FinalizeAccepted
-            | ReducerStageOutcome::ContinueModel { .. }
-            | ReducerStageOutcome::Fail(_) => Self::finalize(),
-            ReducerStageOutcome::Retry(_) => Self::retry(),
-        }
     }
 
     const fn new(
@@ -2379,68 +2335,6 @@ async fn submit_stage(
         }),
     )
     .await
-}
-
-/// Map a port-level middleware error onto the facade's run error, preserving
-/// the component's stable code.
-impl AgentRunError {
-    #[allow(
-        dead_code,
-        reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-    )]
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "by-value keeps this usable as a bare `Result::map_err` argument at call sites"
-    )]
-    fn from_middleware(error: MiddlewareError) -> Self {
-        Self::runtime_message(format!("{}: {error}", error.code()))
-    }
-}
-
-/// Canonical bytes for an ordered message array.
-#[allow(
-    dead_code,
-    reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-)]
-fn canonical_messages(messages: &[Message]) -> Result<Vec<u8>, AgentRunError> {
-    serde_json::to_vec(messages)
-        .map_err(|error| AgentRunError::runtime_message(format!("messages canonicalize: {error}")))
-}
-
-/// Canonical bytes for one message.
-#[allow(
-    dead_code,
-    reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-)]
-fn canonical_message(message: &Message) -> Result<Vec<u8>, AgentRunError> {
-    serde_json::to_vec(message)
-        .map_err(|error| AgentRunError::runtime_message(format!("message canonicalize: {error}")))
-}
-
-/// Parse a `Replace` payload back into an ordered message array.
-#[allow(
-    dead_code,
-    reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-)]
-fn parse_messages(value: &RawJson) -> Result<Vec<Message>, AgentRunError> {
-    serde_json::from_slice(value.as_bytes()).map_err(|error| {
-        AgentRunError::runtime_message(format!("replace payload is not a message array: {error}"))
-    })
-}
-
-/// Canonical bytes for the terminal candidate before any terminal record exists.
-#[allow(
-    dead_code,
-    reason = "consumed by the stage tasks (Tasks 3-6, 9) that call the middleware driver"
-)]
-fn canonical_terminal_candidate(
-    state: &finstack_ai_kernel::KernelState,
-) -> Result<Vec<u8>, AgentRunError> {
-    let candidate = state.terminal_candidate.as_ref().ok_or_else(|| {
-        AgentRunError::runtime_message("before_finalize has no terminal candidate")
-    })?;
-    serde_json::to_vec(candidate)
-        .map_err(|error| AgentRunError::runtime_message(format!("candidate canonicalize: {error}")))
 }
 
 async fn submit(
@@ -3092,37 +2986,6 @@ mod tests {
             security(),
         )
         .expect("request")
-    }
-
-    #[test]
-    fn stage_ids_match_outcome_shape() {
-        use finstack_ai_kernel::{
-            Duration as KernelDuration, ErrorCategory, ErrorDescriptor, ReducerStageOutcome,
-            RetryClassification, RetryDirective,
-        };
-
-        let retry = ReducerStageOutcome::Retry(
-            RetryDirective::try_new(
-                RetryClassification::Validation,
-                KernelDuration::ZERO,
-                "probe",
-            )
-            .expect("directive"),
-        );
-        assert_eq!(StageIds::for_outcome(&retry), StageIds::retry());
-        assert_eq!(
-            StageIds::for_outcome(&ReducerStageOutcome::FinalizeAccepted),
-            StageIds::finalize()
-        );
-        assert_eq!(
-            StageIds::for_outcome(&ReducerStageOutcome::Continue),
-            StageIds::continued()
-        );
-        let fail = ReducerStageOutcome::Fail(
-            ErrorDescriptor::new("probe_failed", "probe", ErrorCategory::Validation, false)
-                .expect("descriptor"),
-        );
-        assert_eq!(StageIds::for_outcome(&fail), StageIds::finalize());
     }
 
     #[test]
