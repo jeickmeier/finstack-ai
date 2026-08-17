@@ -125,10 +125,11 @@ pub use event_hub::{
 };
 pub use id_generation::{Clock, ExternalClock, IdGenerationError, RandomSource, UuidV7Generator};
 pub use journal::{
-    AcceleratedRestore, IdempotencyHorizon, JournalStore, LoadRequest, LoadedSession,
-    MetadataReceipt, OpaqueSnapshot, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanPage,
-    ScanRequest, SnapshotReceipt, SnapshotRequest, SnapshotSchedule, StateSnapshotRequest,
-    StoreCommitTimestamp, StoreError, StoreHealth, StoreLimits, WriteMetadataRequest,
+    AcceleratedRestore, IdempotencyHorizon, JournalStore, LoadFromRequest, LoadRequest, LoadWindow,
+    LoadedSession, MetadataReceipt, OpaqueSnapshot, PruneReceipt, PruneRequest,
+    SCAN_PAGE_MAX_RECORDS, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    SnapshotSchedule, StateSnapshotRequest, StoreCommitTimestamp, StoreError, StoreHealth,
+    StoreLimits, WriteMetadataRequest,
 };
 pub use middleware::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,

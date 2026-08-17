@@ -313,23 +313,23 @@ impl ModelStreamAssembler {
                     )?;
                 }
                 ModelStreamItem::Completed(response) => {
-                    let encoded = serde_json_canonicalizer::to_vec(&response).map_err(|_| {
+                    let encoded_len = canonical_byte_len(&response).ok_or_else(|| {
                         ModelError::validation(
                             MODEL_RESPONSE_MISMATCH,
                             "model response is not serializable",
                         )
                     })?;
-                    add_bytes(&mut byte_count, encoded.len(), self.limits.max_bytes)?;
+                    add_bytes(&mut byte_count, encoded_len, self.limits.max_bytes)?;
                     terminal = Some(ModelTerminal::Completed(response));
                 }
                 ModelStreamItem::Deferred(deferral) => {
-                    let encoded = serde_json_canonicalizer::to_vec(&deferral).map_err(|_| {
+                    let encoded_len = canonical_byte_len(&deferral).ok_or_else(|| {
                         ModelError::validation(
                             MODEL_RESPONSE_MISMATCH,
                             "model deferral is not serializable",
                         )
                     })?;
-                    add_bytes(&mut byte_count, encoded.len(), self.limits.max_bytes)?;
+                    add_bytes(&mut byte_count, encoded_len, self.limits.max_bytes)?;
                     terminal = Some(ModelTerminal::Deferred(deferral));
                 }
             }
@@ -505,6 +505,29 @@ fn add_bytes(total: &mut usize, add: usize, max: usize) -> Result<(), ModelError
         return Err(stream_limit_error());
     }
     Ok(())
+}
+
+/// Counts canonical JSON bytes without materializing the encoded buffer.
+fn canonical_byte_len<T: Serialize>(value: &T) -> Option<usize> {
+    let mut writer = CountingWriter::default();
+    serde_json_canonicalizer::to_writer(value, &mut writer).ok()?;
+    Some(writer.len)
+}
+
+#[derive(Default)]
+struct CountingWriter {
+    len: usize,
+}
+
+impl std::io::Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.len = self.len.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn stream_limit_error() -> ModelError {

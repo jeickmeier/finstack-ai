@@ -115,14 +115,14 @@ pub(super) fn apply_tool_batch_opened(
                 .then_some(call.assigned.group_index)
         })
         .unwrap_or(0);
-    state.active_tool_batch = Some(ActiveToolBatch {
-        opened: opened.clone(),
-        calls: calls.into(),
+    state.active_tool_batch = Some(ActiveToolBatch::new(
+        opened.clone(),
+        calls,
         current_group,
-        next_source_index: 0,
-        result_message_ids: Arc::from([]),
-        fatal_error: None,
-    });
+        0,
+        Arc::from([]),
+        None,
+    ));
     state.last_tool_batch = None;
     state.phase = Some(RunPhase::AwaitingTools);
     Ok(())
@@ -161,9 +161,7 @@ pub(super) fn apply_tool_effect_completed(
         .as_mut()
         .ok_or(KernelError::InvalidRecordOrder)?;
     let index = batch
-        .calls
-        .iter()
-        .position(|call| call.assigned.effect_id == completed.effect_id())
+        .call_index(completed.effect_id())
         .ok_or(KernelError::InvalidRecordOrder)?;
     let (requested, external, planned_call) = match &batch.calls[index].status {
         ActiveToolCallStatus::Requested {
@@ -192,12 +190,15 @@ pub(super) fn apply_tool_effect_completed(
         .active_tool_batch
         .as_mut()
         .ok_or(KernelError::InvariantViolation)?;
-    Arc::make_mut(&mut batch.calls)[index].status = ActiveToolCallStatus::Buffered {
-        result,
-        settlement_digest: digest,
-        synthetic: false,
-        error: None,
-    };
+    batch.set_call_status(
+        index,
+        ActiveToolCallStatus::Buffered {
+            result,
+            settlement_digest: digest,
+            synthetic: false,
+            error: None,
+        },
+    );
     state.phase = Some(tool_wait_phase(batch));
     Ok(())
 }
@@ -211,9 +212,7 @@ pub(super) fn apply_tool_effect_failed(
         .as_mut()
         .ok_or(KernelError::InvalidRecordOrder)?;
     let index = batch
-        .calls
-        .iter()
-        .position(|call| call.assigned.effect_id == failed.effect_id())
+        .call_index(failed.effect_id())
         .ok_or(KernelError::InvalidRecordOrder)?;
     let (requested, external, policy, planned_call) = match &batch.calls[index].status {
         ActiveToolCallStatus::Requested {
@@ -243,12 +242,15 @@ pub(super) fn apply_tool_effect_failed(
         .active_tool_batch
         .as_mut()
         .ok_or(KernelError::InvariantViolation)?;
-    Arc::make_mut(&mut batch.calls)[index].status = ActiveToolCallStatus::Buffered {
-        result,
-        settlement_digest: digest,
-        synthetic: true,
-        error: Some(failed.error().clone()),
-    };
+    batch.set_call_status(
+        index,
+        ActiveToolCallStatus::Buffered {
+            result,
+            settlement_digest: digest,
+            synthetic: true,
+            error: Some(failed.error().clone()),
+        },
+    );
     if policy == crate::ToolFailurePolicy::FailRun && batch.fatal_error.is_none() {
         batch.fatal_error = Some(failed.error().clone());
     }
@@ -377,10 +379,13 @@ pub(super) fn apply_tool_call_settled(
         .active_tool_batch
         .as_mut()
         .ok_or(KernelError::InvariantViolation)?;
-    Arc::make_mut(&mut batch.calls)[index].status = ActiveToolCallStatus::Settled {
-        result_message_id: *settled.message.id(),
-        settlement_digest: settled.settlement_digest,
-    };
+    batch.set_call_status(
+        index,
+        ActiveToolCallStatus::Settled {
+            result_message_id: *settled.message.id(),
+            settlement_digest: settled.settlement_digest,
+        },
+    );
     let mut result_ids = batch.result_message_ids.to_vec();
     result_ids.push(*settled.message.id());
     batch.result_message_ids = result_ids.into();
@@ -388,6 +393,7 @@ pub(super) fn apply_tool_call_settled(
         .next_source_index
         .checked_add(1)
         .ok_or(KernelError::InvariantViolation)?;
+    batch.note_source_advanced();
     Arc::make_mut(&mut state.messages).push(settled.message.clone());
     Ok(())
 }
@@ -405,10 +411,7 @@ pub(super) fn apply_tool_batch_closed(
         || closed.tool_batch_id != batch.opened.tool_batch_id
         || closed.source_message_id != batch.opened.source_message_id
         || closed.result_message_ids != batch.result_message_ids
-        || !batch
-            .calls
-            .iter()
-            .all(|call| matches!(call.status, ActiveToolCallStatus::Settled { .. }))
+        || !batch.all_settled()
     {
         return Err(KernelError::InvalidRecordOrder);
     }

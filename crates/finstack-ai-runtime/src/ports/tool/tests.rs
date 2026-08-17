@@ -104,8 +104,8 @@ fn state_with(calls: Vec<ActiveToolCall>, settled: &[u64]) -> KernelState {
         .map(|call| call.assigned.clone())
         .collect::<Vec<_>>();
     let mut state = KernelState {
-        active_tool_batch: Some(ActiveToolBatch {
-            opened: ToolBatchOpened {
+        active_tool_batch: Some(ActiveToolBatch::new(
+            ToolBatchOpened {
                 cycle: 0,
                 turn_id: id(7),
                 tool_batch_id: id(8),
@@ -114,12 +114,12 @@ fn state_with(calls: Vec<ActiveToolCall>, settled: &[u64]) -> KernelState {
                 continuation: ToolBatchContinuation::ContinueModel,
                 plan_digest: Digest::raw_json(b"tool-batch-plan"),
             },
-            calls: calls.into(),
-            current_group: 0,
-            next_source_index: 0,
-            result_message_ids: Arc::from([]),
-            fatal_error: None,
-        }),
+            calls,
+            0,
+            0,
+            Arc::from([]),
+            None,
+        )),
         ..KernelState::default()
     };
     for ordinal in settled {

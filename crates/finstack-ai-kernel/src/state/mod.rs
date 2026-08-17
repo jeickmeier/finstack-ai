@@ -204,6 +204,15 @@ impl KernelState {
     /// be represented or canonicalized as JSON.
     pub fn state_hash(&self) -> Result<Digest, KernelError> {
         self.validate().map_err(|_| KernelError::StateHashFailed)?;
+        self.hash_projection()
+    }
+
+    /// Stream the versioned hash projection without a second `validate`.
+    ///
+    /// Callers that already validated (restore, apply-adjacent hashing) use this
+    /// so digest bytes stay identical to [`Self::state_hash`] without walking
+    /// tool/message invariants twice.
+    pub(crate) fn hash_projection(&self) -> Result<Digest, KernelError> {
         // Streamed into the hasher rather than canonicalized into a `Vec`: the
         // state projection is the largest single canonical payload the kernel
         // produces, and buffering it grew a fresh allocation every call.

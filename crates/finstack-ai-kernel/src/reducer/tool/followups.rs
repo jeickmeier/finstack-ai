@@ -1,10 +1,9 @@
 //! Post-settlement tool follow-up records.
 
-use std::sync::Arc;
-
 use super::super::decide::required;
 use super::super::decision::KernelError;
 use super::super::fingerprint::synthetic_tool_digest;
+use crate::primitives::EffectId;
 use crate::records::RecordBody;
 use crate::records::tools::{ActiveToolBatch, ActiveToolCallStatus, ToolBatchOutcome};
 use crate::state::TransitionEnv;
@@ -24,27 +23,78 @@ pub fn followup_records(
     let mut actions = Vec::new();
     let current_group_complete = group_is_terminal(batch, batch.current_group);
     if batch.fatal_error.is_some() && current_group_complete {
-        let abort_error = aborted_error()?;
-        for call in Arc::make_mut(&mut batch.calls) {
-            if matches!(call.status, ActiveToolCallStatus::Undispatched) {
-                let result = synthetic_result(call.assigned.plan.call(), &abort_error)?;
-                let digest = synthetic_tool_digest(
-                    batch.opened.tool_batch_id,
-                    *call.assigned.plan.call().tool_call_id(),
-                    call.assigned.effect_id,
-                    &result,
-                    &abort_error,
-                )?;
-                call.status = ActiveToolCallStatus::Buffered {
-                    result,
-                    settlement_digest: digest,
-                    synthetic: true,
-                    error: Some(abort_error.clone()),
-                };
-            }
-        }
+        abort_undispatched_calls(batch)?;
     }
 
+    let (finalized_effects, message_index) = finalize_buffered_prefix(batch, env, &mut bodies)?;
+
+    if batch.fatal_error.is_none()
+        && current_group_complete
+        && let Some(group) = next_executable_group(batch)
+    {
+        append_group_requests(&batch.opened.calls, group, &mut bodies, &mut actions)?;
+        batch.set_current_group(group);
+    }
+
+    if batch.all_settled() {
+        let outcome = match &batch.fatal_error {
+            Some(error) => ToolBatchOutcome::Failed {
+                error: error.clone(),
+            },
+            None => outcome_for_continuation(batch.opened.continuation),
+        };
+        bodies.push(RecordBody::ToolBatchClosed(close_record(
+            &batch.opened,
+            batch.result_message_ids.to_vec(),
+            outcome,
+        )?));
+    }
+    Ok(ToolFollowups {
+        bodies,
+        actions,
+        settlements: finalized_effects,
+        messages: message_index,
+    })
+}
+
+fn abort_undispatched_calls(batch: &mut ActiveToolBatch) -> Result<(), KernelError> {
+    let abort_error = aborted_error()?;
+    let abort_indexes = batch
+        .calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            matches!(call.status, ActiveToolCallStatus::Undispatched).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    for index in abort_indexes {
+        let call = &batch.calls[index];
+        let result = synthetic_result(call.assigned.plan.call(), &abort_error)?;
+        let digest = synthetic_tool_digest(
+            batch.opened.tool_batch_id,
+            *call.assigned.plan.call().tool_call_id(),
+            call.assigned.effect_id,
+            &result,
+            &abort_error,
+        )?;
+        batch.set_call_status(
+            index,
+            ActiveToolCallStatus::Buffered {
+                result,
+                settlement_digest: digest,
+                synthetic: true,
+                error: Some(abort_error.clone()),
+            },
+        );
+    }
+    Ok(())
+}
+
+fn finalize_buffered_prefix(
+    batch: &mut ActiveToolBatch,
+    env: &TransitionEnv,
+    bodies: &mut Vec<RecordBody>,
+) -> Result<(Vec<EffectId>, usize), KernelError> {
     let mut finalized_effects = Vec::new();
     let start =
         usize::try_from(batch.next_source_index).map_err(|_| KernelError::InvariantViolation)?;
@@ -76,49 +126,22 @@ pub fn followup_records(
             },
         )?;
         bodies.push(RecordBody::ToolCallSettled(settled));
-        Arc::make_mut(&mut batch.calls)[index].status = ActiveToolCallStatus::Settled {
-            result_message_id: message_id,
-            settlement_digest,
-        };
+        batch.set_call_status(
+            index,
+            ActiveToolCallStatus::Settled {
+                result_message_id: message_id,
+                settlement_digest,
+            },
+        );
         result_ids.push(message_id);
         batch.next_source_index = batch
             .next_source_index
             .checked_add(1)
             .ok_or(KernelError::InvariantViolation)?;
+        batch.note_source_advanced();
         finalized_effects.push(batch.calls[index].assigned.effect_id);
         message_index += 1;
     }
     batch.result_message_ids = result_ids.into();
-
-    if batch.fatal_error.is_none()
-        && current_group_complete
-        && let Some(group) = next_executable_group(batch)
-    {
-        append_group_requests(&batch.opened.calls, group, &mut bodies, &mut actions)?;
-        batch.current_group = group;
-    }
-
-    if batch
-        .calls
-        .iter()
-        .all(|call| matches!(call.status, ActiveToolCallStatus::Settled { .. }))
-    {
-        let outcome = match &batch.fatal_error {
-            Some(error) => ToolBatchOutcome::Failed {
-                error: error.clone(),
-            },
-            None => outcome_for_continuation(batch.opened.continuation),
-        };
-        bodies.push(RecordBody::ToolBatchClosed(close_record(
-            &batch.opened,
-            batch.result_message_ids.to_vec(),
-            outcome,
-        )?));
-    }
-    Ok(ToolFollowups {
-        bodies,
-        actions,
-        settlements: finalized_effects,
-        messages: message_index,
-    })
+    Ok((finalized_effects, message_index))
 }

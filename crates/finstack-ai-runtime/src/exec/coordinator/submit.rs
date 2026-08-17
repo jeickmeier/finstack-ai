@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::{LoadRequest, LoadedSession, StateSnapshotRequest, StoreError};
+use crate::{
+    LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, StateSnapshotRequest, StoreError,
+};
 
 use finstack_ai_kernel::{
     AppendRequest, CommittedBatch, Decision, Diagnostic, KernelError, KernelInput,
@@ -13,7 +15,8 @@ use super::dispatch::{
     RuntimeDispatch, action_is_authorized, model_dispatch_seed, timer_dispatch_seed,
     tool_dispatch_seed,
 };
-use super::recover::{project_loaded, replay_scoped};
+use super::recover::{adopt_session_head, project_loaded, replay_scoped};
+use super::session_commit::apply_batch_to_session;
 
 impl CommitCoordinator {
     /// Submit one normalized command through the authoritative commit boundary.
@@ -76,12 +79,8 @@ impl CommitCoordinator {
                 Ok(committed) => committed,
                 Err(StoreError::Conflict { .. }) if conflicts == 0 => {
                     conflicts = 1;
-                    let loaded = self
-                        .store
-                        .load(LoadRequest { session_id })
-                        .await
-                        .map_err(|_| self.boundary_fault("conflict_reload_failed"))?;
-                    self.reload_from_loaded(&loaded)?;
+                    self.reload_after_conflict(session_id, "conflict_reload_failed")
+                        .await?;
                     decision = self
                         .kernel
                         .decide(&env, input.clone())
@@ -153,6 +152,38 @@ impl CommitCoordinator {
         }
     }
 
+    pub(super) async fn reload_after_conflict(
+        &mut self,
+        session_id: finstack_ai_kernel::SessionId,
+        fault_code: &'static str,
+    ) -> Result<(), CommitCoordinatorError> {
+        if matches!(self.replay_scope, ReplayScope::StructuralOnly)
+            && let Some(prior_checksum) = self.head_checksum
+        {
+            let from_sequence = self.kernel.state().last_applied_sequence.saturating_add(1);
+            if from_sequence > 1 {
+                let loaded = self
+                    .store
+                    .load_from(LoadFromRequest {
+                        session_id,
+                        window: LoadWindow::FromSequence {
+                            from_sequence,
+                            prior_checksum,
+                        },
+                    })
+                    .await
+                    .map_err(|_| self.boundary_fault(fault_code))?;
+                return self.catch_up_structural(&loaded);
+            }
+        }
+        let loaded = self
+            .store
+            .load(LoadRequest { session_id })
+            .await
+            .map_err(|_| self.boundary_fault(fault_code))?;
+        self.reload_from_loaded(&loaded)
+    }
+
     pub(super) fn reload_from_loaded(
         &mut self,
         loaded: &LoadedSession,
@@ -170,8 +201,37 @@ impl CommitCoordinator {
                     .map(|snapshot| snapshot.sequence)
             })
             .flatten();
-        self.session = project_loaded(loaded).map_err(|code| self.boundary_fault(code))?;
+        self.head_checksum = loaded.head_checksum;
+        if loaded.omits_prefix() {
+            for batch in loaded.committed_batches.iter() {
+                apply_batch_to_session(&mut self.session, batch)
+                    .map_err(|code| self.boundary_fault(code))?;
+            }
+        } else {
+            self.session = project_loaded(loaded).map_err(|code| self.boundary_fault(code))?;
+        }
         Ok(())
+    }
+
+    fn catch_up_structural(
+        &mut self,
+        loaded: &LoadedSession,
+    ) -> Result<(), CommitCoordinatorError> {
+        for batch in loaded.committed_batches.iter() {
+            apply_batch_to_session(&mut self.session, batch)
+                .map_err(|code| self.boundary_fault(code))?;
+        }
+        adopt_session_head(&mut self.kernel, loaded.head_sequence)
+            .map_err(|code| self.boundary_fault(code))?;
+        self.head_checksum = loaded.head_checksum;
+        Ok(())
+    }
+
+    pub(super) fn note_head_checksum(&mut self, committed: &CommittedBatch) {
+        self.head_checksum = committed
+            .records
+            .last()
+            .map(finstack_ai_kernel::RecordEnvelope::checksum);
     }
 
     async fn maybe_write_snapshot(&mut self, committed: &CommittedBatch) {

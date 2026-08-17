@@ -35,6 +35,7 @@ Other tasks used by public docs:
 
 - `mise run check` — formatting, Clippy, Ruff, mypy
 - `mise run test` — Rust and Python tests
+- `mise run kernel` / `runtime` / `python-binding` / `wasm-binding` — narrow crate gates; not a substitute for `check` / `ci`
 - `mise run coverage` — diagnostic Rust, Python, and WASM coverage reports
 - `mise run conformance` — published port and plugin suites
 - `mise run generate-wasm` / `mise run stage-wasm` — JS/WASM package

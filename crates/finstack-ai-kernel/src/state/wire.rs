@@ -31,6 +31,7 @@ use super::{
     ResolutionIdentityHashEntryV6, RetryState, RunPhase, StageSettlementHashEntryV1,
     TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
 };
+use super::types::ToolCallIdentityHashRef;
 
 #[derive(Serialize)]
 struct KernelStateWireV1<'a> {
@@ -89,7 +90,7 @@ struct KernelStateWireV2<'a> {
     model_settlements: Vec<ModelSettlementHashEntryV1>,
     completion_identities: Vec<CompletionIdentityHashEntryV1>,
     active_tool_batch: Option<&'a ActiveToolBatch>,
-    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     tool_settlements: Vec<ToolSettlementHashEntryV2>,
     last_tool_batch: Option<&'a ToolBatchClosed>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -127,7 +128,7 @@ struct KernelStateWireV3<'a> {
     model_settlements: Vec<ModelSettlementHashEntryV1>,
     completion_identities: Vec<CompletionIdentityHashEntryV1>,
     active_tool_batch: Option<&'a ActiveToolBatch>,
-    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     tool_settlements: Vec<ToolSettlementHashEntryV2>,
     last_tool_batch: Option<&'a ToolBatchClosed>,
     limit_usage: &'a LimitUsage,
@@ -164,7 +165,7 @@ struct KernelStateWireV4<'a> {
     model_settlements: Vec<ModelSettlementHashEntryV1>,
     completion_identities: Vec<CompletionIdentityHashEntryV1>,
     active_tool_batch: Option<&'a ActiveToolBatch>,
-    tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     tool_settlements: Vec<ToolSettlementHashEntryV2>,
     last_tool_batch: Option<&'a ToolBatchClosed>,
     limit_usage: &'a LimitUsage,

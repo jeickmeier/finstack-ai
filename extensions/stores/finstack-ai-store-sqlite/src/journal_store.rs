@@ -2,30 +2,31 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 use finstack_ai_runtime::{
-    JournalStore, LoadRequest, LoadedSession, MetadataReceipt, PortFuture, PruneReceipt,
-    PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
-    StoreError, StoreHealth, WriteMetadataRequest,
+    JournalStore, LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PortFuture,
+    PruneReceipt, PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest,
+    StateSnapshotRequest, StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use crate::store::SqliteJournalStore;
 
 impl JournalStore for SqliteJournalStore {
     fn append(&self, request: AppendRequest) -> PortFuture<Result<CommittedBatch, StoreError>> {
-        let result = self.append_sync(&request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.append(&request))
     }
 
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
-        let result = self.load_sync(request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.load(request))
+    }
+
+    fn load_from(&self, request: LoadFromRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
+        self.worker.submit(move |ctx| ctx.load_from(request))
     }
 
     fn write_snapshot(
         &self,
         request: SnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let result = self.write_snapshot_sync(&request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.write_snapshot(&request))
     }
 
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
@@ -42,28 +43,25 @@ impl JournalStore for SqliteJournalStore {
     }
 
     fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
-        let result = self.scan_sync(request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.scan(request))
     }
 
     fn write_metadata(
         &self,
         request: WriteMetadataRequest,
     ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
-        let result = self.write_metadata_sync(request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.write_metadata(request))
     }
 
     fn write_state_snapshot(
         &self,
         request: StateSnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        let result = self.write_state_snapshot_sync(&request);
-        Box::pin(async move { result })
+        self.worker
+            .submit(move |ctx| ctx.write_state_snapshot(&request))
     }
 
     fn prune(&self, request: PruneRequest) -> PortFuture<Result<PruneReceipt, StoreError>> {
-        let result = self.prune_sync(request);
-        Box::pin(async move { result })
+        self.worker.submit(move |ctx| ctx.prune(request))
     }
 }

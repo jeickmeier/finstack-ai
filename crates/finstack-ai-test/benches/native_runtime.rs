@@ -1,7 +1,15 @@
-//! Native idle-session and active-session resident-memory profiles.
+//! Native idle-session allocation and resident-memory profiles.
+#![allow(unsafe_code)]
+//!
+//! NFR-PERF-005 is framework-owned heap (channels, task control blocks, and
+//! other scoped allocations). Incremental `ps` RSS is a separate warning
+//! metric and must not be treated as that budget. `size_of::<RunTaskOwner>()`
+//! is the handle width only.
 
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use finstack_ai::runtime::{
@@ -21,6 +29,72 @@ const VERSION: Version = Version {
     minor: 0,
     patch: 1,
 };
+
+struct ScopedAlloc;
+
+static ALLOCATED: AtomicU64 = AtomicU64::new(0);
+static DEALLOCATED: AtomicU64 = AtomicU64::new(0);
+
+// SAFETY: every method forwards to `System`. Accounting uses relaxed atomics
+// and is never consulted for aliasing, deallocation, or other soundness.
+unsafe impl GlobalAlloc for ScopedAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: `layout` is the caller-supplied allocation layout.
+        let pointer = unsafe { System.alloc(layout) };
+        if !pointer.is_null() {
+            ALLOCATED.fetch_add(
+                u64::try_from(layout.size()).expect("layout"),
+                Ordering::Relaxed,
+            );
+        }
+        pointer
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        DEALLOCATED.fetch_add(
+            u64::try_from(layout.size()).expect("layout"),
+            Ordering::Relaxed,
+        );
+        // SAFETY: `pointer` was allocated with `layout` by this allocator.
+        unsafe { System.dealloc(pointer, layout) };
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: `layout` is the caller-supplied allocation layout.
+        let pointer = unsafe { System.alloc_zeroed(layout) };
+        if !pointer.is_null() {
+            ALLOCATED.fetch_add(
+                u64::try_from(layout.size()).expect("layout"),
+                Ordering::Relaxed,
+            );
+        }
+        pointer
+    }
+
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: `pointer` was allocated with `layout` by this allocator.
+        let new_pointer = unsafe { System.realloc(pointer, layout, new_size) };
+        if !new_pointer.is_null() {
+            let old = u64::try_from(layout.size()).expect("layout");
+            let new = u64::try_from(new_size).expect("layout");
+            if new >= old {
+                ALLOCATED.fetch_add(new.saturating_sub(old), Ordering::Relaxed);
+            } else {
+                DEALLOCATED.fetch_add(old.saturating_sub(new), Ordering::Relaxed);
+            }
+        }
+        new_pointer
+    }
+}
+
+#[global_allocator]
+static GLOBAL: ScopedAlloc = ScopedAlloc;
+
+fn net_heap_bytes() -> u64 {
+    ALLOCATED
+        .load(Ordering::Relaxed)
+        .saturating_sub(DEALLOCATED.load(Ordering::Relaxed))
+}
 
 fn resident_kib() -> u64 {
     let output = Command::new("ps")
@@ -82,7 +156,7 @@ fn run_config() -> RunTaskConfig {
     }
 }
 
-async fn measure_idle(sessions: usize) -> (u64, u64, u64) {
+async fn measure_idle(sessions: usize) -> (u64, u64, u64, u64) {
     let store = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions,
@@ -92,6 +166,7 @@ async fn measure_idle(sessions: usize) -> (u64, u64, u64) {
         })
         .expect("memory store"),
     );
+    let heap_before = net_heap_bytes();
     let baseline_kib = resident_kib();
     let mut owners = Vec::with_capacity(sessions);
     for _ in 0..sessions {
@@ -101,14 +176,21 @@ async fn measure_idle(sessions: usize) -> (u64, u64, u64) {
         );
     }
     tokio::task::yield_now().await;
+    let heap_after = net_heap_bytes();
     let resident_kib = resident_kib();
     let incremental_kib = resident_kib.saturating_sub(baseline_kib);
+    let framework_owned_bytes = heap_after.saturating_sub(heap_before);
     for owner in &mut owners {
         let report = owner.shutdown().await;
         assert_eq!(report.outcome, ShutdownOutcome::Graceful);
         assert_eq!(report.aborted_tasks, 0);
     }
-    (baseline_kib, resident_kib, incremental_kib)
+    (
+        baseline_kib,
+        resident_kib,
+        incremental_kib,
+        framework_owned_bytes,
+    )
 }
 
 fn profile() -> ModelContextProfile {
@@ -166,7 +248,7 @@ fn request(input: &str) -> AgentRunRequest {
     .expect("request")
 }
 
-async fn measure_active(sessions: usize) -> (u64, u64, u64) {
+async fn measure_active(sessions: usize) -> (u64, u64, u64, u64) {
     let store: Arc<dyn JournalStore> = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {
             sessions: sessions.saturating_mul(2).max(8),
@@ -201,6 +283,7 @@ async fn measure_active(sessions: usize) -> (u64, u64, u64) {
     .build()
     .await
     .expect("agent");
+    let heap_before = net_heap_bytes();
     let baseline_kib = resident_kib();
     let mut joins = Vec::with_capacity(sessions);
     for index in 0..sessions {
@@ -215,9 +298,15 @@ async fn measure_active(sessions: usize) -> (u64, u64, u64) {
     for join in joins {
         join.await.expect("join");
     }
+    let heap_after = net_heap_bytes();
     let resident_kib = resident_kib();
     let incremental_kib = resident_kib.saturating_sub(baseline_kib);
-    (baseline_kib, resident_kib, incremental_kib)
+    (
+        baseline_kib,
+        resident_kib,
+        incremental_kib,
+        heap_after.saturating_sub(heap_before),
+    )
 }
 
 fn main() {
@@ -230,16 +319,20 @@ fn main() {
         Mode::Idle => "IDLE_SESSION_MEMORY",
         Mode::Active => "ACTIVE_SESSION_MEMORY",
     };
-    let (baseline_kib, resident_kib, incremental_kib) = match mode {
+    let (baseline_kib, resident_kib, incremental_kib, framework_owned_bytes) = match mode {
         Mode::Idle => runtime.block_on(measure_idle(sessions)),
         Mode::Active => runtime.block_on(measure_active(sessions)),
     };
+    let session_count = u64::try_from(sessions).expect("session count fits u64");
     let bytes_per_session = incremental_kib
         .saturating_mul(1_024)
-        .checked_div(u64::try_from(sessions).expect("session count fits u64"))
+        .checked_div(session_count)
+        .expect("non-zero sessions");
+    let framework_owned_bytes_per_session = framework_owned_bytes
+        .checked_div(session_count)
         .expect("non-zero sessions");
     println!(
-        "{label} {{\"baseline_kib\":{baseline_kib},\"resident_kib\":{resident_kib},\"incremental_kib\":{incremental_kib},\"sessions\":{sessions},\"bytes_per_session\":{bytes_per_session},\"run_task_owner_size_of\":{}}}",
+        "{label} {{\"baseline_kib\":{baseline_kib},\"resident_kib\":{resident_kib},\"incremental_kib\":{incremental_kib},\"sessions\":{sessions},\"bytes_per_session\":{bytes_per_session},\"framework_owned_bytes\":{framework_owned_bytes},\"framework_owned_bytes_per_session\":{framework_owned_bytes_per_session},\"run_task_owner_handle_size_of\":{},\"incremental_rss_is_warning_metric\":true}}",
         std::mem::size_of::<RunTaskOwner>()
     );
 }

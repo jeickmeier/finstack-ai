@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::{AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, SnapshotSchedule};
 
 use finstack_ai_kernel::{
-    CommittedBatch, Kernel, RecordEnvelope, RunId, SessionProjection, Timestamp,
+    CommittedBatch, Digest, Kernel, RecordEnvelope, RunId, SessionProjection, Timestamp,
 };
 
 use super::session_commit::apply_batch_to_session;
@@ -45,6 +45,7 @@ impl CommitCoordinator {
                         .map(|snapshot| snapshot.sequence)
                 })
                 .flatten(),
+            head_checksum: loaded.head_checksum,
             fault: None,
             last_store_reason: None,
             dispatcher: None,
@@ -104,6 +105,7 @@ impl CommitCoordinator {
                         .map(|snapshot| snapshot.sequence)
                 })
                 .flatten(),
+            head_checksum: loaded.head_checksum,
             fault: None,
             last_store_reason: None,
             dispatcher: None,
@@ -115,6 +117,44 @@ impl CommitCoordinator {
             middleware_chain: None,
         })
     }
+
+    /// Structural-only coordinator at a loaded session head.
+    ///
+    /// Structural records do not mutate [`finstack_ai_kernel::KernelState`].
+    /// The kernel is empty except for `last_applied_sequence`.
+    pub(crate) fn structural_from_loaded(
+        store: Arc<dyn JournalStore>,
+        loaded: &LoadedSession,
+        session: SessionProjection,
+    ) -> Result<Self, CommitCoordinatorError> {
+        let mut coordinator = Self::new(store);
+        coordinator.mark_structural_head();
+        adopt_session_head(&mut coordinator.kernel, loaded.head_sequence)
+            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        coordinator.session = session;
+        coordinator.head_checksum = loaded.head_checksum;
+        Ok(coordinator)
+    }
+
+    pub(crate) fn mark_structural_head(&mut self) {
+        self.replay_scope = ReplayScope::StructuralOnly;
+        self.snapshot_schedule = SnapshotSchedule {
+            every_n_records: u64::MAX,
+            write_timeout: Duration::from_millis(50),
+        };
+    }
+
+    pub(crate) fn adopt_live_session(
+        &mut self,
+        session: SessionProjection,
+        sequence: u64,
+        head_checksum: Option<Digest>,
+    ) -> Result<(), CommitCoordinatorError> {
+        adopt_session_head(&mut self.kernel, sequence).map_err(|code| self.boundary_fault(code))?;
+        self.session = session;
+        self.head_checksum = head_checksum;
+        Ok(())
+    }
 }
 
 pub(super) fn replay_scoped(
@@ -124,7 +164,12 @@ pub(super) fn replay_scoped(
     match scope {
         ReplayScope::Primary => replay_loaded(loaded),
         ReplayScope::StructuralOnly => {
-            replay_filtered(loaded, None).map(|(kernel, next, timer)| (kernel, next, timer, false))
+            // Structural records do not mutate kernel state. Adopting the
+            // loaded head is equivalent to replaying them one-by-one and
+            // does not restore run-scoped snapshot state into an empty kernel.
+            let mut kernel = Kernel::default();
+            adopt_session_head(&mut kernel, loaded.head_sequence)?;
+            Ok((kernel, 0, None, false))
         }
         ReplayScope::Run(run_id) => {
             if let Some(accelerated) = loaded.accelerated.as_ref()
@@ -198,7 +243,7 @@ fn record_belongs_to_scope(record: &RecordEnvelope, target: Option<RunId>) -> bo
     target.is_some_and(|run_id| record.run_id() == Some(run_id))
 }
 
-fn adopt_session_head(kernel: &mut Kernel, sequence: u64) -> Result<(), &'static str> {
+pub(super) fn adopt_session_head(kernel: &mut Kernel, sequence: u64) -> Result<(), &'static str> {
     let current = kernel.state().last_applied_sequence;
     if current == sequence {
         return Ok(());
@@ -252,11 +297,7 @@ fn replay_from_snapshot(
     {
         return Err("snapshot_sequence_invalid");
     }
-    let journal_checksum =
-        checksum_at(loaded, accelerated.sequence).ok_or("snapshot_missing_record")?;
-    if journal_checksum != accelerated.head_checksum {
-        return Err("snapshot_checksum_mismatch");
-    }
+    snapshot_checksum_ok(loaded, accelerated)?;
     let mut kernel =
         Kernel::try_restore(accelerated.state.clone()).map_err(|_| "snapshot_state_invalid")?;
     let mut next_transient_sequence = 0_u64;
@@ -318,4 +359,35 @@ fn checksum_at(loaded: &LoadedSession, sequence: u64) -> Option<finstack_ai_kern
         .flat_map(|batch| batch.records.iter())
         .find(|record| record.sequence() == sequence)
         .map(finstack_ai_kernel::RecordEnvelope::checksum)
+}
+
+fn snapshot_checksum_ok(
+    loaded: &LoadedSession,
+    accelerated: &AcceleratedRestore,
+) -> Result<(), &'static str> {
+    if let Some(checksum) = checksum_at(loaded, accelerated.sequence) {
+        return if checksum == accelerated.head_checksum {
+            Ok(())
+        } else {
+            Err("snapshot_checksum_mismatch")
+        };
+    }
+    if loaded.head_sequence == accelerated.sequence
+        && loaded.head_checksum == Some(accelerated.head_checksum)
+        && loaded.committed_batches.is_empty()
+    {
+        return Ok(());
+    }
+    let first = loaded
+        .committed_batches
+        .first()
+        .and_then(|batch| batch.records.first())
+        .ok_or("snapshot_missing_record")?;
+    if first.sequence() != accelerated.sequence.saturating_add(1) {
+        return Err("snapshot_missing_record");
+    }
+    if first.previous_checksum() != Some(accelerated.head_checksum) {
+        return Err("snapshot_checksum_mismatch");
+    }
+    Ok(())
 }

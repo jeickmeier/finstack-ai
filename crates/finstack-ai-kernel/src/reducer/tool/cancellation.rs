@@ -36,16 +36,18 @@ pub fn buffer_cancelled_effect(
 ) -> Result<bool, KernelError> {
     let error = cancelled_error()?;
     let batch_id = batch.opened.tool_batch_id;
-    let Some(call) = Arc::make_mut(&mut batch.calls)
-        .iter_mut()
-        .find(|call| call.assigned.effect_id == effect_id)
-    else {
+    let Some(index) = batch.call_index(effect_id) else {
         return Ok(false);
     };
-    if !matches!(call.status, ActiveToolCallStatus::Requested { .. }) {
+    if !matches!(
+        batch.calls[index].status,
+        ActiveToolCallStatus::Requested { .. }
+    ) {
         return Ok(false);
     }
-    buffer_cancellation_result(call, batch_id, &error)?;
+    let mut call = batch.calls[index].clone();
+    buffer_cancellation_result(&mut call, batch_id, &error)?;
+    batch.set_call_status(index, call.status);
     Ok(true)
 }
 
@@ -55,15 +57,23 @@ pub fn buffer_reconciled_tool_closures(
 ) -> Result<(), KernelError> {
     let error = cancelled_error()?;
     let batch_id = batch.opened.tool_batch_id;
-    for call in Arc::make_mut(&mut batch.calls) {
-        let completed = completed_effects
-            .binary_search(&call.assigned.effect_id)
-            .is_ok();
-        if matches!(call.status, ActiveToolCallStatus::Undispatched)
-            || (completed && matches!(call.status, ActiveToolCallStatus::Requested { .. }))
-        {
-            buffer_cancellation_result(call, batch_id, &error)?;
-        }
+    let indexes = batch
+        .calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            let completed = completed_effects
+                .binary_search(&call.assigned.effect_id)
+                .is_ok();
+            (matches!(call.status, ActiveToolCallStatus::Undispatched)
+                || (completed && matches!(call.status, ActiveToolCallStatus::Requested { .. })))
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    for index in indexes {
+        let mut call = batch.calls[index].clone();
+        buffer_cancellation_result(&mut call, batch_id, &error)?;
+        batch.set_call_status(index, call.status);
     }
     Ok(())
 }

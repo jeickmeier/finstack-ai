@@ -24,6 +24,7 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `stage-wasm` | Pack unpublished `@finstack/ai` 0.0.2 artifacts and typecheck a clean install |
 | `benchmark-wasm` | Record WASM/JS crossing warning measurements |
 | `ci` | `check`, `test`, and `check-wasm` |
+| `kernel` / `runtime` / `python-binding` / `wasm-binding` | Narrow local crate gates. Not a substitute for `check` / `ci` |
 
 ## Workflows
 

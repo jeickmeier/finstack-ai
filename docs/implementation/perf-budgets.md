@@ -46,6 +46,17 @@ Do not invent missing Criterion numbers.
 | `wasm-js-crossing-v1` | Browser WASM + JS | `mise run benchmark-wasm` |
 | `minimal-cli-startup-v1` | Warm FS + kernel init | `uv run --no-project python tools/perf/measure_startup.py` |
 | `size-budgets-v1` | Wheel / WASM / CLI bytes | `mise run check-size-budgets` |
+| `session-append-scaling-v1` | One structural append after 100 / 1,000 / 10,000 prior records (memory + SQLite) | `cargo bench -p finstack-ai-test --offline --locked --bench growth -- session_append_scaling` |
+| `sqlite-scan-paging-v1` | Full SQLite scan of 10k / 100k records at page 64 / 256 (`1024` exceeds `SCAN_PAGE_MAX_RECORDS`) | `cargo bench -p finstack-ai-store-sqlite --offline --locked --bench restore_growth -- sqlite_scan_paging` |
+| `sqlite-concurrent-v1` | 1 / 8 / 64 sessions, durable and relaxed; append/load plus event-loop delay | `cargo bench -p finstack-ai-store-sqlite --offline --locked --bench restore_growth -- sqlite_concurrent` |
+| `state-scaling-activated-v1` | 0 / 64 / 256 tool identities × 16 / 1,024 / 4,096 messages; validate, hash, apply, failed-apply | `cargo bench -p finstack-ai-test --offline --locked --bench conformance -- state_scaling` |
+| `tool-settlement-width-v1` | 1 / 16 / 64 / 256 calls; sequential, parallel, reverse completion | `cargo bench -p finstack-ai-test --offline --locked --bench growth -- tool_settlement_width` |
+| `kernel-micro-extras-v1` | `raw_json_parse_64kib` / `1mib`, `raw_json_de_map_64kib`, `tool_result_ids_append`, `decide_context_prepared`, `apply_context_prepared`, `state_hash_v6_tools` | `cargo bench -p finstack-ai-test --offline --locked --bench conformance -- kernel_micro` |
+| `packaging-profile-v1` | Isolated default-release vs thin-LTO/codegen compile and provider/TLS graphs | `mise run measure-packaging-profile` |
+
+These growth rows are probes. They do not invent NFR fail numbers. Host-local `--quick` smoke is not the 1.0 fail line except on the ratified Darwin arm64 host for the existing NFR-PERF-001–007 rows.
+
+`packaging-profile-v1` is also a probe. It compares isolated release compile cost and provider/TLS graphs. It does not change `[profile.release]` and is not an NFR fail number. Recorded host-local results live under [`artifacts/perf-phase5/`](artifacts/perf-phase5/packaging-profile.md).
 
 ## Fail versus warning
 

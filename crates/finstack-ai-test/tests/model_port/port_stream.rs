@@ -348,6 +348,85 @@ async fn malformed_tool_usage_and_response_sequences_are_fail_closed() {
 }
 
 #[tokio::test]
+async fn completed_and_deferred_byte_limits_match_canonical_encoded_len() {
+    let response = completed("");
+    let response_len = serde_json_canonicalizer::to_vec(&response)
+        .expect("canonical response")
+        .len();
+    assert!(response_len > 1);
+    assert_eq!(
+        assemble_terminal_with_max_bytes(
+            ModelStreamItem::Completed(response.clone()),
+            response_len
+        )
+        .await
+        .expect("exact completed limit"),
+        ModelTerminal::Completed(response.clone())
+    );
+    assert_eq!(
+        assemble_terminal_with_max_bytes(ModelStreamItem::Completed(response), response_len - 1)
+            .await
+            .expect_err("completed over limit")
+            .code(),
+        finstack_ai_runtime::MODEL_STREAM_LIMIT_EXCEEDED
+    );
+
+    let deferral = ModelDeferral {
+        handle: ExternalHandleRef::try_new(
+            ComponentId::parse("finstack.model.scripted").expect("component"),
+            "wait-1",
+            RawJson::parse(b"{}").expect("metadata"),
+        )
+        .expect("handle"),
+        reconciliation: ReconciliationPolicy::Poll,
+        next_poll_at: None,
+        expires_at: None,
+    };
+    let deferral_len = serde_json_canonicalizer::to_vec(&deferral)
+        .expect("canonical deferral")
+        .len();
+    assert!(deferral_len > 1);
+    assert_eq!(
+        assemble_terminal_with_max_bytes(ModelStreamItem::Deferred(deferral.clone()), deferral_len)
+            .await
+            .expect("exact deferred limit"),
+        ModelTerminal::Deferred(deferral.clone())
+    );
+    assert_eq!(
+        assemble_terminal_with_max_bytes(ModelStreamItem::Deferred(deferral), deferral_len - 1)
+            .await
+            .expect_err("deferred over limit")
+            .code(),
+        finstack_ai_runtime::MODEL_STREAM_LIMIT_EXCEEDED
+    );
+}
+
+async fn assemble_terminal_with_max_bytes(
+    item: ModelStreamItem,
+    max_bytes: usize,
+) -> Result<ModelTerminal, ModelError> {
+    let model = ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![ScriptedModelAction::Emit(Ok(item))],
+        }],
+    );
+    let stream = model
+        .request(request(CancellationSignal::new()))
+        .await
+        .expect("stream");
+    ModelStreamAssembler::new(ModelStreamLimits {
+        max_items: 1,
+        max_bytes,
+        max_tool_calls: 1,
+    })
+    .expect("assembler")
+    .assemble(stream)
+    .await
+    .map(|value| value.terminal)
+}
+
+#[tokio::test]
 async fn named_block_acknowledges_exact_effect_cancellation_without_sleep() {
     let model = Arc::new(ScriptedModel::from_plans(
         profile(),

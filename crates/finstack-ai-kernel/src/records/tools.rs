@@ -5,6 +5,7 @@
 //! durable records. [`ActiveToolBatch`] and [`ToolCallIdentity`] are the
 //! replay-derived in-flight state used by the reducer.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -305,7 +306,7 @@ pub enum ActiveToolCallStatus {
 }
 
 /// Replay-derived state of the active source-ordered batch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActiveToolBatch {
     /// Durable opening record.
@@ -321,6 +322,338 @@ pub struct ActiveToolBatch {
     /// First fail-run framework error, when any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fatal_error: Option<ErrorDescriptor>,
+    /// Immutable `effect_id →` source-order call index, built at batch open.
+    #[serde(skip)]
+    effect_index: BTreeMap<EffectId, u32>,
+    /// Open (Requested or Undispatched) calls in [`Self::current_group`].
+    #[serde(skip)]
+    current_group_open: u32,
+    /// Contiguous Buffered run starting at [`Self::next_source_index`].
+    #[serde(skip)]
+    buffered_prefix: u32,
+    /// Calls that are not yet Settled.
+    #[serde(skip)]
+    unsettled_count: u32,
+    /// Calls still waiting for an effect request.
+    #[serde(skip)]
+    undispatched_count: u32,
+}
+
+impl PartialEq for ActiveToolBatch {
+    fn eq(&self, other: &Self) -> bool {
+        self.opened == other.opened
+            && self.calls == other.calls
+            && self.current_group == other.current_group
+            && self.next_source_index == other.next_source_index
+            && self.result_message_ids == other.result_message_ids
+            && self.fatal_error == other.fatal_error
+    }
+}
+
+impl Eq for ActiveToolBatch {}
+
+impl ActiveToolBatch {
+    /// Build replay state and derived settlement indexes from opened calls.
+    #[must_use]
+    pub fn new(
+        opened: ToolBatchOpened,
+        calls: impl Into<Arc<[ActiveToolCall]>>,
+        current_group: u32,
+        next_source_index: u32,
+        result_message_ids: impl Into<Arc<[MessageId]>>,
+        fatal_error: Option<ErrorDescriptor>,
+    ) -> Self {
+        let mut batch = Self {
+            opened,
+            calls: calls.into(),
+            current_group,
+            next_source_index,
+            result_message_ids: result_message_ids.into(),
+            fatal_error,
+            effect_index: BTreeMap::new(),
+            current_group_open: 0,
+            buffered_prefix: 0,
+            unsettled_count: 0,
+            undispatched_count: 0,
+        };
+        batch.reindex();
+        batch
+    }
+
+    /// Look up the source-order index for a batch effect.
+    #[must_use]
+    pub fn call_index(&self, effect_id: EffectId) -> Option<usize> {
+        self.effect_index
+            .get(&effect_id)
+            .copied()
+            .map(|index| index as usize)
+    }
+
+    /// Borrow the active call for `effect_id`.
+    #[must_use]
+    pub fn call(&self, effect_id: EffectId) -> Option<&ActiveToolCall> {
+        self.call_index(effect_id)
+            .and_then(|index| self.calls.get(index))
+    }
+
+    /// Whether every call in `group` is Buffered or Settled.
+    #[must_use]
+    pub fn group_is_terminal(&self, group: u32) -> bool {
+        if group == self.current_group {
+            return self.current_group_open == 0;
+        }
+        self.calls.iter().all(|call| {
+            call.assigned.group_index != group
+                || matches!(
+                    call.status,
+                    ActiveToolCallStatus::Buffered { .. } | ActiveToolCallStatus::Settled { .. }
+                )
+        })
+    }
+
+    /// Whether every source call has a committed result message.
+    #[must_use]
+    pub const fn all_settled(&self) -> bool {
+        self.unsettled_count == 0
+    }
+
+    /// First remaining executable group, if any Undispatched Execute call exists.
+    #[must_use]
+    pub fn next_executable_group(&self) -> Option<u32> {
+        if self.undispatched_count == 0 {
+            return None;
+        }
+        self.calls.iter().find_map(|call| {
+            (matches!(call.status, ActiveToolCallStatus::Undispatched)
+                && matches!(call.assigned.plan, ToolCallPlan::Execute(_)))
+            .then_some(call.assigned.group_index)
+        })
+    }
+
+    /// Record IDs needed after buffering `target` without allocating a status vector.
+    #[must_use]
+    pub fn predicted_settlement_counts(&self, target: usize, fatal: bool) -> (usize, usize, usize) {
+        let current_complete = self.current_group_completes_after(target);
+        let abort_undispatched = fatal && current_complete;
+        let start = usize::try_from(self.next_source_index).unwrap_or(self.calls.len());
+        let mut messages = 0_usize;
+        for (index, call) in self.calls.iter().enumerate().skip(start) {
+            if predicted_buffered(index, target, abort_undispatched, &call.status) {
+                messages += 1;
+            } else {
+                break;
+            }
+        }
+        let requests = if !fatal && current_complete {
+            next_group_request_count(&self.calls, target)
+        } else {
+            0
+        };
+        let remaining = usize::try_from(self.unsettled_count).unwrap_or(0);
+        let close = usize::from(remaining == messages);
+        (messages, requests, close)
+    }
+
+    pub(crate) fn reindex(&mut self) {
+        self.effect_index.clear();
+        self.current_group_open = 0;
+        self.unsettled_count = 0;
+        self.undispatched_count = 0;
+        for (index, call) in self.calls.iter().enumerate() {
+            if let Ok(index) = u32::try_from(index) {
+                self.effect_index.insert(call.assigned.effect_id, index);
+            }
+            match &call.status {
+                ActiveToolCallStatus::Undispatched => {
+                    self.undispatched_count = self.undispatched_count.saturating_add(1);
+                    self.unsettled_count = self.unsettled_count.saturating_add(1);
+                    if call.assigned.group_index == self.current_group {
+                        self.current_group_open = self.current_group_open.saturating_add(1);
+                    }
+                }
+                ActiveToolCallStatus::Requested { .. } => {
+                    self.unsettled_count = self.unsettled_count.saturating_add(1);
+                    if call.assigned.group_index == self.current_group {
+                        self.current_group_open = self.current_group_open.saturating_add(1);
+                    }
+                }
+                ActiveToolCallStatus::Buffered { .. } => {
+                    self.unsettled_count = self.unsettled_count.saturating_add(1);
+                }
+                ActiveToolCallStatus::Settled { .. } => {}
+            }
+        }
+        self.recompute_buffered_prefix();
+    }
+
+    pub(crate) fn set_call_status(&mut self, index: usize, status: ActiveToolCallStatus) {
+        let next = status_kind(&status);
+        let (group, previous) = {
+            let Some(call) = Arc::make_mut(&mut self.calls).get_mut(index) else {
+                return;
+            };
+            let previous = status_kind(&call.status);
+            let group = call.assigned.group_index;
+            call.status = status;
+            (group, previous)
+        };
+        self.adjust_counters(group, previous, next);
+        self.recompute_buffered_prefix();
+    }
+
+    pub(crate) fn note_source_advanced(&mut self) {
+        self.recompute_buffered_prefix();
+    }
+
+    pub(crate) fn set_current_group(&mut self, group: u32) {
+        self.current_group = group;
+        self.current_group_open = self
+            .calls
+            .iter()
+            .filter(|call| {
+                call.assigned.group_index == group
+                    && matches!(
+                        call.status,
+                        ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. }
+                    )
+            })
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+    }
+
+    fn current_group_completes_after(&self, target: usize) -> bool {
+        let Some(call) = self.calls.get(target) else {
+            return self.current_group_open == 0;
+        };
+        let target_open = call.assigned.group_index == self.current_group
+            && matches!(
+                call.status,
+                ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. }
+            );
+        if target_open {
+            self.current_group_open <= 1
+        } else {
+            self.current_group_open == 0
+        }
+    }
+
+    fn recompute_buffered_prefix(&mut self) {
+        let start = usize::try_from(self.next_source_index).unwrap_or(self.calls.len());
+        let mut prefix = 0_u32;
+        for call in self.calls.iter().skip(start) {
+            if matches!(call.status, ActiveToolCallStatus::Buffered { .. }) {
+                prefix = prefix.saturating_add(1);
+            } else {
+                break;
+            }
+        }
+        self.buffered_prefix = prefix;
+    }
+
+    fn adjust_counters(&mut self, group: u32, previous: StatusKind, next: StatusKind) {
+        if previous.undispatched != next.undispatched {
+            if next.undispatched {
+                self.undispatched_count = self.undispatched_count.saturating_add(1);
+            } else {
+                self.undispatched_count = self.undispatched_count.saturating_sub(1);
+            }
+        }
+        if previous.unsettled != next.unsettled {
+            if next.unsettled {
+                self.unsettled_count = self.unsettled_count.saturating_add(1);
+            } else {
+                self.unsettled_count = self.unsettled_count.saturating_sub(1);
+            }
+        }
+        let was_open = group == self.current_group && previous.open;
+        let now_open = group == self.current_group && next.open;
+        if was_open != now_open {
+            if now_open {
+                self.current_group_open = self.current_group_open.saturating_add(1);
+            } else {
+                self.current_group_open = self.current_group_open.saturating_sub(1);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StatusKind {
+    undispatched: bool,
+    unsettled: bool,
+    open: bool,
+}
+
+fn status_kind(status: &ActiveToolCallStatus) -> StatusKind {
+    StatusKind {
+        undispatched: matches!(status, ActiveToolCallStatus::Undispatched),
+        unsettled: !matches!(status, ActiveToolCallStatus::Settled { .. }),
+        open: matches!(
+            status,
+            ActiveToolCallStatus::Undispatched | ActiveToolCallStatus::Requested { .. }
+        ),
+    }
+}
+
+fn predicted_buffered(
+    index: usize,
+    target: usize,
+    abort_undispatched: bool,
+    status: &ActiveToolCallStatus,
+) -> bool {
+    index == target
+        || matches!(status, ActiveToolCallStatus::Buffered { .. })
+        || (abort_undispatched && matches!(status, ActiveToolCallStatus::Undispatched))
+}
+
+fn next_group_request_count(calls: &[ActiveToolCall], target: usize) -> usize {
+    let next_group = calls.iter().enumerate().find_map(|(index, call)| {
+        (index != target
+            && matches!(call.status, ActiveToolCallStatus::Undispatched)
+            && matches!(call.assigned.plan, ToolCallPlan::Execute(_)))
+        .then_some(call.assigned.group_index)
+    });
+    next_group.map_or(0, |group| {
+        calls
+            .iter()
+            .enumerate()
+            .filter(|(index, call)| {
+                *index != target
+                    && matches!(call.status, ActiveToolCallStatus::Undispatched)
+                    && call.assigned.group_index == group
+                    && matches!(call.assigned.plan, ToolCallPlan::Execute(_))
+            })
+            .count()
+    })
+}
+
+impl<'de> Deserialize<'de> for ActiveToolBatch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            opened: ToolBatchOpened,
+            calls: Arc<[ActiveToolCall]>,
+            current_group: u32,
+            next_source_index: u32,
+            result_message_ids: Arc<[MessageId]>,
+            #[serde(default)]
+            fatal_error: Option<ErrorDescriptor>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self::new(
+            wire.opened,
+            wire.calls,
+            wire.current_group,
+            wire.next_source_index,
+            wire.result_message_ids,
+            wire.fatal_error,
+        ))
+    }
 }
 
 /// Persistent source call identity retained for duplicate prevention.
@@ -388,5 +721,83 @@ mod tests {
             error.to_string().contains("array item count"),
             "expected item-ceiling error, got {error}"
         );
+    }
+
+    fn id<T: crate::IdTag>(ordinal: u8) -> crate::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8] = 0x80;
+        bytes[15] = ordinal;
+        crate::Id::from_bytes(bytes)
+    }
+
+    fn synthetic_call(effect_id: EffectId, status: ActiveToolCallStatus) -> ActiveToolCall {
+        ActiveToolCall {
+            assigned: AssignedToolCall {
+                source_index: 0,
+                group_index: 0,
+                effect_id,
+                plan: ToolCallPlan::SyntheticClosure(SyntheticToolClosure {
+                    call: crate::ToolCallBlock::try_new(
+                        id(3),
+                        "t",
+                        crate::RawJson::parse("{}").expect("json"),
+                    )
+                    .expect("call"),
+                    execution: ToolExecutionMode::Sequential,
+                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                    error: crate::ErrorDescriptor::new("x", "x", crate::ErrorCategory::Tool, false)
+                        .expect("error"),
+                }),
+            },
+            status,
+        }
+    }
+
+    #[test]
+    fn active_batch_indexes_effect_ids_and_counts() {
+        let effect_a = id(1);
+        let effect_b = id(2);
+        let opened = ToolBatchOpened {
+            cycle: 0,
+            turn_id: id(4),
+            tool_batch_id: id(5),
+            source_message_id: id(6),
+            calls: Arc::from([]),
+            continuation: ToolBatchContinuation::Finalize,
+            plan_digest: crate::Digest::raw_json(b"plan"),
+        };
+        let batch = ActiveToolBatch::new(
+            opened,
+            vec![
+                synthetic_call(
+                    effect_a,
+                    ActiveToolCallStatus::Buffered {
+                        result: crate::ToolResultBlock::try_new(
+                            id(3),
+                            vec![crate::ContentBlock::Json(crate::JsonBlock::new(
+                                crate::RawJson::parse("{}").expect("json"),
+                            ))],
+                            true,
+                        )
+                        .expect("result"),
+                        settlement_digest: crate::Digest::raw_json(b"s"),
+                        synthetic: true,
+                        error: None,
+                    },
+                ),
+                synthetic_call(effect_b, ActiveToolCallStatus::Undispatched),
+            ],
+            0,
+            0,
+            Arc::from([]),
+            None,
+        );
+        assert_eq!(batch.call_index(effect_a), Some(0));
+        assert_eq!(batch.call_index(effect_b), Some(1));
+        assert!(!batch.all_settled());
+        assert!(!batch.group_is_terminal(0));
+        let (messages, requests, close) = batch.predicted_settlement_counts(0, false);
+        assert_eq!((messages, requests, close), (1, 0, 0));
     }
 }

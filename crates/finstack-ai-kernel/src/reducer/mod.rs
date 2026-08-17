@@ -97,8 +97,9 @@ impl Kernel {
 
     /// Transactionally apply an atomic committed batch and derive public events.
     ///
-    /// The complete batch is validated and applied to a temporary state. The
-    /// authoritative state changes only if every record succeeds.
+    /// The complete batch is preflighted, then applied to a working copy. The
+    /// authoritative state changes only if every record succeeds. Full-state
+    /// validate stays on restore, deserialize, and [`KernelState::state_hash`].
     /// `first_transient_sequence` is the runtime sequencer's next unused value;
     /// derived events consume contiguous values from it.
     ///
@@ -152,7 +153,7 @@ impl Kernel {
     /// ```
     pub fn try_restore(state: KernelState) -> Result<Self, KernelError> {
         state.validate()?;
-        let _ = state.state_hash()?;
+        let _ = state.hash_projection()?;
         Ok(Self { state })
     }
 }

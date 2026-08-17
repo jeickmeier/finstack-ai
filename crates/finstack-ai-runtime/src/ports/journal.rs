@@ -67,6 +67,27 @@ pub trait JournalStore: PortObject {
     /// * `request` - Session identity plus optional snapshot acceleration.
     fn load(&self, request: LoadRequest) -> PortFuture<Result<LoadedSession, StoreError>>;
 
+    /// Load a verified suffix of one session journal.
+    ///
+    /// [`LoadWindow::Full`] matches [`Self::load`]. [`LoadWindow::FromSequence`]
+    /// materializes batches at or after `from_sequence` and fail-closes unless
+    /// that tail chains from `prior_checksum`. [`LoadWindow::SnapshotPlusTail`]
+    /// materializes the disposable snapshot plus batches after it, or falls
+    /// back to a full load when no snapshot exists.
+    ///
+    /// Default implementations call [`Self::load`] and trim. Stores that can
+    /// omit the prefix must still verify the returned tail against the prior
+    /// checksum or snapshot head. Chain verification is not optional.
+    fn load_from(&self, request: LoadFromRequest) -> PortFuture<Result<LoadedSession, StoreError>> {
+        let load = self.load(LoadRequest {
+            session_id: request.session_id,
+        });
+        Box::pin(async move {
+            let loaded = load.await?;
+            trim_loaded_session(loaded, request.window)
+        })
+    }
+
     /// Replace the disposable replay snapshot for one session.
     fn write_snapshot(
         &self,
@@ -166,6 +187,39 @@ pub struct LoadRequest {
     pub session_id: SessionId,
 }
 
+/// How much of a session journal to materialize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadWindow {
+    /// Every committed batch, including any disposable snapshot.
+    Full,
+    /// Batches whose first sequence is at least `from_sequence`.
+    ///
+    /// `from_sequence == 0` means the first committed record. When
+    /// `from_sequence > 1`, `prior_checksum` is the checksum of sequence
+    /// `from_sequence - 1` and the store fail-closes if the tail does not
+    /// chain from it. `from_sequence` must land on a batch boundary.
+    FromSequence {
+        /// Inclusive start sequence; `0` means the first committed record.
+        from_sequence: u64,
+        /// Checksum of the record immediately before `from_sequence`.
+        prior_checksum: Digest,
+    },
+    /// Disposable snapshot plus batches after the snapshot sequence.
+    ///
+    /// Falls back to [`Self::Full`] when no snapshot exists. The tail must
+    /// chain from the snapshot head checksum.
+    SnapshotPlusTail,
+}
+
+/// Session-scoped journal load that may omit a verified prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoadFromRequest {
+    /// Session to load.
+    pub session_id: SessionId,
+    /// Prefix window to materialize.
+    pub window: LoadWindow,
+}
+
 /// Loaded journal preserving the store's committed batch boundaries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedSession {
@@ -199,6 +253,154 @@ impl LoadedSession {
             accelerated: None,
         }
     }
+
+    /// First sequence covered by [`Self::committed_batches`], or `0` when empty.
+    #[must_use]
+    pub fn first_loaded_sequence(&self) -> u64 {
+        self.committed_batches
+            .first()
+            .map_or(0, |batch| batch.first_sequence)
+    }
+
+    /// Whether the authoritative prefix before the first loaded batch was omitted.
+    #[must_use]
+    pub fn omits_prefix(&self) -> bool {
+        self.first_loaded_sequence() > 1
+            || (self.committed_batches.is_empty() && self.head_sequence > 0)
+    }
+}
+
+fn trim_loaded_session(
+    loaded: LoadedSession,
+    window: LoadWindow,
+) -> Result<LoadedSession, StoreError> {
+    match window {
+        LoadWindow::Full => Ok(loaded),
+        LoadWindow::FromSequence {
+            from_sequence,
+            prior_checksum,
+        } => trim_from_sequence(loaded, from_sequence, prior_checksum),
+        LoadWindow::SnapshotPlusTail => trim_snapshot_plus_tail(loaded),
+    }
+}
+
+fn trim_from_sequence(
+    loaded: LoadedSession,
+    from_sequence: u64,
+    prior_checksum: Digest,
+) -> Result<LoadedSession, StoreError> {
+    let start = if from_sequence == 0 { 1 } else { from_sequence };
+    if start <= 1 {
+        return Ok(loaded);
+    }
+    if start > loaded.head_sequence.saturating_add(1) {
+        return Err(StoreError::Integrity {
+            reason_code: "load_from_sequence_gap",
+        });
+    }
+    if let Some(prior) = record_at(&loaded, start.saturating_sub(1))
+        && prior.checksum() != prior_checksum
+    {
+        return Err(StoreError::Integrity {
+            reason_code: "load_from_prior_checksum_mismatch",
+        });
+    }
+    if start == loaded.head_sequence.saturating_add(1) {
+        if loaded.head_checksum != Some(prior_checksum) {
+            return Err(StoreError::Integrity {
+                reason_code: "load_from_prior_checksum_mismatch",
+            });
+        }
+        return Ok(LoadedSession {
+            committed_batches: Arc::from([]),
+            ..loaded
+        });
+    }
+    let start_index = loaded
+        .committed_batches
+        .iter()
+        .position(|batch| batch.first_sequence >= start)
+        .ok_or(StoreError::Integrity {
+            reason_code: "load_from_sequence_gap",
+        })?;
+    if loaded.committed_batches[start_index].first_sequence != start {
+        return Err(StoreError::Integrity {
+            reason_code: "load_from_splits_batch",
+        });
+    }
+    let first = loaded.committed_batches[start_index]
+        .records
+        .first()
+        .ok_or(StoreError::Integrity {
+            reason_code: "load_from_empty_batch",
+        })?;
+    if first.sequence() != start || first.previous_checksum() != Some(prior_checksum) {
+        return Err(StoreError::Integrity {
+            reason_code: "load_from_prior_checksum_mismatch",
+        });
+    }
+    Ok(LoadedSession {
+        committed_batches: Arc::from(loaded.committed_batches[start_index..].to_vec()),
+        ..loaded
+    })
+}
+
+fn trim_snapshot_plus_tail(loaded: LoadedSession) -> Result<LoadedSession, StoreError> {
+    let Some(accelerated) = loaded.accelerated.as_ref() else {
+        return Ok(loaded);
+    };
+    let start = accelerated.sequence.saturating_add(1);
+    if start > loaded.head_sequence.saturating_add(1) {
+        return Err(StoreError::Integrity {
+            reason_code: "snapshot_sequence_invalid",
+        });
+    }
+    if loaded.head_sequence == accelerated.sequence {
+        if loaded.head_checksum != Some(accelerated.head_checksum) {
+            return Err(StoreError::Integrity {
+                reason_code: "snapshot_checksum_mismatch",
+            });
+        }
+        return Ok(LoadedSession {
+            committed_batches: Arc::from([]),
+            ..loaded
+        });
+    }
+    let start_index = loaded
+        .committed_batches
+        .iter()
+        .position(|batch| batch.first_sequence >= start)
+        .ok_or(StoreError::Integrity {
+            reason_code: "snapshot_missing_record",
+        })?;
+    if loaded.committed_batches[start_index].first_sequence != start {
+        return Err(StoreError::Integrity {
+            reason_code: "snapshot_splits_batch",
+        });
+    }
+    let first = loaded.committed_batches[start_index]
+        .records
+        .first()
+        .ok_or(StoreError::Integrity {
+            reason_code: "snapshot_missing_record",
+        })?;
+    if first.previous_checksum() != Some(accelerated.head_checksum) {
+        return Err(StoreError::Integrity {
+            reason_code: "snapshot_checksum_mismatch",
+        });
+    }
+    Ok(LoadedSession {
+        committed_batches: Arc::from(loaded.committed_batches[start_index..].to_vec()),
+        ..loaded
+    })
+}
+
+fn record_at(loaded: &LoadedSession, sequence: u64) -> Option<&RecordEnvelope> {
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .find(|record| record.sequence() == sequence)
 }
 
 /// Session-local scan request. There is no global target-ID scan.

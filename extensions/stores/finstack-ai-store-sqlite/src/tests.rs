@@ -14,11 +14,12 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
 use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, OpaqueSnapshot, ScanRequest, SnapshotRequest,
-    StateSnapshotRequest, StoreError, WriteMetadataRequest,
+    CommitCoordinator, JournalStore, LoadFromRequest, LoadRequest, LoadWindow, OpaqueSnapshot,
+    SCAN_PAGE_MAX_RECORDS, ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError,
+    WriteMetadataRequest,
 };
 use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
 use super::*;
@@ -307,6 +308,15 @@ fn scan_and_metadata_cas_are_session_local() {
     .expect("scan");
     assert_eq!(page.records.len(), 2);
     assert_eq!(page.next_sequence, Some(3));
+    let tail = block_on(store.scan(ScanRequest {
+        session_id: id::<SessionTag>(1),
+        from_sequence: 3,
+        limit: 2,
+    }))
+    .expect("mid scan");
+    assert_eq!(tail.records.len(), 1);
+    assert_eq!(tail.records[0].sequence(), 3);
+    assert_eq!(tail.next_sequence, None);
     assert!(matches!(
         block_on(store.scan(ScanRequest {
             session_id: id::<SessionTag>(1),
@@ -315,6 +325,16 @@ fn scan_and_metadata_cas_are_session_local() {
         })),
         Err(StoreError::InvalidRequest {
             reason_code: "scan_limit_zero"
+        })
+    ));
+    assert!(matches!(
+        block_on(store.scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 1,
+            limit: SCAN_PAGE_MAX_RECORDS + 1,
+        })),
+        Err(StoreError::InvalidRequest {
+            reason_code: "scan_limit_exceeded"
         })
     ));
 
@@ -341,6 +361,32 @@ fn scan_and_metadata_cas_are_session_local() {
     }))
     .expect("load");
     assert_eq!(loaded.metadata, metadata);
+}
+
+#[test]
+fn scan_verifies_page_from_stored_checkpoint() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.sqlite");
+    let store = file_store(&dir, SqliteDurability::Durable);
+    block_on(store.append(request(1, 1, 1, vec![draft(1, 1)]))).expect("append");
+    block_on(store.append(request(2, 1, 2, vec![draft(2, 1)]))).expect("append");
+    block_on(store.append(request(3, 1, 3, vec![draft(3, 1)]))).expect("append");
+    let connection = Connection::open(&path).expect("second connection");
+    connection
+        .execute(
+            "UPDATE records SET envelope_checksum = ?1 WHERE sequence = 2",
+            params![vec![0_u8; 32]],
+        )
+        .expect("corrupt");
+    drop(connection);
+    assert!(matches!(
+        block_on(store.scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 2,
+            limit: 2,
+        })),
+        Err(StoreError::Integrity { .. })
+    ));
 }
 
 #[test]
@@ -599,6 +645,60 @@ fn discarding_sqlite_snapshots_still_recovers_from_the_journal() {
     let rebuilt =
         block_on(CommitCoordinator::recover(store, id::<SessionTag>(1))).expect("rebuild");
     assert_eq!(rebuilt.state().state_hash().expect("hash"), expected);
+}
+
+#[test]
+fn load_from_omits_the_verified_prefix() {
+    let store = snapshot_capable_store();
+    accept_root_run(&store);
+    let full = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }))
+    .expect("full");
+    let first = full.committed_batches.first().expect("first batch");
+    let prior = first.records.last().expect("prior").checksum();
+    let from_sequence = first.last_sequence.saturating_add(1);
+    if from_sequence <= full.head_sequence {
+        let tail = block_on(store.load_from(LoadFromRequest {
+            session_id: id::<SessionTag>(1),
+            window: LoadWindow::FromSequence {
+                from_sequence,
+                prior_checksum: prior,
+            },
+        }))
+        .expect("tail");
+        assert!(tail.omits_prefix());
+        assert_eq!(tail.head_sequence, full.head_sequence);
+        assert_eq!(
+            tail.committed_batches
+                .first()
+                .map(|batch| batch.first_sequence),
+            Some(from_sequence)
+        );
+    }
+    block_on(
+        store.write_state_snapshot(StateSnapshotRequest {
+            session_id: id::<SessionTag>(1),
+            state: block_on(CommitCoordinator::recover(
+                Arc::clone(&store) as Arc<dyn JournalStore>,
+                id::<SessionTag>(1),
+            ))
+            .expect("recover")
+            .state()
+            .clone(),
+            head_checksum: full.head_checksum.expect("head"),
+            pending_timer_scheduled_at: None,
+        }),
+    )
+    .expect("snapshot");
+    let snapshot_plus_tail = block_on(store.load_from(LoadFromRequest {
+        session_id: id::<SessionTag>(1),
+        window: LoadWindow::SnapshotPlusTail,
+    }))
+    .expect("snapshot plus tail");
+    assert!(snapshot_plus_tail.accelerated.is_some());
+    assert!(snapshot_plus_tail.committed_batches.is_empty());
+    assert_eq!(snapshot_plus_tail.head_sequence, full.head_sequence);
 }
 
 #[test]

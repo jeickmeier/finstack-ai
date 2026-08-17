@@ -33,11 +33,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
     let Some(batch) = state.active_tool_batch.as_ref() else {
         return Ok(());
     };
-    let Some(active) = batch
-        .calls
-        .iter()
-        .find(|call| call.assigned.effect_id == effect_id)
-    else {
+    let Some(active) = batch.call(effect_id) else {
         return Ok(());
     };
     if let Some(cancellation) = state.cancellation.as_ref()
@@ -106,11 +102,7 @@ pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(
     let Some(batch) = state.active_tool_batch.as_ref() else {
         return Ok(());
     };
-    let Some(active) = batch
-        .calls
-        .iter()
-        .find(|call| call.assigned.effect_id == effect_id)
-    else {
+    let Some(active) = batch.call(effect_id) else {
         return Ok(());
     };
     if !matches!(
@@ -187,18 +179,6 @@ fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, R
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PredictedToolStatus {
-    Undispatched,
-    Requested,
-    Buffered,
-    Settled,
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "exact allocation mirrors the kernel's contiguous-prefix and next-group cardinalities"
-)]
 fn allocate_tool_settlement<C: Clock, R: RandomSource>(
     state: &finstack_ai_kernel::KernelState,
     settled: &ToolBatchSettled,
@@ -216,87 +196,15 @@ fn allocate_tool_settlement<C: Clock, R: RandomSource>(
         ToolSettlement::Deferred(value) => value.effect_id,
     };
     let target = batch
-        .calls
-        .iter()
-        .position(|call| call.assigned.effect_id == effect_id)
+        .call_index(effect_id)
         .ok_or(RunHandleError::ToolSettlement {
             code: "tool_settlement_call_missing",
         })?;
-    let mut statuses = batch
-        .calls
-        .iter()
-        .map(|call| match call.status {
-            finstack_ai_kernel::ActiveToolCallStatus::Undispatched => {
-                PredictedToolStatus::Undispatched
-            }
-            finstack_ai_kernel::ActiveToolCallStatus::Requested { .. } => {
-                PredictedToolStatus::Requested
-            }
-            finstack_ai_kernel::ActiveToolCallStatus::Buffered { .. } => {
-                PredictedToolStatus::Buffered
-            }
-            finstack_ai_kernel::ActiveToolCallStatus::Settled { .. } => {
-                PredictedToolStatus::Settled
-            }
-        })
-        .collect::<Vec<_>>();
-    statuses[target] = PredictedToolStatus::Buffered;
     let target_plan = &batch.calls[target].assigned.plan;
     let fatal = batch.fatal_error.is_some()
         || (matches!(settled.outcome, ToolSettlement::Failed(_))
             && target_plan.failure_policy() == ToolFailurePolicy::FailRun);
-    let current_complete = batch.calls.iter().enumerate().all(|(index, call)| {
-        call.assigned.group_index != batch.current_group
-            || matches!(
-                statuses[index],
-                PredictedToolStatus::Buffered | PredictedToolStatus::Settled
-            )
-    });
-    if fatal && current_complete {
-        for status in &mut statuses {
-            if *status == PredictedToolStatus::Undispatched {
-                *status = PredictedToolStatus::Buffered;
-            }
-        }
-    }
-    let mut messages = 0_usize;
-    let start =
-        usize::try_from(batch.next_source_index).map_err(|_| RunHandleError::ToolSettlement {
-            code: "tool_source_index_invalid",
-        })?;
-    for status in statuses.iter_mut().skip(start) {
-        if *status != PredictedToolStatus::Buffered {
-            break;
-        }
-        *status = PredictedToolStatus::Settled;
-        messages += 1;
-    }
-    let requests = if !fatal && current_complete {
-        let next_group = batch.calls.iter().enumerate().find_map(|(index, call)| {
-            (statuses[index] == PredictedToolStatus::Undispatched
-                && matches!(call.assigned.plan, ToolCallPlan::Execute(_)))
-            .then_some(call.assigned.group_index)
-        });
-        next_group.map_or(0, |group| {
-            batch
-                .calls
-                .iter()
-                .enumerate()
-                .filter(|(index, call)| {
-                    statuses[*index] == PredictedToolStatus::Undispatched
-                        && call.assigned.group_index == group
-                        && matches!(call.assigned.plan, ToolCallPlan::Execute(_))
-                })
-                .count()
-        })
-    } else {
-        0
-    };
-    let close = usize::from(
-        statuses
-            .iter()
-            .all(|status| *status == PredictedToolStatus::Settled),
-    );
+    let (messages, requests, close) = batch.predicted_settlement_counts(target, fatal);
     let records = 1 + messages + requests + close;
     let events = 1 + 2 * messages + requests;
     AllocatedIds::try_new(
@@ -459,10 +367,7 @@ fn deferred_tool_seed(
 ) -> Option<ToolDispatchSeed> {
     let state = coordinator.state();
     let batch = state.active_tool_batch.as_ref()?;
-    let call = batch
-        .calls
-        .iter()
-        .find(|call| call.assigned.effect_id == effect_id)?;
+    let call = batch.call(effect_id)?;
     let ActiveToolCallStatus::Requested { requested, .. } = &call.status else {
         return None;
     };
@@ -554,15 +459,14 @@ async fn settle_reconciled_tool<C: Clock, R: RandomSource>(
         .active_tool_batch
         .as_ref()
         .is_some_and(|batch| {
-            batch.calls.iter().any(|call| {
-                call.assigned.effect_id == effect_id
-                    && matches!(
-                        call.status,
-                        ActiveToolCallStatus::Requested {
-                            deferred: Some(_),
-                            ..
-                        }
-                    )
+            batch.call(effect_id).is_some_and(|call| {
+                matches!(
+                    call.status,
+                    ActiveToolCallStatus::Requested {
+                        deferred: Some(_),
+                        ..
+                    }
+                )
             })
         });
     let driver = ToolDriverResult {
@@ -648,16 +552,12 @@ async fn ensure_or_wait_tool_deferred<C: Clock, R: RandomSource>(
         .active_tool_batch
         .as_ref()
         .and_then(|batch| {
-            batch.calls.iter().find_map(|call| {
-                (call.assigned.effect_id == effect_id)
-                    .then_some(call.status.clone())
-                    .and_then(|status| match status {
-                        ActiveToolCallStatus::Requested {
-                            deferred: Some(deferred),
-                            ..
-                        } => Some(deferred),
-                        _ => None,
-                    })
+            batch.call(effect_id).and_then(|call| match &call.status {
+                ActiveToolCallStatus::Requested {
+                    deferred: Some(deferred),
+                    ..
+                } => Some(deferred.clone()),
+                _ => None,
             })
         });
     if let Some(existing) = existing {

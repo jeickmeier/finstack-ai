@@ -6,9 +6,9 @@ use finstack_ai_runtime::StoreError;
 use rusqlite::{Transaction, params};
 use serde::{Deserialize, Serialize};
 
+use crate::config::SqliteStoreLimits;
 use crate::error::{i64_from_u64, map_sqlite_error, protocol_error};
 use crate::load::{count_sessions, load_batch, load_session_row, lookup_record_batch};
-use crate::store::SqliteJournalStore;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct AppendIdentity {
@@ -18,113 +18,111 @@ pub(crate) struct AppendIdentity {
     draft_cbor: Vec<Vec<u8>>,
 }
 
-impl SqliteJournalStore {
-    pub(crate) fn append_in_transaction(
-        &self,
-        transaction: &Transaction<'_>,
-        request: &AppendRequest,
-    ) -> Result<CommittedBatch, StoreError> {
-        let request_cbor = request_cbor(request)?;
-        if let Some(existing) = load_batch(transaction, request.batch_id())? {
-            return if existing.request_cbor == request_cbor {
-                Ok(existing.committed)
-            } else {
-                Err(StoreError::Corruption {
-                    reason_code: "append_batch_id_reuse",
-                })
-            };
-        }
+pub(crate) fn append_in_transaction(
+    transaction: &Transaction<'_>,
+    request: &AppendRequest,
+    limits: &SqliteStoreLimits,
+) -> Result<CommittedBatch, StoreError> {
+    let request_cbor = request_cbor(request)?;
+    if let Some(existing) = load_batch(transaction, request.batch_id())? {
+        return if existing.request_cbor == request_cbor {
+            Ok(existing.committed)
+        } else {
+            Err(StoreError::Corruption {
+                reason_code: "append_batch_id_reuse",
+            })
+        };
+    }
 
-        if request.records().is_empty() {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "empty_append_batch",
-            });
-        }
+    if request.records().is_empty() {
+        return Err(StoreError::InvalidRequest {
+            reason_code: "empty_append_batch",
+        });
+    }
 
-        let mut reused = Vec::new();
-        for record in request.records() {
-            if let Some(batch_id) = lookup_record_batch(transaction, record.record_id())? {
-                reused.push(batch_id);
-            }
+    let mut reused = Vec::new();
+    for record in request.records() {
+        if let Some(batch_id) = lookup_record_batch(transaction, record.record_id())? {
+            reused.push(batch_id);
         }
-        if !reused.is_empty() {
-            if reused.len() != request.records().len() {
-                return Err(StoreError::Corruption {
-                    reason_code: "mixed_record_id_reuse",
-                });
-            }
-            let original_batch_id = reused[0];
-            if reused.iter().any(|batch_id| *batch_id != original_batch_id) {
-                return Err(StoreError::Corruption {
-                    reason_code: "mixed_record_batch_reuse",
-                });
-            }
-            let existing =
-                load_batch(transaction, original_batch_id)?.ok_or(StoreError::Integrity {
-                    reason_code: "missing_record_batch_index",
-                })?;
-            let incoming = request_identity(request)?;
-            if existing.identity.session_id == incoming.session_id
-                && existing.identity.expected_sequence == incoming.expected_sequence
-                && existing.identity.draft_cbor == incoming.draft_cbor
-            {
-                return Ok(existing.committed);
-            }
+    }
+    if !reused.is_empty() {
+        if reused.len() != request.records().len() {
             return Err(StoreError::Corruption {
-                reason_code: "record_id_reuse",
+                reason_code: "mixed_record_id_reuse",
             });
         }
-
-        let session = load_session_row(transaction, request.session_id())?;
-        let current_head = session.as_ref().map_or(0, |row| row.current_sequence);
-        let actual_next_sequence = current_head.checked_add(1).ok_or(StoreError::Integrity {
-            reason_code: "sequence_exhausted",
-        })?;
-        if request.expected_sequence() != actual_next_sequence {
-            return Err(StoreError::Conflict {
-                expected_sequence: request.expected_sequence(),
-                actual_next_sequence,
+        let original_batch_id = reused[0];
+        if reused.iter().any(|batch_id| *batch_id != original_batch_id) {
+            return Err(StoreError::Corruption {
+                reason_code: "mixed_record_batch_reuse",
             });
         }
+        let existing =
+            load_batch(transaction, original_batch_id)?.ok_or(StoreError::Integrity {
+                reason_code: "missing_record_batch_index",
+            })?;
+        let incoming = request_identity(request)?;
+        if existing.identity.session_id == incoming.session_id
+            && existing.identity.expected_sequence == incoming.expected_sequence
+            && existing.identity.draft_cbor == incoming.draft_cbor
+        {
+            return Ok(existing.committed);
+        }
+        return Err(StoreError::Corruption {
+            reason_code: "record_id_reuse",
+        });
+    }
 
-        let session_is_new = session.is_none();
-        if session_is_new && count_sessions(transaction)? >= self.limits.sessions {
+    let session = load_session_row(transaction, request.session_id())?;
+    let current_head = session.as_ref().map_or(0, |row| row.current_sequence);
+    let actual_next_sequence = current_head.checked_add(1).ok_or(StoreError::Integrity {
+        reason_code: "sequence_exhausted",
+    })?;
+    if request.expected_sequence() != actual_next_sequence {
+        return Err(StoreError::Conflict {
+            expected_sequence: request.expected_sequence(),
+            actual_next_sequence,
+        });
+    }
+
+    let session_is_new = session.is_none();
+    if session_is_new && count_sessions(transaction)? >= limits.sessions {
+        return Err(StoreError::LimitExceeded {
+            resource: "sessions",
+            limit: limits.sessions,
+        });
+    }
+    if let Some(row) = &session {
+        if row.batches >= limits.batches_per_session {
             return Err(StoreError::LimitExceeded {
-                resource: "sessions",
-                limit: self.limits.sessions,
+                resource: "batches_per_session",
+                limit: limits.batches_per_session,
             });
         }
-        if let Some(row) = &session {
-            if row.batches >= self.limits.batches_per_session {
-                return Err(StoreError::LimitExceeded {
-                    resource: "batches_per_session",
-                    limit: self.limits.batches_per_session,
-                });
-            }
-            if row.records + request.records().len() > self.limits.records_per_session {
-                return Err(StoreError::LimitExceeded {
-                    resource: "records_per_session",
-                    limit: self.limits.records_per_session,
-                });
-            }
-        } else if request.records().len() > self.limits.records_per_session {
+        if row.records + request.records().len() > limits.records_per_session {
             return Err(StoreError::LimitExceeded {
                 resource: "records_per_session",
-                limit: self.limits.records_per_session,
+                limit: limits.records_per_session,
             });
         }
-
-        let previous_checksum = session.as_ref().and_then(|row| row.head_checksum);
-        let committed = build_committed_batch(request, previous_checksum)?;
-        persist_committed_batch(
-            transaction,
-            request,
-            &request_cbor,
-            &committed,
-            session_is_new,
-        )?;
-        Ok(committed)
+    } else if request.records().len() > limits.records_per_session {
+        return Err(StoreError::LimitExceeded {
+            resource: "records_per_session",
+            limit: limits.records_per_session,
+        });
     }
+
+    let previous_checksum = session.as_ref().and_then(|row| row.head_checksum);
+    let committed = build_committed_batch(request, previous_checksum)?;
+    persist_committed_batch(
+        transaction,
+        request,
+        &request_cbor,
+        &committed,
+        session_is_new,
+    )?;
+    Ok(committed)
 }
 
 fn request_identity(request: &AppendRequest) -> Result<AppendIdentity, StoreError> {

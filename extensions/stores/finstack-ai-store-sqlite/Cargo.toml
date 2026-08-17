@@ -20,7 +20,9 @@ serde = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 finstack-ai-test = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true }
 
 [[bench]]
 name = "restore_growth"

@@ -271,18 +271,36 @@ pub fn apply_conversation_entry(
     entries: &mut BTreeMap<EntryId, ConversationEntry>,
     entry: ConversationEntry,
 ) -> Result<(), ConversationError> {
+    preview_conversation_entry(entries, &BTreeMap::new(), &entry)?;
+    if entries.contains_key(&entry.id()) {
+        return Ok(());
+    }
+    entries.insert(entry.id(), entry);
+    Ok(())
+}
+
+/// Validate `entry` against committed entries plus a draft overlay.
+///
+/// The overlay holds drafts from the same preview batch so a parent created
+/// earlier in the batch is visible without cloning the committed map.
+fn preview_conversation_entry(
+    committed: &BTreeMap<EntryId, ConversationEntry>,
+    staged: &BTreeMap<EntryId, ConversationEntry>,
+    entry: &ConversationEntry,
+) -> Result<(), ConversationError> {
     if let Some(parent_id) = entry.parent_id()
-        && !entries.contains_key(&parent_id)
+        && !committed.contains_key(&parent_id)
+        && !staged.contains_key(&parent_id)
     {
         return Err(ConversationError::MissingParent);
     }
-    match entries.get(&entry.id()) {
-        Some(existing) if same_committed_entry(existing, &entry) => Ok(()),
+    match committed
+        .get(&entry.id())
+        .or_else(|| staged.get(&entry.id()))
+    {
+        Some(existing) if same_committed_entry(existing, entry) => Ok(()),
         Some(_) => Err(ConversationError::ImmutableConflict),
-        None => {
-            entries.insert(entry.id(), entry);
-            Ok(())
-        }
+        None => Ok(()),
     }
 }
 
@@ -538,6 +556,30 @@ impl SessionProjection {
     /// are invalid.
     pub fn history(&self, leaf_id: EntryId) -> Result<Vec<ConversationEntry>, ConversationError> {
         extract_history(&self.entries, leaf_id)
+    }
+
+    /// Validate conversation drafts against this projection without cloning
+    /// the committed entry map.
+    ///
+    /// Drafts may refer to parents created earlier in the same iterator.
+    /// Equal replay of an already-committed entry is accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConversationError::MissingParent`] or
+    /// [`ConversationError::ImmutableConflict`] when a draft is illegal.
+    pub fn preview_conversation_entries<'a>(
+        &self,
+        drafts: impl IntoIterator<Item = &'a ConversationEntry>,
+    ) -> Result<(), ConversationError> {
+        let mut staged = BTreeMap::new();
+        for entry in drafts {
+            preview_conversation_entry(&self.entries, &staged, entry)?;
+            if !self.entries.contains_key(&entry.id()) {
+                staged.insert(entry.id(), entry.clone());
+            }
+        }
+        Ok(())
     }
 
     /// Apply one committed envelope. Operation records that are not conversation

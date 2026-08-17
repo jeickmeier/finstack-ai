@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::{RunEvent, RunEventClass};
+use finstack_ai::runtime::{RunEvent, RunEventClass, RunEventKind};
 use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -55,14 +55,8 @@ pub(crate) struct PyEvent {
 #[pymethods]
 impl PyEvent {
     #[getter]
-    fn kind(&self) -> PyResult<String> {
-        event_json_value(&self.inner).and_then(|value| {
-            value
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| PyException::new_err("event kind is missing"))
-        })
+    fn kind(&self) -> &'static str {
+        event_kind_name(self.inner.kind())
     }
 
     #[getter]
@@ -156,6 +150,29 @@ impl PyEventBatch {
     }
 }
 
-fn event_json_value(event: &RunEvent) -> PyResult<serde_json::Value> {
-    serde_json::to_value(event).map_err(|_| PyException::new_err("event serialization failed"))
+const fn event_kind_name(kind: RunEventKind) -> &'static str {
+    match kind {
+        RunEventKind::RunAccepted => "run_accepted",
+        RunEventKind::EffectRequested => "effect_requested",
+        RunEventKind::EffectDeferred => "effect_deferred",
+        RunEventKind::EffectCompleted => "effect_completed",
+        RunEventKind::EffectFailed => "effect_failed",
+        RunEventKind::EffectCancelled => "effect_cancelled",
+        RunEventKind::InteractionRequested => "interaction_requested",
+        RunEventKind::InteractionResolved => "interaction_resolved",
+        RunEventKind::InteractionExpired => "interaction_expired",
+        RunEventKind::InteractionCancelled => "interaction_cancelled",
+        RunEventKind::MessageFinalized => "message_finalized",
+        RunEventKind::ToolSettled => "tool_settled",
+        RunEventKind::LimitReached => "limit_reached",
+        RunEventKind::RunSuspended => "run_suspended",
+        RunEventKind::RunCompleted => "run_completed",
+        RunEventKind::RunFailed => "run_failed",
+        RunEventKind::RunCancelled => "run_cancelled",
+        RunEventKind::ModelTextDelta => "model_text_delta",
+        RunEventKind::ReasoningDelta => "reasoning_delta",
+        RunEventKind::ToolProgress => "tool_progress",
+        RunEventKind::QueueDepthWarning => "queue_depth_warning",
+        RunEventKind::ProviderHeartbeat => "provider_heartbeat",
+    }
 }

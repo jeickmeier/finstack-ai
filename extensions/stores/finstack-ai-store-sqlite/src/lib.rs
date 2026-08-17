@@ -13,6 +13,7 @@ mod journal_store;
 mod load;
 mod schema;
 mod store;
+mod worker;
 
 #[cfg(test)]
 mod tests;

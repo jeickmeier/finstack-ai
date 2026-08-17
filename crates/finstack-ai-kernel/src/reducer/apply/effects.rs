@@ -63,9 +63,7 @@ pub(super) fn apply_effect_requested(
             .as_mut()
             .ok_or(KernelError::InvalidRecordOrder)?;
         let call_index = batch
-            .calls
-            .iter()
-            .position(|call| call.assigned.effect_id == requested.effect_id())
+            .call_index(requested.effect_id())
             .ok_or(KernelError::InvalidRecordOrder)?;
         let active_call = &batch.calls[call_index];
         if !matches!(active_call.status, ActiveToolCallStatus::Undispatched)
@@ -84,12 +82,14 @@ pub(super) fn apply_effect_requested(
         {
             return Err(KernelError::InvalidRecordOrder);
         }
-        let active_call = &mut Arc::make_mut(&mut batch.calls)[call_index];
-        batch.current_group = requested_group;
-        active_call.status = ActiveToolCallStatus::Requested {
-            requested: requested.clone(),
-            deferred: None,
-        };
+        batch.set_current_group(requested_group);
+        batch.set_call_status(
+            call_index,
+            ActiveToolCallStatus::Requested {
+                requested: requested.clone(),
+                deferred: None,
+            },
+        );
         state.phase = Some(RunPhase::AwaitingTools);
         return Ok(());
     }
@@ -221,14 +221,13 @@ pub(super) fn apply_effect_deferred(
             .active_tool_batch
             .as_mut()
             .ok_or(KernelError::InvalidRecordOrder)?;
-        let call = Arc::make_mut(&mut batch.calls)
-            .iter_mut()
-            .find(|call| call.assigned.effect_id == deferred.effect_id)
+        let call_index = batch
+            .call_index(deferred.effect_id)
             .ok_or(KernelError::InvalidRecordOrder)?;
         let ActiveToolCallStatus::Requested {
             requested,
             deferred: existing,
-        } = &mut call.status
+        } = &batch.calls[call_index].status
         else {
             return Err(KernelError::InvalidRecordOrder);
         };
@@ -238,7 +237,14 @@ pub(super) fn apply_effect_deferred(
         if existing.is_some() {
             return Err(KernelError::InvalidRecordOrder);
         }
-        *existing = Some(deferred.clone());
+        let requested = requested.clone();
+        batch.set_call_status(
+            call_index,
+            ActiveToolCallStatus::Requested {
+                requested,
+                deferred: Some(deferred.clone()),
+            },
+        );
         state.phase = Some(RunPhase::AwaitingExternal);
         return Ok(());
     }

@@ -15,6 +15,8 @@ const REPORT_PATH = resolve(
   REPO_ROOT,
   "docs/implementation/artifacts/pr-063/wasm-js-crossing.json",
 );
+const WASM_OVERHEAD_TARGET_PERCENT = 15;
+const PAIRED_SAMPLES = 7;
 
 test("records isolated WASM/JS crossing warning measurements", async ({
   page,
@@ -27,31 +29,66 @@ test("records isolated WASM/JS crossing warning measurements", async ({
   await page.evaluate(() => window.finstackReady);
   const initMs = Date.now() - initStarted;
 
-  const measured = await page.evaluate(async () => {
+  const measured = await page.evaluate(async (samples: number) => {
     const now = () => performance.now();
+    const payload = {
+      text: "ok",
+      completion_id: "bench-1",
+    };
     const modelOptions = {
       component: "js.model.bench",
       provider: "js-fixture",
       model: "js-bench-model",
     };
-    let hostMs = 0;
-    const model = new window.finstackTest.JsModel(
-      {
-        request: async () => {
-          const started = now();
-          const result = { text: "ok", completion_id: "bench-1" };
-          hostMs += now() - started;
-          return result;
+    const hostModel = {
+      request: async () => structuredClone(payload),
+    };
+    const jsHostSamples: number[] = [];
+    for (let index = 0; index < samples; index += 1) {
+      const started = now();
+      const result = await hostModel.request();
+      jsHostSamples.push(now() - started);
+      if (result.text !== payload.text || result.completion_id !== payload.completion_id) {
+        throw new Error("JS baseline mutated the paired payload");
+      }
+    }
+
+    const wasmRunSamples: number[] = [];
+    let hostCallbackMs = 0;
+    let lastText = "";
+    for (let index = 0; index < samples; index += 1) {
+      hostCallbackMs = 0;
+      const model = new window.finstackTest.JsModel(
+        {
+          request: async () => {
+            const started = now();
+            const result = await hostModel.request();
+            hostCallbackMs += now() - started;
+            return result;
+          },
         },
+        modelOptions,
+      );
+      const agent = await window.finstackTest.Agent.create({ model });
+      const runStarted = now();
+      const result = await agent.run("hello");
+      wasmRunSamples.push(now() - runStarted);
+      lastText = result.text;
+    }
+
+    const createStarted = now();
+    const warmupModel = new window.finstackTest.JsModel(
+      {
+        request: async () => hostModel.request(),
       },
       modelOptions,
     );
-    const createStarted = now();
-    const agent = await window.finstackTest.Agent.create({ model });
+    const warmupAgent = await window.finstackTest.Agent.create({
+      model: warmupModel,
+    });
     const createMs = now() - createStarted;
-    const runStarted = now();
-    const result = await agent.run("hello");
-    const runMs = now() - runStarted;
+    await warmupAgent.run("hello");
+
     let events = 0;
     const streamModel = new window.finstackTest.JsModel(
       {
@@ -60,7 +97,10 @@ test("records isolated WASM/JS crossing warning measurements", async ({
             for (let index = 0; index < 32; index += 1) {
               yield { text: "x" };
             }
-            yield { text: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", completion_id: "bench-stream" };
+            yield {
+              text: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              completion_id: "bench-stream",
+            };
           },
         }),
       },
@@ -76,23 +116,36 @@ test("records isolated WASM/JS crossing warning measurements", async ({
     }
     await streamRun.result();
     const streamMs = now() - streamStarted;
+    const jsHostMs = jsHostSamples.slice().sort((left, right) => left - right)[
+      Math.floor(jsHostSamples.length / 2)
+    ];
+    const runMs = wasmRunSamples.slice().sort((left, right) => left - right)[
+      Math.floor(wasmRunSamples.length / 2)
+    ];
+    if (jsHostMs === undefined || runMs === undefined) {
+      throw new Error("paired WASM/JS samples were empty");
+    }
     return {
       createMs,
       runMs,
-      hostMs,
+      jsHostMs,
+      hostMs: hostCallbackMs,
       streamMs,
       events,
-      text: result.text,
+      text: lastText,
+      samples,
     };
-  });
+  }, PAIRED_SAMPLES);
 
   expect(measured.text).toBe("ok");
   const ns = (ms: number) => Math.round(ms * 1_000_000);
-  const wasmDriveMs = Math.max(measured.runMs - measured.hostMs, 0);
-  const overhead =
-    wasmDriveMs === 0
-      ? 0
-      : ((measured.runMs - wasmDriveMs) / wasmDriveMs) * 100;
+  expect(measured.jsHostMs).toBeGreaterThan(0);
+  expect(measured.runMs).toBeGreaterThan(0);
+  const wasmDriveMs = Math.max(measured.runMs - measured.jsHostMs, 0);
+  expect(wasmDriveMs).toBeGreaterThan(0);
+  // Same shape as the Python fast path: (binding_path / paired_baseline - 1) * 100.
+  const overhead = (measured.runMs / measured.jsHostMs - 1) * 100;
+  expect(overhead).toBeLessThanOrEqual(WASM_OVERHEAD_TARGET_PERCENT);
   const wasm = readFileSync(WASM_PATH);
   const commit = execSync("git rev-parse --short=12 HEAD", {
     cwd: REPO_ROOT,
@@ -111,20 +164,21 @@ test("records isolated WASM/JS crossing warning measurements", async ({
     parameters: {
       deltas_per_run: 32,
       runs_per_sample: 1,
-      samples: 1,
+      samples: measured.samples,
+      comparison: "paired_within_browser_identical_payload",
     },
     timing_ns: {
       init_median: ns(initMs),
       create_median: ns(measured.createMs),
       reducer_run_median: ns(measured.runMs),
       event_throughput_median: ns(measured.streamMs),
-      host_callback_median: ns(measured.hostMs),
+      host_callback_median: ns(measured.jsHostMs),
       wasm_drive_median: ns(wasmDriveMs),
     },
     binding: {
       overhead_percent: overhead,
-      target_percent: 15,
-      within_target: overhead <= 15,
+      target_percent: WASM_OVERHEAD_TARGET_PERCENT,
+      within_target: overhead <= WASM_OVERHEAD_TARGET_PERCENT,
     },
     event_delivery: {
       logical_events: measured.events,
@@ -145,5 +199,4 @@ test("records isolated WASM/JS crossing warning measurements", async ({
     },
   };
   writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
-  expect(report.timing_ns.reducer_run_median).toBeGreaterThan(0);
 });

@@ -1,9 +1,9 @@
-use crate::{LoadRequest, StoreError};
+use crate::StoreError;
 
 use finstack_ai_kernel::{
     AppendBatchId, AppendRequest, CommittedBatch, ConversationEntry, EntryId, KernelState, LaneId,
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordId, SessionId,
-    SessionProjection, Timestamp, apply_conversation_entry,
+    SessionProjection, Timestamp,
 };
 
 use super::{CommitCoordinator, CommitCoordinatorError};
@@ -56,12 +56,8 @@ impl CommitCoordinator {
                 Ok(committed) => committed,
                 Err(StoreError::Conflict { .. }) if conflicts == 0 => {
                     conflicts = 1;
-                    let loaded = self
-                        .store
-                        .load(LoadRequest { session_id })
-                        .await
-                        .map_err(|_| self.boundary_fault("composition_conflict_reload_failed"))?;
-                    self.reload_from_loaded(&loaded)?;
+                    self.reload_after_conflict(session_id, "composition_conflict_reload_failed")
+                        .await?;
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -134,12 +130,8 @@ impl CommitCoordinator {
                 Ok(committed) => committed,
                 Err(StoreError::Conflict { .. }) if conflicts == 0 => {
                     conflicts = 1;
-                    let loaded = self
-                        .store
-                        .load(LoadRequest { session_id })
-                        .await
-                        .map_err(|_| self.boundary_fault("session_conflict_reload_failed"))?;
-                    self.reload_from_loaded(&loaded)?;
+                    self.reload_after_conflict(session_id, "session_conflict_reload_failed")
+                        .await?;
                     continue;
                 }
                 Err(StoreError::Conflict { .. }) => {
@@ -171,7 +163,9 @@ impl CommitCoordinator {
         committed: &CommittedBatch,
     ) -> Result<(), CommitCoordinatorError> {
         apply_batch_to_session(&mut self.session, committed)
-            .map_err(|code| self.boundary_fault(code))
+            .map_err(|code| self.boundary_fault(code))?;
+        self.note_head_checksum(committed);
+        Ok(())
     }
 
     pub(super) async fn maybe_commit_conversation_siblings(
@@ -362,17 +356,14 @@ fn preview_session_records(
     session: &SessionProjection,
     records: &[RecordDraft],
 ) -> Result<(), CommitCoordinatorError> {
-    let mut entries = session.entries().clone();
-    for record in records {
-        if let RecordBody::ConversationEntry(entry) = record.body() {
-            apply_conversation_entry(&mut entries, entry.clone()).map_err(|_| {
-                CommitCoordinatorError::BoundaryFault {
-                    code: "session_records_invalid",
-                }
-            })?;
-        }
-    }
-    Ok(())
+    session
+        .preview_conversation_entries(records.iter().filter_map(|record| match record.body() {
+            RecordBody::ConversationEntry(entry) => Some(entry),
+            _ => None,
+        }))
+        .map_err(|_| CommitCoordinatorError::BoundaryFault {
+            code: "session_records_invalid",
+        })
 }
 
 fn lane_moved_record_id(entry_id: EntryId) -> RecordId {

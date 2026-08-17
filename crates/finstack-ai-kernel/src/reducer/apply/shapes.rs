@@ -387,11 +387,7 @@ pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelo
         RecordBody::EffectFailed(value)
             if value.output_contract().kind == EffectOutputKind::ToolResult =>
         {
-            let Some(call) = batch
-                .calls
-                .iter()
-                .find(|call| call.assigned.effect_id == value.effect_id())
-            else {
+            let Some(call) = batch.call(value.effect_id()) else {
                 return false;
             };
             (
@@ -407,11 +403,7 @@ pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelo
         }
         _ => return false,
     };
-    let Some(target_index) = batch
-        .calls
-        .iter()
-        .position(|call| call.assigned.effect_id == effect_id)
-    else {
+    let Some(target_index) = batch.call_index(effect_id) else {
         return false;
     };
     if batch.calls[target_index].assigned.group_index != batch.current_group {

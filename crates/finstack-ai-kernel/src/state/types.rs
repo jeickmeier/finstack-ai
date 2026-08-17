@@ -339,6 +339,18 @@ pub struct ToolCallIdentityHashEntryV2 {
     pub call: crate::ToolCallBlock,
 }
 
+/// Borrowed hash/wire projection of one persistent tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct ToolCallIdentityHashRef<'a> {
+    pub(crate) tool_call_id: ToolCallId,
+    pub(crate) cycle: u64,
+    pub(crate) turn_id: TurnId,
+    pub(crate) source_message_id: MessageId,
+    pub(crate) tool_batch_id: Option<crate::ToolBatchId>,
+    pub(crate) effect_id: Option<EffectId>,
+    pub(crate) call: &'a crate::ToolCallBlock,
+}
+
 /// Sorted state-hash projection entry for one tool settlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

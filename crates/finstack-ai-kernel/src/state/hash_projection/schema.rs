@@ -9,10 +9,11 @@ use crate::records::policy::ActiveCapability;
 use crate::records::policy::LimitReached;
 use crate::state::projection::MessageSeq;
 
+use super::super::types::ToolCallIdentityHashRef;
 use super::super::{
     CompletionIdentityHashEntryV1, KernelState, ModelSettlementHashEntryV1,
     ResolutionIdentityHashEntryV6, RunPhase, StageSettlementHashEntryV1,
-    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
+    ToolSettlementHashEntryV2,
 };
 
 use super::projections::{
@@ -94,7 +95,7 @@ pub struct KernelStateHashV2<'a> {
     pub model_settlements: Vec<ModelSettlementHashEntryV1>,
     pub completion_identities: Vec<CompletionIdentityHashEntryV1>,
     pub active_tool_batch: Option<ActiveToolBatchProjection<'a>>,
-    pub tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    pub tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     pub tool_settlements: Vec<ToolSettlementHashEntryV2>,
     pub last_tool_batch: Option<ToolBatchClosedProjection<'a>>,
     pub terminal: Option<TerminalStateProjection<'a>>,
@@ -106,7 +107,7 @@ impl<'a> KernelStateHashV2<'a> {
         stage_settlements: Vec<StageSettlementHashEntryV1>,
         model_settlements: Vec<ModelSettlementHashEntryV1>,
         completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
         tool_settlements: Vec<ToolSettlementHashEntryV2>,
     ) -> Self {
         Self {
@@ -162,7 +163,7 @@ pub struct KernelStateHashV3<'a> {
     pub model_settlements: Vec<ModelSettlementHashEntryV1>,
     pub completion_identities: Vec<CompletionIdentityHashEntryV1>,
     pub active_tool_batch: Option<ActiveToolBatchProjection<'a>>,
-    pub tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    pub tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     pub tool_settlements: Vec<ToolSettlementHashEntryV2>,
     pub last_tool_batch: Option<ToolBatchClosedProjection<'a>>,
     pub accepted_at: Option<Timestamp>,
@@ -180,7 +181,7 @@ impl<'a> KernelStateHashV3<'a> {
         stage_settlements: Vec<StageSettlementHashEntryV1>,
         model_settlements: Vec<ModelSettlementHashEntryV1>,
         completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
         tool_settlements: Vec<ToolSettlementHashEntryV2>,
     ) -> Self {
         Self {
@@ -245,7 +246,7 @@ pub struct KernelStateHashV4<'a> {
     pub model_settlements: Vec<ModelSettlementHashEntryV1>,
     pub completion_identities: Vec<CompletionIdentityHashEntryV1>,
     pub active_tool_batch: Option<ActiveToolBatchProjection<'a>>,
-    pub tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+    pub tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
     pub tool_settlements: Vec<ToolSettlementHashEntryV2>,
     pub last_tool_batch: Option<ToolBatchClosedProjection<'a>>,
     pub accepted_at: Option<Timestamp>,
@@ -268,7 +269,7 @@ impl<'a> KernelStateHashV4<'a> {
         stage_settlements: Vec<StageSettlementHashEntryV1>,
         model_settlements: Vec<ModelSettlementHashEntryV1>,
         completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
         tool_settlements: Vec<ToolSettlementHashEntryV2>,
     ) -> Self {
         Self {
@@ -345,7 +346,7 @@ impl<'a> KernelStateHashV5<'a> {
         stage_settlements: Vec<StageSettlementHashEntryV1>,
         model_settlements: Vec<ModelSettlementHashEntryV1>,
         completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
         tool_settlements: Vec<ToolSettlementHashEntryV2>,
     ) -> Self {
         Self {
@@ -391,7 +392,7 @@ impl<'a> KernelStateHashV6<'a> {
         stage_settlements: Vec<StageSettlementHashEntryV1>,
         model_settlements: Vec<ModelSettlementHashEntryV1>,
         completion_identities: Vec<CompletionIdentityHashEntryV1>,
-        tool_calls: Vec<ToolCallIdentityHashEntryV2>,
+        tool_calls: Vec<ToolCallIdentityHashRef<'a>>,
         tool_settlements: Vec<ToolSettlementHashEntryV2>,
         resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
     ) -> Self {

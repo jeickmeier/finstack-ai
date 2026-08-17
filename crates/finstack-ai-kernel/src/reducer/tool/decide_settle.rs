@@ -1,7 +1,5 @@
 //! Tool-batch settlement decisions.
 
-use std::sync::Arc;
-
 use super::super::allocated_ids::validate_allocated_ids;
 use super::super::capacity::{self, StateGrowth};
 use super::super::decide::{draft_for_state, duplicate_decision, next_sequence, reject_terminal};
@@ -44,15 +42,14 @@ pub fn decide_tool_settled(
 }
 
 pub fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
-    state.active_tool_batch.as_ref().is_some_and(|batch| {
-        batch
-            .calls
-            .iter()
-            .any(|call| call.assigned.effect_id == effect_id)
-    }) || state
-        .tool_calls
-        .values()
-        .any(|identity| identity.effect_id == Some(effect_id))
+    state
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(|batch| batch.call_index(effect_id).is_some())
+        || state
+            .tool_calls
+            .values()
+            .any(|identity| identity.effect_id == Some(effect_id))
 }
 
 pub fn decide_external_tool(
@@ -71,10 +68,8 @@ pub fn decide_external_tool(
         .as_ref()
         .and_then(|batch| {
             batch
-                .calls
-                .iter()
-                .any(|call| call.assigned.effect_id == input.completion.effect_id)
-                .then_some(batch.opened.tool_batch_id)
+                .call_index(input.completion.effect_id)
+                .map(|_| batch.opened.tool_batch_id)
         })
         .or_else(|| {
             state
@@ -113,9 +108,7 @@ pub fn decide_external_tool(
             effect_id: input.completion.effect_id,
         })?;
     let active = batch
-        .calls
-        .iter()
-        .find(|call| call.assigned.effect_id == input.completion.effect_id)
+        .call(input.completion.effect_id)
         .ok_or(KernelError::EffectNotPending {
             effect_id: input.completion.effect_id,
         })?;
@@ -219,9 +212,7 @@ fn settle_normalized_tool(
         return Err(KernelError::ToolSettlementMismatch);
     }
     let call_index = batch
-        .calls
-        .iter()
-        .position(|call| call.assigned.effect_id == effect_id)
+        .call_index(effect_id)
         .ok_or(KernelError::ToolSettlementMismatch)?;
     let active_call = &batch.calls[call_index];
     let ActiveToolCallStatus::Requested {
@@ -268,13 +259,15 @@ fn settle_normalized_tool(
                 settlement_digest,
             )?;
             let result = decode_tool_result(completion, active_call.assigned.plan.call())?;
-            Arc::make_mut(&mut prospective.calls)[call_index].status =
+            prospective.set_call_status(
+                call_index,
                 ActiveToolCallStatus::Buffered {
                     result,
                     settlement_digest,
                     synthetic: false,
                     error: None,
-                };
+                },
+            );
             bodies.push(RecordBody::EffectCompleted(completion.clone()));
         }
         ToolSettlement::Failed(failure) => {
@@ -289,13 +282,15 @@ fn settle_normalized_tool(
             )?;
             let error = failure.error().clone();
             let result = synthetic_result(active_call.assigned.plan.call(), &error)?;
-            Arc::make_mut(&mut prospective.calls)[call_index].status =
+            prospective.set_call_status(
+                call_index,
                 ActiveToolCallStatus::Buffered {
                     result,
                     settlement_digest,
                     synthetic: true,
                     error: Some(error.clone()),
-                };
+                },
+            );
             if active_call.assigned.plan.failure_policy() == ToolFailurePolicy::FailRun
                 && prospective.fatal_error.is_none()
             {
@@ -310,11 +305,13 @@ fn settle_normalized_tool(
             if external {
                 return Err(KernelError::ToolSettlementMismatch);
             }
-            Arc::make_mut(&mut prospective.calls)[call_index].status =
+            prospective.set_call_status(
+                call_index,
                 ActiveToolCallStatus::Requested {
                     requested: requested.clone(),
                     deferred: Some(value.clone()),
-                };
+                },
+            );
             bodies.push(RecordBody::EffectDeferred(value.clone()));
             let requirements = requirements_for_bodies(&bodies, 0, 0, 0)?;
             validate_allocated_ids(&env.ids, requirements)?;

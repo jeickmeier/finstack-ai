@@ -10,7 +10,7 @@ use crate::effects::{EffectCompleted, EffectInput, EffectKind, EffectRequested};
 use crate::primitives::{Metadata, RawJson};
 use crate::records::RecordBody;
 use crate::records::tools::{
-    ActiveToolBatch, ActiveToolCallStatus, AssignedToolCall, ToolBatchClosed,
+    ActiveToolBatch, AssignedToolCall, ToolBatchClosed,
     ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
 };
 use crate::state::TransitionEnv;
@@ -154,21 +154,11 @@ pub fn first_executable_group(assigned: &[AssignedToolCall]) -> Option<u32> {
 }
 
 pub fn next_executable_group(batch: &ActiveToolBatch) -> Option<u32> {
-    batch.calls.iter().find_map(|call| {
-        (matches!(call.status, ActiveToolCallStatus::Undispatched)
-            && matches!(call.assigned.plan, ToolCallPlan::Execute(_)))
-        .then_some(call.assigned.group_index)
-    })
+    batch.next_executable_group()
 }
 
 pub fn group_is_terminal(batch: &ActiveToolBatch, group: u32) -> bool {
-    batch.calls.iter().all(|call| {
-        call.assigned.group_index != group
-            || matches!(
-                call.status,
-                ActiveToolCallStatus::Buffered { .. } | ActiveToolCallStatus::Settled { .. }
-            )
-    })
+    batch.group_is_terminal(group)
 }
 
 pub fn outcome_for_continuation(continuation: ToolBatchContinuation) -> ToolBatchOutcome {

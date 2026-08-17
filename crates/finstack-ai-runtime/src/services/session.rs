@@ -177,6 +177,10 @@ fn commit_code(error: &CommitCoordinatorError) -> &'static str {
 struct SessionInner {
     projection: SessionProjection,
     guards: BTreeMap<LaneId, LaneOwner>,
+    /// Structural-only coordinator at the live session head. Taken out for
+    /// the duration of one structural commit so the mutex is not held across
+    /// store I/O.
+    head: Option<CommitCoordinator>,
 }
 
 /// Shared in-process writer for one session journal.
@@ -239,6 +243,7 @@ impl SessionRuntime {
             )
             .await
             .map_err(|error| SessionError::commit(&error))?;
+        coordinator.mark_structural_head();
         intern(Self {
             store,
             session_id: ids.session_id,
@@ -246,6 +251,7 @@ impl SessionRuntime {
             inner: Mutex::new(SessionInner {
                 projection: coordinator.session().clone(),
                 guards: BTreeMap::new(),
+                head: Some(coordinator),
             }),
         })
     }
@@ -273,6 +279,12 @@ impl SessionRuntime {
                     code: "session_load_failed",
                 })?;
         let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+        let coordinator = CommitCoordinator::structural_from_loaded(
+            Arc::clone(&store),
+            &loaded,
+            projection.clone(),
+        )
+        .map_err(|error| SessionError::recover(&error))?;
         intern(Self {
             store,
             session_id,
@@ -280,6 +292,7 @@ impl SessionRuntime {
             inner: Mutex::new(SessionInner {
                 projection,
                 guards: BTreeMap::new(),
+                head: Some(coordinator),
             }),
         })
     }
@@ -339,7 +352,15 @@ impl SessionRuntime {
                 code: "session_load_failed",
             })?;
         let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
-        self.lock()?.projection = projection.clone();
+        let coordinator = CommitCoordinator::structural_from_loaded(
+            Arc::clone(&self.store),
+            &loaded,
+            projection.clone(),
+        )
+        .map_err(|error| SessionError::recover(&error))?;
+        let mut inner = self.lock()?;
+        inner.projection = projection.clone();
+        inner.head = Some(coordinator);
         Ok(projection)
     }
 
@@ -575,7 +596,7 @@ impl SessionRuntime {
             )
             .await
             .map_err(|error| SessionError::commit(&error))?;
-        self.lock()?.projection = coordinator.session().clone();
+        self.sync_structural_head(&coordinator)?;
         Ok(coordinator)
     }
 
@@ -616,7 +637,7 @@ impl SessionRuntime {
                 }) => {}
                 Err(error) => return Err(SessionError::commit(&error)),
             }
-            self.lock()?.projection = coordinator.session().clone();
+            self.sync_structural_head(&coordinator)?;
         }
         self.fan_out(run_id, &initiator, next_env).await
     }
@@ -672,12 +693,50 @@ impl SessionRuntime {
         batch_id: AppendBatchId,
         records: Vec<RecordDraft>,
     ) -> Result<(), SessionError> {
-        let mut coordinator = self.coordinator_for_run(None).await?;
-        coordinator
-            .commit_session_records(batch_id, records)
+        let mut coordinator = self.take_structural_head().await?;
+        let result = coordinator.commit_session_records(batch_id, records).await;
+        match result {
+            Ok(_) => self.put_structural_head(coordinator),
+            Err(error) => Err(SessionError::commit(&error)),
+        }
+    }
+
+    async fn take_structural_head(&self) -> Result<CommitCoordinator, SessionError> {
+        if let Some(coordinator) = self.lock()?.head.take() {
+            return Ok(coordinator);
+        }
+        let loaded = self
+            .store
+            .load(LoadRequest {
+                session_id: self.session_id,
+            })
             .await
-            .map_err(|error| SessionError::commit(&error))?;
-        self.lock()?.projection = coordinator.session().clone();
+            .map_err(|_| SessionError::Recover {
+                code: "session_load_failed",
+            })?;
+        let projection = project_loaded(&loaded).map_err(|code| SessionError::Recover { code })?;
+        CommitCoordinator::structural_from_loaded(Arc::clone(&self.store), &loaded, projection)
+            .map_err(|error| SessionError::recover(&error))
+    }
+
+    fn put_structural_head(&self, coordinator: CommitCoordinator) -> Result<(), SessionError> {
+        let mut inner = self.lock()?;
+        inner.projection = coordinator.session().clone();
+        inner.head = Some(coordinator);
+        Ok(())
+    }
+
+    fn sync_structural_head(&self, foreign: &CommitCoordinator) -> Result<(), SessionError> {
+        let mut inner = self.lock()?;
+        inner.projection = foreign.session().clone();
+        if let Some(head) = inner.head.as_mut() {
+            head.adopt_live_session(
+                foreign.session().clone(),
+                foreign.state().last_applied_sequence,
+                foreign.head_checksum(),
+            )
+            .map_err(|error| SessionError::recover(&error))?;
+        }
         Ok(())
     }
 
@@ -928,6 +987,7 @@ mod tests {
             inner: Mutex::new(SessionInner {
                 projection: SessionProjection::new(session_id),
                 guards: BTreeMap::new(),
+                head: None,
             }),
         });
         assert!(matches!(leaked, Err(SessionError::Poisoned)));

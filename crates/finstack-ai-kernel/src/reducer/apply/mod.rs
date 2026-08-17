@@ -71,11 +71,9 @@ pub(super) fn apply(
     validate_tool_digests(&committed.records)?;
     validate_model_digests(original, &committed.records)?;
     capacity::preflight_batch(original, &committed.records)?;
+    // Working-copy apply after preflight. Per-record checks stay in apply_*;
+    // full-state validate is reserved for try_restore / deserialize / state_hash.
     let applied = apply_semantic_records(original, &committed.records)?;
-    applied
-        .state
-        .validate()
-        .map_err(|_| KernelError::InvalidRecordOrder)?;
 
     let mut events = Vec::new();
     for (record, correlations) in committed.records.iter().zip(applied.event_correlations) {
@@ -156,17 +154,13 @@ fn event_correlations_for(state: &KernelState, body: &RecordBody) -> EventCorrel
     };
     let tool = state.active_tool_batch.as_ref().and_then(|batch| {
         let effect_id = effect_id?;
-        batch
-            .calls
-            .iter()
-            .find(|call| call.assigned.effect_id == effect_id)
-            .map(|call| {
-                (
-                    batch.opened.turn_id,
-                    batch.opened.tool_batch_id,
-                    *call.assigned.plan.call().tool_call_id(),
-                )
-            })
+        batch.call(effect_id).map(|call| {
+            (
+                batch.opened.turn_id,
+                batch.opened.tool_batch_id,
+                *call.assigned.plan.call().tool_call_id(),
+            )
+        })
     });
     EventCorrelations {
         model_turn,

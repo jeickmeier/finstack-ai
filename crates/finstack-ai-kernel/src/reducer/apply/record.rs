@@ -471,14 +471,9 @@ pub(super) fn apply_record(
                     .as_mut()
                     .ok_or(KernelError::InvalidRecordOrder)?;
                 let requested = batch
-                    .calls
-                    .iter()
-                    .find_map(|call| match &call.status {
-                        ActiveToolCallStatus::Requested { requested, .. }
-                            if requested.effect_id() == cancelled.effect_id() =>
-                        {
-                            Some(requested)
-                        }
+                    .call(cancelled.effect_id())
+                    .and_then(|call| match &call.status {
+                        ActiveToolCallStatus::Requested { requested, .. } => Some(requested),
                         _ => None,
                     })
                     .ok_or(KernelError::InvalidRecordOrder)?;
@@ -489,14 +484,11 @@ pub(super) fn apply_record(
                     return Err(KernelError::InvalidRecordOrder);
                 }
                 let digest = batch
-                    .calls
-                    .iter()
-                    .find_map(|call| match &call.status {
+                    .call(cancelled.effect_id())
+                    .and_then(|call| match &call.status {
                         ActiveToolCallStatus::Buffered {
                             settlement_digest, ..
-                        } if call.assigned.effect_id == cancelled.effect_id() => {
-                            Some(*settlement_digest)
-                        }
+                        } => Some(*settlement_digest),
                         _ => None,
                     })
                     .ok_or(KernelError::InvalidRecordOrder)?;

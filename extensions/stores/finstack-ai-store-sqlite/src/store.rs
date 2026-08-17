@@ -1,34 +1,34 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
 use finstack_ai_runtime::{
-    LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt, PruneRequest, SCAN_PAGE_MAX_RECORDS,
+    LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt, PruneRequest,
     ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
     WriteMetadataRequest,
 };
-use rusqlite::{Connection, Transaction, TransactionBehavior, params};
+use rusqlite::{Transaction, TransactionBehavior, params};
 
-use crate::config::{SqliteStoreConfig, SqliteStoreLimits, health_label, is_memory_path};
+use crate::append::append_in_transaction;
+use crate::config::{SqliteStoreConfig, health_label, is_memory_path};
 use crate::error::{i64_from_u64, map_sqlite_error};
 use crate::load::{
-    accelerated_from, encode_state_request, load_session, load_session_records, load_session_row,
-    load_snapshot, outstanding_count, session_exists, tombstone_count, verify_stored_session,
+    VerifiedHead, accelerated_from, encode_state_request, load_session, load_session_row,
+    load_session_window, load_snapshot, outstanding_count, scan_session, tombstone_count,
 };
-use crate::schema::{apply_durability, apply_schema, quick_check};
+use crate::worker::{WorkerCtx, WorkerHandle};
 
-/// File-backed or in-memory sqlite journal with one owned connection.
+/// File-backed or in-memory sqlite journal with one dedicated worker thread.
 ///
-/// Records are append-only and authoritative. Optional
+/// The worker owns the connection and applies jobs in submit order. Records
+/// are append-only and authoritative. Optional
 /// [`JournalStore::prune`](finstack_ai_runtime::JournalStore::prune) deletes
 /// snapshot-covered prefix records while retaining the snapshot-boundary
 /// record, outstanding tail, and settlement indexes.
 pub struct SqliteJournalStore {
     path: PathBuf,
-    pub(crate) limits: SqliteStoreLimits,
     pub(crate) durable: bool,
     pub(crate) detail: &'static str,
-    inner: Mutex<Connection>,
+    pub(crate) worker: WorkerHandle,
 }
 
 impl SqliteJournalStore {
@@ -41,7 +41,8 @@ impl SqliteJournalStore {
     ///
     /// Returns [`StoreError::InvalidRequest`] for zero limits, Durable on an
     /// in-memory path, or a zero busy timeout. Integrity failures include
-    /// unsupported `user_version` and `PRAGMA quick_check` errors.
+    /// unsupported `user_version` and `PRAGMA quick_check` errors. Worker
+    /// spawn or open failures return [`StoreError::Unavailable`].
     ///
     /// # Examples
     ///
@@ -79,26 +80,14 @@ impl SqliteJournalStore {
         }
         let memory = is_memory_path(&config.path);
         let (durable, detail) = health_label(config.durability, memory)?;
-        let connection = if memory {
-            Connection::open_in_memory().map_err(map_sqlite_error)?
-        } else {
-            Connection::open(&config.path).map_err(map_sqlite_error)?
-        };
-        connection
-            .busy_timeout(config.busy_timeout)
-            .map_err(map_sqlite_error)?;
-        connection
-            .pragma_update(None, "foreign_keys", "ON")
-            .map_err(map_sqlite_error)?;
-        apply_durability(&connection, config.durability, memory)?;
-        apply_schema(&connection)?;
-        quick_check(&connection)?;
+        let path = config.path.clone();
+        let mut opened = config;
+        opened.limits = limits;
         Ok(Self {
-            path: config.path,
-            limits,
+            path,
             durable,
             detail,
-            inner: Mutex::new(connection),
+            worker: WorkerHandle::spawn(opened)?,
         })
     }
 
@@ -108,18 +97,109 @@ impl SqliteJournalStore {
         &self.path
     }
 
-    fn lock(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
-        self.inner.lock().map_err(|_| StoreError::Unavailable {
-            reason_code: "sqlite_lock_poisoned",
+    /// Current database page count on the owned connection. Used by PR-040 disk-full tests.
+    #[doc(hidden)]
+    pub fn page_count(&self) -> Result<i64, StoreError> {
+        self.worker.call(|ctx| {
+            ctx.connection
+                .query_row("PRAGMA page_count", [], |row| row.get(0))
+                .map_err(map_sqlite_error)
         })
     }
 
-    fn with_immediate<T>(
-        &self,
+    /// Cap the database page count on the owned connection. Used by PR-040 disk-full tests.
+    #[doc(hidden)]
+    pub fn set_max_page_count(&self, pages: i64) -> Result<(), StoreError> {
+        self.worker.call(move |ctx| {
+            ctx.connection
+                .pragma_update(None, "max_page_count", pages)
+                .map_err(map_sqlite_error)
+        })
+    }
+
+    /// Switch off WAL so `max_page_count` can raise `SQLITE_FULL` on the next write.
+    #[doc(hidden)]
+    pub fn use_rollback_journal_for_test(&self) -> Result<(), StoreError> {
+        self.worker.call(|ctx| {
+            ctx.connection
+                .pragma_update(None, "journal_mode", "DELETE")
+                .map_err(map_sqlite_error)?;
+            let _ = ctx
+                .connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+            Ok(())
+        })
+    }
+
+    /// Insert a padding blob on the owned connection. Used to exhaust free pages.
+    #[doc(hidden)]
+    pub fn insert_padding_blob(&self, bytes: usize) -> Result<(), StoreError> {
+        self.worker.call(move |ctx| {
+            ctx.connection
+                .execute_batch("CREATE TABLE IF NOT EXISTS padding (blob BLOB)")
+                .map_err(map_sqlite_error)?;
+            ctx.connection
+                .execute(
+                    "INSERT INTO padding (blob) VALUES (?1)",
+                    params![vec![0_u8; bytes]],
+                )
+                .map_err(map_sqlite_error)?;
+            Ok(())
+        })
+    }
+
+    /// Persist a batch's rows, then `ROLLBACK`. Used by PR-040-A01.
+    #[doc(hidden)]
+    pub fn append_then_rollback(&self, request: &AppendRequest) -> Result<(), StoreError> {
+        let request = request.clone();
+        self.worker.call(move |ctx| {
+            let transaction = ctx
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(map_sqlite_error)?;
+            append_in_transaction(&transaction, &request, &ctx.limits)?;
+            transaction.rollback().map_err(map_sqlite_error)
+        })
+    }
+
+    /// Drop the disposable snapshot cache for one session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] when the session is missing.
+    pub fn discard_snapshot(&self, session_id: SessionId) -> Result<(), StoreError> {
+        self.worker.call(move |ctx| {
+            ctx.with_immediate(|transaction| {
+                if load_session_row(transaction, session_id)?.is_none() {
+                    return Err(StoreError::InvalidRequest {
+                        reason_code: "snapshot_session_not_found",
+                    });
+                }
+                transaction
+                    .execute(
+                        "DELETE FROM snapshots WHERE session_id = ?1",
+                        params![session_id.as_bytes().as_slice()],
+                    )
+                    .map_err(map_sqlite_error)?;
+                transaction
+                    .execute(
+                        "UPDATE sessions SET snapshot_sequence = NULL WHERE session_id = ?1",
+                        params![session_id.as_bytes().as_slice()],
+                    )
+                    .map_err(map_sqlite_error)?;
+                Ok(())
+            })
+        })
+    }
+}
+
+impl WorkerCtx {
+    pub(crate) fn with_immediate<T>(
+        &mut self,
         body: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut connection = self.lock()?;
-        let transaction = connection
+        let transaction = self
+            .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sqlite_error)?;
         let value = body(&transaction)?;
@@ -127,67 +207,91 @@ impl SqliteJournalStore {
         Ok(value)
     }
 
-    pub(crate) fn append_sync(
-        &self,
-        request: &AppendRequest,
-    ) -> Result<CommittedBatch, StoreError> {
-        self.with_immediate(|transaction| self.append_in_transaction(transaction, request))
+    pub(crate) fn remember(&mut self, session_id: SessionId, head: VerifiedHead) {
+        self.verified.insert(session_id, head);
     }
 
-    pub(crate) fn load_sync(&self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
-        let connection = self.lock()?;
-        load_session(&connection, request.session_id, self.limits.snapshot_bytes)
+    pub(crate) fn invalidate(&mut self, session_id: SessionId) {
+        self.verified.remove(&session_id);
     }
 
-    pub(crate) fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
-        if request.limit == 0 {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "scan_limit_zero",
-            });
-        }
-        if request.limit > SCAN_PAGE_MAX_RECORDS {
-            return Err(StoreError::InvalidRequest {
-                reason_code: "scan_limit_exceeded",
-            });
-        }
-        let connection = self.lock()?;
-        if !session_exists(&connection, request.session_id)? {
-            return Ok(ScanPage {
-                session_id: request.session_id,
-                records: Arc::from([]),
-                next_sequence: None,
-            });
-        }
-        let stored = load_session_records(&connection, request.session_id)?;
-        verify_stored_session(&connection, request.session_id, &stored)?;
-        let start = if request.from_sequence == 0 {
-            1
-        } else {
-            request.from_sequence
-        };
-        let matched = stored
-            .iter()
-            .map(|row| row.envelope.clone())
-            .filter(|record| record.sequence() >= start)
-            .collect::<Vec<_>>();
-        let limit = usize::try_from(request.limit).expect("u32 fits usize");
-        let records = matched.iter().take(limit).cloned().collect::<Vec<_>>();
-        let next_sequence = if matched.len() > records.len() {
-            records
-                .last()
-                .and_then(|record| record.sequence().checked_add(1))
-        } else {
-            None
-        };
-        Ok(ScanPage {
-            session_id: request.session_id,
-            records: records.into(),
-            next_sequence,
-        })
+    pub(crate) fn cached(&self, session_id: SessionId) -> Option<VerifiedHead> {
+        self.verified.get(&session_id).copied()
     }
 
-    pub(crate) fn write_metadata_sync(
-        &self,
+    pub(crate) fn append(&mut self, request: &AppendRequest) -> Result<CommittedBatch, StoreError> {
+        let session_id = request.session_id();
+        let previous = self.cached(session_id);
+        let limits = self.limits;
+        let committed = self
+            .with_immediate(|transaction| append_in_transaction(transaction, request, &limits))?;
+        self.invalidate(session_id);
+        let genesis = committed.first_sequence == 1;
+        let prior_verified = previous.is_some_and(|head| {
+            head.sequence.saturating_add(1) == committed.first_sequence
+                && committed
+                    .records
+                    .first()
+                    .is_some_and(|record| record.previous_checksum() == head.checksum)
+        });
+        if (genesis || prior_verified)
+            && let Some(last) = committed.records.last()
+        {
+            self.remember(
+                session_id,
+                VerifiedHead {
+                    sequence: last.sequence(),
+                    checksum: Some(last.checksum()),
+                },
+            );
+        }
+        Ok(committed)
+    }
+
+    pub(crate) fn load(&mut self, request: LoadRequest) -> Result<LoadedSession, StoreError> {
+        let loaded = load_session(
+            &self.connection,
+            request.session_id,
+            self.limits.snapshot_bytes,
+            self.cached(request.session_id),
+        )?;
+        self.remember(
+            request.session_id,
+            VerifiedHead {
+                sequence: loaded.head_sequence,
+                checksum: loaded.head_checksum,
+            },
+        );
+        Ok(loaded)
+    }
+
+    pub(crate) fn load_from(
+        &mut self,
+        request: LoadFromRequest,
+    ) -> Result<LoadedSession, StoreError> {
+        let loaded = load_session_window(
+            &self.connection,
+            request.session_id,
+            self.limits.snapshot_bytes,
+            request.window,
+            self.cached(request.session_id),
+        )?;
+        self.remember(
+            request.session_id,
+            VerifiedHead {
+                sequence: loaded.head_sequence,
+                checksum: loaded.head_checksum,
+            },
+        );
+        Ok(loaded)
+    }
+
+    pub(crate) fn scan(&mut self, request: ScanRequest) -> Result<ScanPage, StoreError> {
+        scan_session(&self.connection, request)
+    }
+
+    pub(crate) fn write_metadata(
+        &mut self,
         request: WriteMetadataRequest,
     ) -> Result<MetadataReceipt, StoreError> {
         self.with_immediate(|transaction| {
@@ -218,8 +322,8 @@ impl SqliteJournalStore {
         })
     }
 
-    pub(crate) fn write_snapshot_sync(
-        &self,
+    pub(crate) fn write_snapshot(
+        &mut self,
         request: &SnapshotRequest,
     ) -> Result<SnapshotReceipt, StoreError> {
         if request.snapshot.bytes().len() > self.limits.snapshot_bytes {
@@ -279,114 +383,31 @@ impl SqliteJournalStore {
         })
     }
 
-    /// Current database page count on the owned connection. Used by PR-040 disk-full tests.
-    #[doc(hidden)]
-    pub fn page_count(&self) -> Result<i64, StoreError> {
-        let connection = self.lock()?;
-        connection
-            .query_row("PRAGMA page_count", [], |row| row.get(0))
-            .map_err(map_sqlite_error)
-    }
-
-    /// Cap the database page count on the owned connection. Used by PR-040 disk-full tests.
-    #[doc(hidden)]
-    pub fn set_max_page_count(&self, pages: i64) -> Result<(), StoreError> {
-        let connection = self.lock()?;
-        connection
-            .pragma_update(None, "max_page_count", pages)
-            .map_err(map_sqlite_error)
-    }
-
-    /// Switch off WAL so `max_page_count` can raise `SQLITE_FULL` on the next write.
-    #[doc(hidden)]
-    pub fn use_rollback_journal_for_test(&self) -> Result<(), StoreError> {
-        let connection = self.lock()?;
-        connection
-            .pragma_update(None, "journal_mode", "DELETE")
-            .map_err(map_sqlite_error)?;
-        let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
-        Ok(())
-    }
-
-    /// Insert a padding blob on the owned connection. Used to exhaust free pages.
-    #[doc(hidden)]
-    pub fn insert_padding_blob(&self, bytes: usize) -> Result<(), StoreError> {
-        let connection = self.lock()?;
-        connection
-            .execute_batch("CREATE TABLE IF NOT EXISTS padding (blob BLOB)")
-            .map_err(map_sqlite_error)?;
-        connection
-            .execute(
-                "INSERT INTO padding (blob) VALUES (?1)",
-                params![vec![0_u8; bytes]],
-            )
-            .map_err(map_sqlite_error)?;
-        Ok(())
-    }
-
-    /// Persist a batch's rows, then `ROLLBACK`. Used by PR-040-A01.
-    #[doc(hidden)]
-    pub fn append_then_rollback(&self, request: &AppendRequest) -> Result<(), StoreError> {
-        let mut connection = self.lock()?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(map_sqlite_error)?;
-        self.append_in_transaction(&transaction, request)?;
-        transaction.rollback().map_err(map_sqlite_error)
-    }
-
-    pub(crate) fn write_state_snapshot_sync(
-        &self,
+    pub(crate) fn write_state_snapshot(
+        &mut self,
         request: &StateSnapshotRequest,
     ) -> Result<SnapshotReceipt, StoreError> {
         let snapshot = encode_state_request(request, self.limits.snapshot_bytes)?;
-        self.write_snapshot_sync(&SnapshotRequest {
+        self.write_snapshot(&SnapshotRequest {
             session_id: request.session_id,
             snapshot,
         })
     }
 
-    /// Drop the disposable snapshot cache for one session.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StoreError::InvalidRequest`] when the session is missing.
-    pub fn discard_snapshot(&self, session_id: SessionId) -> Result<(), StoreError> {
-        self.with_immediate(|transaction| {
-            if load_session_row(transaction, session_id)?.is_none() {
-                return Err(StoreError::InvalidRequest {
-                    reason_code: "snapshot_session_not_found",
-                });
-            }
-            transaction
-                .execute(
-                    "DELETE FROM snapshots WHERE session_id = ?1",
-                    params![session_id.as_bytes().as_slice()],
-                )
-                .map_err(map_sqlite_error)?;
-            transaction
-                .execute(
-                    "UPDATE sessions SET snapshot_sequence = NULL WHERE session_id = ?1",
-                    params![session_id.as_bytes().as_slice()],
-                )
-                .map_err(map_sqlite_error)?;
-            Ok(())
-        })
-    }
-
-    pub(crate) fn prune_sync(&self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
+    pub(crate) fn prune(&mut self, request: PruneRequest) -> Result<PruneReceipt, StoreError> {
+        self.invalidate(request.session_id);
+        let snapshot_bytes = self.limits.snapshot_bytes;
         self.with_immediate(|transaction| {
             let session = load_session_row(transaction, request.session_id)?.ok_or(
                 StoreError::InvalidRequest {
                     reason_code: "prune_session_not_found",
                 },
             )?;
-            let snapshot =
-                load_snapshot(transaction, request.session_id, self.limits.snapshot_bytes)?.ok_or(
-                    StoreError::InvalidRequest {
-                        reason_code: "prune_requires_snapshot",
-                    },
-                )?;
+            let snapshot = load_snapshot(transaction, request.session_id, snapshot_bytes)?.ok_or(
+                StoreError::InvalidRequest {
+                    reason_code: "prune_requires_snapshot",
+                },
+            )?;
             if snapshot.sequence() == 0 || snapshot.sequence() > session.current_sequence {
                 return Err(StoreError::InvalidRequest {
                     reason_code: "prune_snapshot_not_aligned",

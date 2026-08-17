@@ -35,6 +35,53 @@ uv run --isolated --no-project --with mypy==2.3.0 \
 mise run check-size-budgets
 """
 
+[tasks.kernel]
+description = "Clippy and test the kernel crate only (not the workspace gate)"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai-kernel --all-targets --locked -- -D warnings
+cargo test -p finstack-ai-kernel --locked
+"""
+
+[tasks.runtime]
+description = "Clippy and test the runtime crate only (not the workspace gate)"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai-runtime --all-targets --locked -- -D warnings
+cargo clippy -p finstack-ai-runtime --all-targets --locked --features native-tokio -- -D warnings
+cargo test -p finstack-ai-runtime --locked --features native-tokio
+"""
+
+[tasks.python-binding]
+description = "Clippy and test the Python binding only (not the workspace gate)"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai-python --all-targets --locked -- -D warnings
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  --with pydantic==2.12.5 \
+  pytest -q
+"""
+
+[tasks.wasm-binding]
+description = "Clippy and type-check the WASM binding crate only (not the workspace gate)"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai-wasm --all-targets --locked -- -D warnings
+cargo clippy -p finstack-ai-wasm --all-targets --locked --features scripted-trace -- -D warnings
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
+cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked --features scripted-trace
+"""
+
+[tasks.measure-packaging-profile]
+description = "Compare default release vs thin-LTO/codegen and provider/TLS graphs"
+run = """
+set -euo pipefail
+uv run --no-project python tools/perf/measure_packaging_profile.py \
+  --packages kernel,runtime "$@"
+"""
+
 [tasks.check-size-budgets]
 description = "Fail when ratified wheel, WASM, or CLI size budgets are exceeded"
 run = """
@@ -204,6 +251,32 @@ mise run generate-wasm
 cd bindings/finstack-ai-wasm/js
 npx playwright install --with-deps chromium
 npx playwright test src/benchmark.test.ts --project=chromium
+"""
+
+[tasks.benchmark]
+description = "Run Criterion groups plus native idle-session allocation/RSS profiles"
+run = """
+set -euo pipefail
+CONFORMANCE='kernel_micro|resolved_dispatch|scripted_model_reducer|state_scaling'
+GROWTH='session_append_scaling|tool_settlement_width'
+SQLITE='sqlite_scan_paging|sqlite_concurrent|sqlite_restore|sqlite_recover'
+cargo bench -p finstack-ai-test --offline --locked --bench conformance -- "${CONFORMANCE}"
+cargo bench -p finstack-ai-test --offline --locked --bench growth -- "${GROWTH}"
+cargo bench -p finstack-ai-store-sqlite --offline --locked --bench restore_growth -- "${SQLITE}"
+cargo bench -p finstack-ai-test --offline --locked --bench native_runtime -- --mode idle --sessions 128
+"""
+
+[tasks.benchmark-smoke]
+description = "Quick Criterion smoke plus a small idle-session allocation/RSS profile"
+run = """
+set -euo pipefail
+CONFORMANCE='kernel_micro|resolved_dispatch|scripted_model_reducer|state_scaling'
+GROWTH='session_append_scaling|tool_settlement_width'
+SQLITE='sqlite_scan_paging|sqlite_concurrent|sqlite_restore|sqlite_recover'
+cargo bench -p finstack-ai-test --offline --locked --bench conformance -- --quick "${CONFORMANCE}"
+cargo bench -p finstack-ai-test --offline --locked --bench growth -- --quick "${GROWTH}"
+cargo bench -p finstack-ai-store-sqlite --offline --locked --bench restore_growth -- --quick "${SQLITE}"
+cargo bench -p finstack-ai-test --offline --locked --bench native_runtime -- --mode idle --sessions 32
 """
 
 [tasks.docs-links]

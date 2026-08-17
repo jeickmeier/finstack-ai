@@ -11,7 +11,7 @@ mod tests;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    CommittedBatch, Diagnostic, EffectId, EventId, Kernel, KernelState, ModelTextDelta,
+    CommittedBatch, Diagnostic, Digest, EffectId, EventId, Kernel, KernelState, ModelTextDelta,
     ProviderHeartbeat, ReasoningDelta, RunEvent, RunEventBody, RunId, Sensitivity,
     SessionProjection, Timestamp, ToolProgress,
 };
@@ -112,6 +112,7 @@ pub struct CommitCoordinator {
     pending_timer_scheduled_at: Option<Timestamp>,
     snapshot_schedule: SnapshotSchedule,
     last_snapshot_sequence: Option<u64>,
+    head_checksum: Option<Digest>,
     fault: Option<RunFault>,
     last_store_reason: Option<Arc<str>>,
     dispatcher: Option<Arc<dyn PostCommitDispatcher>>,
@@ -135,6 +136,7 @@ impl CommitCoordinator {
             pending_timer_scheduled_at: None,
             snapshot_schedule: SnapshotSchedule::default(),
             last_snapshot_sequence: None,
+            head_checksum: None,
             fault: None,
             last_store_reason: None,
             dispatcher: None,
@@ -164,6 +166,12 @@ impl CommitCoordinator {
     #[must_use]
     pub const fn session(&self) -> &SessionProjection {
         &self.session
+    }
+
+    /// Checksum of the last applied envelope, when the journal is non-empty.
+    #[must_use]
+    pub const fn head_checksum(&self) -> Option<Digest> {
+        self.head_checksum
     }
 
     /// Current run-local runtime fault.

@@ -22,11 +22,13 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendBatchId, BudgetPropagation, CancellationPropagation,
-    CommittedBatch, ContentBlock, DeadlinePropagation, Decision, Digest, EffectId, EventId, Kernel,
-    KernelInput, KernelState, LaneId, Message, MessageId, MessageRole, Metadata, ModelRequestId,
-    OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson,
-    RecordDraft, RecordEnvelope, RecordId, RunAccepted, RunId, RunLimits, RunPropagationPolicy,
-    RunRelation, RunSecurityContext, SessionId, TextBlock, Timestamp, TransitionEnv, Usage,
+    CommittedBatch, ContentBlock, DeadlinePropagation, Decision, Digest, EffectId, EventId, Id,
+    IdTag, Kernel, KernelInput, KernelState, LaneId, Message, MessageId, MessageRole, Metadata,
+    ModelRequestId, OperationLocator, OutputSpec, PrincipalPropagation, PrincipalRef, ProviderIds,
+    RAW_JSON_MAX_BYTES, RawJson, RecordDraft, RecordEnvelope, RecordId, ReducerStageOutcome,
+    RunAccepted, RunId, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
+    SessionId, Stage, StageCursor, StageSettled, TextBlock, Timestamp, ToolCallBlock,
+    ToolCallIdentity, ToolCallTag, TransitionEnv, TurnId, TurnTag, Usage,
 };
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, InputCapabilities, Model, ModelCallContext,
@@ -54,6 +56,18 @@ fn configure(group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::W
     group.sample_size(GATE_SAMPLE_SIZE);
     group.warm_up_time(GATE_WARM_UP);
     group.measurement_time(GATE_MEASUREMENT);
+}
+
+fn bench_quick() -> bool {
+    std::env::args().any(|argument| argument == "--quick")
+}
+
+fn bench_id<T: IdTag>(ordinal: u64) -> Id<T> {
+    let mut bytes = [0_u8; 16];
+    bytes[6] = 0x70;
+    bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Id::from_bytes(bytes)
 }
 
 fn conformance_noop(c: &mut Criterion) {
@@ -144,6 +158,58 @@ fn state_with_messages(count: usize) -> KernelState {
     }
 }
 
+fn tool_call_block(ordinal: u64) -> ToolCallBlock {
+    ToolCallBlock::try_new(
+        bench_id::<ToolCallTag>(ordinal),
+        "lookup_price",
+        RawJson::parse(format!(r#"{{"ordinal":{ordinal}}}"#)).expect("arguments"),
+    )
+    .expect("tool call")
+}
+
+/// Messages plus authored tool identities so `validate_tool_state` runs.
+fn activated_state(tool_count: usize, message_count: usize) -> KernelState {
+    let tools = (0..tool_count)
+        .map(|index| {
+            let ordinal = u64::try_from(index + 1).expect("ordinal");
+            let call = tool_call_block(ordinal);
+            let identity = ToolCallIdentity {
+                cycle: 0,
+                turn_id: bench_id::<TurnTag>(3),
+                source_message_id: bench_id(1_000 + ordinal),
+                tool_batch_id: None,
+                effect_id: None,
+                call: call.clone(),
+            };
+            (call, identity)
+        })
+        .collect::<Vec<_>>();
+    let mut messages = (0..message_count).map(filler_message).collect::<Vec<_>>();
+    for (call, identity) in &tools {
+        messages.push(
+            Message::try_new(
+                identity.source_message_id,
+                MessageRole::Assistant,
+                vec![ContentBlock::ToolCall(call.clone())],
+                Timestamp::from_unix_ms(2_000).expect("ts"),
+                None,
+                ProviderIds::empty(),
+                Metadata::empty(),
+            )
+            .expect("authored"),
+        );
+    }
+    KernelState {
+        state_version: 2,
+        messages: messages.into(),
+        tool_calls: tools
+            .into_iter()
+            .map(|(call, identity)| (*call.tool_call_id(), identity))
+            .collect(),
+        ..KernelState::default()
+    }
+}
+
 /// Growth-shaped benchmarks over conversation length.
 ///
 /// Both operations run on every committed batch, so any regression that scales
@@ -174,6 +240,75 @@ fn state_scaling(c: &mut Criterion) {
             },
         );
     }
+
+    let tool_counts: &[usize] = if bench_quick() {
+        &[0, 16, 64]
+    } else {
+        &[0, 64, 256]
+    };
+    let message_counts: &[usize] = if bench_quick() {
+        &[16, 128, 1_024]
+    } else {
+        &[16, 1_024, 4_096]
+    };
+    let (empty_kernel, accept_env, accept_input) = accept_run_input();
+    let accept_decision = empty_kernel
+        .decide(&accept_env, accept_input)
+        .expect("accept decision");
+    let accept_batch = commit_decision(&accept_decision);
+    for &tools in tool_counts {
+        for &messages in message_counts {
+            let state = activated_state(tools, messages);
+            state.validate().expect("activated state must validate");
+            let label = format!("tools{tools}_messages{messages}");
+            group.bench_with_input(
+                BenchmarkId::new("activated_validate", &label),
+                &state,
+                |bencher, state| {
+                    bencher.iter(|| state.validate().expect("validate"));
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new("activated_state_hash", &label),
+                &state,
+                |bencher, state| {
+                    bencher.iter(|| black_box(state.state_hash().expect("state hash")));
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new("activated_apply_accept", &label),
+                &state,
+                |bencher, state| {
+                    bencher.iter(|| {
+                        let mut kernel =
+                            Kernel::try_restore(black_box(state.clone())).expect("restore");
+                        let events = kernel.apply(black_box(&accept_batch), 0);
+                        black_box(events)
+                    });
+                },
+            );
+            let mut rejected = state.clone();
+            rejected.last_applied_sequence = 32;
+            group.bench_with_input(
+                BenchmarkId::new("activated_apply_rollback", &label),
+                &rejected,
+                |bencher, state| {
+                    bencher.iter(|| {
+                        let mut kernel =
+                            Kernel::try_restore(black_box(state.clone())).expect("restore");
+                        let error = kernel
+                            .apply(black_box(&accept_batch), 0)
+                            .expect_err("sequence must fail");
+                        black_box(error)
+                    });
+                },
+            );
+        }
+    }
+    let tool_state = activated_state(16, 128);
+    group.bench_function("state_hash_v6_tools", |bencher| {
+        bencher.iter(|| black_box(tool_state.state_hash().expect("v6 tools hash")));
+    });
 
     group.finish();
 }
@@ -382,7 +517,147 @@ fn kernel_micro(c: &mut Criterion) {
             black_box(view);
         });
     });
+    kernel_micro_extras(&mut group);
     group.finish();
+}
+
+fn kernel_micro_extras(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+) {
+    let json_64kib = json_object_bytes(64 * 1024);
+    let json_1mib = json_object_bytes(RAW_JSON_MAX_BYTES);
+    let json_map_64kib = json_map_bytes(64 * 1024);
+    group.bench_function("raw_json_parse_64kib", |bencher| {
+        bencher.iter(|| black_box(RawJson::parse(black_box(&json_64kib)).expect("64kib")));
+    });
+    group.bench_function("raw_json_parse_1mib", |bencher| {
+        bencher.iter(|| black_box(RawJson::parse(black_box(&json_1mib)).expect("1mib")));
+    });
+    group.bench_function("raw_json_de_map_64kib", |bencher| {
+        bencher.iter(|| black_box(RawJson::parse(black_box(&json_map_64kib)).expect("map")));
+    });
+    let result_ids: Arc<[MessageId]> = (0..64_u64).map(bench_id).collect::<Vec<_>>().into();
+    group.bench_function("tool_result_ids_append", |bencher| {
+        bencher.iter(|| {
+            let mut copied = result_ids.to_vec();
+            copied.push(bench_id(99));
+            black_box(Arc::<[MessageId]>::from(copied));
+        });
+    });
+    let (context_kernel, context_env, context_input) = preparing_context_kernel();
+    group.bench_function("decide_context_prepared", |bencher| {
+        bencher.iter(|| {
+            let decision = context_kernel
+                .decide(black_box(&context_env), black_box(context_input.clone()))
+                .expect("decide context");
+            black_box(decision);
+        });
+    });
+    let context_decision = context_kernel
+        .decide(&context_env, context_input.clone())
+        .expect("context decision");
+    let context_batch = commit_decision(&context_decision);
+    group.bench_function("apply_context_prepared", |bencher| {
+        bencher.iter(|| {
+            let mut apply_kernel = context_kernel.clone();
+            let events = apply_kernel
+                .apply(black_box(&context_batch), 0)
+                .expect("apply context");
+            black_box(events);
+        });
+    });
+}
+
+fn json_object_bytes(target: usize) -> Vec<u8> {
+    let overhead = 8;
+    let pad = target.saturating_sub(overhead);
+    let mut bytes = Vec::with_capacity(target);
+    bytes.extend_from_slice(br#"{"d":""#);
+    bytes.extend(std::iter::repeat_n(b'a', pad));
+    bytes.extend_from_slice(br#""}"#);
+    bytes
+}
+
+fn json_map_bytes(target: usize) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(target);
+    bytes.push(b'{');
+    let mut index = 0_u32;
+    while bytes.len() + 24 < target {
+        if index > 0 {
+            bytes.push(b',');
+        }
+        bytes.extend(format!(r#""k{index}":{index}"#).into_bytes());
+        index += 1;
+    }
+    bytes.push(b'}');
+    bytes
+}
+
+fn apply_input(kernel: &mut Kernel, env: &TransitionEnv, input: KernelInput) {
+    let decision = kernel.decide(env, input).expect("decide");
+    let batch = commit_decision(&decision);
+    kernel.apply(&batch, 0).expect("apply");
+}
+
+fn empty_ids(records: Vec<RecordId>, events: Vec<EventId>, turns: Vec<TurnId>) -> AllocatedIds {
+    AllocatedIds::try_new(
+        records,
+        events,
+        vec![],
+        vec![],
+        vec![],
+        turns,
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+        vec![],
+    )
+    .expect("ids")
+}
+
+fn preparing_context_kernel() -> (Kernel, TransitionEnv, KernelInput) {
+    let (mut kernel, env, input) = accept_run_input();
+    apply_input(&mut kernel, &env, input);
+    apply_input(
+        &mut kernel,
+        &TransitionEnv {
+            now: Timestamp::from_unix_ms(1_100).expect("now"),
+            ids: empty_ids(
+                vec![RecordId::parse("01234567-89ab-7cde-89ab-0123456789b1").expect("record")],
+                vec![],
+                vec![],
+            ),
+        },
+        KernelInput::StageSettled(StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeRun,
+            },
+            outcome: ReducerStageOutcome::Continue,
+        }),
+    );
+    let context_env = TransitionEnv {
+        now: Timestamp::from_unix_ms(1_200).expect("now"),
+        ids: empty_ids(
+            vec![
+                RecordId::parse("01234567-89ab-7cde-89ab-0123456789b2").expect("record"),
+                RecordId::parse("01234567-89ab-7cde-89ab-0123456789b3").expect("record"),
+            ],
+            vec![],
+            vec![TurnId::parse("01234567-89ab-7cde-89ab-0123456789b4").expect("turn")],
+        ),
+    };
+    let context_input = KernelInput::StageSettled(StageSettled {
+        cursor: StageCursor {
+            cycle: 0,
+            stage: Stage::PrepareContext,
+        },
+        outcome: ReducerStageOutcome::ContextPrepared {
+            messages: Arc::from([filler_message(0)]),
+        },
+    });
+    (kernel, context_env, context_input)
 }
 
 fn commit_decision(decision: &Decision) -> CommittedBatch {

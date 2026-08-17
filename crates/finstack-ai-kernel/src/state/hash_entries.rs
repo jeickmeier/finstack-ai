@@ -6,10 +6,11 @@ use crate::primitives::{EffectId, ToolCallId};
 use crate::records::lifecycle::{Stage, StageCursor};
 use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint};
 
+use super::types::ToolCallIdentityHashRef;
 use super::{
     CompletionIdentity, CompletionIdentityHashEntryV1, ModelSettlementFingerprint,
     ModelSettlementHashEntryV1, ResolutionIdentity, ResolutionIdentityHashEntryV6,
-    StageSettlementHashEntryV1, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
+    StageSettlementHashEntryV1, ToolSettlementHashEntryV2,
 };
 
 pub(super) fn stage_hash_entries(
@@ -72,17 +73,17 @@ pub(super) fn resolution_hash_entries(
 
 pub(super) fn tool_call_hash_entries(
     entries: &BTreeMap<ToolCallId, ToolCallIdentity>,
-) -> Vec<ToolCallIdentityHashEntryV2> {
+) -> Vec<ToolCallIdentityHashRef<'_>> {
     entries
         .iter()
-        .map(|(tool_call_id, identity)| ToolCallIdentityHashEntryV2 {
+        .map(|(tool_call_id, identity)| ToolCallIdentityHashRef {
             tool_call_id: *tool_call_id,
             cycle: identity.cycle,
             turn_id: identity.turn_id,
             source_message_id: identity.source_message_id,
             tool_batch_id: identity.tool_batch_id,
             effect_id: identity.effect_id,
-            call: identity.call.clone(),
+            call: &identity.call,
         })
         .collect()
 }

@@ -246,6 +246,36 @@ fn parent_chain_is_immutable_and_equal_replay_is_idempotent() {
 }
 
 #[test]
+fn preview_validates_against_an_overlay_without_cloning_committed_entries() {
+    let mut projection = SessionProjection::new(id(1));
+    let root = entry(10, None, 1, MessageRole::User, "a");
+    apply_conversation_entry(&mut projection.entries, root.clone()).expect("root");
+    let child = entry(11, Some(10), 2, MessageRole::Assistant, "b");
+    let grandchild = entry(12, Some(11), 3, MessageRole::User, "c");
+    projection
+        .preview_conversation_entries([&child, &grandchild])
+        .expect("overlay parent");
+    assert_eq!(projection.entries().len(), 1);
+    let rewritten = ConversationEntry::try_new(
+        root.id(),
+        root.parent_id(),
+        root.lane_id(),
+        root.sequence(),
+        crate::conversation::EntryBody::Message(text_message(10, MessageRole::User, "changed")),
+    )
+    .expect("rewrite");
+    assert_eq!(
+        projection.preview_conversation_entries([&rewritten]),
+        Err(ConversationError::ImmutableConflict)
+    );
+    let orphan = entry(13, Some(99), 4, MessageRole::User, "orphan");
+    assert_eq!(
+        projection.preview_conversation_entries([&orphan]),
+        Err(ConversationError::MissingParent)
+    );
+}
+
+#[test]
 fn branch_foundation_does_not_rewrite_the_shared_parent() {
     let mut entries = BTreeMap::new();
     let a = entry(10, None, 1, MessageRole::User, "a");

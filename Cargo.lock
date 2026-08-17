@@ -1056,7 +1056,9 @@ dependencies = [
  "finstack-ai-test",
  "rusqlite",
  "serde",
+ "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1076,6 +1078,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

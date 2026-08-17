@@ -306,11 +306,7 @@ fn equal_tool_deferred_duplicate(
         return Ok(None);
     }
     let effect_id = tool_settlement_effect_id(&input.outcome);
-    let Some(active) = batch
-        .calls
-        .iter()
-        .find(|call| call.assigned.effect_id == effect_id)
-    else {
+    let Some(active) = batch.call(effect_id) else {
         return Ok(None);
     };
     let crate::records::tools::ActiveToolCallStatus::Requested {

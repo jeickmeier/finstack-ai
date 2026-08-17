@@ -222,14 +222,30 @@ def _native_idle_from_profiles() -> dict[str, int]:
             and item.get("id") == "idle-session-rss-v1"
             and item.get("sessions") == 128
         ):
-            return {
+            row = {
                 "baseline_kib": int(item["baseline_kib"]),
                 "resident_kib": int(item["resident_kib"]),
                 "incremental_kib": int(item["incremental_kib"]),
                 "sessions": int(item["sessions"]),
                 "bytes_per_session": int(item["bytes_per_session"]),
             }
+            owned = item.get("framework_owned_bytes_per_session")
+            if owned is not None:
+                row["framework_owned_bytes_per_session"] = int(owned)
+            return row
     raise RuntimeError("session-profiles.json has no 128-session idle RSS row")
+
+
+def _framework_owned_within_target(native_idle: dict[str, int]) -> bool:
+    """Compare allocator-scoped framework-owned bytes to NFR-PERF-005.
+
+    Incremental `ps` RSS is a separate warning metric and is not this budget.
+    An unmeasured profile fails closed.
+    """
+    owned = native_idle.get("framework_owned_bytes_per_session")
+    if owned is None:
+        return False
+    return int(owned) <= IDLE_SESSION_TARGET_BYTES
 
 
 def _validate_report(report: dict[str, object]) -> None:
@@ -271,6 +287,22 @@ def _validate_report(report: dict[str, object]) -> None:
         raise RuntimeError("default Rust-backed delivery invoked Python callbacks")
     if concurrency.get("overlapped") is not True:
         raise RuntimeError("independent Rust runs serialized before the model gate")
+    throughput = report["throughput"]
+    idle_memory = report["idle_memory"]
+    if not isinstance(throughput, dict) or not isinstance(idle_memory, dict):
+        raise RuntimeError("report throughput/idle_memory sections must be objects")
+    if throughput.get("native_within_target") is not True:
+        raise RuntimeError(
+            "native event throughput misses NFR-PERF-004: "
+            f"{throughput.get('native_model_deltas_per_second')} < "
+            f"{throughput.get('target_model_deltas_per_second')}"
+        )
+    if idle_memory.get("native_within_target") is not True:
+        raise RuntimeError(
+            "idle-session framework-owned memory misses NFR-PERF-005: "
+            f"{idle_memory.get('native_session_reference')} vs "
+            f"{idle_memory.get('target_bytes_per_session')} bytes"
+        )
 
 
 async def _run(smoke: bool) -> dict[str, object]:
@@ -335,8 +367,7 @@ async def _run(smoke: bool) -> dict[str, object]:
             "python_heap_bytes_per_idle_handle_pair": idle_python_heap,
             "native_session_reference": native_idle,
             "target_bytes_per_session": IDLE_SESSION_TARGET_BYTES,
-            "native_within_target": native_idle["bytes_per_session"]
-            <= IDLE_SESSION_TARGET_BYTES,
+            "native_within_target": _framework_owned_within_target(native_idle),
         },
         "concurrency": concurrency,
         "external_io": {
