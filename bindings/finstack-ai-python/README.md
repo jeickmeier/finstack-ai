@@ -17,12 +17,20 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
 See [docs/site/python.md](../../docs/site/python.md). Callbacks are
 [T2](../../docs/site/security-trust-levels.md) and are not isolated.
 
-The curated wheel links the Rust-backed OpenAI-compatible, Anthropic Messages,
-and Ollama/local paths into the same extension module.
-`linked_providers()` reports `("openai-compatible", "anthropic", "ollama")`.
-`Agent.openai_compatible()`, `Agent.anthropic()`, and `Agent.ollama()` construct
-those clients explicitly; importing `finstack_ai` still does not create a
-provider client, initialize Tokio, read credentials, or open network resources.
+The curated wheel links the Rust-backed OpenAI Responses, Anthropic Messages,
+and native Ollama paths into the same extension module.
+`linked_providers()` reports `("openai", "anthropic", "ollama")`.
+`Agent.openai()`, `Agent.anthropic()`, and `Agent.ollama()` construct
+those T1 clients explicitly and accept the same keyword-only T2 ports as
+`Agent.from_python` (`toolsets`, `context_providers`, `middleware`,
+`observers`, `output_type`). `openai` takes required keyword-only `api_key`
+as Bearer auth and optional `reasoning_effort`; it always targets official
+OpenAI Responses. Output is capped at 128,000 tokens while the linked
+context window remains 1,050,000 tokens. `ollama` stays keyless and uses
+`/api/chat`.
+The factories do not read environment variables. Importing `finstack_ai` still
+does not create a provider client, initialize Tokio, read credentials, or open
+network resources.
 `finstack_ai.providers` exposes in-package availability probes and does not
 construct provider clients.
 Call `await run.cancel()` for explicit cancellation. Classic `abi3` wheels are

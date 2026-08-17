@@ -572,6 +572,7 @@ fn encode_state_request(
         request.state.last_applied_sequence,
         request.head_checksum,
         request.pending_timer_scheduled_at,
+        request.last_model_continuation.clone(),
     )
     .map_err(|_| StoreError::Integrity {
         reason_code: "snapshot_encode_failed",
@@ -591,6 +592,7 @@ fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
         sequence: decoded.sequence,
         head_checksum: decoded.head_checksum,
         pending_timer_scheduled_at: decoded.pending_timer_scheduled_at,
+        last_model_continuation: decoded.last_model_continuation,
         state: decoded.state,
     })
 }

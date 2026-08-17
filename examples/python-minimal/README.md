@@ -4,12 +4,16 @@ Three deliberately small starters against the typed public `finstack_ai`
 package. Workspace pin is `finstack-ai==1.0.0` (unpublished; last public
 tag `v0.1.0`; not on PyPI).
 
-- [`rust-backed/`](rust-backed/) — curated Rust-backed OpenAI-compatible
-  provider ([T1](../../docs/site/security-trust-levels.md)). Default path
-  performs no network I/O.
+- [`rust-backed/`](rust-backed/) — curated Rust-backed native Ollama provider
+  ([T1](../../docs/site/security-trust-levels.md)). Default path performs no
+  network I/O.
 - [`python-callback/`](python-callback/) — trusted Python callback
   ([T2](../../docs/site/security-trust-levels.md)). Not isolated.
 - [`service/`](service/) — resolve once, health, one offline request (T2).
+- [`notebooks/`](notebooks/) — seven-notebook learning series. 01–04 stay
+  offline. 05 runs local Ollama when `gemma4:26b` (or `OLLAMA_MODEL`) is
+  installed. 06–07 run live providers only when the matching API key is
+  set.
 
 ## Quick start
 

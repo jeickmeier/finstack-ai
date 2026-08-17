@@ -293,6 +293,13 @@ set -euo pipefail
 uv run --no-project python tools/docs/quickstarts.py
 """
 
+[tasks.docs-notebooks]
+description = "Execute the Python learning notebooks"
+run = """
+set -euo pipefail
+uv run python tools/docs/notebooks.py
+"""
+
 [tasks.docs-license]
 description = "Sweep public package license metadata for MIT OR Apache-2.0"
 run = """

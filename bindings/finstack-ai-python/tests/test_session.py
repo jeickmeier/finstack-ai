@@ -6,7 +6,7 @@ import asyncio
 
 import finstack_ai
 
-from test_handles import _agent, _server, _text_sse
+from test_handles import _agent, _ollama_ndjson, _server
 
 
 def test_session_create_lane_inspect_and_identity_bind() -> None:
@@ -32,5 +32,5 @@ def test_session_create_lane_inspect_and_identity_bind() -> None:
         assert opened.session_id == session.session_id
         assert (await opened.lane("research")).lane_id == research.lane_id
 
-    with _server(_text_sse(["ok"])) as server:
+    with _server(_ollama_ndjson(["ok"])) as server:
         asyncio.run(exercise(server))

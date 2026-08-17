@@ -29,9 +29,7 @@ import type {
   JsToolsetOptions,
   PrebetaKind,
 } from "./index.ts";
-import type {
-  OpenAICompatibleOptions,
-} from "./adapters/openai-compatible.ts";
+import type { OpenAIOptions } from "./adapters/openai.ts";
 import type {
   createIndexedDbArtifactStore,
   createIndexedDbJournalStore,
@@ -94,8 +92,8 @@ declare global {
       ) => Promise<SessionInspectSnapshot>;
       createHostClock: (now?: () => number) => HostClock;
       createHostRandomSource: () => HostRandomSource;
-      createOpenAICompatibleModel: (options?: OpenAICompatibleOptions) => HostModel;
-      openaiCompatibleDefaultBaseUrl: string;
+      createOpenAIModel: (options?: OpenAIOptions) => HostModel;
+      openaiDefaultBaseUrl: string;
       journalKnownAnswer: (
         kind: "record_body" | "record_envelope",
         value: unknown,

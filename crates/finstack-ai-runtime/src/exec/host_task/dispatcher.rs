@@ -143,7 +143,7 @@ impl HostDispatcher {
                 request_id: seed.pending.model_request_id,
             },
             draft,
-            continuation_state: None,
+            continuation_state: seed.continuation_state.clone(),
         };
         self.enqueue(HostWork::Model { seed, request })
     }

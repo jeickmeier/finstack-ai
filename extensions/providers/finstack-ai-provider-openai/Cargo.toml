@@ -1,0 +1,26 @@
+[package]
+name = "finstack-ai-provider-openai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Official OpenAI Responses provider for finstack-ai"
+readme = "README.md"
+
+[features]
+default = []
+vendored-tls = ["reqwest/native-tls-vendored"]
+
+[dependencies]
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

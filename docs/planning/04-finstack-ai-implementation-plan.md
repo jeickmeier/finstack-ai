@@ -13,7 +13,7 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.20 |
+| Version | 0.21 |
 | Status | Implementation baseline |
 | Date | 2026-08-15 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
@@ -87,6 +87,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 0.1.0 public preview | Phase 8 | Ecosystem batteries, server, workflow adapters, docs | Published preview compatibility policy |
 | 1.0.0 GA | Phase 9 | Stable contracts, audit, performance and release hardening | SemVer and schema compatibility commitments |
 | 1.0.x maintenance | Phase 10 | Post-GA fail-closed hardening; no journal/WIT/protocol meaning change | SemVer patch; public removals remain major |
+| 2.0 provider migration | Phase 11 | Responses + native Ollama; Chat Completions removed | Major public break; publication is a later named action |
 
 ## 2.1 MVP and preview boundary
 
@@ -126,6 +127,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 8. Public preview | 4-6 weeks | Ecosystem work can begin earlier in leaf packages |
 | 9. 1.0 hardening | 6-10 weeks | Driven by preview feedback and audits |
 | 10. 1.0.x reliability | 1-2 weeks | Sequential slices after G8; one logical PR |
+| 11. 2.0 provider migration | 2-4 weeks | Sequential after ADR-040; publication excluded |
 
 ## 3.1 Staffing scenarios
 
@@ -2909,6 +2911,69 @@ A separate ADR is required before merging a change that:
 **Traceability.** NFR-SEC-003/005; NFR-REL; NFR-COMP; TM-04; TDD sections 2-4; 1.0 compatibility policy.
 
 **Explicitly excluded.** Journal or interaction-cursor field adds; `KernelError` variant-shape change; `manual-drive` feature-gate or public-API removal; `task.rs` / `host_task.rs` merge; production server rewrite; config-schema allowlist; god-file splits; marketplace, channel catalog, and product-specific UIs.
+
+# 17B. Phase 11: 2.0 provider migration
+
+**Outcome.** Official OpenAI uses Responses. Ollama uses native `/api/chat`. Chat Completions and generic compatible endpoints are removed. Registry publication is not part of this phase.
+
+**Planning range.** 2-4 weeks
+
+**Traceability.** FR-MDL; ADR-040; NFR-COMP; TM-04.
+
+## Entrance criteria
+
+- ADR-040 is accepted and primary planning documents are reconciled.
+- Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-067 envelopes.
+
+## Exit criteria
+
+- `Agent.openai` talks only to `/v1/responses` with `store:false`.
+- `Agent.ollama` talks only to native `/api/chat`.
+- `Agent.openai_compatible`, `finstack-ai-provider-openai-compatible`, and `createOpenAICompatibleModel` are gone.
+- Continuation state and provider `call_id` survive a tool loop.
+- Workspace version fields are unchanged; no crates.io / PyPI / npm publish.
+
+## Pull request sequence
+
+### PR-068 - Authorize the 2.0 provider break
+
+**Purpose.** Record ADR-040 and reconcile planning documents.
+
+**Principal changes.** Standalone ADR-040; ADR-023 superseded; pack v0.23; Phase 11 sequence.
+
+**Dependencies.** ADR-040 acceptance.
+
+**Explicitly excluded.** Production provider code; publication.
+
+### PR-069 - Durable continuation and provider call IDs
+
+**Purpose.** Pass last `continuation_state` on the next model request and preserve optional provider `call_id`.
+
+**Dependencies.** PR-068.
+
+### PR-070 - Native Ollama `/api/chat`
+
+**Purpose.** Add `finstack-ai-provider-ollama` and rewire `Agent.ollama`.
+
+**Dependencies.** PR-069.
+
+### PR-071 - Delete Chat Completions
+
+**Purpose.** Remove the compatible crate, factories, fixtures, and docs.
+
+**Dependencies.** PR-070.
+
+### PR-072 - Official OpenAI Responses provider
+
+**Purpose.** Add `finstack-ai-provider-openai` for `/v1/responses`.
+
+**Dependencies.** PR-069. May proceed in parallel with PR-070 after PR-069.
+
+### PR-073 - Public `Agent.openai` and documentation
+
+**Purpose.** Replace Python/WASM/docs/notebooks. Do not publish.
+
+**Dependencies.** PR-071 and PR-072.
 
 # 18. Cross-phase quality plan
 

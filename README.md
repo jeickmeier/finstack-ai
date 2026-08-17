@@ -40,6 +40,7 @@ Common tasks:
 - `mise run ci` — `check` plus `test` (hosted CI)
 - `mise run docs-links` — relative markdown links on the public set
 - `mise run docs-quickstarts` — offline public-package starters
+- `mise run docs-notebooks` — Python learning notebooks
 
 Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
 [`mise.toml`](mise.toml). Hosted CI lives under
@@ -48,6 +49,11 @@ Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
 The installable Python package lives under `bindings/finstack-ai-python`.
 Build it from the root with `uv build --package finstack-ai` or
 `uv build --project bindings/finstack-ai-python`.
+
+`uv sync` at the repository root creates `.venv` with editable
+`finstack-ai[pydantic]` plus notebook kernel packages. Register
+`finstack-ai-notebooks` from that environment; see
+[examples/python-minimal/notebooks/README.md](examples/python-minimal/notebooks/README.md).
 
 ## Workspace layout
 

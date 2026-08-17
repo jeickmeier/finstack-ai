@@ -9,15 +9,26 @@ Workspace version is **1.0.0**. The package is not on PyPI.
 
 ## Agent composition
 
-- `Agent.openai_compatible(base_url, model, instruction=None, capabilities=None,
-  active_capabilities=None)` builds the curated Rust-backed Chat Completions
-  provider. Import still constructs no HTTP client.
+- `Agent.openai(model, instruction=None, capabilities=None,
+  active_capabilities=None, *, api_key, reasoning_effort=None,
+  reasoning_summary=None,
+  toolsets=None, context_providers=None, middleware=None, observers=None,
+  output_type=None)` builds the official OpenAI Responses provider (T1).
+  Keyword-only ports are the same T2 callbacks as `from_python`. `api_key` is
+  required keyword-only Bearer auth. `reasoning_effort` is `none` / `minimal`
+  / `low` / `medium` / `high` / `xhigh` / `max`; `reasoning_summary` is
+  `auto` / `concise` / `detailed`. Requests use `store: false`. The binding
+  does not read environment variables or expose alternate gateways.
 - `Agent.anthropic(base_url, model, api_key=None, instruction=None,
-  capabilities=None, active_capabilities=None)` builds the curated Anthropic
-  Messages leaf. An `api_key` requires HTTPS; keyless HTTP loopback is allowed.
+  capabilities=None, active_capabilities=None, *, toolsets=None,
+  context_providers=None, middleware=None, observers=None, output_type=None)`
+  builds the curated Anthropic Messages leaf (T1) plus the same keyword-only
+  T2 ports. An `api_key` remains positional and requires HTTPS; keyless HTTP
+  loopback is allowed.
 - `Agent.ollama(base_url, model, instruction=None, capabilities=None,
-  active_capabilities=None)` builds the keyless Ollama/local path of the
-  OpenAI-compatible crate. It does not change `Agent.openai_compatible`.
+  active_capabilities=None, *, toolsets=None, context_providers=None,
+  middleware=None, observers=None, output_type=None)` builds the keyless
+  native Ollama `/api/chat` provider plus the same keyword-only T2 ports.
 - `Agent.from_python(model, toolsets=None, instruction=None, output_type=None,
   capabilities=None, active_capabilities=None, context_providers=None,
   middleware=None, observers=None)` accepts trusted coarse callback adapters.

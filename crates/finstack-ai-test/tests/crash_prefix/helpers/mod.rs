@@ -384,6 +384,7 @@ pub(crate) async fn write_snapshot(store: &Arc<dyn JournalStore>, coordinator: &
             state: coordinator.state().clone(),
             head_checksum: loaded.head_checksum.expect("head"),
             pending_timer_scheduled_at: None,
+            last_model_continuation: None,
         })
         .await
         .expect("snapshot");

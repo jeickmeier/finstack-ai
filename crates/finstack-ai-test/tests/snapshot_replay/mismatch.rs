@@ -27,7 +27,7 @@ fn corrupt_and_mismatched_snapshots_are_ignored() {
     if let CanonicalValue::Map(entries) = &mut value {
         for (key, item) in entries.iter_mut() {
             if *key == CanonicalValue::Text("format_version".into()) {
-                *item = CanonicalValue::Unsigned(2);
+                *item = CanonicalValue::Unsigned(3);
             }
         }
     }
@@ -50,6 +50,7 @@ fn corrupt_and_mismatched_snapshots_are_ignored() {
         &recovered_state,
         recovered_state.last_applied_sequence,
         Digest::raw_json(b"forked-head"),
+        None,
         None,
     )
     .expect("forked envelope");

@@ -522,27 +522,56 @@ class Agent:
     """Immutable Rust-owned resolved agent handle."""
 
     @staticmethod
-    async def openai_compatible(
-        base_url: str,
+    async def openai(
         model: str,
         instruction: str | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
+        *,
+        api_key: str,
+        reasoning_effort: str | None = None,
+        reasoning_summary: str | None = None,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
     ) -> Agent:
-        """Build a keyless Rust-backed OpenAI-compatible agent.
+        """Build a Rust-backed official OpenAI Responses agent.
+
+        The native client posts to ``https://api.openai.com/v1/responses``
+        with ``store=false``. Keyword-only ``toolsets``,
+        ``context_providers``, ``middleware``, ``observers``, and
+        ``output_type`` register the same trusted T2 Python ports as
+        :meth:`Agent.from_python`. This factory does not read environment
+        variables and does not accept a generic ``base_url``. Output is
+        capped at 128,000 tokens while the linked context window is
+        1,050,000 tokens.
 
         Args:
-            base_url: OpenAI-compatible Chat Completions base URL.
-            model: Provider model name.
+            model: Official OpenAI model name.
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            api_key: Required Bearer credential. HTTPS is required.
+            reasoning_effort: Optional Responses ``reasoning.effort``.
+                Allowed values are ``none``, ``minimal``, ``low``,
+                ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
+                provider default.
+            reasoning_summary: Optional Responses ``reasoning.summary``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
 
         Returns:
             An immutable Rust-owned agent handle.
 
         Raises:
-            ConfigurationError: The endpoint, model, or capability set is invalid.
+            ConfigurationError: The credential, model, capability set, or
+                port registration is invalid.
         """
     @staticmethod
     async def anthropic(
@@ -552,26 +581,44 @@ class Agent:
         instruction: str | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
+        *,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
         Construction of the HTTP client happens only in this factory. Importing
-        ``finstack_ai`` does not open sockets or start Tokio.
+        ``finstack_ai`` does not open sockets or start Tokio. The native
+        provider is T1. Keyword-only port lists register the same T2 Python
+        callbacks as :meth:`Agent.from_python`. This factory does not read
+        environment variables.
 
         Args:
             base_url: Anthropic Messages base URL.
             model: Provider model name.
             api_key: Optional ``x-api-key``. HTTPS is required when set.
+                Keyless HTTP loopback is allowed. HTTP plus a key raises
+                :class:`ConfigurationError` and does not include the secret
+                in ``str`` or ``repr``.
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
 
         Returns:
             An immutable Rust-owned agent handle.
 
         Raises:
-            ConfigurationError: The endpoint, credential, model, or capability
-                set is invalid.
+            ConfigurationError: The endpoint, credential, model, capability
+                set, or port registration is invalid.
         """
     @staticmethod
     async def ollama(
@@ -580,12 +627,18 @@ class Agent:
         instruction: str | None = None,
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
+        *,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
     ) -> Agent:
-        """Build a keyless Rust-backed Ollama/local agent.
+        """Build a keyless Rust-backed native Ollama agent.
 
-        Uses the OpenAI-compatible Chat Completions path with
-        ``EndpointKind.Ollama``. This does not change
-        :meth:`Agent.openai_compatible`.
+        Uses Ollama ``/api/chat``. This factory does not accept an API key.
+        Keyword-only port lists register the same T2 Python callbacks as
+        :meth:`Agent.from_python`.
 
         Args:
             base_url: Ollama base URL, typically ``http://127.0.0.1:11434``.
@@ -593,12 +646,19 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
 
         Returns:
             An immutable Rust-owned agent handle.
 
         Raises:
-            ConfigurationError: The endpoint, model, or capability set is invalid.
+            ConfigurationError: The endpoint, model, capability set, or port
+                registration is invalid.
         """
     @staticmethod
     async def from_python(
@@ -674,7 +734,7 @@ class Agent:
         self,
         input: str,
         *,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
@@ -686,7 +746,9 @@ class Agent:
 
         Args:
             input: Non-empty plain-text user input.
-            timeout_seconds: Operational deadline in seconds. Must be positive.
+            timeout_seconds: Operational deadline in seconds. ``None`` uses
+                the agent default (30, or 120 for
+                :meth:`Agent.openai`). Must be positive when set.
             max_cycles: Maximum model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id. ``None``
@@ -711,7 +773,7 @@ class Agent:
         self,
         input: str,
         *,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
@@ -722,7 +784,9 @@ class Agent:
 
         Args:
             input: Non-empty plain-text user input.
-            timeout_seconds: Operational deadline in seconds. Must be positive.
+            timeout_seconds: Operational deadline in seconds. ``None`` uses
+                the agent default (30, or 120 for
+                :meth:`Agent.openai`). Must be positive when set.
             max_cycles: Maximum model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id. ``None``
@@ -762,7 +826,7 @@ def linked_providers() -> tuple[str, ...]:
     """Return curated Rust-backed providers linked into this extension.
 
     Returns:
-        A tuple such as ``(\"openai-compatible\", \"anthropic\", \"ollama\")``.
+        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\")``.
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:

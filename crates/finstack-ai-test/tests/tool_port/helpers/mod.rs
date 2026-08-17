@@ -149,6 +149,7 @@ pub(crate) fn model_response(call_count: usize, tool_name: &str) -> ModelRespons
             .map(|index| ModelToolCall {
                 name: Arc::from(tool_name),
                 arguments: RawJson::parse(format!(r#"{{"value":{index}}}"#)).expect("arguments"),
+                provider_call_id: None,
             })
             .collect::<Vec<_>>()
             .into(),
@@ -170,6 +171,7 @@ pub(crate) fn model_plan(call_count: usize, tool_name: &str) -> ScriptedModelPla
                 index: u32::try_from(index).expect("index"),
                 name: Some(Arc::clone(&call.name)),
                 arguments_delta: Arc::from(call.arguments.as_str()),
+                provider_call_id: None,
             })))
         })
         .collect::<Vec<_>>();

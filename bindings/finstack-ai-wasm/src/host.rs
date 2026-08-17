@@ -89,6 +89,8 @@ pub struct HostModelOutput {
 pub struct HostModelToolCall {
     name: String,
     arguments: serde_json::Value,
+    #[serde(default)]
+    provider_call_id: Option<String>,
 }
 
 /// Incremental stream item accepted from a `ReadableStream` or async iterable.
@@ -204,6 +206,7 @@ pub fn model_response(output: HostModelOutput) -> Result<ModelResponse, HostFail
             Ok(ModelToolCall {
                 name: Arc::from(call.name),
                 arguments: RawJson::parse(arguments).map_err(|_| HostFailure::InvalidResult)?,
+                provider_call_id: call.provider_call_id.map(Arc::from),
             })
         })
         .collect::<Result<Vec<_>, HostFailure>>()?;

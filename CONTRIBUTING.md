@@ -26,6 +26,7 @@ When the change touches public docs or starters, also run:
 ```bash
 mise run docs-links
 mise run docs-quickstarts
+mise run docs-notebooks
 ```
 
 The hosted `ci.yml` workflow invokes the same task names. Do not reimplement
@@ -40,6 +41,7 @@ Other tasks used by public docs:
 - `mise run conformance` — published port and plugin suites
 - `mise run generate-wasm` / `mise run stage-wasm` — JS/WASM package
 - `mise run check-plugin-template` — plugin guest templates
+- `mise run docs-notebooks` — Python learning notebooks
 - `mise run migrate` — 0.1.0 → 1.0.0 in-tree migration helpers
 
 ## Developer Certificate of Origin (DCO)

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{CapabilityId, ModelName, OperationLocator, RawJson};
+use finstack_ai::runtime::{CapabilityId, ModelName, ModelSettings, OperationLocator, RawJson};
 use finstack_ai::{
     AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RunSecurityContext,
 };
@@ -255,6 +255,7 @@ pub(crate) fn run_request(
     max_cycles: u64,
     max_output_retries: u32,
     capability: Option<String>,
+    settings: ModelSettings,
 ) -> Result<AgentRunRequest, AgentRunError> {
     if !timeout_seconds.is_finite()
         || timeout_seconds <= 0.0
@@ -276,6 +277,7 @@ pub(crate) fn run_request(
     )
     .map_err(|error| configuration_error(error.to_string()))?;
     let mut request = AgentRunRequest::try_new(model.clone(), input, security)?;
+    request.settings = settings;
     request.timeout = Duration::from_secs_f64(timeout_seconds);
     request.max_cycles = max_cycles;
     request.max_output_retries = max_output_retries;

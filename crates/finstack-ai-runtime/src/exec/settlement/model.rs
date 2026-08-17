@@ -485,8 +485,13 @@ fn build_settlement(
                     response.tool_calls.iter().zip(&allocation.tool_call_ids)
                 {
                     content.push(ContentBlock::ToolCall(
-                        ToolCallBlock::try_new(*tool_call_id, &call.name, call.arguments.clone())
-                            .map_err(|_| RunHandleError::ModelSettlement {
+                        ToolCallBlock::try_new_with_provider_call_id(
+                            *tool_call_id,
+                            &call.name,
+                            call.arguments.clone(),
+                            call.provider_call_id.as_deref(),
+                        )
+                        .map_err(|_| RunHandleError::ModelSettlement {
                             code: "model_tool_call_invalid",
                         })?,
                     ));

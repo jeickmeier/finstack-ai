@@ -2,12 +2,36 @@
 # Bare `uv build` at the repository root is unsupported; build the member instead:
 #   uv build --package finstack-ai
 #   uv build --project bindings/finstack-ai-python
+#
+# Jupyter / ipykernel / nbclient stay here. Do not add them to the published
+# `finstack-ai` extras in bindings/finstack-ai-python/pyproject.toml.
+
+[project]
+name = "finstack-ai-workspace"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "finstack-ai[pydantic]",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel",
+    "jupyter",
+    "nbclient",
+    "pytest",
+    "ruff",
+    "ty"
+]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
 members = ["bindings/finstack-ai-python"]
+
+[tool.uv.sources]
+finstack-ai = { workspace = true }
 
 [tool.pytest.ini_options]
 pythonpath = ["bindings/finstack-ai-python/python"]

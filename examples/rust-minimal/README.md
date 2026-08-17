@@ -6,7 +6,7 @@ Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`). `publish 
 Trust class: [T1](../../docs/site/security-trust-levels.md). Native
 in-process providers and tools are not isolated.
 
-- `minimal` completes a model-only run through the OpenAI-compatible provider.
+- `minimal` completes a model-only run through the native Ollama provider.
 - `coding` composes calculator, filesystem, shell, repository/memory context,
   sliding-window compaction, and a before_finalize verifier over a keyless
   loopback model. **Its compaction leg does not work**: once the window

@@ -41,3 +41,26 @@ fn tool_bearing_snapshot_plus_tail_matches_full_replay() {
     assert!(recovered.state().state_version >= 2);
     assert_snapshot_matches_full_replay(&store);
 }
+
+#[test]
+fn snapshot_restores_model_continuation_sidecar() {
+    let store = store();
+    populate_settled_session(&store);
+    let before_snapshot = block_on(CommitCoordinator::recover(
+        Arc::clone(&store) as Arc<dyn JournalStore>,
+        id::<SessionTag>(1),
+    ))
+    .expect("recover before snapshot");
+    let continuation = before_snapshot
+        .last_model_continuation()
+        .cloned()
+        .expect("journal continuation");
+    write_current_snapshot(&store);
+
+    let recovered = block_on(CommitCoordinator::recover(
+        Arc::clone(&store) as Arc<dyn JournalStore>,
+        id::<SessionTag>(1),
+    ))
+    .expect("recover from snapshot");
+    assert_eq!(recovered.last_model_continuation(), Some(&continuation));
+}

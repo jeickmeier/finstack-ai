@@ -4,8 +4,10 @@ use std::time::Duration;
 use crate::{AcceleratedRestore, JournalStore, LoadRequest, LoadedSession, SnapshotSchedule};
 
 use finstack_ai_kernel::{
-    CommittedBatch, Digest, Kernel, RecordEnvelope, RunId, SessionProjection, Timestamp,
+    CommittedBatch, Digest, EffectOutputKind, Kernel, RawJson, RecordBody, RecordEnvelope, RunId,
+    SessionProjection, Timestamp,
 };
+use serde::Deserialize;
 
 use super::session_commit::apply_batch_to_session;
 use super::submit::update_pending_timer_timestamp;
@@ -27,6 +29,9 @@ impl CommitCoordinator {
             .map_err(CommitCoordinatorError::Store)?;
         let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
             replay_loaded(&loaded)
+                .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        let last_model_continuation =
+            continuation_after_replay(&loaded, ReplayScope::Primary, used_snapshot)
                 .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         let session = project_loaded(&loaded)
             .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
@@ -55,6 +60,7 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: ReplayScope::Primary,
             middleware_chain: None,
+            last_model_continuation,
         })
     }
 
@@ -85,6 +91,8 @@ impl CommitCoordinator {
         let (kernel, next_transient_sequence, pending_timer_scheduled_at, used_snapshot) =
             replay_scoped(&loaded, scope)
                 .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
+        let last_model_continuation = continuation_after_replay(&loaded, scope, used_snapshot)
+            .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         let session = project_loaded(&loaded)
             .map_err(|code| CommitCoordinatorError::BoundaryFault { code })?;
         Ok(Self {
@@ -115,6 +123,7 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: scope,
             middleware_chain: None,
+            last_model_continuation,
         })
     }
 
@@ -241,6 +250,78 @@ fn record_belongs_to_scope(record: &RecordEnvelope, target: Option<RunId>) -> bo
         return true;
     }
     target.is_some_and(|run_id| record.run_id() == Some(run_id))
+}
+
+#[derive(Deserialize)]
+struct ModelContinuationOutput {
+    #[serde(default)]
+    continuation_state: Option<RawJson>,
+}
+
+pub(super) fn update_last_model_continuation(
+    current: &mut Option<RawJson>,
+    committed: &CommittedBatch,
+) -> Result<(), &'static str> {
+    for record in committed.records.iter() {
+        update_continuation_from_record(current, record)?;
+    }
+    Ok(())
+}
+
+pub(super) fn continuation_after_replay(
+    loaded: &LoadedSession,
+    scope: ReplayScope,
+    used_snapshot: bool,
+) -> Result<Option<RawJson>, &'static str> {
+    let snapshot_sequence = used_snapshot
+        .then(|| {
+            loaded
+                .accelerated
+                .as_ref()
+                .map(|snapshot| snapshot.sequence)
+        })
+        .flatten()
+        .unwrap_or(0);
+    let mut continuation = used_snapshot
+        .then(|| {
+            loaded
+                .accelerated
+                .as_ref()
+                .and_then(|snapshot| snapshot.last_model_continuation.clone())
+        })
+        .flatten();
+    for record in loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter(|record| record.sequence() > snapshot_sequence)
+    {
+        let belongs_to_scope = match scope {
+            ReplayScope::Primary => true,
+            ReplayScope::StructuralOnly => false,
+            ReplayScope::Run(run_id) => record_belongs_to_scope(record, Some(run_id)),
+        };
+        if belongs_to_scope {
+            update_continuation_from_record(&mut continuation, record)?;
+        }
+    }
+    Ok(continuation)
+}
+
+fn update_continuation_from_record(
+    current: &mut Option<RawJson>,
+    record: &RecordEnvelope,
+) -> Result<(), &'static str> {
+    let RecordBody::EffectCompleted(completed) = record.body() else {
+        return Ok(());
+    };
+    if completed.output_contract().kind != EffectOutputKind::ModelResponse {
+        return Ok(());
+    }
+    let output: ModelContinuationOutput = serde_json::from_slice(completed.output().as_bytes())
+        .map_err(|_| "model_continuation_invalid")?;
+    *current = output.continuation_state;
+    Ok(())
 }
 
 pub(super) fn adopt_session_head(kernel: &mut Kernel, sequence: u64) -> Result<(), &'static str> {

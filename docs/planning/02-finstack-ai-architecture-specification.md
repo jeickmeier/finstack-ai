@@ -13,7 +13,7 @@ date: "2026-08-09"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Architecture Specification |
-| Version | 0.10 |
+| Version | 0.11 |
 | Status | Pre-implementation architecture baseline |
 | Scope | Logical, runtime, data, extension, binding, security, and deployment architecture |
 | Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Technical Design v0.15; Implementation Plan v0.15; Security and Threat Model v0.5 |
@@ -203,7 +203,7 @@ The Rust runtime is loaded as a Python extension module. Rust-backed components 
 
 ### Browser WASM mode
 
-The kernel and a WASM-compatible runtime compile into one WebAssembly module. JavaScript supplies host adapters for model calls, tools, persistence, timers, and UI events. The package also offers an optional OpenAI-compatible fetch/SSE adapter, but host interfaces remain the contract.
+The kernel and a WASM-compatible runtime compile into one WebAssembly module. JavaScript supplies host adapters for model calls, tools, persistence, timers, and UI events. The package also offers an optional OpenAI Responses fetch/SSE adapter, but host interfaces remain the contract.
 
 ### Native host with WASM plugins
 
@@ -386,7 +386,7 @@ Architectural responsibilities:
 
 The model port is deliberately not a generic provider registry. Registries and model selection live in the composition/runtime layers.
 
-The scripted model is the semantic reference for deterministic conformance. The reference network implementation is OpenAI-compatible with Chat Completions as its required baseline; Responses-style mapping is optional. Provider quirks stay in a versioned adapter table rather than changing the port contract.
+The scripted model is the semantic reference for deterministic conformance. Official OpenAI uses the Responses API; Ollama uses native `/api/chat`. Generic OpenAI-compatible Chat Completions is not a first-party network provider. Provider quirks stay in adapters rather than changing the port contract.
 
 ## 6.2 Toolset
 
@@ -922,7 +922,7 @@ The binding provides awaitables and async iterators backed by runtime futures an
 
 ## 13.6 Python distribution and ABI
 
-The initial `finstack-ai` wheel bundles the curated Rust-backed OpenAI-compatible, Anthropic, and local providers while their Rust crates remain separate. Imports are lazy, optional pure-Python dependencies are extras, and CI enforces a wheel-size budget.
+The initial `finstack-ai` wheel bundles the curated Rust-backed OpenAI Responses, Anthropic Messages, and native Ollama providers while their Rust crates remain separate. Imports are lazy, optional pure-Python dependencies are extras, and CI enforces a wheel-size budget.
 
 The initial compatibility matrix is CPython 3.11-3.14 with per-version wheels plus 3.14t where supported. Classic `abi3` is intentionally not the launch strategy. Python 3.15+ `abi3t` or combined stable-ABI wheels may replace part of the matrix only after PyO3/maturin, performance, and project conformance gates pass.
 
@@ -957,7 +957,7 @@ IndexedDB is implemented as a host `JournalStore` adapter. The kernel remains st
 
 ## 14.6 Optional remote-model adapter
 
-`@finstack/ai/adapters/openai-compatible` is a tree-shakeable fetch/SSE implementation of the model host interface. It defaults to a same-origin application proxy, documents CORS behavior, and never treats browser-embedded provider API keys as an acceptable production configuration. The adapter is a battery, not a kernel network dependency.
+`@finstack/ai/adapters/openai` is a tree-shakeable fetch/SSE implementation of the official OpenAI Responses host interface. It defaults to a same-origin application proxy, documents CORS behavior, and never treats browser-embedded provider API keys as an acceptable production configuration. The adapter is a battery, not a kernel network dependency.
 
 # 15. Isolated plugin architecture
 
@@ -1356,7 +1356,8 @@ The first slice proves the semantic center rather than the ecosystem:
 | ADR-020 | Capability mechanics ship in MVP; model-activated catalog UX is required by public preview |
 | ADR-021 | Remote and process protocols share framing/handshake code but not message vocabularies |
 | ADR-022 | JSON Schema 2020-12 is the schema source of truth with conformant native/binding validators |
-| ADR-023 | The network reference provider is OpenAI-compatible Chat Completions; the scripted model remains semantic reference |
+| ADR-023 | Superseded by ADR-040. Historical: OpenAI-compatible Chat Completions was the network reference provider |
+| ADR-040 | Official OpenAI uses Responses and Ollama uses native `/api/chat`; the scripted model remains the semantic reference; Chat Completions is removed |
 | ADR-024 | The project uses MIT OR Apache-2.0, DCO, named maintainers, and ADR/RFC governance |
 | ADR-025 | Effects may defer generically and later complete under the original `EffectId` |
 | ADR-026 | Every run persists explicit root/parent/effect lineage |

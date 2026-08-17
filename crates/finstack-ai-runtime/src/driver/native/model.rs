@@ -200,7 +200,7 @@ impl PostCommitDispatcher for ModelDispatcher {
                         request_id: seed.pending.model_request_id,
                     },
                     draft,
-                    continuation_state: None,
+                    continuation_state: seed.continuation_state.clone(),
                 };
                 let jobs = self.jobs.clone();
                 let active = Arc::clone(&self.active);

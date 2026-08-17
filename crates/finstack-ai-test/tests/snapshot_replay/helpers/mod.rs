@@ -205,7 +205,10 @@ pub(crate) fn settle_model(store: Arc<MemoryJournalStore>) {
     let completion = EffectCompleted::try_new(
         pending.requested.effect_id(),
         output_contract(),
-        RawJson::parse(r#"{"text":"hello"}"#).expect("output"),
+        RawJson::parse(
+            r#"{"continuation_state":{"provider":"openai.responses","replay_items":[],"version":1}}"#,
+        )
+        .expect("output"),
         None,
         vec![],
         ProviderIds::empty(),
@@ -255,6 +258,7 @@ pub(crate) fn write_current_snapshot(store: &Arc<MemoryJournalStore>) {
         state: recovered.state().clone(),
         head_checksum,
         pending_timer_scheduled_at: None,
+        last_model_continuation: recovered.last_model_continuation().cloned(),
     }))
     .expect("write snapshot");
 }

@@ -31,6 +31,7 @@ impl CommitCoordinator {
             budget_scope_id,
             attempt: state.retry.attempts.checked_add(1)?,
             requested_at: state.accepted_at?,
+            continuation_state: self.last_model_continuation.clone(),
         })
     }
 
@@ -198,6 +199,7 @@ pub(crate) struct ModelDispatchSeed {
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
     pub(crate) requested_at: Timestamp,
+    pub(crate) continuation_state: Option<finstack_ai_kernel::RawJson>,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +261,7 @@ pub(super) fn model_dispatch_seed(
     state: &KernelState,
     action: PostCommitAction,
     committed: &CommittedBatch,
+    continuation_state: Option<finstack_ai_kernel::RawJson>,
 ) -> Option<ModelDispatchSeed> {
     let PostCommitAction::ExecuteEffect { effect_id } = action else {
         return None;
@@ -275,6 +278,7 @@ pub(super) fn model_dispatch_seed(
         budget_scope_id,
         attempt: state.retry.attempts.checked_add(1)?,
         requested_at: effect_requested_at(committed, effect_id)?,
+        continuation_state,
     })
 }
 

@@ -49,8 +49,10 @@ BUILD_PACKAGES: tuple[tuple[str, tuple[str, ...], str], ...] = (
 )
 
 TREE_TARGETS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("finstack-ai-provider-openai-compatible", ()),
-    ("finstack-ai-provider-openai-compatible", ("--features", "vendored-tls")),
+    ("finstack-ai-provider-openai", ()),
+    ("finstack-ai-provider-openai", ("--features", "vendored-tls")),
+    ("finstack-ai-provider-ollama", ()),
+    ("finstack-ai-provider-ollama", ("--features", "vendored-tls")),
     ("finstack-ai-provider-anthropic", ()),
     ("finstack-ai-provider-anthropic", ("--features", "vendored-tls")),
     ("finstack-ai-python", ()),
@@ -288,7 +290,7 @@ def main() -> int:
         },
         "wheel_budget_bytes": WHEEL_BUDGET_BYTES,
         "public_python_providers": [
-            "openai-compatible",
+            "openai",
             "anthropic",
             "ollama",
         ],

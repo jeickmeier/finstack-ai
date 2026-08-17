@@ -13,7 +13,7 @@ date: "2026-08-10"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.18 |
+| Version | 0.19 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
@@ -163,7 +163,8 @@ finstack-ai/
 
   extensions/                 # trusted native leaf batteries (in-process port implementations)
     providers/
-      finstack-ai-provider-openai-compatible/
+      finstack-ai-provider-openai/
+      finstack-ai-provider-ollama/
       finstack-ai-provider-anthropic/
       finstack-ai-provider-test/
 
@@ -526,6 +527,7 @@ pub struct ToolCallBlock {
     pub tool_call_id: ToolCallId,
     pub tool_name: Arc<str>,
     pub arguments: RawJson,
+    pub provider_call_id: Option<Arc<str>>,
 }
 
 pub struct ToolResultBlock {
@@ -2777,6 +2779,7 @@ pub struct ToolCallDelta {
     pub index: u32,
     pub name: Option<Arc<str>>,
     pub arguments_delta: Arc<str>,
+    pub provider_call_id: Option<Arc<str>>,
 }
 
 pub struct UsageDelta {
@@ -2791,7 +2794,7 @@ pub struct OpaqueProviderEvent {
 
 `Completed` and `Deferred` are terminal alternatives. After observing one terminal item, the runtime continues polling through EOF and rejects a second terminal, any later item, or a later error. EOF before a terminal is invalid. Text, reasoning, tool-call fragments, cumulative usage snapshots, heartbeat data, and opaque provider events are bounded independently and in aggregate.
 
-`ToolCallDelta` carries a zero-based provider index, an optional name, and one UTF-8 arguments fragment. The first appearance fixes source order; later fragments may fill but never mutate the name. Completion requires a non-empty name and strict canonical JSON arguments. Framework `ToolCallId` values are intentionally absent from model DTOs and are allocated only when the runtime constructs the final kernel `Message`.
+`ToolCallDelta` carries a zero-based provider index, an optional name, one UTF-8 arguments fragment, and an optional provider-native call id. The first appearance fixes source order; later fragments may fill but never mutate the name or provider id. Completion requires a non-empty name and strict canonical JSON arguments. Framework `ToolCallId` values are intentionally absent from model DTOs and are allocated only when the runtime constructs the final kernel `Message`; the optional provider id is copied into that durable tool-call block for exact result correlation.
 
 `UsageDelta` is cumulative. Every present counter must be greater than or equal to its prior value, checked token totals must be internally consistent, and the final response usage must equal the final streamed snapshot when one was emitted. Text/reasoning/tool-call aggregates and final usage/provider/completion identity must match `ModelResponse`; mismatches produce no partial durable success.
 
@@ -2799,6 +2802,7 @@ pub struct OpaqueProviderEvent {
 pub struct ModelToolCall {
     pub name: Arc<str>,
     pub arguments: RawJson,
+    pub provider_call_id: Option<Arc<str>>,
 }
 
 pub struct ModelResponse {
@@ -2935,7 +2939,7 @@ All listed errors are non-retryable. `model_context_limit_exceeded` and `model_s
 
 ## 14.6 Reference implementations
 
-`ScriptedModel` is the PR-015 semantic reference and actual leaf implementation of `Model`. It drives deterministic success, fragmentation, cumulative usage, heartbeat/opaque events, error, deferral, malformed ordering, blocking, cancellation acknowledgement, warmup, and reuse fixtures while preserving the existing fixture language. The reference network provider is OpenAI-compatible with Chat Completions as the required baseline in its later owning PR. Responses API mapping is an optional adapter extension. A versioned quirks table captures endpoint deviations, and Anthropic fixtures act as the early check that `Model` remains provider-neutral.
+`ScriptedModel` is the PR-015 semantic reference and actual leaf implementation of `Model`. It drives deterministic success, fragmentation, cumulative usage, heartbeat/opaque events, error, deferral, malformed ordering, blocking, cancellation acknowledgement, warmup, and reuse fixtures while preserving the existing fixture language. Official OpenAI uses the Responses API (`finstack-ai-provider-openai`). Ollama uses native `/api/chat` (`finstack-ai-provider-ollama`). Generic Chat Completions is not a first-party provider. Anthropic fixtures remain the early check that `Model` stays provider-neutral.
 
 # 15. Toolset port design
 
@@ -4069,7 +4073,7 @@ Rust RawJson
 
 ## 25.8 Distribution composition
 
-One `finstack-ai` wheel contains the binding and curated Rust-backed OpenAI-compatible, Anthropic, and local providers. Their Rust crates remain independently packaged leaf crates but follow the lockstep workspace version through pre-1.0; version decoupling after 1.0 requires a published compatibility range and conformance evidence. They are linked into the same extension module to avoid relying on an unstable Rust ABI across separate wheels. Provider submodules import lazily, Pydantic remains an extra, and wheel size is a release budget.
+One `finstack-ai` wheel contains the binding and curated Rust-backed OpenAI Responses, Anthropic Messages, and native Ollama providers. Their Rust crates remain independently packaged leaf crates but follow the lockstep workspace version through pre-1.0; version decoupling after 1.0 requires a published compatibility range and conformance evidence. They are linked into the same extension module to avoid relying on an unstable Rust ABI across separate wheels. Provider submodules import lazily, Pydantic remains an extra, and wheel size is a release budget.
 
 ## 25.9 Exception hierarchy
 
@@ -4132,9 +4136,9 @@ The package includes a worker helper that hosts one or more agents in a Web Work
 - Events are arrays of compact objects per batch.
 - Internal state never round-trips through JavaScript for each transition.
 
-## 26.6 Optional OpenAI-compatible adapter
+## 26.6 Optional OpenAI Responses adapter
 
-The npm package exports a tree-shakeable `@finstack/ai/adapters/openai-compatible` module that implements the model host ABI using browser `fetch` and SSE. Its default configuration targets a same-origin proxy URL. It owns no kernel semantics, includes `AbortSignal` propagation and CORS diagnostics, and documents that provider credentials must not be embedded in shipped browser code.
+The npm package exports a tree-shakeable `@finstack/ai/adapters/openai` module that implements the model host ABI using browser `fetch` and typed Responses SSE events. Its default configuration targets a same-origin proxy URL and sends `store: false`. It owns no kernel semantics, includes `AbortSignal` propagation and CORS diagnostics, and documents that provider credentials must not be embedded in shipped browser code.
 
 # 27. WIT plugin design
 
@@ -4411,7 +4415,7 @@ Authoritative journal records retain or securely reference the complete state ne
 {
   "schema_version": 1,
   "id": "research-agent",
-  "model": { "id": "finstack.model.openai-compatible", "instance": "default" },
+  "model": { "id": "finstack.model.openai", "instance": "default" },
   "toolsets": [
     { "id": "finstack.tools.filesystem", "instance": "workspace" }
   ],
@@ -4420,7 +4424,7 @@ Authoritative journal records retain or securely reference the complete state ne
   ],
   "limits": { "max_turns": 12, "max_tool_calls": 50 },
   "extension_config": {
-    "finstack.model.openai-compatible/default": {
+    "finstack.model.openai/default": {
       "model": "example-model",
       "base_url": "https://example.invalid/v1"
     }
@@ -4745,7 +4749,7 @@ Features are not used as a giant central registry of every provider/channel/tool
 
 - registrar and registry;
 - AgentBuilder/AgentSpec;
-- one OpenAI-compatible provider;
+- official OpenAI Responses and native Ollama providers;
 - minimal filesystem or calculator toolset;
 - Rust examples and benchmarks.
 

@@ -571,7 +571,7 @@ mod tests {
     fn keys_validate_namespace_rules() {
         let local = AgentId::parse("research-agent").expect("local alias");
         assert_eq!(local.as_str(), "research-agent");
-        let namespaced = ComponentId::parse("finstack.model.openai-compatible").expect("ns");
+        let namespaced = ComponentId::parse("finstack.model.openai").expect("ns");
         assert!(namespaced.as_str().contains('.'));
         assert!(matches!(
             ToolId::parse("filesystem").expect_err("global tool").kind,

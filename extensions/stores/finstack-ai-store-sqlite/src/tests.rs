@@ -626,6 +626,7 @@ fn discarding_sqlite_snapshots_still_recovers_from_the_journal() {
         state: recovered.state().clone(),
         head_checksum: loaded.head_checksum.expect("head"),
         pending_timer_scheduled_at: None,
+        last_model_continuation: None,
     }))
     .expect("snapshot");
     let loaded = block_on(store.load(LoadRequest {
@@ -688,6 +689,7 @@ fn load_from_omits_the_verified_prefix() {
             .clone(),
             head_checksum: full.head_checksum.expect("head"),
             pending_timer_scheduled_at: None,
+            last_model_continuation: None,
         }),
     )
     .expect("snapshot");

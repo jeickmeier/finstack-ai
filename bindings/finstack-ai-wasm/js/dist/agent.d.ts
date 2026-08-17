@@ -43,6 +43,8 @@ export interface ActiveCapability {
 }
 /**
  * Options for {@link Agent.create}.
+ *
+ * Host objects inherit page authority and are not a sandbox.
  */
 export interface AgentOptions {
     /** Trusted JS model wrapper. */
@@ -57,7 +59,9 @@ export interface AgentOptions {
      */
     store?: JsJournalStore;
     /**
-     * Optional declarative capabilities. Instruction-only in the JS alpha.
+     * Optional declarative capabilities. JS capabilities contribute instructions.
+     * Pass a model-activation id to {@link Agent.start} / {@link Agent.run}
+     * via run options; unknown ids fail closed.
      */
     capabilities?: Capability[];
     /**

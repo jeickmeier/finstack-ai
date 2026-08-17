@@ -141,6 +141,78 @@ fn duplicate_decision_skips_append_and_recovery_matches_live_state() {
 }
 
 #[test]
+fn recovery_restores_last_model_continuation_from_committed_output() {
+    let store = Arc::new(FakeStore::new(FakeMode::Normal));
+    let dispatcher = Arc::new(RecordingDispatcher::default());
+    let mut coordinator =
+        CommitCoordinator::with_test_dispatcher(store.clone(), dispatcher);
+    block_on(drive_to_model_request(&mut coordinator));
+    let continuation =
+        RawJson::parse(r#"{"provider":"openai.responses","replay_items":[],"version":1}"#)
+            .expect("continuation");
+    let response = crate::ModelResponse {
+        assistant_content: Arc::from([ContentBlock::Text(
+            TextBlock::try_new("hello").expect("text"),
+        )]),
+        tool_calls: Arc::from([]),
+        usage: Usage::empty(),
+        provider_ids: ProviderIds::empty(),
+        completion_id: Arc::from("response-1"),
+        continuation_state: Some(continuation.clone()),
+    };
+    let output = RawJson::parse(
+        serde_json_canonicalizer::to_vec(&response)
+            .expect("response JSON")
+            .as_slice(),
+    )
+    .expect("canonical response");
+    let completion = EffectCompleted::try_new(
+        id(103),
+        output_contract(),
+        output,
+        Some(Usage::empty()),
+        vec![],
+        ProviderIds::empty(),
+        Some("response-1"),
+        None,
+    )
+    .expect("completion");
+    let assistant_message = Message::try_new(
+        id(504),
+        MessageRole::Assistant,
+        vec![ContentBlock::Text(
+            TextBlock::try_new("hello").expect("text"),
+        )],
+        timestamp(1_400),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("assistant message");
+    block_on(coordinator.submit(
+        env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[504], 105),
+        KernelInput::ModelSettled(ModelSettled {
+            turn_id: id(101),
+            model_request_id: id(102),
+            outcome: ModelSettlement::Completed {
+                completion,
+                assistant_message,
+            },
+        }),
+    ))
+    .expect("settle model");
+    assert_eq!(
+        coordinator.last_model_continuation(),
+        Some(&continuation),
+        "committed completion updates live continuation"
+    );
+
+    let recovered =
+        block_on(CommitCoordinator::recover(store, id::<SessionTag>(1))).expect("recover");
+    assert_eq!(recovered.last_model_continuation(), Some(&continuation));
+}
+
+#[test]
 fn one_conflict_reloads_and_repeated_conflict_faults() {
     let once = Arc::new(FakeStore::new(FakeMode::ConflictOnce));
     let mut coordinator = CommitCoordinator::new(once.clone());

@@ -868,7 +868,8 @@ dependencies = [
  "finstack-ai-context-repository",
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-verify",
- "finstack-ai-provider-openai-compatible",
+ "finstack-ai-provider-ollama",
+ "finstack-ai-provider-openai",
  "finstack-ai-store-memory",
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-filesystem",
@@ -960,7 +961,8 @@ dependencies = [
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
- "finstack-ai-provider-openai-compatible",
+ "finstack-ai-provider-ollama",
+ "finstack-ai-provider-openai",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
@@ -972,11 +974,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "finstack-ai-provider-openai-compatible"
+name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
- "criterion",
- "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-provider-openai"
+version = "1.0.0"
+dependencies = [
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",
@@ -992,7 +1004,8 @@ dependencies = [
  "finstack-ai",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
- "finstack-ai-provider-openai-compatible",
+ "finstack-ai-provider-ollama",
+ "finstack-ai-provider-openai",
  "finstack-ai-store-memory",
  "finstack-ai-test",
  "futures-util",

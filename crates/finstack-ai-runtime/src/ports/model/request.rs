@@ -213,6 +213,9 @@ pub struct ModelToolCall {
     pub name: Arc<str>,
     /// Strict canonical arguments.
     pub arguments: RawJson,
+    /// Provider-native call identity that must be replayed on the next turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<Arc<str>>,
 }
 
 /// Final normalized successful model response.

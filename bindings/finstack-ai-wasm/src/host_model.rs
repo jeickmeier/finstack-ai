@@ -257,6 +257,7 @@ fn items_from_response(
             index: u32::try_from(index).map_err(|_| model_failure(HostFailure::InvalidResult))?,
             name: Some(Arc::clone(&call.name)),
             arguments_delta: Arc::from(call.arguments.as_str()),
+            provider_call_id: None,
         }));
     }
     items.push(ModelStreamItem::Completed(response));
@@ -297,6 +298,7 @@ fn items_from_encoded(items: &[String]) -> Result<ModelEventStream, ModelError> 
                 index,
                 name,
                 arguments_delta: Arc::from(arguments_delta),
+                provider_call_id: None,
             }));
         } else {
             return Err(model_failure(HostFailure::InvalidResult));

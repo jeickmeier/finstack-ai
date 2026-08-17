@@ -47,7 +47,7 @@ an unsigned component, or a lock digest mismatch fail closed. See
 ## `import finstack_ai` appears to do nothing
 
 That is expected. Import does not create a provider, start Tokio, read
-credentials, or open sockets. Call `Agent.openai_compatible`,
+credentials, or open sockets. Call `Agent.openai`,
 `Agent.anthropic`, `Agent.ollama`, or `Agent.from_python` explicitly.
 
 ## IndexedDB did not resume my run

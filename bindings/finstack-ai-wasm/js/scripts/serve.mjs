@@ -36,7 +36,7 @@ function writeSseFrame(response, payload) {
   response.write(`data: ${payload}\n\n`);
 }
 
-async function handleOpenAICompatible(request, response, url) {
+async function handleOpenAIResponses(request, response, url) {
   await readBody(request);
   const delayMs = Number(url.searchParams.get("delay") ?? 0);
   response.writeHead(200, {
@@ -46,14 +46,20 @@ async function handleOpenAICompatible(request, response, url) {
   });
   const frames = [
     JSON.stringify({
-      id: "chatcmpl-scripted",
-      choices: [{ delta: { content: "hel" } }],
+      type: "response.output_text.delta",
+      sequence_number: 1,
+      delta: "hel",
     }),
     JSON.stringify({
-      id: "chatcmpl-scripted",
-      choices: [{ delta: { content: "lo" } }],
+      type: "response.output_text.delta",
+      sequence_number: 2,
+      delta: "lo",
     }),
-    "[DONE]",
+    JSON.stringify({
+      type: "response.completed",
+      sequence_number: 3,
+      response: { id: "resp-scripted", status: "completed" },
+    }),
   ];
   for (const frame of frames) {
     if (delayMs > 0) {
@@ -74,7 +80,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
   if (request.method === "POST" && url.pathname === "/finstack/openai") {
     try {
-      await handleOpenAICompatible(request, response, url);
+      await handleOpenAIResponses(request, response, url);
     } catch {
       if (!response.headersSent) {
         response.writeHead(500);
@@ -177,8 +183,8 @@ function rewriteExampleModule(source) {
       'from "/dist/adapters/indexeddb.js"',
     )
     .replaceAll(
-      'from "@finstack/ai/adapters/openai-compatible"',
-      'from "/dist/adapters/openai-compatible.js"',
+      'from "@finstack/ai/adapters/openai"',
+      'from "/dist/adapters/openai.js"',
     )
     .replaceAll('from "@finstack/ai/worker"', 'from "/dist/worker.js"')
     .replaceAll('from "@finstack/ai"', 'from "/dist/index.js"');

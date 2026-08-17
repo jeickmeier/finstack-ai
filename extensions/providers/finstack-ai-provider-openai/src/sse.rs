@@ -1,13 +1,12 @@
-//! Incremental, bounded Server-Sent Events framing.
+//! Incremental, bounded official `OpenAI` Responses Server-Sent Events framing.
 
 use finstack_ai_runtime::{ModelError, SseFrameParser};
 
 use crate::error::{stream_error, stream_limit_error};
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SseEvent {
-    Data(String),
-    Done,
+pub(crate) struct SseEvent {
+    pub(crate) data: String,
 }
 
 pub(crate) struct SseParser {
@@ -36,14 +35,14 @@ impl SseParser {
         if self.frames.finish_clean() {
             Ok(())
         } else {
-            Err(stream_error("OpenAI-compatible SSE stream ended mid-event"))
+            Err(stream_error("OpenAI SSE stream ended mid-event"))
         }
     }
 }
 
 fn parse_frame(bytes: &[u8]) -> Result<Option<SseEvent>, ModelError> {
-    let frame = core::str::from_utf8(bytes)
-        .map_err(|_| stream_error("OpenAI-compatible SSE event is not UTF-8"))?;
+    let frame =
+        core::str::from_utf8(bytes).map_err(|_| stream_error("OpenAI SSE event is not UTF-8"))?;
     let mut data = String::new();
     for line in frame.lines() {
         if line.starts_with(':') || line.is_empty() {
@@ -56,12 +55,11 @@ fn parse_frame(bytes: &[u8]) -> Result<Option<SseEvent>, ModelError> {
             data.push_str(value.strip_prefix(' ').unwrap_or(value));
         }
     }
-    if data.is_empty() {
+    if data.is_empty() || data == "[DONE]" {
+        // `[DONE]` is not a Responses success signal.
         Ok(None)
-    } else if data == "[DONE]" {
-        Ok(Some(SseEvent::Done))
     } else {
-        Ok(Some(SseEvent::Data(data)))
+        Ok(Some(SseEvent { data }))
     }
 }
 
@@ -70,15 +68,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_fragmented_crlf_and_done() {
+    fn parses_fragmented_json_and_ignores_done() {
         let mut parser = SseParser::new(128, 1_024);
         assert!(parser.push(b"data: {\"id\":").unwrap().is_empty());
         assert_eq!(
             parser.push(b"\"one\"}\r\n\r\ndata: [DONE]\n\n").unwrap(),
-            vec![
-                SseEvent::Data("{\"id\":\"one\"}".to_owned()),
-                SseEvent::Done
-            ]
+            vec![SseEvent {
+                data: "{\"id\":\"one\"}".to_owned(),
+            }]
         );
         parser.finish().unwrap();
     }

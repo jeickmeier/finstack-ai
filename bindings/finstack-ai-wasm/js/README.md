@@ -65,9 +65,9 @@ const agent = await Agent.create({ model });
 const result = await agent.run("hello");
 ```
 
-Compose `createOpenAICompatibleModel()` from
-`@finstack/ai/adapters/openai-compatible` with `Agent.create({ model })`. There
-is no `Agent.openaiCompatible` on the root barrel. Do not embed provider
+Compose `createOpenAIModel()` from
+`@finstack/ai/adapters/openai` with `Agent.create({ model })`. There is no
+provider-specific factory on the root barrel. Do not embed provider
 credentials in browser bundles.
 
 The production browser topology hosts the WASM engine in a Dedicated Worker.
@@ -119,20 +119,21 @@ it does not meet NFR-REL-001. `durable` stays false. Reload restore is
 Call `deleteIndexedDbStores()` to drop origin-local data. This package does
 not ship SQLite and does not claim crash durability.
 
-## Same-origin OpenAI-compatible battery
+## Same-origin OpenAI Responses battery
 
 Import the tree-shakeable subpath, not the root barrel:
 
 ```ts
-import { createOpenAICompatibleModel } from "@finstack/ai/adapters/openai-compatible";
+import { createOpenAIModel } from "@finstack/ai/adapters/openai";
 
-const model = createOpenAICompatibleModel();
+const model = createOpenAIModel();
 ```
 
-The default URL is the same-origin path `/finstack/openai`. The adapter is
-TypeScript `fetch` plus SSE only. Do not embed provider credentials in browser
-bundles, headers, or examples. Terminate secrets at a trusted same-origin
-proxy. Optional application `headers` are not a credential helper.
+The default URL is the same-origin path `/finstack/openai`. The adapter sends
+OpenAI Responses requests with `store: false` and parses typed SSE events.
+Do not embed provider credentials in browser bundles, headers, or examples.
+Terminate secrets at a trusted same-origin proxy. Optional application
+`headers` are not a credential helper.
 
 ## Public surface
 
@@ -149,7 +150,7 @@ proxy. Optional application `headers` are not a credential helper.
   observer, journal, clock, random, and artifacts
 - `normalizePrebetaShape(kind, value)`
 - `journalKnownAnswer(kind, value)`
-- `@finstack/ai/adapters/openai-compatible`
+- `@finstack/ai/adapters/openai`
 - `@finstack/ai/adapters/indexeddb`
 - `@finstack/ai/worker` (`connectWorker`, `exposeWorkerHost`, `WorkerRun`,
   `inspectSession`)

@@ -17,7 +17,7 @@ pub(crate) fn error(
     message: &'static str,
 ) -> ModelError {
     ModelError::try_new(code, category, retryable, message, Metadata::empty())
-        .expect("frozen OpenAI-compatible provider error is valid")
+        .expect("frozen OpenAI provider error is valid")
 }
 
 pub(crate) fn config_error(message: &'static str) -> ModelError {
@@ -32,6 +32,15 @@ pub(crate) fn response_error(message: &'static str) -> ModelError {
     error(RESPONSE_INVALID, ErrorCategory::Model, false, message)
 }
 
+pub(crate) fn incomplete_error() -> ModelError {
+    error(
+        RESPONSE_INVALID,
+        ErrorCategory::Limit,
+        false,
+        "OpenAI response was incomplete",
+    )
+}
+
 pub(crate) fn stream_error(message: &'static str) -> ModelError {
     error(STREAM_INVALID, ErrorCategory::Model, false, message)
 }
@@ -41,6 +50,6 @@ pub(crate) fn stream_limit_error() -> ModelError {
         STREAM_LIMIT_EXCEEDED,
         ErrorCategory::Limit,
         false,
-        "OpenAI-compatible response exceeded a configured stream limit",
+        "OpenAI response exceeded a configured stream limit",
     )
 }

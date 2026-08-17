@@ -5,13 +5,18 @@ a client on import.
 
 | Crate | Notes |
 | --- | --- |
-| `finstack-ai-provider-openai-compatible` | HTTPS or explicit loopback; Ollama/local constructor |
+| `finstack-ai-provider-openai` | Official OpenAI Responses; HTTPS Bearer |
+| `finstack-ai-provider-ollama` | Native `/api/chat`; keyless loopback |
 | `finstack-ai-provider-anthropic` | Anthropic Messages leaf |
 | `finstack-ai-test` (`ScriptedModel`) | Semantic scripted tests; no HTTP |
 
 Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
-`Agent.openai_compatible()`, `Agent.anthropic()`, and `Agent.ollama()` are
-explicit constructors.
+`Agent.openai()`, `Agent.anthropic()`, and `Agent.ollama()` are
+explicit T1 constructors. They accept the same keyword-only T2 Python ports
+as `Agent.from_python`. `openai` maps required keyword-only `api_key` to
+Bearer auth and always targets official Responses. `ollama` stays keyless.
+The factories do not read environment variables. Generic Chat Completions
+gateways are not a first-party provider.
 
 Never put secrets in `AgentSpec`, bundle defaults, resolution locks, logs,
 or source files. Pass credentials only through redacted `Authentication`

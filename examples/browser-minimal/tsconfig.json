@@ -19,8 +19,8 @@
       "@finstack/ai/adapters/indexeddb": [
         "../../bindings/finstack-ai-wasm/js/dist/adapters/indexeddb.d.ts"
       ],
-      "@finstack/ai/adapters/openai-compatible": [
-        "../../bindings/finstack-ai-wasm/js/dist/adapters/openai-compatible.d.ts"
+      "@finstack/ai/adapters/openai": [
+        "../../bindings/finstack-ai-wasm/js/dist/adapters/openai.d.ts"
       ]
     }
   },

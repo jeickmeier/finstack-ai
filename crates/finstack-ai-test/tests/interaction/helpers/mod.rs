@@ -132,6 +132,7 @@ pub(crate) fn model_plan() -> ScriptedModelPlan {
         tool_calls: Arc::from([ModelToolCall {
             name: Arc::from("echo"),
             arguments: arguments.clone(),
+            provider_call_id: None,
         }]),
         usage: finstack_ai_kernel::Usage::empty(),
         provider_ids: ProviderIds::empty(),
@@ -144,6 +145,7 @@ pub(crate) fn model_plan() -> ScriptedModelPlan {
                 index: 0,
                 name: Some(Arc::from("echo")),
                 arguments_delta: Arc::from(arguments.as_str()),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(response))),
         ],

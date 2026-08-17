@@ -587,6 +587,7 @@ impl CompletionAssembly {
                         index: stream_index,
                         name: Some(Arc::from(name.as_str())),
                         arguments_delta: Arc::from(arguments.as_str()),
+                        provider_call_id: None,
                     }));
                 }
                 self.tools
@@ -686,6 +687,7 @@ impl CompletionAssembly {
                     index: stream_index,
                     name: Some(Arc::from(name.as_str())),
                     arguments_delta: Arc::from(fragment.as_str()),
+                    provider_call_id: None,
                 })])
             }
             _ => Err(response_error("Anthropic content_block_delta is invalid")),
@@ -791,6 +793,7 @@ impl CompletionAssembly {
             tool_calls.push(ModelToolCall {
                 name: Arc::from(name),
                 arguments,
+                provider_call_id: None,
             });
         }
         let provider_ids = ProviderIds::try_new(

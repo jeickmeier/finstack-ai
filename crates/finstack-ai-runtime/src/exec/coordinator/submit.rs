@@ -15,7 +15,10 @@ use super::dispatch::{
     RuntimeDispatch, action_is_authorized, model_dispatch_seed, timer_dispatch_seed,
     tool_dispatch_seed,
 };
-use super::recover::{adopt_session_head, project_loaded, replay_scoped};
+use super::recover::{
+    adopt_session_head, continuation_after_replay, project_loaded, replay_scoped,
+    update_last_model_continuation,
+};
 use super::session_commit::apply_batch_to_session;
 
 impl CommitCoordinator {
@@ -109,6 +112,11 @@ impl CommitCoordinator {
                 return Err(self.boundary_fault("committed_batch_apply_failed"));
             };
             update_pending_timer_timestamp(&mut self.pending_timer_scheduled_at, &committed);
+            if let Err(code) =
+                update_last_model_continuation(&mut self.last_model_continuation, &committed)
+            {
+                return Err(self.boundary_fault(code));
+            }
             self.next_transient_sequence = self
                 .next_transient_sequence
                 .checked_add(
@@ -193,6 +201,9 @@ impl CommitCoordinator {
         self.kernel = kernel;
         self.next_transient_sequence = next_transient_sequence;
         self.pending_timer_scheduled_at = pending_timer_scheduled_at;
+        self.last_model_continuation =
+            continuation_after_replay(loaded, self.replay_scope, used_snapshot)
+                .map_err(|code| self.boundary_fault(code))?;
         self.last_snapshot_sequence = used_snapshot
             .then(|| {
                 loaded
@@ -253,6 +264,7 @@ impl CommitCoordinator {
             state: self.kernel.state().clone(),
             head_checksum: record.checksum(),
             pending_timer_scheduled_at: self.pending_timer_scheduled_at,
+            last_model_continuation: self.last_model_continuation.clone(),
         };
         let write = self.store.write_state_snapshot(request);
         #[cfg(feature = "native-tokio")]
@@ -301,7 +313,12 @@ impl CommitCoordinator {
         };
         let dispatch = RuntimeDispatch {
             action,
-            model: model_dispatch_seed(self.kernel.state(), action, committed),
+            model: model_dispatch_seed(
+                self.kernel.state(),
+                action,
+                committed,
+                self.last_model_continuation.clone(),
+            ),
             tool: tool_dispatch_seed(self.kernel.state(), action, committed),
             timer: timer_dispatch_seed(
                 self.kernel.state(),

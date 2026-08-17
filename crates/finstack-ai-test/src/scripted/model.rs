@@ -545,6 +545,7 @@ fn fixture_plan(input: &ScriptedInput) -> ScriptedModelPlan {
                     calls.push(ModelToolCall {
                         name: name.clone(),
                         arguments,
+                        provider_call_id: None,
                     });
                 }
                 let index = u32::try_from(calls.len().saturating_sub(1)).unwrap_or(u32::MAX);
@@ -553,6 +554,7 @@ fn fixture_plan(input: &ScriptedInput) -> ScriptedModelPlan {
                         index,
                         name: Some(name),
                         arguments_delta: arguments_text.into(),
+                        provider_call_id: None,
                     }),
                 )));
             }

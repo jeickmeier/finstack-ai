@@ -8,7 +8,7 @@ use crate::ENGINE_VERSION;
 use crate::callbacks::normalize_pydantic_schema;
 use crate::json_bridge::{json_to_py, py_to_json};
 
-pub(crate) const OPENAI_COMPATIBLE_PROVIDER: &str = "openai-compatible";
+pub(crate) const OPENAI_PROVIDER: &str = "openai";
 pub(crate) const ANTHROPIC_PROVIDER: &str = "anthropic";
 pub(crate) const OLLAMA_PROVIDER: &str = "ollama";
 
@@ -21,13 +21,8 @@ pub(crate) fn health() -> &'static str {
 #[pyfunction]
 #[pyo3(text_signature = "()")]
 pub(crate) fn linked_providers() -> (&'static str, &'static str, &'static str) {
-    let _ = finstack_ai_provider_openai_compatible::ENDPOINT_QUIRKS_VERSION;
     let _ = finstack_ai_provider_anthropic::ANTHROPIC_MESSAGES_VERSION;
-    (
-        OPENAI_COMPATIBLE_PROVIDER,
-        ANTHROPIC_PROVIDER,
-        OLLAMA_PROVIDER,
-    )
+    (OPENAI_PROVIDER, ANTHROPIC_PROVIDER, OLLAMA_PROVIDER)
 }
 
 /// Compute journal known-answer hex through the one Rust engine.
@@ -105,9 +100,6 @@ pub(crate) fn build_metadata(py: Python<'_>) -> PyResult<Py<PyDict>> {
     metadata.set_item("engine_version", ENGINE_VERSION)?;
     metadata.set_item("implementation", "cpython")?;
     metadata.set_item("free_threaded", cfg!(Py_GIL_DISABLED))?;
-    metadata.set_item(
-        "provider_quirks_version",
-        finstack_ai_provider_openai_compatible::ENDPOINT_QUIRKS_VERSION,
-    )?;
+    metadata.set_item("provider_quirks_version", 2)?;
     Ok(metadata.unbind())
 }

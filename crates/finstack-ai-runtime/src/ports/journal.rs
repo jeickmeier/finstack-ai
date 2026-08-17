@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AppendRequest, CommittedBatch, Digest, KernelState, Metadata, RecordEnvelope, SessionId,
-    Timestamp,
+    AppendRequest, CommittedBatch, Digest, KernelState, Metadata, RawJson, RecordEnvelope,
+    SessionId, Timestamp,
 };
 use thiserror::Error;
 
@@ -509,6 +509,8 @@ pub struct AcceleratedRestore {
     pub head_checksum: Digest,
     /// Semantic timestamp of a pending `RetryScheduled` record, when present.
     pub pending_timer_scheduled_at: Option<Timestamp>,
+    /// Opaque provider continuation from the last successful model settlement.
+    pub last_model_continuation: Option<RawJson>,
     /// Hydrated kernel state. This is not a second snapshot DTO.
     pub state: KernelState,
 }
@@ -542,6 +544,8 @@ pub struct StateSnapshotRequest {
     pub head_checksum: Digest,
     /// Semantic timestamp of a pending `RetryScheduled` record, when present.
     pub pending_timer_scheduled_at: Option<Timestamp>,
+    /// Opaque provider continuation from the last successful model settlement.
+    pub last_model_continuation: Option<RawJson>,
 }
 
 /// Request to replace one session's disposable snapshot cache.

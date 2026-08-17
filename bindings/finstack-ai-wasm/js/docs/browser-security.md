@@ -7,10 +7,10 @@ credentials, persistence, worker deployment, and compatibility for
 ## Same-origin proxy and credentials
 
 Terminate provider secrets at a trusted same-origin proxy. The optional
-`@finstack/ai/adapters/openai-compatible` battery defaults to `/finstack/openai`
-and uses browser `fetch` plus SSE only. Do not embed provider credentials in
-browser bundles, headers, examples, or worker scripts. The secret scan rejects
-the provider credential field token used by typical OpenAI-compatible SDKs.
+`@finstack/ai/adapters/openai` battery defaults to `/finstack/openai`, sends
+stateless OpenAI Responses requests, and parses typed SSE events. Do not embed
+provider credentials in browser bundles, headers, examples, or worker scripts.
+The secret scan rejects provider credential fields.
 
 CORS failures from the fetch battery map to `js_host_failed`. Diagnose them at
 the proxy, not by shipping a credential into the page.

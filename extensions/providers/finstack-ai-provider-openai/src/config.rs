@@ -1,7 +1,7 @@
-//! Secret-safe provider and model configuration.
+//! Secret-safe official `OpenAI` Responses provider and model configuration.
 
 use core::fmt;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,12 +13,12 @@ use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::error::config_error;
-use crate::{EndpointKind, EndpointQuirks};
 
-const DEFAULT_CHAT_PATH: &str = "/v1/chat/completions";
+const DEFAULT_RESPONSES_PATH: &str = "/v1/responses";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
+
 /// Opaque configured secret whose formatting is always redacted.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SecretString(Arc<str>);
@@ -51,12 +51,10 @@ impl fmt::Debug for SecretString {
 /// Explicit provider authentication configuration.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Authentication {
-    /// No credential, suitable for keyless local endpoints.
+    /// No credential, suitable for keyless local loopback.
     None,
-    /// OpenAI-style bearer credential.
+    /// `OpenAI`-style bearer credential.
     Bearer(SecretString),
-    /// Azure-style `api-key` credential.
-    ApiKey(SecretString),
 }
 
 impl fmt::Debug for Authentication {
@@ -64,7 +62,6 @@ impl fmt::Debug for Authentication {
         match self {
             Self::None => formatter.write_str("None"),
             Self::Bearer(_) => formatter.write_str("Bearer([REDACTED])"),
-            Self::ApiKey(_) => formatter.write_str("ApiKey([REDACTED])"),
         }
     }
 }
@@ -88,7 +85,7 @@ impl SecretHeader {
             .map_err(|_| config_error("custom header name is invalid"))?;
         if matches!(
             parsed.as_str(),
-            "authorization" | "api-key" | "content-type" | "x-client-request-id"
+            "authorization" | "content-type" | "x-client-request-id"
         ) {
             return Err(config_error("custom header name is provider-owned"));
         }
@@ -109,30 +106,26 @@ impl fmt::Debug for SecretHeader {
     }
 }
 
-/// Strict provider transport configuration.
+/// Strict `OpenAI` Responses (`/v1/responses`) transport configuration.
 #[derive(Clone)]
-pub struct OpenAiCompatibleConfig {
+pub struct OpenAiConfig {
     base_url: Arc<str>,
-    chat_completions_path: Arc<str>,
-    endpoint: EndpointKind,
+    responses_path: Arc<str>,
     authentication: Authentication,
     headers: Arc<[SecretHeader]>,
-    query: BTreeMap<Arc<str>, Arc<str>>,
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
 }
 
-impl fmt::Debug for OpenAiCompatibleConfig {
+impl fmt::Debug for OpenAiConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("OpenAiCompatibleConfig")
+            .debug_struct("OpenAiConfig")
             .field("base_url", &self.base_url)
-            .field("chat_completions_path", &self.chat_completions_path)
-            .field("endpoint", &self.endpoint)
+            .field("responses_path", &self.responses_path)
             .field("authentication", &self.authentication)
             .field("headers", &self.headers)
-            .field("query", &self.query)
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
@@ -140,31 +133,10 @@ impl fmt::Debug for OpenAiCompatibleConfig {
     }
 }
 
-impl OpenAiCompatibleConfig {
-    /// Construct keyless configuration for one endpoint family.
+impl OpenAiConfig {
+    /// Construct keyless configuration for one Responses endpoint.
     ///
-    /// # Errors
-    ///
-    /// Rejects a URL with credentials, query, fragment, or a non-HTTP scheme.
-    pub fn try_new(base_url: impl AsRef<str>, endpoint: EndpointKind) -> Result<Self, ModelError> {
-        let base_url = base_url.as_ref();
-        validate_base_url(base_url)?;
-        Ok(Self {
-            base_url: Arc::from(base_url),
-            chat_completions_path: Arc::from(DEFAULT_CHAT_PATH),
-            endpoint,
-            authentication: Authentication::None,
-            headers: Arc::from([]),
-            query: BTreeMap::new(),
-            request_timeout: DEFAULT_TIMEOUT,
-            max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
-            max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
-        })
-    }
-
-    /// Construct keyless Ollama/local Chat Completions configuration.
-    ///
-    /// Uses [`EndpointKind::Ollama`], no authentication, and `/v1/chat/completions`.
+    /// The wire path is fixed at `/v1/responses`.
     ///
     /// # Errors
     ///
@@ -173,28 +145,23 @@ impl OpenAiCompatibleConfig {
     /// # Examples
     ///
     /// ```
-    /// use finstack_ai_provider_openai_compatible::{EndpointKind, OpenAiCompatibleConfig};
+    /// use finstack_ai_provider_openai::OpenAiConfig;
     ///
-    /// let config = OpenAiCompatibleConfig::ollama_local("http://127.0.0.1:11434").expect("config");
-    /// assert!(format!("{config:?}").contains("Ollama"));
-    /// let _ = EndpointKind::Ollama;
+    /// let config = OpenAiConfig::try_new("http://127.0.0.1:9").expect("config");
+    /// assert!(format!("{config:?}").contains("127.0.0.1"));
     /// ```
-    pub fn ollama_local(base_url: impl AsRef<str>) -> Result<Self, ModelError> {
-        Self::try_new(base_url, EndpointKind::Ollama)
-    }
-
-    /// Set the Chat Completions path, including deployment-scoped Azure paths.
-    ///
-    /// # Errors
-    ///
-    /// Rejects non-absolute paths, query/fragment text, NUL, and oversized values.
-    pub fn with_chat_completions_path(mut self, path: impl AsRef<str>) -> Result<Self, ModelError> {
-        let path = path.as_ref();
-        if !path.starts_with('/') || path.len() > 2_048 || path.contains(['?', '#', '\0']) {
-            return Err(config_error("chat completions path is invalid"));
-        }
-        self.chat_completions_path = Arc::from(path);
-        Ok(self)
+    pub fn try_new(base_url: impl AsRef<str>) -> Result<Self, ModelError> {
+        let base_url = base_url.as_ref();
+        validate_base_url(base_url)?;
+        Ok(Self {
+            base_url: Arc::from(base_url),
+            responses_path: Arc::from(DEFAULT_RESPONSES_PATH),
+            authentication: Authentication::None,
+            headers: Arc::from([]),
+            request_timeout: DEFAULT_TIMEOUT,
+            max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
+            max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
+        })
     }
 
     /// Set explicit authentication.
@@ -209,43 +176,6 @@ impl OpenAiCompatibleConfig {
     pub fn with_headers(mut self, headers: Vec<SecretHeader>) -> Self {
         self.headers = headers.into();
         self
-    }
-
-    /// Add one non-secret URL query parameter such as Azure's `api-version`.
-    ///
-    /// # Errors
-    ///
-    /// Rejects empty, oversized, duplicate, or NUL-bearing names and values.
-    pub fn with_query_parameter(
-        mut self,
-        name: impl AsRef<str>,
-        value: impl AsRef<str>,
-    ) -> Result<Self, ModelError> {
-        let (name, value) = (name.as_ref(), value.as_ref());
-        let normalized_name = name.to_ascii_lowercase().replace('-', "_");
-        if name.is_empty()
-            || value.is_empty()
-            || name.len() > 128
-            || value.len() > 1_024
-            || name.as_bytes().contains(&0)
-            || value.as_bytes().contains(&0)
-            || self.query.contains_key(name)
-            || matches!(
-                normalized_name.as_str(),
-                "api_key"
-                    | "apikey"
-                    | "authorization"
-                    | "key"
-                    | "secret"
-                    | "sig"
-                    | "signature"
-                    | "token"
-            )
-        {
-            return Err(config_error("provider query parameter is invalid"));
-        }
-        self.query.insert(Arc::from(name), Arc::from(value));
-        Ok(self)
     }
 
     /// Set the whole-request timeout.
@@ -282,13 +212,7 @@ impl OpenAiCompatibleConfig {
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
-        base.set_path(&self.chat_completions_path);
-        if !self.query.is_empty() {
-            let mut query = base.query_pairs_mut();
-            for (name, value) in &self.query {
-                query.append_pair(name, value);
-            }
-        }
+        base.set_path(&self.responses_path);
         Ok(base)
     }
 
@@ -311,12 +235,6 @@ impl OpenAiCompatibleConfig {
                 header.set_sensitive(true);
                 headers.insert(reqwest::header::AUTHORIZATION, header);
             }
-            Authentication::ApiKey(value) => {
-                let mut header = HeaderValue::from_str(value.expose())
-                    .map_err(|_| config_error("API key is not a valid header value"))?;
-                header.set_sensitive(true);
-                headers.insert(HeaderName::from_static("api-key"), header);
-            }
         }
         for custom in self.headers.iter() {
             let name = HeaderName::from_bytes(custom.name.as_bytes())
@@ -329,10 +247,6 @@ impl OpenAiCompatibleConfig {
             }
         }
         Ok(headers)
-    }
-
-    pub(crate) const fn endpoint(&self) -> EndpointKind {
-        self.endpoint
     }
 
     pub(crate) const fn request_timeout(&self) -> Duration {
@@ -363,7 +277,7 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// Provider facts for one configured model name.
+/// Provider facts for one configured official `OpenAI` model name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAiModelConfig {
     /// Provider model name.
@@ -382,8 +296,6 @@ pub struct OpenAiModelConfig {
     pub parallel_tool_calls: bool,
     /// Whether the configured model advertises reasoning content.
     pub reasoning: bool,
-    /// Whether the configured model advertises prompt-cache support.
-    pub prompt_cache: bool,
 }
 
 impl OpenAiModelConfig {
@@ -392,6 +304,23 @@ impl OpenAiModelConfig {
     /// # Errors
     ///
     /// Rejects zero/overflowing ceilings or safety margins outside the window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_provider_openai::OpenAiModelConfig;
+    ///
+    /// let model = OpenAiModelConfig::try_new(
+    ///     "gpt-test",
+    ///     1_000_000,
+    ///     128_000,
+    ///     4_096,
+    ///     4_096,
+    ///     256,
+    /// )
+    /// .expect("model");
+    /// assert!(!model.reasoning);
+    /// ```
     pub fn try_new(
         name: impl AsRef<str>,
         hard_input_bytes: u64,
@@ -421,7 +350,6 @@ impl OpenAiModelConfig {
             provider_overhead_tokens,
             parallel_tool_calls: true,
             reasoning: false,
-            prompt_cache: false,
         })
     }
 
@@ -439,15 +367,7 @@ impl OpenAiModelConfig {
         self
     }
 
-    /// Advertise prompt-cache support for this model only.
-    #[must_use]
-    pub const fn with_prompt_cache(mut self, enabled: bool) -> Self {
-        self.prompt_cache = enabled;
-        self
-    }
-
-    pub(crate) fn capabilities(&self, endpoint: EndpointKind) -> ModelCapabilities {
-        let quirks = EndpointQuirks::for_kind(endpoint);
+    pub(crate) fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: InputCapabilities {
                 text: true,
@@ -457,7 +377,7 @@ impl OpenAiModelConfig {
                 files: false,
             },
             context_profile: ModelContextProfile {
-                provider: Arc::from("openai-compatible"),
+                provider: Arc::from("openai"),
                 model: self.name.clone(),
                 hard_input_bytes: self.hard_input_bytes,
                 context_window_tokens: self.context_window_tokens,
@@ -468,25 +388,17 @@ impl OpenAiModelConfig {
             },
             native_tool_calls: true,
             parallel_tool_calls: self.parallel_tool_calls,
-            structured_output: if quirks.native_structured_output {
-                StructuredOutputCapability::Native
-            } else {
-                StructuredOutputCapability::Prompted
-            },
+            structured_output: StructuredOutputCapability::Native,
             reasoning: self.reasoning,
-            prompt_cache: self.prompt_cache,
+            prompt_cache: false,
             resumable_stream: false,
             idempotent_requests: false,
-            native_capabilities: BTreeSet::from([
-                Arc::from("openai.chat_completions"),
-                Arc::from("openai.sse"),
-            ]),
+            native_capabilities: BTreeSet::from([Arc::from("openai.responses")]),
         }
     }
 
     pub(crate) fn apply_capabilities(&mut self, update: &ModelCapabilities) {
         self.reasoning = update.reasoning;
-        self.prompt_cache = update.prompt_cache;
         self.hard_input_bytes = update.context_profile.hard_input_bytes;
         self.context_window_tokens = update.context_profile.context_window_tokens;
         self.max_output_tokens = update.context_profile.max_output_tokens;
@@ -498,7 +410,7 @@ impl OpenAiModelConfig {
 
 pub(crate) fn estimator_ref() -> TokenEstimatorRef {
     TokenEstimatorRef {
-        id: Arc::from("openai-compatible.utf8-byte-upper-bound"),
+        id: Arc::from("openai.utf8-byte-upper-bound"),
         version: Arc::from("1"),
         source: TokenEstimatorSource::ConservativeUpperBound,
     }
@@ -508,17 +420,16 @@ pub(crate) fn estimator_ref() -> TokenEstimatorRef {
 mod tests {
     use super::*;
 
-    const CANARY: &str = "sk-secret-canary-024";
+    const CANARY: &str = "sk-secret-canary-040";
 
     #[test]
     fn secret_values_are_redacted_from_all_debug_surfaces() {
         let secret = SecretString::try_new(CANARY).expect("secret");
         let header = SecretHeader::try_new("x-private-token", secret.clone()).expect("header");
-        let config =
-            OpenAiCompatibleConfig::try_new("https://api.example.test", EndpointKind::OpenAi)
-                .expect("config")
-                .with_authentication(Authentication::Bearer(secret.clone()))
-                .with_headers(vec![header.clone()]);
+        let config = OpenAiConfig::try_new("https://api.openai.test")
+            .expect("config")
+            .with_authentication(Authentication::Bearer(secret.clone()))
+            .with_headers(vec![header.clone()]);
 
         for rendered in [
             format!("{secret:?}"),
@@ -540,41 +451,22 @@ mod tests {
             "https://example.test/#fragment",
         ] {
             assert_eq!(
-                OpenAiCompatibleConfig::try_new(url, EndpointKind::Gateway)
-                    .expect_err("unsafe URL")
-                    .code(),
+                OpenAiConfig::try_new(url).expect_err("unsafe URL").code(),
                 crate::error::CONFIG_INVALID
             );
         }
     }
 
     #[test]
-    fn plaintext_http_is_keyless_only_and_query_secrets_are_rejected() {
+    fn plaintext_http_is_keyless_only_and_owned_headers_are_rejected() {
         let secret = SecretString::try_new(CANARY).expect("secret");
-        let config =
-            OpenAiCompatibleConfig::try_new("http://127.0.0.1:8080", EndpointKind::Gateway)
-                .expect("local endpoint")
-                .with_authentication(Authentication::Bearer(secret));
+        let config = OpenAiConfig::try_new("http://127.0.0.1:8080")
+            .expect("local endpoint")
+            .with_authentication(Authentication::Bearer(secret.clone()));
         assert_eq!(
             config.header_map().expect_err("HTTP credential").code(),
             crate::error::CONFIG_INVALID
         );
-        assert!(
-            OpenAiCompatibleConfig::try_new("https://example.test", EndpointKind::Gateway)
-                .expect("config")
-                .with_query_parameter("api-key", CANARY)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn ollama_local_is_keyless_and_uses_the_ollama_family() {
-        let config =
-            OpenAiCompatibleConfig::ollama_local("http://127.0.0.1:11434").expect("ollama");
-        assert_eq!(config.endpoint(), EndpointKind::Ollama);
-        assert!(config.header_map().is_ok());
-        let rendered = format!("{config:?}");
-        assert!(rendered.contains("Ollama"));
-        assert!(rendered.contains("None"));
+        assert!(SecretHeader::try_new("authorization", secret).is_err());
     }
 }

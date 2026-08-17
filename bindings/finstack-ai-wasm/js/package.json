@@ -17,9 +17,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./adapters/openai-compatible": {
-      "types": "./dist/adapters/openai-compatible.d.ts",
-      "import": "./dist/adapters/openai-compatible.js"
+    "./adapters/openai": {
+      "types": "./dist/adapters/openai.d.ts",
+      "import": "./dist/adapters/openai.js"
     },
     "./adapters/indexeddb": {
       "types": "./dist/adapters/indexeddb.d.ts",

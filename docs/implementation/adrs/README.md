@@ -1,10 +1,11 @@
 # ADR record directory
 
 This is the canonical location for standalone ADR records. Accepted ADR-001
-through ADR-038 and Proposed ADR-039 are indexed in the
+through ADR-038, Proposed ADR-039, and Accepted ADR-040 are indexed in the
 [ADR database](../adr-register.md). ADR-001 through ADR-037 were
 materialized here as versioned standalone records under logical PR-004;
-ADR-038 and ADR-039 are later implementation records.
+ADR-038 through ADR-040 are later implementation records. ADR-040
+supersedes ADR-023.
 
 Files use `ADR-NNN-short-topic.md`. The ADR database must link each file before
 its record state is `Standalone`; each file must satisfy the standalone-record
@@ -57,3 +58,4 @@ chain and receive the next approved ADR number.
 | ADR-037 | [ADR-037-middleware-compaction.md](ADR-037-middleware-compaction.md) |
 | ADR-038 | [ADR-038-ciborium-test-interop.md](ADR-038-ciborium-test-interop.md) |
 | ADR-039 | [ADR-039-jsonschema-crate-selection.md](ADR-039-jsonschema-crate-selection.md) |
+| ADR-040 | [ADR-040-openai-responses-native-ollama.md](ADR-040-openai-responses-native-ollama.md) |

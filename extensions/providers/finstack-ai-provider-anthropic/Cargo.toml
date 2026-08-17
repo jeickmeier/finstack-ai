@@ -26,7 +26,8 @@ tokio = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-kernel = { workspace = true }
-finstack-ai-provider-openai-compatible = { workspace = true }
+finstack-ai-provider-openai = { workspace = true }
+finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }

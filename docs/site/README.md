@@ -55,5 +55,6 @@ the public index and does not replace either layer.
 ```text
 mise run docs-links
 mise run docs-quickstarts
+mise run docs-notebooks
 mise run check-plugin-template
 ```

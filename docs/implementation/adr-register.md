@@ -2,7 +2,7 @@
 
 This register is the implementation index for architectural decisions. It does not duplicate decision text or rationale. The canonical decision summaries are in [Architecture Specification section 25](../planning/02-finstack-ai-architecture-specification.md#25-architecture-decision-summary); detailed delivery metadata for ADR-015 through ADR-024 is in [PRD section 18](../planning/01-finstack-ai-product-requirements.md#18-resolved-foundational-product-decisions), and reconsideration conditions for ADR-029 through ADR-037 are in [Technical Design section 37](../planning/03-finstack-ai-technical-design.md#37-technical-decision-status).
 
-There are no open architectural decisions and no recorded supersession relationships in the pre-implementation baseline. ADR-039 is a post-baseline Proposed crate-selection record and is open pending acceptance.
+ADR-040 supersedes ADR-023. ADR-039 remains a post-baseline Proposed crate-selection record and is open pending acceptance.
 
 ## Status model
 
@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-17 (prior 2026-08-15 gate reconciliation unchanged; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
+Index last reconciled: 2026-08-17 (ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ Index last reconciled: 2026-08-17 (prior 2026-08-15 gate reconciliation unchange
 | ADR-020 | `capability-delivery` | Ecosystem lead | PR-012, PR-022, PR-032, PR-038, PR-048 | Accepted | Standalone | Implemented | Verified ([PR-022 Always/Application activation](artifacts/pr-022/README.md); [PR-038 JS catalog UX](artifacts/pr-038/candidate-validation.txt); PR-048 activation-restart; [G5](artifacts/pr-048/g5-decision.txt)) |
 | ADR-021 | `shared-framing` | Runtime/security owner | PR-058 | Accepted | Standalone | Implemented | Verified (locally integrated [PR-058 shared frame/handshake with distinct remote and process vocabularies](artifacts/pr-058/README.md)) |
 | ADR-022 | `json-schema-2020-12` | Ecosystem lead | Decide before PR-012; PR-031 and binding peers | Accepted | Standalone | In progress | Partial ([PR-016 Draft 2020-12 compile-once validator, offline reference, parity, native/WASM evidence](artifacts/pr-016/README.md); [PR-031 Python Pydantic normalization/validation evidence](artifacts/pr-031/implementation.md); browser/WASM binding peers remain) |
-| ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Accepted | Standalone | Implemented | Verified ([PR-024 provider evidence](artifacts/pr-024/README.md) plus hosted native-preview/G3 verification) |
+| ADR-023 | `reference-provider` | Ecosystem lead | PR-024 | Superseded | Standalone | Implemented | Verified ([PR-024 provider evidence](artifacts/pr-024/README.md) plus hosted native-preview/G3 verification); superseded by ADR-040 |
 | ADR-024 | `governance-and-license` | Quality/release owner | PR-001, PR-004, PR-060; G0 | Accepted | Standalone | Implemented | Verified (governance files only: RFC entry, contribution-link audit, and license-metadata sweep at [PR-060](artifacts/pr-060/README.md); not G7) |
 | ADR-025 | `generic-deferred-effects` | Durability/ecosystem lead | PR-008, PR-014, PR-042–PR-044, PR-048 | Accepted | Standalone | Implemented | Verified (PR-013 deferral identity plus PR-042–PR-045/PR-048 model/tool/interaction/cancel restore, crash-prefix, and [G5](artifacts/pr-048/g5-decision.txt)) |
 | ADR-026 | `run-lineage` | Durability/ecosystem lead | PR-006, PR-008, PR-046–PR-048 | Accepted | Standalone | Implemented | Verified (PR-013 attenuation plus PR-046–PR-048 mapping persist/restore, cancel fan-out, child-prefix restore, and [G5](artifacts/pr-048/g5-decision.txt)) |
@@ -64,6 +64,7 @@ Index last reconciled: 2026-08-17 (prior 2026-08-15 gate reconciliation unchange
 | ADR-037 | `middleware-compaction` | Core/runtime lead | PR-018, PR-023, PR-048, PR-056 | Accepted | Standalone | Implemented | Verified ([PR-018 immutable compaction contract](artifacts/pr-018/README.md), [PR-022 activation rebuild/digest invalidation](artifacts/pr-022/README.md), [PR-023 public adversarial conformance](artifacts/pr-023/README.md), PR-048 recorded-outcome / ArtifactRef restart, PR-056 leaf strategies, and [G7](artifacts/pr-061/g7-decision.txt)) |
 | ADR-038 | `ciborium-test-interop` | Durability/ecosystem lead | Protocol `to_ciborium` unexport; `ciborium` dev-dep | Accepted | Standalone | In progress | Missing |
 | ADR-039 | `jsonschema-crate-selection` | Ecosystem lead | C2 swap blocked until acceptance; recommended outcome is no swap | Proposed | Standalone | Not started | Partial ([C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md)) |
+| ADR-040 | `openai-responses-native-ollama` | Ecosystem lead | PR-068–PR-073 | Accepted | Standalone | In progress | Partial (decision accepted; mapped delivery in progress; publication excluded) |
 
 ## Security review seed
 
@@ -84,7 +85,7 @@ Index last reconciled: 2026-08-17 (prior 2026-08-15 gate reconciliation unchange
 | ADR-017, ADR-018, ADR-024 | TM-18 |
 | ADR-019, ADR-031 | TM-05 |
 | ADR-022 | TM-02, TM-16 |
-| ADR-023 | SEC-INV-005; TM-04 |
+| ADR-023, ADR-040 | SEC-INV-005; TM-04 |
 | ADR-027 | SEC-INV-003, SEC-INV-004; TM-11 |
 | ADR-030 | TM-06 |
 | ADR-032 | TM-13 |
@@ -408,6 +409,10 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-17 | ADR-039 | Decision | me@jeickmeier.com | — | Proposed | Keep `jsonschema` 0.40.2; do not swap the production validator | [C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md) | — |
 | 2026-08-17 | ADR-039 | Record | me@jeickmeier.com | — | Standalone | ADR-039-jsonschema-crate-selection.md | — | — |
 | 2026-08-17 | ADR-039 | Evidence | me@jeickmeier.com | Missing | Partial | Isolated candidate trees, license map, and capability probes; no production swap | [C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md) | — |
+| 2026-08-17 | ADR-040 | Decision | me@jeickmeier.com | — | Accepted | Official OpenAI uses Responses; Ollama uses native `/api/chat`; Chat Completions is removed | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-040 | Record | me@jeickmeier.com | — | Standalone | ADR-040-openai-responses-native-ollama.md | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-040 | Implementation | me@jeickmeier.com | Not started | In progress | PR-068–PR-073 mapped delivery; publication excluded | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-023 | Decision | me@jeickmeier.com | Accepted | Superseded | Replaced by ADR-040 | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -452,13 +457,13 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-037 | [ADR-037-middleware-compaction.md](adrs/ADR-037-middleware-compaction.md) | me@jeickmeier.com | Verified: PR-018 unique ownership, protected projection, tool pairs, digests/checkpoints, child Model relation, TM-21, and native/WASM; PR-022-E-integration-f2d6a9c3e174; PR-023-E-integration-949f34010a2f; PR-048 recorded-outcome / ArtifactRef restart; G5-D-durable-beta-a9568bd869b5; PR-056 leaf strategies through PR-056-E-integration-cd7c725b3ab6; G7-D-public-preview-f7c7e70b9e04 | PR-004 standalone ADR; PR-018/PR-022/PR-023/PR-048/PR-056 local merges; G5 and G7 Passed | 2026-08-15 |
 | ADR-038 | [ADR-038-ciborium-test-interop.md](adrs/ADR-038-ciborium-test-interop.md) | me@jeickmeier.com | Missing: change-control record accepted; protocol unexport and dev-dep move are in progress and uncommitted | ADR-038 standalone record | 2026-08-17 |
 | ADR-039 | [ADR-039-jsonschema-crate-selection.md](adrs/ADR-039-jsonschema-crate-selection.md) | me@jeickmeier.com | Partial: C1 unique-tree, license, and capability spike; production validator unchanged | ADR-039 standalone Proposed record | 2026-08-17 |
+| ADR-040 | [ADR-040-openai-responses-native-ollama.md](adrs/ADR-040-openai-responses-native-ollama.md) | me@jeickmeier.com | Partial: decision accepted; Responses and native Ollama delivery in progress; publication excluded | ADR-040 standalone record; PR-068–PR-073 | 2026-08-17 |
 
 ## Supersession log
 
-No supersessions are recorded.
-
 | Date | Superseded ADR | Superseding ADR | Planning reconciliation | Approval evidence |
 | --- | --- | --- | --- | --- |
+| 2026-08-17 | ADR-023 | ADR-040 | Pack v0.23; PRD §18; Architecture §6.1/§25; TDD §2/§14.6; Implementation Plan Phase 11 | Decision owner acceptance to execute the removal-first migration without publication |
 
 ## Standalone record requirements
 

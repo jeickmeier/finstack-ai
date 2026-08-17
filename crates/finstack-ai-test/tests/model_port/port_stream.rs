@@ -66,10 +66,12 @@ async fn legal_progress_tool_usage_completion_and_deferral_transitions_are_norma
             ModelToolCall {
                 name: Arc::from("calc"),
                 arguments: RawJson::parse(br#"{"a":1}"#).expect("arguments"),
+                provider_call_id: None,
             },
             ModelToolCall {
                 name: Arc::from("lookup"),
                 arguments: RawJson::parse(br#"{"x":1}"#).expect("arguments"),
+                provider_call_id: None,
             },
         ]),
         usage: final_usage.clone(),
@@ -90,21 +92,25 @@ async fn legal_progress_tool_usage_completion_and_deferral_transitions_are_norma
                 index: 2,
                 name: Some(Arc::from("calc")),
                 arguments_delta: Arc::from("{\"a\":"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: 0,
                 name: Some(Arc::from("lookup")),
                 arguments_delta: Arc::from("{\"x\":"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: 2,
                 name: None,
                 arguments_delta: Arc::from("1}"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: 0,
                 name: None,
                 arguments_delta: Arc::from("1}"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Usage(UsageDelta {
                 usage: Usage::try_new(Some(1), Some(0), Some(1), None, BTreeMap::new())
@@ -232,7 +238,8 @@ async fn malformed_tool_usage_and_response_sequences_are_fail_closed() {
             ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: 0,
                 name: None,
-                arguments_delta: Arc::from("{}"),
+                arguments_delta: Arc::from("{"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(completed("")))),
         ],
@@ -251,6 +258,7 @@ async fn malformed_tool_usage_and_response_sequences_are_fail_closed() {
                 index: 0,
                 name: Some(Arc::from("lookup")),
                 arguments_delta: Arc::from("{"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(completed("")))),
         ],
@@ -269,11 +277,13 @@ async fn malformed_tool_usage_and_response_sequences_are_fail_closed() {
                 index: 0,
                 name: Some(Arc::from("first")),
                 arguments_delta: Arc::from("{"),
+                provider_call_id: None,
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: 0,
                 name: Some(Arc::from("second")),
                 arguments_delta: Arc::from("}"),
+                provider_call_id: None,
             }))),
         ],
     };

@@ -122,6 +122,7 @@ pub struct CommitCoordinator {
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
     replay_scope: ReplayScope,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
+    last_model_continuation: Option<finstack_ai_kernel::RawJson>,
 }
 
 impl CommitCoordinator {
@@ -146,6 +147,7 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: ReplayScope::Primary,
             middleware_chain: None,
+            last_model_continuation: None,
         }
     }
 
@@ -154,6 +156,12 @@ impl CommitCoordinator {
     pub fn with_snapshot_schedule(mut self, schedule: SnapshotSchedule) -> Self {
         self.snapshot_schedule = schedule;
         self
+    }
+
+    /// Opaque provider continuation from the last successful model settlement.
+    #[must_use]
+    pub const fn last_model_continuation(&self) -> Option<&finstack_ai_kernel::RawJson> {
+        self.last_model_continuation.as_ref()
     }
 
     /// Borrow replay-derived semantic state.

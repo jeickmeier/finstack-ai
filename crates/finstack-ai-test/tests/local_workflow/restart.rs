@@ -211,13 +211,15 @@ async fn interaction_survives_worker_restart() {
                     index: 0,
                     name: Some(Arc::from("echo")),
                     arguments_delta: Arc::from(arguments.as_str()),
+                    provider_call_id: None,
                 }))),
                 ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
                     assistant_content: Arc::from([]),
                     tool_calls: Arc::from([ModelToolCall {
                         name: Arc::from("echo"),
                         arguments,
-                    }]),
+                provider_call_id: None,
+            }]),
                     usage: Usage::empty(),
                     provider_ids: ProviderIds::empty(),
                     completion_id: Arc::from("completion-tools"),

@@ -1,6 +1,6 @@
 import { Agent, JsJournalStore, JsModel, init } from "@finstack/ai";
 import { createIndexedDbJournalStore } from "@finstack/ai/adapters/indexeddb";
-import { createOpenAICompatibleModel } from "@finstack/ai/adapters/openai-compatible";
+import { createOpenAIModel } from "@finstack/ai/adapters/openai";
 import { exposeWorkerHost } from "@finstack/ai/worker";
 
 const MODEL_OPTIONS = {
@@ -28,7 +28,7 @@ exposeWorkerHost({
         : "scripted";
     if (scenario === "openai") {
       return Agent.create({
-        model: new JsModel(createOpenAICompatibleModel(), MODEL_OPTIONS),
+        model: new JsModel(createOpenAIModel(), MODEL_OPTIONS),
         store: journalStore(),
       });
     }

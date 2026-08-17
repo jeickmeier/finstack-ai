@@ -109,7 +109,7 @@ pub fn validate_model_request(
         ));
     }
     if draft.limits.max_input_bytes > locked.profile.hard_input_bytes
-        || draft.limits.max_output_tokens > locked.profile.max_output_tokens
+        || draft.limits.max_output_tokens > locked.profile.reserved_output_tokens
         || draft.limits.max_input_tokens == 0
         || draft.limits.max_output_tokens == 0
     {
@@ -141,7 +141,7 @@ pub fn validate_model_request(
         })?;
     let input_limit = draft.limits.max_input_tokens.min(available);
     if estimate.input_tokens > input_limit
-        || draft.limits.max_output_tokens > locked.profile.reserved_output_tokens
+        || draft.limits.max_output_tokens > locked.profile.max_output_tokens
     {
         return Err(ModelError::limit(
             MODEL_CONTEXT_LIMIT_EXCEEDED,

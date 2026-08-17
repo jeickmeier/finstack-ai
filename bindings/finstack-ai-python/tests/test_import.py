@@ -18,7 +18,7 @@ def test_import_finstack_ai() -> None:
     assert finstack_ai.health() == "ok"
     assert finstack_ai.__version__ == "1.0.0"
     assert finstack_ai.linked_providers() == (
-        "openai-compatible",
+        "openai",
         "anthropic",
         "ollama",
     )
@@ -37,7 +37,7 @@ def test_provider_namespace_is_lazy() -> None:
     assert "finstack_ai.providers" not in sys.modules
     import finstack_ai.providers as providers
 
-    assert providers.openai_compatible.is_available()
+    assert providers.openai.is_available()
     assert providers.anthropic.is_available()
     assert providers.ollama.is_available()
     assert finstack_ai.health() == "ok"
@@ -147,6 +147,26 @@ def test_anthropic_http_credentials_fail_closed_without_leaking_the_canary() -> 
             await finstack_ai.Agent.anthropic(
                 "http://127.0.0.1:9",
                 "fixture-model",
+                api_key=canary,
+            )
+        assert caught.value.code == "agent_run_invalid_configuration"
+        assert canary not in str(caught.value)
+        assert canary not in repr(caught.value)
+
+    asyncio.run(construct())
+
+
+def test_openai_invalid_model_does_not_leak_the_api_key() -> None:
+    import asyncio
+
+    import finstack_ai
+
+    canary = "sk-openai-secret-canary-056"
+
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError) as caught:
+            await finstack_ai.Agent.openai(
+                "",
                 api_key=canary,
             )
         assert caught.value.code == "agent_run_invalid_configuration"

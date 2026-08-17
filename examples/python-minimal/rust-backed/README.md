@@ -1,8 +1,7 @@
 # Rust-backed Python starter
 
-Constructs the curated Rust-backed OpenAI-compatible provider. The default
-path performs no network I/O. Pass `--run` only with an explicit trusted
-endpoint.
+Constructs the curated Rust-backed native Ollama provider. The default path
+performs no network I/O. Pass `--run` only with an explicit trusted endpoint.
 
 Trust class: [T1](../../../docs/site/security-trust-levels.md). Native
 provider code is not isolated.

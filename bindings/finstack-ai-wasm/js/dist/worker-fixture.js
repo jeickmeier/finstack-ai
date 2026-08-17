@@ -1,6 +1,6 @@
 import { Agent, JsJournalStore, JsModel, JsToolset, init } from "./index.js";
 import { createIndexedDbJournalStore } from "./adapters/indexeddb.js";
-import { createOpenAICompatibleModel } from "./adapters/openai-compatible.js";
+import { createOpenAIModel } from "./adapters/openai.js";
 import { exposeWorkerHost } from "./worker-host.js";
 const MODEL_OPTIONS = {
     component: "js.model.fixture",
@@ -115,7 +115,7 @@ exposeWorkerHost({
                 });
             case "hanging-fetch":
                 return Agent.create({
-                    model: new JsModel(createOpenAICompatibleModel({
+                    model: new JsModel(createOpenAIModel({
                         baseUrl: "/finstack/openai?delay=5000",
                     }), MODEL_OPTIONS),
                 });

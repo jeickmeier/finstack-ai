@@ -8,9 +8,8 @@ use finstack_ai::runtime::{
 };
 use finstack_ai::{Agent, CapabilityActivation, CapabilitySpec, InstructionSpec};
 use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
-use finstack_ai_provider_openai_compatible::{
-    EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
-};
+use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
+use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
 
@@ -24,9 +23,9 @@ const VERSION: Version = Version {
 async fn capability_catalog_is_identical_across_scripted_compatible_anthropic_and_ollama() {
     let catalogs = [
         catalog_for(scripted()).await,
-        catalog_for(openai_model(EndpointKind::OpenAi)).await,
+        catalog_for(openai_model()).await,
         catalog_for(anthropic_model()).await,
-        catalog_for(openai_model(EndpointKind::Ollama)).await,
+        catalog_for(ollama_model()).await,
     ];
     for catalog in &catalogs[1..] {
         assert_eq!(&catalogs[0], catalog);
@@ -59,9 +58,8 @@ fn leaf_metadata_refresh_updates_advertised_flags_without_a_network() {
     assert!(anthropic.capabilities(&name).reasoning);
     assert!(anthropic.capabilities(&name).prompt_cache);
 
-    let openai = OpenAiCompatibleProvider::try_new(
-        OpenAiCompatibleConfig::try_new("http://127.0.0.1:9", EndpointKind::OpenAi)
-            .expect("config"),
+    let openai = OpenAiProvider::try_new(
+        OpenAiConfig::try_new("http://127.0.0.1:9").expect("config"),
         vec![
             OpenAiModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
                 .expect("model"),
@@ -176,18 +174,25 @@ fn scripted() -> Arc<dyn Model> {
     ))
 }
 
-fn openai_model(kind: EndpointKind) -> Arc<dyn Model> {
-    let config = match kind {
-        EndpointKind::Ollama => {
-            OpenAiCompatibleConfig::ollama_local("http://127.0.0.1:9").expect("ollama")
-        }
-        _ => OpenAiCompatibleConfig::try_new("http://127.0.0.1:9", kind).expect("config"),
-    };
+fn openai_model() -> Arc<dyn Model> {
     Arc::new(
-        OpenAiCompatibleProvider::try_new(
-            config,
+        OpenAiProvider::try_new(
+            OpenAiConfig::try_new("http://127.0.0.1:9").expect("config"),
             vec![
                 OpenAiModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
+                    .expect("model"),
+            ],
+        )
+        .expect("provider"),
+    )
+}
+
+fn ollama_model() -> Arc<dyn Model> {
+    Arc::new(
+        OllamaProvider::try_new(
+            OllamaConfig::try_new("http://127.0.0.1:9").expect("config"),
+            vec![
+                OllamaModelConfig::try_new("preview-1", 1_000_000, 128_000, 4_096, 4_096, 256)
                     .expect("model"),
             ],
         )

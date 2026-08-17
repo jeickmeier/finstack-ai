@@ -13,7 +13,7 @@ credentials.
 cargo run -p finstack-ai-native-examples --bin minimal --offline --locked
 ```
 
-That binary builds an `Agent` over a process-local loopback OpenAI-compatible
+That binary builds an `Agent` over a process-local native Ollama loopback
 provider, calls `run`, and prints the completion. No credential is required.
 
 `Agent::builder` registers the model and journal store, then `build().await`

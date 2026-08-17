@@ -35,6 +35,8 @@ struct PythonModelOutput {
 struct PythonModelToolCall {
     name: String,
     arguments: serde_json::Value,
+    #[serde(default)]
+    provider_call_id: Option<String>,
 }
 
 struct PythonModelAdapter {
@@ -98,6 +100,7 @@ impl Model for PythonModelAdapter {
                         .map_err(|_| model_failure(CallbackFailure::InvalidResult))?,
                     name: Some(Arc::clone(&call.name)),
                     arguments_delta: Arc::from(call.arguments.as_str()),
+                    provider_call_id: None,
                 }));
             }
             items.push(ModelStreamItem::Completed(response));
@@ -133,6 +136,7 @@ fn model_response(output: PythonModelOutput) -> Result<ModelResponse, ()> {
             Ok(ModelToolCall {
                 name: Arc::from(call.name),
                 arguments: RawJson::parse(arguments).map_err(|_| ())?,
+                provider_call_id: call.provider_call_id.map(Arc::from),
             })
         })
         .collect::<Result<Vec<_>, ()>>()?;

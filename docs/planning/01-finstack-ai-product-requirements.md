@@ -13,7 +13,7 @@ date: "2026-08-08"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Product Requirements Document (PRD) |
-| Version | 0.7 |
+| Version | 0.8 |
 | Status | Pre-implementation product baseline |
 | Primary audience | Product owners, framework architects, Rust/Python/WASM engineers, extension authors |
 | Related documents | Engineering Standards v0.5; Architecture Specification v0.9; Technical Design v0.14; Implementation Plan v0.14; Security and Threat Model v0.4 |
@@ -471,7 +471,7 @@ Higher-level capabilities shall be able to select provider-native functionality 
 
 ### FR-MDL-004: First-party providers
 
-The first stable distribution shall include separate Rust crates for at least one OpenAI-compatible provider, Anthropic-compatible provider, and local/OpenAI-compatible endpoint. Those curated Rust-backed providers shall be bundled into the initial `finstack-ai` Python wheel; provider crates shall not be dependencies of the kernel.
+The first stable distribution shall include separate Rust crates for official OpenAI Responses, Anthropic Messages, and native Ollama `/api/chat`. Those curated Rust-backed providers shall be bundled into the initial `finstack-ai` Python wheel; provider crates shall not be dependencies of the kernel.
 
 ### FR-MDL-005: Test model
 
@@ -703,7 +703,7 @@ Equivalent scripted inputs shall produce the same durable record sequence and no
 
 ### FR-WASM-007: Optional remote-model adapter
 
-Host interfaces remain the browser contract. The npm package shall additionally provide one tree-shakeable fetch/SSE OpenAI-compatible adapter intended for a same-origin application proxy. It shall not encourage or require embedding provider secrets in browser code.
+Host interfaces remain the browser contract. The npm package shall additionally provide one tree-shakeable OpenAI Responses fetch/SSE adapter intended for a same-origin application proxy. It shall not encourage or require embedding provider secrets in browser code.
 
 ## 9.14 Isolated plugins
 
@@ -885,7 +885,7 @@ Bindings shall remain idiomatic rather than mirroring Rust types mechanically.
 
 ```rust
 use finstack_ai::{Agent, Capability, Result};
-use finstack_ai_provider_openai_compatible::OpenAiCompatible;
+use finstack_ai_provider_openai::OpenAiProvider;
 use finstack_ai_tools_filesystem::FileSystem;
 
 #[tokio::main]
@@ -895,7 +895,7 @@ async fn main() -> Result<()> {
         .toolset("filesystem")
         .build();
 
-    let agent = Agent::builder(OpenAiCompatible::from_env()?)
+    let agent = Agent::builder(OpenAiProvider::from_env()?)
         .register_toolset("filesystem", FileSystem::scoped("."))
         .capability(coding)
         .build()?;
@@ -1000,7 +1000,7 @@ finstack-ai[pydantic]       # optional binding-native validation ergonomics
 finstack-ai-provider-*      # reserved for future callback/split providers
 ```
 
-The initial Python distribution bundles the curated OpenAI-compatible, Anthropic, and local Rust-backed providers in one wheel. Rust crate boundaries remain intact, provider imports are lazy, optional pure-Python dependencies use extras, and CI enforces a wheel-size budget. A separately distributed Rust-backed provider cannot rely on Rust trait ABI compatibility across independent extension modules.
+The initial Python distribution bundles the curated OpenAI Responses, Anthropic Messages, and native Ollama Rust-backed providers in one wheel. Rust crate boundaries remain intact, provider imports are lazy, optional pure-Python dependencies use extras, and CI enforces a wheel-size budget. A separately distributed Rust-backed provider cannot rely on Rust trait ABI compatibility across independent extension modules.
 
 ## 12.3 JavaScript packages
 
@@ -1030,7 +1030,7 @@ The plugin-alpha packages track the workspace `0.0.4` release and remain explici
 ## Phase B: Native runtime and SDK
 
 - Tokio-based effect driver.
-- One OpenAI-compatible model implementation.
+- One official OpenAI Responses model implementation.
 - In-memory journal.
 - Minimal toolset.
 - Rust builder API.
@@ -1173,11 +1173,11 @@ These directions are the planning baseline. PR-004 records the corresponding acc
 | 2 | ADR-016 | Ship the first SQLite store before public multi-lane concurrency. Lane IDs and immutable parent-linked entries remain in the Phase 1 data model. | PR-040 precedes PR-047. |
 | 3 | ADR-017 | Bundle curated Rust-backed providers in the single initial Python wheel while retaining separate Rust crates. | Finalized before PR-027. |
 | 4 | ADR-018 | Support CPython 3.11-3.14 with per-version wheels and 3.14t where supported; skip classic `abi3` initially and gate Python 3.15+ `abi3t` adoption on production evidence. | Matrix approved before PR-027. |
-| 5 | ADR-019 | Keep browser host interfaces as the contract and ship one optional fetch/SSE OpenAI-compatible adapter for same-origin proxies. | PR-034. |
+| 5 | ADR-019, amended by ADR-040 | Keep browser host interfaces as the contract and ship one optional OpenAI Responses fetch/SSE adapter for same-origin proxies. | PR-034; migrated by PR-072. |
 | 6 | ADR-020 | Put durable activation mechanics plus always/application modes in MVP; complete model-activated catalog UX after MVP and before 0.1.0. | PR-012/PR-022 foundations; PR-032/PR-038 binding UX; PR-048 durability gate. |
 | 7 | ADR-021 | Share bounded framing, envelope, and handshake code between remote and process protocols, but keep their message vocabularies distinct. | Generic framing in PR-058; process vocabulary later. |
 | 8 | ADR-022 | Use JSON Schema draft 2020-12 as the source of truth, a default precompiled Rust validator, and optional binding-native validators behind shared fixtures. | ADR before PR-012; adapters in PR-031 and peers. |
-| 9 | ADR-023 | Use an OpenAI-compatible Chat Completions baseline as the reference network provider; keep the scripted model as the semantic reference and Responses mapping optional. | PR-024. |
+| 9 | ADR-040 | Official OpenAI uses the Responses API; Ollama uses native `/api/chat`; Chat Completions and generic compatible endpoints are removed; the scripted model remains the semantic reference. | PR-068–PR-073. Historical ADR-023/PR-024 delivered Chat Completions. |
 | 10 | ADR-024 | Dual-license under MIT OR Apache-2.0, use DCO sign-off, and govern through a named maintainer group plus the existing ADR/RFC process. | License/governance files in PR-001; ADR in PR-004. |
 
 For decision 4, the support floor aligns with the [current CPython lifecycle](https://devguide.python.org/versions/), and the future stable-ABI direction follows [PEP 803](https://peps.python.org/pep-0803/) and the [PyO3 ABI guidance](https://pyo3.rs/main/building-and-distribution). The initial matrix remains version-specific until the project's own performance and compatibility gates pass.

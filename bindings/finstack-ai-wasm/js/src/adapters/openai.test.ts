@@ -14,12 +14,12 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => window.finstackReady);
 });
 
-test("streams same-origin SSE items without a credential field", async ({
+test("streams same-origin Responses items without a credential field", async ({
   page,
 }) => {
   const result = await page.evaluate(async ({ modelOptions }) => {
-    const defaultUrl = window.finstackTest.openaiCompatibleDefaultBaseUrl;
-    const host = window.finstackTest.createOpenAICompatibleModel();
+    const defaultUrl = window.finstackTest.openaiDefaultBaseUrl;
+    const host = window.finstackTest.createOpenAIModel();
     const raw = await host.request("{}");
     const items: unknown[] = [];
     if (!(raw instanceof ReadableStream)) {
@@ -34,7 +34,7 @@ test("streams same-origin SSE items without a credential field", async ({
       items.push(next.value);
     }
     const driven = await window.finstackTest.driveScriptedModelRequest(
-      window.finstackTest.createOpenAICompatibleModel(),
+      window.finstackTest.createOpenAIModel(),
       modelOptions,
     );
     return { defaultUrl, items, driven };
@@ -45,12 +45,12 @@ test("streams same-origin SSE items without a credential field", async ({
   expect(result.items[1]).toEqual({ text: "lo" });
   expect(result.items.at(-1)).toEqual({
     text: "hello",
-    completion_id: "chatcmpl-scripted",
+    completion_id: "resp-scripted",
   });
   expect(result.driven).toMatchObject({
     ok: true,
     text: "hello",
-    completion_id: "chatcmpl-scripted",
+    completion_id: "resp-scripted",
   });
 });
 
@@ -58,7 +58,7 @@ test("propagates AbortSignal through the same-origin fetch battery", async ({
   page,
 }) => {
   const result = await page.evaluate(async ({ modelOptions }) => {
-    const host = window.finstackTest.createOpenAICompatibleModel({
+    const host = window.finstackTest.createOpenAIModel({
       baseUrl: "/finstack/openai?delay=250",
     });
     const controller = new AbortController();
@@ -71,7 +71,7 @@ test("propagates AbortSignal through the same-origin fetch battery", async ({
     const driven = await pending;
     let directName = "";
     try {
-      const direct = window.finstackTest.createOpenAICompatibleModel({
+      const direct = window.finstackTest.createOpenAIModel({
         baseUrl: "/finstack/openai?delay=250",
       });
       const again = new AbortController();

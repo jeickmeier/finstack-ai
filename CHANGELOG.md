@@ -14,6 +14,18 @@ unpublished.
 
 ## [Unreleased]
 
+### Changed
+
+- Official OpenAI integration now uses stateless Responses requests through
+  `finstack-ai-provider-openai` and Python `Agent.openai`. Ollama now uses its
+  native `/api/chat` protocol through `finstack-ai-provider-ollama`.
+
+### Removed
+
+- Removed the generic OpenAI-compatible Chat Completions crate, Python factory,
+  browser adapter, and vLLM/LM Studio/gateway endpoint surface. This breaking
+  migration remains unpublished.
+
 ### Fixed
 
 - Session intern-table poison, sidecar `AmbiguousAcknowledgement`,

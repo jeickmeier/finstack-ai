@@ -13,11 +13,9 @@ use finstack_ai_context_repository::RepositoryContextProvider;
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_verify::VerifyMiddleware;
 use finstack_ai_native_examples::{
-    BoxError, PREVIEW_VERSION, calculator_response, security, serve_sse, text_response,
+    BoxError, PREVIEW_VERSION, calculator_response, security, serve_ndjson, text_response,
 };
-use finstack_ai_provider_openai_compatible::{
-    EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
-};
+use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use finstack_ai_tools_filesystem::FileSystemToolset;
@@ -62,15 +60,15 @@ async fn main() -> Result<(), BoxError> {
     )?);
     let verify: Arc<dyn Middleware> = Arc::new(VerifyMiddleware::try_accept()?);
 
-    let (base_url, server) = serve_sse(vec![
+    let (base_url, server) = serve_ndjson(vec![
         calculator_response(),
         text_response("five", "tool-final"),
     ])
     .await?;
     let model_name = ModelName::try_new("preview-model")?;
-    let provider: Arc<dyn Model> = Arc::new(OpenAiCompatibleProvider::try_new(
-        OpenAiCompatibleConfig::try_new(base_url, EndpointKind::Gateway)?,
-        vec![OpenAiModelConfig::try_new(
+    let provider: Arc<dyn Model> = Arc::new(OllamaProvider::try_new(
+        OllamaConfig::try_new(base_url)?,
+        vec![OllamaModelConfig::try_new(
             model_name.as_ref(),
             1_048_576,
             1_048_576,
@@ -83,7 +81,7 @@ async fn main() -> Result<(), BoxError> {
     let mut builder = Agent::builder(
         AgentId::parse("preview.agent.coding")?,
         BundleId::parse("preview.bundle.coding")?,
-        (component("preview.model.openai-compatible")?, provider),
+        (component("preview.model.ollama")?, provider),
         (component("preview.store.memory")?, store),
     )
     .try_instruction("Answer directly and use registered tools when helpful.")?

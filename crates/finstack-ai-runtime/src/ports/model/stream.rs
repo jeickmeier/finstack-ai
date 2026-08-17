@@ -55,6 +55,9 @@ pub struct ToolCallDelta {
     pub name: Option<Arc<str>>,
     /// UTF-8 arguments fragment.
     pub arguments_delta: Arc<str>,
+    /// Provider-native call identity, when the fragment supplies one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<Arc<str>>,
 }
 
 /// Opaque bounded provider event retained only inside the driver.
@@ -143,6 +146,7 @@ pub struct AssembledModelStream {
 struct PartialToolCall {
     name: Option<Arc<str>>,
     arguments: String,
+    provider_call_id: Option<Arc<str>>,
 }
 
 /// Pure bounded stream validator and assembler.
@@ -286,6 +290,20 @@ impl ModelStreamAssembler {
                         self.limits.max_bytes,
                     )?;
                     partial.arguments.push_str(&delta.arguments_delta);
+                    if let Some(provider_call_id) = delta.provider_call_id {
+                        validated_label(&provider_call_id, "tool_call.provider_call_id")?;
+                        if partial
+                            .provider_call_id
+                            .as_ref()
+                            .is_some_and(|current| current != &provider_call_id)
+                        {
+                            return Err(ModelError::validation(
+                                MODEL_TOOL_CALL_DELTA_INVALID,
+                                "model tool-call provider id mutated across fragments",
+                            ));
+                        }
+                        partial.provider_call_id = Some(provider_call_id);
+                    }
                 }
                 ModelStreamItem::Usage(delta) => {
                     validate_usage(&delta.usage, usage.as_ref())?;
@@ -416,7 +434,11 @@ fn validate_completed_response(
                 "model tool-call arguments are not strict JSON",
             )
         })?;
-        assembled_calls.push(ModelToolCall { name, arguments });
+        assembled_calls.push(ModelToolCall {
+            name,
+            arguments,
+            provider_call_id: partial.provider_call_id.clone(),
+        });
     }
     if assembled_calls.as_slice() != response.tool_calls.as_ref() {
         return Err(ModelError::validation(

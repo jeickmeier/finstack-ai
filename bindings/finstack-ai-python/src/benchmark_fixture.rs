@@ -17,7 +17,7 @@ use finstack_ai_test::{
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use super::agent::{PyAgent, component};
+use super::agent::{PyAgent, component, empty_model_settings};
 use super::errors::{agent_error, configuration_error};
 use super::run::run_request;
 
@@ -105,6 +105,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             1,
             1,
             None,
+            empty_model_settings()?,
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
@@ -161,6 +162,8 @@ async fn build_agent(
             inner: Arc::new(agent),
             model: model_name,
             output_adapter: None,
+            settings: empty_model_settings()?,
+            default_timeout_seconds: 30.0,
         },
         PyBenchmarkControl { model, control },
     ))

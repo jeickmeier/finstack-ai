@@ -7,9 +7,7 @@ use finstack_ai::runtime::{
     AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, Toolset, Version,
 };
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
-use finstack_ai_provider_openai_compatible::{
-    EndpointKind, OpenAiCompatibleConfig, OpenAiCompatibleProvider, OpenAiModelConfig,
-};
+use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_tools_calculator::CalculatorToolset;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,7 +23,7 @@ pub const PREVIEW_VERSION: Version = Version {
     patch: 1,
 };
 
-/// Build an offline OpenAI-compatible agent and its loopback server task.
+/// Build an offline native Ollama agent and its loopback server task.
 ///
 /// # Errors
 ///
@@ -41,11 +39,11 @@ pub async fn build_agent(
     ),
     BoxError,
 > {
-    let (base_url, server) = serve_sse(responses).await?;
+    let (base_url, server) = serve_ndjson(responses).await?;
     let model_name = ModelName::try_new("preview-model")?;
-    let provider: Arc<dyn Model> = Arc::new(OpenAiCompatibleProvider::try_new(
-        OpenAiCompatibleConfig::try_new(base_url, EndpointKind::Gateway)?,
-        vec![OpenAiModelConfig::try_new(
+    let provider: Arc<dyn Model> = Arc::new(OllamaProvider::try_new(
+        OllamaConfig::try_new(base_url)?,
+        vec![OllamaModelConfig::try_new(
             model_name.as_ref(),
             1_048_576,
             1_048_576,
@@ -63,7 +61,7 @@ pub async fn build_agent(
     let mut builder = Agent::builder(
         AgentId::parse("preview.agent.native")?,
         BundleId::parse("preview.bundle.native")?,
-        (component("preview.model.openai-compatible")?, provider),
+        (component("preview.model.ollama")?, provider),
         (component("preview.store.memory")?, store),
     )
     .try_instruction("Answer directly and use registered tools when helpful.")?;
@@ -135,30 +133,31 @@ fn component(id: &str) -> Result<ComponentRef, BoxError> {
     ))
 }
 
-/// One SSE text completion used by the offline loopback server.
+/// One NDJSON text completion used by the offline loopback server.
 #[must_use]
 pub fn text_response(text: &str, id: &str) -> String {
+    let _ = id;
     format!(
-        "data: {{\"id\":\"{id}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{text}\"}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}}}\n\ndata: [DONE]\n\n"
+        "{{\"message\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\"done\":false}}\n{{\"message\":{{\"role\":\"assistant\",\"content\":\"\"}},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}}\n"
     )
 }
 
-/// One SSE calculator tool-call used by the offline loopback server.
+/// One NDJSON calculator tool-call used by the offline loopback server.
 #[must_use]
 pub fn calculator_response() -> String {
     concat!(
-        "data: {\"id\":\"tool-call\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"calculator\",\"arguments\":\"{\\\"operation\\\":\\\"add\\\",\\\"operands\\\":[2,3]}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
-        "data: [DONE]\n\n"
+        "{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"calculator\",\"arguments\":{\"operation\":\"add\",\"operands\":[2,3]}}}]},\"done\":false}\n",
+        "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}\n",
     )
     .to_owned()
 }
 
-/// Serve a finite sequence of SSE bodies on a loopback listener.
+/// Serve a finite sequence of NDJSON bodies on a loopback listener.
 ///
 /// # Errors
 ///
 /// Returns a bind or address error before the accept loop starts.
-pub async fn serve_sse(
+pub async fn serve_ndjson(
     responses: Vec<String>,
 ) -> Result<(String, tokio::task::JoinHandle<Result<(), String>>), BoxError> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -168,7 +167,7 @@ pub async fn serve_sse(
             let (mut socket, _) = listener.accept().await.map_err(|error| error.to_string())?;
             read_request(&mut socket).await?;
             let headers = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
             socket

@@ -1,27 +1,18 @@
 /**
- * Same-origin default path for the OpenAI-compatible proxy.
+ * Same-origin default path for the official OpenAI Responses proxy.
  *
  * Browser bundles must not embed provider credentials. Point this path at a
  * trusted proxy that terminates secrets off-browser.
  */
-export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "/finstack/openai";
+export const OPENAI_DEFAULT_BASE_URL = "/finstack/openai";
 /**
- * Create a {@link HostModel} that speaks OpenAI-compatible SSE over `fetch`.
+ * Create a {@link HostModel} that speaks OpenAI Responses SSE over `fetch`.
  *
- * The adapter owns no kernel semantics. CORS and network failures surface as
- * a stable `TypeError` (`js_host_failed`). `AbortSignal` is propagated.
- *
- * @param options - Same-origin URL, optional headers, and optional model name.
- * @returns A tree-shakeable host model implementation.
- * @throws When `fetch` fails or the response body is missing.
- * @example
- * ```ts
- * const model = createOpenAICompatibleModel();
- * const stream = await model.request(draft, { signal });
- * ```
+ * The adapter sends `store: false`, treats `response.completed` as the only
+ * successful terminal event, and propagates `AbortSignal`.
  */
-export function createOpenAICompatibleModel(options = {}) {
-    const baseUrl = options.baseUrl ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
+export function createOpenAIModel(options = {}) {
+    const baseUrl = options.baseUrl ?? OPENAI_DEFAULT_BASE_URL;
     const headers = options.headers;
     const modelName = options.model;
     return {
@@ -29,8 +20,9 @@ export function createOpenAICompatibleModel(options = {}) {
             const parsed = parseDraft(draft);
             const body = {
                 model: modelName ?? readModel(parsed),
-                messages: readMessages(parsed),
+                input: readInput(parsed),
                 stream: true,
+                store: false,
             };
             const signal = detachAbort(requestOptions?.signal);
             let response;
@@ -52,17 +44,10 @@ export function createOpenAICompatibleModel(options = {}) {
             if (!response.ok || response.body === null) {
                 throw new TypeError("js_host_failed");
             }
-            return streamSse(response.body, signal);
+            return streamResponses(response.body, signal);
         },
     };
 }
-/**
- * Copy an incoming abort onto a local controller after the current turn.
- *
- * wasm-bindgen drops host futures during `Run.cancel`. Attaching that signal
- * directly to `fetch` re-enters a dropped closure. A detached controller
- * aborts the network after cancel returns.
- */
 function detachAbort(signal) {
     if (signal === undefined) {
         return undefined;
@@ -110,20 +95,24 @@ function readModel(draft) {
     }
     return "scripted";
 }
-function readMessages(draft) {
-    if (typeof draft === "object" && draft !== null && "messages" in draft) {
-        const messages = draft.messages;
-        if (Array.isArray(messages) && messages.length > 0) {
-            return messages.map((message) => {
-                if (typeof message !== "object" || message === null) {
-                    return { role: "user", content: "hello" };
-                }
-                const role = "role" in message && typeof message.role === "string" ? message.role : "user";
-                return { role, content: extractText(message) };
-            });
-        }
+function readInput(draft) {
+    if (typeof draft !== "object" || draft === null || !("messages" in draft)) {
+        return [{ role: "user", content: [{ type: "input_text", text: "hello" }] }];
     }
-    return [{ role: "user", content: "hello" }];
+    const messages = draft.messages;
+    if (!Array.isArray(messages) || messages.length === 0) {
+        return [{ role: "user", content: [{ type: "input_text", text: "hello" }] }];
+    }
+    return messages.map((message) => {
+        if (typeof message !== "object" || message === null) {
+            return { role: "user", content: [{ type: "input_text", text: "hello" }] };
+        }
+        const role = "role" in message && typeof message.role === "string" ? message.role : "user";
+        return {
+            role,
+            content: [{ type: "input_text", text: extractText(message) }],
+        };
+    });
 }
 function extractText(message) {
     if (!("content" in message)) {
@@ -146,14 +135,13 @@ function extractText(message) {
     })
         .join("");
 }
-function streamSse(body, signal) {
+function streamResponses(body, signal) {
     return new ReadableStream({
         async start(controller) {
             const reader = body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
             let text = "";
-            let completionId = "openai-compatible";
             try {
                 while (true) {
                     if (signal?.aborted) {
@@ -168,36 +156,35 @@ function streamSse(body, signal) {
                     buffer = frames.pop() ?? "";
                     for (const frame of frames) {
                         const data = readSseData(frame);
-                        if (data === null) {
+                        if (data === null || data === "[DONE]") {
                             continue;
                         }
-                        if (data === "[DONE]") {
-                            controller.enqueue({
-                                text,
-                                completion_id: completionId,
-                            });
+                        const event = parseEvent(data);
+                        if (event === null) {
+                            continue;
+                        }
+                        if (event.type === "response.output_text.delta") {
+                            const delta = typeof event.delta === "string" ? event.delta : "";
+                            if (delta.length > 0) {
+                                text += delta;
+                                controller.enqueue({ text: delta });
+                            }
+                            continue;
+                        }
+                        if (event.type === "response.completed") {
+                            const completionId = readCompletionId(event);
+                            controller.enqueue({ text, completion_id: completionId });
                             controller.close();
                             return;
                         }
-                        const parsed = parseSseJson(data);
-                        if (parsed === null) {
-                            continue;
-                        }
-                        if (typeof parsed.id === "string" && parsed.id.length > 0) {
-                            completionId = parsed.id;
-                        }
-                        const delta = readDeltaText(parsed);
-                        if (delta.length > 0) {
-                            text += delta;
-                            controller.enqueue({ text: delta });
+                        if (event.type === "response.failed" ||
+                            event.type === "response.incomplete" ||
+                            event.type === "error") {
+                            throw new TypeError("js_host_failed");
                         }
                     }
                 }
-                controller.enqueue({
-                    text,
-                    completion_id: completionId,
-                });
-                controller.close();
+                throw new TypeError("js_host_failed");
             }
             catch (error) {
                 reader.releaseLock();
@@ -210,19 +197,13 @@ function streamSse(body, signal) {
     });
 }
 function readSseData(frame) {
-    const lines = frame.split("\n");
-    const data = [];
-    for (const line of lines) {
-        if (line.startsWith("data:")) {
-            data.push(line.slice(5).trim());
-        }
-    }
-    if (data.length === 0) {
-        return null;
-    }
-    return data.join("\n");
+    const data = frame
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim());
+    return data.length === 0 ? null : data.join("\n");
 }
-function parseSseJson(data) {
+function parseEvent(data) {
     try {
         return JSON.parse(data);
     }
@@ -230,19 +211,13 @@ function parseSseJson(data) {
         return null;
     }
 }
-function readDeltaText(parsed) {
-    if (!Array.isArray(parsed.choices) || parsed.choices[0] === undefined) {
-        return "";
+function readCompletionId(event) {
+    if (typeof event.response === "object" && event.response !== null && "id" in event.response) {
+        const id = event.response.id;
+        if (typeof id === "string" && id.length > 0) {
+            return id;
+        }
     }
-    const choice = parsed.choices[0];
-    if (typeof choice !== "object" || choice === null || !("delta" in choice)) {
-        return "";
-    }
-    const delta = choice.delta;
-    if (typeof delta !== "object" || delta === null || !("content" in delta)) {
-        return "";
-    }
-    const content = delta.content;
-    return typeof content === "string" ? content : "";
+    throw new TypeError("js_host_failed");
 }
-//# sourceMappingURL=openai-compatible.js.map
+//# sourceMappingURL=openai.js.map

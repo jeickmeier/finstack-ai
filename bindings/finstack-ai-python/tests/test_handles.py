@@ -15,23 +15,27 @@ import pytest
 import finstack_ai
 
 
-def _text_sse(parts: list[str]) -> bytes:
-    events = []
-    for index, part in enumerate(parts):
-        payload = {
-            "id": "python-binding-fixture",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": part},
-                    "finish_reason": "stop" if index == len(parts) - 1 else None,
-                }
-            ],
-            "usage": None,
-        }
-        events.append(f"data: {json.dumps(payload, separators=(',', ':'))}\n\n")
-    events.append("data: [DONE]\n\n")
-    return "".join(events).encode()
+def _ollama_ndjson(parts: list[str]) -> bytes:
+    events = [
+        json.dumps(
+            {"message": {"role": "assistant", "content": part}, "done": False},
+            separators=(",", ":"),
+        )
+        for part in parts
+    ]
+    events.append(
+        json.dumps(
+            {
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 1,
+                "eval_count": 1,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return ("\n".join(events) + "\n").encode()
 
 
 class _FixtureServer(ThreadingHTTPServer):
@@ -72,7 +76,7 @@ class _FixtureHandler(BaseHTTPRequestHandler):
         if self.server.hold_response:
             self.server.release_response.wait(timeout=5)
         content_type = (
-            "text/event-stream" if self.server.status == 200 else "application/json"
+            "application/x-ndjson" if self.server.status == 200 else "application/json"
         )
         try:
             self.send_response(self.server.status)
@@ -108,7 +112,7 @@ def _server(
 
 
 async def _agent(server: _FixtureServer) -> finstack_ai.Agent:
-    return await finstack_ai.Agent.openai_compatible(
+    return await finstack_ai.Agent.ollama(
         server.base_url,
         "fixture-model",
         "Answer concisely.",
@@ -136,7 +140,7 @@ def test_rust_backed_run_batches_events_and_retains_result() -> None:
         assert first.session.session_id == run.session.session_id
         return run, batches
 
-    with _server(_text_sse(["hello", " ", "w", "o", "r", "l", "d"])) as server:
+    with _server(_ollama_ndjson(["hello", " ", "w", "o", "r", "l", "d"])) as server:
         run, batches = asyncio.run(exercise(server))
 
     events = [event for batch in batches for event in batch.events()]
@@ -175,7 +179,7 @@ def test_independent_rust_runs_reach_io_without_gil_serialization() -> None:
         server.release_response.set()
         assert await asyncio.gather(first, second) == ["concurrent", "concurrent"]
 
-    with _server(_text_sse(["concurrent"]), hold_response=True) as server:
+    with _server(_ollama_ndjson(["concurrent"]), hold_response=True) as server:
         asyncio.run(exercise(server))
 
 
@@ -193,7 +197,7 @@ def test_explicit_cancellation_is_idempotent_and_contextual() -> None:
         assert caught.value.context == run.locator.to_dict()
         await run.close_events()
 
-    with _server(_text_sse(["late"]), hold_response=True) as server:
+    with _server(_ollama_ndjson(["late"]), hold_response=True) as server:
         try:
             asyncio.run(exercise(server))
         finally:
@@ -219,16 +223,14 @@ def test_cancelling_one_result_waiter_does_not_cancel_the_run() -> None:
         result = await run.result()
         assert result.text == "completed"
 
-    with _server(_text_sse(["completed"]), hold_response=True) as server:
+    with _server(_ollama_ndjson(["completed"]), hold_response=True) as server:
         asyncio.run(exercise(server))
 
 
 def test_error_hierarchy_preserves_codes_retryability_and_safe_context() -> None:
     async def invalid_configuration() -> None:
         with pytest.raises(finstack_ai.ConfigurationError) as caught:
-            await finstack_ai.Agent.openai_compatible(
-                "ftp://unsafe.example", "fixture-model"
-            )
+            await finstack_ai.Agent.ollama("ftp://unsafe.example", "fixture-model")
         assert caught.value.code == "agent_run_invalid_configuration"
         assert caught.value.retryable is False
         assert caught.value.context is None
@@ -262,7 +264,7 @@ def test_error_hierarchy_preserves_codes_retryability_and_safe_context() -> None
     asyncio.run(invalid_configuration())
     with _server(b'{"error":{"message":"fixture failure"}}', status=500) as server:
         asyncio.run(runtime_failure(server))
-    with _server(_text_sse(["late"]), hold_response=True) as server:
+    with _server(_ollama_ndjson(["late"]), hold_response=True) as server:
         try:
             asyncio.run(timeout(server))
         finally:

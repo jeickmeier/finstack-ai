@@ -11,7 +11,7 @@ from typing import Any
 
 import finstack_ai
 
-from test_handles import _agent, _server, _text_sse
+from test_handles import _agent, _ollama_ndjson, _server
 from test_interactions import _resolution, _wait_for_interaction, _write_tool
 
 
@@ -32,7 +32,7 @@ def test_session_and_lane_survive_open_after_drop() -> None:
         inspect = await (await opened.lane("research")).inspect()
         assert inspect["name"] == "research"
 
-    with _server(_text_sse(["ok"])) as server:
+    with _server(_ollama_ndjson(["ok"])) as server:
         asyncio.run(exercise(server))
 
 
@@ -47,7 +47,7 @@ def test_completed_run_inspects_after_open_session() -> None:
         )
         assert opened.session_id == result.session.session_id
 
-    with _server(_text_sse(["hello"])) as server:
+    with _server(_ollama_ndjson(["hello"])) as server:
         asyncio.run(exercise(server))
 
 

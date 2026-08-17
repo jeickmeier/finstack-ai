@@ -160,7 +160,7 @@ def rust_starters(stage: Path) -> None:
         REPO_ROOT / "examples" / "rust-minimal",
         """[dependencies]
 finstack-ai = { workspace = true, features = ["native-tokio"] }
-finstack-ai-provider-openai-compatible = { workspace = true }
+finstack-ai-provider-ollama = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-tools-calculator = { workspace = true }
 finstack-ai-tools-filesystem = { workspace = true }

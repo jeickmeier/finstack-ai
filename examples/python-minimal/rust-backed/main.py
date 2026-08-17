@@ -10,8 +10,8 @@ import finstack_ai
 
 async def main(*, run: bool) -> None:
     """Construct the Rust-backed agent and optionally execute one request."""
-    agent = await finstack_ai.Agent.openai_compatible(
-        "http://127.0.0.1:8000/v1",
+    agent = await finstack_ai.Agent.ollama(
+        "http://127.0.0.1:11434",
         "local-model",
         "Answer concisely.",
         capabilities=[

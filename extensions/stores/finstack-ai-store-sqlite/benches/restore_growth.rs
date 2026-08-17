@@ -225,6 +225,7 @@ fn snapshot_versus_full_replay(criterion: &mut Criterion) {
         state: recovered.state().clone(),
         head_checksum: loaded.head_checksum.expect("head"),
         pending_timer_scheduled_at: None,
+        last_model_continuation: None,
     }))
     .expect("snapshot");
     for sequence in (SNAPSHOT_AT + 1)..=RESTORE_RECORDS {

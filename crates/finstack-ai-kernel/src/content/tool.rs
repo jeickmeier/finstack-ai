@@ -20,6 +20,8 @@ pub struct ToolCallBlock {
     tool_call_id: ToolCallId,
     tool_name: Arc<str>,
     arguments: RawJson,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_call_id: Option<Arc<str>>,
 }
 
 impl ToolCallBlock {
@@ -54,10 +56,31 @@ impl ToolCallBlock {
         arguments: RawJson,
     ) -> Result<Self, ContentError> {
         let tool_name = validated_label(tool_name.as_ref(), "tool_name")?;
+        Self::try_new_with_provider_call_id(tool_call_id, tool_name, arguments, None::<&str>)
+    }
+
+    /// Construct a tool-call block that preserves a provider-native call id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContentError`] when `tool_name` or `provider_call_id` is empty,
+    /// oversized, or contains NUL.
+    pub fn try_new_with_provider_call_id(
+        tool_call_id: ToolCallId,
+        tool_name: impl AsRef<str>,
+        arguments: RawJson,
+        provider_call_id: Option<impl AsRef<str>>,
+    ) -> Result<Self, ContentError> {
+        let tool_name = validated_label(tool_name.as_ref(), "tool_name")?;
+        let provider_call_id = match provider_call_id {
+            Some(value) => Some(validated_label(value.as_ref(), "provider_call_id")?),
+            None => None,
+        };
         Ok(Self {
             tool_call_id,
             tool_name,
             arguments,
+            provider_call_id,
         })
     }
 
@@ -78,6 +101,12 @@ impl ToolCallBlock {
     pub const fn arguments(&self) -> &RawJson {
         &self.arguments
     }
+
+    /// Provider-native call identity, when the model supplied one.
+    #[must_use]
+    pub fn provider_call_id(&self) -> Option<&str> {
+        self.provider_call_id.as_deref()
+    }
 }
 
 impl<'de> Deserialize<'de> for ToolCallBlock {
@@ -91,13 +120,16 @@ impl<'de> Deserialize<'de> for ToolCallBlock {
             tool_call_id: ToolCallId,
             tool_name: BoundedString<LABEL_MAX_BYTES>,
             arguments: RawJson,
+            #[serde(default)]
+            provider_call_id: Option<BoundedString<LABEL_MAX_BYTES>>,
         }
 
         let wire = BinaryWire::deserialize(deserializer)?;
-        Self::try_new(
+        Self::try_new_with_provider_call_id(
             wire.tool_call_id,
             wire.tool_name.into_inner(),
             wire.arguments,
+            wire.provider_call_id.map(BoundedString::into_inner),
         )
         .map_err(de::Error::custom)
     }

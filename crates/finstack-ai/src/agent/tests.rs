@@ -121,11 +121,14 @@ fn calculator_call() -> ScriptedModelPlan {
         tool_calls: Arc::from([ModelToolCall {
             name: Arc::from("calculator"),
             arguments: arguments.clone(),
+            provider_call_id: Some(Arc::from("call-preview-calculator")),
         }]),
         usage: Usage::empty(),
         provider_ids: ProviderIds::empty(),
         completion_id: Arc::from("preview-tool-completion"),
-        continuation_state: None,
+        continuation_state: Some(
+            RawJson::parse(br#"{"provider":"test","value":1}"#).expect("continuation"),
+        ),
     };
     ScriptedModelPlan {
         actions: vec![
@@ -133,10 +136,33 @@ fn calculator_call() -> ScriptedModelPlan {
                 index: 0,
                 name: Some(Arc::from("calculator")),
                 arguments_delta: Arc::from(arguments.as_str()),
+                provider_call_id: Some(Arc::from("call-preview-calculator")),
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(response))),
         ],
     }
+}
+
+fn assert_continuation_reaches_second_request(model: &ScriptedModel) {
+    let second_request = model.last_request().expect("second request");
+    assert_eq!(
+        second_request
+            .continuation_state
+            .as_ref()
+            .map(RawJson::as_str),
+        Some(r#"{"provider":"test","value":1}"#)
+    );
+    let provider_call_ids = second_request
+        .draft
+        .messages
+        .iter()
+        .flat_map(finstack_ai_kernel::Message::content)
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall(call) => call.provider_call_id(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(provider_call_ids, ["call-preview-calculator"]);
 }
 
 fn security() -> RunSecurityContext {
@@ -583,6 +609,7 @@ async fn tool_loop_executes_read_only_calculator_then_completes() {
     assert_eq!(output.text(), "five");
     assert_eq!(model.request_count(), 2);
     assert_eq!(model.warmup_count(), 1);
+    assert_continuation_reaches_second_request(&model);
 }
 
 fn observer_descriptor(id: &str) -> ObserverDescriptor {

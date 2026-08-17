@@ -33,14 +33,38 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
 | [service](../../examples/python-minimal/service/README.md) | T2 callback | Resolve once, health, one offline request |
 
 `import finstack_ai` does not create a provider, start Tokio, or read
-credentials. `Agent.openai_compatible()`, `Agent.anthropic()`, and
-`Agent.ollama()` are explicit. Lazy `finstack_ai.providers.*` stay unloaded
-until attribute access.
+credentials. `Agent.openai()`, `Agent.anthropic()`, and
+`Agent.ollama()` are explicit T1 constructors. They accept the same
+keyword-only T2 ports as `Agent.from_python`. `openai` takes required
+keyword-only `api_key` (Bearer; HTTPS required) and optional
+`reasoning_effort`, and always uses official OpenAI Responses.
+`ollama` stays keyless and uses native `/api/chat`. OpenAI output is
+capped at 128,000 tokens; the linked context window is 1,050,000 tokens.
+Pass keys explicitly; the binding does not read environment variables.
+Lazy `finstack_ai.providers.*` stay unloaded until attribute access.
 
 Never put secrets in `AgentSpec`. See [provider security](provider-security.md).
 
 `Agent.start` / `run` take optional `capability=` to select a model-activated
 variant. `None` runs this agent. See [FAQ](faq.md).
+
+## Learning notebooks
+
+The [notebook series](../../examples/python-minimal/notebooks/) teaches
+`Agent` as the composition root. There is no Python `Harness` type.
+Notebooks 01–04 stay offline. 05 constructs a local Ollama agent and runs
+live when the server is reachable. 06–07 construct linked providers
+offline and run live only when `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+is set. Notebook 06 takes `OPENAI_MODEL` from its first code cell
+(`gpt-4o-mini` by default). Pass `api_key=` explicitly; the binding does
+not read environment variables.
+
+```bash
+uv sync
+uv run python -m ipykernel install --user --name=finstack-ai-notebooks \
+  --display-name="finstack-ai-notebooks"
+mise run docs-notebooks
+```
 
 ## License
 

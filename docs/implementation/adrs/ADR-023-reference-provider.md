@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-040
 
 ## Date
 
@@ -63,7 +63,7 @@ Provider adapter contract; scripted model remains semantic reference.
 
 ## Supersession metadata
 
-None. This ADR supersedes no prior ADR and is not superseded.
+Superseded by [ADR-040](ADR-040-openai-responses-native-ollama.md). This ADR supersedes no prior ADR.
 
 ## Reconsideration conditions
 
