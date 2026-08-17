@@ -9,7 +9,9 @@ in-process providers and tools are not isolated.
 - `minimal` completes a model-only run through the OpenAI-compatible provider.
 - `coding` composes calculator, filesystem, shell, repository/memory context,
   sliding-window compaction, and a before_finalize verifier over a keyless
-  loopback model.
+  loopback model. **Its compaction leg does not work**: once the window
+  triggers, the run fails with `compaction_result_invalid`. See
+  [why compaction cannot complete](../../docs/site/middleware.md#why-compaction-cannot-complete).
 - `service` resolves once, checks component health, and handles one request.
 - `diagnostic` prints credential-free `AgentSpec` and lock fingerprints.
 

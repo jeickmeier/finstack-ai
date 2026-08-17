@@ -27,7 +27,7 @@ run. Python and WASM expose the same inspect path as `Agent.open_session`.
 | Binary | Role |
 | --- | --- |
 | `minimal` | Model-only loopback run |
-| `coding` | Calculator, filesystem, shell, context, compaction, verifier |
+| `coding` | Calculator, filesystem, shell, context, compaction, verifier — the compaction leg fails once the window triggers, see [why compaction cannot complete](middleware.md#why-compaction-cannot-complete) |
 | `service` | Resolve once, health, one request |
 | `diagnostic` | Credential-free `AgentSpec` and lock fingerprints |
 
