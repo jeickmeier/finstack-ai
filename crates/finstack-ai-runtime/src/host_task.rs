@@ -973,7 +973,7 @@ async fn run_worker_with_effects<C, R>(
             );
             break;
         }
-        if let Err(error) = drain_effects_accepting_commands(
+        if let Err(error) = Box::pin(drain_effects_accepting_commands(
             &mut coordinator,
             &intake,
             &shared,
@@ -986,7 +986,7 @@ async fn run_worker_with_effects<C, R>(
             &sources,
             stage_driver.as_ref(),
             &profile,
-        )
+        ))
         .await
         {
             fault_shared(
@@ -1077,7 +1077,7 @@ where
         };
         match work {
             HostWork::Model { seed, request } => {
-                settle_driven_model(
+                Box::pin(settle_driven_model(
                     coordinator,
                     intake,
                     shared,
@@ -1090,7 +1090,7 @@ where
                     profile,
                     seed,
                     request,
-                )
+                ))
                 .await?;
             }
             HostWork::Tool {
