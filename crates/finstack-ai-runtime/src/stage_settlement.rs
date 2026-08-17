@@ -12,19 +12,53 @@
 //! # Governing invariant: passthrough when the chain is empty
 //!
 //! When no driver is installed, or the driver has no component registered for
-//! the cursor's stage, or the chain's fold is the identity, the facade's `env`
-//! and `input` are submitted **byte for byte unchanged** — the facade's own
-//! pre-minted record/event/effect ids included. The feature is opt-in per
+//! the cursor's stage, or the base outcome is not one that stage can fold on top
+//! of (see [`foldable_base`]), or the chain's fold is the identity, the facade's
+//! `env` and `input` are submitted **byte for byte unchanged** — the facade's
+//! own pre-minted record/event/effect ids included. The feature is opt-in per
 //! agent: an agent with no middleware must produce a journal identical to the
-//! one it produced before this module existed.
+//! one it produced before this module existed, and no settlement the kernel
+//! admits may stop landing merely because a component was registered.
 //!
 //! # Stage coverage
 //!
-//! [`settle_facade_stage`] folds `BeforeRun`, `PrepareContext`, `AfterModel`,
-//! `AfterToolBatch`, and `BeforeFinalize`. `BeforeModel` is deliberately
-//! passthrough here: its [`StageInput`] is the typed
-//! `StageInput::BeforeModel(Box<BeforeModelInput>)`, whose assembly needs the
-//! run's `LockedModelContextProfile` and is owned by a later task.
+//! [`settle_facade_stage`] folds all six facade-authored stages: `BeforeRun`,
+//! `PrepareContext`, `BeforeModel`, `AfterModel`, `AfterToolBatch`, and
+//! `BeforeFinalize`. `BeforeModel` is the one stage whose [`StageInput`] is not
+//! a bare `RawJson` but the typed `StageInput::BeforeModel(Box<BeforeModelInput>)`,
+//! which is why it needs the run's [`LockedModelContextProfile`] threaded down
+//! from the spawn path — see [`before_model_input`].
+//!
+//! ## Known limitation: `CompactContext` cannot land, and why
+//!
+//! Two of the seven [`crate::middleware::StageOutcome`] variants a `BeforeModel`
+//! component may legally return are unreachable through this choke point, and
+//! both are the compaction ones:
+//!
+//! - `RequestCompactionModel` needs a **committed child model effect** under a
+//!   committed `EffectKind::Middleware` parent, plus a chain re-entry carrying
+//!   `compaction_resume`. The aggregate-fold design has no place for either: a
+//!   stage settles exactly once, as one `ReducerStageOutcome`, and no
+//!   `KernelInput` commits a middleware parent effect at all. It is refused with
+//!   [`MIDDLEWARE_STAGE_UNLANDABLE`] by [`StageFold::accumulate`].
+//! - `CompactContext` is refused one layer earlier, by
+//!   `validate_compaction_result` (`middleware.rs:998-1002`), which requires the
+//!   final [`CompactionSourceEntry`] to be `protected`. The causal chain is:
+//!   `protected` is authoritative-from-the-context-port
+//!   ([`crate::ContextItem::protected`], `context.rs:138`) and a compactor may
+//!   not set it; the `ContextProvider` port has **no production driver** — no
+//!   `ContextItem` is constructed anywhere in a live run — so
+//!   [`before_model_input`] can only ever assemble unprotected entries; so every
+//!   compaction result fails validation with
+//!   [`crate::COMPACTION_RESULT_INVALID`].
+//!
+//!   **Wiring the `ContextProvider` port is the unblock.** Patching the
+//!   compactor, or fabricating a `protected` bit here, is not: `protected` would
+//!   then be asserted by the party the check exists to constrain.
+//!
+//! Every other `BeforeModel` outcome — `AddInstructions`, `AddContext`,
+//! `FilterTools`, `Replace`, `Fail`, `Continue` — folds normally through
+//! [`apply_model_draft`].
 //!
 //! `BeforeToolBatch` never reaches this choke point at all — the facade never
 //! settles it; `settlement::prepare_tool_batch_if_ready` does, and it is the
@@ -39,19 +73,20 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchTag, ErrorDescriptor, EventTag, KernelError, KernelInput, KernelState,
-    Message, MessageRole, MessageTag, Metadata, ProviderIds, RawJson, RecordTag,
-    ReducerStageOutcome, SEMANTIC_ARRAY_MAX_ITEMS, Stage, StageCursor, StageSettled, ToolCallBlock,
-    ToolId, TransitionEnv,
+    AllocatedIds, AppendBatchTag, Digest, EntryId, ErrorDescriptor, EventTag, KernelError,
+    KernelInput, KernelState, Message, MessageRole, MessageTag, Metadata, ProviderIds, RawJson,
+    RecordTag, ReducerStageOutcome, SEMANTIC_ARRAY_MAX_ITEMS, Sensitivity, Stage, StageCursor,
+    StageSettled, ToolCallBlock, ToolId, TransitionEnv,
 };
 
 use crate::context::ContextItem;
 use crate::coordinator::CommitCoordinator;
-use crate::middleware::{MiddlewareError, StageInput};
+use crate::middleware::{BeforeModelInput, CompactionSourceEntry, MiddlewareError, StageInput};
 use crate::middleware_driver::{
     MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, MiddlewareStageContext,
     StageDriver, StageFold, StageTerminal, derived_stage_effect_id,
 };
+use crate::model::{LockedModelContextProfile, ModelRequestDraft};
 use crate::run_types::RunHandleError;
 use crate::settlement::{SettlementSources, stage_allocation};
 use crate::{Clock, CommitOutcome, RandomSource, RunCallContext};
@@ -108,12 +143,14 @@ fn middleware_error(error: &MiddlewareError) -> RunHandleError {
 
 /// Whether [`settle_facade_stage`] folds a chain at `stage`.
 ///
-/// `BeforeModel` and `BeforeToolBatch` are excluded — see the module docs.
+/// `BeforeToolBatch` is the sole exclusion — it never reaches this choke point.
+/// See the module docs.
 const fn folds_at(stage: Stage) -> bool {
     matches!(
         stage,
         Stage::BeforeRun
             | Stage::PrepareContext
+            | Stage::BeforeModel
             | Stage::AfterModel
             | Stage::AfterToolBatch
             | Stage::BeforeFinalize
@@ -135,12 +172,13 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
     env: TransitionEnv,
     input: KernelInput,
 ) -> Result<CommitOutcome, RunHandleError> {
     match input {
         KernelInput::StageSettled(settled) => {
-            settle_facade_stage(coordinator, driver, sources, env, settled).await
+            settle_facade_stage(coordinator, driver, sources, profile, env, settled).await
         }
         other => coordinator
             .submit(env, other)
@@ -157,8 +195,10 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
 /// Returns `coordinator.submit(env, KernelInput::StageSettled(settled))`
 /// unchanged when `driver` is `None`, when the driver has no component
 /// registered at `settled.cursor.stage`, when this choke point does not fold
-/// that stage, or when the chain's fold is the identity. In all four cases the
-/// facade's `env` — its `now` and its pre-minted id bags — is reused verbatim.
+/// that stage, when the base outcome is not one the stage can fold on top of
+/// (see [`foldable_base`]), or when the chain's fold is the identity. In all
+/// five cases the facade's `env` — its `now` and its pre-minted id bags — is
+/// reused verbatim.
 ///
 /// # Re-allocation
 ///
@@ -181,22 +221,51 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
     env: TransitionEnv,
     settled: StageSettled,
 ) -> Result<CommitOutcome, RunHandleError> {
     let cursor = settled.cursor;
-    let Some(driver) =
-        driver.filter(|driver| folds_at(cursor.stage) && driver.is_active(cursor.stage))
-    else {
+    let Some(driver) = driver.filter(|driver| {
+        folds_at(cursor.stage)
+            && driver.is_active(cursor.stage)
+            && foldable_base(cursor.stage, &settled.outcome)
+    }) else {
         return submit_settled(coordinator, env, settled).await;
     };
-    let input = stage_input(coordinator.state(), cursor.stage, &settled.outcome)?;
+    let input = stage_input(coordinator.state(), cursor.stage, &settled.outcome, profile)?;
     let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
     if fold.is_identity() {
         return submit_settled(coordinator, env, settled).await;
     }
     let outcome = apply_fold(&fold, cursor, settled.outcome, sources)?;
     submit_folded(coordinator, sources, env.now, cursor, outcome).await
+}
+
+/// Whether the facade's base outcome at `stage` is one a chain can fold on top
+/// of.
+///
+/// Only `BeforeModel` narrows here, and it must. The kernel admits exactly two
+/// outcomes at that cursor — `ModelRequestPrepared` (`decide.rs:1134-1141`) and
+/// `Fail` (`decide.rs:1165-1177`) — and only the first carries the
+/// [`ModelRequestDraft`] that *is* the whole payload of
+/// `StageInput::BeforeModel`. Without this gate a `Fail` settled at
+/// `BeforeModel` would reach [`before_model_input`], which has no draft to
+/// assemble from and returns [`MIDDLEWARE_STAGE_INPUT_INVALID`] — so a
+/// kernel-admissible, deliberate stage failure would stop landing the moment a
+/// component was registered at the stage, even a purely observational one that
+/// would have folded to the identity. That is the exact inverse of the
+/// governing passthrough invariant, so the settlement passes through instead
+/// and the run fails as it would with no middleware installed.
+///
+/// Every other stage returns `true`: their inputs are built from live
+/// `KernelState` rather than from the base outcome, so no base outcome can
+/// starve them. `PrepareContext` is the near miss — it reads the base outcome
+/// when it is a `ContextPrepared` — but it already falls back to
+/// `state.messages` rather than failing.
+fn foldable_base(stage: Stage, outcome: &ReducerStageOutcome) -> bool {
+    stage != Stage::BeforeModel
+        || matches!(outcome, ReducerStageOutcome::ModelRequestPrepared { .. })
 }
 
 async fn submit_settled(
@@ -358,10 +427,15 @@ fn tool_batch_policy(fold: &StageFold) -> Result<ToolBatchPolicy, RunHandleError
 /// - `AfterToolBatch` — the trailing run of `MessageRole::Tool` messages, i.e.
 ///   the results the batch just appended.
 /// - `BeforeFinalize` — the terminal candidate, live and O(1) here.
+///
+/// `BeforeModel` is the exception: it is the typed
+/// `StageInput::BeforeModel(Box<BeforeModelInput>)`, built by
+/// [`before_model_input`] from the base outcome plus the run's locked profile.
 fn stage_input(
     state: &KernelState,
     cursor_stage: Stage,
     outcome: &ReducerStageOutcome,
+    profile: &LockedModelContextProfile,
 ) -> Result<StageInput, RunHandleError> {
     match cursor_stage {
         Stage::BeforeRun => Ok(StageInput::BeforeRun {
@@ -392,10 +466,97 @@ fn stage_input(
         Stage::BeforeFinalize => Ok(StageInput::BeforeFinalize {
             candidate: canonical_terminal_candidate(state)?,
         }),
-        Stage::BeforeModel | Stage::BeforeToolBatch => {
-            Err(stage_error(MIDDLEWARE_STAGE_INPUT_INVALID))
-        }
+        Stage::BeforeModel => Ok(StageInput::BeforeModel(Box::new(before_model_input(
+            outcome, profile,
+        )?))),
+        Stage::BeforeToolBatch => Err(stage_error(MIDDLEWARE_STAGE_INPUT_INVALID)),
     }
+}
+
+/// Assemble the typed `BeforeModel` stage input.
+///
+/// # `request`
+///
+/// Round-tripped from the base outcome's `request: RawJson`, which the facade
+/// produced with `ModelRequestDraft::canonical_bytes` (`agent.rs:813-815`), so
+/// the trip is exact. `HostDispatcher::parse_and_validate`
+/// (`host_task.rs:650-676`) already relies on the same round trip.
+///
+/// # `source_entries`
+///
+/// One entry per message of **the draft's own array**, not of
+/// `state.current_turn.context.messages`. In the facade path the two are the
+/// same array — `model_draft` is handed `turn.context.messages`
+/// (`agent.rs:797-812`) — but sourcing them from the draft is the choice that
+/// stays correct if they ever diverge: a `CompactContext` result is validated
+/// against `source_entries` (`middleware.rs:1013-1027`) and then *replaces*
+/// `draft.messages`, so entries drawn from anywhere else would let a compactor
+/// inject a message the draft never had, or lose one it did.
+///
+/// Each field is derived, never invented:
+///
+/// - `entry_id` — `EntryId::from_bytes(message.id().to_bytes())`, the kernel's
+///   own message-to-entry mapping (`conversation.rs:128` and `:584`).
+/// - `sensitivity` — [`Sensitivity::Internal`], the classification the kernel
+///   itself requires of every message-bearing event (`events.rs:864-867`).
+/// - `provenance_digest` — over the message's canonical bytes. In a
+///   journal-derived history the message *is* its own provenance. It is never
+///   compared field-wise; it only feeds `compaction_source_digest`, so any
+///   deterministic derivation is self-consistent.
+/// - `protected` — always `false`. See the module docs: the context port is its
+///   authoritative setter and that port has no production driver, so no
+///   protected entry can exist. This is the value that makes `CompactContext`
+///   unreachable, and it is deliberately not fabricated.
+///
+/// # `hard_input_tokens`
+///
+/// `context_window_tokens - (reserved_output_tokens + provider_overhead_tokens)`,
+/// which is exactly `validate_model_request`'s `available` (`model.rs:1274-1287`)
+/// and matches the field's own definition, "maximum permitted model-input tokens
+/// after output/overhead reservation".
+///
+/// # Errors
+///
+/// Returns `middleware_stage_input_invalid` when the base outcome is not a
+/// `ModelRequestPrepared` (nothing else can carry a draft at this cursor) or the
+/// locked profile's margins leave no input budget, and
+/// `middleware_stage_payload_invalid` when the committed request is not a
+/// decodable draft.
+fn before_model_input(
+    outcome: &ReducerStageOutcome,
+    profile: &LockedModelContextProfile,
+) -> Result<BeforeModelInput, RunHandleError> {
+    let ReducerStageOutcome::ModelRequestPrepared { request, .. } = outcome else {
+        return Err(stage_error(MIDDLEWARE_STAGE_INPUT_INVALID));
+    };
+    let draft = parse_draft(request)?;
+    let mut source_entries = Vec::with_capacity(draft.messages.len());
+    for message in draft.messages.iter() {
+        source_entries.push(CompactionSourceEntry {
+            entry_id: EntryId::from_bytes(message.id().to_bytes()),
+            message: message.clone(),
+            sensitivity: Sensitivity::Internal,
+            provenance_digest: Digest::raw_json(canonical_message(message)?.as_bytes()),
+            protected: false,
+        });
+    }
+    Ok(BeforeModelInput {
+        request: draft,
+        source_entries: source_entries.into(),
+        model_context_profile_digest: profile.digest,
+        hard_input_tokens: hard_input_tokens(profile)?,
+        checkpoint: None,
+    })
+}
+
+/// The locked profile's input-token budget after output and overhead margins.
+fn hard_input_tokens(profile: &LockedModelContextProfile) -> Result<u64, RunHandleError> {
+    profile
+        .profile
+        .reserved_output_tokens
+        .checked_add(profile.profile.provider_overhead_tokens)
+        .and_then(|margins| profile.profile.context_window_tokens.checked_sub(margins))
+        .ok_or_else(|| stage_error(MIDDLEWARE_STAGE_INPUT_INVALID))
 }
 
 /// The maximal trailing slice of `messages` whose role is `role`.
@@ -412,15 +573,16 @@ fn trailing_role_run(messages: &[Message], role: MessageRole) -> &[Message] {
 /// A [`StageTerminal`] wins outright: it replaces the base outcome whatever the
 /// base was, which is what makes a middleware `Retry` at `BeforeFinalize`
 /// supersede the facade's own structured-output `Retry` at the same cursor.
-/// Otherwise the only non-terminal fold with a kernel landing at the stages
-/// this choke point folds is `ContextPrepared` at `PrepareContext`; a
-/// non-identity fold anywhere else has nowhere to land and is rejected rather
-/// than silently dropped.
+/// Otherwise exactly two non-terminal folds have a kernel landing at the stages
+/// this choke point folds: `ContextPrepared` at `PrepareContext` and
+/// `ModelRequestPrepared` at `BeforeModel`. A non-identity fold anywhere else
+/// has nowhere to land and is rejected rather than silently dropped.
 ///
 /// # Errors
 ///
 /// Returns [`MIDDLEWARE_STAGE_UNLANDABLE`] for a non-terminal fold with no
-/// landing at `cursor`, or the payload errors of [`apply_context_prepared`].
+/// landing at `cursor`, or the payload errors of [`apply_context_prepared`] and
+/// [`apply_model_draft`].
 fn apply_fold<C: Clock, R: RandomSource>(
     fold: &StageFold,
     cursor: StageCursor,
@@ -443,9 +605,111 @@ fn apply_fold<C: Clock, R: RandomSource>(
                 messages: apply_context_prepared(fold, &messages, sources)?,
             })
         }
+        ReducerStageOutcome::ModelRequestPrepared {
+            request,
+            component,
+            output_contract,
+            retry_safety,
+            deadline,
+        } if cursor.stage == Stage::BeforeModel => {
+            let folded = apply_model_draft(fold, parse_draft(&request)?, sources)?;
+            Ok(ReducerStageOutcome::ModelRequestPrepared {
+                request: canonical_draft(&folded)?,
+                component,
+                output_contract,
+                retry_safety,
+                deadline,
+            })
+        }
         other if fold.is_identity() => Ok(other),
         _ => Err(stage_error(MIDDLEWARE_STAGE_UNLANDABLE)),
     }
+}
+
+/// Rebuild a `BeforeModel` model draft from an aggregate fold.
+///
+/// # Precedence: replacement re-bases, then compaction, then additions, then
+/// narrowing
+///
+/// The same field-level rule [`apply_context_prepared`] documents, extended to
+/// the draft's two independent axes. [`StageFold`] keeps no ordering *between*
+/// outcome kinds, so a positional "last writer wins" is not representable; this
+/// applier therefore fixes a stable, documented order:
+///
+/// 1. `Replace` substitutes the **whole draft** — at `BeforeModel` the stage's
+///    payload is the request, so a `Replace` there re-bases model, tools,
+///    output, settings and limits together, not just the messages.
+/// 2. `CompactContext` replaces the **message projection** of whatever base
+///    survived, and nothing else. At most one component can produce one (the
+///    single-compactor rule, `middleware.rs:612`). Its `derived_summaries` and
+///    `checkpoint` have no landing in a `ModelRequestPrepared` and are dropped.
+///    That is a real gap, not a design choice — a working compactor needs its
+///    summary in the projection — but it is unobservable today because
+///    `CompactContext` cannot reach here at all (see the module docs), and
+///    fixing it before the `ContextProvider` port is wired would mean writing
+///    a landing rule no test could exercise through the port. It belongs with
+///    the `protected` work, not ahead of it.
+/// 3. `AddInstructions` (as [`MessageRole::System`]) then `AddContext` (as
+///    [`MessageRole::User`]) append, each group in chain order.
+/// 4. `FilterTools` intersects the surviving tool set.
+///
+/// Narrowing last is not arbitrary: intersection is monotone, so applying it
+/// after a `Replace` that widened the tool list still honours every component's
+/// restriction, whereas the reverse order would let a later `Replace`
+/// resurrect a tool a `FilterTools` had already removed.
+///
+/// # Errors
+///
+/// Returns [`MIDDLEWARE_STAGE_BOUNDS_EXCEEDED`] when the rebuilt message array
+/// would exceed [`ModelRequestDraft::MAX_MESSAGES`], and
+/// `middleware_stage_payload_invalid` when a `Replace` payload is not a model
+/// draft, an added item cannot become a valid message, or the rebuilt draft
+/// fails its own `validate` (duplicate tool name, oversized collection).
+fn apply_model_draft<C: Clock, R: RandomSource>(
+    fold: &StageFold,
+    base: ModelRequestDraft,
+    sources: &SettlementSources<C, R>,
+) -> Result<ModelRequestDraft, RunHandleError> {
+    let mut draft = match fold.replacement.as_ref() {
+        Some(replacement) => parse_draft(replacement)?,
+        None => base,
+    };
+    if let Some(compaction) = fold.compaction.as_ref() {
+        draft.messages = compaction.replacement_messages.clone();
+    }
+    if !fold.instructions.is_empty() || !fold.context.is_empty() {
+        let mut messages = draft.messages.to_vec();
+        for item in &fold.instructions {
+            messages.push(message_from_item(item, MessageRole::System, sources)?);
+        }
+        for item in &fold.context {
+            messages.push(message_from_item(item, MessageRole::User, sources)?);
+        }
+        draft.messages = messages.into();
+    }
+    // Unconditional, not folded into the branch above: `StageFold::accumulate`
+    // bounds-checks its own additions and its compaction projection
+    // (`middleware_driver.rs`'s `check_bounds`), but it never inspects a
+    // `Replace` payload, so a replacement draft is the one way the array can
+    // arrive here oversized with nothing appended. Reaching `validate` in that
+    // case would report it as `middleware_stage_payload_invalid` — a different
+    // stable code for the identical condition.
+    if draft.messages.len() > ModelRequestDraft::MAX_MESSAGES {
+        return Err(stage_error(MIDDLEWARE_STAGE_BOUNDS_EXCEEDED));
+    }
+    if let Some(retained) = fold.retained_tools.as_ref() {
+        draft.tools = draft
+            .tools
+            .iter()
+            .filter(|tool| retained.contains(&tool.id))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+    }
+    draft
+        .validate()
+        .map_err(|_| stage_error(MIDDLEWARE_STAGE_PAYLOAD_INVALID))?;
+    Ok(draft)
 }
 
 /// Rebuild a `ContextPrepared` message array from an aggregate fold.
@@ -553,8 +817,9 @@ fn message_from_item<C: Clock, R: RandomSource>(
 ///
 /// # Errors
 ///
-/// Forwards `stage_allocation`'s admissibility rejection, the coordinator's
-/// error, or `middleware_stage_payload_invalid` when an id bag is invalid.
+/// Forwards `stage_allocation`'s admissibility rejection **re-classified** by
+/// [`folded_allocation_error`], the coordinator's error, or
+/// `middleware_stage_payload_invalid` when an id bag is invalid.
 pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
@@ -562,7 +827,8 @@ pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
     cursor: StageCursor,
     outcome: ReducerStageOutcome,
 ) -> Result<CommitOutcome, RunHandleError> {
-    let ids = stage_allocation(coordinator.state(), cursor, &outcome, sources)?;
+    let ids = stage_allocation(coordinator.state(), cursor, &outcome, sources)
+        .map_err(folded_allocation_error)?;
     let settled = StageSettled { cursor, outcome };
     let input = KernelInput::StageSettled(settled.clone());
     let env = TransitionEnv { now, ids };
@@ -576,6 +842,39 @@ pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
         Ok(_) | Err(_) => env,
     };
     submit_settled(coordinator, env, settled).await
+}
+
+/// Re-classify [`stage_allocation`]'s rejection of a **folded** outcome as a
+/// middleware failure rather than a worker fault.
+///
+/// `stage_allocation` reports every admissibility rejection as
+/// [`RunHandleError::ToolSettlement`] — it was written for the tool-settlement
+/// path, where that classification is right. Both worker loops' `result_fault_code`
+/// (`task.rs:1173-1190`, `host_task.rs:1389-1406`) list `ToolSettlement` among
+/// the variants that **tear down the command intake and set
+/// `RunStatus::Faulted`**. For a folded outcome that is the wrong blast radius:
+/// a middleware fold the kernel will not admit must fail the *run* that
+/// submitted it and leave the worker healthy, which is precisely why
+/// [`RunHandleError::Middleware`] exists (`run_types.rs:213-222`).
+///
+/// This was unreachable before `BeforeModel` folded: [`apply_fold`] could only
+/// produce `Fail`, `Retry` at `BeforeFinalize`, and `ContextPrepared` at
+/// `PrepareContext`, none of which hits a guarded arm of `stage_allocation`.
+/// [`apply_model_draft`] makes it reachable, because
+/// `ModelRequestPrepared` has one: a request whose `output_contract.kind` is not
+/// `EffectOutputKind::ModelResponse` is rejected with
+/// `stage_allocation_model_request_contract_mismatch` (`settlement.rs:573-577`).
+///
+/// The stable code is preserved verbatim, so the diagnosis does not change —
+/// only the classification does. Non-`ToolSettlement` errors pass through
+/// untouched.
+fn folded_allocation_error(error: RunHandleError) -> RunHandleError {
+    match error {
+        RunHandleError::ToolSettlement { code } => RunHandleError::Middleware {
+            code: Arc::from(code),
+        },
+        other => other,
+    }
 }
 
 /// The fixed id bag `decide_limit` demands when it intercepts an input
@@ -624,6 +923,21 @@ fn canonical_message(message: &Message) -> Result<RawJson, RunHandleError> {
 fn parse_messages(value: &RawJson) -> Result<Vec<Message>, RunHandleError> {
     serde_json::from_slice(value.as_bytes())
         .map_err(|_| stage_error(MIDDLEWARE_STAGE_PAYLOAD_INVALID))
+}
+
+/// Parse a committed `ModelRequestPrepared` request, or a `BeforeModel`
+/// `Replace` payload, back into a [`ModelRequestDraft`].
+fn parse_draft(value: &RawJson) -> Result<ModelRequestDraft, RunHandleError> {
+    serde_json::from_slice(value.as_bytes())
+        .map_err(|_| stage_error(MIDDLEWARE_STAGE_PAYLOAD_INVALID))
+}
+
+/// Re-canonicalize a folded draft into the `RawJson` the outcome carries.
+fn canonical_draft(draft: &ModelRequestDraft) -> Result<RawJson, RunHandleError> {
+    let bytes = draft
+        .canonical_bytes()
+        .map_err(|_| stage_error(MIDDLEWARE_STAGE_PAYLOAD_INVALID))?;
+    RawJson::parse(&bytes).map_err(|_| stage_error(MIDDLEWARE_STAGE_PAYLOAD_INVALID))
 }
 
 /// JCS-canonical bytes for the terminal candidate gated by `BeforeFinalize`,
@@ -1069,6 +1383,7 @@ mod tests {
             &mut coordinator,
             None,
             &sources,
+            &test_profile(),
             facade_env,
             before_run_settled(),
         ))
@@ -1099,6 +1414,7 @@ mod tests {
             &mut coordinator,
             Some(&driver),
             &sources,
+            &test_profile(),
             env(1_100, &[2], &[], &[], &[], &[], &[], 102),
             before_run_settled(),
         ))
@@ -1122,6 +1438,7 @@ mod tests {
             &mut coordinator,
             Some(&driver),
             &sources,
+            &test_profile(),
             env(1_100, &[2], &[], &[], &[], &[], &[], 102),
             before_run_settled(),
         ))
@@ -1134,12 +1451,212 @@ mod tests {
         );
     }
 
+    /// `BeforeModel` now folds, so its passthrough is no longer a stage-level
+    /// exclusion — it is the ordinary identity/inactive path, and it must still
+    /// reuse the facade's pre-minted ids byte for byte.
     #[test]
-    fn before_model_is_passthrough_until_the_typed_stage_input_lands() {
-        // Task 8 owns `StageInput::BeforeModel(Box<BeforeModelInput>)`. Until it
-        // lands, BeforeModel is a documented passthrough at this choke point.
+    fn before_model_passthrough_still_reuses_the_facade_ids() {
+        for outcome in [
+            // No component registered at BeforeModel at all.
+            StageOutcome::AddContext(Arc::from([item("never-runs")])),
+            // A component that runs and contributes nothing.
+            StageOutcome::Continue,
+        ] {
+            let mut coordinator = accepted_coordinator(RunLimits::empty());
+            drive_to_before_model(&mut coordinator);
+            let sources = test_sources();
+            let inactive = matches!(outcome, StageOutcome::AddContext(_));
+            let driver = driver_for(
+                "fixture.model",
+                if inactive {
+                    Stage::PrepareContext
+                } else {
+                    Stage::BeforeModel
+                },
+                outcome,
+            );
+            let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+
+            let committed = block_on(settle_facade_stage(
+                &mut coordinator,
+                Some(&driver),
+                &sources,
+                &test_profile(),
+                before_model_env(),
+                model_request_settled(&draft),
+            ))
+            .expect("passthrough");
+
+            assert_eq!(
+                committed_record_ids(&committed),
+                vec![id(5), id(6)],
+                "a BeforeModel passthrough must reuse the facade's env byte for byte"
+            );
+            assert_eq!(
+                committed_model_request(&coordinator),
+                draft,
+                "a passthrough must not perturb the facade's own model draft"
+            );
+        }
+    }
+
+    /// `Fail` is the *other* outcome the kernel admits at `BeforeModel`
+    /// (`decide.rs:1165-1177`), and it carries no draft. Folding it is
+    /// impossible, so it must land exactly as it would with no middleware
+    /// installed — otherwise registering a component at the stage, even one
+    /// that only observes, would stop a deliberate stage failure from
+    /// settling at all.
+    #[test]
+    fn a_fail_settled_at_before_model_passes_through_the_chain() {
         let mut coordinator = accepted_coordinator(RunLimits::empty());
-        drive_to_prepare_context(&mut coordinator);
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let driver = driver_for(
+            "fixture.model",
+            Stage::BeforeModel,
+            StageOutcome::AddContext(Arc::from([item("must-not-run")])),
+        );
+        assert!(driver.is_active(Stage::BeforeModel));
+
+        let committed = block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            // `Fail` at a non-BeforeFinalize stage needs one record and
+            // nothing else (`decide.rs:1165-1177`).
+            env(1_300, &[5], &[], &[], &[], &[], &[], 104),
+            StageSettled {
+                cursor: StageCursor {
+                    cycle: 0,
+                    stage: Stage::BeforeModel,
+                },
+                outcome: ReducerStageOutcome::Fail(
+                    ErrorDescriptor::new(
+                        "fixture_before_model_failure",
+                        "fixture",
+                        ErrorCategory::Middleware,
+                        false,
+                    )
+                    .expect("descriptor"),
+                ),
+            },
+        ))
+        .expect("a Fail at BeforeModel must still settle with a component registered");
+
+        assert_eq!(
+            committed_record_ids(&committed),
+            vec![id(5)],
+            "the failure must reuse the facade's own pre-minted record id"
+        );
+        assert!(
+            coordinator.state().pending_model_effect.is_none(),
+            "a failed BeforeModel must not have opened a model effect"
+        );
+    }
+
+    // ---- BeforeModel fold -------------------------------------------------
+
+    fn tool_id(name: &str) -> ToolId {
+        ToolId::parse(format!("fixture.{name}")).expect("tool id")
+    }
+
+    fn tool_spec(name: &str) -> crate::model::ToolSpec {
+        crate::model::ToolSpec {
+            id: tool_id(name),
+            model_name: Arc::from(name),
+            title: Arc::from(name),
+            description: Arc::from("fixture tool"),
+            input_schema: RawJson::parse(br#"{"type":"object"}"#).expect("input schema"),
+            output_schema: None,
+            execution: finstack_ai_kernel::ToolExecutionMode::Sequential,
+            side_effect: crate::model::SideEffectClass::ReadOnly,
+            retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
+            approval: crate::model::ApprovalMetadata {
+                requirement: crate::model::ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+            max_result_bytes: 4_096,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    /// `context_window_tokens - (reserved_output_tokens + provider_overhead_tokens)`
+    /// = `10_000 - (1_000 + 500)`.
+    const FIXTURE_HARD_INPUT_TOKENS: u64 = 8_500;
+
+    fn test_profile() -> crate::LockedModelContextProfile {
+        crate::model::resolve_model_context_profile(
+            crate::model::ModelContextProfile {
+                provider: Arc::from("fixture-provider"),
+                model: crate::model::ModelName::try_new("fixture-model").expect("model"),
+                hard_input_bytes: 1_000_000,
+                context_window_tokens: 10_000,
+                max_output_tokens: 1_000,
+                reserved_output_tokens: 1_000,
+                provider_overhead_tokens: 500,
+                estimator: crate::model::TokenEstimatorRef {
+                    id: Arc::from("fixture-estimator"),
+                    version: Arc::from("1"),
+                    source: crate::model::TokenEstimatorSource::ProjectExact,
+                },
+            },
+            None,
+            None,
+            false,
+        )
+        .expect("locked profile")
+    }
+
+    fn request_draft(
+        messages: Vec<Message>,
+        tools: Vec<crate::model::ToolSpec>,
+    ) -> crate::ModelRequestDraft {
+        crate::ModelRequestDraft {
+            model: crate::model::ModelName::try_new("fixture-model").expect("model"),
+            messages: messages.into(),
+            tools: tools.into(),
+            output: finstack_ai_kernel::OutputSpec::PlainText,
+            settings: crate::model::ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: crate::model::ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: FIXTURE_HARD_INPUT_TOKENS,
+                max_output_tokens: 1_000,
+            },
+        }
+    }
+
+    fn model_output_contract() -> finstack_ai_kernel::EffectOutputContract {
+        finstack_ai_kernel::EffectOutputContract {
+            kind: finstack_ai_kernel::EffectOutputKind::ModelResponse,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br#"{"type":"model_response"}"#),
+        }
+    }
+
+    fn model_request_settled(draft: &crate::ModelRequestDraft) -> StageSettled {
+        StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::BeforeModel,
+            },
+            outcome: ReducerStageOutcome::ModelRequestPrepared {
+                request: RawJson::parse(draft.canonical_bytes().expect("canonical bytes"))
+                    .expect("request"),
+                component: None,
+                output_contract: model_output_contract(),
+                retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
+                deadline: None,
+            },
+        }
+    }
+
+    /// Drive an accepted coordinator to the `BeforeModel` cursor.
+    fn drive_to_before_model(coordinator: &mut CommitCoordinator) {
+        drive_to_prepare_context(coordinator);
         block_on(coordinator.submit(
             env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
             KernelInput::StageSettled(StageSettled {
@@ -1153,42 +1670,599 @@ mod tests {
             }),
         ))
         .expect("context");
+    }
+
+    /// The facade's own id bag for a `ModelRequestPrepared` settlement:
+    /// `(records 2, events 1, effects 1, turns 0, model_requests 1, messages 0)`.
+    fn before_model_env() -> TransitionEnv {
+        env(1_300, &[5, 6], &[2], &[103], &[], &[102], &[], 104)
+    }
+
+    /// The model draft the kernel actually committed for the pending effect.
+    fn committed_model_request(coordinator: &CommitCoordinator) -> crate::ModelRequestDraft {
+        let pending = coordinator
+            .state()
+            .pending_model_effect
+            .as_ref()
+            .expect("pending model effect");
+        let finstack_ai_kernel::EffectInput::Model { request } = pending.requested.input() else {
+            panic!("the pending model effect must carry a model input");
+        };
+        serde_json::from_slice(request.as_bytes()).expect("committed draft")
+    }
+
+    #[test]
+    fn before_model_filter_tools_narrows_the_committed_model_request() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
         let sources = test_sources();
         let driver = driver_for(
-            "fixture.model",
+            "fixture.filter",
             Stage::BeforeModel,
-            StageOutcome::AddContext(Arc::from([item("would-be-injected")])),
+            StageOutcome::FilterTools(Arc::from([tool_id("keep")])),
+        );
+        let draft = request_draft(
+            vec![user_message(4, "hi")],
+            vec![tool_spec("keep"), tool_spec("drop")],
         );
 
-        let outcome = block_on(settle_facade_stage(
+        block_on(settle_facade_stage(
             &mut coordinator,
             Some(&driver),
             &sources,
-            env(1_300, &[5, 6], &[2], &[103], &[], &[102], &[], 104),
-            StageSettled {
-                cursor: StageCursor {
-                    cycle: 0,
-                    stage: Stage::BeforeModel,
-                },
-                outcome: ReducerStageOutcome::ModelRequestPrepared {
-                    request: RawJson::parse(br#"{"messages":[]}"#).expect("request"),
-                    component: None,
-                    output_contract: finstack_ai_kernel::EffectOutputContract {
-                        kind: finstack_ai_kernel::EffectOutputKind::ModelResponse,
-                        schema_version: 1,
-                        schema_digest: Digest::raw_json(br#"{"type":"model_response"}"#),
-                    },
-                    retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
-                    deadline: None,
-                },
-            },
+            &test_profile(),
+            before_model_env(),
+            model_request_settled(&draft),
         ))
-        .expect("passthrough");
+        .expect("settles");
 
         assert_eq!(
-            committed_record_ids(&outcome),
-            vec![id(5), id(6)],
-            "BeforeModel must still reuse the facade's env until Task 8"
+            committed_model_request(&coordinator)
+                .tools
+                .iter()
+                .map(|tool| tool.id.clone())
+                .collect::<Vec<_>>(),
+            vec![tool_id("keep")],
+            "FilterTools did not narrow the committed model draft"
+        );
+    }
+
+    #[test]
+    fn before_model_add_context_appends_to_the_committed_model_request() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let driver = driver_for(
+            "fixture.context",
+            Stage::BeforeModel,
+            StageOutcome::AddContext(Arc::from([item("injected-before-model")])),
+        );
+        let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+
+        block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            before_model_env(),
+            model_request_settled(&draft),
+        ))
+        .expect("settles");
+
+        let committed = committed_model_request(&coordinator);
+        assert_eq!(
+            committed
+                .messages
+                .iter()
+                .map(message_text)
+                .collect::<Vec<_>>(),
+            vec!["hi".to_owned(), "injected-before-model".to_owned()],
+            "AddContext must append after the facade's own draft messages"
+        );
+        assert_eq!(committed.messages[1].role(), MessageRole::User);
+    }
+
+    // ---- BeforeModel: compaction is unreachable until the context port runs
+
+    fn compactor_descriptor(component: &str) -> MiddlewareDescriptor {
+        MiddlewareDescriptor {
+            role: MiddlewareRole::ContextCompactor {
+                strategy_id: Arc::from("fixture.strategy"),
+                strategy_version: 1,
+            },
+            order: MiddlewareOrder {
+                tier: OrderTier::ContextCompaction,
+                priority: 0,
+                before: Arc::from([]),
+                after: Arc::from([]),
+            },
+            ..descriptor(component, Stage::BeforeModel)
+        }
+    }
+
+    fn validator_descriptor(component: &str) -> MiddlewareDescriptor {
+        MiddlewareDescriptor {
+            role: MiddlewareRole::PostCompactionValidator,
+            order: MiddlewareOrder {
+                tier: OrderTier::PostCompactionValidation,
+                priority: 0,
+                before: Arc::from([]),
+                after: Arc::from([]),
+            },
+            ..descriptor(component, Stage::BeforeModel)
+        }
+    }
+
+    fn driver_from(descriptor: MiddlewareDescriptor, outcome: StageOutcome) -> StageDriver {
+        let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(Fixed {
+            descriptor,
+            outcome,
+        });
+        StageDriver::new(
+            Arc::new(
+                ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                    .expect("chain"),
+            ),
+            CancellationSignal::new(),
+        )
+    }
+
+    /// The `BeforeModelInput` this choke point actually assembles for `draft`.
+    fn assembled_before_model_input(draft: &crate::ModelRequestDraft) -> BeforeModelInput {
+        let StageInput::BeforeModel(input) = stage_input(
+            &state_with_messages(Vec::new()),
+            Stage::BeforeModel,
+            &model_request_settled(draft).outcome,
+            &test_profile(),
+        )
+        .expect("before model input") else {
+            panic!("BeforeModel must be the typed stage input");
+        };
+        *input
+    }
+
+    /// A `CompactionResult` whose evidence is computed from `input` and is
+    /// therefore correct in every respect the validator checks — digests,
+    /// covered/retained entry ids, token accounting. The *only* contract it can
+    /// still violate is the one this choke point cannot satisfy.
+    fn evidence_correct_compaction(
+        input: &BeforeModelInput,
+        retained: &[Message],
+    ) -> crate::middleware::CompactionResult {
+        let replacement_messages: Arc<[Message]> = Arc::from(retained.to_vec());
+        let by_message = |message: &Message| {
+            input
+                .source_entries
+                .iter()
+                .find(|entry| entry.message.id() == message.id())
+                .expect("retained message must come from a source entry")
+                .entry_id
+        };
+        crate::middleware::CompactionResult {
+            evidence: crate::middleware::CompactionEvidence {
+                strategy_id: Arc::from("fixture.strategy"),
+                strategy_version: 1,
+                configuration_digest: Digest::raw_json(b"{}"),
+                model_context_profile_digest: input.model_context_profile_digest,
+                source_digest: crate::middleware::compaction_source_digest(&input.source_entries)
+                    .expect("source digest"),
+                protected_item_set_digest: crate::middleware::compaction_protected_set_digest(
+                    &input
+                        .source_entries
+                        .iter()
+                        .filter(|entry| entry.protected)
+                        .map(|entry| entry.entry_id)
+                        .collect::<Vec<_>>(),
+                )
+                .expect("protected digest"),
+                covered_entry_ids: input
+                    .source_entries
+                    .iter()
+                    .map(|entry| entry.entry_id)
+                    .collect(),
+                retained_entry_ids: retained.iter().map(by_message).collect(),
+                projection_digest: crate::middleware::compaction_projection_digest(
+                    &replacement_messages,
+                )
+                .expect("projection digest"),
+                estimated_tokens_before: 10,
+                estimated_tokens_after: 5,
+                summary_digest: None,
+                cache_impact: crate::middleware::PromptCacheImpact::CacheInvalidated,
+            },
+            replacement_messages,
+            derived_summaries: Arc::from([]),
+            checkpoint: None,
+        }
+    }
+
+    /// The causal chain, pinned end to end.
+    ///
+    /// `protected` is authoritative-from-the-context-port (`context.rs:138`) and
+    /// a compactor may not set it; the `ContextProvider` port has no production
+    /// driver, so [`before_model_input`] can only assemble unprotected entries;
+    /// so `validate_compaction_result` (`middleware.rs:998-1002`) refuses every
+    /// result. Wiring `ContextProvider` is the unblock — patching the compactor
+    /// is not.
+    ///
+    /// The compaction result here is evidence-correct by construction, and the
+    /// second half of the test flips **only** `protected` and shows the very
+    /// same result validating. That is what makes this a proof that the
+    /// unprotected entry is the sole obstruction, rather than a test that merely
+    /// observes some rejection.
+    #[test]
+    fn compact_context_is_rejected_until_the_context_port_is_driven() {
+        let retained = user_message(4, "hi");
+        let draft = request_draft(vec![retained.clone()], Vec::new());
+        let descriptor = compactor_descriptor("fixture.compactor");
+        let input = assembled_before_model_input(&draft);
+        assert!(
+            input.source_entries.iter().all(|entry| !entry.protected),
+            "the assembled input must carry no protected entry"
+        );
+        let result = evidence_correct_compaction(&input, std::slice::from_ref(&retained));
+
+        let rejected = crate::middleware::validate_compaction_result(&descriptor, &input, &result)
+            .expect_err("an unprotected trailing entry cannot satisfy the compaction contract");
+        assert_eq!(
+            rejected.code(),
+            crate::middleware::COMPACTION_RESULT_INVALID
+        );
+
+        // Flip only `protected`, recompute the two digests that depend on it,
+        // and the identical projection now validates.
+        let protected_entries: Arc<[CompactionSourceEntry]> = input
+            .source_entries
+            .iter()
+            .map(|entry| CompactionSourceEntry {
+                protected: true,
+                ..entry.clone()
+            })
+            .collect();
+        let protected_input = BeforeModelInput {
+            source_entries: protected_entries,
+            ..input
+        };
+        let protected_result =
+            evidence_correct_compaction(&protected_input, std::slice::from_ref(&retained));
+        crate::middleware::validate_compaction_result(
+            &descriptor,
+            &protected_input,
+            &protected_result,
+        )
+        .expect("with a protected trailing user entry the same projection is valid");
+    }
+
+    /// The same limitation observed through the choke point rather than through
+    /// the validator: a registered compactor's `CompactContext` fails the run
+    /// with the validator's own stable code, and never reaches the kernel.
+    #[test]
+    fn a_compact_context_chain_fails_the_run_at_the_choke_point() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let retained = user_message(4, "hi");
+        let draft = request_draft(vec![retained.clone()], Vec::new());
+        let input = assembled_before_model_input(&draft);
+        let driver = driver_from(
+            compactor_descriptor("fixture.compactor"),
+            StageOutcome::CompactContext(Box::new(evidence_correct_compaction(
+                &input,
+                std::slice::from_ref(&retained),
+            ))),
+        );
+
+        let error = block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            before_model_env(),
+            model_request_settled(&draft),
+        ))
+        .expect_err("no source entry can be protected, so compaction cannot validate");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == crate::middleware::COMPACTION_RESULT_INVALID),
+            "expected the compaction validator's own stable code, got {error:?}"
+        );
+        assert!(
+            coordinator.state().pending_model_effect.is_none(),
+            "a rejected fold must not have committed a model effect"
+        );
+    }
+
+    #[test]
+    fn post_compaction_validator_may_not_add_context() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let driver = driver_from(
+            validator_descriptor("fixture.validator"),
+            StageOutcome::AddContext(Arc::from([item("not-allowed-here")])),
+        );
+        let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+
+        let error = block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            before_model_env(),
+            model_request_settled(&draft),
+        ))
+        .expect_err("the post-compaction narrowing must reject AddContext");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == "middleware_outcome_not_allowed"),
+            "expected the post-compaction narrowing (middleware.rs:956) to reject it, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn request_compaction_model_folds_to_unlandable_rather_than_being_dropped() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let driver = driver_from(
+            compactor_descriptor("fixture.compactor"),
+            StageOutcome::RequestCompactionModel(Box::new(
+                crate::middleware::CompactionModelRequest {
+                    model: finstack_ai_kernel::ComponentRef::new(
+                        finstack_ai_kernel::ComponentId::parse("fixture.child-model")
+                            .expect("component"),
+                        None,
+                    ),
+                    request: request_draft(Vec::new(), Vec::new()),
+                    budget_scope_id: id(9),
+                    source_sensitivity: Sensitivity::Internal,
+                    residency_policy_digest: Digest::raw_json(b"residency"),
+                    resume_state: RawJson::parse(b"{}").expect("resume"),
+                },
+            )),
+        );
+        let draft = request_draft(vec![user_message(4, "hi")], Vec::new());
+
+        let error = block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            before_model_env(),
+            model_request_settled(&draft),
+        ))
+        .expect_err("RequestCompactionModel has no StageSettled landing path");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == MIDDLEWARE_STAGE_UNLANDABLE),
+            "expected the stable unlandable code, got {error:?}"
+        );
+    }
+
+    // ---- BeforeModel: draft applier --------------------------------------
+
+    #[test]
+    fn a_before_model_replace_substitutes_the_whole_draft_not_just_its_messages() {
+        let sources = test_sources();
+        let base = request_draft(vec![user_message(4, "base")], vec![tool_spec("base-tool")]);
+        let substitute = request_draft(
+            vec![user_message(11, "replaced")],
+            vec![tool_spec("substitute-tool")],
+        );
+        let fold = StageFold {
+            replacement: Some(canonical_draft(&substitute).expect("replacement")),
+            ..StageFold::default()
+        };
+
+        let applied = apply_model_draft(&fold, base, &sources).expect("applied");
+
+        assert_eq!(
+            applied, substitute,
+            "at BeforeModel the stage payload is the whole request, so Replace re-bases all of it"
+        );
+    }
+
+    #[test]
+    fn a_before_model_replace_still_admits_additive_and_narrowing_contributions() {
+        let sources = test_sources();
+        let base = request_draft(vec![user_message(4, "base")], Vec::new());
+        let substitute = request_draft(
+            vec![user_message(11, "replaced")],
+            vec![tool_spec("keep"), tool_spec("drop")],
+        );
+        let fold = StageFold {
+            replacement: Some(canonical_draft(&substitute).expect("replacement")),
+            instructions: vec![item("system-add")],
+            context: vec![item("context-add")],
+            retained_tools: Some(BTreeSet::from([tool_id("keep")])),
+            ..StageFold::default()
+        };
+
+        let applied = apply_model_draft(&fold, base, &sources).expect("applied");
+
+        assert_eq!(
+            applied
+                .messages
+                .iter()
+                .map(message_text)
+                .collect::<Vec<_>>(),
+            vec![
+                "replaced".to_owned(),
+                "system-add".to_owned(),
+                "context-add".to_owned()
+            ],
+            "Replace rebases; additive contributions still land, after it"
+        );
+        assert_eq!(applied.messages[1].role(), MessageRole::System);
+        assert_eq!(applied.messages[2].role(), MessageRole::User);
+        assert_eq!(
+            applied
+                .tools
+                .iter()
+                .map(|tool| tool.id.clone())
+                .collect::<Vec<_>>(),
+            vec![tool_id("keep")],
+            "narrowing applies after Replace, so a Replace cannot resurrect a filtered tool"
+        );
+    }
+
+    #[test]
+    fn an_oversized_before_model_fold_is_a_stable_bounds_error() {
+        let sources = test_sources();
+        let fold = StageFold {
+            context: (0..crate::ModelRequestDraft::MAX_MESSAGES)
+                .map(|_| item("x"))
+                .collect(),
+            ..StageFold::default()
+        };
+
+        let error = apply_model_draft(
+            &fold,
+            request_draft(vec![user_message(4, "base")], Vec::new()),
+            &sources,
+        )
+        .expect_err("base + additions exceed the model request message bound");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
+            "expected a stable bounds error, got {error:?}"
+        );
+    }
+
+    /// The `Replace` payload is the one route to an oversized message array
+    /// that `StageFold::accumulate`'s own bounds check cannot see, because it
+    /// never inspects the replacement. It must still report the *bounds* code,
+    /// not the payload one — the condition is identical to the case above.
+    #[test]
+    fn an_oversized_before_model_replace_is_the_same_stable_bounds_error() {
+        let sources = test_sources();
+        let oversized = request_draft(
+            (0..=crate::ModelRequestDraft::MAX_MESSAGES)
+                .map(|ordinal| user_message(u64::try_from(ordinal).expect("ordinal") + 1_000, "x"))
+                .collect(),
+            Vec::new(),
+        );
+        // Deliberately NOT `canonical_draft`: that goes through
+        // `ModelRequestDraft::canonical_bytes`, which validates first and so
+        // cannot express this payload at all. A component's `Replace` is raw
+        // bytes that never passed through the draft's own constructor, which
+        // is exactly why this check cannot be left to `validate`.
+        let fold = StageFold {
+            replacement: Some(
+                RawJson::parse(
+                    serde_json_canonicalizer::to_vec(&oversized).expect("raw replacement"),
+                )
+                .expect("replacement"),
+            ),
+            ..StageFold::default()
+        };
+
+        let error = apply_model_draft(
+            &fold,
+            request_draft(vec![user_message(4, "base")], Vec::new()),
+            &sources,
+        )
+        .expect_err("a replacement draft can exceed the message bound on its own");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == MIDDLEWARE_STAGE_BOUNDS_EXCEEDED),
+            "a Replace overflow must report the bounds code, not the payload one: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_before_model_replace_that_is_not_a_model_draft_is_a_stable_payload_error() {
+        let sources = test_sources();
+        let fold = StageFold {
+            replacement: Some(RawJson::parse(b"[]").expect("not a draft")),
+            ..StageFold::default()
+        };
+
+        let error = apply_model_draft(
+            &fold,
+            request_draft(vec![user_message(4, "base")], Vec::new()),
+            &sources,
+        )
+        .expect_err("a message array is not a model request draft");
+
+        assert!(matches!(&error, RunHandleError::Middleware { code }
+            if code.as_ref() == "middleware_stage_payload_invalid"));
+    }
+
+    // ---- folded-allocation rejection is a run failure, not a worker fault --
+
+    /// `stage_allocation` speaks [`RunHandleError::ToolSettlement`], which both
+    /// worker loops' `result_fault_code` (`task.rs:1173-1190`,
+    /// `host_task.rs:1389-1406`) treat as a worker fault: intake torn down,
+    /// `RunStatus::Faulted`. A middleware fold the kernel will not admit must
+    /// fail only the run.
+    #[test]
+    fn folded_allocation_rejection_is_reclassified_as_a_middleware_failure() {
+        let error = folded_allocation_error(RunHandleError::ToolSettlement {
+            code: "stage_allocation_model_request_contract_mismatch",
+        });
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == "stage_allocation_model_request_contract_mismatch"),
+            "the diagnosis must survive verbatim while the classification changes, got {error:?}"
+        );
+        // Anything that is already correctly classified passes through.
+        assert!(matches!(
+            folded_allocation_error(RunHandleError::InvalidConfiguration),
+            RunHandleError::InvalidConfiguration
+        ));
+    }
+
+    /// End to end: the *only* `stage_allocation` guard a fold can now trip.
+    /// `apply_model_draft` re-emits `ModelRequestPrepared` carrying the facade's
+    /// own `output_contract`, so a base outcome with a non-`ModelResponse`
+    /// contract makes `stage_allocation_model_request_contract_mismatch`
+    /// reachable for the first time. Before `BeforeModel` folded, `apply_fold`
+    /// could only produce `Fail`, `Retry`, and `ContextPrepared`, none of which
+    /// hits a guarded arm.
+    #[test]
+    fn a_fold_the_kernel_cannot_allocate_for_fails_the_run_not_the_worker() {
+        let mut coordinator = accepted_coordinator(RunLimits::empty());
+        drive_to_before_model(&mut coordinator);
+        let sources = test_sources();
+        let driver = driver_for(
+            "fixture.filter",
+            Stage::BeforeModel,
+            StageOutcome::FilterTools(Arc::from([tool_id("keep")])),
+        );
+        let draft = request_draft(
+            vec![user_message(4, "hi")],
+            vec![tool_spec("keep"), tool_spec("drop")],
+        );
+        let mut settled = model_request_settled(&draft);
+        let ReducerStageOutcome::ModelRequestPrepared {
+            ref mut output_contract,
+            ..
+        } = settled.outcome
+        else {
+            panic!("fixture must be a prepared model request");
+        };
+        output_contract.kind = finstack_ai_kernel::EffectOutputKind::ToolResult;
+
+        let error = block_on(settle_facade_stage(
+            &mut coordinator,
+            Some(&driver),
+            &sources,
+            &test_profile(),
+            before_model_env(),
+            settled,
+        ))
+        .expect_err("a non-ModelResponse contract has no stage allocation");
+
+        assert!(
+            matches!(&error, RunHandleError::Middleware { code }
+                if code.as_ref() == "stage_allocation_model_request_contract_mismatch"),
+            "a fold the kernel cannot allocate for must be a run failure, not a worker fault: {error:?}"
         );
     }
 
@@ -1209,6 +2283,7 @@ mod tests {
             &mut coordinator,
             Some(&driver),
             &sources,
+            &test_profile(),
             env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
             StageSettled {
                 cursor: StageCursor {
@@ -1358,8 +2433,13 @@ mod tests {
     #[test]
     fn after_model_stage_input_is_the_latest_message() {
         let state = state_with_messages(vec![user_message(1, "u1"), assistant_message(2, "a1")]);
-        let input = stage_input(&state, Stage::AfterModel, &ReducerStageOutcome::Continue)
-            .expect("after model input");
+        let input = stage_input(
+            &state,
+            Stage::AfterModel,
+            &ReducerStageOutcome::Continue,
+            &test_profile(),
+        )
+        .expect("after model input");
         assert_eq!(input.stage(), Stage::AfterModel);
         let StageInput::AfterModel { value } = input else {
             panic!("wrong variant");
@@ -1374,6 +2454,7 @@ mod tests {
             &state_with_messages(Vec::new()),
             Stage::AfterModel,
             &ReducerStageOutcome::Continue,
+            &test_profile(),
         )
         .expect_err("no message to observe");
         assert!(matches!(&error, RunHandleError::Middleware { code }
@@ -1387,6 +2468,7 @@ mod tests {
             &state,
             Stage::AfterToolBatch,
             &ReducerStageOutcome::Continue,
+            &test_profile(),
         )
         .expect("after tool batch input");
         let StageInput::AfterToolBatch { value } = input else {
@@ -1418,6 +2500,7 @@ mod tests {
             &state,
             Stage::BeforeFinalize,
             &ReducerStageOutcome::FinalizeAccepted,
+            &test_profile(),
         )
         .expect("before finalize input");
         let StageInput::BeforeFinalize { candidate: value } = input else {
@@ -1431,6 +2514,7 @@ mod tests {
             &finstack_ai_kernel::KernelState::default(),
             Stage::BeforeFinalize,
             &ReducerStageOutcome::FinalizeAccepted,
+            &test_profile(),
         )
         .expect_err("no candidate to observe");
         assert!(matches!(&error, RunHandleError::Middleware { code }
@@ -1438,22 +2522,93 @@ mod tests {
     }
 
     #[test]
-    fn stage_input_refuses_the_two_stages_this_choke_point_does_not_fold() {
-        for stage in [Stage::BeforeModel, Stage::BeforeToolBatch] {
-            assert!(
-                !folds_at(stage),
-                "{stage:?} must be excluded from the choke point's fold set"
-            );
-            assert!(
-                stage_input(
-                    &state_with_messages(Vec::new()),
-                    stage,
-                    &ReducerStageOutcome::Continue,
-                )
-                .is_err(),
-                "{stage:?} has no untyped stage input to build here"
-            );
-        }
+    fn stage_input_refuses_the_one_stage_this_choke_point_does_not_fold() {
+        assert!(
+            !folds_at(Stage::BeforeToolBatch),
+            "BeforeToolBatch never reaches this choke point"
+        );
+        assert!(
+            stage_input(
+                &state_with_messages(Vec::new()),
+                Stage::BeforeToolBatch,
+                &ReducerStageOutcome::Continue,
+                &test_profile(),
+            )
+            .is_err(),
+            "BeforeToolBatch has no stage input to build here"
+        );
+        assert!(
+            folds_at(Stage::BeforeModel),
+            "BeforeModel folds now that its typed stage input lands"
+        );
+    }
+
+    #[test]
+    fn before_model_stage_input_is_the_typed_input_over_the_committed_draft() {
+        let draft = request_draft(
+            vec![user_message(4, "hi"), assistant_message(5, "hello")],
+            vec![tool_spec("keep")],
+        );
+        let settled = model_request_settled(&draft);
+        let profile = test_profile();
+
+        let input = stage_input(
+            &state_with_messages(Vec::new()),
+            Stage::BeforeModel,
+            &settled.outcome,
+            &profile,
+        )
+        .expect("before model input");
+
+        let StageInput::BeforeModel(before_model) = input else {
+            panic!("BeforeModel must be the typed stage input");
+        };
+        assert_eq!(before_model.request, draft, "the draft round trip is exact");
+        assert_eq!(before_model.model_context_profile_digest, profile.digest);
+        assert_eq!(before_model.hard_input_tokens, FIXTURE_HARD_INPUT_TOKENS);
+        assert!(before_model.checkpoint.is_none());
+        assert_eq!(
+            before_model
+                .source_entries
+                .iter()
+                .map(|entry| entry.entry_id)
+                .collect::<Vec<_>>(),
+            draft
+                .messages
+                .iter()
+                .map(|message| EntryId::from_bytes(message.id().to_bytes()))
+                .collect::<Vec<_>>(),
+            "entry ids must use the kernel's own message-to-entry mapping"
+        );
+        assert!(
+            before_model
+                .source_entries
+                .iter()
+                .all(|entry| !entry.protected && entry.sensitivity == Sensitivity::Internal),
+            "no entry can be protected while the context port has no production driver"
+        );
+        assert_eq!(
+            before_model.source_entries[0].provenance_digest,
+            Digest::raw_json(
+                canonical_message(&draft.messages[0])
+                    .expect("canonical")
+                    .as_bytes()
+            ),
+            "provenance is derived from the message's own canonical bytes"
+        );
+    }
+
+    #[test]
+    fn before_model_stage_input_without_a_prepared_request_is_a_stable_error() {
+        let error = stage_input(
+            &state_with_messages(Vec::new()),
+            Stage::BeforeModel,
+            &ReducerStageOutcome::Continue,
+            &test_profile(),
+        )
+        .expect_err("nothing but a prepared request can carry a draft at this cursor");
+        assert!(matches!(&error, RunHandleError::Middleware { code }
+            if code.as_ref() == "middleware_stage_input_invalid"));
     }
 
     // ---- terminal folds ---------------------------------------------------
@@ -1724,6 +2879,7 @@ mod tests {
             &mut coordinator,
             Some(&driver),
             &sources,
+            &test_profile(),
             env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
             StageSettled {
                 cursor: StageCursor {

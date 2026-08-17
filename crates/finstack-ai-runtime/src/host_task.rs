@@ -341,6 +341,9 @@ impl RunTaskOwner {
 
         let pending = Arc::new(Mutex::new(VecDeque::new()));
         let active = Arc::new(Mutex::new(BTreeMap::new()));
+        // Cloned before the move: the worker needs the locked profile to
+        // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
+        let stage_profile = profile.clone();
         let dispatcher = Arc::new(HostDispatcher {
             model: Arc::clone(&model),
             profile,
@@ -445,6 +448,7 @@ impl RunTaskOwner {
             active,
             sources,
             stage_driver,
+            stage_profile,
         )))
         .map_err(|_| RunHandleError::InvalidConfiguration)?;
         Ok(Self {
@@ -930,6 +934,7 @@ async fn run_worker_with_effects<C, R>(
     active: Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>,
     sources: SettlementSources<C, R>,
     stage_driver: Option<StageDriver>,
+    profile: LockedModelContextProfile,
 ) where
     C: Clock + crate::PortObject,
     R: RandomSource + crate::PortObject,
@@ -950,6 +955,7 @@ async fn run_worker_with_effects<C, R>(
             &shared,
             stage_driver.as_ref(),
             &sources,
+            &profile,
             command,
         )
         .await
@@ -979,6 +985,7 @@ async fn run_worker_with_effects<C, R>(
             &active,
             &sources,
             stage_driver.as_ref(),
+            &profile,
         )
         .await
         {
@@ -1004,6 +1011,7 @@ async fn submit_and_reply<C, R>(
     shared: &Arc<Shared>,
     stage_driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
     command: RunCommand,
 ) -> bool
 where
@@ -1011,7 +1019,7 @@ where
     R: RandomSource + crate::PortObject,
 {
     let RunCommand { env, input, reply } = command;
-    let result = submit_command(coordinator, stage_driver, sources, env, input).await;
+    let result = submit_command(coordinator, stage_driver, sources, profile, env, input).await;
     let fault_code = result_fault_code(&result);
     reply.send(result);
     if let Some(code) = fault_code {
@@ -1042,6 +1050,7 @@ async fn drain_effects_accepting_commands<C, R>(
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
     stage_driver: Option<&StageDriver>,
+    profile: &LockedModelContextProfile,
 ) -> Result<(), RunHandleError>
 where
     C: Clock + crate::PortObject,
@@ -1078,6 +1087,7 @@ where
                     active,
                     sources,
                     stage_driver,
+                    profile,
                     seed,
                     request,
                 )
@@ -1096,6 +1106,7 @@ where
                     active,
                     sources,
                     stage_driver,
+                    profile,
                     seed,
                     context,
                     resolved,
@@ -1121,6 +1132,7 @@ async fn settle_driven_model<C, R>(
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
     stage_driver: Option<&StageDriver>,
+    profile: &LockedModelContextProfile,
     seed: ModelDispatchSeed,
     request: ModelRequest,
 ) -> Result<(), RunHandleError>
@@ -1136,6 +1148,7 @@ where
         intake,
         shared,
         stage_driver,
+        profile,
         sources,
         drive_model(model, model_assembler, request),
     )
@@ -1185,6 +1198,7 @@ async fn settle_driven_tool<C, R>(
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
     stage_driver: Option<&StageDriver>,
+    profile: &LockedModelContextProfile,
     seed: ToolDispatchSeed,
     context: ToolCallContext,
     resolved: Arc<ResolvedTool>,
@@ -1203,6 +1217,7 @@ where
         intake,
         shared,
         stage_driver,
+        profile,
         sources,
         drive_tool(resolved, context, call, assembler),
     )
@@ -1233,6 +1248,7 @@ async fn drive_accepting_commands<C, R, T>(
     intake: &CommandIntake,
     shared: &Arc<Shared>,
     stage_driver: Option<&StageDriver>,
+    profile: &LockedModelContextProfile,
     sources: &SettlementSources<C, R>,
     drive: impl Future<Output = T>,
 ) -> Result<T, RunHandleError>
@@ -1256,7 +1272,16 @@ where
         match outcome {
             DrivePoll::Command(None) => return Err(RunHandleError::IntakeClosed),
             DrivePoll::Command(Some(command)) => {
-                if submit_and_reply(coordinator, shared, stage_driver, sources, *command).await {
+                if submit_and_reply(
+                    coordinator,
+                    shared,
+                    stage_driver,
+                    sources,
+                    profile,
+                    *command,
+                )
+                .await
+                {
                     return Err(RunHandleError::Faulted {
                         code: "host_run_faulted_during_effect",
                     });
@@ -1510,6 +1535,29 @@ mod tests {
         StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, Usage,
         resolve_model_context_profile,
     };
+
+    /// The other half of the folded-allocation fix (`stage_settlement.rs`'s
+    /// `folded_allocation_error`): `RunHandleError::Middleware` must never tear
+    /// the worker down. `ToolSettlement` deliberately still does — a genuine
+    /// tool-settlement failure is a worker fault — which is exactly why a
+    /// middleware fold's rejection has to be re-classified before it gets here.
+    #[test]
+    fn a_middleware_failure_is_not_a_worker_fault() {
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::Middleware {
+                code: Arc::from("stage_allocation_model_request_contract_mismatch"),
+            })),
+            None,
+            "a middleware fold failure must fail only the run, not the worker"
+        );
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::ToolSettlement {
+                code: "stage_allocation_model_request_contract_mismatch",
+            })),
+            Some("stage_allocation_model_request_contract_mismatch"),
+            "tool settlement stays a worker fault, so the re-classification is load-bearing"
+        );
+    }
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let mut future = std::pin::pin!(future);

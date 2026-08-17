@@ -362,6 +362,9 @@ impl RunTaskOwner {
         let (timer_job_sender, timer_job_receiver) = mpsc::channel(run_config.command_capacity);
         let (timer_result_sender, timer_result_receiver) =
             mpsc::channel(run_config.command_capacity);
+        // Cloned before the move: the worker needs the locked profile to
+        // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
+        let stage_profile = profile.clone();
         let model_dispatcher = Arc::new(ModelDispatcher::new(
             Arc::clone(&model),
             profile,
@@ -427,6 +430,7 @@ impl RunTaskOwner {
             Arc::clone(&shared),
             sources,
             stage_driver,
+            stage_profile,
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -550,6 +554,9 @@ impl RunTaskOwner {
         let (timer_result_sender, timer_result_receiver) =
             mpsc::channel(run_config.command_capacity);
 
+        // Cloned before the move: the worker needs the locked profile to
+        // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
+        let stage_profile = profile.clone();
         let model_dispatcher = Arc::new(ModelDispatcher::new(
             Arc::clone(&model),
             profile,
@@ -645,6 +652,7 @@ impl RunTaskOwner {
             sources,
             catalog,
             stage_driver,
+            stage_profile,
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -816,6 +824,10 @@ async fn run_worker(
     shared.events.close().await;
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the single owner select keeps command, model, and timer ordering visibly contiguous"
+)]
 async fn run_worker_with_model<C, R>(
     mut coordinator: CommitCoordinator,
     mut receiver: mpsc::Receiver<RunCommand>,
@@ -824,6 +836,7 @@ async fn run_worker_with_model<C, R>(
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     stage_driver: Option<StageDriver>,
+    profile: LockedModelContextProfile,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -892,6 +905,7 @@ async fn run_worker_with_model<C, R>(
                     &mut coordinator,
                     stage_driver.as_ref(),
                     &sources,
+                    &profile,
                     env,
                     input,
                 ).await;
@@ -936,6 +950,7 @@ async fn run_worker_with_model_and_tools<C, R>(
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
     stage_driver: Option<StageDriver>,
+    profile: LockedModelContextProfile,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -1043,6 +1058,7 @@ async fn run_worker_with_model_and_tools<C, R>(
                     &mut coordinator,
                     stage_driver.as_ref(),
                     &sources,
+                    &profile,
                     env,
                     input,
                 ).await;
@@ -1223,6 +1239,29 @@ mod tests {
         EventHubConfig, JournalStore, LoadRequest, LoadedSession, PortFuture, SnapshotReceipt,
         SnapshotRequest, StoreError, StoreHealth,
     };
+
+    /// The other half of the folded-allocation fix (`stage_settlement.rs`'s
+    /// `folded_allocation_error`): `RunHandleError::Middleware` must never tear
+    /// the worker down. `ToolSettlement` deliberately still does — a genuine
+    /// tool-settlement failure is a worker fault — which is exactly why a
+    /// middleware fold's rejection has to be re-classified before it gets here.
+    #[test]
+    fn a_middleware_failure_is_not_a_worker_fault() {
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::Middleware {
+                code: Arc::from("stage_allocation_model_request_contract_mismatch"),
+            })),
+            None,
+            "a middleware fold failure must fail only the run, not the worker"
+        );
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::ToolSettlement {
+                code: "stage_allocation_model_request_contract_mismatch",
+            })),
+            Some("stage_allocation_model_request_contract_mismatch"),
+            "tool settlement stays a worker fault, so the re-classification is load-bearing"
+        );
+    }
 
     struct BlockingStore {
         calls: AtomicUsize,
