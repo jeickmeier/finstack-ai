@@ -111,7 +111,17 @@ impl RawJson {
                 max: limits.max_bytes,
             });
         }
-        let value = strict_parse_value(input, limits)?;
+        // Source span is the actual input. Streaming `charge_bytes` uses
+        // reconstructed token sizes (`f64::to_string`, unescaped strings) and
+        // would mis-classify compact scientific source as `SourceTooLarge`
+        // before the canonical JCS ceiling can apply.
+        let value = strict_parse_value(
+            input,
+            Limits {
+                max_bytes: usize::MAX,
+                ..limits
+            },
+        )?;
         if limits.require_object && !value.is_object() {
             return Err(RawJsonError::ExpectedObject);
         }
@@ -575,6 +585,14 @@ fn map_de_error(error: &serde_json::Error) -> RawJsonError {
             return RawJsonError::KeyTooLong { len, max };
         }
     }
+    if let Some(rest) = text.strip_prefix("too many metadata members: ") {
+        let head = rest.split(" at line ").next().unwrap_or(rest);
+        if let Some((count, max)) = head.split_once(" > ")
+            && let (Ok(count), Ok(max)) = (count.parse(), max.parse())
+        {
+            return RawJsonError::TooManyMembers { count, max };
+        }
+    }
     RawJsonError::Parse(text)
 }
 
@@ -824,7 +842,13 @@ mod tests {
             .map(|i| format!(r#""k{i}":1"#))
             .collect::<Vec<_>>()
             .join(",");
-        assert!(Metadata::parse(format!("{{{too_many}}}")).is_err());
+        assert!(matches!(
+            Metadata::parse(format!("{{{too_many}}}")).expect_err("members"),
+            RawJsonError::TooManyMembers {
+                count: 65,
+                max: METADATA_MAX_MEMBERS
+            }
+        ));
         let long_key = format!(r#"{{"{}":1}}"#, "k".repeat(METADATA_MAX_KEY_BYTES + 1));
         assert!(Metadata::parse(long_key).is_err());
         assert_eq!(Metadata::empty().as_str(), "{}");

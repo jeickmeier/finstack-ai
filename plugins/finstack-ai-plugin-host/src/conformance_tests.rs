@@ -23,6 +23,7 @@ use crate::cache::{
     engine_fingerprint_parts, host_target,
 };
 use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
+use crate::limits::EffectiveLimits;
 use crate::lockfile::resolve_lockfile;
 use crate::signature::{SignaturePolicy, verify_manifest};
 
@@ -277,12 +278,20 @@ async fn ungranted_wasi_instantiate_fails_closed() {
         .into_iter()
         .map(str::to_owned)
         .collect();
+    // Instrumented coverage builds can spend more than the 5s host default
+    // compiling this guest; keep the deadline above that so the ungranted
+    // WASI path still reports instantiate-failed rather than timeout.
+    let limits = EffectiveLimits {
+        call_timeout_ms: 60_000,
+        ..EffectiveLimits::default()
+    };
     let host = Arc::new(
         PluginHost::try_new(
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
                 .with_application_grants(grants)
-                .expect("grants"),
+                .expect("grants")
+                .with_default_limits(limits),
         )
         .expect("host"),
     );

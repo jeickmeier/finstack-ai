@@ -539,7 +539,10 @@ fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
                 .map_err(|error| fail(error.to_string()))?
                 .kernel_state
         }
-        other => return Err(fail(format!("unsupported kernel-state operation {other}"))),
+        other => match accepted_hash_version(other) {
+            Some(version) => representative_accepted_state(fixture, version)?,
+            None => return Err(fail(format!("unsupported kernel-state operation {other}"))),
+        },
     };
     if !fixture.expect.ok {
         return Err(fail("expected KernelState hash failure"));
@@ -560,6 +563,88 @@ fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
         )));
     }
     Ok(())
+}
+
+fn accepted_hash_version(operation: &str) -> Option<u16> {
+    let digits = operation
+        .strip_prefix('v')?
+        .strip_suffix("_accepted_hash")?;
+    let version = digits.parse().ok()?;
+    (2..=6).contains(&version).then_some(version)
+}
+
+fn representative_accepted_state(
+    fixture: &PublicApiFixture,
+    operation_version: u16,
+) -> Result<KernelState, PublicApiFixtureError> {
+    let input = require_input(fixture)?;
+    let state_version = u16::try_from(
+        input
+            .get("state_version")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| fail("kernel-state accepted hash requires state_version"))?,
+    )
+    .map_err(|error| fail(error.to_string()))?;
+    if state_version != operation_version {
+        return Err(fail(format!(
+            "kernel-state accepted hash version mismatch: operation {operation_version}, input {state_version}"
+        )));
+    }
+    let accepted_at = if state_version >= 3 {
+        Some(
+            finstack_ai_kernel::Timestamp::from_unix_ms(1_000)
+                .map_err(|error| fail(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    Ok(KernelState {
+        state_version,
+        session_id: Some(oracle_id::<finstack_ai_kernel::SessionTag>(1)),
+        lane_id: Some(oracle_id::<finstack_ai_kernel::LaneTag>(2)),
+        accepted: Some(oracle_root_acceptance()?),
+        accepted_at,
+        ..KernelState::default()
+    })
+}
+
+fn oracle_id<T: finstack_ai_kernel::IdTag>(ordinal: u64) -> finstack_ai_kernel::Id<T> {
+    let mut bytes = [0_u8; 16];
+    bytes[..6].copy_from_slice(&[0x01, 0x23, 0x45, 0x67, 0x89, 0xab]);
+    bytes[6] = 0x70;
+    bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    finstack_ai_kernel::Id::from_bytes(bytes)
+}
+
+fn oracle_root_acceptance() -> Result<finstack_ai_kernel::RunAccepted, PublicApiFixtureError> {
+    let run_id = oracle_id::<finstack_ai_kernel::RunTag>(3);
+    finstack_ai_kernel::RunAccepted::try_new(
+        run_id,
+        finstack_ai_kernel::RunRelation::root(run_id).map_err(|error| fail(error.to_string()))?,
+        finstack_ai_kernel::RunSecurityContext::try_new(
+            "tenant-a",
+            finstack_ai_kernel::PrincipalRef::try_new("issuer-a", "subject-a", Some("tenant-a"))
+                .map_err(|error| fail(error.to_string()))?,
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .map_err(|error| fail(error.to_string()))?,
+        None,
+        finstack_ai_kernel::RunLimits::empty(),
+        finstack_ai_kernel::RunPropagationPolicy {
+            cancellation: finstack_ai_kernel::CancellationPropagation::Cascade,
+            deadline: finstack_ai_kernel::DeadlinePropagation::MinimumOfParentAndChild,
+            budget: finstack_ai_kernel::BudgetPropagation::SharedScope,
+            principal: finstack_ai_kernel::PrincipalPropagation::Inherit,
+        },
+        finstack_ai_kernel::Digest::raw_json(br#"{"agent":"fixture"}"#),
+        None,
+    )
+    .map_err(|error| fail(error.to_string()))
 }
 
 fn run_record(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {

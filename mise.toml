@@ -316,9 +316,9 @@ set -euo pipefail
 export PATH="$(mise where github:taiki-e/cargo-llvm-cov):${PATH}"
 mkdir -p target/coverage/rust
 cargo llvm-cov clean --workspace
-cargo llvm-cov --workspace --locked --html --lcov \
-  --output-dir target/coverage/rust/html \
-  --output-path target/coverage/rust/lcov.info
+cargo llvm-cov --workspace --locked --html \
+  --output-dir target/coverage/rust/html
+cargo llvm-cov report --lcov --output-path target/coverage/rust/lcov.info
 """
 
 [tasks.coverage-python]
