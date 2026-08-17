@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview", targets = "wasm32-unknown-unknown" }
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy,llvm-tools", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
 node = "22.18.0"

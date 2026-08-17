@@ -24,6 +24,7 @@ use super::hash_entries::{
     completion_hash_entries, model_hash_entries, resolution_hash_entries, stage_hash_entries,
     tool_call_hash_entries, tool_settlement_hash_entries,
 };
+use super::types::ToolCallIdentityHashRef;
 use super::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
     CurrentTurn, InteractionTerminal, KernelState, ModelSettlementFingerprint,
@@ -31,7 +32,6 @@ use super::{
     ResolutionIdentityHashEntryV6, RetryState, RunPhase, StageSettlementHashEntryV1,
     TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
 };
-use super::types::ToolCallIdentityHashRef;
 
 #[derive(Serialize)]
 struct KernelStateWireV1<'a> {

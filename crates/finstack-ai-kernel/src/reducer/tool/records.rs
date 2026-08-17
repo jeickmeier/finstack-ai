@@ -10,8 +10,8 @@ use crate::effects::{EffectCompleted, EffectInput, EffectKind, EffectRequested};
 use crate::primitives::{Metadata, RawJson};
 use crate::records::RecordBody;
 use crate::records::tools::{
-    ActiveToolBatch, AssignedToolCall, ToolBatchClosed,
-    ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
+    ActiveToolBatch, AssignedToolCall, ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened,
+    ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
 };
 use crate::state::TransitionEnv;
 

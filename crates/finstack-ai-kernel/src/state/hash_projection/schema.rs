@@ -12,8 +12,7 @@ use crate::state::projection::MessageSeq;
 use super::super::types::ToolCallIdentityHashRef;
 use super::super::{
     CompletionIdentityHashEntryV1, KernelState, ModelSettlementHashEntryV1,
-    ResolutionIdentityHashEntryV6, RunPhase, StageSettlementHashEntryV1,
-    ToolSettlementHashEntryV2,
+    ResolutionIdentityHashEntryV6, RunPhase, StageSettlementHashEntryV1, ToolSettlementHashEntryV2,
 };
 
 use super::projections::{

@@ -22,12 +22,10 @@
       "within_budget": true
     },
     {
-      "bytes": 8730288,
-      "detail": "within ratified budget or unratified optional",
-      "gzip_bytes": 3963164,
+      "detail": "optional artifact absent",
       "id": "minimal-cli",
-      "path": "target/release/minimal",
-      "present": true,
+      "path": null,
+      "present": false,
       "required": false,
       "within_budget": true
     }
