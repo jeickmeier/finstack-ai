@@ -656,6 +656,27 @@ impl WorkflowSession {
         Ok(())
     }
 
+    /// Respawn [`RunTaskOwner`] after a park, including journal-authoritative waits.
+    ///
+    /// Ports must already be bound with [`Self::with_ports`].
+    ///
+    /// # Errors
+    ///
+    /// Returns recover, spawn, or port failures.
+    pub async fn respawn_owner(&mut self) -> Result<(), WorkflowDriverError> {
+        self.refresh_state().await?;
+        if self.owner.is_none() {
+            self.spawn_owner().await?;
+        }
+        Ok(())
+    }
+
+    /// Whether this driver currently owns a live [`RunTaskOwner`].
+    #[must_use]
+    pub const fn owner_is_live(&self) -> bool {
+        self.owner.is_some()
+    }
+
     async fn spawn_owner(&mut self) -> Result<(), WorkflowDriverError> {
         let model = self
             .model

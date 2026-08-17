@@ -252,6 +252,10 @@ impl Session {
     pub(crate) async fn runtime(&self) -> Result<Arc<SessionRuntime>, SessionError> {
         self.ensure().await
     }
+
+    pub(crate) fn journal_store(&self) -> Arc<dyn JournalStore> {
+        Arc::clone(&self.store)
+    }
 }
 
 /// Live handle for one lane in a session.

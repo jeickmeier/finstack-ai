@@ -35,7 +35,7 @@ use finstack_ai_runtime::native_driver as driver;
 use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 
 use super::handle::Agent;
-use super::run::{AgentRun, AgentRunInner, publish_start_failure, publish_started};
+use super::run::{AgentRunInner, publish_start_failure, publish_started};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
     DEFAULT_EVENT_BATCH_BYTES, DEFAULT_EVENT_BATCH_COUNT, DEFAULT_EVENT_BATCH_INTERVAL,
@@ -716,20 +716,6 @@ async fn append_lane_input(
         .await
         .map_err(|error| session_error(&error))?;
     Ok(())
-}
-
-impl crate::Lane {
-    /// Start a new root run on this idle lane.
-    ///
-    /// Prefer [`Agent::start_on_lane`].
-    ///
-    /// # Errors
-    ///
-    /// Returns a busy-lane or agent configuration/runtime failure.
-    #[deprecated(since = "1.0.0", note = "use Agent::start_on_lane")]
-    pub fn run(&self, agent: &Agent, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
-        agent.start_on_lane(self, request)
-    }
 }
 
 async fn bootstrap_main_lane(

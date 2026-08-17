@@ -379,7 +379,7 @@ impl AgentRun {
         }
     }
 
-    async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
+    pub(crate) async fn runtime_handle(&self) -> Result<RunHandle, AgentRunError> {
         loop {
             events_fault(&self.inner)?;
             let notified = self.inner.handle_ready.notified();

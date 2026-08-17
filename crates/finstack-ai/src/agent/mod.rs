@@ -3,6 +3,7 @@
 mod builder;
 mod drive;
 mod handle;
+mod lane;
 mod prepare;
 mod run;
 mod types;

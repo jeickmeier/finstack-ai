@@ -20,6 +20,10 @@ provider, calls `run`, and prints the completion. No credential is required.
 resolves once. `Agent::run` / `start` execute one run. `request.capability`
 selects a model-activated variant; `None` runs the `Agent` that was called.
 `Session::open` inspects an existing journal and does not continue a parked
+run. `Lane::run` starts a new root on an idle lane through
+`Agent::start_on_lane`. `Lane::suspend` parks the in-process driver without
+dropping the journal; `Lane::resume` respawns `RunTaskOwner` through
+`WorkflowSession::with_ports`. `Lane::append_text` still does not start a
 run. Python and WASM expose the same inspect path as `Agent.open_session`.
 
 ## Starters

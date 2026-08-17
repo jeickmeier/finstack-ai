@@ -26,7 +26,7 @@ use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
     BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, CompatibilityRequirements,
     Extension, ExtensionDescriptor, ReadyComponent, Registrar, RegistrationError,
-    RegistrationMetadata, RuntimeServices,
+    RegistrationMetadata, RuntimeServices, Session,
 };
 
 const VERSION: Version = Version {
@@ -701,4 +701,148 @@ async fn failing_or_stalled_observer_does_not_change_journal_prefix() {
     assert_eq!(stall_out.text(), noop_out.text());
     assert_eq!(fail_out.record_kinds(), noop_out.record_kinds());
     assert_eq!(stall_out.record_kinds(), noop_out.record_kinds());
+}
+
+async fn wait_active_run(lane: &crate::Lane) -> finstack_ai_kernel::RunId {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(inspect) = lane.inspect().await
+                && let Some(run_id) = inspect.active_run_id
+            {
+                return run_id;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("lane accepted a live run")
+}
+
+#[tokio::test]
+async fn idle_lane_run_returns_a_live_run() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("lane ready")],
+    ));
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let run = lane.run(&agent, request("Say hello")).expect("run");
+    assert_eq!(run.locator().session_id, session.session_id());
+    assert_eq!(run.locator().lane_id, lane.lane_id());
+    let accepted = wait_active_run(&lane).await;
+    assert_eq!(accepted, run.locator().run_id);
+    let output = tokio::time::timeout(Duration::from_secs(3), run.result())
+        .await
+        .expect("result timeout")
+        .expect("result");
+    assert_eq!(output.text(), "lane ready");
+    assert_eq!(model.request_count(), 1);
+}
+
+#[tokio::test]
+async fn suspend_parks_without_dropping_the_journal() {
+    let gate = Arc::<str>::from("lane-suspend");
+    let mut plan = completed("should stay parked");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let control = model.control();
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let session = Session::create(Arc::clone(&store) as _, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let run = lane.run(&agent, request("park me")).expect("run");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("model reached gate");
+    let run_id = wait_active_run(&lane).await;
+    assert_eq!(run_id, run.locator().run_id);
+    lane.suspend().await.expect("suspend");
+    let inspect = lane.inspect().await.expect("inspect after suspend");
+    assert_eq!(inspect.active_run_id, Some(run_id));
+    let journal: Arc<dyn JournalStore> = store.clone();
+    let loaded = journal
+        .load(finstack_ai_runtime::LoadRequest {
+            session_id: session.session_id(),
+        })
+        .await
+        .expect("journal load");
+    assert!(
+        loaded.head_sequence > 0 && !loaded.committed_batches.is_empty(),
+        "suspend must keep the accepted journal"
+    );
+    let reopened = Session::open(
+        Arc::clone(&store) as _,
+        session.session_id(),
+        "tenant-preview",
+    )
+    .await
+    .expect("reopen");
+    let restored = reopened
+        .lane("main")
+        .await
+        .expect("restored main")
+        .inspect()
+        .await
+        .expect("restored inspect");
+    assert_eq!(restored.active_run_id, Some(run_id));
+}
+
+#[tokio::test]
+async fn resume_respawns_run_task_owner() {
+    let gate = Arc::<str>::from("lane-resume");
+    let mut plan = completed("resumed");
+    plan.actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&gate)));
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![plan]));
+    let control = model.control();
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let _run = lane.run(&agent, request("resume me")).expect("run");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("model reached gate");
+    let run_id = wait_active_run(&lane).await;
+    lane.suspend().await.expect("suspend");
+    assert!(!lane.workflow_owner_is_live());
+    lane.resume(&agent).await.expect("resume");
+    assert!(
+        lane.workflow_owner_is_live(),
+        "resume must respawn RunTaskOwner"
+    );
+    let inspect = lane.inspect().await.expect("inspect after resume");
+    assert_eq!(inspect.active_run_id, Some(run_id));
+}
+
+#[tokio::test]
+async fn append_text_does_not_start_a_run() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("unused")],
+    ));
+    let (_agent, store) = model_only_agent(model).await;
+    let session = Session::create(store, "tenant-preview")
+        .await
+        .expect("session");
+    let lane = session.lane("main").await.expect("main");
+    let entry = lane.append_text("note only").await.expect("append");
+    let inspect = lane.inspect().await.expect("inspect");
+    assert!(inspect.active_run_id.is_none());
+    assert_eq!(inspect.leaf_id, Some(entry));
+    assert_eq!(inspect.history.len(), 1);
 }

@@ -16,6 +16,10 @@ unpublished.
 
 ### Added
 
+- `Lane::run` / `suspend` / `resume` complete the PR-047 minimum verbs:
+  idle `run` uses the existing `Agent::start_on_lane` / `AcceptRun` path,
+  `suspend` parks the driver without dropping the journal, and `resume`
+  respawns `RunTaskOwner` through `WorkflowSession::with_ports`.
 - Restored `finstack-ai-workflow-local` as the in-process `WorkflowSession`
   driver, with adapter-owned durable cron (run-once catch-up against
   `ExternalClock`, tenant-scoped table in the journal sqlite file).
