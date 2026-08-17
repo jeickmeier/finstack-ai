@@ -176,6 +176,11 @@ pub use middleware::{
     middleware_resume_action, stage_name as middleware_stage_name,
     validate_compaction_model_effect, validate_compaction_result, validate_stage_outcome,
 };
+// The chain driver's supported entry points, re-exported so
+// `tools/compat/public_items.py` tracks them: it scrapes braced `pub use`
+// blocks only, so the rest of `middleware_driver`'s `pub` surface is public
+// through `pub mod` but unfrozen. See the module contract.
+pub use middleware_driver::{MiddlewareStageContext, invoke_middleware_stage};
 pub use model::{
     ApprovalMetadata, ApprovalRequirement, AssembledModelStream, AuthorizationContext,
     CancellationSignal, InputCapabilities, LockedModelContextProfile, MODEL_CONTEXT_LIMIT_EXCEEDED,

@@ -42,7 +42,7 @@
 //!   `KernelInput` commits a middleware parent effect at all. It is refused with
 //!   [`MIDDLEWARE_STAGE_UNLANDABLE`] by [`StageFold::accumulate`].
 //! - `CompactContext` is refused one layer earlier, by
-//!   `validate_compaction_result` (`middleware.rs:998-1002`), which requires the
+//!   `validate_compaction_result` (`middleware.rs:1054-1058`), which requires the
 //!   final [`CompactionSourceEntry`] to be `protected`. The causal chain is:
 //!   `protected` is authoritative-from-the-context-port
 //!   ([`crate::ContextItem::protected`], `context.rs:138`) and a compactor may
@@ -260,9 +260,36 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
 ///
 /// Every other stage returns `true`: their inputs are built from live
 /// `KernelState` rather than from the base outcome, so no base outcome can
-/// starve them. `PrepareContext` is the near miss — it reads the base outcome
-/// when it is a `ContextPrepared` — but it already falls back to
-/// `state.messages` rather than failing.
+/// starve them at [`stage_input`].
+///
+/// # Known residual gap at `PrepareContext`
+///
+/// The gate is deliberately narrower than the failure mode it is named for, and
+/// `PrepareContext` keeps a smaller version of the same problem. `stage_input`
+/// is fine there — a non-`ContextPrepared` base falls back to `state.messages`
+/// rather than failing. The gap is one function later, in [`apply_fold`]: a
+/// `Fail` base at `PrepareContext` (kernel-admissible, `decide.rs:1165-1177`)
+/// combined with an *additive* component produces a non-identity fold that
+/// matches neither the `ContextPrepared` nor the `ModelRequestPrepared` arm, so
+/// it falls to `_ => Err(MIDDLEWARE_STAGE_UNLANDABLE)` and the deliberate `Fail`
+/// still does not land.
+///
+/// It is materially weaker than the `BeforeModel` case this gate fixes, which
+/// is why the gate was not widened to match:
+///
+/// - A *passive* component is harmless. The fold is the identity, and
+///   [`settle_facade_stage`] short-circuits to passthrough before [`apply_fold`]
+///   is reached, so merely registering an observational component cannot break a
+///   `Fail`. At `BeforeModel` the equivalent case *did* break, because the input
+///   assembly failed before any component ran.
+/// - No in-tree producer reaches it. `Agent::run` settles only
+///   `ContextPrepared` at this cursor (`agent.rs:788-795`); an out-of-tree
+///   `KernelInput::StageSettled` producer is required to construct the base.
+///
+/// Widening `foldable_base` is **not** the fix if it is ever hit: it would make
+/// an additive component silently no-op instead of failing loudly. The fix is an
+/// [`apply_fold`] arm that decides, explicitly, that a terminal base outcome
+/// wins over additive contributions at every stage.
 fn foldable_base(stage: Stage, outcome: &ReducerStageOutcome) -> bool {
     stage != Stage::BeforeModel
         || matches!(outcome, ReducerStageOutcome::ModelRequestPrepared { .. })
@@ -489,7 +516,7 @@ fn stage_input(
 /// same array — `model_draft` is handed `turn.context.messages`
 /// (`agent.rs:797-812`) — but sourcing them from the draft is the choice that
 /// stays correct if they ever diverge: a `CompactContext` result is validated
-/// against `source_entries` (`middleware.rs:1013-1027`) and then *replaces*
+/// against `source_entries` (`middleware.rs:1069-1083`) and then *replaces*
 /// `draft.messages`, so entries drawn from anywhere else would let a compactor
 /// inject a message the draft never had, or lose one it did.
 ///
@@ -511,7 +538,7 @@ fn stage_input(
 /// # `hard_input_tokens`
 ///
 /// `context_window_tokens - (reserved_output_tokens + provider_overhead_tokens)`,
-/// which is exactly `validate_model_request`'s `available` (`model.rs:1274-1287`)
+/// which is exactly `validate_model_request`'s `available` (`model.rs:1289-1302`)
 /// and matches the field's own definition, "maximum permitted model-input tokens
 /// after output/overhead reservation".
 ///
@@ -641,14 +668,30 @@ fn apply_fold<C: Clock, R: RandomSource>(
 ///    output, settings and limits together, not just the messages.
 /// 2. `CompactContext` replaces the **message projection** of whatever base
 ///    survived, and nothing else. At most one component can produce one (the
-///    single-compactor rule, `middleware.rs:612`). Its `derived_summaries` and
-///    `checkpoint` have no landing in a `ModelRequestPrepared` and are dropped.
-///    That is a real gap, not a design choice — a working compactor needs its
-///    summary in the projection — but it is unobservable today because
-///    `CompactContext` cannot reach here at all (see the module docs), and
-///    fixing it before the `ContextProvider` port is wired would mean writing
-///    a landing rule no test could exercise through the port. It belongs with
-///    the `protected` work, not ahead of it.
+///    single-compactor rule, `middleware.rs:650-655`).
+///
+///    Two gaps live in this step. Both are unobservable today, because
+///    `CompactContext` cannot reach here at all (see the module docs), and both
+///    become live the moment the `ContextProvider` port is wired — whoever does
+///    that work owns them:
+///
+///    - Its `derived_summaries` and `checkpoint` have no landing in a
+///      `ModelRequestPrepared` and are **dropped**. That is a real gap, not a
+///      design choice: a working compactor needs its summary in the projection.
+///    - A fold carrying **both** a `Replace` and a `CompactContext` applies a
+///      projection that was validated against the *base* draft's
+///      `source_entries` — assembled by [`before_model_input`], checked at
+///      `middleware.rs:1069-1083` — on top of the *replaced* draft, which step 1
+///      has already substituted. The
+///      compactor's guarantees — protected-entry preservation, tool-pair
+///      atomicity, source-digest integrity — are all stated against the array it
+///      was shown, and the array it lands on is a different one. Two components
+///      are required for this (the single compactor cannot also `Replace`), so a
+///      chain with a compactor plus any `BeforeModel` `Replace` reaches it.
+///
+///    Neither is fixed ahead of the `ContextProvider` work, because a landing
+///    rule for either one is untestable through the port until a protected
+///    entry can exist. They belong with the `protected` work, not ahead of it.
 /// 3. `AddInstructions` (as [`MessageRole::System`]) then `AddContext` (as
 ///    [`MessageRole::User`]) append, each group in chain order.
 /// 4. `FilterTools` intersects the surviving tool set.
@@ -855,7 +898,7 @@ pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
 /// `RunStatus::Faulted`**. For a folded outcome that is the wrong blast radius:
 /// a middleware fold the kernel will not admit must fail the *run* that
 /// submitted it and leave the worker healthy, which is precisely why
-/// [`RunHandleError::Middleware`] exists (`run_types.rs:213-222`).
+/// [`RunHandleError::Middleware`] exists (`run_types.rs:237-246`).
 ///
 /// This was unreachable before `BeforeModel` folded: [`apply_fold`] could only
 /// produce `Fail`, `Retry` at `BeforeFinalize`, and `ContextPrepared` at
@@ -1881,7 +1924,7 @@ mod tests {
     /// `protected` is authoritative-from-the-context-port (`context.rs:138`) and
     /// a compactor may not set it; the `ContextProvider` port has no production
     /// driver, so [`before_model_input`] can only assemble unprotected entries;
-    /// so `validate_compaction_result` (`middleware.rs:998-1002`) refuses every
+    /// so `validate_compaction_result` (`middleware.rs:1054-1058`) refuses every
     /// result. Wiring `ContextProvider` is the unblock — patching the compactor
     /// is not.
     ///
@@ -1997,7 +2040,7 @@ mod tests {
         assert!(
             matches!(&error, RunHandleError::Middleware { code }
                 if code.as_ref() == "middleware_outcome_not_allowed"),
-            "expected the post-compaction narrowing (middleware.rs:956) to reject it, got {error:?}"
+            "expected the post-compaction narrowing (middleware.rs:1012) to reject it, got {error:?}"
         );
     }
 

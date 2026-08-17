@@ -595,7 +595,22 @@ pub struct RunCallContext {
     pub locator: OperationLocator,
     /// Authorized principal projection.
     pub authorization: AuthorizationContext,
-    /// Committed effect identity.
+    /// Committed effect identity — **except at a middleware stage boundary**.
+    ///
+    /// For every port that runs under a committed effect (Model, Tool, Context,
+    /// Artifact, Budget) this is that effect's journaled `EffectId` and may be
+    /// used as a journal key.
+    ///
+    /// A middleware stage boundary has no committed effect: no `KernelInput`
+    /// commits an `EffectKind::Middleware` `EffectRequested`, and stage
+    /// settlement emits only `StageOutcomeRecorded`. The chain driver therefore
+    /// fills this field with
+    /// [`middleware_driver::derived_stage_effect_id`](crate::middleware_driver::derived_stage_effect_id),
+    /// a deterministic, domain-separated **correlation id** that names nothing
+    /// in the journal. The value is projected verbatim to WIT guests by
+    /// `sanitize_call_context` (`plugins/finstack-ai-wit/src/mapping.rs`), so a
+    /// host or plugin that looks it up as a committed effect is wrong. See the
+    /// [`middleware_driver`](crate::middleware_driver) module contract.
     pub effect_id: EffectId,
     /// One-based execution attempt.
     pub attempt: u32,

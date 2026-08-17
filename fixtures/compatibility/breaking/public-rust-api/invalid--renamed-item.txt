@@ -548,6 +548,7 @@ finstack-ai-runtime::MiddlewareReconcileResult
 finstack-ai-runtime::MiddlewareRef
 finstack-ai-runtime::MiddlewareRegistration
 finstack-ai-runtime::MiddlewareRole
+finstack-ai-runtime::MiddlewareStageContext
 finstack-ai-runtime::Model
 finstack-ai-runtime::ModelCallContext
 finstack-ai-runtime::ModelCapabilities
@@ -771,10 +772,12 @@ finstack-ai-runtime::compaction_summary_digest
 finstack-ai-runtime::context_resume_action
 finstack-ai-runtime::diagnostic_contains
 finstack-ai-runtime::interaction_resume_action
+finstack-ai-runtime::invoke_middleware_stage
 finstack-ai-runtime::journal_export_jsonl
 finstack-ai-runtime::map_model_reconcile_result
 finstack-ai-runtime::map_tool_reconcile_result
 finstack-ai-runtime::middleware_resume_action
+finstack-ai-runtime::middleware_stage_name
 finstack-ai-runtime::model_resume_action
 finstack-ai-runtime::model_retry_allowed
 finstack-ai-runtime::normalize_tool_result
@@ -783,6 +786,7 @@ finstack-ai-runtime::resolve_checkpoint_sequence
 finstack-ai-runtime::resolve_model_context_profile
 finstack-ai-runtime::retry_backoff_with_jitter
 finstack-ai-runtime::retry_decision
+finstack-ai-runtime::stage_name
 finstack-ai-runtime::stage_required_artifact
 finstack-ai-runtime::support_bundle_versions
 finstack-ai-runtime::tool_resume_action

@@ -136,6 +136,30 @@ impl ToolTaskConfig {
 }
 
 /// Bounded run-handle failures.
+///
+/// # Deliberately not `#[non_exhaustive]`
+///
+/// Adding a variant (most recently [`Self::Middleware`]) breaks a downstream
+/// exhaustive `match`, and `tools/compat/public_items.py` tracks item names
+/// rather than enum variants, so no gate catches it. That was reviewed and left
+/// as is, for three reasons:
+///
+/// - The 1.0 promise for public Rust
+///   (`docs/implementation/1.0-compatibility-policy.md`) defines the breaking
+///   set as semantic renames and removals; variant addition is outside it, and
+///   the checked-in public-item list implements exactly that policy.
+/// - `#[non_exhaustive]` appears on no type in this workspace. Applying it to
+///   one of roughly a dozen public error enums (`ModelError`, `ToolError`,
+///   `ContextError`, `MiddlewareError`, `CommitCoordinatorError`, …) would be an
+///   arbitrary split; the decision belongs workspace-wide, in an ADR.
+/// - Adding it is itself a breaking change for any exhaustive match, so it
+///   trades one certain break now for a hypothetical one later.
+///
+/// The window is not closed: nothing is published to crates.io, so no
+/// downstream exhaustive match exists yet and the attribute can still be added
+/// for free. It must be decided before first publication, after which it
+/// becomes a major-version-only change. Anyone adding a variant should re-read
+/// this note rather than assume the question was never asked.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RunHandleError {
     /// Queue capacity or shutdown deadline was zero.

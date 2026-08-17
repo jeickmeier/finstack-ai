@@ -499,6 +499,15 @@ pub struct CompactionModelResume {
 }
 
 /// Outstanding middleware effect supplied to `reconcile`.
+///
+/// # Deprecated in place: never constructed in a run
+///
+/// Input to [`Middleware::reconcile`], which nothing calls. Under the
+/// aggregate-fold design a middleware invocation is never a committed effect,
+/// so no effect is ever outstanding and there is nothing to reconcile. Kept
+/// because it is frozen 1.0 public API that cannot be removed without a major
+/// version. See section 5 of the [`crate::middleware_driver`] module contract
+/// and the `middleware-aggregate-fold` ADR under `docs/implementation/adrs/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingMiddlewareEffect {
     /// Frozen input.
@@ -510,6 +519,11 @@ pub struct PendingMiddlewareEffect {
 }
 
 /// Middleware reconciliation result.
+///
+/// # Deprecated in place: never produced in a run
+///
+/// Return type of [`Middleware::reconcile`]. See
+/// [`PendingMiddlewareEffect`] for why that path is dead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MiddlewareReconcileResult {
     /// Normalized output is available.
@@ -551,6 +565,16 @@ pub trait Middleware: PortObject {
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>>;
 
     /// Reconcile an outstanding committed invocation.
+    ///
+    /// # Deprecated in place: never called
+    ///
+    /// The runtime has no caller for this method and will not grow one under
+    /// the aggregate-fold design: a middleware invocation is never a committed
+    /// effect, so nothing is ever outstanding. Recovery re-runs the whole chain
+    /// instead (section 2 of the [`crate::middleware_driver`] module contract),
+    /// which is why implementations must be pure with respect to external
+    /// state. Overriding this method has no effect on any run; do not rely on
+    /// it for crash safety.
     fn reconcile(
         &self,
         _ctx: ReconcileContext,
@@ -691,6 +715,17 @@ impl ResolvedMiddlewareChain {
 }
 
 /// Guard proving a middleware invocation is backed by an exact committed effect record.
+///
+/// # Deprecated in place: unconstructible in a run
+///
+/// [`Self::try_new`] validates an `EffectRequested` record of kind
+/// `EffectKind::Middleware`. No `KernelInput` ever commits one, so outside this
+/// module's own tests the guard can never be constructed and
+/// [`Self::invoke`] is never reached. `crate::middleware_driver` invokes
+/// components directly and folds their outcomes instead. Kept because it is
+/// frozen 1.0 public API; see section 5 of the [`crate::middleware_driver`]
+/// module contract and the `middleware-aggregate-fold` ADR under
+/// `docs/implementation/adrs/`.
 #[derive(Debug, Clone)]
 pub struct CommittedMiddlewareCall {
     context: MiddlewareContext,
@@ -763,6 +798,15 @@ impl CommittedMiddlewareCall {
 }
 
 /// A middleware output proven to have been committed after its exact request.
+///
+/// # Deprecated in place: reconstructs records that are never written
+///
+/// [`Self::try_from_records`] pairs an `EffectRequested` of kind
+/// `EffectKind::Middleware` with its `EffectCompleted`. Neither record is ever
+/// committed, so no journal contains the pair and nothing outside this module's
+/// tests calls it. See [`CommittedMiddlewareCall`] for the same reason at the
+/// request end, and section 5 of the [`crate::middleware_driver`] module
+/// contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedMiddlewareOutcome {
     /// Middleware component.
@@ -835,6 +879,18 @@ impl RecordedMiddlewareOutcome {
 }
 
 /// Determine recovery behavior from committed request/output state.
+///
+/// # Deprecated in place: never called on a recovery path
+///
+/// This is the function that would honour a descriptor's
+/// `InvocationRecovery::NonRepeatable` marker, and nothing calls it: the only
+/// callers are this crate's tests and `crates/finstack-ai-test/tests/crash_prefix.rs`.
+/// Under the aggregate-fold design there is no committed middleware
+/// `EffectRequested` to pass in, and recovery re-runs a cursor's whole chain
+/// unconditionally when its `StageOutcomeRecorded` is absent — so a
+/// `NonRepeatable` middleware is re-invoked rather than suspended. That gap is
+/// section 2 of the [`crate::middleware_driver`] module contract; this function
+/// is not the mitigation for it.
 #[must_use]
 pub fn middleware_resume_action(
     requested: &EffectRequested,
