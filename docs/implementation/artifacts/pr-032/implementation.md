@@ -10,10 +10,10 @@ Branch: `codex/pr-032-python-release-staging`
   membership are represented in the exact lock and committed through the
   existing kernel `CapabilitiesActivated` transition with the matching source.
 - The native `Agent` retains a pre-resolved variant for each model-selectable
-  capability. A bounded 8 KiB compact catalog and deterministic ASCII token
-  overlap policy select at most one variant per run; ties resolve by capability
-  ID. Ordinary runs retain direct component handles and perform no registry
-  lookup.
+  capability. A bounded 8 KiB compact catalog lists those ids; a run selects
+  at most one variant through explicit `AgentRunRequest.capability`. The
+  default (`None`) is the called `Agent`. Ordinary runs retain direct
+  component handles and perform no registry lookup.
 - The Python facade exposes declarative `Capability`, application activation,
   the compact model catalog, committed active-capability snapshots, and stable
   Rust record-kind traces. Runtime exports and the shipped stub remain aligned.
@@ -59,8 +59,9 @@ Branch: `codex/pr-032-python-release-staging`
 - The alpha Python `Capability` constructor contributes instructions only.
   Native bundle definitions may also contribute already registered toolsets,
   context providers, and middleware.
-- Model selection is a small deterministic token-overlap activation heuristic,
-  not free-form model-authored component loading or an authorization decision.
+- Model selection is an explicit `AgentRunRequest.capability` id (default: the
+  called `Agent`), not free-form model-authored component loading or an
+  authorization decision. Token-overlap activation was removed in PR-067.
 - The staged wheel is per-interpreter and platform-specific; hosted PR-032
   evidence includes a complete approved-matrix pass at evidence head
   `bc1403f15062e599bf6b7140ec69da28e55a9a7f`. Subsequent PR-032 through PR-038

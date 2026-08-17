@@ -6,7 +6,7 @@ stay stable.
 
 | Family | Negative |
 | --- | --- |
-| Public Rust / Python / JS | `valid--v0.1.0-*.txt` baselines plus `invalid--renamed-*.txt` |
+| Public Rust / Python / JS | `valid--v0.1.0-*.txt` baselines plus `invalid--renamed-*.txt`; Rust also has `invalid--added-field.txt` and `invalid--return-type-change.txt` |
 | Journal | `../journal/breaking/invalid--unknown-state-field.json` |
 | Runtime events | `../runtime-events/v1/` |
 | Remote / process | `../remote/v1/handshake/invalid--unknown-field.json` and process peer |

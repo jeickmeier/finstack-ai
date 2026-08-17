@@ -33,11 +33,11 @@ Exception IDs use `EX-short-slug-xxxxxxxxxxxx`, where the final 12 lowercase hex
 
 Every field is required before approval. `No` in either impact field still requires an explicit determination; `—` is not valid for an approved exception.
 
-Architecture and dependency suppressions enforced by `mise run architecture` additionally require:
+Architecture and dependency suppressions are enforced by the surviving graph checks, not a retired `architecture` task or `tools/architecture/allowlist.toml`. A waiver additionally requires:
 
 - an accepted ADR identifier in the `ADR` column;
-- a matching `[[exceptions]]` entry in [`tools/architecture/allowlist.toml`](../../tools/architecture/allowlist.toml) whose `exception_id` equals this register's Exception ID; and
-- a non-waivable check ID rejection for kernel I/O / forbidden kernel dependencies (`ARCH001`) and six-port contract ownership (`ARCH002`).
+- a matching entry in [`deny.toml`](../../deny.toml) (`exceptions = []` today; cargo-deny six target triples) whose exception identity equals this register's Exception ID; and
+- a non-waivable rejection for kernel I/O / forbidden kernel dependencies and six-port contract ownership, enforced by [`tools/wasm_package/check.py`](../../tools/wasm_package/check.py) `check_graph()` plus the four native graph tests in `crates/finstack-ai-test/tests/journal_v1.rs`, `extensions/stores/finstack-ai-store-sqlite/tests/faults.rs`, `plugins/finstack-ai-plugin-host/src/lib.rs`, and `plugins/finstack-ai-guest-sdk/src/lib.rs`.
 
 ## Exception event log
 

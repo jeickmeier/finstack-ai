@@ -107,7 +107,8 @@ restore, and rollback procedure.
 This review is not `G8-D-*`. G8 later passed via
 `G8-D-general-availability-a889a29a3f54`. FIND-064-010 (unpublished
 registries) stays Accepted until the first named publish. FIND-064-003
-(unbounded settlement map) stays Open and is not accepted here.
+(unbounded settlement map) is Closed: the replica fails closed at a
+receipt cap and indexes by `command_id`.
 
 ## Related
 

@@ -41,8 +41,9 @@ Results:
     tools/plugin_wasm/sync_guest_wit.py, tools/plugin_wasm/template_check.py,
     and tools/wit_bindgen/generate.py (not reformatted)
 
-A01 public-package Quick start headings exist and the runner executes
-    the offline commands above. Kernel/runtime/protocol point at rust.md.
+A01 site guide or package README Quick start headings exist and the
+    runner executes the offline commands above. Kernel/runtime/protocol
+    point at rust.md.
 A02 starters pin workspace 0.0.4 (path or lockstep). Python service
     added under examples/python-minimal/service/. No hosted starter org.
 A03 docs/site/security-trust-levels.md owns T0–T5. T1/T2 are never

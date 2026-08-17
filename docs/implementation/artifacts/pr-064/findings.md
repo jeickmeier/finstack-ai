@@ -16,11 +16,11 @@ asserted; none exists for this project.
 | --- | --- | --- | --- | --- | --- |
 | FIND-064-001 | High | plugin | **Closed** | Closed 2026-08-15 | [§1](#find-064-001) · `plugins/finstack-ai-plugin-host/src/{cache.rs,host.rs}` |
 | FIND-064-002 | Medium | fs-shell | Open | PR-064 (recommended) | [§2](#find-064-002) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
-| FIND-064-003 | Medium | protocol | Open | PR-064 (recommended) | [§3](#find-064-003) · `crates/finstack-ai-server/src/replica.rs` |
+| FIND-064-003 | Medium | protocol | **Closed** | Closed 2026-08-17 | [§3](#find-064-003) · `crates/finstack-ai-server/src/session.rs` |
 | FIND-064-004 | Medium | dependency/build/release provenance | **Closed** | Closed 2026-08-15 | [§4](#find-064-004) · `deny.toml`; `mise run supply-chain` |
 | FIND-064-005 | Low | protocol | Open | PR-065 (release engineering) | [§5](#find-064-005) · `crates/finstack-ai-server/src/auth.rs` |
 | FIND-064-006 | Low | dependency/build/release provenance | Open | PR-064 (recommended) | [§6](#find-064-006) · `mise.toml`, `.github/workflows/ci.yml` |
-| FIND-064-007 | Low | fs-shell | Open | PR-065 (release engineering) | [§7](#find-064-007) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
+| FIND-064-007 | Low | fs-shell | **Closed** | Closed 2026-08-17 | [§7](#find-064-007) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
 | FIND-064-008 | High | plugin | **Accepted** | Not applicable — permanent non-goal; see §8 | [§8](#find-064-008) · `docs/site/security-trust-levels.md` |
 | FIND-064-009 | Medium | journal/recovery integrity | **Accepted** | Not applicable — permanent residual; see §9 | [§9](#find-064-009) · `crates/finstack-ai-protocol/src/journal.rs` |
 | FIND-064-010 | Medium | dependency/build/release provenance | **Accepted** | First registry publish (PR-065/PR-066) | [§10](#find-064-010) · `docs/implementation/release-rehearsal.md` |
@@ -240,11 +240,11 @@ symlink-swap race test that the filesystem toolset already has.
 | ID | FIND-064-003 |
 | Severity | Medium |
 | Surface | protocol (remote framing, authentication hooks, authorization context) |
-| Status | Open |
+| Status | **Closed** |
 | Owner | PR-064 implementer |
-| Owning module | `crates/finstack-ai-server/src/replica.rs` (`SessionReplica::receipts`, `apply_command`) |
-| Remediation date | PR-064 (recommended) |
-| Evidence | independent-review.md §3.2; `crates/finstack-ai-server/src/tests.rs::command_idempotency_replays_and_conflicts` |
+| Owning module | `crates/finstack-ai-server/src/session.rs` (`SessionReplica::receipts`, `apply_command`) |
+| Remediation date | Closed 2026-08-17 |
+| Evidence | `SessionReplica::with_receipt_cap`; `session::tests::receipt_map_fails_closed_at_cap`; `session::tests::receipt_conflict_is_constant_time_lookup` |
 | Threat model | SEC-INV-007, TM-16, §8.5 ("outstanding-operation limits are configurable and observable"), NFR-REL-004 |
 
 ### Defect
@@ -269,7 +269,11 @@ external-completion router has an `IdempotencyHorizon`
 (`crates/finstack-ai-runtime/src/ingress.rs`); the reference replica has no
 equivalent.
 
-This is filed `Open` and deliberately **not** `Accepted`: an unbounded
+This finding is **Closed**. The replica now indexes receipts by
+`command_id` (O(1) conflict) and fails closed at a configurable
+retention cap (`DEFAULT_RECEIPT_CAP`, `with_receipt_cap`).
+
+This was filed `Open` and deliberately **not** `Accepted`: an unbounded
 resource is not a waivable deviation.
 
 ### Suggested remediation
@@ -427,11 +431,11 @@ builds.
 | ID | FIND-064-007 |
 | Severity | Low |
 | Surface | fs-shell |
-| Status | Open |
+| Status | **Closed** |
 | Owner | Release engineering |
 | Owning module | `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` (`run_process`) |
-| Remediation date | PR-065 (release engineering) |
-| Evidence | independent-review.md §3.4 |
+| Remediation date | Closed 2026-08-17 |
+| Evidence | Incremental bounded pipe read; `tests::hostile_stdout_is_killed_at_the_byte_cap` |
 | Threat model | TM-03 ("bounded output/time"), SEC-INV-007 |
 
 ### Defect

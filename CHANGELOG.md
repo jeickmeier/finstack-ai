@@ -14,6 +14,12 @@ unpublished.
 
 ## [Unreleased]
 
+### Added
+
+- Restored `finstack-ai-workflow-local` as the in-process `WorkflowSession`
+  driver, with adapter-owned durable cron (run-once catch-up against
+  `ExternalClock`, tenant-scoped table in the journal sqlite file).
+
 ### Changed
 
 - Official OpenAI integration now uses stateless Responses requests through
@@ -44,6 +50,8 @@ unpublished.
   run a model-activated variant; `None` keeps the `Agent` that was called.
   Rust struct literals that listed every `AgentRunRequest` field must
   set `capability` (use `try_new`, which defaults it to `None`).
+  `AgentRunRequest` is `#[non_exhaustive]` so a later field is not
+  another silent struct-literal break.
 - wasm-host event hub uses `event_sequence_mismatch`, a real observer
   audience, and `BlockBounded` waits via the host driver.
 - Ready-slot resolution fails closed when a per-request configuration is
@@ -118,7 +126,7 @@ PyPI, or npm publication.
 - Architecture and dependency enforcement via `mise run architecture` (PR-002)
 - Cross-platform CI workflows, supply-chain/secret checks, and private release-smoke binary (PR-003)
 - Standalone ADR-001 through ADR-037 records with Threat Model cross-links (PR-004)
-- Schema/API compatibility governance: contract registry, reserved schema/fixture roots, change-classification template, and `mise run schema-governance` enforcement (PR-004)
+- Schema/API compatibility governance: contract registry, reserved schema/fixture roots, change-classification template, and per-family Rust fixture coupling (`crates/finstack-ai-test/tests/public_rust_api.rs`, `journal_v1.rs`, `crates/finstack-ai-protocol/tests/compat_fixtures.rs`) (PR-004)
 - Pull request template API/schema/performance/security impact sections (PR-004)
 - Golden-trace and scripted-input schemas, fixtures, and Rust conformance harness (PR-005)
 - Criterion benchmark groups with machine-readable metadata and non-blocking `benchmark.yml` (PR-005)

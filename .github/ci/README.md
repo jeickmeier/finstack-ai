@@ -21,9 +21,13 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `check-wasm` | Type-check the selected wasm-host graph and reject Tokio/native I/O |
 | `generate-wasm` | Regenerate wasm-bindgen glue and the `@finstack/ai` TypeScript facade |
 | `test-browser` | Type-check and run the headless Chromium, Firefox, and WebKit package harness |
-| `stage-wasm` | Pack unpublished `@finstack/ai` 0.0.2 artifacts and typecheck a clean install |
+| `stage-wasm` | Pack unpublished `@finstack/ai` artifacts and typecheck a clean install |
 | `benchmark-wasm` | Record WASM/JS crossing warning measurements |
-| `ci` | `check`, `test`, and `check-wasm` |
+| `ci` | `check`, `test`, `check-wasm`, `supply-chain`, `docs-links`, `docs-license`, `check-guest-sdk`, `check-plugin-template`, and `check-plugin-lock` |
+| `supply-chain` | cargo-deny across the workspace and fuzz manifest (Eng §9; TM-18) |
+| `secret-scan` | gitleaks over the repository tree and history (SEC-INV-005; TM-04) |
+| `secret-scan-canary` | Temporary-repo negatives proving gitleaks fails on assembled canaries |
+| `fuzz-smoke` | Deterministic bounded cargo-fuzz smoke (nightly) |
 | `kernel` / `runtime` / `python-binding` / `wasm-binding` | Narrow local crate gates. Not a substitute for `check` / `ci` |
 
 ## Workflows
@@ -31,7 +35,9 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
 | [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (consecutive byte-identical rebuild), and `test-browser`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
-| [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` 0.0.2 artifacts. Does not publish. |
+| [`security.yml`](../workflows/security.yml) | every PR, `main` push, weekly, manual | `supply-chain`, `secret-scan`, and `secret-scan-canary`. |
+| [`nightly.yml`](../workflows/nightly.yml) | daily, manual | `starter-rc` then `fuzz-smoke`. Does not publish. |
+| [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` artifacts. Does not publish. |
 
 Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
@@ -55,11 +61,16 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
 ## Retired automation
 
-Supply-chain (`cargo-deny`), secret scanning, fuzz and Miri campaigns, pinned
-nightly compatibility, Criterion benchmarks, coverage reports, architecture and
-schema-governance enforcement, release smoke and reproducibility, and Python
-wheel/sdist staging have been removed along with their helper scripts,
-configuration, and fixtures. Reintroducing any of them means writing the check
-again as an explicit mise task. Historical evidence under
-`docs/implementation/` records the runs made while those gates were active and
-is unchanged.
+The following historical mise tasks no longer exist: `architecture`,
+`schema-governance`, `test-schema-governance`, `docs`, `check-minimal`,
+`test-miri`, `check-nightly`, `release-smoke`, `release-reproducible`,
+`build-python-wheel-ci`, per-PR `test-pr0xx` wrappers, and the focused
+`test-kernel` / `test-model` / `test-tool` / `test-events` /
+`test-extensions` / `test-lifecycle` / `test-runtime` / `test-runtime-gate` /
+`test-sdk` slices. Historical evidence under `docs/implementation/` records
+the runs made while those gates were active.
+
+Surviving replacements: `check`, `test`, `conformance`, `supply-chain`,
+`docs-links`, `docs-quickstarts`, `secret-scan`, `secret-scan-canary`,
+`fuzz-smoke`, `starter-rc`, and `release-rehearsal`. Do not invent a passing
+result for a retired task.

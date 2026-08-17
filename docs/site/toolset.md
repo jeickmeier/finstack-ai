@@ -12,9 +12,9 @@ and policy surface is intended to stay under 100 lines (NFR-DX-002).
 The `coding` binary in [rust-minimal](../../examples/rust-minimal/README.md)
 composes those leaves with repository/memory context, sliding-window
 compaction, and a `before_finalize` verifier over a keyless loopback model.
-The toolset and context legs work; the compaction leg fails once the
-window triggers — see
-[why compaction cannot complete](middleware.md#why-compaction-cannot-complete).
+The toolset, context, and sliding-window compaction legs work. Summarize
+compaction stays unlandable — see
+[why summarize compaction cannot complete](middleware.md#why-summarize-compaction-cannot-complete).
 
 Native toolsets are [T1](security-trust-levels.md). They inherit process
 authority. Do not call them a sandbox. Untrusted code belongs on the

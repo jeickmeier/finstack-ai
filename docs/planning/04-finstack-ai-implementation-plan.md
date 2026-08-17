@@ -13,11 +13,11 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.21 |
+| Version | 0.22 |
 | Status | Implementation baseline |
-| Date | 2026-08-15 |
+| Date | 2026-08-17 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Technical Design v0.18; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Technical Design v0.19; Security and Threat Model v0.6 |
 
 # Executive implementation decision
 
@@ -44,9 +44,11 @@ Python bindings       Browser WASM       Durability/recovery
               ecosystem + public preview
                         |
                   1.0 hardening
+                        |
+            1.0.x reliability / 1.0 production drivers
 ```
 
-The plan contains **67 logical pull requests** across eleven phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
+The plan contains **79 logical pull requests** across twelve phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
 
 # 1. Purpose and use of this plan
 
@@ -88,6 +90,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 1.0.0 GA | Phase 9 | Stable contracts, audit, performance and release hardening | SemVer and schema compatibility commitments |
 | 1.0.x maintenance | Phase 10 | Post-GA fail-closed hardening; no journal/WIT/protocol meaning change | SemVer patch; public removals remain major |
 | 2.0 provider migration | Phase 11 | Responses + native Ollama; Chat Completions removed | Major public break; publication is a later named action |
+| 1.0 production drivers | Phase 12 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | SemVer additive or new-package; freeze gate must see additions |
 
 ## 2.1 MVP and preview boundary
 
@@ -128,6 +131,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 9. 1.0 hardening | 6-10 weeks | Driven by preview feedback and audits |
 | 10. 1.0.x reliability | 1-2 weeks | Sequential slices after G8; one logical PR |
 | 11. 2.0 provider migration | 2-4 weeks | Sequential after ADR-040; publication excluded |
+| 12. 1.0 production drivers | 2-4 weeks | E1 parallel with E3 after authorization; E4 sequential on E3 |
 
 ## 3.1 Staffing scenarios
 
@@ -200,6 +204,10 @@ Phase 4: Python     Phase 5: WASM      Phase 6: durability
                                         Phase 9: 1.0
                                                |
                                         Phase 10: 1.0.x
+                                               |
+                          ---------------------|---------------------
+                          v                                         v
+                   Phase 11: 2.0 providers              Phase 12: 1.0 drivers
 ```
 
 Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
@@ -2923,7 +2931,7 @@ A separate ADR is required before merging a change that:
 ## Entrance criteria
 
 - ADR-040 is accepted and primary planning documents are reconciled.
-- Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-067 envelopes.
+- Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-067 envelopes. Phase 12 / PR-074–PR-079 may proceed in parallel after pack v0.24; this phase does not implement production drivers.
 
 ## Exit criteria
 
@@ -2974,6 +2982,196 @@ A separate ADR is required before merging a change that:
 **Purpose.** Replace Python/WASM/docs/notebooks. Do not publish.
 
 **Dependencies.** PR-071 and PR-072.
+
+# 17C. Phase 12: 1.0 production drivers
+
+**Outcome.** Production drivers that the 1.0 freeze already described but that no non-test path invokes: `ContextProvider` assembly with authoritative `protected`, the restored local workflow adapter with journal-durable cron, the remaining PR-047 `Lane` verbs, Python lane/SQLite handles, and Rust-then-Python child-run / external-completion routing. Phase 10 remains fail-closed hardening with no new surface. Phase 11 remains the ADR-040 provider migration.
+
+**Planning range.** 2-4 weeks
+
+**Traceability.** FR-CTX, FR-DUR-007/008/010/011, FR-PY; PRD UC-05, UC-08, UC-09; TDD sections 16-19 and 24; TM-15, TM-19, TM-21; 1.0 compatibility policy.
+
+## Entrance criteria
+
+- Documentation pack v0.24 / Implementation Plan 0.22 authorizes this section. Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-073 envelopes.
+- The public-item freeze gate fails on added names and Rust signature drift, so new E-group surface is visible. Phase 11 / PR-068–PR-073 may proceed in parallel; this phase does not implement the provider break.
+
+## Exit criteria
+
+- A non-test caller invokes `ContextProvider` on the `prepare_context` / `before_model` path; repository and memory leaves reach `BeforeModelInput` with authoritative `protected`; `RequestCompactionModel` still returns `middleware_stage_unlandable`.
+- `finstack-ai-workflow-local` drives `WorkflowSession`; cron persists in an adapter-owned journal table; restart fires at most one missed tick per schedule against `ExternalClock`.
+- `Lane::run` returns a live `Run`; `suspend` parks without dropping the journal; `resume` respawns `RunTaskOwner`.
+- Python exposes `cancel` / `append_text` / `lane_by_id` / `run` / `suspend` / `resume` and `SqliteDurability`.
+- Rust `AgentRun` and Python route child-run accept and external completion; the Python path is not data-only `normalize`.
+- No journal `RecordBody` variant, WIT world, remote-protocol meaning, or NFR-PORT-* amendment.
+
+## Pull request sequence
+
+### PR-074 - Authorize Phase 12 and record hygiene
+
+**Purpose.** Authorize 1.0 production-driver work as Phase 12 and record the planning-pack amendment. Waves 1–4 hygiene is already largely in the worktree; this PR owns the authorization slice, not E-group code.
+
+**Principal changes.**
+
+- Add §17C Phase 12 with PR-074–PR-079.
+- Update §5.1 and §22; bump Plan 0.21→0.22 and pack 0.23→0.24.
+- Add additive / new-package rows to the 1.0 compatibility matrix for E surfaces.
+- Write envelope stubs at `docs/implementation/artifacts/pr-074` through `pr-079`.
+- Record Waves 1–4 hygiene (A/B/C + TM-04) as already landed; do not revert those changes.
+- Do not amend NFR-PORT-*.
+
+**Acceptance evidence.**
+
+- Implementation Plan 0.22 contains §17C with PR-074–PR-079, each with Purpose, Principal changes, Acceptance evidence, Dependencies, Explicitly excluded, and Traceability.
+
+- Pack README is v0.24 and lists Implementation Plan 0.22.
+
+- Compatibility matrix has additive / new-package rows for Lane verbs, `finstack-ai-workflow-local`, Python handles, and the child-run API.
+
+- Envelope stubs exist for PR-074–PR-079.
+
+- NFR-PORT-* text is unchanged.
+
+**Dependencies.** Waves 1–4 hygiene in the worktree; B1 freeze-gate upgrade; Phase 9 / G8. Phase 10 may remain in progress.
+
+**Traceability.** FR-CTX, FR-DUR-007/008/010/011; PRD UC-05/UC-08/UC-09; TDD sections 16-19, 24; 1.0 compatibility policy; NFR-COMP.
+
+**Explicitly excluded.** E1/E3/E4 production code; Phase 11 provider migration; NFR-PORT-* amendment; D1–D18 governance transaction; `RequestCompactionModel` landing; Temporal engine integration; registry publication.
+
+### PR-075 - E1 ContextProvider production driver
+
+**Purpose.** Invoke registered `ContextProvider`s on the production `prepare_context` / `before_model` path so repository and memory leaves, protected projection, and the Python adapter become reachable.
+
+**Principal changes.**
+
+- Add a context-effect driver arm parallel to model/tool in the host-task dispatcher.
+- Place the driver under `crates/finstack-ai-runtime/src/exec/context_driver/`.
+- Replace hard-coded `protected = false` in `stage_settlement/input.rs` with authoritative projection from assembled context.
+- Do not change `RequestCompactionModel` / `MIDDLEWARE_STAGE_UNLANDABLE`.
+
+**Acceptance evidence.**
+
+- A non-test caller of `assemble_context` / `CommittedContextCall::try_new` exists on the `prepare_context` / `before_model` path.
+
+- Repository and memory leaves produce `ContextItem`s that reach `BeforeModelInput.source_entries` with authoritative `protected`.
+
+- Sliding-window compaction in `examples/rust-minimal --bin coding` no longer fails `compaction_result_invalid`.
+
+- A Python `ContextProvider` adapter test fires end-to-end and is not only `TypeError` on `.component`.
+
+- `RequestCompactionModel` still returns `middleware_stage_unlandable`.
+
+**Dependencies.** PR-074. Independent of PR-076–PR-079. B1 freeze gate must already see additions.
+
+**Traceability.** FR-CTX-001–004; FR-MW compaction contract; Architecture section 11.5; TDD sections 16-19, especially 17.6; TM-21.
+
+**Explicitly excluded.** `RequestCompactionModel` / summarize compaction; `fold.rs` unlandable-stage change; journal/WIT/protocol meaning change; Temporal; Phase 11 provider code; NFR-PORT-* amendment.
+
+### PR-076 - E3 local workflow + cron
+
+**Purpose.** Restore `finstack-ai-workflow-local` as the shipped driver of `WorkflowSession` and add adapter-owned durable cron with run-once catch-up.
+
+**Principal changes.**
+
+- Restore `extensions/workflow/finstack-ai-workflow-local/` as the production driver of `WorkflowSession`.
+- Promote the relocated `local_workflow` suite into that crate.
+- Persist schedule state in an adapter-owned durable table in the same `JournalStore` / sqlite file (tenant-scoped), loaded on `attach`. Document that this is adapter state, not a kernel record.
+- Cron expression + next-fire instant computed against `WorkflowSession::clock()` (`ExternalClock`), never wall time.
+- On restart, for each schedule whose next-fire is in the past, fire once, then recompute the next future tick. No backfill storm.
+- Do not add a `RecordBody` variant.
+
+**Acceptance evidence.**
+
+- Existing `local_workflow` A01/A02/A04/TM-19 still pass through the restored crate.
+
+- New `restart.rs` cases: schedule survives restart; one catch-up fire; no second catch-up; tenant isolation via `WorkflowSession::tenant_scope()`.
+
+- Cron advances only through `ExternalClock` (no wall-clock flake).
+
+- Temporal remains a non-engine shim; the PR-059 "reference integration" claim is true of the local adapter.
+
+**Dependencies.** PR-074. Independent of PR-075.
+
+**Traceability.** PRD UC-05, UC-09; FR-DUR-010/011; Architecture sections 2.3, 9.5, 10; TDD workflow driver; TM-19; ADR-013 (not reopened).
+
+**Explicitly excluded.** `RecordBody` / journal-freeze change; Temporal engine integration; kernel clock; Phase 11; E1/E4 code; NFR-PORT-* amendment.
+
+### PR-077 - E4a Lane::run / suspend / resume
+
+**Purpose.** Complete the PR-047 minimum `Lane` verbs: `run(input) -> Run`, `suspend()`, `resume()`.
+
+**Principal changes.**
+
+- `Lane::run(input)` on the existing `Agent::start` / `AcceptRun` path.
+- `suspend` parks the driver without dropping the journal.
+- `resume` uses `WorkflowSession::with_ports` plus local-workflow restart respawn (PR-076).
+- `append_text` still does not start a run.
+
+**Acceptance evidence.**
+
+- Idle lane `run(input)` returns a live `Run`.
+
+- `suspend` parks without dropping the journal.
+
+- `resume` respawns `RunTaskOwner`.
+
+- `append_text` still does not start a run.
+
+**Dependencies.** PR-076 for `suspend`/`resume`. `run` may be implemented first in this PR if PR-076 is not yet merged; `suspend`/`resume` land in the same PR once PR-076 is in.
+
+**Traceability.** FR-DUR-008/009/010; PRD UC-08; TDD section 24.2; PR-047 minimum.
+
+**Explicitly excluded.** Bookmark/checkout convenience navigation; distributed multi-writer; Python bindings (PR-078); child-run API (PR-079); journal field adds; Phase 11.
+
+### PR-078 - E4b+E4c Python lanes + SQLite store
+
+**Purpose.** Expose Rust lane verbs on `PyLane` / `Session` and wire the Python binding to `finstack-ai-store-sqlite`.
+
+**Principal changes.**
+
+- Python `cancel`, `append_text`, and `Session.lane_by_id` as thin `#[pymethods]` (may ship slightly ahead of `run`/`suspend`/`resume`).
+- Python `run` / `suspend` / `resume` wrappers after PR-077.
+- Add `finstack-ai-store-sqlite` to the binding manifest; expose `SqliteDurability::{Durable, Relaxed}`.
+- Add the migration and settlement-idempotency fixtures called by the PR-048 plan.
+- Extend `test_durable_restart.py` to respawn once E3/E4a `resume` exists.
+
+**Acceptance evidence.**
+
+- `PyLane` exposes `cancel`, `append_text`, `run`, `suspend`, and `resume`; `Session` exposes `lane_by_id`.
+
+- `SqliteDurability` is importable from the public Python package.
+
+- Migration and settlement-idempotency fixtures pass through the Python binding.
+
+- `test_durable_restart.py` respawns a run after `resume` (not inspect-only).
+
+**Dependencies.** PR-077. `cancel` / `append_text` / `lane_by_id` may be written first in this PR.
+
+**Traceability.** FR-PY; FR-DUR-007/008/010; TDD binding handles; PR-048 binding restart fixtures.
+
+**Explicitly excluded.** Child-run / `complete_external` Python routing (PR-079); WASM lane verbs; Temporal; NFR-PORT-* amendment; wheel-matrix restoration.
+
+### PR-079 - E4d Rust + Python child-runs / external completions
+
+**Purpose.** Add `AgentRun` child-run and external-completion surfaces in Rust, then route them from Python.
+
+**Principal changes.**
+
+- Rust `AgentRun` methods to prepare/accept a child via `ChildRunPrepared` + `AgentInvoker`.
+- External completion routing patterned on `WorkflowSession::complete_external`.
+- Python pymethods that actually route, retiring the data-only prebeta path for those two kinds (or keeping `normalize` as a validator in front of the router).
+
+**Acceptance evidence.**
+
+- Rust unit + journal fixture for child accept/cancel fan-out (lane tests already distinguish child vs lane).
+
+- Python test that starts a child and completes an external effect, not merely round-trips JSON.
+
+**Dependencies.** PR-078.
+
+**Traceability.** FR-DUR-011; FR-KRN lineage; TDD `AgentInvoker` / `ChildRunPrepared`; Architecture section 9; TM-15.
+
+**Explicitly excluded.** `RemoteChildSession` dispatch; marketplace; Phase 11; `RequestCompactionModel`; Temporal engine; NFR-PORT-* / D1–D18; registry publication.
 
 # 18. Cross-phase quality plan
 
@@ -3100,6 +3298,8 @@ PRD lettered phases are capability groupings; the numbered phases and logical PR
 | F - Server and ecosystem adapters | Phase 8, PR-055 through PR-061 | 8 | G7 |
 | Cross-cutting GA hardening | Phase 9, PR-062 through PR-066 | Definition of done and all milestones | G8 |
 | 1.0.x reliability hardening | Phase 10, PR-067 | Post-GA fail-closed maintenance | — |
+| 2.0 provider migration | Phase 11, PR-068–PR-073 | Responses + native Ollama; Chat Completions removed | — |
+| 1.0 production drivers | Phase 12, PR-074–PR-079 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | — |
 
 A family traceability reference such as `NFR-PERF` expands to every numbered requirement in that family unless the entry names a narrower range. This convention avoids duplicating requirement prose while preserving ownership.
 
@@ -3116,6 +3316,8 @@ A family traceability reference such as `NFR-PERF` expands to every numbered req
 | Ecosystem/public preview | PR-055 to PR-061 | Release scope and representative use cases | Providers, compaction/context batteries, observers, server, workflows |
 | 1.0 hardening | PR-062 to PR-066 | All NFR families | Compatibility, performance, security, release |
 | 1.0.x reliability | PR-067 | NFR-SEC, NFR-REL, NFR-COMP | Fail-closed poison/ack, SDK honesty, event-hub parity |
+| 2.0 provider migration | PR-068 to PR-073 | FR-MDL; ADR-040; NFR-COMP | Responses, native Ollama, Chat Completions removed |
+| 1.0 production drivers | PR-074 to PR-079 | FR-CTX, FR-DUR, FR-PY; UC-05/08/09 | Context driver, workflow-local cron, Lane verbs, Python SQLite, child-runs |
 
 # 23. First 30 days
 

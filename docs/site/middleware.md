@@ -77,27 +77,15 @@ settlement that can carry them.
 | Leaf | Status |
 | --- | --- |
 | [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
-| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Does not work end to end. Both outcomes are unapplicable. |
+| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize (`RequestCompactionModel`) stays unlandable. |
 
-### Why compaction cannot complete
+### Why summarize compaction cannot complete
 
-The two causes are independent; fixing either alone is not enough.
-
-**Deterministic strategies return `CompactContext`, which fails
-validation.** `validate_compaction_result` requires the last source
-entry handed to the compactor to be `protected`. `protected` is
-authoritative-from-the-context-port: a compactor is not allowed to
-assert it, precisely because the check exists to constrain the
-compactor. The `ContextProvider` port has **no production driver** —
-nothing in a live run collects a contribution or assembles context — so
-no protected context item is ever created, every source entry is
-structurally unprotected, and every compaction result is rejected with
-`compaction_result_invalid`.
-
-**Wiring the `ContextProvider` port is the unblock.** Patching the
-compactor, or fabricating the `protected` bit where the source entries
-are assembled, is not: it would let the constrained party certify
-itself.
+**Deterministic strategies return `CompactContext`.** That outcome
+lands once the last source entry is a protected user. `protected` is
+authoritative-from-the-context-port plus the structural rule (system /
+developer messages and the trailing current user). A compactor still
+cannot set the bit.
 
 **The `summarize` strategy returns `RequestCompactionModel`, which has
 no design slot at all.** It needs a committed child model effect
@@ -107,14 +95,13 @@ there is no committed middleware parent to attach a child to, so the
 aggregate design has nowhere to put either half. This one is not
 unblocked by the context port; it needs a design change.
 
-Two further gaps sit behind the first cause and become live the moment
-`ContextProvider` is wired. Both are documented at
-`apply_model_draft` in
+Two residual gaps sit behind a landed `CompactContext`. Both are
+documented at `apply_model_draft` in
 [`crates/finstack-ai-runtime/src/exec/stage_settlement/`](../../crates/finstack-ai-runtime/src/exec/stage_settlement/):
 a landed compaction result drops its derived summaries and checkpoint,
 and a chain producing both a replacement and a compaction would apply a
 projection validated against the original message array on top of the
-replacement array.
+replacement array. Sliding-window compaction does not use those fields.
 
 ## Stable codes
 

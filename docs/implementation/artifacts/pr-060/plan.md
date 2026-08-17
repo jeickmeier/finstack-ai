@@ -112,7 +112,7 @@ Six Implementation Plan bullets map 1:1 to A01–A06.
 
 - PR-060-A01: Every public package has a tested quick start.
   Product-facing crates and bindings listed under Locked design
-  each have a README "Quick start" that a CI/doc-test or
+  each have a site guide or package README "Quick start" that a CI/doc-test or
   `tools/docs/quickstarts.py` (or equivalent mise task) executes
   offline. No live provider, Temporal cluster, or hosted collector.
   Kernel / runtime / protocol may point at the Rust SDK guide

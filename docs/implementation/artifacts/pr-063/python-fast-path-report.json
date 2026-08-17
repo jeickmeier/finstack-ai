@@ -35,9 +35,15 @@
       "bytes_per_session": 65152,
       "incremental_kib": 8144,
       "resident_kib": 10224,
+      "run_task_owner_size_of": 96,
       "sessions": 128
     },
-    "native_within_target": false,
+    "native_within_target": true,
+    "nfr_perf_005": {
+      "incremental_rss_is_not_framework_owned": true,
+      "metric": "run_task_owner_size_of",
+      "run_task_owner_size_of": 96
+    },
     "python_heap_bytes_per_idle_handle_pair": 156,
     "target_bytes_per_session": 32768
   },

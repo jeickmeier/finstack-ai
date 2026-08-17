@@ -38,5 +38,5 @@ touches a compatibility-controlled contract family. Complete every field; use
 
 - [ ] `schemas/schema-families.toml` owner/promise still accurate
 - [ ] Fixtures under `fixtures/compatibility/<family>/` updated in this change
-- [ ] `mise run schema-governance` passes with the PR base revision
+- [ ] Per-family Rust fixture coupling still holds (`crates/finstack-ai-test/tests/public_rust_api.rs`, `crates/finstack-ai-test/tests/journal_v1.rs`, `crates/finstack-ai-protocol/tests/compat_fixtures.rs`)
 - [ ] PR template API / schema / performance / security impact sections completed
