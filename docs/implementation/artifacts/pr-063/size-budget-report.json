@@ -2,9 +2,9 @@
   "format_version": 1,
   "results": [
     {
-      "bytes": 9127,
+      "bytes": 9007,
       "detail": "within ratified budget or unratified optional",
-      "gzip_bytes": 8573,
+      "gzip_bytes": 8449,
       "id": "python-wheel",
       "path": "target/wheels/finstack_ai-1.0.0-cp314-cp314-macosx_11_0_arm64.whl",
       "present": true,

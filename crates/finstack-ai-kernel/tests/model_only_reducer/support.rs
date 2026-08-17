@@ -919,7 +919,7 @@ mod settlements;
 mod structured_output;
 #[path = "successful.rs"]
 mod successful;
-#[path = "termination.rs"]
+#[path = "termination/mod.rs"]
 mod termination;
-#[path = "tool_batches.rs"]
+#[path = "tool_batches/mod.rs"]
 mod tool_batches;

@@ -1,0 +1,33 @@
+//! Context-provider port, committed invocation guard, and deterministic assembly.
+
+mod assembly;
+mod committed;
+mod error;
+mod port;
+mod projection;
+mod types;
+
+#[cfg(all(test, feature = "native-tokio"))]
+mod tests;
+
+pub use assembly::{AssembledContext, ContextTruncationDiagnostic, assemble_context};
+pub use committed::{
+    CommittedContextCall, InvocationResumeAction, RecordedContextContribution,
+    context_resume_action,
+};
+pub use error::{
+    CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID,
+    CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,
+};
+pub use port::{
+    ContextCallContext, ContextProvider, ContextProviderDescriptor, ContextReconcileResult,
+    PendingContextEffect,
+};
+pub use projection::{
+    CapabilityContext, ContextProjectionInput, ContextProjectionItem, ContextProjectionSource,
+    assemble_context_projection,
+};
+pub use types::{
+    ContextAuthority, ContextBudget, ContextContribution, ContextItem, ContextItemKind,
+    ContextOverflowPolicy, ContextProvenance, ContextRequest,
+};

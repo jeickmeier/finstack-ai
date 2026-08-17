@@ -1,0 +1,519 @@
+use finstack_ai_kernel::{
+    AppendBatchId, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
+    RecordEnvelope, RecordId, SessionId, Timestamp,
+};
+use finstack_ai_protocol::{
+    decode, decode_opaque_snapshot, encode_snapshot, verify_chain, verify_chain_from,
+};
+use finstack_ai_runtime::{
+    AcceleratedRestore, LoadedSession, OpaqueSnapshot, StateSnapshotRequest, StoreError,
+};
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::append::AppendIdentity;
+use crate::error::{map_sqlite_error, protocol_error, u16_from_i64, u64_from_i64, usize_from_i64};
+
+pub(crate) struct LoadedBatch {
+    pub(crate) request_cbor: Vec<u8>,
+    pub(crate) identity: AppendIdentity,
+    pub(crate) committed: CommittedBatch,
+}
+
+pub(crate) struct SessionRow {
+    pub(crate) current_sequence: u64,
+    pub(crate) head_checksum: Option<Digest>,
+    pub(crate) snapshot_sequence: Option<u64>,
+    pub(crate) batches: usize,
+    pub(crate) records: usize,
+}
+
+pub(crate) struct StoredRecord {
+    pub(crate) batch_id: AppendBatchId,
+    pub(crate) envelope: RecordEnvelope,
+}
+
+pub(crate) fn load_batch(
+    connection: &Connection,
+    batch_id: AppendBatchId,
+) -> Result<Option<LoadedBatch>, StoreError> {
+    let Some((request_cbor, first_sequence, last_sequence)) = connection
+        .query_row(
+            "SELECT request_cbor, first_sequence, last_sequence FROM batches WHERE batch_id = ?1",
+            params![batch_id.as_bytes().as_slice()],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(map_sqlite_error)?
+    else {
+        return Ok(None);
+    };
+    let identity = decode::<AppendIdentity>(&request_cbor).map_err(protocol_error)?;
+    let records = load_batch_records(connection, batch_id)?;
+    let committed = CommittedBatch::try_new(
+        batch_id,
+        u64_from_i64(first_sequence, "first_sequence")?,
+        u64_from_i64(last_sequence, "last_sequence")?,
+        records,
+    )
+    .map_err(|_| StoreError::Integrity {
+        reason_code: "committed_batch_invalid",
+    })?;
+    Ok(Some(LoadedBatch {
+        request_cbor,
+        identity,
+        committed,
+    }))
+}
+
+fn load_batch_records(
+    connection: &Connection,
+    batch_id: AppendBatchId,
+) -> Result<Vec<RecordEnvelope>, StoreError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT session_id, sequence, record_id, lane_id, run_id, kind,
+                    format_version, kind_version, payload_cbor, timestamp,
+                    payload_digest, previous_checksum, envelope_checksum, derived_event_ids
+             FROM records WHERE batch_id = ?1 ORDER BY sequence",
+        )
+        .map_err(map_sqlite_error)?;
+    let rows = statement
+        .query_map(params![batch_id.as_bytes().as_slice()], row_to_envelope)
+        .map_err(map_sqlite_error)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(map_sqlite_error)?
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+}
+
+pub(crate) fn load_session_records(
+    connection: &Connection,
+    session_id: SessionId,
+) -> Result<Vec<StoredRecord>, StoreError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT session_id, sequence, record_id, lane_id, run_id, kind,
+                    format_version, kind_version, payload_cbor, timestamp,
+                    payload_digest, previous_checksum, envelope_checksum, derived_event_ids,
+                    batch_id
+             FROM records WHERE session_id = ?1 ORDER BY sequence",
+        )
+        .map_err(map_sqlite_error)?;
+    let rows = statement
+        .query_map(params![session_id.as_bytes().as_slice()], |row| {
+            let batch_id = row.get::<_, Vec<u8>>(14)?;
+            let envelope = row_to_envelope(row)?;
+            Ok((batch_id, envelope))
+        })
+        .map_err(map_sqlite_error)?;
+    let mut stored = Vec::new();
+    for row in rows {
+        let (batch_bytes, envelope) = row.map_err(map_sqlite_error)?;
+        stored.push(StoredRecord {
+            batch_id: id_from_blob(&batch_bytes)?,
+            envelope: envelope?,
+        });
+    }
+    Ok(stored)
+}
+
+fn row_to_envelope(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Result<RecordEnvelope, StoreError>> {
+    let session_id = row.get::<_, Vec<u8>>(0)?;
+    let sequence = row.get::<_, i64>(1)?;
+    let record_id = row.get::<_, Vec<u8>>(2)?;
+    let lane_id = row.get::<_, Vec<u8>>(3)?;
+    let run_id = row.get::<_, Option<Vec<u8>>>(4)?;
+    let kind = row.get::<_, String>(5)?;
+    let format_version = row.get::<_, i64>(6)?;
+    let kind_version = row.get::<_, i64>(7)?;
+    let payload_cbor = row.get::<_, Vec<u8>>(8)?;
+    let timestamp = row.get::<_, i64>(9)?;
+    let payload_digest = row.get::<_, Vec<u8>>(10)?;
+    let previous_checksum = row.get::<_, Option<Vec<u8>>>(11)?;
+    let envelope_checksum = row.get::<_, Vec<u8>>(12)?;
+    let derived_event_ids = row.get::<_, Vec<u8>>(13)?;
+    Ok(reconstruct_envelope(
+        &session_id,
+        sequence,
+        &record_id,
+        &lane_id,
+        run_id.as_deref(),
+        &kind,
+        format_version,
+        kind_version,
+        &payload_cbor,
+        timestamp,
+        &payload_digest,
+        previous_checksum.as_deref(),
+        &envelope_checksum,
+        &derived_event_ids,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reconstruct_envelope(
+    session_id: &[u8],
+    sequence: i64,
+    record_id: &[u8],
+    lane_id: &[u8],
+    run_id: Option<&[u8]>,
+    kind: &str,
+    format_version: i64,
+    kind_version: i64,
+    payload_cbor: &[u8],
+    timestamp: i64,
+    payload_digest: &[u8],
+    previous_checksum: Option<&[u8]>,
+    envelope_checksum: &[u8],
+    derived_event_ids: &[u8],
+) -> Result<RecordEnvelope, StoreError> {
+    let body = decode::<RecordBody>(payload_cbor).map_err(protocol_error)?;
+    if body.kind_name() != kind {
+        return Err(StoreError::Integrity {
+            reason_code: "sqlite_kind_mismatch",
+        });
+    }
+    let events = decode::<Vec<EventId>>(derived_event_ids).map_err(protocol_error)?;
+    let envelope = RecordEnvelope::try_new(
+        u16_from_i64(format_version, "format_version")?,
+        u16_from_i64(kind_version, "kind_version")?,
+        id_from_blob(record_id)?,
+        id_from_blob(session_id)?,
+        id_from_blob(lane_id)?,
+        run_id.map(id_from_blob).transpose()?,
+        u64_from_i64(sequence, "sequence")?,
+        Timestamp::from_unix_ms(timestamp).map_err(|_| StoreError::Integrity {
+            reason_code: "sqlite_timestamp",
+        })?,
+        None,
+        digest_from_blob(payload_digest)?,
+        previous_checksum.map(digest_from_blob).transpose()?,
+        digest_from_blob(envelope_checksum)?,
+        events,
+        body,
+    )
+    .map_err(|_| StoreError::Integrity {
+        reason_code: "sqlite_envelope_invalid",
+    })?;
+    Ok(envelope)
+}
+
+pub(crate) fn load_session(
+    connection: &Connection,
+    session_id: SessionId,
+    snapshot_bytes: usize,
+) -> Result<LoadedSession, StoreError> {
+    if !session_exists(connection, session_id)? {
+        return Ok(LoadedSession::empty(session_id));
+    }
+    let stored = load_session_records(connection, session_id)?;
+    let head_checksum = verify_stored_session(connection, session_id, &stored)?;
+    let committed_batches = group_batches(&stored)?;
+    let (metadata, head_sequence, snapshot) =
+        load_session_extras(connection, session_id, snapshot_bytes)?;
+    Ok(LoadedSession {
+        session_id,
+        head_sequence,
+        head_checksum,
+        metadata,
+        committed_batches: committed_batches.into(),
+        snapshot: snapshot.clone(),
+        accelerated: snapshot.as_ref().and_then(accelerated_from),
+    })
+}
+
+fn load_session_extras(
+    connection: &Connection,
+    session_id: SessionId,
+    snapshot_bytes: usize,
+) -> Result<(Metadata, u64, Option<OpaqueSnapshot>), StoreError> {
+    let (metadata, head_sequence, snapshot_sequence) = connection
+        .query_row(
+            "SELECT metadata, current_sequence, snapshot_sequence FROM sessions WHERE session_id = ?1",
+            params![session_id.as_bytes().as_slice()],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        )
+        .map_err(map_sqlite_error)?;
+    let metadata = Metadata::parse(metadata).map_err(|_| StoreError::Integrity {
+        reason_code: "sqlite_metadata",
+    })?;
+    let snapshot = if snapshot_sequence.is_some() {
+        load_snapshot(connection, session_id, snapshot_bytes)?
+    } else {
+        None
+    };
+    Ok((
+        metadata,
+        u64_from_i64(head_sequence, "current_sequence")?,
+        snapshot,
+    ))
+}
+
+pub(crate) fn load_snapshot(
+    connection: &Connection,
+    session_id: SessionId,
+    snapshot_bytes: usize,
+) -> Result<Option<OpaqueSnapshot>, StoreError> {
+    let Some((sequence, payload, digest)) = connection
+        .query_row(
+            "SELECT sequence, payload_cbor, digest FROM snapshots WHERE session_id = ?1",
+            params![session_id.as_bytes().as_slice()],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(map_sqlite_error)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(OpaqueSnapshot::try_new(
+        u64_from_i64(sequence, "snapshot_sequence")?,
+        digest_from_blob(&digest)?,
+        payload,
+        snapshot_bytes,
+    )?))
+}
+
+pub(crate) fn encode_state_request(
+    request: &StateSnapshotRequest,
+    max_bytes: usize,
+) -> Result<OpaqueSnapshot, StoreError> {
+    let (bytes, digest) = encode_snapshot(
+        &request.state,
+        request.state.last_applied_sequence,
+        request.head_checksum,
+        request.pending_timer_scheduled_at,
+    )
+    .map_err(|_| StoreError::Integrity {
+        reason_code: "snapshot_encode_failed",
+    })?;
+    OpaqueSnapshot::try_new(
+        request.state.last_applied_sequence,
+        digest,
+        bytes,
+        max_bytes,
+    )
+}
+
+pub(crate) fn accelerated_from(snapshot: &OpaqueSnapshot) -> Option<AcceleratedRestore> {
+    let decoded =
+        decode_opaque_snapshot(snapshot.sequence(), snapshot.digest(), snapshot.bytes()).ok()?;
+    Some(AcceleratedRestore {
+        sequence: decoded.sequence,
+        head_checksum: decoded.head_checksum,
+        pending_timer_scheduled_at: decoded.pending_timer_scheduled_at,
+        state: decoded.state,
+    })
+}
+
+pub(crate) fn outstanding_count(restored: &AcceleratedRestore) -> u64 {
+    u64::from(restored.state.pending_model_effect.is_some())
+        .saturating_add(u64::from(restored.state.pending_interaction.is_some()))
+}
+
+pub(crate) fn tombstone_count(restored: &AcceleratedRestore) -> u64 {
+    u64::try_from(
+        restored
+            .state
+            .completion_identities
+            .len()
+            .saturating_add(restored.state.resolution_identities.len())
+            .saturating_add(restored.state.model_settlements.len())
+            .saturating_add(restored.state.tool_settlements.len()),
+    )
+    .unwrap_or(u64::MAX)
+}
+
+pub(crate) fn verify_stored_session(
+    connection: &Connection,
+    session_id: SessionId,
+    stored: &[StoredRecord],
+) -> Result<Option<Digest>, StoreError> {
+    let records = stored
+        .iter()
+        .map(|row| row.envelope.clone())
+        .collect::<Vec<_>>();
+    let head = match records.first() {
+        Some(first) if first.sequence() > 1 => {
+            verify_chain_from(&records, first.previous_checksum(), Some(first.sequence()))
+                .map_err(protocol_error)?
+        }
+        _ => verify_chain(&records).map_err(protocol_error)?,
+    };
+    let stored_head = connection
+        .query_row(
+            "SELECT head_checksum FROM sessions WHERE session_id = ?1",
+            params![session_id.as_bytes().as_slice()],
+            |row| row.get::<_, Option<Vec<u8>>>(0),
+        )
+        .map_err(map_sqlite_error)?;
+    let stored_head = stored_head.as_deref().map(digest_from_blob).transpose()?;
+    if head != stored_head {
+        return Err(StoreError::Integrity {
+            reason_code: "head_checksum_mismatch",
+        });
+    }
+    Ok(head)
+}
+
+fn group_batches(stored: &[StoredRecord]) -> Result<Vec<CommittedBatch>, StoreError> {
+    let mut batches = Vec::new();
+    let mut index = 0;
+    while index < stored.len() {
+        let batch_id = stored[index].batch_id;
+        let first_sequence = stored[index].envelope.sequence();
+        let mut records = Vec::new();
+        while index < stored.len() && stored[index].batch_id == batch_id {
+            records.push(stored[index].envelope.clone());
+            index += 1;
+        }
+        let last_sequence = records
+            .last()
+            .map_or(first_sequence, RecordEnvelope::sequence);
+        batches.push(
+            CommittedBatch::try_new(batch_id, first_sequence, last_sequence, records).map_err(
+                |_| StoreError::Integrity {
+                    reason_code: "committed_batch_invalid",
+                },
+            )?,
+        );
+    }
+    Ok(batches)
+}
+
+pub(crate) fn session_exists(
+    connection: &Connection,
+    session_id: SessionId,
+) -> Result<bool, StoreError> {
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sessions WHERE session_id = ?1",
+            params![session_id.as_bytes().as_slice()],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite_error)?;
+    Ok(count > 0)
+}
+
+pub(crate) fn load_session_row(
+    connection: &Connection,
+    session_id: SessionId,
+) -> Result<Option<SessionRow>, StoreError> {
+    let Some((current_sequence, head_checksum, snapshot_sequence)) = connection
+        .query_row(
+            "SELECT current_sequence, head_checksum, snapshot_sequence
+             FROM sessions WHERE session_id = ?1",
+            params![session_id.as_bytes().as_slice()],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<Vec<u8>>>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(map_sqlite_error)?
+    else {
+        return Ok(None);
+    };
+    let batches = count_where(
+        connection,
+        "SELECT COUNT(*) FROM batches WHERE session_id = ?1",
+        session_id,
+    )?;
+    let records = count_where(
+        connection,
+        "SELECT COUNT(*) FROM records WHERE session_id = ?1",
+        session_id,
+    )?;
+    Ok(Some(SessionRow {
+        current_sequence: u64_from_i64(current_sequence, "current_sequence")?,
+        head_checksum: head_checksum.as_deref().map(digest_from_blob).transpose()?,
+        snapshot_sequence: snapshot_sequence
+            .map(|value| u64_from_i64(value, "snapshot_sequence"))
+            .transpose()?,
+        batches,
+        records,
+    }))
+}
+
+pub(crate) fn count_sessions(connection: &Connection) -> Result<usize, StoreError> {
+    let count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+        .map_err(map_sqlite_error)?;
+    usize_from_i64(count, "sessions")
+}
+
+fn count_where(
+    connection: &Connection,
+    sql: &str,
+    session_id: SessionId,
+) -> Result<usize, StoreError> {
+    let count: i64 = connection
+        .query_row(sql, params![session_id.as_bytes().as_slice()], |row| {
+            row.get(0)
+        })
+        .map_err(map_sqlite_error)?;
+    usize_from_i64(count, "count")
+}
+
+pub(crate) fn lookup_record_batch(
+    connection: &Connection,
+    record_id: RecordId,
+) -> Result<Option<AppendBatchId>, StoreError> {
+    let bytes = connection
+        .query_row(
+            "SELECT batch_id FROM records WHERE record_id = ?1",
+            params![record_id.as_bytes().as_slice()],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map_err(map_sqlite_error)?;
+    bytes.as_deref().map(id_from_blob).transpose()
+}
+
+fn id_from_blob<T: IdTag>(bytes: &[u8]) -> Result<Id<T>, StoreError> {
+    let value: [u8; 16] = bytes.try_into().map_err(|_| StoreError::Integrity {
+        reason_code: "sqlite_id_width",
+    })?;
+    Ok(Id::from_bytes(value))
+}
+
+const DIGEST_HEX: &[u8; 16] = b"0123456789abcdef";
+
+fn digest_from_blob(bytes: &[u8]) -> Result<Digest, StoreError> {
+    if bytes.len() != 32 {
+        return Err(StoreError::Integrity {
+            reason_code: "sqlite_digest_width",
+        });
+    }
+    let mut hex = [0_u8; 64];
+    for (index, byte) in bytes.iter().enumerate() {
+        hex[index * 2] = DIGEST_HEX[usize::from(byte >> 4)];
+        hex[index * 2 + 1] = DIGEST_HEX[usize::from(byte & 0x0f)];
+    }
+    let hex = core::str::from_utf8(&hex).expect("hex alphabet");
+    Digest::from_hex(hex).map_err(|_| StoreError::Integrity {
+        reason_code: "sqlite_digest_hex",
+    })
+}

@@ -17,7 +17,9 @@ use finstack_ai_test::{
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use super::{PyAgent, agent_error, component, configuration_error, run_request};
+use super::agent::{PyAgent, component};
+use super::errors::{agent_error, configuration_error};
+use super::run::run_request;
 
 const BENCHMARK_MODEL: &str = "python-fast-path-v1";
 const MAX_DELTAS: usize = 4_096;
