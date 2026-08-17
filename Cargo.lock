@@ -1180,6 +1180,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-workflow-local"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-workflow-temporal"
 version = "1.0.0"
 dependencies = [

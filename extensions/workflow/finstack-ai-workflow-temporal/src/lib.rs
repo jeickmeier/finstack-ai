@@ -1,8 +1,8 @@
 //! Temporal-shaped mapping over the runtime workflow-driver contract.
 //!
 //! This crate does not depend on `temporalio` or a cluster. The in-process
-//! reference driver is [`finstack_ai_runtime::LocalWorkflowDriver`]. It does
-//! not plan model or tool batches.
+//! reference driver is `finstack-ai-workflow-local`. It does not plan model
+//! or tool batches.
 
 #![warn(missing_docs)]
 
@@ -145,7 +145,7 @@ pub fn apply_activity_retry_policy(
     tool: Option<&ToolSpec>,
     dispatch_count: &mut u32,
 ) -> WorkflowRetryDecision {
-    let _ = policy_attempts;
+    let _ = policy_attempts; // engine intent only; kernel retry_decision is authoritative
     let decision = retry_decision(state, effect_id, model, tool);
     if matches!(decision, WorkflowRetryDecision::Allow { .. }) {
         *dispatch_count = dispatch_count.saturating_add(1);

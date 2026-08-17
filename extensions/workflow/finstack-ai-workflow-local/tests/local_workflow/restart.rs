@@ -129,8 +129,7 @@ async fn deferred_survives_worker_restart() {
         .expect("completion"),
     )
     .expect("command");
-    resumed
-        .complete_external(command, timestamp(3_000))
+    Box::pin(resumed.complete_external(command, timestamp(3_000)))
         .await
         .expect("complete");
     let _ = resumed.drive_until_wait().await;
@@ -314,4 +313,255 @@ async fn interaction_survives_worker_restart() {
         .resolve_interaction(command, timestamp(3_000))
         .await
         .expect("resolve");
+}
+
+fn cron_journal_file() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().expect("dir");
+    let path = dir.path().join("journal.sqlite");
+    (dir, path)
+}
+
+fn open_sqlite_journal(path: &Path) -> Arc<SqliteJournalStore> {
+    Arc::new(
+        SqliteJournalStore::try_open(SqliteStoreConfig {
+            path: path.to_path_buf(),
+            durability: SqliteDurability::Relaxed {
+                synchronous: SqliteSynchronous::Normal,
+            },
+            limits: SqliteStoreLimits {
+                sessions: 4,
+                batches_per_session: 128,
+                records_per_session: 512,
+                snapshot_bytes: 4_096,
+            },
+            busy_timeout: StdDuration::from_secs(1),
+        })
+        .expect("sqlite journal"),
+    )
+}
+
+async fn seed_accepted_run(
+    store: Arc<SqliteJournalStore>,
+    model: Arc<dyn Model>,
+    clock: ExternalClock,
+    seed: u64,
+) {
+    let owner = spawn_model_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        clock,
+        seed,
+    )
+    .await;
+    drive_to_active_model_request(&owner.handle()).await;
+    wait_state_on(store as Arc<dyn JournalStore>, |state| {
+        state.accepted.is_some()
+    })
+    .await;
+    drop(owner);
+}
+
+#[tokio::test]
+async fn cron_schedule_survives_worker_restart() {
+    let (_dir, path) = cron_journal_file();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed_plan("hello")],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    let first_next;
+    {
+        let store = open_sqlite_journal(&path);
+        seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 810).await;
+        let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
+        let driver = LocalWorkflowDriver::attach(
+            store,
+            locator(),
+            clock.clone(),
+            810,
+            cron,
+        )
+        .await
+        .expect("attach")
+        .with_ports(Arc::clone(&model), locked_profile(), None);
+        let scheduled = driver
+            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .expect("schedule");
+        first_next = scheduled.next_fire_at;
+        assert_eq!(scheduled.fire_count, 0);
+        assert_eq!(driver.tenant_scope(), "tenant-a");
+    }
+
+    let store = open_sqlite_journal(&path);
+    let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
+    let resumed = LocalWorkflowDriver::attach(store, locator(), clock, 811, cron)
+        .await
+        .expect("resume")
+        .with_ports(model, locked_profile(), None);
+    let schedules = resumed.schedules().expect("schedules");
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0].schedule_id.as_ref(), "tick");
+    assert_eq!(schedules[0].next_fire_at, first_next);
+    assert_eq!(schedules[0].fire_count, 0);
+    assert!(resumed.catch_up_fires().is_empty());
+}
+
+#[tokio::test]
+async fn cron_catch_up_fires_once_then_advances() {
+    let (_dir, path) = cron_journal_file();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed_plan("hello")],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    {
+        let store = open_sqlite_journal(&path);
+        seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 820).await;
+        let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
+        let driver = LocalWorkflowDriver::attach(
+            store,
+            locator(),
+            clock.clone(),
+            820,
+            cron,
+        )
+        .await
+        .expect("attach")
+        .with_ports(Arc::clone(&model), locked_profile(), None);
+        driver
+            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .expect("schedule");
+    }
+
+    clock.jump(25).expect("jump past several ticks");
+    let now = clock.now().expect("now");
+    let store = open_sqlite_journal(&path);
+    let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
+    let resumed = LocalWorkflowDriver::attach(
+        store,
+        locator(),
+        clock.clone(),
+        821,
+        cron,
+    )
+    .await
+    .expect("catch-up")
+    .with_ports(Arc::clone(&model), locked_profile(), None);
+    assert_eq!(resumed.catch_up_fires().len(), 1, "one catch-up fire");
+    assert_eq!(resumed.catch_up_fires()[0].schedule_id.as_ref(), "tick");
+    let after = &resumed.schedules().expect("schedules")[0];
+    assert_eq!(after.fire_count, 1);
+    assert!(after.next_fire_at > now, "next tick is in the future");
+    assert_eq!(after.next_fire_at.as_unix_ms(), 2_030);
+}
+
+#[tokio::test]
+async fn cron_second_attach_does_not_catch_up_again() {
+    let (_dir, path) = cron_journal_file();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed_plan("hello")],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    {
+        let store = open_sqlite_journal(&path);
+        seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 830).await;
+        let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
+        let driver = LocalWorkflowDriver::attach(
+            store,
+            locator(),
+            clock.clone(),
+            830,
+            cron,
+        )
+        .await
+        .expect("attach")
+        .with_ports(Arc::clone(&model), locked_profile(), None);
+        driver
+            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .expect("schedule");
+    }
+    clock.jump(25).expect("jump");
+    {
+        let store = open_sqlite_journal(&path);
+        let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
+        let first = LocalWorkflowDriver::attach(store, locator(), clock.clone(), 831, cron)
+            .await
+            .expect("first catch-up")
+            .with_ports(Arc::clone(&model), locked_profile(), None);
+        assert_eq!(first.catch_up_fires().len(), 1);
+        assert_eq!(first.schedules().expect("schedules")[0].fire_count, 1);
+    }
+
+    let store = open_sqlite_journal(&path);
+    let cron = Arc::new(SqliteCronStore::open(&path).expect("second reopen"));
+    let second = LocalWorkflowDriver::attach(store, locator(), clock, 832, cron)
+        .await
+        .expect("second attach")
+        .with_ports(model, locked_profile(), None);
+    assert!(
+        second.catch_up_fires().is_empty(),
+        "no second catch-up without another clock jump"
+    );
+    assert_eq!(second.schedules().expect("schedules")[0].fire_count, 1);
+}
+
+#[tokio::test]
+async fn cron_catch_up_is_tenant_scoped() {
+    let (_dir, path) = cron_journal_file();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed_plan("hello")],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    {
+        let store = open_sqlite_journal(&path);
+        seed_accepted_run(store.clone(), Arc::clone(&model), clock.clone(), 840).await;
+        let cron = Arc::new(SqliteCronStore::open(&path).expect("cron"));
+        let driver = LocalWorkflowDriver::attach(
+            store,
+            locator(),
+            clock.clone(),
+            840,
+            Arc::clone(&cron) as Arc<dyn CronScheduleStore>,
+        )
+        .await
+        .expect("attach")
+        .with_ports(Arc::clone(&model), locked_profile(), None);
+        driver
+            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .expect("schedule");
+        cron.upsert(&CronSchedule {
+            tenant_scope: Arc::from("tenant-b"),
+            schedule_id: Arc::from("tick"),
+            expression: CronExpression::parse("every 10ms").expect("expr"),
+            origin: timestamp(2_000),
+            next_fire_at: timestamp(2_010),
+            last_fired_at: None,
+            fire_count: 0,
+        })
+        .expect("foreign schedule");
+        assert_eq!(driver.tenant_scope(), "tenant-a");
+        assert_eq!(driver.schedules().expect("tenant-a").len(), 1);
+    }
+
+    clock.jump(25).expect("jump");
+    let store = open_sqlite_journal(&path);
+    let cron = Arc::new(SqliteCronStore::open(&path).expect("reopen cron"));
+    let resumed = LocalWorkflowDriver::attach(
+        store,
+        locator(),
+        clock,
+        841,
+        Arc::clone(&cron) as Arc<dyn CronScheduleStore>,
+    )
+    .await
+    .expect("catch-up")
+    .with_ports(model, locked_profile(), None);
+    assert_eq!(resumed.catch_up_fires().len(), 1);
+    assert_eq!(resumed.catch_up_fires()[0].tenant_scope.as_ref(), "tenant-a");
+    assert_eq!(resumed.schedules().expect("tenant-a")[0].fire_count, 1);
+    let foreign = cron.load_tenant("tenant-b").expect("tenant-b");
+    assert_eq!(foreign.len(), 1);
+    assert_eq!(foreign[0].fire_count, 0, "foreign tenant is not catch-up fired");
 }

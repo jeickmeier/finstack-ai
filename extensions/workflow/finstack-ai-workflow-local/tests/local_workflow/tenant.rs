@@ -37,8 +37,7 @@ async fn cross_tenant_locator_is_unknown() {
         .expect("completion"),
     )
     .expect("command");
-    let error = driver
-        .complete_external(command, timestamp(3_000))
+    let error = Box::pin(driver.complete_external(command, timestamp(3_000)))
         .await
         .expect_err("cross-tenant");
     assert_eq!(error.code(), "unknown_locator");

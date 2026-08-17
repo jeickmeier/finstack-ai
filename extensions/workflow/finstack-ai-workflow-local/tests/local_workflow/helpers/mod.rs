@@ -15,14 +15,15 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, ExternalClock, IdGenerationError, JournalStore,
-    LoadRequest, LocalWorkflowDriver, LockedModelContextProfile, Model, ModelContextProfile,
-    ModelError, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
-    RunTaskOwner, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolSpec, WorkflowSession,
+    LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelError, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem,
+    ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig, RunTaskOwner,
+    TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolSpec, WorkflowSession,
     resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModelAction, ScriptedModelPlan};
+use finstack_ai_workflow_local::{LocalWorkflowDriver, MemoryCronStore};
 
 pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
@@ -377,13 +378,13 @@ pub(crate) async fn drive_to_after_model(
     wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await;
 }
 
-pub(crate) async fn wait_state(
-    store: &Arc<MemoryJournalStore>,
+pub(crate) async fn wait_state_on(
+    store: Arc<dyn JournalStore>,
     predicate: impl Fn(&KernelState) -> bool,
 ) -> CommitCoordinator {
     tokio::time::timeout(StdDuration::from_secs(2), async {
         loop {
-            let recovered = CommitCoordinator::recover(store.clone(), id(1))
+            let recovered = CommitCoordinator::recover(Arc::clone(&store), id(1))
                 .await
                 .expect("recover");
             if predicate(recovered.state()) {
@@ -394,6 +395,13 @@ pub(crate) async fn wait_state(
     })
     .await
     .expect("state wait")
+}
+
+pub(crate) async fn wait_state(
+    store: &Arc<MemoryJournalStore>,
+    predicate: impl Fn(&KernelState) -> bool,
+) -> CommitCoordinator {
+    wait_state_on(Arc::clone(store) as Arc<dyn JournalStore>, predicate).await
 }
 
 pub(crate) async fn journal_trace(
@@ -445,8 +453,11 @@ pub(crate) async fn attach_driver(
     clock: ExternalClock,
     seed: u64,
 ) -> LocalWorkflowDriver {
-    WorkflowSession::trusted(store, locator(), clock, seed)
-        .await
-        .expect("attach")
-        .with_ports(model, locked_profile(), None)
+    LocalWorkflowDriver::wrap(
+        WorkflowSession::trusted(store, locator(), clock, seed)
+            .await
+            .expect("attach")
+            .with_ports(model, locked_profile(), None),
+        Arc::new(MemoryCronStore::new()),
+    )
 }
