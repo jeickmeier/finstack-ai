@@ -78,9 +78,27 @@ pub struct MiddlewareRef {
 impl MiddlewareRef {
     /// Construct a middleware reference.
     ///
+    /// # Arguments
+    ///
+    /// * `component` - Middleware component identity and optional version.
+    /// * `stage` - Optional stage label; `None` leaves the stage unset.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when `stage` is empty, oversized, or NUL-bearing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ComponentId, ComponentRef, MiddlewareRef};
+    ///
+    /// let middleware = MiddlewareRef::try_new(
+    ///     ComponentRef::new(ComponentId::parse("mw.compact").expect("component"), None),
+    ///     Some("before_model"),
+    /// )
+    /// .expect("middleware");
+    /// assert_eq!(middleware.stage(), Some("before_model"));
+    /// ```
     pub fn try_new(
         component: ComponentRef,
         stage: Option<impl AsRef<str>>,
@@ -135,9 +153,26 @@ pub struct PrincipalRef {
 impl PrincipalRef {
     /// Construct a principal reference.
     ///
+    /// # Arguments
+    ///
+    /// * `issuer` - Identity-issuer label (non-empty, no NUL).
+    /// * `subject` - Subject label within that issuer.
+    /// * `tenant_scope` - Optional tenant label; `None` leaves the principal
+    ///   unscoped.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when issuer/subject(/tenant) fail label rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::PrincipalRef;
+    ///
+    /// let principal = PrincipalRef::try_new("oidc", "user-1", Some("tenant")).expect("principal");
+    /// assert_eq!(principal.issuer(), "oidc");
+    /// assert_eq!(principal.tenant_scope(), Some("tenant"));
+    /// ```
     pub fn try_new(
         issuer: impl AsRef<str>,
         subject: impl AsRef<str>,
@@ -265,9 +300,23 @@ pub struct AuthorizationEvidence {
 impl AuthorizationEvidence {
     /// Construct authorization evidence.
     ///
+    /// # Arguments
+    ///
+    /// * `policy_version` - Policy version that produced the decision.
+    /// * `decision_id` - Stable authorization-decision identity.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when fields fail label rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::AuthorizationEvidence;
+    ///
+    /// let evidence = AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("evidence");
+    /// assert_eq!(evidence.policy_version(), "policy-v1");
+    /// ```
     pub fn try_new(
         policy_version: impl AsRef<str>,
         decision_id: impl AsRef<str>,

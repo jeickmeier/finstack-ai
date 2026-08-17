@@ -19,9 +19,23 @@ pub struct ModelTextDelta {
 impl ModelTextDelta {
     /// Construct a text delta.
     ///
+    /// # Arguments
+    ///
+    /// * `text` - Non-empty UTF-8 delta text. Must stay within
+    ///   [`crate::TEXT_MAX_BYTES`] and must not contain NUL.
+    ///
     /// # Errors
     ///
     /// Returns [`EventError`] when text is empty, oversized, or NUL-bearing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ModelTextDelta;
+    ///
+    /// let delta = ModelTextDelta::try_new("hello").expect("delta");
+    /// assert_eq!(delta.text(), "hello");
+    /// ```
     pub fn try_new(text: impl AsRef<str>) -> Result<Self, EventError> {
         let text = text.as_ref();
         if text.is_empty()
@@ -66,9 +80,23 @@ pub struct ReasoningDelta {
 impl ReasoningDelta {
     /// Construct a reasoning delta.
     ///
+    /// # Arguments
+    ///
+    /// * `text` - Non-empty UTF-8 reasoning delta. Uses the same bounds as
+    ///   [`ModelTextDelta::try_new`].
+    ///
     /// # Errors
     ///
     /// Returns [`EventError`] when text is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ReasoningDelta;
+    ///
+    /// let delta = ReasoningDelta::try_new("thinking").expect("delta");
+    /// assert_eq!(delta.text(), "thinking");
+    /// ```
     pub fn try_new(text: impl AsRef<str>) -> Result<Self, EventError> {
         Ok(Self {
             text: ModelTextDelta::try_new(text)?.text,
@@ -108,9 +136,23 @@ pub struct ToolProgress {
 impl ToolProgress {
     /// Construct tool progress.
     ///
+    /// # Arguments
+    ///
+    /// * `message` - Progress text (non-empty, no NUL).
+    /// * `percent` - Optional completion percent in `0..=100`; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EventError`] when message is invalid or percent > 100.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ToolProgress;
+    ///
+    /// ToolProgress::try_new("working", Some(50)).expect("progress");
+    /// assert!(ToolProgress::try_new("working", Some(101)).is_err());
+    /// ```
     pub fn try_new(message: impl AsRef<str>, percent: Option<u8>) -> Result<Self, EventError> {
         if percent.is_some_and(|value| value > 100) {
             return Err(EventError::InvalidPercent);
@@ -160,9 +202,23 @@ pub struct ProviderHeartbeat {
 impl ProviderHeartbeat {
     /// Construct a heartbeat.
     ///
+    /// # Arguments
+    ///
+    /// * `provider` - Provider label.
+    /// * `detail` - Optional heartbeat detail text; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EventError`] when labels fail validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ProviderHeartbeat;
+    ///
+    /// ProviderHeartbeat::try_new("openai", Some("alive")).expect("heartbeat");
+    /// assert!(ProviderHeartbeat::try_new("", None::<&str>).is_err());
+    /// ```
     pub fn try_new(
         provider: impl AsRef<str>,
         detail: Option<impl AsRef<str>>,

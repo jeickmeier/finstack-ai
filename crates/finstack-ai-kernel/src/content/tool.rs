@@ -25,9 +25,29 @@ pub struct ToolCallBlock {
 impl ToolCallBlock {
     /// Construct a tool-call block.
     ///
+    /// # Arguments
+    ///
+    /// * `tool_call_id` - Stable identity for this assistant call.
+    /// * `tool_name` - Model-facing tool name (non-empty, ≤ [`LABEL_MAX_BYTES`], no NUL).
+    /// * `arguments` - Canonical JSON arguments object or value.
+    ///
     /// # Errors
     ///
     /// Returns [`ContentError`] when `tool_name` is empty, oversized, or contains NUL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{RawJson, ToolCallBlock, ToolCallId};
+    ///
+    /// let call = ToolCallBlock::try_new(
+    ///     ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     "search.web",
+    ///     RawJson::parse("{}").expect("json"),
+    /// )
+    /// .expect("call");
+    /// assert_eq!(call.tool_name(), "search.web");
+    /// ```
     pub fn try_new(
         tool_call_id: ToolCallId,
         tool_name: impl AsRef<str>,
@@ -95,10 +115,31 @@ pub struct ToolResultBlock {
 impl ToolResultBlock {
     /// Construct a tool-result block.
     ///
+    /// # Arguments
+    ///
+    /// * `tool_call_id` - Identity of the matching assistant tool call.
+    /// * `content` - Nested content blocks. Must not contain tool-call or
+    ///   tool-result blocks, and must stay within the v1 item ceiling.
+    /// * `is_error` - Whether this result is a tool-level error payload.
+    ///
     /// # Errors
     ///
     /// Returns [`ContentError`] when nested content is oversized or contains nested
     /// tool-call/tool-result blocks.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ContentBlock, TextBlock, ToolCallId, ToolResultBlock};
+    ///
+    /// let result = ToolResultBlock::try_new(
+    ///     ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     vec![ContentBlock::Text(TextBlock::try_new("ok").expect("text"))],
+    ///     false,
+    /// )
+    /// .expect("result");
+    /// assert!(!result.is_error());
+    /// ```
     pub fn try_new(
         tool_call_id: ToolCallId,
         content: Vec<ContentBlock>,

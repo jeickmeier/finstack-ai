@@ -55,10 +55,24 @@ pub struct LaneCreated {
 impl LaneCreated {
     /// Construct a lane-creation body.
     ///
+    /// # Arguments
+    ///
+    /// * `name` - Stable application lane key. Must be non-empty and no longer
+    ///   than [`LABEL_MAX_BYTES`].
+    ///
     /// # Errors
     ///
     /// Returns [`SessionRecordError::InvalidLaneName`] when `name` is empty or
     /// longer than [`LABEL_MAX_BYTES`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::LaneCreated;
+    ///
+    /// let lane = LaneCreated::try_new("research").expect("lane");
+    /// assert_eq!(lane.name(), "research");
+    /// ```
     pub fn try_new(name: impl Into<Arc<str>>) -> Result<Self, SessionRecordError> {
         let name = name.into();
         if name.is_empty() || name.len() > LABEL_MAX_BYTES {

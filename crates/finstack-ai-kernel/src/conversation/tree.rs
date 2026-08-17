@@ -30,6 +30,14 @@ pub struct ConversationEntry {
 impl ConversationEntry {
     /// Construct a conversation entry.
     ///
+    /// # Arguments
+    ///
+    /// * `id` - Stable conversation-entry identity.
+    /// * `parent_id` - Parent entry, or `None` for a lane root. Must not equal `id`.
+    /// * `lane_id` - Lane that owns this entry.
+    /// * `sequence` - Store-assigned conversation sequence for the lane.
+    /// * `body` - Message or other committed conversation payload.
+    ///
     /// # Errors
     ///
     /// Returns [`ConversationError::SelfParent`] when `parent_id` equals `id`.
@@ -216,10 +224,49 @@ impl ConversationError {
 
 /// Apply one committed conversation entry to an in-memory map.
 ///
+/// # Arguments
+///
+/// * `entries` - Mutable map keyed by entry identity. Existing equal entries
+///   are treated as idempotent reuse.
+/// * `entry` - Committed entry to insert. Its parent, when present, must already
+///   exist in `entries`.
+///
 /// # Errors
 ///
 /// Returns [`ConversationError`] for a missing parent, self-parent, or a
 /// conflicting reuse of an existing identity.
+///
+/// # Examples
+///
+/// ```
+/// use std::collections::BTreeMap;
+/// use finstack_ai_kernel::{
+///     ContentBlock, ConversationEntry, EntryBody, EntryId, LaneId, Message, MessageId,
+///     MessageRole, Metadata, ProviderIds, TextBlock, Timestamp, apply_conversation_entry,
+/// };
+///
+/// let message = Message::try_new(
+///     MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+///     MessageRole::User,
+///     vec![ContentBlock::Text(TextBlock::try_new("hello").expect("text"))],
+///     Timestamp::from_unix_ms(0).expect("epoch"),
+///     None,
+///     ProviderIds::empty(),
+///     Metadata::empty(),
+/// )
+/// .expect("message");
+/// let entry = ConversationEntry::try_new(
+///     EntryId::from_bytes(message.id().to_bytes()),
+///     None,
+///     LaneId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("lane"),
+///     1,
+///     EntryBody::Message(message),
+/// )
+/// .expect("entry");
+/// let mut entries = BTreeMap::new();
+/// apply_conversation_entry(&mut entries, entry.clone()).expect("apply");
+/// assert_eq!(entries.len(), 1);
+/// ```
 pub fn apply_conversation_entry(
     entries: &mut BTreeMap<EntryId, ConversationEntry>,
     entry: ConversationEntry,
@@ -243,6 +290,12 @@ pub fn apply_conversation_entry(
 ///
 /// Inspect and mid-run restore use this path. Model-facing history still goes
 /// through [`extract_history`], which rejects an open tool-call/result pair.
+///
+/// # Arguments
+///
+/// * `entries` - Committed conversation map previously built by
+///   [`apply_conversation_entry`].
+/// * `leaf_id` - Leaf to walk from. Must exist in `entries`.
 ///
 /// # Errors
 ///
@@ -274,6 +327,12 @@ pub fn walk_conversation(
 }
 
 /// Walk `parent_id` from `leaf_id` to the root and validate tool-call pairs.
+///
+/// # Arguments
+///
+/// * `entries` - Committed conversation map previously built by
+///   [`apply_conversation_entry`].
+/// * `leaf_id` - Leaf to walk from. Must exist in `entries`.
 ///
 /// # Errors
 ///

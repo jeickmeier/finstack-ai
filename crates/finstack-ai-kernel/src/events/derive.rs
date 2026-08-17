@@ -388,6 +388,12 @@ pub(super) fn is_model_effect_record(body: &RecordBody) -> bool {
 }
 /// Map a record body to derived event kinds by ordinal (`kind_version` = 1).
 ///
+/// # Arguments
+///
+/// * `body` - Committed record body whose derived-event table is consulted.
+/// * `kind_version` - Body kind version. Only version 1 is supported.
+/// * `ordinal` - Zero-based derived-event ordinal for that body.
+///
 /// # Errors
 ///
 /// Returns [`EventError::UnsupportedOrdinal`] when the ordinal is out of range.

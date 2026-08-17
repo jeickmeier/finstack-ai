@@ -53,9 +53,48 @@ pub struct AllocatedIds {
 impl AllocatedIds {
     /// Construct bounded runtime-owned ID bags.
     ///
+    /// # Arguments
+    ///
+    /// * `record_ids` - Preallocated record identities for this transition.
+    /// * `event_ids` - Preallocated derived-event identities.
+    /// * `effect_ids` - Preallocated effect identities.
+    /// * `interaction_ids` - Preallocated interaction identities.
+    /// * `message_ids` - Preallocated message identities.
+    /// * `turn_ids` - Preallocated turn identities.
+    /// * `model_request_ids` - Preallocated model-request identities.
+    /// * `tool_batch_ids` - Preallocated tool-batch identities.
+    /// * `tool_call_ids` - Preallocated tool-call identities.
+    /// * `append_batch_ids` - Preallocated append-batch identities.
+    /// * `cancellation_request_ids` - Preallocated cancellation-request identities.
+    ///
+    /// Each bag must stay within [`crate::SEMANTIC_ARRAY_MAX_ITEMS`]. Unused
+    /// families may be empty.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::TooManyItems`] when any bag exceeds the v1 array ceiling.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{AllocatedIds, RecordId};
+    ///
+    /// let ids = AllocatedIds::try_new(
+    ///     vec![RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id")],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    ///     vec![],
+    /// )
+    /// .expect("ids");
+    /// assert_eq!(ids.record_ids().len(), 1);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         record_ids: Vec<RecordId>,

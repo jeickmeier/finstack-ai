@@ -34,10 +34,49 @@ pub struct RecordDraft {
 impl RecordDraft {
     /// Construct a draft with validated derived-event ordinal cardinality.
     ///
+    /// # Arguments
+    ///
+    /// * `format_version` - Envelope format version. Must be the supported v1 value.
+    /// * `kind_version` - Body kind version. Must be the supported v1 value.
+    /// * `record_id` - Stable record identity allocated for this draft.
+    /// * `session_id` - Session that will own the committed record.
+    /// * `lane_id` - Lane that will own the committed record.
+    /// * `run_id` - Optional run scope; required for run-scoped bodies.
+    /// * `timestamp` - Semantic event time.
+    /// * `derived_event_ids` - Derived event identities; length must match the
+    ///   ordinal table for `body`.
+    /// * `body` - Durable record payload.
+    ///
     /// # Errors
     ///
     /// Returns [`RecordError`] when format/kind versions are unsupported or
     /// `derived_event_ids` length does not match the ordinal table.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     LaneCreated, LaneId, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft,
+    ///     RecordId, SessionId, Timestamp,
+    /// };
+    ///
+    /// # let record_id = RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let session_id = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("id");
+    /// # let lane_id = LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("id");
+    /// let draft = RecordDraft::try_new(
+    ///     RECORD_FORMAT_VERSION,
+    ///     RECORD_KIND_VERSION,
+    ///     record_id,
+    ///     session_id,
+    ///     lane_id,
+    ///     None,
+    ///     Timestamp::from_unix_ms(0).expect("ts"),
+    ///     vec![],
+    ///     RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+    /// )
+    /// .expect("draft");
+    /// assert!(draft.run_id().is_none());
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         format_version: u16,

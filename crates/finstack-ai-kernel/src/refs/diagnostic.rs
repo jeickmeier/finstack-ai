@@ -38,10 +38,32 @@ pub struct Diagnostic {
 impl Diagnostic {
     /// Construct a diagnostic.
     ///
+    /// # Arguments
+    ///
+    /// * `code` - Stable diagnostic code label.
+    /// * `message` - Human-readable diagnostic text (non-empty, no NUL).
+    /// * `severity` - Diagnostic severity.
+    /// * `metadata` - Non-authoritative diagnostic metadata.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when `code` fails label rules, or when
     /// `message` is empty/oversized/NUL-bearing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{Diagnostic, DiagnosticSeverity, Metadata};
+    ///
+    /// let diagnostic = Diagnostic::try_new(
+    ///     "duplicate_decision",
+    ///     "input already applied",
+    ///     DiagnosticSeverity::Info,
+    ///     Metadata::empty(),
+    /// )
+    /// .expect("diagnostic");
+    /// assert_eq!(diagnostic.code(), "duplicate_decision");
+    /// ```
     pub fn try_new(
         code: impl AsRef<str>,
         message: impl AsRef<str>,

@@ -83,9 +83,26 @@ pub struct PipelinePosition {
 impl PipelinePosition {
     /// Construct a pipeline position.
     ///
+    /// # Arguments
+    ///
+    /// * `chain_digest` - Digest of the immutable middleware chain.
+    /// * `stage` - Stage name label.
+    /// * `index` - Zero-based index of this stage in the chain.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError::Refs`] when `stage` is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{Digest, PipelinePosition};
+    ///
+    /// let position = PipelinePosition::try_new(Digest::raw_json(b"chain"), "before_model", 0)
+    ///     .expect("position");
+    /// assert_eq!(position.stage(), "before_model");
+    /// assert_eq!(position.index(), 0);
+    /// ```
     pub fn try_new(
         chain_digest: Digest,
         stage: impl AsRef<str>,

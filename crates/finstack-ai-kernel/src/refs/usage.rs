@@ -24,9 +24,25 @@ pub struct CostAmount {
 impl CostAmount {
     /// Construct a cost amount.
     ///
+    /// # Arguments
+    ///
+    /// * `unit` - Cost-unit label (for example a currency or token unit).
+    /// * `micros` - Amount in millionths of `unit`.
+    /// * `pricing_policy_version` - Pricing-policy version that produced the amount.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when unit/policy labels fail rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::CostAmount;
+    ///
+    /// let cost = CostAmount::try_new("USD", 250_000, "pricing-v1").expect("cost");
+    /// assert_eq!(cost.unit(), "USD");
+    /// assert_eq!(cost.micros(), 250_000);
+    /// ```
     pub fn try_new(
         unit: impl AsRef<str>,
         micros: u64,
@@ -122,9 +138,28 @@ impl Usage {
 
     /// Construct validated normalized usage.
     ///
+    /// # Arguments
+    ///
+    /// * `input_tokens` - Optional input-token count; `None` means unused.
+    /// * `output_tokens` - Optional output-token count; `None` means unused.
+    /// * `total_tokens` - Optional total-token count; `None` means unused.
+    /// * `cost` - Optional normalized cost; `None` means unused.
+    /// * `extension_counters` - Additional named counters, bounded by the v1 map
+    ///   ceiling.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::TooManyEntries`] when extension counters exceed the v1 ceiling.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Usage;
+    ///
+    /// let usage = Usage::try_new(Some(10), Some(4), Some(14), None, Default::default())
+    ///     .expect("usage");
+    /// assert_eq!(usage.total_tokens(), Some(14));
+    /// ```
     pub fn try_new(
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,

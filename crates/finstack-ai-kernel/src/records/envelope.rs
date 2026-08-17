@@ -55,9 +55,58 @@ impl RecordEnvelope {
     ///
     /// Digest and checksum calculation/verification remains owned by PR-039.
     ///
+    /// # Arguments
+    ///
+    /// * `format_version` - Envelope format version. Must be the supported v1 value.
+    /// * `kind_version` - Body kind version. Must be the supported v1 value.
+    /// * `record_id` - Stable record identity.
+    /// * `session_id` - Session that owns the record.
+    /// * `lane_id` - Lane that owns the record.
+    /// * `run_id` - Optional run scope; required for run-scoped bodies.
+    /// * `sequence` - Store-assigned session sequence.
+    /// * `timestamp` - Semantic event time.
+    /// * `committed_at` - Optional store commit time; `None` when unknown.
+    /// * `payload_digest` - Protocol-computed payload digest.
+    /// * `previous_checksum` - Previous envelope checksum; `None` for the first record.
+    /// * `checksum` - Protocol-computed envelope checksum.
+    /// * `derived_event_ids` - Derived event identities; length must match the
+    ///   ordinal table for `body`.
+    /// * `body` - Durable record payload.
+    ///
     /// # Errors
     ///
     /// Returns [`RecordError`] when versions or derived-event cardinality are invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     Digest, LaneCreated, LaneId, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
+    ///     RecordEnvelope, RecordId, SessionId, Timestamp,
+    /// };
+    ///
+    /// # let record_id = RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let session_id = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("id");
+    /// # let lane_id = LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("id");
+    /// let envelope = RecordEnvelope::try_new(
+    ///     RECORD_FORMAT_VERSION,
+    ///     RECORD_KIND_VERSION,
+    ///     record_id,
+    ///     session_id,
+    ///     lane_id,
+    ///     None,
+    ///     1,
+    ///     Timestamp::from_unix_ms(0).expect("ts"),
+    ///     None,
+    ///     Digest::raw_json(b"payload"),
+    ///     None,
+    ///     Digest::raw_json(b"checksum"),
+    ///     vec![],
+    ///     RecordBody::LaneCreated(LaneCreated::try_new("main").expect("lane")),
+    /// )
+    /// .expect("envelope");
+    /// assert_eq!(envelope.sequence(), 1);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         format_version: u16,

@@ -42,9 +42,52 @@ pub struct EffectRequested {
 impl EffectRequested {
     /// Construct an effect request and compute `input_digest`.
     ///
+    /// # Arguments
+    ///
+    /// * `effect_id` - Stable effect identity allocated for this request.
+    /// * `kind` - Effect family. Must match `input`.
+    /// * `relation` - Optional parent/child effect relation; `None` for a root effect.
+    /// * `component` - Optional resolved component invocation; `None` when unused.
+    /// * `pipeline` - Optional middleware pipeline position; `None` when unused.
+    /// * `output_contract` - Required output shape for completion.
+    /// * `input` - Kind-specific input payload. Its digest is computed here.
+    /// * `retry_safety` - Whether the host may retry the effect.
+    /// * `deadline` - Optional semantic deadline; `None` means no deadline.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] when kind/input mismatch or digest canonicalization fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     Digest, EffectId, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
+    ///     EffectRequested, RawJson, RetrySafety,
+    /// };
+    ///
+    /// # let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let contract = EffectOutputContract {
+    /// #     kind: EffectOutputKind::ModelResponse,
+    /// #     schema_version: 1,
+    /// #     schema_digest: Digest::raw_json(b"{}"),
+    /// # };
+    /// let requested = EffectRequested::try_new(
+    ///     effect_id,
+    ///     EffectKind::Model,
+    ///     None,
+    ///     None,
+    ///     None,
+    ///     contract,
+    ///     EffectInput::Model {
+    ///         request: RawJson::parse(r#"{"messages":[]}"#).expect("request"),
+    ///     },
+    ///     RetrySafety::SafeToRetry,
+    ///     None,
+    /// )
+    /// .expect("requested");
+    /// assert_eq!(requested.kind(), EffectKind::Model);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         effect_id: EffectId,
@@ -249,9 +292,48 @@ pub struct EffectCompleted {
 impl EffectCompleted {
     /// Construct a completion, computing output/usage digests.
     ///
+    /// # Arguments
+    ///
+    /// * `effect_id` - Identity of the completed effect.
+    /// * `output_contract` - Output contract frozen on the request.
+    /// * `output` - Canonical output JSON. Its digest is computed here.
+    /// * `usage` - Optional normalized usage; `None` omits usage and its digest.
+    /// * `artifacts` - Produced artifacts, bounded by the v1 array ceiling.
+    /// * `provider_ids` - Opaque provider correlation identifiers.
+    /// * `completion_id` - Optional provider completion label; `None` omits it.
+    /// * `reservation_id` - Optional budget reservation settled by this completion.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] on digest/label failures or usage/digest pairing errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     Digest, EffectCompleted, EffectId, EffectOutputContract, EffectOutputKind, ProviderIds,
+    ///     RawJson,
+    /// };
+    ///
+    /// # let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let contract = EffectOutputContract {
+    /// #     kind: EffectOutputKind::ModelResponse,
+    /// #     schema_version: 1,
+    /// #     schema_digest: Digest::raw_json(b"{}"),
+    /// # };
+    /// let completed = EffectCompleted::try_new(
+    ///     effect_id,
+    ///     contract,
+    ///     RawJson::parse(r#"{"text":"done"}"#).expect("output"),
+    ///     None,
+    ///     vec![],
+    ///     ProviderIds::empty(),
+    ///     None::<&str>,
+    ///     None,
+    /// )
+    /// .expect("completed");
+    /// assert!(completed.usage().is_none());
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         effect_id: EffectId,
@@ -427,9 +509,39 @@ pub struct EffectFailed {
 impl EffectFailed {
     /// Construct a failed completion.
     ///
+    /// # Arguments
+    ///
+    /// * `effect_id` - Identity of the failed effect.
+    /// * `output_contract` - Output contract frozen on the request.
+    /// * `error` - Safe failure descriptor.
+    /// * `usage` - Optional usage observed before failure; `None` omits it.
+    /// * `completion_id` - Optional provider completion label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] on usage/digest pairing or label failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     Digest, EffectFailed, EffectId, EffectOutputContract, EffectOutputKind, ErrorCategory,
+    ///     ErrorDescriptor,
+    /// };
+    ///
+    /// # let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let contract = EffectOutputContract {
+    /// #     kind: EffectOutputKind::ModelResponse,
+    /// #     schema_version: 1,
+    /// #     schema_digest: Digest::raw_json(b"{}"),
+    /// # };
+    /// # let error = ErrorDescriptor::new(
+    /// #     "provider_failed", "provider failed", ErrorCategory::Model, true,
+    /// # ).expect("error");
+    /// let failed = EffectFailed::try_new(effect_id, contract, error, None, None::<&str>)
+    ///     .expect("failed");
+    /// assert!(failed.usage().is_none());
+    /// ```
     pub fn try_new(
         effect_id: EffectId,
         output_contract: EffectOutputContract,
@@ -555,9 +667,34 @@ pub struct EffectCancelled {
 impl EffectCancelled {
     /// Construct a cancellation record.
     ///
+    /// # Arguments
+    ///
+    /// * `effect_id` - Identity of the cancelled effect.
+    /// * `output_contract` - Output contract frozen on the request.
+    /// * `reason` - Optional safe cancellation reason; `None` omits it.
+    /// * `completion_id` - Optional provider completion label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] when labels fail validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     Digest, EffectCancelled, EffectId, EffectOutputContract, EffectOutputKind,
+    /// };
+    ///
+    /// # let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let contract = EffectOutputContract {
+    /// #     kind: EffectOutputKind::ModelResponse,
+    /// #     schema_version: 1,
+    /// #     schema_digest: Digest::raw_json(b"{}"),
+    /// # };
+    /// let cancelled = EffectCancelled::try_new(effect_id, contract, Some("shutdown"), None::<&str>)
+    ///     .expect("cancelled");
+    /// assert_eq!(cancelled.reason(), Some("shutdown"));
+    /// ```
     pub fn try_new(
         effect_id: EffectId,
         output_contract: EffectOutputContract,

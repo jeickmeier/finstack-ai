@@ -100,10 +100,25 @@ pub struct ModelRef {
 impl ModelRef {
     /// Construct a model reference without optional selected configuration.
     ///
+    /// # Arguments
+    ///
+    /// * `provider` - Provider label (non-empty, ≤ [`LABEL_MAX_BYTES`], no NUL).
+    /// * `model` - Model label under the same rules as `provider`.
+    ///
     /// # Errors
     ///
     /// Returns [`MessageError::InvalidLabel`] when labels are empty, oversized, or
     /// contain NUL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ModelRef;
+    ///
+    /// let model = ModelRef::try_new("openai", "gpt-example").expect("model");
+    /// assert_eq!(model.provider(), "openai");
+    /// assert_eq!(model.thinking_level(), None);
+    /// ```
     pub fn try_new(
         provider: impl AsRef<str>,
         model: impl AsRef<str>,
@@ -118,6 +133,30 @@ impl ModelRef {
     /// Returns [`MessageError::InvalidLabel`] when labels are empty, oversized, or
     /// contain NUL. Returns [`MessageError::InvalidContextLength`] when a context
     /// length is zero or exceeds [`MODEL_CONTEXT_LENGTH_MAX`].
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - Provider label (non-empty, ≤ [`LABEL_MAX_BYTES`], no NUL).
+    /// * `model` - Model label under the same rules as `provider`.
+    /// * `thinking_level` - Optional selected thinking effort; `None` leaves it unset.
+    /// * `context_length` - Optional token context window in `1..=MODEL_CONTEXT_LENGTH_MAX`.
+    /// * `fast` - Optional fast-mode selection; `None` leaves it unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ModelRef, ThinkingLevel};
+    ///
+    /// let model = ModelRef::try_new_with_options(
+    ///     "openai",
+    ///     "gpt-example",
+    ///     Some(ThinkingLevel::Medium),
+    ///     Some(128_000),
+    ///     Some(true),
+    /// )
+    /// .expect("model");
+    /// assert_eq!(model.context_length(), Some(128_000));
+    /// ```
     pub fn try_new_with_options(
         provider: impl AsRef<str>,
         model: impl AsRef<str>,
@@ -227,9 +266,27 @@ impl ProviderIds {
 
     /// Construct provider identifiers with v1 string ceilings.
     ///
+    /// # Arguments
+    ///
+    /// * `request_id` - Optional provider request id; `None` omits the field.
+    /// * `response_id` - Optional provider response id; `None` omits the field.
+    /// * `continuation_id` - Optional provider continuation id; `None` omits the field.
+    ///
+    /// Each present string must be non-empty and within the v1 text ceiling.
+    ///
     /// # Errors
     ///
     /// Returns [`MessageError`] when any present string is empty or oversized.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ProviderIds;
+    ///
+    /// let ids = ProviderIds::try_new(Some("req-1"), None::<&str>, None::<&str>).expect("ids");
+    /// assert_eq!(ids.request_id(), Some("req-1"));
+    /// assert_eq!(ids.response_id(), None);
+    /// ```
     pub fn try_new(
         request_id: Option<impl AsRef<str>>,
         response_id: Option<impl AsRef<str>>,
@@ -324,10 +381,44 @@ pub struct Message {
 impl Message {
     /// Construct and validate a message.
     ///
+    /// # Arguments
+    ///
+    /// * `id` - Stable message identity.
+    /// * `role` - Canonical conversation role; it must match the block kinds in
+    ///   `content`.
+    /// * `content` - Ordered content blocks. Empty is allowed; nested tool
+    ///   blocks are rejected for [`MessageRole::Tool`].
+    /// * `created_at` - Environment-supplied creation timestamp.
+    /// * `model` - Optional model that produced an assistant message; `None` for
+    ///   other roles or when the producer is unknown.
+    /// * `provider_ids` - Opaque provider correlation identifiers.
+    /// * `metadata` - Non-authoritative message metadata.
+    ///
     /// # Errors
     ///
     /// Returns [`MessageError`] for role/block violations, oversized content, or
     /// invalid tool associations (when role is [`MessageRole::Tool`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     ContentBlock, Message, MessageId, MessageRole, Metadata, ProviderIds, TextBlock,
+    ///     Timestamp,
+    /// };
+    ///
+    /// let message = Message::try_new(
+    ///     MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     MessageRole::User,
+    ///     vec![ContentBlock::Text(TextBlock::try_new("hello").expect("text"))],
+    ///     Timestamp::from_unix_ms(0).expect("ts"),
+    ///     None,
+    ///     ProviderIds::empty(),
+    ///     Metadata::empty(),
+    /// )
+    /// .expect("message");
+    /// assert_eq!(message.role(), MessageRole::User);
+    /// ```
     pub fn try_new(
         id: MessageId,
         role: MessageRole,
@@ -397,7 +488,7 @@ impl Message {
     /// Validate pure structural tool-result associations.
     ///
     /// When `known_calls` is `Some`, every tool-result `tool_call_id` must appear in
-    /// that set. Run-state pairing remains outside this DTO layer (PR-010).
+    /// that set. Run-state pairing remains outside this DTO layer.
     ///
     /// # Errors
     ///

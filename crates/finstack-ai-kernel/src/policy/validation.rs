@@ -50,10 +50,27 @@ pub struct ValidationIssue {
 impl ValidationIssue {
     /// Construct one bounded validator-independent issue.
     ///
+    /// # Arguments
+    ///
+    /// * `instance_path` - JSON pointer into the instance document.
+    /// * `schema_path` - JSON pointer into the schema document.
+    /// * `keyword` - Optional schema keyword label; `None` omits it.
+    /// * `message` - Non-empty validator-independent issue text.
+    ///
     /// # Errors
     ///
     /// Returns a stable validation reason when a pointer, keyword, or message
     /// violates the semantic text bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ValidationIssue;
+    ///
+    /// let issue = ValidationIssue::try_new("/", "/properties/name", Some("required"), "missing name")
+    ///     .expect("issue");
+    /// assert_eq!(issue.keyword.as_deref(), Some("required"));
+    /// ```
     pub fn try_new(
         instance_path: impl Into<Arc<str>>,
         schema_path: impl Into<Arc<str>>,

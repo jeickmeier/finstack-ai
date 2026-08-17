@@ -43,10 +43,60 @@ impl Eq for LineageValidation {}
 impl RunAccepted {
     /// Construct a validated `RunAccepted` body.
     ///
+    /// # Arguments
+    ///
+    /// * `run_id` - Identity of the accepted run.
+    /// * `relation` - Immutable lineage. Roots must match `run_id` and omit a parent.
+    /// * `security` - Tenant, principal, and authorization captured at acceptance.
+    /// * `effective_deadline` - Optional semantic deadline after parent/child
+    ///   attenuation; `None` means no deadline.
+    /// * `limits` - Value-only run limits.
+    /// * `propagation` - How cancellation, deadline, budget, and principal propagate.
+    /// * `resolved_agent_lock_digest` - Digest of the immutable resolved agent spec.
+    /// * `parent` - Parent accepted run for child attenuation; `None` for roots.
+    ///
     /// # Errors
     ///
     /// Returns [`RunError`] for invalid lineage or when a child fails attenuation checks
     /// against an optional parent context.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     BudgetPropagation, CancellationPropagation, DeadlinePropagation, Digest, PrincipalPropagation,
+    ///     PrincipalRef, RunAccepted, RunId, RunLimits, RunPropagationPolicy, RunRelation,
+    ///     RunSecurityContext,
+    /// };
+    ///
+    /// # let run_id = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let security = RunSecurityContext::try_new(
+    /// #     "tenant",
+    /// #     PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal"),
+    /// #     "oidc",
+    /// #     "high",
+    /// #     "policy-v1",
+    /// #     "decision-v1",
+    /// #     None,
+    /// # ).expect("security");
+    /// let accepted = RunAccepted::try_new(
+    ///     run_id,
+    ///     RunRelation::root(run_id).expect("root"),
+    ///     security,
+    ///     None,
+    ///     RunLimits::empty(),
+    ///     RunPropagationPolicy {
+    ///         cancellation: CancellationPropagation::Cascade,
+    ///         deadline: DeadlinePropagation::MinimumOfParentAndChild,
+    ///         budget: BudgetPropagation::SharedScope,
+    ///         principal: PrincipalPropagation::Inherit,
+    ///     },
+    ///     Digest::raw_json(br#"{"agent":"example"}"#),
+    ///     None,
+    /// )
+    /// .expect("accepted");
+    /// assert_eq!(accepted.run_id(), run_id);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         run_id: RunId,

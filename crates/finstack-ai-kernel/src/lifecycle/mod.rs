@@ -1,4 +1,10 @@
-//! PR-009 reducer cursors and durable record payloads.
+//! Reducer stage cursors and durable lifecycle record payloads.
+//!
+//! Defines the seven normalized middleware [`Stage`] values, [`StageCursor`],
+//! [`StageDisposition`], and the durable records that move a run through
+//! context preparation, retry, suspension, cancellation, completion, and
+//! failure ([`ContextPrepared`], [`EntryAppended`], [`RetryScheduled`],
+//! [`RunSuspended`], [`RunCancelled`], [`RunCompleted`], [`RunFailed`]).
 
 use std::sync::Arc;
 
@@ -109,7 +115,7 @@ pub enum RetryClassification {
     Model,
     /// Tool failure retry.
     Tool,
-    /// Structured-validation retry reserved for PR-012.
+    /// Structured-output validation retry.
     Validation,
     /// Framework failure retry.
     Framework,
@@ -129,9 +135,29 @@ pub struct RetryDirective {
 impl RetryDirective {
     /// Construct a retry directive with a bounded non-empty policy version.
     ///
+    /// # Arguments
+    ///
+    /// * `classification` - Failure family that selected this retry.
+    /// * `backoff` - Semantic delay before the next attempt.
+    /// * `policy_version` - Non-empty policy-version label.
+    ///
     /// # Errors
     ///
     /// Returns [`EntryError::InvalidLabel`] for an invalid policy version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{Duration, RetryClassification, RetryDirective};
+    ///
+    /// let directive = RetryDirective::try_new(
+    ///     RetryClassification::Model,
+    ///     Duration::from_millis(250),
+    ///     "policy-v1",
+    /// )
+    /// .expect("directive");
+    /// assert_eq!(directive.policy_version.as_ref(), "policy-v1");
+    /// ```
     pub fn try_new(
         classification: RetryClassification,
         backoff: Duration,
@@ -196,9 +222,44 @@ pub struct RetryScheduled {
 impl RetryScheduled {
     /// Construct validated durable retry intent.
     ///
+    /// # Arguments
+    ///
+    /// * `cycle` - Failed model cycle.
+    /// * `attempt` - One-based additional attempt number. Zero is rejected.
+    /// * `classification` - Failure family being retried.
+    /// * `policy_version` - Non-empty policy-version label.
+    /// * `timer_effect_id` - Timer effect that will fire at `due_at`.
+    /// * `due_at` - Semantic due time for the retry timer.
+    /// * `prior_error` - Safe descriptor of the failure being retried.
+    ///
     /// # Errors
     ///
     /// Returns [`EntryError`] when the attempt, policy version, or error is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     EffectId, ErrorCategory, ErrorDescriptor, RetryClassification, RetryScheduled,
+    ///     Timestamp,
+    /// };
+    ///
+    /// # let timer = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let error = ErrorDescriptor::new(
+    /// #     "provider_failed", "provider failed", ErrorCategory::Model, true,
+    /// # ).expect("error");
+    /// let scheduled = RetryScheduled::try_new(
+    ///     0,
+    ///     1,
+    ///     RetryClassification::Model,
+    ///     "policy-v1",
+    ///     timer,
+    ///     Timestamp::from_unix_ms(1_000).expect("due"),
+    ///     error,
+    /// )
+    /// .expect("scheduled");
+    /// assert_eq!(scheduled.attempt, 1);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         cycle: u64,
@@ -291,7 +352,7 @@ pub struct RunCancelled {
     pub reason_code: ErrorCode,
 }
 
-/// PR-011 entry/control payload construction failure.
+/// Entry and control payload construction failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum EntryError {
     /// A bounded label was empty, oversized, or contained NUL.
@@ -365,10 +426,35 @@ impl ContextPrepared {
 
     /// Construct a bounded prepared context and validate its canonical digest.
     ///
+    /// # Arguments
+    ///
+    /// * `cycle` - Model cycle that owns this prepared context.
+    /// * `turn_id` - Fresh turn identity allocated for the context.
+    /// * `messages` - Prepared provider-neutral messages. Length must stay within
+    ///   the semantic array ceiling.
+    /// * `context_digest` - Caller-supplied `model-context` digest. It must match
+    ///   the canonical digest of `messages`.
+    ///
     /// # Errors
     ///
     /// Returns [`ContextPreparedError`] when the message ceiling is exceeded,
     /// canonicalization fails, or `context_digest` does not match the messages.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ContextPrepared, Digest, TurnId};
+    ///
+    /// let digest = Digest::domain_separated("model-context", 1, b"[]").expect("digest");
+    /// let prepared = ContextPrepared::try_new(
+    ///     0,
+    ///     TurnId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     vec![],
+    ///     digest,
+    /// )
+    /// .expect("context");
+    /// assert_eq!(prepared.cycle, 0);
+    /// ```
     pub fn try_new(
         cycle: u64,
         turn_id: TurnId,

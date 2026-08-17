@@ -362,10 +362,40 @@ pub struct ExternalEffectCompletion {
 impl ExternalEffectCompletion {
     /// Construct a bounded external completion identity and outcome.
     ///
+    /// # Arguments
+    ///
+    /// * `effect_id` - Effect being completed by the external host.
+    /// * `completion_id` - Non-empty provider completion label.
+    /// * `outcome` - Completed, failed, or deferred external outcome.
+    ///
     /// # Errors
     ///
     /// Returns [`KernelError::InvalidInputPayload`] for an invalid completion ID
     /// or an oversized artifact collection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     EffectId, ErrorCategory, ErrorDescriptor, ExternalEffectCompletion, ExternalEffectOutcome,
+    /// };
+    ///
+    /// let completion = ExternalEffectCompletion::try_new(
+    ///     EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     "completion-1",
+    ///     ExternalEffectOutcome::Failed {
+    ///         error: ErrorDescriptor::new(
+    ///             "provider_failed",
+    ///             "provider failed",
+    ///             ErrorCategory::Model,
+    ///             true,
+    ///         )
+    ///         .expect("error"),
+    ///     },
+    /// )
+    /// .expect("completion");
+    /// assert_eq!(completion.completion_id.as_ref(), "completion-1");
+    /// ```
     pub fn try_new(
         effect_id: EffectId,
         completion_id: impl AsRef<str>,

@@ -24,9 +24,25 @@ pub struct Timestamp(i64);
 impl Timestamp {
     /// Construct a timestamp from Unix-epoch milliseconds when in range.
     ///
+    /// # Arguments
+    ///
+    /// * `ms` - Unix-epoch milliseconds in UTC. Leap seconds are not
+    ///   representable. The accepted range is [`TIMESTAMP_MIN_MS`] through
+    ///   [`TIMESTAMP_MAX_MS`].
+    ///
     /// # Errors
     ///
     /// Returns [`TimeError::OutOfRange`] outside years 0001–9999.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Timestamp;
+    ///
+    /// let ts = Timestamp::from_unix_ms(0).expect("epoch");
+    /// assert_eq!(ts.as_unix_ms(), 0);
+    /// assert_eq!(ts.to_rfc3339(), "1970-01-01T00:00:00.000Z");
+    /// ```
     pub const fn from_unix_ms(ms: i64) -> Result<Self, TimeError> {
         if ms < TIMESTAMP_MIN_MS || ms > TIMESTAMP_MAX_MS {
             return Err(TimeError::OutOfRange { value: ms });
@@ -49,10 +65,24 @@ impl Timestamp {
 
     /// Parse exact RFC 3339 UTC with millisecond precision.
     ///
+    /// # Arguments
+    ///
+    /// * `input` - Exact `YYYY-MM-DDTHH:MM:SS.sssZ` text. Offsets other than `Z`
+    ///   and leap-second seconds are rejected.
+    ///
     /// # Errors
     ///
     /// Returns [`TimeError`] for malformed text, non-UTC offsets, leap seconds,
     /// or out-of-range civil values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Timestamp;
+    ///
+    /// let ts = Timestamp::parse_rfc3339("1970-01-01T00:00:00.000Z").expect("epoch");
+    /// assert_eq!(ts.as_unix_ms(), 0);
+    /// ```
     pub fn parse_rfc3339(input: &str) -> Result<Self, TimeError> {
         parse_rfc3339_ms(input)
     }

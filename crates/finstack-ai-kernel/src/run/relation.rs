@@ -45,9 +45,39 @@ pub struct RunRelation {
 impl RunRelation {
     /// Construct a validated run relation.
     ///
+    /// # Arguments
+    ///
+    /// * `root_run_id` - Root of the lineage tree.
+    /// * `parent_run_id` - Immediate parent run, or `None` for a root.
+    /// * `parent_effect_id` - Parent invocation effect, required for child kinds.
+    /// * `kind` - Lineage kind. [`RunRelationKind::Root`] must have no parent.
+    /// * `depth` - Distance from the root; roots are `0` and must stay ≤
+    ///   [`crate::MAX_RUN_RELATION_DEPTH`].
+    /// * `budget_scope_id` - Optional shared-budget scope inherited by the child.
+    /// * `external_work_ref` - Optional external work label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`RunError`] for invalid root/parent shape, depth, or labels.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{RunId, RunRelation, RunRelationKind};
+    ///
+    /// let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// let relation = RunRelation::try_new(
+    ///     run,
+    ///     None,
+    ///     None,
+    ///     RunRelationKind::Root,
+    ///     0,
+    ///     None,
+    ///     None::<&str>,
+    /// )
+    /// .expect("relation");
+    /// assert_eq!(relation.kind(), RunRelationKind::Root);
+    /// ```
     pub fn try_new(
         root_run_id: RunId,
         parent_run_id: Option<RunId>,
@@ -75,9 +105,25 @@ impl RunRelation {
 
     /// Construct a root relation for `run_id` at depth 0.
     ///
+    /// # Arguments
+    ///
+    /// * `run_id` - Identity of the root run. It is stored as both `run_id` and
+    ///   `root_run_id`.
+    ///
     /// # Errors
     ///
     /// Returns [`RunError`] only if label validation fails (not expected for roots).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{RunId, RunRelation, RunRelationKind};
+    ///
+    /// let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// let relation = RunRelation::root(run).expect("root");
+    /// assert_eq!(relation.kind(), RunRelationKind::Root);
+    /// assert_eq!(relation.depth(), 0);
+    /// ```
     pub fn root(run_id: RunId) -> Result<Self, RunError> {
         Self::try_new(
             run_id,

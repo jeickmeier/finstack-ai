@@ -192,9 +192,27 @@ pub struct OpaqueBlock {
 impl OpaqueBlock {
     /// Construct an opaque block.
     ///
+    /// # Arguments
+    ///
+    /// * `media_type` - Namespaced media-type label (non-empty, no NUL).
+    /// * `payload` - Inline bytes or a blob reference that must round-trip.
+    ///
     /// # Errors
     ///
     /// Returns [`ContentError`] when `media_type` is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{OpaqueBlock, OpaquePayload, RawJson};
+    ///
+    /// let block = OpaqueBlock::try_new(
+    ///     "application/vnd.example+json",
+    ///     OpaquePayload::json(RawJson::parse(r#"{"k":1}"#).expect("json")),
+    /// )
+    /// .expect("opaque");
+    /// assert_eq!(block.media_type(), "application/vnd.example+json");
+    /// ```
     pub fn try_new(
         media_type: impl AsRef<str>,
         payload: OpaquePayload,

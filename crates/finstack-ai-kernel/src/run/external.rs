@@ -28,9 +28,31 @@ pub struct OperationLocator {
 impl OperationLocator {
     /// Construct a bounded operation locator.
     ///
+    /// # Arguments
+    ///
+    /// * `tenant_scope` - Tenant/scope label owning the operation.
+    /// * `session_id` - Session containing the operation.
+    /// * `lane_id` - Lane containing the run.
+    /// * `run_id` - Run owning the target effect or interaction.
+    ///
     /// # Errors
     ///
     /// Returns [`ExternalCommandError::InvalidLabel`] when `tenant_scope` is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{LaneId, OperationLocator, RunId, SessionId};
+    ///
+    /// let locator = OperationLocator::try_new(
+    ///     "tenant",
+    ///     SessionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("session"),
+    ///     LaneId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("lane"),
+    ///     RunId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("run"),
+    /// )
+    /// .expect("locator");
+    /// assert_eq!(locator.tenant_scope.as_ref(), "tenant");
+    /// ```
     pub fn try_new(
         tenant_scope: impl AsRef<str>,
         session_id: SessionId,
@@ -99,10 +121,53 @@ pub struct ExternalEffectCompletionCommand {
 impl ExternalEffectCompletionCommand {
     /// Construct an authenticated effect-completion command.
     ///
+    /// # Arguments
+    ///
+    /// * `locator` - Durable operation locator expanded from the callback token.
+    /// * `principal` - Authenticated principal submitting the completion.
+    /// * `authorization` - Authorization evidence for that principal.
+    /// * `completion` - External effect completion payload.
+    ///
     /// # Errors
     ///
     /// Returns [`ExternalCommandError::PrincipalScopeMismatch`] when the principal's
     /// explicit tenant scope disagrees with the locator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     AuthorizationEvidence, EffectId, ErrorCategory, ErrorDescriptor, ExternalEffectCompletion,
+    ///     ExternalEffectCompletionCommand, ExternalEffectOutcome, LaneId, OperationLocator,
+    ///     PrincipalRef, RunId, SessionId,
+    /// };
+    ///
+    /// # let locator = OperationLocator::try_new(
+    /// #     "tenant",
+    /// #     SessionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("session"),
+    /// #     LaneId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("lane"),
+    /// #     RunId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("run"),
+    /// # ).expect("locator");
+    /// # let principal = PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal");
+    /// # let authorization = AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth");
+    /// # let completion = ExternalEffectCompletion::try_new(
+    /// #     EffectId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("id"),
+    /// #     "completion-1",
+    /// #     ExternalEffectOutcome::Failed {
+    /// #         error: ErrorDescriptor::new(
+    /// #             "provider_failed", "provider failed", ErrorCategory::Model, true,
+    /// #         ).expect("error"),
+    /// #     },
+    /// # ).expect("completion");
+    /// let command = ExternalEffectCompletionCommand::try_new(
+    ///     locator,
+    ///     principal,
+    ///     authorization,
+    ///     completion,
+    /// )
+    /// .expect("command");
+    /// assert_eq!(command.locator.tenant_scope.as_ref(), "tenant");
+    /// ```
     pub fn try_new(
         locator: OperationLocator,
         principal: PrincipalRef,
@@ -155,10 +220,43 @@ pub struct InteractionResolutionCommand {
 impl InteractionResolutionCommand {
     /// Construct an authenticated interaction-resolution command.
     ///
+    /// # Arguments
+    ///
+    /// * `locator` - Durable operation locator expanded from the callback token.
+    /// * `resolution` - Interaction resolution, including its resolving principal.
+    ///
     /// # Errors
     ///
     /// Returns [`ExternalCommandError::PrincipalScopeMismatch`] when the resolving
     /// principal's explicit tenant scope disagrees with the locator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     AuthorizationEvidence, InteractionId, InteractionResolution, InteractionResolutionCommand,
+    ///     LaneId, OperationLocator, PrincipalRef, RawJson, RunId, SessionId,
+    /// };
+    ///
+    /// # let locator = OperationLocator::try_new(
+    /// #     "tenant",
+    /// #     SessionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("session"),
+    /// #     LaneId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("lane"),
+    /// #     RunId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("run"),
+    /// # ).expect("locator");
+    /// # let principal = PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal");
+    /// # let authorization = AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth");
+    /// # let resolution = InteractionResolution::try_new(
+    /// #     InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("id"),
+    /// #     "resolution-1",
+    /// #     principal,
+    /// #     authorization,
+    /// #     RawJson::parse(r#"{"approved":true}"#).expect("json"),
+    /// #     None::<&str>,
+    /// # ).expect("resolution");
+    /// let command = InteractionResolutionCommand::try_new(locator, resolution).expect("command");
+    /// assert_eq!(command.resolution.resolution_id(), "resolution-1");
+    /// ```
     pub fn try_new(
         locator: OperationLocator,
         resolution: InteractionResolution,
@@ -231,10 +329,48 @@ pub struct ExternalCommandRejected {
 impl ExternalCommandRejected {
     /// Construct bounded, kind/target-consistent durable rejection evidence.
     ///
+    /// # Arguments
+    ///
+    /// * `command_kind` - Rejected command family.
+    /// * `command_id` - Caller-assigned command identity label.
+    /// * `target` - Target family that must agree with `command_kind`.
+    /// * `principal` - Principal that submitted the rejected command.
+    /// * `authorization` - Authorization evidence for that principal.
+    /// * `reason_code` - Stable rejection-reason label.
+    /// * `submitted_digest` - Digest of the submitted command payload.
+    /// * `accepted_digest` - Optional digest of an already-accepted conflicting
+    ///   command; `None` when none exists.
+    ///
     /// # Errors
     ///
     /// Returns [`ExternalCommandError`] when an identity/reason is invalid or the
     /// command kind disagrees with its target family.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     AuthorizationEvidence, Digest, EffectId, ExternalCommandKind, ExternalCommandRejected,
+    ///     ExternalCommandTarget, PrincipalRef,
+    /// };
+    ///
+    /// # let principal = PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal");
+    /// # let authorization = AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth");
+    /// let rejected = ExternalCommandRejected::try_new(
+    ///     ExternalCommandKind::EffectCompletion,
+    ///     "completion-1",
+    ///     ExternalCommandTarget::Effect(
+    ///         EffectId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     ),
+    ///     principal,
+    ///     authorization,
+    ///     "conflicting_completion",
+    ///     Digest::raw_json(b"{}"),
+    ///     None,
+    /// )
+    /// .expect("rejected");
+    /// assert_eq!(rejected.reason_code.as_ref(), "conflicting_completion");
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         command_kind: ExternalCommandKind,

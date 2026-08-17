@@ -24,9 +24,33 @@ pub struct AppendRequest {
 impl AppendRequest {
     /// Construct an append request enforcing the batch record-count ceiling.
     ///
+    /// # Arguments
+    ///
+    /// * `batch_id` - Runtime-owned append-attempt identity.
+    /// * `session_id` - Session every draft in `records` must belong to.
+    /// * `expected_sequence` - First sequence the store must assign.
+    /// * `records` - Ordered drafts. Length must not exceed
+    ///   [`APPEND_BATCH_MAX_RECORDS`].
+    ///
     /// # Errors
     ///
     /// Returns [`RecordError::BatchTooLarge`] when over [`APPEND_BATCH_MAX_RECORDS`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{AppendBatchId, AppendRequest, SessionId};
+    ///
+    /// let request = AppendRequest::try_new(
+    ///     AppendBatchId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("batch"),
+    ///     SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session"),
+    ///     1,
+    ///     vec![],
+    /// )
+    /// .expect("request");
+    /// assert_eq!(request.expected_sequence(), 1);
+    /// assert!(request.records().is_empty());
+    /// ```
     pub fn try_new(
         batch_id: AppendBatchId,
         session_id: SessionId,

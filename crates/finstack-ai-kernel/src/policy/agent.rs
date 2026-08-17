@@ -215,6 +215,20 @@ impl<'de> Deserialize<'de> for FinalResultRecorded {
 }
 
 /// Whether a tool name belongs to the reserved framework namespace.
+///
+/// # Arguments
+///
+/// * `name` - Model-facing tool name. Internal names start with
+///   [`INTERNAL_TOOL_NAMESPACE`].
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai_kernel::{SUBMIT_FINAL_OUTPUT_TOOL, is_internal_tool_name};
+///
+/// assert!(is_internal_tool_name(SUBMIT_FINAL_OUTPUT_TOOL));
+/// assert!(!is_internal_tool_name("search.web"));
+/// ```
 #[must_use]
 pub fn is_internal_tool_name(name: &str) -> bool {
     name.starts_with(INTERNAL_TOOL_NAMESPACE)

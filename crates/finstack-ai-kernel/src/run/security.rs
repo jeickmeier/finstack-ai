@@ -27,9 +27,37 @@ pub struct RunSecurityContext {
 impl RunSecurityContext {
     /// Construct a security context.
     ///
+    /// # Arguments
+    ///
+    /// * `tenant_scope` - Tenant label captured at acceptance.
+    /// * `principal` - Authenticated principal for the run.
+    /// * `authentication_method` - Authentication-method label (for example `oidc`).
+    /// * `assurance_level` - Assurance-level label (for example `high`).
+    /// * `authorization_policy_version` - Policy version that produced the decision.
+    /// * `authorization_decision_id` - Stable authorization-decision identity.
+    /// * `delegated_from` - Optional delegating principal; `None` for a direct run.
+    ///
     /// # Errors
     ///
     /// Returns [`RunError`] when labels fail validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{PrincipalRef, RunSecurityContext};
+    ///
+    /// let security = RunSecurityContext::try_new(
+    ///     "tenant",
+    ///     PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal"),
+    ///     "oidc",
+    ///     "high",
+    ///     "policy-v1",
+    ///     "decision-v1",
+    ///     None,
+    /// )
+    /// .expect("security");
+    /// assert_eq!(security.tenant_scope(), "tenant");
+    /// ```
     pub fn try_new(
         tenant_scope: impl AsRef<str>,
         principal: PrincipalRef,

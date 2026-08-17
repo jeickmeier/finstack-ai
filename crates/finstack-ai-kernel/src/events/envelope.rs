@@ -210,6 +210,12 @@ impl RunEvent {
     ///
     /// Returns [`EventError`] when the record is not run-scoped, the ordinal is
     /// unsupported, or record/body correlations are invalid.
+    ///
+    /// # Arguments
+    ///
+    /// * `record` - Committed source envelope. Must be run-scoped.
+    /// * `ordinal` - Zero-based derived-event ordinal on that record.
+    /// * `transient_sequence` - Runtime sequencer value assigned to this event.
     pub fn try_from_record(
         record: &RecordEnvelope,
         ordinal: usize,

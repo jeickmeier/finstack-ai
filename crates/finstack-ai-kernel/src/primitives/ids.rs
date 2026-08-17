@@ -97,9 +97,23 @@ impl<T: IdTag> Id<T> {
 
     /// Parse a lowercase or uppercase hyphenated UUID string.
     ///
+    /// # Arguments
+    ///
+    /// * `input` - Hyphenated 8-4-4-4-12 UUID text. Case is accepted; the stored
+    ///   value is the 16 raw UUID bytes.
+    ///
     /// # Errors
     ///
     /// Returns [`IdParseError`] when the string is not a valid UUID.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::RunId;
+    ///
+    /// let id = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// assert_eq!(id.to_canonical_string(), "01234567-89ab-7cde-89ab-0123456789ab");
+    /// ```
     pub fn parse(input: &str) -> Result<Self, IdParseError> {
         let Some(value) = parse_uuid_hyphenated(input) else {
             return Err(IdParseError {
@@ -318,6 +332,22 @@ impl<T: KeyTag> Key<T> {
     ///
     /// Returns [`KeyParseError`] when the value is empty, oversized, missing a
     /// required namespace, or contains disallowed characters.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Local alias matching `[a-z][a-z0-9._-]{0,127}`, or a
+    ///   namespaced id with at least one `.`. [`ToolId`], [`ComponentId`], and
+    ///   [`CapabilityId`] always require the namespace form.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ToolId;
+    ///
+    /// let id = ToolId::parse("search.web").expect("tool");
+    /// assert_eq!(id.as_str(), "search.web");
+    /// assert!(ToolId::parse("web").is_err());
+    /// ```
     pub fn parse(input: impl AsRef<str>) -> Result<Self, KeyParseError> {
         let input = input.as_ref();
         validate_key(input, T::REQUIRES_NAMESPACE).map_err(|kind| KeyParseError {

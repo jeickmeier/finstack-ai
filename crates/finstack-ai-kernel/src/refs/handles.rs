@@ -25,9 +25,30 @@ pub struct ExternalHandleRef {
 impl ExternalHandleRef {
     /// Construct an external handle reference.
     ///
+    /// # Arguments
+    ///
+    /// * `provider` - Component that issued the handle.
+    /// * `handle` - Provider-native handle label.
+    /// * `reconciliation_metadata` - Canonical JSON the host uses to reconcile
+    ///   the handle; the kernel does not interpret it.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when `handle` fails label rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ComponentId, ExternalHandleRef, RawJson};
+    ///
+    /// let handle = ExternalHandleRef::try_new(
+    ///     ComponentId::parse("provider.openai").expect("component"),
+    ///     "job-1",
+    ///     RawJson::parse("{}").expect("json"),
+    /// )
+    /// .expect("handle");
+    /// assert_eq!(handle.handle(), "job-1");
+    /// ```
     pub fn try_new(
         provider: ComponentId,
         handle: impl AsRef<str>,
@@ -95,9 +116,36 @@ pub struct ArtifactRef {
 impl ArtifactRef {
     /// Construct an artifact reference.
     ///
+    /// # Arguments
+    ///
+    /// * `id` - Artifact identity.
+    /// * `kind` - Artifact-kind label.
+    /// * `blob` - External blob that stores the artifact bytes.
+    /// * `content_digest` - Digest of the artifact content.
+    /// * `scope_digest` - Digest of the visibility/scope binding.
+    /// * `metadata` - Non-authoritative artifact metadata.
+    ///
     /// # Errors
     ///
     /// Returns [`RefsError::InvalidLabel`] when `kind` fails label rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ArtifactId, ArtifactRef, BlobRef, Digest, Metadata};
+    ///
+    /// # let blob = BlobRef::try_new("blob-1", "text/plain", 4, None, None::<&str>).expect("blob");
+    /// let artifact = ArtifactRef::try_new(
+    ///     ArtifactId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     "text",
+    ///     blob,
+    ///     Digest::raw_json(b"data"),
+    ///     Digest::raw_json(b"scope"),
+    ///     Metadata::empty(),
+    /// )
+    /// .expect("artifact");
+    /// assert_eq!(artifact.kind(), "text");
+    /// ```
     pub fn try_new(
         id: ArtifactId,
         kind: impl AsRef<str>,

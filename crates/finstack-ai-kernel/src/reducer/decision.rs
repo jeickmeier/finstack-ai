@@ -69,10 +69,33 @@ pub struct CommittedBatch {
 impl CommittedBatch {
     /// Construct a committed batch under the atomic record-count ceiling.
     ///
+    /// # Arguments
+    ///
+    /// * `batch_id` - Runtime-owned append-attempt identity.
+    /// * `first_sequence` - Inclusive first store-assigned sequence.
+    /// * `last_sequence` - Inclusive last store-assigned sequence.
+    /// * `records` - Ordered committed envelopes. Length must not exceed
+    ///   [`APPEND_BATCH_MAX_RECORDS`].
+    ///
     /// # Errors
     ///
     /// Returns [`KernelError::InvalidInputPayload`] when the record collection
     /// exceeds [`APPEND_BATCH_MAX_RECORDS`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{AppendBatchId, CommittedBatch};
+    ///
+    /// let batch = CommittedBatch::try_new(
+    ///     AppendBatchId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("batch"),
+    ///     1,
+    ///     0,
+    ///     vec![],
+    /// )
+    /// .expect("batch");
+    /// assert!(batch.records.is_empty());
+    /// ```
     pub fn try_new(
         batch_id: AppendBatchId,
         first_sequence: u64,

@@ -33,10 +33,24 @@ pub struct RawJson(Bytes);
 impl RawJson {
     /// Parse and validate JSON bytes under the `RawJson` ceilings.
     ///
+    /// # Arguments
+    ///
+    /// * `input` - UTF-8 JSON bytes or text. Object members are stored in RFC 8785
+    ///   canonical order; the original key order is not preserved.
+    ///
     /// # Errors
     ///
     /// Returns [`RawJsonError`] for oversized input, invalid JSON, duplicate keys,
     /// trailing data, excessive depth, non-finite numbers, or canonical overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::RawJson;
+    ///
+    /// let json = RawJson::parse(r#"{"b":1,"a":2}"#).expect("json");
+    /// assert_eq!(json.as_str(), r#"{"a":2,"b":1}"#);
+    /// ```
     pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, RawJsonError> {
         Self::parse_with_limits(
             input.as_ref(),
@@ -262,10 +276,25 @@ impl Metadata {
 
     /// Parse metadata requiring a top-level object and metadata ceilings.
     ///
+    /// # Arguments
+    ///
+    /// * `input` - UTF-8 JSON object bytes or text. Arrays and scalars are
+    ///   rejected; member count and key length use the metadata ceilings.
+    ///
     /// # Errors
     ///
     /// Returns [`RawJsonError`] for the same failure classes as [`RawJson::parse`],
     /// plus non-object roots and metadata member/key limits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Metadata;
+    ///
+    /// let meta = Metadata::parse(r#"{"trace":"abc"}"#).expect("metadata");
+    /// assert_eq!(meta.as_raw_json().as_str(), r#"{"trace":"abc"}"#);
+    /// assert!(Metadata::parse("[]").is_err());
+    /// ```
     pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, RawJsonError> {
         let raw = RawJson::parse_with_limits(
             input.as_ref(),

@@ -66,9 +66,24 @@ impl Digest {
 
     /// Parse a lowercase or uppercase 64-character hex digest.
     ///
+    /// # Arguments
+    ///
+    /// * `input` - Exactly 64 ASCII hex digits. Case is accepted; the stored
+    ///   value is the 32 raw digest bytes.
+    ///
     /// # Errors
     ///
     /// Returns [`DigestError::InvalidHex`] for malformed input.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Digest;
+    ///
+    /// let digest = Digest::raw_json(b"{}");
+    /// let parsed = Digest::from_hex(&digest.to_hex()).expect("hex");
+    /// assert_eq!(parsed, digest);
+    /// ```
     pub fn from_hex(input: &str) -> Result<Self, DigestError> {
         if input.len() != 64 || !input.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(DigestError::InvalidHex {
@@ -95,6 +110,13 @@ impl Digest {
     ///
     /// Domain names must be non-empty and must not contain NUL bytes so the
     /// encoding remains unambiguous.
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - Non-empty domain name without NUL bytes.
+    /// * `schema_version` - Domain schema version encoded as big-endian `u32`.
+    /// * `canonical_bytes` - Already-canonical payload bytes hashed after the
+    ///   domain prefix.
     ///
     /// # Errors
     ///

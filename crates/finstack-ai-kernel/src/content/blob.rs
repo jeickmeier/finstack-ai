@@ -47,9 +47,29 @@ pub struct BlobRef {
 impl BlobRef {
     /// Construct a validated blob reference.
     ///
+    /// # Arguments
+    ///
+    /// * `id` - Caller-assigned blob identity label.
+    /// * `media_type` - Media-type label such as `image/png`.
+    /// * `length` - Declared payload length in bytes. The kernel does not fetch
+    ///   the bytes.
+    /// * `digest` - Optional content digest; `None` when the host has not hashed
+    ///   the payload.
+    /// * `name` - Optional display name; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`ContentError`] when labels are empty, oversized, or contain NUL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::BlobRef;
+    ///
+    /// let blob = BlobRef::try_new("blob-1", "image/png", 1024, None, Some("diagram.png"))
+    ///     .expect("blob");
+    /// assert_eq!(blob.length(), 1024);
+    /// ```
     pub fn try_new(
         id: impl AsRef<str>,
         media_type: impl AsRef<str>,

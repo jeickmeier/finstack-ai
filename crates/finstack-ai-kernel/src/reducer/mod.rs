@@ -76,10 +76,21 @@ impl Kernel {
 
     /// Produce a pure deterministic decision from current state and normalized input.
     ///
+    /// # Arguments
+    ///
+    /// * `env` - Caller-supplied time and preallocated identities for this
+    ///   transition. The kernel does not allocate IDs or read a clock.
+    /// * `input` - Normalized command or settlement. The legal family depends on
+    ///   the current [`KernelState::phase`].
+    ///
     /// # Errors
     ///
     /// Returns [`KernelError`] for invalid phase/input combinations, settlement
     /// conflicts, semantic payload mismatches, or allocated-ID mismatches.
+    ///
+    /// # Examples
+    ///
+    /// See the crate-level "Model-only decide, commit, and apply" example.
     pub fn decide(&self, env: &TransitionEnv, input: KernelInput) -> Result<Decision, KernelError> {
         decide::decide(&self.state, env, input)
     }
@@ -91,10 +102,21 @@ impl Kernel {
     /// `first_transient_sequence` is the runtime sequencer's next unused value;
     /// derived events consume contiguous values from it.
     ///
+    /// # Arguments
+    ///
+    /// * `committed` - Atomic store result whose sequences and record identities
+    ///   must match the preceding [`Decision`].
+    /// * `first_transient_sequence` - Next unused runtime sequencer value.
+    ///   Derived events consume contiguous values from it.
+    ///
     /// # Errors
     ///
     /// Returns [`KernelError`] for invalid ranges, sequences, identities,
     /// sibling ordering, settlement digests, or state transitions.
+    ///
+    /// # Examples
+    ///
+    /// See the crate-level "Model-only decide, commit, and apply" example.
     pub fn apply(
         &mut self,
         committed: &CommittedBatch,
@@ -110,10 +132,24 @@ impl Kernel {
     /// The caller must treat the snapshot as a disposable cache: this only
     /// hydrates validated `KernelState`. It does not consult a journal.
     ///
+    /// # Arguments
+    ///
+    /// * `state` - Already-replayed snapshot. It is validated and hashed before
+    ///   the kernel accepts it; the journal is not consulted.
+    ///
     /// # Errors
     ///
     /// Returns [`KernelError`] when the state fails [`KernelState::validate`]
     /// or cannot produce a `kernel-state` digest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{Kernel, KernelState};
+    ///
+    /// let kernel = Kernel::try_restore(KernelState::default()).expect("restore");
+    /// assert_eq!(kernel.state().last_applied_sequence, 0);
+    /// ```
     pub fn try_restore(state: KernelState) -> Result<Self, KernelError> {
         state.validate()?;
         let _ = state.state_hash()?;

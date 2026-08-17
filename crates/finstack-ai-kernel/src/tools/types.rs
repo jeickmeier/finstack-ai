@@ -1,4 +1,4 @@
-//! PR-010 tool-call planning, durable records, and replay state.
+//! Tool-call planning, durable batch records, and replay state.
 
 use std::sync::Arc;
 

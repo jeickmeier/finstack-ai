@@ -98,9 +98,52 @@ pub struct InteractionRequest {
 impl InteractionRequest {
     /// Construct an interaction request and compute digests.
     ///
+    /// # Arguments
+    ///
+    /// * `request_version` - Interaction-request schema version.
+    /// * `interaction_id` - Stable interaction identity.
+    /// * `effect_id` - Effect that requested the interaction.
+    /// * `kind` - Interaction kind, including custom named kinds.
+    /// * `prompt` - Prompt content shown to the assignee.
+    /// * `response_schema` - Canonical JSON schema for the expected response.
+    /// * `policy_component` - Policy component that owns the interaction.
+    /// * `policy_version` - Version of that policy component.
+    /// * `assignee_hint` - Optional assignee hint; `None` leaves assignment open.
+    /// * `expires_at` - Optional expiry; `None` means no expiry.
+    /// * `delegatable` - Whether the assignee may delegate the interaction.
+    /// * `metadata` - Non-authoritative interaction metadata.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] on content/digest failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     ComponentId, ComponentRef, EffectId, InteractionId, InteractionKind, InteractionRequest,
+    ///     Metadata, RawJson, Version,
+    /// };
+    ///
+    /// # let interaction = InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("id");
+    /// let request = InteractionRequest::try_new(
+    ///     1,
+    ///     interaction,
+    ///     effect,
+    ///     InteractionKind::Approval,
+    ///     vec![],
+    ///     RawJson::parse("{}").expect("schema"),
+    ///     ComponentRef::new(ComponentId::parse("policy.approval").expect("component"), None),
+    ///     Version { major: 1, minor: 0, patch: 0 },
+    ///     None,
+    ///     None,
+    ///     false,
+    ///     Metadata::empty(),
+    /// )
+    /// .expect("request");
+    /// assert_eq!(request.kind(), &InteractionKind::Approval);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         request_version: u16,
@@ -305,9 +348,40 @@ pub struct InteractionResolution {
 impl InteractionResolution {
     /// Construct a resolution.
     ///
+    /// # Arguments
+    ///
+    /// * `interaction_id` - Interaction being resolved.
+    /// * `resolution_id` - Stable resolution identity label.
+    /// * `principal` - Principal that produced the resolution.
+    /// * `authorization` - Authorization evidence for that principal.
+    /// * `response` - Canonical JSON response matching the request schema.
+    /// * `comment` - Optional safe comment label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError`] when labels fail validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{
+    ///     AuthorizationEvidence, InteractionId, InteractionResolution, PrincipalRef, RawJson,
+    /// };
+    ///
+    /// # let id = InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    /// # let principal = PrincipalRef::try_new("issuer", "subject", Some("tenant")).expect("principal");
+    /// # let authorization = AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth");
+    /// let resolution = InteractionResolution::try_new(
+    ///     id,
+    ///     "resolution-1",
+    ///     principal,
+    ///     authorization,
+    ///     RawJson::parse(r#"{"approved":true}"#).expect("json"),
+    ///     None::<&str>,
+    /// )
+    /// .expect("resolution");
+    /// assert_eq!(resolution.resolution_id(), "resolution-1");
+    /// ```
     pub fn try_new(
         interaction_id: InteractionId,
         resolution_id: impl AsRef<str>,
@@ -424,10 +498,33 @@ pub struct InteractionCancelled {
 impl InteractionCancelled {
     /// Construct a cancellation with principal/authorization pairing rules.
     ///
+    /// # Arguments
+    ///
+    /// * `interaction_id` - Interaction being cancelled.
+    /// * `principal` - Optional cancelling principal. Must be paired with
+    ///   `authorization` (both present or both absent).
+    /// * `authorization` - Optional authorization evidence paired with `principal`.
+    /// * `reason` - Optional safe reason label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`EffectError::InvalidCancellationPair`] when exactly one of
     /// principal/authorization is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{InteractionCancelled, InteractionId};
+    ///
+    /// let cancelled = InteractionCancelled::try_new(
+    ///     InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     None,
+    ///     None,
+    ///     Some("timeout"),
+    /// )
+    /// .expect("cancelled");
+    /// assert_eq!(cancelled.reason(), Some("timeout"));
+    /// ```
     pub fn try_new(
         interaction_id: InteractionId,
         principal: Option<PrincipalRef>,

@@ -283,9 +283,27 @@ pub struct CostLimit {
 impl CostLimit {
     /// Construct a cost limit.
     ///
+    /// # Arguments
+    ///
+    /// * `unit` - Cost-unit label.
+    /// * `micros` - Ceiling in millionths of `unit`.
+    /// * `pricing_policy_version` - Pricing-policy version that defines the unit.
+    /// * `unknown_usage` - How unknown usage dimensions are treated.
+    ///
     /// # Errors
     ///
     /// Returns [`LimitsError::InvalidLabel`] when unit/policy labels fail rules.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{CostLimit, UnknownUsagePolicy};
+    ///
+    /// let limit = CostLimit::try_new("USD", 1_000_000, "pricing-v1", UnknownUsagePolicy::FailClosed)
+    ///     .expect("limit");
+    /// assert_eq!(limit.unit(), "USD");
+    /// assert_eq!(limit.micros(), 1_000_000);
+    /// ```
     pub fn try_new(
         unit: impl AsRef<str>,
         micros: u64,

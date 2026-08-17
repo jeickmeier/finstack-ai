@@ -1,4 +1,11 @@
 //! Agent output policy, budgets, capabilities, limits, and validation.
+//!
+//! Groups structured-output configuration (`OutputSpec`, `OutputConfiguration`,
+//! and the `finstack.internal.*` control-tool names), shared-budget
+//! request/receipt records, capability activation (`ActiveCapability`,
+//! `CapabilitiesActivated`), value-only [`RunLimits`], and
+//! validator-independent [`OutputValidated`] / [`OutputValidationFailed`]
+//! outcomes.
 
 mod agent;
 mod budget;

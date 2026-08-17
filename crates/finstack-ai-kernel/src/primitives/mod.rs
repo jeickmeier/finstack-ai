@@ -1,4 +1,9 @@
 //! Semantic IDs, time, raw JSON, digests, errors, and bounded collections.
+//!
+//! Owns typed identifiers (`Id` and the `*Id` newtypes), `Timestamp` and
+//! `Duration`, canonical `RawJson`/`Metadata`, domain-scoped `Digest` values,
+//! and stable `ErrorDescriptor` types. Collection ceilings are
+//! [`SEMANTIC_ARRAY_MAX_ITEMS`] and [`SEMANTIC_MAP_MAX_ENTRIES`].
 
 mod bounds;
 mod digest;

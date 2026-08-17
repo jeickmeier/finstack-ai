@@ -25,10 +25,25 @@ impl ErrorCode {
     /// Codes are lowercase `snake_case` identifiers and must remain identical across
     /// bindings.
     ///
+    /// # Arguments
+    ///
+    /// * `code` - Lowercase `snake_case` identifier. It must stay identical
+    ///   across language bindings.
+    ///
     /// # Errors
     ///
     /// Returns [`ErrorCodeError`] when the code is empty, exceeds the label
     /// ceiling, or is not lowercase `snake_case`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ErrorCode;
+    ///
+    /// let code = ErrorCode::new("invalid_input").expect("code");
+    /// assert_eq!(code.as_str(), "invalid_input");
+    /// assert!(ErrorCode::new("InvalidInput").is_err());
+    /// ```
     pub fn new(code: impl AsRef<str>) -> Result<Self, ErrorCodeError> {
         let code = code.as_ref();
         validate_error_code(code)?;
@@ -284,10 +299,32 @@ pub struct ErrorDescriptor {
 impl ErrorDescriptor {
     /// Construct a descriptor with empty identifiers and metadata.
     ///
+    /// # Arguments
+    ///
+    /// * `code` - Stable lowercase `snake_case` error code.
+    /// * `message` - Safe human-readable message (non-empty, no NUL).
+    /// * `category` - Stable error category.
+    /// * `retryable` - Whether a generic retry may be appropriate.
+    ///
     /// # Errors
     ///
     /// Returns [`ErrorDescriptorError`] when `code` is invalid or `message`
     /// violates the semantic text ceiling.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor};
+    ///
+    /// let error = ErrorDescriptor::new(
+    ///     "invalid_input",
+    ///     "payload rejected",
+    ///     ErrorCategory::Validation,
+    ///     false,
+    /// )
+    /// .expect("descriptor");
+    /// assert_eq!(error.code.as_str(), "invalid_input");
+    /// ```
     pub fn new(
         code: impl AsRef<str>,
         message: impl AsRef<str>,

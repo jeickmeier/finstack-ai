@@ -22,6 +22,11 @@ pub const LABEL_MAX_BYTES: usize = 256;
 
 /// Whether a semantic label is non-empty, bounded, and NUL-free.
 ///
+/// # Arguments
+///
+/// * `value` - Candidate label. Must be 1..=[`LABEL_MAX_BYTES`] UTF-8 bytes and
+///   must not contain a NUL byte.
+///
 /// # Examples
 ///
 /// ```
@@ -34,6 +39,10 @@ pub fn label_is_valid(value: &str) -> bool {
 }
 
 /// Decode one ASCII hex nibble.
+///
+/// # Arguments
+///
+/// * `byte` - ASCII `0-9`, `a-f`, or `A-F`. Any other byte returns `None`.
 ///
 /// # Examples
 ///
@@ -88,9 +97,23 @@ pub struct TextBlock {
 impl TextBlock {
     /// Construct a text block under the v1 text ceiling.
     ///
+    /// # Arguments
+    ///
+    /// * `text` - UTF-8 message text. Length is measured in bytes and must not
+    ///   exceed [`TEXT_MAX_BYTES`].
+    ///
     /// # Errors
     ///
     /// Returns [`ContentError::TextTooLarge`] when `text` exceeds [`TEXT_MAX_BYTES`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::TextBlock;
+    ///
+    /// let block = TextBlock::try_new("hello").expect("text");
+    /// assert_eq!(block.text(), "hello");
+    /// ```
     pub fn try_new(text: impl AsRef<str>) -> Result<Self, ContentError> {
         let text = text.as_ref();
         if text.len() > TEXT_MAX_BYTES {

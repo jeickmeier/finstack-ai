@@ -48,9 +48,29 @@ pub struct CancellationRequest {
 impl CancellationRequest {
     /// Construct a bounded cancellation request.
     ///
+    /// # Arguments
+    ///
+    /// * `request_id` - Stable cancellation-request identity.
+    /// * `initiator` - Authenticated source of the request.
+    /// * `reason` - Optional safe reason label; `None` omits it.
+    ///
     /// # Errors
     ///
     /// Returns [`RunError`] when the optional reason is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::{CancellationInitiator, CancellationRequest, CancellationRequestId};
+    ///
+    /// let request = CancellationRequest::try_new(
+    ///     CancellationRequestId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
+    ///     CancellationInitiator::Deadline,
+    ///     Some("expired"),
+    /// )
+    /// .expect("request");
+    /// assert_eq!(request.reason.as_deref(), Some("expired"));
+    /// ```
     pub fn try_new(
         request_id: CancellationRequestId,
         initiator: CancellationInitiator,
