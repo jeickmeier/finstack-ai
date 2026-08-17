@@ -1,4 +1,4 @@
-// ---- BeforeModel: compaction is unreachable until the context port runs
+// ---- BeforeModel: sliding-window CompactContext lands; summarize does not
 
 fn compactor_descriptor(component: &str) -> MiddlewareDescriptor {
     MiddlewareDescriptor {
@@ -50,6 +50,7 @@ fn assembled_before_model_input(draft: &crate::ModelRequestDraft) -> BeforeModel
         Stage::BeforeModel,
         &model_request_settled(draft).outcome,
         &test_profile(),
+        None,
     )
     .expect("before model input") else {
         panic!("BeforeModel must be the typed stage input");
@@ -112,64 +113,29 @@ fn evidence_correct_compaction(
     }
 }
 
-/// The causal chain, pinned end to end.
-///
-/// `protected` is authoritative-from-the-context-port (`context.rs:138`) and
-/// a compactor may not set it; the `ContextProvider` port has no production
-/// driver, so [`before_model_input`] can only assemble unprotected entries;
-/// so `validate_compaction_result` (`middleware.rs:1054-1058`) refuses every
-/// result. Wiring `ContextProvider` is the unblock — patching the compactor
-/// is not.
-///
-/// The compaction result here is evidence-correct by construction, and the
-/// second half of the test flips **only** `protected` and shows the very
-/// same result validating. That is what makes this a proof that the
-/// unprotected entry is the sole obstruction, rather than a test that merely
-/// observes some rejection.
+/// Sliding-window `CompactContext` is landable once the trailing current
+/// user is structurally protected. `RequestCompactionModel` stays unlandable.
 #[test]
-fn compact_context_is_rejected_until_the_context_port_is_driven() {
+fn compact_context_validates_when_the_trailing_user_is_protected() {
     let retained = user_message(4, "hi");
     let draft = request_draft(vec![retained.clone()], Vec::new());
     let descriptor = compactor_descriptor("fixture.compactor");
     let input = assembled_before_model_input(&draft);
     assert!(
-        input.source_entries.iter().all(|entry| !entry.protected),
-        "the assembled input must carry no protected entry"
+        input.source_entries.last().is_some_and(|entry| {
+            entry.protected && entry.message.role() == finstack_ai_kernel::MessageRole::User
+        }),
+        "the trailing current user is structurally protected"
     );
     let result = evidence_correct_compaction(&input, std::slice::from_ref(&retained));
-
-    let rejected = crate::middleware::validate_compaction_result(&descriptor, &input, &result)
-        .expect_err("an unprotected trailing entry cannot satisfy the compaction contract");
-    assert_eq!(
-        rejected.code(),
-        crate::middleware::COMPACTION_RESULT_INVALID
-    );
-
-    // Flip only `protected`, recompute the two digests that depend on it,
-    // and the identical projection now validates.
-    let protected_entries: Arc<[CompactionSourceEntry]> = input
-        .source_entries
-        .iter()
-        .map(|entry| CompactionSourceEntry {
-            protected: true,
-            ..entry.clone()
-        })
-        .collect();
-    let protected_input = BeforeModelInput {
-        source_entries: protected_entries,
-        ..input
-    };
-    let protected_result =
-        evidence_correct_compaction(&protected_input, std::slice::from_ref(&retained));
-    crate::middleware::validate_compaction_result(&descriptor, &protected_input, &protected_result)
-        .expect("with a protected trailing user entry the same projection is valid");
+    crate::middleware::validate_compaction_result(&descriptor, &input, &result)
+        .expect("a protected trailing user entry makes CompactContext valid");
 }
 
-/// The same limitation observed through the choke point rather than through
-/// the validator: a registered compactor's `CompactContext` fails the run
-/// with the validator's own stable code, and never reaches the kernel.
+/// The same contract through the choke point: a registered sliding-window
+/// `CompactContext` lands and commits the model effect.
 #[test]
-fn a_compact_context_chain_fails_the_run_at_the_choke_point() {
+fn a_compact_context_chain_lands_when_the_trailing_user_is_protected() {
     let mut coordinator = accepted_coordinator(RunLimits::empty());
     drive_to_before_model(&mut coordinator);
     let sources = test_sources();
@@ -184,7 +150,7 @@ fn a_compact_context_chain_fails_the_run_at_the_choke_point() {
         ))),
     );
 
-    let error = block_on(settle_facade_stage(
+    block_on(settle_facade_stage(
         &mut coordinator,
         Some(&driver),
         &sources,
@@ -192,16 +158,11 @@ fn a_compact_context_chain_fails_the_run_at_the_choke_point() {
         before_model_env(),
         model_request_settled(&draft),
     ))
-    .expect_err("no source entry can be protected, so compaction cannot validate");
+    .expect("CompactContext must land once the trailing user is protected");
 
     assert!(
-        matches!(&error, RunHandleError::Middleware { code }
-            if code.as_ref() == crate::middleware::COMPACTION_RESULT_INVALID),
-        "expected the compaction validator's own stable code, got {error:?}"
-    );
-    assert!(
-        coordinator.state().pending_model_effect.is_none(),
-        "a rejected fold must not have committed a model effect"
+        coordinator.state().pending_model_effect.is_some(),
+        "a landed CompactContext must commit the model effect"
     );
 }
 

@@ -62,7 +62,7 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
     let Ok(result) = model.reconcile(context, seed.pending.clone()).await else {
         return Ok(ModelResumeAction::SuspendUncertain);
     };
-    apply_model_reconcile_result(
+    Box::pin(apply_model_reconcile_result(
         coordinator,
         model,
         seed,
@@ -70,7 +70,7 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
         result,
         retry_allowed,
         sources,
-    )
+    ))
     .await
 }
 async fn apply_model_reconcile_result<C: Clock, R: RandomSource>(

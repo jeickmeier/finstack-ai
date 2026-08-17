@@ -92,14 +92,13 @@ pub(super) fn apply_fold<C: Clock, R: RandomSource>(
 ///    survived, and nothing else. At most one component can produce one (the
 ///    single-compactor rule, `middleware.rs:650-655`).
 ///
-///    Two gaps live in this step. Both are unobservable today, because
-///    `CompactContext` cannot reach here at all (see the module docs), and both
-///    become live the moment the `ContextProvider` port is wired — whoever does
-///    that work owns them:
+///    Two residual gaps live in this step. Sliding-window `CompactContext`
+///    does not use them; compaction-summarize stays unlandable at the fold:
 ///
 ///    - Its `derived_summaries` and `checkpoint` have no landing in a
 ///      `ModelRequestPrepared` and are **dropped**. That is a real gap, not a
-///      design choice: a working compactor needs its summary in the projection.
+///      design choice: a working summarize-compactor needs its summary in the
+///      projection.
 ///    - A fold carrying **both** a `Replace` and a `CompactContext` applies a
 ///      projection that was validated against the *base* draft's
 ///      `source_entries` — assembled by [`before_model_input`], checked at
@@ -110,10 +109,6 @@ pub(super) fn apply_fold<C: Clock, R: RandomSource>(
 ///      was shown, and the array it lands on is a different one. Two components
 ///      are required for this (the single compactor cannot also `Replace`), so a
 ///      chain with a compactor plus any `BeforeModel` `Replace` reaches it.
-///
-///    Neither is fixed ahead of the `ContextProvider` work, because a landing
-///    rule for either one is untestable through the port until a protected
-///    entry can exist. They belong with the `protected` work, not ahead of it.
 /// 3. `AddInstructions` (as [`MessageRole::System`]) then `AddContext` (as
 ///    [`MessageRole::User`]) append, each group in chain order.
 /// 4. `FilterTools` intersects the surviving tool set.

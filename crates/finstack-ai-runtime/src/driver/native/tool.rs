@@ -125,6 +125,7 @@ impl ToolDispatcher {
             model: None,
             tool: Some(seed),
             timer: None,
+            context: None,
         })
         .await
     }
@@ -336,8 +337,18 @@ impl PostCommitDispatcher for RuntimeDispatcher {
         }
         if dispatch.model.is_some() {
             self.model.dispatch(dispatch)
-        } else if let Some(tools) = &self.tools {
-            tools.dispatch(dispatch)
+        } else if dispatch.tool.is_some() {
+            if let Some(tools) = &self.tools {
+                tools.dispatch(dispatch)
+            } else {
+                Box::pin(async {
+                    Err(DispatchError {
+                        code: "unsupported_effect_driver",
+                    })
+                })
+            }
+        } else if dispatch.context.is_some() {
+            Box::pin(async { Ok(()) })
         } else {
             Box::pin(async {
                 Err(DispatchError {

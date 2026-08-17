@@ -57,6 +57,8 @@ mod services;
 
 #[cfg(feature = "native-tokio")]
 pub(crate) use driver::{ingress, native, workflow};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use exec::context_driver;
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 pub(crate) use exec::host_task;
 #[cfg(feature = "native-tokio")]

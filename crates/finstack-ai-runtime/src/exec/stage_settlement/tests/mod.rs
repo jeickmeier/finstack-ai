@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
@@ -21,11 +21,13 @@ use super::input::{stage_input, trailing_role_run};
 use super::submit::{folded_allocation_error, limit_crossing_allocation};
 use super::tool_batch::tool_batch_policy;
 use super::*;
-use crate::context::{ContextAuthority, ContextItem, ContextItemKind, ContextProvenance};
+use crate::context::{
+    ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
+    ContextItemKind, ContextProvenance, ContextProvider, ContextProviderDescriptor, ContextRequest,
+};
 use crate::middleware::{
-    BeforeModelInput, CompactionSourceEntry, MiddlewareDescriptor, MiddlewareOrder,
-    MiddlewareRegistration, MiddlewareRole, OrderTier, ResolvedMiddlewareChain, StageInput,
-    StageMask, StageOutcome,
+    BeforeModelInput, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRegistration,
+    MiddlewareRole, OrderTier, ResolvedMiddlewareChain, StageInput, StageMask, StageOutcome,
 };
 use crate::middleware_driver::{
     MIDDLEWARE_STAGE_BOUNDS_EXCEEDED, MIDDLEWARE_STAGE_UNLANDABLE, StageDriver, StageFold,
@@ -42,6 +44,7 @@ include!("fixtures.rs");
 include!("passthrough.rs");
 include!("before_model.rs");
 include!("compaction.rs");
+include!("context_providers.rs");
 include!("prepare_context.rs");
 include!("stage_input.rs");
 include!("terminal_fold.rs");

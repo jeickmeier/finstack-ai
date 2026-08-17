@@ -19,6 +19,8 @@ pub use error::{
     CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID,
     CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,
 };
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use port::CONTEXT_STAGE;
 pub use port::{
     ContextCallContext, ContextProvider, ContextProviderDescriptor, ContextReconcileResult,
     PendingContextEffect,

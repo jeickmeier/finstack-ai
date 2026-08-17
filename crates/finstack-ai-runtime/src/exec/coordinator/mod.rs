@@ -17,17 +17,28 @@ use finstack_ai_kernel::{
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use finstack_ai_kernel::{Decision, KernelError, KernelInput, TransitionEnv};
+#[cfg(all(test, not(any(feature = "native-tokio", feature = "wasm-host"))))]
+use finstack_ai_kernel::{KernelInput, TransitionEnv};
 use thiserror::Error;
 
-use crate::{JournalStore, ModelProgress, ResolvedMiddlewareChain, SnapshotSchedule, StoreError};
+use crate::{
+    ContextProvider, JournalStore, ModelProgress, ResolvedMiddlewareChain, SnapshotSchedule,
+    StoreError,
+};
 
 pub(crate) use dispatch::PostCommitDispatcher;
 #[cfg(feature = "native-tokio")]
 pub(crate) use dispatch::TimerDispatchSeed;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
 pub(crate) use dispatch::cancel_registered_effect;
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-pub(crate) use dispatch::{DispatchError, ModelDispatchSeed, RuntimeDispatch, ToolDispatchSeed};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host", test))]
+#[allow(
+    unused_imports,
+    reason = "wasm host-task dispatcher consumes the context seed"
+)]
+pub(crate) use dispatch::{
+    ContextDispatchSeed, DispatchError, ModelDispatchSeed, RuntimeDispatch, ToolDispatchSeed,
+};
 pub(crate) use recover::project_loaded;
 
 /// Stable run-local fault state owned by a commit coordinator.
@@ -122,6 +133,14 @@ pub struct CommitCoordinator {
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
     replay_scope: ReplayScope,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
+    context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    context_projection: Option<
+        std::collections::BTreeMap<
+            finstack_ai_kernel::EntryId,
+            (bool, finstack_ai_kernel::Sensitivity),
+        >,
+    >,
     last_model_continuation: Option<finstack_ai_kernel::RawJson>,
 }
 
@@ -147,6 +166,9 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: ReplayScope::Primary,
             middleware_chain: None,
+            context_providers: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            context_projection: None,
             last_model_continuation: None,
         }
     }
@@ -264,6 +286,50 @@ impl CommitCoordinator {
     #[must_use]
     pub fn middleware_chain(&self) -> Option<&Arc<ResolvedMiddlewareChain>> {
         self.middleware_chain.as_ref()
+    }
+
+    /// Install the resolved `ContextProvider` list the runtime drives at
+    /// `prepare_context` / `before_model`.
+    ///
+    /// Additive public peer of [`Self::install_middleware_chain`]. The facade
+    /// hands over `ResolvedRunPlan::context_providers` once, before spawning
+    /// the run worker. An absent or empty list is a passthrough: no provider
+    /// is invoked and source-entry `protected` still follows the structural
+    /// projection (system/developer and the trailing current user).
+    pub fn install_context_providers(&mut self, providers: Arc<[Arc<dyn ContextProvider>]>) {
+        self.context_providers = Some(providers);
+    }
+
+    /// The context providers installed by [`Self::install_context_providers`].
+    #[must_use]
+    pub fn context_providers(&self) -> Option<&Arc<[Arc<dyn ContextProvider>]>> {
+        self.context_providers.as_ref()
+    }
+
+    /// Store the authoritative `protected` projection for `BeforeModel`.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn store_context_projection(
+        &mut self,
+        projection: std::collections::BTreeMap<
+            finstack_ai_kernel::EntryId,
+            (bool, finstack_ai_kernel::Sensitivity),
+        >,
+    ) {
+        self.context_projection = Some(projection);
+    }
+
+    /// Authoritative `protected` / sensitivity map from the last context collect.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    #[must_use]
+    pub(crate) fn context_projection(
+        &self,
+    ) -> Option<
+        &std::collections::BTreeMap<
+            finstack_ai_kernel::EntryId,
+            (bool, finstack_ai_kernel::Sensitivity),
+        >,
+    > {
+        self.context_projection.as_ref()
     }
 
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

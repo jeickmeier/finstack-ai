@@ -43,7 +43,13 @@ where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
 {
-    let action = resume_pending_model_effect(coordinator, model, sources, cancellation).await?;
+    let action = Box::pin(resume_pending_model_effect(
+        coordinator,
+        model,
+        sources,
+        cancellation,
+    ))
+    .await?;
     match action {
         ModelResumeAction::Retry => {
             let seed = coordinator
@@ -259,13 +265,13 @@ impl RunTaskOwner {
         if cancelling {
             drain_idle_cancellation(&mut coordinator, &sources, true).await?;
         } else {
-            resume_model_effect(
+            Box::pin(resume_model_effect(
                 &mut coordinator,
                 model.as_ref(),
                 &model_dispatcher,
                 &sources,
                 &model_cancellation,
-            )
+            ))
             .await?;
         }
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::model_only(
@@ -458,13 +464,13 @@ impl RunTaskOwner {
         if cancelling {
             drain_idle_cancellation(&mut coordinator, &sources, true).await?;
         } else {
-            resume_model_effect(
+            Box::pin(resume_model_effect(
                 &mut coordinator,
                 model.as_ref(),
                 &model_dispatcher,
                 &sources,
                 &model_cancellation,
-            )
+            ))
             .await?;
         }
         coordinator.install_dispatcher(Arc::new(RuntimeDispatcher::with_tools(

@@ -12,11 +12,10 @@ page follows from it.
 
 ## Read this first
 
-**The `finstack-ai-middleware-compaction` leaf does not work end to
-end.** It is one of only two shipping middleware leaves, and neither of
-its two outcomes can be applied to a run. This is not a bug in the
-compactor. See [Shipping leaves](#shipping-leaves) below for the two
-independent causes and the one change that unblocks the first of them.
+**Sliding-window and large-tool-output `CompactContext` land** once the
+trailing current user is structurally protected. The `summarize`
+strategy still cannot complete: it returns `RequestCompactionModel`,
+which has no settlement slot. See [Shipping leaves](#shipping-leaves).
 
 ## What an author must know
 
@@ -58,7 +57,7 @@ land. Both checks can reject; neither ever coerces.
 | `FilterTools` | `before_model`, `before_tool_batch` |
 | `Replace` | `prepare_context`, `before_model` only |
 | `Retry` | `before_finalize` only |
-| `CompactContext` | never applied today — see below |
+| `CompactContext` | `before_model` when the last source entry is a protected user |
 | `RequestCompactionModel` | never |
 | `RequestInteraction` | never |
 | `Suspend` | never |

@@ -4,13 +4,13 @@ This is the canonical live checklist for implementation status. The [Implementat
 
 ## Current snapshot
 
-Last updated 2026-08-17 and reconciled against documentation pack v0.24 / PLAN-0.22 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, `G8-D-general-availability-a889a29a3f54`, tag `v1.0.0` at `6e9ec39fae89a70f696ee740de2d2094670cba3e`, Phase 9 entrance `PH9-E-entrance-tag-b610b0ba93b5` / `PH9-E-entrance-feedback-ee6999c59a12`, and `COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-067 is `In progress` on local `main` (hardening slices are at HEAD; acceptance recorded 9/9 locally; no candidate). Phase 12 / PR-074 is `In progress` (authorization slice; Waves 1–4 hygiene already in the worktree). PR-076 is `In progress` (E3 local workflow + cron). PR-075 and PR-077–PR-079 are `Todo`. Phase 11 / PR-068–PR-073 remain `Todo`. Update this date and the totals below in every change that alters delivery state.
+Last updated 2026-08-17 and reconciled against documentation pack v0.24 / PLAN-0.22 through G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, `G8-D-general-availability-a889a29a3f54`, tag `v1.0.0` at `6e9ec39fae89a70f696ee740de2d2094670cba3e`, Phase 9 entrance `PH9-E-entrance-tag-b610b0ba93b5` / `PH9-E-entrance-feedback-ee6999c59a12`, and `COMP-1.0-D-contract-freeze-00b78667ecc4`. PR-067 is `In progress` on local `main` (hardening slices are at HEAD; acceptance recorded 9/9 locally; no candidate). Phase 12 / PR-074 is `In progress` (authorization slice; Waves 1–4 hygiene already in the worktree). PR-076 is `In progress` (E3 local workflow + cron). PR-075 is `In progress` on local `pr-075` (A01–A05 recorded locally; no candidate). PR-077–PR-079 are `Todo`. Phase 11 / PR-068–PR-073 remain `Todo`. Update this date and the totals below in every change that alters delivery state.
 
 | Item | Planned | Done or passed | Current state |
 | --- | ---: | ---: | --- |
 | Phases | 12 | 10 | Phase 0–9 `Done`; Phase 10 `In progress`; Phase 11 `Todo`; Phase 12 `In progress` |
-| Logical PRs | 79 | 66 | PR-001–PR-066 `Done`; PR-067 `In progress`; PR-068–PR-073 `Todo`; PR-074 `In progress`; PR-076 `In progress`; PR-075 and PR-077–PR-079 `Todo` |
-| PR acceptance-evidence bullets | 378 | 350 | PR-001–PR-066 closed; PR-067 acceptance recorded 9/9 locally (no candidate; not merge-complete); PR-074 0/5; PR-075–PR-079 planned 19 |
+| Logical PRs | 79 | 66 | PR-001–PR-066 `Done`; PR-067 `In progress`; PR-068–PR-073 `Todo`; PR-074 `In progress`; PR-075 `In progress`; PR-076 `In progress`; PR-077–PR-079 `Todo` |
+| PR acceptance-evidence bullets | 378 | 350 | PR-001–PR-066 closed; PR-067 acceptance recorded 9/9 locally (no candidate; not merge-complete); PR-074 0/5; PR-075 acceptance recorded 5/5 locally (no candidate; not merge-complete); PR-076–PR-079 planned 14 |
 | Phase entrance and exit bullets | 84 | 64 | Phase 0–9 entrance and exit `Passed`; Phase 10 entrance cited from G8/PR-066; exit 0/5; Phase 11 0/2 entrance 0/5 exit; Phase 12 0/2 entrance 0/6 exit |
 | Program gates | 9 | 9 | G0–G8 `Passed` |
 | Implementation tasks | 409 | 409 | PR-066 tasks Done; PR-067 has no separate task rows; PR-076 tasks Done locally (no candidate) |
@@ -110,7 +110,7 @@ PR-066 is `Done` at local `main` merge `4888cfe285b2897b1da4e6a2d13ceb8c8bdda1a5
 
 PR-067 is `In progress` on local `main` (hardening slices are committed at HEAD; no issue, actual pull request, or candidate commit). Phase 10 is `In progress`. Closed PR-001–PR-066 envelopes are not reused. Acceptance A01–A09 are recorded locally. TM-04 secret-needle review is registered at [`artifacts/pr-067/tm-04-secret-needles.md`](artifacts/pr-067/tm-04-secret-needles.md) (Pass with residual; not a merge decision). Do not mark PR-067 `Done`. Phase 10 stays fail-closed hardening with no new surface.
 
-Phase 12 / PR-074 is `In progress` (authorization and envelope stubs at [`artifacts/pr-074/plan.md`](artifacts/pr-074/plan.md); Waves 1–4 hygiene already in the worktree). PR-076 is `In progress` (E3 local workflow + cron; admitted by the Wave 7 Build request). PR-075 and PR-077–PR-079 are `Todo`. Phase 11 / PR-068–PR-073 stay `Todo` (ADR-040 provider migration). Closed PR-001–PR-073 envelopes are not reused for E-group code.
+Phase 12 / PR-074 is `In progress` (authorization and envelope stubs at [`artifacts/pr-074/plan.md`](artifacts/pr-074/plan.md); Waves 1–4 hygiene already in the worktree). PR-075 is `In progress` on local `pr-075` (E1 ContextProvider production driver; A01–A05 recorded locally; no candidate; do not mark `Done`). PR-076 is `In progress` (E3 local workflow + cron; admitted by the Wave 7 Build request). PR-077–PR-079 are `Todo`. Phase 11 / PR-068–PR-073 stay `Todo` (ADR-040 provider migration). Closed PR-001–PR-073 envelopes are not reused for E-group code.
 
 ## Active execution envelope
 
@@ -382,7 +382,7 @@ Coverage is recorded as `verified criteria / total criteria` from the plan. Evid
 | Logical PR | Status | Owner | Issue / actual PRs / change | Tasks | Acceptance | Evidence | Blocker | Merged commits / dates | Updated |
 | --- | --- | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | PR-074 | In progress | me@jeickmeier.com | Phase 12 authorization / pack v0.24 (no issue or actual PR; no candidate) | 0 | 0/5 | — | — | — | 2026-08-17 |
-| PR-075 | Todo | — | E1 ContextProvider production driver; envelope at [`artifacts/pr-075/plan.md`](artifacts/pr-075/plan.md) | 0 | 0/5 | — | — | — | 2026-08-17 |
+| PR-075 | In progress | me@jeickmeier.com | E1 ContextProvider production driver; local branch `pr-075`; envelope at [`artifacts/pr-075/plan.md`](artifacts/pr-075/plan.md); no issue or actual PR; no candidate | 5 | 5/5 local | — | — | — | 2026-08-17 |
 | PR-076 | In progress | me@jeickmeier.com | E3 local workflow + cron; envelope at [`artifacts/pr-076/plan.md`](artifacts/pr-076/plan.md); no issue or actual PR; no candidate | 3 | 0/4 | — | — | — | 2026-08-17 |
 | PR-077 | Todo | — | E4a `Lane::run` / `suspend` / `resume`; envelope at [`artifacts/pr-077/plan.md`](artifacts/pr-077/plan.md) | 0 | 0/4 | — | — | — | 2026-08-17 |
 | PR-078 | Todo | — | E4b+E4c Python lanes + SQLite store; envelope at [`artifacts/pr-078/plan.md`](artifacts/pr-078/plan.md) | 0 | 0/4 | — | — | — | 2026-08-17 |

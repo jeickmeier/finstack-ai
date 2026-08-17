@@ -13,14 +13,14 @@ use finstack_ai_kernel::{
     StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy,
-    EventSubscriptionConfig, LaneAppendIds, LockedModelContextProfile, Model, ModelCapabilities,
-    ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-    ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, Observer, PendingModelEffect,
-    PortFuture, ProgressCoalescing, ReconcileContext, RunEvent, RunHandle, RunTaskConfig,
-    RunTaskOwner, SessionError, SessionRuntime, StructuredOutputCapability, ToolStreamLimits,
-    ToolTaskConfig, UuidV7Generator, resolve_model_context_profile,
+    CommitCoordinator, ContextProvider, EventBatchConfig, EventFilter, EventHubConfig,
+    EventLagPolicy, EventSubscriptionConfig, LaneAppendIds, LockedModelContextProfile, Model,
+    ModelCapabilities, ModelContextProfileOverride, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits,
+    ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, Observer,
+    PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext, RunEvent, RunHandle,
+    RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime, StructuredOutputCapability,
+    ToolStreamLimits, ToolTaskConfig, UuidV7Generator, resolve_model_context_profile,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -261,6 +261,15 @@ impl Agent {
         }
         coordinator
             .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
+        let providers: Arc<[Arc<dyn ContextProvider>]> = self
+            .resolved
+            .run_plan()
+            .context_providers()
+            .iter()
+            .map(|component| Arc::clone(component.handle()))
+            .collect::<Vec<_>>()
+            .into();
+        coordinator.install_context_providers(providers);
         let observer_count = self.resolved.run_plan().observers().len();
         let owner = if self.tools.is_empty() {
             Box::pin(RunTaskOwner::spawn_with_model(

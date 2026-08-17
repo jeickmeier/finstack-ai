@@ -23,6 +23,7 @@ pub use error::{
 };
 pub use port::Toolset;
 pub use resume::{map_tool_reconcile_result, tool_resume_action, tool_retry_allowed};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use stream::AssembledToolTerminal;
 pub use stream::{
     AssembledToolStream, ToolStreamAssembler, ToolStreamLimits, normalize_tool_result,

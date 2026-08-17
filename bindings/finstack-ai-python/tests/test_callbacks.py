@@ -105,6 +105,39 @@ def test_sync_python_model_runs_off_the_event_loop_thread() -> None:
     assert callback_threads != [event_loop_thread]
 
 
+def test_python_context_provider_collects_during_agent_run() -> None:
+    seen: list[tuple[dict[str, object], dict[str, Any]]] = []
+
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context, request
+        return {"text": "from context path", "completion_id": "python-context-1"}
+
+    async def context_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        seen.append((context.to_dict(), request))
+        return {"items": [], "estimated_tokens": 0, "bytes": 0, "cache_key": None}
+
+    async def exercise() -> str:
+        provider = finstack_ai.PythonContextProvider(
+            context_callback,
+            component="python.context.e2e",
+        )
+        agent = await finstack_ai.Agent.from_python(
+            _model(model_callback),
+            context_providers=[provider],
+        )
+        return (await agent.run("hello")).text
+
+    assert asyncio.run(exercise()) == "from context path"
+    assert seen, "ContextProvider.collect must run on the production path"
+    context, request = seen[0]
+    assert context["kind"] == "context"
+    assert request["user_input"]
+
+
 def test_coarse_port_adapters_validate_and_cache_registration() -> None:
     async def callback(
         context: finstack_ai.CallbackContext, request: dict[str, Any]

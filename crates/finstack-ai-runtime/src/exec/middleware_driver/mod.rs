@@ -98,37 +98,30 @@
 //!   than prompting.
 //! - `RequestCompactionModel` — see below.
 //!
-//! ## The compaction leaf cannot function end to end
+//! ## Compaction landing
 //!
 //! `finstack-ai-middleware-compaction` is one of only two shipping middleware
-//! leaves, and **neither of its two outcomes can land**, for two independent
-//! reasons:
+//! leaves. Its two outcomes diverge:
 //!
-//! - Its deterministic strategies return `CompactContext`, which this fold
-//!   accepts at `BeforeModel` — but the outcome is rejected one layer earlier,
-//!   by `validate_compaction_result` (`middleware.rs`), which requires the last
-//!   [`crate::middleware::CompactionSourceEntry`] to be `protected`. `protected`
-//!   is authoritative-from-the-context-port, and the `ContextProvider` port has
-//!   **no production driver**: `CommittedContextCall::try_new` and
-//!   `assemble_context` have no non-test callers, so no protected
-//!   [`crate::ContextItem`] is ever constructed during a run and
-//!   `crate::stage_settlement`'s source entries are structurally `protected:
-//!   false`. **Wiring the `ContextProvider` port is the unblock** — patching the
-//!   compactor, or fabricating the `protected` bit at the seam, would make the
-//!   party the check exists to constrain assert its own compliance.
+//! - Deterministic strategies return `CompactContext`, which this fold accepts
+//!   at `BeforeModel` after `validate_compaction_result` sees a protected
+//!   trailing user. That bit is authoritative-from-the-context-port plus the
+//!   structural rule (system/developer and the current user). The production
+//!   `ContextProvider` driver is the caller of `CommittedContextCall::try_new`
+//!   and `assemble_context`.
 //! - Its `summarize` strategy returns `RequestCompactionModel`, which needs a
 //!   committed child model effect under `EffectPurpose::CompactionSummary` and a
 //!   re-entry carrying `compaction_resume`. A stage settles exactly once, as one
 //!   `ReducerStageOutcome`, and there is no committed middleware parent to relate
 //!   a child effect to (section 1), so the aggregate design has no place for
-//!   either half.
+//!   either half. It stays [`MIDDLEWARE_STAGE_UNLANDABLE`].
 //!
-//! Two further gaps sit behind that first one and become live the moment
-//! `ContextProvider` is wired; both are documented at
-//! `stage_settlement::apply_model_draft`, which is where they would be fixed:
-//! a landed `CompactionResult` drops its `derived_summaries` and `checkpoint`,
-//! and a fold carrying both a `Replace` and a `CompactContext` would apply a
-//! projection validated against the base draft on top of the replacement draft.
+//! Two residual gaps sit behind a landed `CompactContext` and are documented at
+//! `stage_settlement::apply_model_draft`: a landed `CompactionResult` drops its
+//! `derived_summaries` and `checkpoint`, and a fold carrying both a `Replace`
+//! and a `CompactContext` would apply a projection validated against the base
+//! draft on top of the replacement draft. Sliding-window compaction does not
+//! use those fields.
 //!
 //! ## Public surface that is never called
 //!

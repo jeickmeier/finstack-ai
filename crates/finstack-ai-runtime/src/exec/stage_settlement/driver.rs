@@ -4,6 +4,7 @@ use finstack_ai_kernel::{
     KernelInput, ReducerStageOutcome, Stage, StageCursor, StageSettled, TransitionEnv,
 };
 
+use crate::context_driver::{ContextDriver, collect_context_stage};
 use crate::coordinator::CommitCoordinator;
 use crate::middleware::StageInput;
 use crate::middleware_driver::{
@@ -15,6 +16,7 @@ use crate::settlement::SettlementSources;
 use crate::{Clock, CommitOutcome, RandomSource, RunCallContext};
 
 use super::apply::apply_fold;
+use super::codec::{canonical_draft, parse_draft};
 use super::input::stage_input;
 use super::submit::{submit_folded, submit_settled};
 use super::{MIDDLEWARE_STAGE_IDENTITY_MISSING, middleware_error, stage_error};
@@ -35,6 +37,20 @@ pub(crate) fn stage_driver(
     coordinator
         .middleware_chain()
         .map(|chain| StageDriver::new(Arc::clone(chain), cancellation.child()))
+}
+
+/// Build the run's context driver from the providers the facade installed.
+///
+/// `None` means no provider list was installed. An installed empty list still
+/// produces a driver so `BeforeModel` can apply the structural protected
+/// projection (system/developer and the trailing current user).
+pub(crate) fn context_driver(
+    coordinator: &CommitCoordinator,
+    cancellation: &crate::CancellationSignal,
+) -> Option<ContextDriver> {
+    coordinator
+        .context_providers()
+        .map(|providers| ContextDriver::new(Arc::clone(providers), cancellation.child()))
 }
 
 /// Whether [`settle_facade_stage`] folds a chain at `stage`.
@@ -119,9 +135,12 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     profile: &LockedModelContextProfile,
     env: TransitionEnv,
-    settled: StageSettled,
+    mut settled: StageSettled,
 ) -> Result<CommitOutcome, RunHandleError> {
     let cursor = settled.cursor;
+    if matches!(cursor.stage, Stage::PrepareContext | Stage::BeforeModel) {
+        apply_context_providers(coordinator, driver, sources, profile, &mut settled).await?;
+    }
     let Some(driver) = driver.filter(|driver| {
         folds_at(cursor.stage)
             && driver.is_active(cursor.stage)
@@ -129,13 +148,66 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
     }) else {
         return submit_settled(coordinator, env, settled).await;
     };
-    let input = stage_input(coordinator.state(), cursor.stage, &settled.outcome, profile)?;
+    let input = stage_input(
+        coordinator.state(),
+        cursor.stage,
+        &settled.outcome,
+        profile,
+        coordinator.context_projection(),
+    )?;
     let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
     if fold.is_identity() {
         return submit_settled(coordinator, env, settled).await;
     }
     let outcome = apply_fold(&fold, cursor, settled.outcome, sources)?;
     submit_folded(coordinator, sources, env.now, cursor, outcome).await
+}
+
+async fn apply_context_providers<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    stage_driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
+    settled: &mut StageSettled,
+) -> Result<(), RunHandleError> {
+    if settled.cursor.stage == Stage::BeforeModel && coordinator.context_projection().is_some() {
+        return Ok(());
+    }
+    let cancellation = stage_driver.map_or_else(crate::CancellationSignal::new, |driver| {
+        driver.cancellation().child()
+    });
+    let Some(driver) = context_driver(coordinator, &cancellation) else {
+        return Ok(());
+    };
+    let base_messages = match &settled.outcome {
+        ReducerStageOutcome::ContextPrepared { messages } => messages.to_vec(),
+        ReducerStageOutcome::ModelRequestPrepared { request, .. } => {
+            parse_draft(request)?.messages.to_vec()
+        }
+        _ => coordinator.state().messages.to_vec(),
+    };
+    let plan = collect_context_stage(
+        coordinator,
+        &driver,
+        sources,
+        profile,
+        settled.cursor.cycle,
+        &base_messages,
+    )
+    .await?;
+    coordinator.store_context_projection(plan.projection.into_map());
+    match (&mut settled.outcome, settled.cursor.stage) {
+        (ReducerStageOutcome::ContextPrepared { messages }, Stage::PrepareContext) => {
+            *messages = plan.messages;
+        }
+        (ReducerStageOutcome::ModelRequestPrepared { request, .. }, Stage::BeforeModel) => {
+            let mut draft = parse_draft(request)?;
+            draft.messages = plan.messages;
+            *request = canonical_draft(&draft)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Whether the facade's base outcome at `stage` is one a chain can fold on top

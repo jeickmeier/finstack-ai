@@ -3,9 +3,9 @@ use std::sync::Arc;
 use crate::{AuthorizationContext, PortFuture, PortObject};
 
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, CommittedBatch, EffectId, EffectRequested, KernelInput, KernelState,
-    Metadata, OperationLocator, PendingModelEffect, PostCommitAction, RecordBody, Timestamp,
-    ToolBatchId, ToolCallId, ValidatedToolCall,
+    ActiveToolCallStatus, CommittedBatch, EffectId, EffectKind, EffectRequested, KernelInput,
+    KernelState, Metadata, OperationLocator, PendingModelEffect, PostCommitAction, RecordBody,
+    Timestamp, ToolBatchId, ToolCallId, ValidatedToolCall,
 };
 
 use super::CommitCoordinator;
@@ -247,6 +247,19 @@ pub(crate) struct RuntimeDispatch {
     pub(crate) model: Option<ModelDispatchSeed>,
     pub(crate) tool: Option<ToolDispatchSeed>,
     pub(crate) timer: Option<TimerDispatchSeed>,
+    pub(crate) context: Option<ContextDispatchSeed>,
+}
+
+/// Seed for a committed `EffectKind::Context` dispatch.
+#[derive(Debug, Clone)]
+#[allow(dead_code, reason = "consumed by the wasm host-task Context arm")]
+pub(crate) struct ContextDispatchSeed {
+    pub(crate) requested: EffectRequested,
+    pub(crate) envelope: finstack_ai_kernel::RecordEnvelope,
+    pub(crate) locator: OperationLocator,
+    pub(crate) authorization: crate::AuthorizationContext,
+    pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
+    pub(crate) attempt: u32,
 }
 
 pub(crate) trait PostCommitDispatcher: PortObject {
@@ -331,6 +344,35 @@ pub(super) fn timer_dispatch_seed(
     (scheduled.timer_effect_id == effect_id).then(|| TimerDispatchSeed {
         scheduled: scheduled.clone(),
         scheduled_at,
+    })
+}
+
+pub(super) fn context_dispatch_seed(
+    state: &KernelState,
+    action: PostCommitAction,
+    committed: &CommittedBatch,
+) -> Option<ContextDispatchSeed> {
+    let PostCommitAction::ExecuteEffect { effect_id } = action else {
+        return None;
+    };
+    let envelope = committed.records.iter().find(|record| {
+        matches!(
+            record.body(),
+            RecordBody::EffectRequested(request)
+                if request.effect_id() == effect_id && request.kind() == EffectKind::Context
+        )
+    })?;
+    let RecordBody::EffectRequested(requested) = envelope.body() else {
+        return None;
+    };
+    let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
+    Some(ContextDispatchSeed {
+        requested: requested.clone(),
+        envelope: envelope.clone(),
+        locator,
+        authorization,
+        budget_scope_id,
+        attempt: state.retry.attempts.checked_add(1)?,
     })
 }
 

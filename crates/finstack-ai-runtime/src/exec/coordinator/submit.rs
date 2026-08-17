@@ -12,8 +12,8 @@ use finstack_ai_kernel::{
 use super::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, ReplayScope, RunFault};
 
 use super::dispatch::{
-    RuntimeDispatch, action_is_authorized, model_dispatch_seed, timer_dispatch_seed,
-    tool_dispatch_seed,
+    RuntimeDispatch, action_is_authorized, context_dispatch_seed, model_dispatch_seed,
+    timer_dispatch_seed, tool_dispatch_seed,
 };
 use super::recover::{
     adopt_session_head, continuation_after_replay, project_loaded, replay_scoped,
@@ -325,6 +325,7 @@ impl CommitCoordinator {
                 action,
                 self.pending_timer_scheduled_at,
             ),
+            context: context_dispatch_seed(self.kernel.state(), action, committed),
         };
         #[cfg(feature = "native-tokio")]
         if let Some(manual_drive) = &self.manual_drive {

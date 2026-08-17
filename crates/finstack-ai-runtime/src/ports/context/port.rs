@@ -6,7 +6,7 @@ use crate::{PortFuture, PortObject, ReconcileContext, RunCallContext};
 use super::error::ContextError;
 use super::types::{ContextContribution, ContextRequest};
 
-pub(super) const CONTEXT_STAGE: &str = "prepare_context";
+pub(crate) const CONTEXT_STAGE: &str = "prepare_context";
 
 /// Immutable context-provider descriptor locked at agent resolution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

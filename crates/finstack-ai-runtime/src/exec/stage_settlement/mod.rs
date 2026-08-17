@@ -29,11 +29,10 @@
 //! which is why it needs the run's [`LockedModelContextProfile`] threaded down
 //! from the spawn path — see [`input::before_model_input`].
 //!
-//! ## Known limitation: `CompactContext` cannot land, and why
+//! ## Compaction landing
 //!
 //! Two of the seven [`crate::middleware::StageOutcome`] variants a `BeforeModel`
-//! component may legally return are unreachable through this choke point, and
-//! both are the compaction ones:
+//! component may legally return are compaction outcomes, and they diverge:
 //!
 //! - `RequestCompactionModel` needs a **committed child model effect** under a
 //!   committed `EffectKind::Middleware` parent, plus a chain re-entry carrying
@@ -41,20 +40,12 @@
 //!   stage settles exactly once, as one `ReducerStageOutcome`, and no
 //!   `KernelInput` commits a middleware parent effect at all. It is refused with
 //!   [`MIDDLEWARE_STAGE_UNLANDABLE`] by [`StageFold::accumulate`].
-//! - `CompactContext` is refused one layer earlier, by
-//!   `validate_compaction_result` (`middleware.rs:1054-1058`), which requires the
-//!   final [`CompactionSourceEntry`] to be `protected`. The causal chain is:
-//!   `protected` is authoritative-from-the-context-port
-//!   ([`crate::ContextItem::protected`], `context.rs:138`) and a compactor may
-//!   not set it; the `ContextProvider` port has **no production driver** — no
-//!   `ContextItem` is constructed anywhere in a live run — so
-//!   [`input::before_model_input`] can only ever assemble unprotected entries; so every
-//!   compaction result fails validation with
-//!   [`crate::COMPACTION_RESULT_INVALID`].
-//!
-//!   **Wiring the `ContextProvider` port is the unblock.** Patching the
-//!   compactor, or fabricating a `protected` bit here, is not: `protected` would
-//!   then be asserted by the party the check exists to constrain.
+//! - `CompactContext` is landable once the last [`CompactionSourceEntry`] is a
+//!   protected user. `protected` stays authoritative-from-the-context-port
+//!   ([`crate::ContextItem::protected`]) plus the structural rule (system /
+//!   developer messages and the trailing current user). The production
+//!   `ContextProvider` driver projects that bit into
+//!   [`input::before_model_input`]; a compactor still cannot set it.
 //!
 //! Every other `BeforeModel` outcome — `AddInstructions`, `AddContext`,
 //! `FilterTools`, `Replace`, `Fail`, `Continue` — folds normally through

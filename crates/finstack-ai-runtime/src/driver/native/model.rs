@@ -73,6 +73,7 @@ impl ModelDispatcher {
             model: Some(seed),
             tool: None,
             timer: None,
+            context: None,
         })
         .await
     }

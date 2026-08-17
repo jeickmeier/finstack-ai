@@ -60,6 +60,9 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: ReplayScope::Primary,
             middleware_chain: None,
+            context_providers: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            context_projection: None,
             last_model_continuation,
         })
     }
@@ -123,6 +126,9 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: scope,
             middleware_chain: None,
+            context_providers: None,
+            #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+            context_projection: None,
             last_model_continuation,
         })
     }

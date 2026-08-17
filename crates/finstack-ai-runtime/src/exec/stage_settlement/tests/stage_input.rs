@@ -48,6 +48,7 @@ fn after_model_stage_input_is_the_latest_message() {
         Stage::AfterModel,
         &ReducerStageOutcome::Continue,
         &test_profile(),
+        None,
     )
     .expect("after model input");
     assert_eq!(input.stage(), Stage::AfterModel);
@@ -65,6 +66,7 @@ fn after_model_stage_input_without_a_message_is_a_stable_error() {
         Stage::AfterModel,
         &ReducerStageOutcome::Continue,
         &test_profile(),
+        None,
     )
     .expect_err("no message to observe");
     assert!(matches!(&error, RunHandleError::Middleware { code }
@@ -79,6 +81,7 @@ fn after_tool_batch_stage_input_is_the_trailing_tool_result_run() {
         Stage::AfterToolBatch,
         &ReducerStageOutcome::Continue,
         &test_profile(),
+        None,
     )
     .expect("after tool batch input");
     let StageInput::AfterToolBatch { value } = input else {
@@ -111,6 +114,7 @@ fn before_finalize_stage_input_is_the_live_terminal_candidate() {
         Stage::BeforeFinalize,
         &ReducerStageOutcome::FinalizeAccepted,
         &test_profile(),
+        None,
     )
     .expect("before finalize input");
     let StageInput::BeforeFinalize { candidate: value } = input else {
@@ -125,6 +129,7 @@ fn before_finalize_stage_input_is_the_live_terminal_candidate() {
         Stage::BeforeFinalize,
         &ReducerStageOutcome::FinalizeAccepted,
         &test_profile(),
+        None,
     )
     .expect_err("no candidate to observe");
     assert!(matches!(&error, RunHandleError::Middleware { code }
@@ -143,6 +148,7 @@ fn stage_input_refuses_the_one_stage_this_choke_point_does_not_fold() {
             Stage::BeforeToolBatch,
             &ReducerStageOutcome::Continue,
             &test_profile(),
+            None,
         )
         .is_err(),
         "BeforeToolBatch has no stage input to build here"
@@ -156,7 +162,7 @@ fn stage_input_refuses_the_one_stage_this_choke_point_does_not_fold() {
 #[test]
 fn before_model_stage_input_is_the_typed_input_over_the_committed_draft() {
     let draft = request_draft(
-        vec![user_message(4, "hi"), assistant_message(5, "hello")],
+        vec![assistant_message(5, "hello"), user_message(4, "hi")],
         vec![tool_spec("keep")],
     );
     let settled = model_request_settled(&draft);
@@ -167,6 +173,7 @@ fn before_model_stage_input_is_the_typed_input_over_the_committed_draft() {
         Stage::BeforeModel,
         &settled.outcome,
         &profile,
+        None,
     )
     .expect("before model input");
 
@@ -194,8 +201,17 @@ fn before_model_stage_input_is_the_typed_input_over_the_committed_draft() {
         before_model
             .source_entries
             .iter()
-            .all(|entry| !entry.protected && entry.sensitivity == Sensitivity::Internal),
-        "no entry can be protected while the context port has no production driver"
+            .all(|entry| entry.sensitivity == Sensitivity::Internal)
+    );
+    assert!(
+        before_model.source_entries.last().is_some_and(|entry| {
+            entry.protected && entry.message.role() == MessageRole::User
+        }),
+        "the trailing current user is structurally protected"
+    );
+    assert!(
+        !before_model.source_entries[0].protected,
+        "non-trailing history stays unprotected without a provider projection"
     );
     assert_eq!(
         before_model.source_entries[0].provenance_digest,
@@ -215,6 +231,7 @@ fn before_model_stage_input_without_a_prepared_request_is_a_stable_error() {
         Stage::BeforeModel,
         &ReducerStageOutcome::Continue,
         &test_profile(),
+        None,
     )
     .expect_err("nothing but a prepared request can carry a draft at this cursor");
     assert!(matches!(&error, RunHandleError::Middleware { code }

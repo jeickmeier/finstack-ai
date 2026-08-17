@@ -2,6 +2,7 @@ use finstack_ai_kernel::{
     Digest, EntryId, KernelState, Message, MessageRole, ReducerStageOutcome, Sensitivity, Stage,
 };
 
+use crate::context_driver::structural_protected;
 use crate::middleware::{BeforeModelInput, CompactionSourceEntry, StageInput};
 use crate::model::LockedModelContextProfile;
 use crate::run_types::RunHandleError;
@@ -33,6 +34,7 @@ pub(super) fn stage_input(
     cursor_stage: Stage,
     outcome: &ReducerStageOutcome,
     profile: &LockedModelContextProfile,
+    projection: Option<&std::collections::BTreeMap<EntryId, (bool, Sensitivity)>>,
 ) -> Result<StageInput, RunHandleError> {
     match cursor_stage {
         Stage::BeforeRun => Ok(StageInput::BeforeRun {
@@ -64,7 +66,7 @@ pub(super) fn stage_input(
             candidate: canonical_terminal_candidate(state)?,
         }),
         Stage::BeforeModel => Ok(StageInput::BeforeModel(Box::new(before_model_input(
-            outcome, profile,
+            outcome, profile, projection,
         )?))),
         Stage::BeforeToolBatch => Err(stage_error(MIDDLEWARE_STAGE_INPUT_INVALID)),
     }
@@ -100,10 +102,9 @@ pub(super) fn stage_input(
 ///   journal-derived history the message *is* its own provenance. It is never
 ///   compared field-wise; it only feeds `compaction_source_digest`, so any
 ///   deterministic derivation is self-consistent.
-/// - `protected` — always `false`. See the module docs: the context port is its
-///   authoritative setter and that port has no production driver, so no
-///   protected entry can exist. This is the value that makes `CompactContext`
-///   unreachable, and it is deliberately not fabricated.
+/// - `protected` — from the context-port projection when providers ran, else
+///   the structural rule: system/developer messages and the trailing current
+///   user are protected. A compactor still cannot set this bit.
 ///
 /// # `hard_input_tokens`
 ///
@@ -122,19 +123,30 @@ pub(super) fn stage_input(
 pub(super) fn before_model_input(
     outcome: &ReducerStageOutcome,
     profile: &LockedModelContextProfile,
+    projection: Option<&std::collections::BTreeMap<EntryId, (bool, Sensitivity)>>,
 ) -> Result<BeforeModelInput, RunHandleError> {
     let ReducerStageOutcome::ModelRequestPrepared { request, .. } = outcome else {
         return Err(stage_error(MIDDLEWARE_STAGE_INPUT_INVALID));
     };
     let draft = parse_draft(request)?;
+    let last = draft.messages.len().saturating_sub(1);
     let mut source_entries = Vec::with_capacity(draft.messages.len());
-    for message in draft.messages.iter() {
+    for (index, message) in draft.messages.iter().enumerate() {
+        let entry_id = EntryId::from_bytes(message.id().to_bytes());
+        let (protected, sensitivity) = projection
+            .and_then(|map| map.get(&entry_id).copied())
+            .unwrap_or_else(|| {
+                (
+                    structural_protected(message, index == last),
+                    Sensitivity::Internal,
+                )
+            });
         source_entries.push(CompactionSourceEntry {
-            entry_id: EntryId::from_bytes(message.id().to_bytes()),
+            entry_id,
             message: message.clone(),
-            sensitivity: Sensitivity::Internal,
+            sensitivity,
             provenance_digest: Digest::raw_json(canonical_message(message)?.as_bytes()),
-            protected: false,
+            protected,
         });
     }
     Ok(BeforeModelInput {

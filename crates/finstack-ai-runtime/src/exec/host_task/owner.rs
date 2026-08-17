@@ -201,6 +201,7 @@ impl RunTaskOwner {
             model: Arc::clone(&model),
             profile,
             catalog: catalog.clone(),
+            context_providers: coordinator.context_providers().map(Arc::clone),
             pending: Arc::clone(&pending),
             active: Arc::clone(&active),
             parent: parent.clone(),
