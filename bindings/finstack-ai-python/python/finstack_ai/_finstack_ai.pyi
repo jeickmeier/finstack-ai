@@ -594,7 +594,8 @@ class Agent:
         ``finstack_ai`` does not open sockets or start Tokio. The native
         provider is T1. Keyword-only port lists register the same T2 Python
         callbacks as :meth:`Agent.from_python`. This factory does not read
-        environment variables.
+        environment variables. Output is capped at 64,000 tokens, the current
+        Claude ceiling, while the linked context window is 1,050,000 tokens.
 
         Args:
             base_url: Anthropic Messages base URL.

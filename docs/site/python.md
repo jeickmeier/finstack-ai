@@ -39,7 +39,8 @@ keyword-only T2 ports as `Agent.from_python`. `openai` takes required
 keyword-only `api_key` (Bearer; HTTPS required) and optional
 `reasoning_effort`, and always uses official OpenAI Responses.
 `ollama` stays keyless and uses native `/api/chat`. OpenAI output is
-capped at 128,000 tokens; the linked context window is 1,050,000 tokens.
+capped at 128,000 tokens and Anthropic output at 64,000 tokens, the
+current Claude ceiling; the linked context window is 1,050,000 tokens.
 Pass keys explicitly; the binding does not read environment variables.
 Lazy `finstack_ai.providers.*` stay unloaded until attribute access.
 

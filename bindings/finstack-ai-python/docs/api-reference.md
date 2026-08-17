@@ -24,7 +24,8 @@ Workspace version is **1.0.0**. The package is not on PyPI.
   context_providers=None, middleware=None, observers=None, output_type=None)`
   builds the curated Anthropic Messages leaf (T1) plus the same keyword-only
   T2 ports. An `api_key` remains positional and requires HTTPS; keyless HTTP
-  loopback is allowed.
+  loopback is allowed. Requests ask for at most 64,000 output tokens, the
+  current Claude ceiling.
 - `Agent.ollama(base_url, model, instruction=None, capabilities=None,
   active_capabilities=None, *, toolsets=None, context_providers=None,
   middleware=None, observers=None, output_type=None)` builds the keyless

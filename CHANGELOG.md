@@ -28,6 +28,12 @@ unpublished.
 
 ### Fixed
 
+- The Anthropic provider no longer reports zero-valued cache counters in
+  `Usage.extension_counters`. Anthropic sends them on every completion, and a
+  run that never registered those keys in `RunLimits` faulted with
+  `unused_allocated_ids`, so every live Anthropic run failed.
+- Python `Agent.anthropic` requests at most 64,000 output tokens instead of
+  128,000, which Anthropic rejects for models whose own ceiling is lower.
 - Session intern-table poison, sidecar `AmbiguousAcknowledgement`,
   dispatcher cancel-registry poison, and SDK event-lock poison fail
   closed instead of returning a live owner, `Ok(())`, or hanging.

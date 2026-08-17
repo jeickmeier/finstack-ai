@@ -718,14 +718,18 @@ impl CompletionAssembly {
     }
 
     fn apply_usage(&mut self, usage: &WireUsage) -> Result<Vec<ModelStreamItem>, ModelError> {
+        // Anthropic reports both cache counters on every completion, including
+        // zeroes when no cache breakpoint was sent. A run only accepts counters
+        // its `RunLimits` registered, so report cache activity only when there
+        // is some.
         let mut counters = BTreeMap::new();
-        if let Some(value) = usage.cache_creation_input_tokens {
+        if let Some(value) = usage.cache_creation_input_tokens.filter(|value| *value > 0) {
             counters.insert(
                 LimitKey::parse(CACHE_CREATION_KEY).expect("cache key"),
                 value,
             );
         }
-        if let Some(value) = usage.cache_read_input_tokens {
+        if let Some(value) = usage.cache_read_input_tokens.filter(|value| *value > 0) {
             counters.insert(LimitKey::parse(CACHE_READ_KEY).expect("cache key"), value);
         }
         let input_tokens = usage.input_tokens.or(self.usage.input_tokens());
@@ -942,5 +946,26 @@ mod tests {
                 .expect("cache counter"),
             2
         );
+    }
+
+    #[test]
+    fn zero_cache_counters_are_not_reported() {
+        let mut assembly = CompletionAssembly::new("request-2".to_owned(), false);
+        assembly
+            .consume(
+                "message_start",
+                r#"{"type":"message_start","message":{"id":"msg-2","usage":{"input_tokens":608,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":22}}}"#,
+            )
+            .unwrap();
+        assembly
+            .consume(
+                "message_delta",
+                r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":608,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":69}}"#,
+            )
+            .unwrap();
+        let response = assembly.finish().unwrap();
+        assert!(response.usage.extension_counters().is_empty());
+        assert_eq!(response.usage.input_tokens(), Some(608));
+        assert_eq!(response.usage.output_tokens(), Some(69));
     }
 }

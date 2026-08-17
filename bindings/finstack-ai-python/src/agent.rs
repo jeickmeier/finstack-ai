@@ -40,6 +40,9 @@ const OPENAI_TIMEOUT_SECONDS: f64 = 120.0;
 const DEFAULT_MAX_CYCLES: u64 = 16;
 const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
 const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
+/// Anthropic rejects `max_tokens` above the selected model's own ceiling, and
+/// the current Claude generation tops out at 64,000 output tokens.
+const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
 const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
@@ -461,8 +464,8 @@ async fn build_anthropic_agent(
         &model,
         LINKED_CONTEXT_WINDOW_TOKENS,
         LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_RESERVED_OUTPUT_TOKENS,
+        LINKED_ANTHROPIC_OUTPUT_TOKENS,
+        LINKED_ANTHROPIC_OUTPUT_TOKENS,
         LINKED_PROVIDER_OVERHEAD_TOKENS,
     )
     .map_err(model_configuration_error)?;
