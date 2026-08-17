@@ -10,7 +10,7 @@ use crate::primitives::Digest;
 use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
 use crate::primitives::{ComponentId, EffectId, EffectOutputKey, InteractionId};
-use crate::refs::{Version, validated_text};
+use crate::primitives::{Version, validated_text};
 
 use super::EffectError;
 

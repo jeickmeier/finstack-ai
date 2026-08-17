@@ -10,11 +10,11 @@ use crate::content::ContentBlock;
 use crate::conversation::{Message, MessageRole};
 use crate::primitives::Metadata;
 use crate::primitives::{EffectId, EntryId, LaneId, RunId, SessionId};
-use crate::records::{LaneCreated, LaneMoved, RecordBody, RecordEnvelope};
-use crate::run::{
+use crate::records::run::{
     ChildRunPrepared, RunAccepted, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
-use crate::tools::ToolCallSettled;
+use crate::records::tools::ToolCallSettled;
+use crate::records::{LaneCreated, LaneMoved, RecordBody, RecordEnvelope};
 
 /// Canonical conversation entry with an immutable parent link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

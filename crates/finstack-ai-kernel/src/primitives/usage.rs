@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
 
-use super::error::{RefsError, deserialize_micros, serialize_micros, validated_label};
+use super::refs_error::{RefsError, deserialize_micros, serialize_micros, validated_label};
 use crate::primitives::BoundedMap;
 use crate::primitives::LimitKey;
 use std::collections::BTreeMap;

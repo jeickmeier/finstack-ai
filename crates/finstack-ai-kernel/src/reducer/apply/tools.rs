@@ -5,11 +5,11 @@ use crate::conversation::MessageRole;
 use crate::effects::EffectOutputKind;
 use crate::primitives::Digest;
 use crate::records::RecordEnvelope;
-use crate::state::{CompletionIdentity, KernelState, RunPhase, TerminalCandidate};
-use crate::tools::{
+use crate::records::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchOutcome, ToolCallPlan,
     ToolSettlementFingerprint, ToolSettlementKind,
 };
+use crate::state::{CompletionIdentity, KernelState, RunPhase, TerminalCandidate};
 
 use super::super::decision::KernelError;
 use super::super::fingerprint::{

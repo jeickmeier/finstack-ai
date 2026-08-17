@@ -9,7 +9,7 @@ use crate::primitives::Digest;
 use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
 use crate::primitives::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
-use crate::tools::{ToolBatchContinuation, ToolBatchOutcome};
+use crate::records::tools::{ToolBatchContinuation, ToolBatchOutcome};
 use std::sync::Arc;
 
 use crate::conversation::{MessageRole, ProviderIds};
@@ -17,7 +17,7 @@ use crate::effects::{EffectDeferred, EffectOutputKind, ReconciliationPolicy};
 use crate::primitives::Metadata;
 use crate::primitives::{ArtifactId, ComponentId, MessageId};
 use crate::primitives::{ErrorCategory, ErrorDescriptor};
-use crate::refs::{ExternalHandleRef, Usage};
+use crate::primitives::{ExternalHandleRef, Usage};
 use crate::{ArtifactRef, BlobRef, ContentBlock, TextBlock};
 
 #[test]

@@ -3,8 +3,10 @@
 use super::super::decision::KernelError;
 use super::super::input::{ReducerStageOutcome, StageSettled};
 use crate::effects::{EffectInput, EffectRequested};
-use crate::lifecycle::{ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded};
 use crate::primitives::Digest;
+use crate::records::lifecycle::{
+    ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded,
+};
 use crate::state::projection::{ErrorProjection, MessageSeq};
 
 use super::types::{

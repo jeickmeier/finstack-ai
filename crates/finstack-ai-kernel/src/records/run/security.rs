@@ -6,7 +6,7 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::refs::{PrincipalRef, validated_label};
+use crate::primitives::{PrincipalRef, validated_label};
 
 use super::error::RunError;
 use super::propagation::PrincipalPropagation;

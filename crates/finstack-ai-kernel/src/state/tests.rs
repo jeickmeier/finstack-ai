@@ -11,7 +11,7 @@ mod validate_tool_state_tests {
     use crate::conversation::{Message, MessageRole, ProviderIds};
     use crate::primitives::MessageId;
     use crate::primitives::{Metadata, RawJson};
-    use crate::tools::ToolCallIdentity;
+    use crate::records::tools::ToolCallIdentity;
 
     /// Reference implementation of the authorship check: the nested scan the
     /// indexed version replaced. Any input the two disagree on is a regression

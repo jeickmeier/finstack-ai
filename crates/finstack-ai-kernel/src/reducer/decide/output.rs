@@ -243,7 +243,7 @@ fn output_validation_body(
                     reason_code: "must_not_be_empty",
                 });
             }
-            let error = crate::policy::expected_validation_error(
+            let error = crate::records::policy::expected_validation_error(
                 state.retry.attempts,
                 state
                     .accepted

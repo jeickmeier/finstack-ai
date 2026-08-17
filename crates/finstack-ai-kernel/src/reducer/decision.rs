@@ -7,9 +7,9 @@ use thiserror::Error;
 
 use crate::StageCursor;
 use crate::primitives::BoundedVec;
+use crate::primitives::Diagnostic;
 use crate::primitives::{AppendBatchId, EffectId};
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RecordDraft, RecordEnvelope};
-use crate::refs::Diagnostic;
 use crate::state::RunPhase;
 
 /// Pure reducer proposal before atomic append.

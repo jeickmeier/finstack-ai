@@ -7,8 +7,8 @@ use super::super::validation::validate_error_descriptor;
 use crate::content::ToolCallBlock;
 use crate::effects::EffectOutputKind;
 use crate::records::APPEND_BATCH_MAX_RECORDS;
+use crate::records::tools::{AssignedToolCall, ToolCallPlan, ToolFailurePolicy};
 use crate::state::{KernelState, TransitionEnv};
-use crate::tools::{AssignedToolCall, ToolCallPlan, ToolFailurePolicy};
 
 pub fn opening_id_requirements(plans: &[ToolCallPlan]) -> Result<IdRequirements, KernelError> {
     let groups = execution_groups(plans)?;

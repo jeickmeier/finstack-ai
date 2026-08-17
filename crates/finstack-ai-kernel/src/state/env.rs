@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::primitives::AllocatedIds;
 use crate::primitives::Timestamp;
-use crate::refs::AllocatedIds;
 
 /// Runtime-supplied nondeterministic values for one pure decision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

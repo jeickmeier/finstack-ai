@@ -1,8 +1,8 @@
 use crate::content::LABEL_MAX_BYTES;
 use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
-use crate::lifecycle::EntryAppended;
 use crate::primitives::Digest;
 use crate::records::RecordBody;
+use crate::records::lifecycle::EntryAppended;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};

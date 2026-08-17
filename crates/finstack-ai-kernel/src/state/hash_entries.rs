@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::lifecycle::{Stage, StageCursor};
 use crate::primitives::Digest;
 use crate::primitives::{EffectId, ToolCallId};
-use crate::tools::{ToolCallIdentity, ToolSettlementFingerprint};
+use crate::records::lifecycle::{Stage, StageCursor};
+use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint};
 
 use super::{
     CompletionIdentity, CompletionIdentityHashEntryV1, ModelSettlementFingerprint,

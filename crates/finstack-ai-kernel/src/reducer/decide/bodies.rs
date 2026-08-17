@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind, EffectRequested};
-use crate::lifecycle::{ContextPrepared, Stage, StageCursor, StageDisposition};
 use crate::primitives::Digest;
 use crate::records::RecordBody;
+use crate::records::lifecycle::{ContextPrepared, Stage, StageCursor, StageDisposition};
 use crate::state::{KernelState, TransitionEnv};
 
 use super::super::decision::{KernelError, PostCommitAction};

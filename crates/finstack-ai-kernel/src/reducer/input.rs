@@ -18,13 +18,13 @@ use crate::effects::{
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
+use crate::primitives::{ArtifactRef, Usage};
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{
     CancellationRequestId, EffectId, LaneId, ModelRequestId, SessionId, ToolBatchId, TurnId,
 };
-use crate::refs::{ArtifactRef, Usage};
-use crate::run::{CancellationInitiator, RunAccepted};
-use crate::tools::{ToolBatchContinuation, ToolCallPlan};
+use crate::records::run::{CancellationInitiator, RunAccepted};
+use crate::records::tools::{ToolBatchContinuation, ToolCallPlan};
 use crate::{CapabilitiesActivated, OutputConfiguration, OutputValidated};
 
 /// Complete concrete command vocabulary owned through PR-012.

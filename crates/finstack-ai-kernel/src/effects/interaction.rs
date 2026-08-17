@@ -10,11 +10,11 @@ use crate::content::{
 };
 use crate::primitives::Digest;
 use crate::primitives::Timestamp;
-use crate::primitives::{EffectId, InteractionId};
-use crate::primitives::{Metadata, RawJson};
-use crate::refs::{
+use crate::primitives::{
     AssigneeHint, AuthorizationEvidence, ComponentRef, PrincipalRef, Version, validated_label,
 };
+use crate::primitives::{EffectId, InteractionId};
+use crate::primitives::{Metadata, RawJson};
 
 use super::EffectError;
 

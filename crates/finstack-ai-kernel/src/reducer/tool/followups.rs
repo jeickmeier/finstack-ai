@@ -6,8 +6,8 @@ use super::super::decide::required;
 use super::super::decision::KernelError;
 use super::super::fingerprint::synthetic_tool_digest;
 use crate::records::RecordBody;
+use crate::records::tools::{ActiveToolBatch, ActiveToolCallStatus, ToolBatchOutcome};
 use crate::state::TransitionEnv;
-use crate::tools::{ActiveToolBatch, ActiveToolCallStatus, ToolBatchOutcome};
 
 use super::cancellation::ToolFollowups;
 use super::records::synthetic_result;

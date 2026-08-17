@@ -2,8 +2,8 @@
 
 use thiserror::Error;
 
-use crate::policy::LimitsError;
-use crate::refs::RefsError;
+use crate::primitives::RefsError;
+use crate::records::policy::LimitsError;
 
 /// Run lineage / acceptance errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

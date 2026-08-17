@@ -14,8 +14,8 @@ use super::super::validation::{validate_completion_identity, validate_error_desc
 use crate::conversation::ProviderIds;
 use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
 use crate::records::RecordBody;
+use crate::records::tools::{ActiveToolCallStatus, ToolFailurePolicy};
 use crate::state::{KernelState, RunPhase, TransitionEnv};
-use crate::tools::{ActiveToolCallStatus, ToolFailurePolicy};
 
 use super::followups::followup_records;
 use super::planning::ensure_record_batch_bound;

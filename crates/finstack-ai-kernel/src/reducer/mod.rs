@@ -24,7 +24,7 @@ pub use input::{
 };
 
 use crate::events::RunEvent;
-use crate::lifecycle::RunFailed;
+use crate::records::lifecycle::RunFailed;
 use crate::state::{KernelState, TransitionEnv};
 use crate::{Digest, ErrorDescriptor};
 

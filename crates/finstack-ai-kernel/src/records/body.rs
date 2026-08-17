@@ -5,22 +5,24 @@ use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,
     InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
 };
-use crate::lifecycle::{
+use crate::records::lifecycle::{
     ContextPrepared, EntryAppended, RetryScheduled, RunCancelled, RunCompleted, RunFailed,
     RunSuspended, StageOutcomeRecorded, TimerFired,
 };
-use crate::policy::CapabilitiesActivated;
-use crate::policy::LimitReached;
-use crate::policy::OutputValidationFailed;
-use crate::policy::{
+use crate::records::policy::CapabilitiesActivated;
+use crate::records::policy::LimitReached;
+use crate::records::policy::OutputValidationFailed;
+use crate::records::policy::{
     BudgetChargeRecorded, BudgetReservationReleased, BudgetReservationRequested,
     BudgetReservationSettled,
 };
-use crate::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::records::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::records::run::ExternalCommandRejected;
+use crate::records::run::{
+    CancellationReconciled, CancellationRequested, ChildRunPrepared, RunAccepted,
+};
+use crate::records::tools::{ToolBatchClosed, ToolBatchOpened, ToolCallSettled};
 use crate::records::{LaneCreated, LaneMoved, SessionCreated, SnapshotWritten};
-use crate::run::ExternalCommandRejected;
-use crate::run::{CancellationReconciled, CancellationRequested, ChildRunPrepared, RunAccepted};
-use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolCallSettled};
 use serde::{Deserialize, Serialize};
 
 use super::RECORD_KIND_VERSION;

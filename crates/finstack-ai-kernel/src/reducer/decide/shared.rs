@@ -1,11 +1,11 @@
 use crate::EffectOutputContract;
 use crate::effects::EffectOutputKind;
-use crate::lifecycle::{
+use crate::primitives::Digest;
+use crate::primitives::{Diagnostic, DiagnosticSeverity};
+use crate::records::lifecycle::{
     RunCompleted, RunFailed, Stage, StageCursor, StageDisposition, StageOutcomeRecorded,
 };
-use crate::primitives::Digest;
 use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
-use crate::refs::{Diagnostic, DiagnosticSeverity};
 use crate::state::{KernelState, RunPhase, TerminalCandidate, TransitionEnv};
 
 use super::super::decision::{Decision, KernelError};
@@ -51,7 +51,7 @@ pub fn draft_for_state(
     let run_id = state
         .accepted
         .as_ref()
-        .map(crate::run::RunAccepted::run_id)
+        .map(crate::records::run::RunAccepted::run_id)
         .ok_or(KernelError::InvariantViolation)?;
     let mut event_index = 0;
     let mut records = Vec::with_capacity(bodies.len());

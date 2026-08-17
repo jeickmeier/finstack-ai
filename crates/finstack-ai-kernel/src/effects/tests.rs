@@ -5,8 +5,8 @@ use crate::content::BlobRef;
 use crate::primitives::Digest;
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::{ArtifactId, ComponentId, EffectId};
+use crate::primitives::{ArtifactRef, ExternalHandleRef};
 use crate::primitives::{Metadata, RawJson};
-use crate::refs::{ArtifactRef, ExternalHandleRef};
 
 #[test]
 fn effect_input_external_tag_round_trips_raw_json() {

@@ -9,11 +9,11 @@ use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,
     InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
 };
-use crate::policy::LimitDimension;
 use crate::primitives::Digest;
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::{CancellationRequestId, MessageId, ToolCallId};
-use crate::run::RunAccepted;
+use crate::records::policy::LimitDimension;
+use crate::records::run::RunAccepted;
 
 use super::{
     ModelTextDelta, ProviderHeartbeat, QueueDepthWarning, ReasoningDelta, RunEventKind,

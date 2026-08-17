@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use crate::content::ContentBlock;
 use crate::effects::{EffectKind, EffectOutputKind};
-use crate::lifecycle::EntryAppended;
 use crate::primitives::Digest;
 use crate::records::RecordBody;
+use crate::records::lifecycle::EntryAppended;
+use crate::records::tools::{ActiveToolCallStatus, ToolCallIdentity};
 use crate::state::{
     CompletionIdentity, KernelState, ModelSettlementFingerprint, ModelSettlementKind,
     PendingModelEffect, RunPhase, TerminalCandidate,
 };
-use crate::tools::{ActiveToolCallStatus, ToolCallIdentity};
 
 use super::super::decision::KernelError;
 use super::super::fingerprint::{completed_record_digest, failed_record_digest};

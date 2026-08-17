@@ -10,9 +10,9 @@ use crate::primitives::Digest;
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
+use crate::primitives::{ArtifactRef, ExternalHandleRef, Usage, validated_label, validated_text};
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{BudgetReservationId, EffectId};
-use crate::refs::{ArtifactRef, ExternalHandleRef, Usage, validated_label, validated_text};
 
 use super::EffectError;
 use super::kinds::{

@@ -9,11 +9,11 @@ use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{EffectCompleted, EffectInput, EffectKind, EffectRequested};
 use crate::primitives::{Metadata, RawJson};
 use crate::records::RecordBody;
-use crate::state::TransitionEnv;
-use crate::tools::{
+use crate::records::tools::{
     ActiveToolBatch, ActiveToolCallStatus, AssignedToolCall, ToolBatchClosed,
     ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
 };
+use crate::state::TransitionEnv;
 
 pub fn append_group_requests(
     assigned: &[AssignedToolCall],

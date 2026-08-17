@@ -5,11 +5,13 @@ use super::super::input::{ExternalEffectCompletedInput, ExternalEffectOutcome, T
 use crate::effects::{EffectCompleted, EffectFailed};
 use crate::primitives::Digest;
 use crate::primitives::{EffectId, ToolBatchId, ToolCallId, TurnId};
+use crate::records::tools::{
+    AssignedToolCall, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome,
+};
 use crate::state::projection::{
     ArtifactSeq, EffectCompletedProjection, EffectDeferredProjection, EffectFailedProjection,
     ErrorProjection, UsageProjection,
 };
-use crate::tools::{AssignedToolCall, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome};
 
 use super::types::{
     AssignedToolCallFingerprintV1, ToolBatchCloseFingerprintV1, ToolBatchOutcomeFingerprintV1,

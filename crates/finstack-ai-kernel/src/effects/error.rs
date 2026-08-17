@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::content::ContentError;
 use crate::primitives::ErrorDescriptorError;
-use crate::refs::RefsError;
+use crate::primitives::RefsError;
 
 /// Effect/interaction errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

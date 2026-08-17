@@ -5,12 +5,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
-use crate::policy::{SchemaRef, StructuredResultSource};
 use crate::primitives::Digest;
 use crate::primitives::RawJson;
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{EffectId, MessageId, ModelRequestId, ToolCallId, TurnId};
 use crate::primitives::{ErrorCategory, ErrorDescriptor, ErrorDescriptorError};
+use crate::records::policy::{SchemaRef, StructuredResultSource};
 
 pub(crate) fn expected_validation_error(
     retry_attempts: u32,

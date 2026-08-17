@@ -1,12 +1,12 @@
 use crate::conversation::MessageRole;
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::lifecycle::{
+use crate::records::lifecycle::{
     EntryAppended, RunCompleted, RunFailed, Stage, StageCursor, StageDisposition,
     StageOutcomeRecorded,
 };
+use crate::records::tools::{ActiveToolCall, ActiveToolCallStatus, ToolCallPlan};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::{KernelState, PendingModelEffect, RunPhase, TerminalCandidate};
-use crate::tools::{ActiveToolCall, ActiveToolCallStatus, ToolCallPlan};
 
 use super::super::decision::KernelError;
 use super::super::failure_from_state;

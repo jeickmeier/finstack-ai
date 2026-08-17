@@ -10,7 +10,7 @@ use crate::primitives::ArtifactId;
 use crate::primitives::Digest;
 use crate::primitives::Metadata;
 
-use super::error::{RefsError, validated_label};
+use super::refs_error::{RefsError, validated_label};
 use crate::primitives::ComponentId;
 use crate::primitives::RawJson;
 

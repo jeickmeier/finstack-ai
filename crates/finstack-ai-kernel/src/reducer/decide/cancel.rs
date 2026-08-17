@@ -1,6 +1,6 @@
 use crate::effects::{EffectCancelled, InteractionCancelled};
-use crate::lifecycle::{RunCancelled, RunSuspended, TimerFired};
 use crate::primitives::ErrorCode;
+use crate::records::lifecycle::{RunCancelled, RunSuspended, TimerFired};
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RECORD_KIND_VERSION, RecordBody};
 use crate::state::{KernelState, TransitionEnv};
 use crate::{

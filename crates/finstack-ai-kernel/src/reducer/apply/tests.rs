@@ -7,16 +7,16 @@ use crate::effects::{
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
     ReconciliationPolicy, RetrySafety,
 };
-use crate::lifecycle::EntryAppended;
 use crate::primitives::ComponentId;
 use crate::primitives::Digest;
+use crate::primitives::ExternalHandleRef;
 use crate::primitives::Timestamp;
 use crate::primitives::{Metadata, RawJson};
+use crate::records::lifecycle::EntryAppended;
 use crate::records::{
     APPEND_BATCH_MAX_RECORDS, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
     RecordEnvelope,
 };
-use crate::refs::ExternalHandleRef;
 use crate::state::{
     KernelState, ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
 };

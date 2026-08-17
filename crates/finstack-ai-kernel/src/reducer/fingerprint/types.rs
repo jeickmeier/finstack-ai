@@ -3,15 +3,17 @@
 use serde::Serialize;
 
 use crate::effects::{ComponentInvocation, EffectOutputContract, RetrySafety};
-use crate::lifecycle::StageCursor;
 use crate::primitives::RawJson;
 use crate::primitives::Timestamp;
 use crate::primitives::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
+use crate::records::lifecycle::StageCursor;
+use crate::records::tools::{
+    AssignedToolCall, ToolBatchContinuation, ToolBatchOutcome, ToolCallPlan,
+};
 use crate::state::projection::{
     ArtifactSeq, ContentSeq, EffectCompletedProjection, EffectDeferredProjection,
     EffectFailedProjection, ErrorProjection, MessageProjection, MessageSeq, UsageProjection,
 };
-use crate::tools::{AssignedToolCall, ToolBatchContinuation, ToolBatchOutcome, ToolCallPlan};
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]

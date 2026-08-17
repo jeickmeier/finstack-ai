@@ -6,6 +6,18 @@
 //! must not perform network, filesystem, database, clock, environment, process,
 //! or host-language I/O.
 //!
+//! # Module map
+//!
+//! - `primitives` — IDs, time, JSON, digest, errors, bounds, and shared refs
+//! - `content` — content blocks and blob references
+//! - `conversation` — messages and conversation tree
+//! - `records` — journal envelopes and durable payloads (`run`, `lifecycle`,
+//!   `policy`, `tools`)
+//! - `effects` — effect and interaction envelopes
+//! - `events` — runtime events
+//! - `state` — kernel state and projections
+//! - `reducer` — decide and apply
+//!
 //! # Examples
 //!
 //! ```
@@ -102,15 +114,10 @@ mod content;
 mod conversation;
 mod effects;
 mod events;
-mod lifecycle;
-mod policy;
 mod primitives;
 mod records;
 mod reducer;
-mod refs;
-mod run;
 mod state;
-mod tools;
 
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
@@ -134,22 +141,6 @@ pub use events::{
     RUN_EVENT_SCHEMA_VERSION, ReasoningDelta, RunEvent, RunEventBody, RunEventClass, RunEventKind,
     ToolProgress, derived_event_kind,
 };
-pub use lifecycle::{
-    ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
-    RetryDirective, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
-    StageCursor, StageDisposition, StageOutcomeRecorded, TimerFired,
-};
-pub use policy::{
-    ActiveCapability, BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest,
-    BudgetRecordError, BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest,
-    BudgetReservationReceipt, BudgetReservationReleased, BudgetReservationRequested,
-    BudgetReservationSettled, BudgetReserveRequest, CapabilitiesActivated,
-    CapabilityActivationSource, CostLimit, FinalResultRecorded, INTERNAL_TOOL_NAMESPACE,
-    JsonSchemaDraft, LOAD_CAPABILITY_TOOL, LimitDimension, LimitReached, LimitUsage, LimitValue,
-    LimitsError, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
-    OutputValidationFailed, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, StructuredResultSource,
-    UnknownUsagePolicy, ValidationIssue, ValidationOutcome, is_internal_tool_name,
-};
 pub use primitives::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, AgentId, AgentTag, AppendBatchId, AppendBatchTag, ArtifactId,
     ArtifactTag, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, BudgetReservationId, BudgetReservationTag,
@@ -172,6 +163,42 @@ pub use primitives::{
     TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp, ToolBatchId, ToolBatchTag,
     ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId, TurnTag,
 };
+pub use primitives::{
+    AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
+    Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef, RefsError,
+    Sensitivity, Usage, Version,
+};
+pub use records::lifecycle::{
+    ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
+    RetryDirective, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
+    StageCursor, StageDisposition, StageOutcomeRecorded, TimerFired,
+};
+pub use records::policy::{
+    ActiveCapability, BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest,
+    BudgetRecordError, BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest,
+    BudgetReservationReceipt, BudgetReservationReleased, BudgetReservationRequested,
+    BudgetReservationSettled, BudgetReserveRequest, CapabilitiesActivated,
+    CapabilityActivationSource, CostLimit, FinalResultRecorded, INTERNAL_TOOL_NAMESPACE,
+    JsonSchemaDraft, LOAD_CAPABILITY_TOOL, LimitDimension, LimitReached, LimitUsage, LimitValue,
+    LimitsError, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
+    OutputValidationFailed, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, StructuredResultSource,
+    UnknownUsagePolicy, ValidationIssue, ValidationOutcome, is_internal_tool_name,
+};
+pub use records::run::{
+    BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
+    CancellationRequest, CancellationRequested, ChildPlacement, ChildRunLocator, ChildRunPrepared,
+    DeadlinePropagation, ExternalCommandError, ExternalCommandKind, ExternalCommandRejected,
+    ExternalCommandTarget, ExternalEffectCompletionCommand, InteractionResolutionCommand,
+    MAX_RUN_RELATION_DEPTH, OperationLocator, PrincipalPropagation, RecordExternalCommandRejected,
+    RemoteRouteRef, RunAccepted, RunError, RunPropagationPolicy, RunRelation, RunRelationKind,
+    RunSecurityContext,
+};
+pub use records::tools::{
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
+    ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallIdentity,
+    ToolCallPlan, ToolCallSettled, ToolExecutionMode, ToolFailurePolicy, ToolSettlementFingerprint,
+    ToolSettlementKind, ValidatedToolCall,
+};
 pub use records::{
     APPEND_BATCH_MAX_RECORDS, AppendRequest, LaneCreated, LaneMoved, RECORD_FORMAT_VERSION,
     RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordEnvelope, RecordError, SessionCreated,
@@ -184,20 +211,6 @@ pub use reducer::{
     PostCommitAction, ReducerStageOutcome, RequestInteraction, StageSettled, TimerFiredInput,
     ToolBatchSettled, ToolSettlement,
 };
-pub use refs::{
-    AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
-    Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef, RefsError,
-    Sensitivity, Usage, Version,
-};
-pub use run::{
-    BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
-    CancellationRequest, CancellationRequested, ChildPlacement, ChildRunLocator, ChildRunPrepared,
-    DeadlinePropagation, ExternalCommandError, ExternalCommandKind, ExternalCommandRejected,
-    ExternalCommandTarget, ExternalEffectCompletionCommand, InteractionResolutionCommand,
-    MAX_RUN_RELATION_DEPTH, OperationLocator, PrincipalPropagation, RecordExternalCommandRejected,
-    RemoteRouteRef, RunAccepted, RunError, RunPropagationPolicy, RunRelation, RunRelationKind,
-    RunSecurityContext,
-};
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
     CurrentTurn, InteractionTerminal, InteractionTerminalOutcome, KernelState,
@@ -205,10 +218,4 @@ pub use state::{
     PendingInteraction, PendingModelEffect, ResolutionIdentity, ResolutionIdentityHashEntryV6,
     RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
     ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
-};
-pub use tools::{
-    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
-    ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallIdentity,
-    ToolCallPlan, ToolCallSettled, ToolExecutionMode, ToolFailurePolicy, ToolSettlementFingerprint,
-    ToolSettlementKind, ValidatedToolCall,
 };

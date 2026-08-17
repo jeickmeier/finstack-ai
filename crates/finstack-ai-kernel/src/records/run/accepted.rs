@@ -3,10 +3,10 @@
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::policy::RunLimits;
 use crate::primitives::Digest;
 use crate::primitives::RunId;
 use crate::primitives::Timestamp;
+use crate::records::policy::RunLimits;
 
 use super::error::RunError;
 use super::propagation::RunPropagationPolicy;

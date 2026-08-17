@@ -9,7 +9,7 @@ use super::error::RunError;
 use super::validate::validate_relation_shape;
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
 use crate::primitives::BudgetScopeId;
-use crate::refs::validated_label;
+use crate::primitives::validated_label;
 use std::sync::Arc;
 
 /// How a run relates to its root/parent lineage.

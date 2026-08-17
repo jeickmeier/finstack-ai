@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use crate::effects::EffectOutputKind;
+use crate::primitives::Sensitivity;
 use crate::primitives::{EffectId, ModelRequestId, RunId, ToolBatchId, ToolCallId, TurnId};
 use crate::records::{RECORD_KIND_VERSION, RecordBody};
-use crate::refs::Sensitivity;
 
 use super::body::RunEventBody;
 use super::envelope::{EventCorrelations, ResolvedEventCorrelations};

@@ -1,8 +1,8 @@
 //! Relation-shape and child-attenuation validation.
 
-use crate::policy::RunLimits;
 use crate::primitives::Timestamp;
 use crate::primitives::{EffectId, RunId};
+use crate::records::policy::RunLimits;
 
 use super::MAX_RUN_RELATION_DEPTH;
 use super::accepted::RunAccepted;

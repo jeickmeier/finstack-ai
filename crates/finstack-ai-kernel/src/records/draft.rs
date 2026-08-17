@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::primitives::Timestamp;
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{EventId, LaneId, RecordId, RunId, SessionId};
-use crate::run::{RunAccepted, RunRelationKind};
+use crate::records::run::{RunAccepted, RunRelationKind};
 
 use super::body::RecordBody;
 use super::error::RecordError;

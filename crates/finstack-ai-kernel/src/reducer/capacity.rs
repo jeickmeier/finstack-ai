@@ -247,14 +247,14 @@ mod tests {
     use super::*;
     use crate::conversation::{Message, MessageRole, ProviderIds};
     use crate::effects::{EffectCompleted, EffectOutputContract, EffectOutputKind};
-    use crate::lifecycle::EntryAppended;
     use crate::primitives::{
         EffectId, EventId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId,
         ToolCallId, TurnId,
     };
     use crate::primitives::{Metadata, RawJson};
+    use crate::records::lifecycle::EntryAppended;
+    use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint, ToolSettlementKind};
     use crate::state::{CompletionIdentity, ModelSettlementFingerprint, ModelSettlementKind};
-    use crate::tools::{ToolCallIdentity, ToolSettlementFingerprint, ToolSettlementKind};
     use crate::{
         ContentBlock, Digest, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, Stage, TextBlock,
         Timestamp,

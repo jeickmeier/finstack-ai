@@ -7,8 +7,8 @@ use super::super::decision::{KernelError, PostCommitAction};
 use super::super::fingerprint::synthetic_tool_digest;
 use crate::effects::EffectCancelled;
 use crate::records::RecordBody;
+use crate::records::tools::{ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus};
 use crate::state::{KernelState, TransitionEnv};
-use crate::tools::{ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus};
 
 use super::planning::ensure_record_batch_bound;
 use super::records::synthetic_result;

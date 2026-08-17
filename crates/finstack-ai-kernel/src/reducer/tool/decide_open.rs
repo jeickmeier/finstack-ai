@@ -6,10 +6,10 @@ use super::super::decide::{draft_for_state, next_sequence, required};
 use super::super::decision::{Decision, KernelError};
 use super::super::fingerprint::{synthetic_tool_digest, tool_batch_plan_digest};
 use super::super::input::StageSettled;
-use crate::lifecycle::{StageDisposition, StageOutcomeRecorded};
 use crate::records::RecordBody;
+use crate::records::lifecycle::{StageDisposition, StageOutcomeRecorded};
+use crate::records::tools::{ToolBatchOpened, ToolCallPlan};
 use crate::state::{KernelState, RunPhase, TransitionEnv};
-use crate::tools::{ToolBatchOpened, ToolCallPlan};
 
 use super::planning::{
     assign_plans, ensure_record_batch_bound, opening_id_requirements, validate_plans,

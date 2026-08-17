@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::effects::EffectOutputKind;
+use crate::records::tools::{ActiveToolCallStatus, ToolSettlementKind};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::{
     BudgetReservationReplay, CancellationState, CurrentTurn, KernelState, RunPhase, TerminalState,
 };
-use crate::tools::{ActiveToolCallStatus, ToolSettlementKind};
 
 use super::super::decision::KernelError;
 use super::effects::{
@@ -61,7 +61,7 @@ pub(super) fn apply_record(
             // canonicalization; doing them separately walked the whole
             // conversation twice per turn.
             let (digest, context_bytes) =
-                crate::lifecycle::context_digest_and_len(&context.messages)
+                crate::records::lifecycle::context_digest_and_len(&context.messages)
                     .map_err(|_| KernelError::ContextDigestMismatch)?;
             if digest != context.context_digest {
                 return Err(KernelError::ContextDigestMismatch);

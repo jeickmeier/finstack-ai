@@ -18,9 +18,9 @@ use crate::primitives::{
     EventId, InteractionId, LaneId, LimitKey, MessageId, ModelRequestId, RecordId, RunId,
     SessionId, ToolBatchId, ToolCallId, TurnId,
 };
+use crate::primitives::{ArtifactRef, CostAmount, ExternalHandleRef, Usage};
 use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor, ErrorIdentifiers};
 use crate::primitives::{Metadata, RawJson};
-use crate::refs::{ArtifactRef, CostAmount, ExternalHandleRef, Usage};
 
 /// Serializes a borrowed slice through a per-element projection, lazily.
 ///

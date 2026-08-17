@@ -10,7 +10,7 @@ use super::draft::RecordDraft;
 use super::error::RecordError;
 use super::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION};
 use crate::records::SessionRecordError;
-use crate::tools::ToolBatchOutcome;
+use crate::records::tools::ToolBatchOutcome;
 
 pub(super) fn validate_versions_and_events(
     format_version: u16,

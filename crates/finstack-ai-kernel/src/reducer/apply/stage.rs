@@ -1,5 +1,5 @@
 use crate::content::ContentBlock;
-use crate::lifecycle::{Stage, StageDisposition, StageOutcomeRecorded};
+use crate::records::lifecycle::{Stage, StageDisposition, StageOutcomeRecorded};
 use crate::state::{KernelState, RunPhase, TerminalCandidate};
 
 use super::super::decision::KernelError;

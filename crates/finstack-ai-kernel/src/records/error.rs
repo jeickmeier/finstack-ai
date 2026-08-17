@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::primitives::ErrorDescriptorError;
 use crate::records::SessionRecordError;
-use crate::run::RunError;
+use crate::records::run::RunError;
 
 /// Record construction errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

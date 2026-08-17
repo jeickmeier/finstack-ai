@@ -12,7 +12,7 @@ use crate::primitives::BoundedMap;
 use crate::primitives::Digest;
 use crate::primitives::Duration;
 use crate::primitives::LimitKey;
-use crate::refs::{CostAmount, RefsError, validated_label};
+use crate::primitives::{CostAmount, RefsError, validated_label};
 
 /// Limit dimension used by reserved limit-reached surfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

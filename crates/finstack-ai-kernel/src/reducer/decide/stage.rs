@@ -1,6 +1,8 @@
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::lifecycle::{RetryClassification, RetryScheduled, Stage, StageCursor, StageDisposition};
 use crate::primitives::Digest;
+use crate::records::lifecycle::{
+    RetryClassification, RetryScheduled, Stage, StageCursor, StageDisposition,
+};
 use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
 use crate::state::{KernelState, TerminalCandidate, TransitionEnv};
 use crate::{OutputConfiguration, OutputSpec, RetrySafety};

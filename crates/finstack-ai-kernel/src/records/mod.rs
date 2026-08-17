@@ -1,11 +1,18 @@
-//! Journal drafts, envelopes, and owned record bodies (TDD §12.1–§12.2).
+//! Journal drafts, envelopes, owned record bodies, and durable payloads.
+//!
+//! This module is the payload catalog: envelope/draft/body types plus nested
+//! `run`, `lifecycle`, `policy`, and `tools` records.
 
 mod append;
 mod body;
 mod draft;
 mod envelope;
 mod error;
+pub(crate) mod lifecycle;
+pub(crate) mod policy;
+pub(crate) mod run;
 mod session;
+pub(crate) mod tools;
 mod validate;
 
 #[cfg(test)]

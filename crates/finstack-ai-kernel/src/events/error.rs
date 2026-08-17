@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::refs::RefsError;
+use crate::primitives::RefsError;
 
 use super::RunEventClass;
 

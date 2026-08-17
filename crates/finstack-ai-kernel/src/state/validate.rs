@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 
 use crate::content::{ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::policy::OutputConfiguration;
 use crate::primitives::{MessageId, ToolCallId};
 use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
+use crate::records::policy::OutputConfiguration;
+use crate::records::tools::{
+    ActiveToolBatch, ActiveToolCallStatus, ToolCallPlan, ToolSettlementKind,
+};
 use crate::reducer::KernelError;
-use crate::tools::{ActiveToolBatch, ActiveToolCallStatus, ToolCallPlan, ToolSettlementKind};
 
 use super::{KernelState, RetryState, RunPhase, TerminalCandidate, TerminalState};
 

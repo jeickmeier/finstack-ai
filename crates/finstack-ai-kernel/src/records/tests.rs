@@ -3,17 +3,17 @@ use crate::effects::{
     EffectInput, EffectKind, EffectOutputContract, InteractionKind, InteractionRequest, RetrySafety,
 };
 use crate::effects::{EffectOutputKind, EffectRequested};
-use crate::policy::RunLimits;
 use crate::primitives::AppendBatchId;
 use crate::primitives::Digest;
 use crate::primitives::Timestamp;
 use crate::primitives::{ComponentId, EffectId, EventId, InteractionId};
+use crate::primitives::{ComponentRef, PrincipalRef, Version};
 use crate::primitives::{LaneId, RecordId, RunId, SessionId};
 use crate::primitives::{Metadata, RawJson};
-use crate::refs::{ComponentRef, PrincipalRef, Version};
-use crate::run::RunAccepted;
-use crate::run::RunRelationKind;
-use crate::run::{
+use crate::records::policy::RunLimits;
+use crate::records::run::RunAccepted;
+use crate::records::run::RunRelationKind;
+use crate::records::run::{
     BudgetPropagation, CancellationPropagation, DeadlinePropagation, PrincipalPropagation,
     RunPropagationPolicy, RunRelation, RunSecurityContext,
 };

@@ -2,15 +2,15 @@
 
 use serde::Serialize;
 
-use crate::policy::ActiveCapability;
-use crate::policy::BudgetChargeReceipt;
-use crate::policy::LimitReached;
-use crate::policy::OutputValidationFailed;
-use crate::policy::{FinalResultRecorded, OutputConfiguration};
 use crate::primitives::Digest;
 use crate::primitives::Timestamp;
 use crate::primitives::{LaneId, SessionId};
-use crate::run::ChildRunPrepared;
+use crate::records::policy::ActiveCapability;
+use crate::records::policy::BudgetChargeReceipt;
+use crate::records::policy::LimitReached;
+use crate::records::policy::OutputValidationFailed;
+use crate::records::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::records::run::ChildRunPrepared;
 use crate::state::projection::MessageSeq;
 
 use super::super::{

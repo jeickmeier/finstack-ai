@@ -9,7 +9,7 @@ use crate::primitives::{
 };
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 
-use super::error::RefsError;
+use super::refs_error::RefsError;
 
 /// Runtime-owned preallocated `UUIDv7` bags for a transition.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]

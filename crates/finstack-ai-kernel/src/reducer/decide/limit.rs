@@ -1,8 +1,8 @@
-use crate::lifecycle::RunSuspended;
-use crate::policy::{LimitDimension, LimitReached, LimitUsage, LimitValue};
 use crate::primitives::Digest;
 use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor};
 use crate::records::RecordBody;
+use crate::records::lifecycle::RunSuspended;
+use crate::records::policy::{LimitDimension, LimitReached, LimitUsage, LimitValue};
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
