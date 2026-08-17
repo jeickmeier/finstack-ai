@@ -228,7 +228,7 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
 name = "finstack-ai"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-kernel"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "serde",
@@ -265,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ciborium",
  "finstack-ai-kernel",
@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "finstack-ai-kernel",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "finstack-ai-wit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-kernel",
