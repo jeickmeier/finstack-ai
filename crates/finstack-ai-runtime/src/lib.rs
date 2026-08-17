@@ -5,6 +5,17 @@
 //! `wasm-host` selects the local `PortObject`, `PortFuture`, and `PortStream`
 //! aliases. The browser executor and wasm-bindgen surface live in the
 //! `finstack-ai-wasm` binding crate.
+//!
+//! # Module map
+//!
+//! - `ports` — six primary ports (`model`, `tool`, `context`, `middleware`,
+//!   `journal`, `observer`) and shared `PortObject` bounds
+//! - `services` — host-owned session, id generation, interaction, agent
+//!   invoke, artifact, audit, budget, identity, and composition
+//! - `exec` — commit-before-effect, stage fold, run-task owners, and the
+//!   event hub
+//! - `driver` — target I/O: native-tokio drivers, wasm-host driver, ingress,
+//!   workflow, and the SDK native-driver facade
 
 #![warn(missing_docs)]
 
@@ -38,94 +49,57 @@ pub use finstack_ai_kernel::{
     QueueDepthWarning as RunEventQueueDepthWarning, ReasoningDelta as RunEventReasoningDelta,
 };
 
-mod agent_invoker;
-mod artifact;
-mod audit;
-mod budget;
-mod composition;
-mod context;
-mod coordinator;
+mod driver;
 mod error;
-mod event_hub;
-mod id_generation;
-mod identity_map;
-mod interaction;
-mod journal;
-#[cfg(feature = "native-tokio")]
-mod manual_drive;
-mod middleware;
-pub mod middleware_driver;
-mod model;
-mod observer;
-mod observer_export;
-mod observer_queue;
+mod exec;
 mod ports;
-mod provider_util;
-mod session;
-mod tool;
-
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-mod run_types;
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-mod settlement;
-#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-mod stage_settlement;
+mod services;
 
 #[cfg(feature = "native-tokio")]
-mod task;
+pub(crate) use driver::{ingress, native, workflow};
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+pub(crate) use exec::host_task;
+#[cfg(feature = "native-tokio")]
+pub(crate) use exec::task;
+pub(crate) use exec::{coordinator, event_hub};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use exec::{run_types, settlement, stage_settlement};
+pub(crate) use ports::{context, journal, middleware, model, observer, tool};
+pub(crate) use services::{id_generation, interaction, session};
 
 #[cfg(feature = "wasm-host")]
-pub mod host_driver;
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-mod host_task;
-
+pub use driver::host_driver;
 #[cfg(feature = "native-tokio")]
-mod model_runtime;
+pub use driver::sdk as native_driver;
+pub use exec::middleware_driver;
 
-#[cfg(feature = "native-tokio")]
-mod tool_runtime;
-
-#[cfg(feature = "native-tokio")]
-mod time;
-
-#[cfg(feature = "native-tokio")]
-mod timer_runtime;
-
-#[cfg(feature = "native-tokio")]
-mod ingress;
-
-#[cfg(feature = "native-tokio")]
-mod workflow;
-
-pub use agent_invoker::{
+pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
+pub use interaction::{InteractionResumeAction, interaction_resume_action};
+pub use services::agent_invoker::{
     AGENT_INVOKE_CONFLICT, AGENT_INVOKE_INVALID_ACCEPTANCE, AGENT_INVOKE_UNAVAILABLE,
     AgentInvokeError, AgentInvoker, AgentRef, ChildRunContext, ChildRunHandle, ChildRunRequest,
 };
-pub use artifact::{
+pub use services::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ARTIFACT_INVALID_METADATA, ARTIFACT_NOT_FOUND,
     ARTIFACT_SCOPE_MISMATCH, ARTIFACT_TOO_LARGE, ARTIFACT_UNAVAILABLE, ArtifactError,
     ArtifactMetadata, ArtifactScope, ArtifactStore, MAX_ARTIFACT_BYTES, stage_required_artifact,
     validate_staged_artifact,
 };
-pub use audit::{
+pub use services::audit::{
     SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
 };
-pub use budget::{
+pub use services::budget::{
     BUDGET_CONFLICT, BUDGET_INVALID_RECEIPT, BUDGET_UNAVAILABLE, BUDGET_UNKNOWN, BudgetError,
     BudgetLedger, BudgetReservationState,
 };
-pub use composition::{
+pub use services::composition::{
     BudgetCoordinator, BudgetOperationIds, ChildCoordinationIds, ChildRunCoordinator,
     CompositionError, child_relation_digest,
 };
-
-pub use coordinator::{CommitCoordinator, CommitCoordinatorError, CommitOutcome, RunFault};
-pub use identity_map::{
+pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
 };
-pub use interaction::{InteractionResumeAction, interaction_resume_action};
 pub use session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, LaneOwner, SessionCreateIds, SessionError,
     SessionRuntime,
@@ -156,12 +130,6 @@ pub use journal::{
     ScanRequest, SnapshotReceipt, SnapshotRequest, SnapshotSchedule, StateSnapshotRequest,
     StoreCommitTimestamp, StoreError, StoreHealth, StoreLimits, WriteMetadataRequest,
 };
-#[cfg(feature = "native-tokio")]
-#[doc(hidden)]
-pub use manual_drive::{
-    ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
-    ManualDrivePermit,
-};
 pub use middleware::{
     BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
     COMPACTION_RESULT_INVALID, CommittedMiddlewareCall, CompactedSummary, CompactionCheckpoint,
@@ -175,6 +143,12 @@ pub use middleware::{
     compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
     middleware_resume_action, stage_name as middleware_stage_name,
     validate_compaction_model_effect, validate_compaction_result, validate_stage_outcome,
+};
+#[cfg(feature = "native-tokio")]
+#[doc(hidden)]
+pub use native::manual_drive::{
+    ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
+    ManualDrivePermit,
 };
 // The chain driver's supported entry points, re-exported so
 // `tools/compat/public_items.py` tracks them: it scrapes braced `pub use`
@@ -196,25 +170,24 @@ pub use model::{
     ModelRequestLimits, ModelRequestValidation, ModelResponse, ModelResumeAction, ModelSettings,
     ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTerminal, ModelTokenEstimate,
     ModelToolCall, ModelWarmupContext, OpaqueProviderEvent, ReasoningDelta, ReconcileContext,
-    RunCallContext, SideEffectClass, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, ToolCallDelta, ToolSpec, UsageDelta, map_model_reconcile_result,
-    model_resume_action, model_retry_allowed, resolve_model_context_profile,
-    validate_model_request,
+    RunCallContext, SECRET_MAX_BYTES, SideEffectClass, SseFrameError, SseFrameParser,
+    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolSpec, UsageDelta, map_model_reconcile_result, model_resume_action, model_retry_allowed,
+    resolve_model_context_profile, secret_is_valid, validate_model_request,
+};
+pub use observer::export::{
+    diagnostic_contains, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
+};
+pub use observer::queue::{
+    OBSERVER_QUEUE_OVERFLOW, ObserverBackpressure, ObserverDiagnostic, ObserverQueue,
+    ObserverQueuePush,
 };
 pub use observer::{
     NoopObserver, OBSERVER_CAPACITY_EXCEEDED, OBSERVER_CONFIGURATION_INVALID, OBSERVER_UNAVAILABLE,
     Observer, ObserverDescriptor, ObserverError, ObserverEventView, ObserverPayloadMode,
     ReferenceObserver,
 };
-pub use observer_export::{
-    diagnostic_contains, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
-};
-pub use observer_queue::{
-    OBSERVER_QUEUE_OVERFLOW, ObserverBackpressure, ObserverDiagnostic, ObserverQueue,
-    ObserverQueuePush,
-};
 pub use ports::{PortFuture, PortObject, PortStream};
-pub use provider_util::{SECRET_MAX_BYTES, SseFrameError, SseFrameParser, secret_is_valid};
 pub use tool::{
     AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
     ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
@@ -244,13 +217,13 @@ pub use host_task::{RunHandle, RunTaskOwner};
 pub use event_hub::EventSubscription;
 
 #[cfg(feature = "native-tokio")]
-pub use time::{
+pub use native::time::{
     DeadlineDiagnostic, MonotonicDeadline, NoRetryJitter, RetryJitterSource, RuntimeTimeError,
     retry_backoff_with_jitter,
 };
 
 #[cfg(feature = "native-tokio")]
-pub use audit::{SecurityAuditGate, SecurityAuditGateError};
+pub use services::audit::{SecurityAuditGate, SecurityAuditGateError};
 
 #[cfg(feature = "native-tokio")]
 pub use ingress::{
@@ -269,115 +242,3 @@ pub type LocalWorkflowDriver = WorkflowSession;
 
 #[cfg(feature = "native-tokio")]
 pub use id_generation::{OsRandomSource, SystemClock};
-
-/// Native driver utilities used by the SDK facade without exposing Tokio
-/// types in its public API.
-#[cfg(feature = "native-tokio")]
-pub mod native_driver {
-    use std::future::Future;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use crate::PortFuture;
-
-    /// No native runtime is active for a requested driver operation.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub struct DriverUnavailable;
-
-    impl std::fmt::Display for DriverUnavailable {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("native driver is unavailable")
-        }
-    }
-
-    impl std::error::Error for DriverUnavailable {}
-
-    /// The native driver deadline elapsed before the future completed.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    pub struct TimeoutElapsed;
-
-    impl std::fmt::Display for TimeoutElapsed {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("native driver deadline elapsed")
-        }
-    }
-
-    impl std::error::Error for TimeoutElapsed {}
-
-    /// Cloneable one-way notification used by native SDK state machines.
-    #[derive(Clone, Default)]
-    pub struct Signal {
-        inner: Arc<tokio::sync::Notify>,
-    }
-
-    impl Signal {
-        /// Create an empty notification signal.
-        #[must_use]
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        /// Register a waiter before checking its guarded state.
-        pub fn notified(&self) -> impl Future<Output = ()> + '_ {
-            self.inner.notified()
-        }
-
-        /// Wake every waiter registered before this call.
-        pub fn notify_waiters(&self) {
-            self.inner.notify_waiters();
-        }
-    }
-
-    /// Await a future until the native driver deadline elapses.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TimeoutElapsed`] when the future does not complete before the
-    /// requested duration.
-    pub async fn timeout<F>(duration: Duration, future: F) -> Result<F::Output, TimeoutElapsed>
-    where
-        F: Future,
-    {
-        tokio::time::timeout(duration, future)
-            .await
-            .map_err(|_| TimeoutElapsed)
-    }
-
-    /// Run one blocking function on the native driver's blocking executor.
-    ///
-    /// This keeps synchronous extension code off runtime worker threads while
-    /// avoiding a dependency on a guest-language executor.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DriverUnavailable`] when no native runtime is active or when
-    /// the blocking task cannot be joined.
-    pub async fn run_blocking<F, R>(function: F) -> Result<R, DriverUnavailable>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        let handle = tokio::runtime::Handle::try_current().map_err(|_| DriverUnavailable)?;
-        handle
-            .spawn_blocking(function)
-            .await
-            .map_err(|_| DriverUnavailable)
-    }
-
-    /// Spawn one detached SDK driver future on the active native runtime.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DriverUnavailable`] when the caller is not inside the native
-    /// runtime context.
-    pub fn spawn(future: PortFuture<()>) -> Result<(), DriverUnavailable> {
-        let handle = tokio::runtime::Handle::try_current().map_err(|_| DriverUnavailable)?;
-        handle.spawn(future);
-        Ok(())
-    }
-
-    /// Cooperatively yield one turn to the native driver.
-    pub async fn yield_now() {
-        tokio::task::yield_now().await;
-    }
-}

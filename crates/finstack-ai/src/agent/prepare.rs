@@ -34,7 +34,7 @@ use finstack_ai_runtime::native_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{OsRandomSource as AgentRandom, SystemClock as AgentClock};
 
-use super::Agent;
+use super::handle::Agent;
 use super::run::{AgentRun, AgentRunInner, publish_start_failure, publish_started};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,

@@ -110,7 +110,7 @@ unblocked by the context port; it needs a design change.
 Two further gaps sit behind the first cause and become live the moment
 `ContextProvider` is wired. Both are documented at
 `apply_model_draft` in
-[`crates/finstack-ai-runtime/src/stage_settlement.rs`](../../crates/finstack-ai-runtime/src/stage_settlement.rs):
+[`crates/finstack-ai-runtime/src/exec/stage_settlement/`](../../crates/finstack-ai-runtime/src/exec/stage_settlement/):
 a landed compaction result drops its derived summaries and checkpoint,
 and a chain producing both a replacement and a compaction would apply a
 projection validated against the original message array on top of the
@@ -142,10 +142,10 @@ runtime worker healthy.
 
 The enforced contract lives with the code, not on this page:
 
-- [`crates/finstack-ai-runtime/src/middleware_driver.rs`](../../crates/finstack-ai-runtime/src/middleware_driver.rs)
+- [`crates/finstack-ai-runtime/src/exec/middleware_driver/`](../../crates/finstack-ai-runtime/src/exec/middleware_driver/)
   — the module contract: the fold invariant, replay safety, the derived
   effect id, ordering, and the full limitation list.
-- [`crates/finstack-ai-runtime/src/stage_settlement.rs`](../../crates/finstack-ai-runtime/src/stage_settlement.rs)
+- [`crates/finstack-ai-runtime/src/exec/stage_settlement/`](../../crates/finstack-ai-runtime/src/exec/stage_settlement/)
   — where each stage's fold is applied.
 
 See also [conformance](conformance.md) for the published middleware and

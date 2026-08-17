@@ -7,6 +7,15 @@
 //!
 //! Start at [`Agent::builder`]. Kernel, runtime, and protocol crates are not a
 //! second constructor path.
+//!
+//! # Module map
+//!
+//! - `spec` — declarative `AgentSpec` / `AgentBuilder` (data only)
+//! - `agent` — live `Agent` / `NativeAgentBuilder` / `AgentRun`
+//! - `session` — journaled `Session` / `Lane` handles
+//! - `bundle` — catalog, exact lock, resolver
+//! - `registry` — registration and one-time resolution
+//! - `result` — typed decode of a committed structured result
 
 #![warn(missing_docs)]
 

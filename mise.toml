@@ -230,8 +230,8 @@ uv run --no-project python tools/docs/license_sweep.py
 description = "Run published port and plugin conformance suites"
 run = """
 set -euo pipefail
-cargo test -p finstack-ai-test --locked --lib -- port_conformance::tests
-cargo test -p finstack-ai-test --locked --test port_helpers --test compaction_conformance
+cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
+cargo test -p finstack-ai-test --locked --test port_conformance --test compaction_conformance
 cargo test -p finstack-ai-plugin-host --locked -- conformance -- --test-threads=1
 """
 

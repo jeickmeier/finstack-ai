@@ -1,0 +1,11 @@
+//! Host-owned services that are not among the six primary ports.
+
+pub(crate) mod agent_invoker;
+pub(crate) mod artifact;
+pub(crate) mod audit;
+pub(crate) mod budget;
+pub(crate) mod composition;
+pub(crate) mod id_generation;
+pub(crate) mod identity_map;
+pub(crate) mod interaction;
+pub(crate) mod session;

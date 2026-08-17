@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{LoadRequest, LockedModelContextProfile, RunHandle};
 
-use super::Agent;
+use super::handle::Agent;
 use super::prepare::{
     NativeIds, StageIds, ensure_nonterminal_failure, model_draft, model_output_contract,
     recover_state, structured_candidate, submit, submit_stage, wait_for_phase,

@@ -10,11 +10,11 @@ use crate::{
 use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, MiddlewareRef, Version};
 use finstack_ai_runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
 
+use super::handle::{Agent, ModelCapabilityVariant};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, CapabilityCatalogEntry,
     MAX_COMPACT_CATALOG_BYTES,
 };
-use super::{Agent, ModelCapabilityVariant};
 
 /// Ergonomic native composition builder over direct ready handles.
 ///

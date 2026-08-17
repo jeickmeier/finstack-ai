@@ -1,15 +1,16 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, ContentBlock, ProviderIds,
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, ContentBlock, ProviderIds, RawJson,
     RunEventClass, RunSecurityContext, TerminalState, TextBlock, Usage, Version,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, Metadata, ModelContextProfile, ModelName, ModelResponse,
-    ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Toolset,
+    CommitCoordinator, JournalStore, Metadata, Model, ModelContextProfile, ModelName,
+    ModelResponse, ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor,
+    ObserverError, ObserverPayloadMode, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    Toolset,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{

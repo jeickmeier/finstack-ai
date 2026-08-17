@@ -7,7 +7,7 @@ use finstack_ai_protocol::{
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::ServerError;
-use crate::io::{read_post_auth, read_pre_auth, write_post_auth, write_pre_auth};
+use crate::frame::{read_post_auth, read_pre_auth, write_post_auth, write_pre_auth};
 
 /// Messages received after a successful reconnect barrier.
 #[derive(Debug, Clone, PartialEq, Eq)]
