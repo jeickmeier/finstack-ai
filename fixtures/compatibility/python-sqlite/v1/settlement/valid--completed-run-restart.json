@@ -1,0 +1,6 @@
+{
+  "id": "valid--completed-run-restart",
+  "scenario": "completed_run_reopen",
+  "durability": "relaxed",
+  "expect": "session_survives_without_active_run"
+}

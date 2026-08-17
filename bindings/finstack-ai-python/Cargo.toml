@@ -33,6 +33,7 @@ finstack-ai-provider-anthropic = { workspace = true, features = ["vendored-tls"]
 finstack-ai-provider-openai = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-provider-ollama = { workspace = true, features = ["vendored-tls"] }
 finstack-ai-store-memory = { workspace = true }
+finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true, optional = true }
 futures-util = { workspace = true }
 pyo3 = { workspace = true }

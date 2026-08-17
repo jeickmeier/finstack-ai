@@ -32,8 +32,13 @@ Workspace version is **1.0.0**. The package is not on PyPI.
   native Ollama `/api/chat` provider plus the same keyword-only T2 ports.
 - `Agent.from_python(model, toolsets=None, instruction=None, output_type=None,
   capabilities=None, active_capabilities=None, context_providers=None,
-  middleware=None, observers=None)` accepts trusted coarse callback adapters.
-  `output_type` lazily requires the Pydantic extra.
+  middleware=None, observers=None, *, sqlite_path=None,
+  sqlite_durability=None)` accepts trusted coarse callback adapters.
+  `output_type` lazily requires the Pydantic extra. Keyword-only
+  `sqlite_path` and `sqlite_durability` open `finstack-ai-store-sqlite`.
+  `SqliteDurability.Durable` is WAL plus `synchronous=FULL`.
+  `SqliteDurability.Relaxed` is named non-durable. `:memory:` requires
+  `Relaxed`.
 - `Agent.start(..., capability=None) -> Run` starts one bounded run and returns
   immediately.
 - `await Agent.run(..., capability=None) -> RunResult` waits for the committed
@@ -43,7 +48,14 @@ Workspace version is **1.0.0**. The package is not on PyPI.
   shared 8 KiB registration ceiling.
 - `await Agent.create_session(tenant_scope="default")` bootstraps a `main` lane.
 - `await Agent.open_session(session_id, tenant_scope)` rebuilds a handle from
-  the journal and does not respawn parked runs.
+  the journal and does not respawn parked runs. Call `await lane.resume(agent)`
+  to respawn the owner.
+- `await Session.lane_by_id(lane_id)` looks up a lane by durable identity.
+- `Lane.run(agent, input, ...)` starts a root run on an idle lane.
+  `await Lane.suspend()` parks the in-process driver. `await Lane.resume(agent)`
+  respawns it. `await Lane.cancel()` cancels the active run.
+  `await Lane.append_text(text)` appends a user message and does not start a
+  run.
 
 ## Capabilities
 

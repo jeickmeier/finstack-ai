@@ -25,6 +25,7 @@ from ._finstack_ai import (
     RunResult,
     RuntimeError,
     Session,
+    SqliteDurability,
     TimeoutError,
 )
 from ._pydantic import PydanticTool, pydantic_toolset, tool
@@ -140,6 +141,7 @@ __all__ = [
     "RunResult",
     "RuntimeError",
     "Session",
+    "SqliteDurability",
     "TimeoutError",
     "__version__",
     "build_metadata",

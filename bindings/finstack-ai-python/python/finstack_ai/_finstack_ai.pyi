@@ -297,6 +297,19 @@ class Session:
         Raises:
             ConfigurationError: The named lane does not exist.
         """
+    def lane_by_id(self, lane_id: str) -> Awaitable[Lane]:
+        """Look up one lane by durable identity.
+
+        Args:
+            lane_id: Durable lane identity.
+
+        Returns:
+            The live lane handle.
+
+        Raises:
+            ConfigurationError: The identity is invalid or the lane does
+                not exist.
+        """
     def bind_external_identity(
         self,
         map: MemoryExternalIdentityMap,
@@ -364,6 +377,96 @@ class Lane:
         Raises:
             ConfigurationError: The lane cannot be inspected.
         """
+    def cancel(self) -> Awaitable[None]:
+        """Cancel the active run on this lane.
+
+        Rust owns fan-out through child mappings. An idle lane is a no-op.
+
+        Raises:
+            ConfigurationError: The journal cannot be loaded or the cancel
+                commit fails.
+        """
+    def append_text(self, text: str) -> Awaitable[str]:
+        """Append one user text message on this idle lane.
+
+        This does not start a run.
+
+        Args:
+            text: Non-empty user text.
+
+        Returns:
+            The durable entry identity.
+
+        Raises:
+            ConfigurationError: The lane is busy or the text is invalid.
+        """
+    def run(
+        self,
+        agent: Agent,
+        input: str,
+        *,
+        timeout_seconds: float | None = None,
+        max_cycles: int = 16,
+        max_output_retries: int = 1,
+        capability: str | None = None,
+    ) -> Run:
+        """Start a new root run on this idle lane.
+
+        Dropping the returned handle detaches observation; it does not cancel
+        the durable run. Call :meth:`Run.cancel` for explicit cancellation.
+
+        Args:
+            agent: Resolved agent that owns the model and journal store.
+            input: Non-empty plain-text user input.
+            timeout_seconds: Operational deadline in seconds. ``None`` uses
+                the agent default. Must be positive when set.
+            max_cycles: Maximum model cycles.
+            max_output_retries: Maximum structured-output retries.
+            capability: Optional model-activated capability id.
+
+        Returns:
+            A shared :class:`Run` handle.
+
+        Raises:
+            ConfigurationError: Input, limits, tenant, or ``capability``
+                are invalid, or the lane is busy.
+            RuntimeError: The background task cannot be accepted.
+        """
+    def suspend(self) -> Awaitable[None]:
+        """Park the in-process driver without dropping the journal.
+
+        The lane's active or suspended run remains durable.
+        :meth:`resume` respawns the owner.
+
+        Raises:
+            ConfigurationError: The journal cannot be loaded or the lane
+                lock is poisoned.
+        """
+    def resume(self, agent: Agent) -> Awaitable[None]:
+        """Recover the parked run and respawn the in-process owner.
+
+        ``Agent.open_session`` still inspects only. Call this after open
+        to continue a parked run.
+
+        Args:
+            agent: Resolved agent that supplies model and tool ports.
+
+        Raises:
+            ConfigurationError: The lane has no suspended run.
+            RuntimeError: Restore or spawn fails.
+        """
+
+class SqliteDurability:
+    """Durability policy applied when the binding opens SQLite.
+
+    ``Durable`` is WAL plus ``synchronous=FULL`` and is the only mode that
+    may advertise durable health. ``Relaxed`` is a named non-durable mode
+    and must never advertise NFR-REL-001. ``:memory:`` is allowed only
+    with ``Relaxed``.
+    """
+
+    Durable: SqliteDurability
+    Relaxed: SqliteDurability
 
 class MemoryExternalIdentityMap:
     """In-process external identity map."""
@@ -672,6 +775,9 @@ class Agent:
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
+        *,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
     ) -> Agent:
         """Build an agent from trusted callbacks and optional Pydantic output type.
 
@@ -685,12 +791,18 @@ class Agent:
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
+            sqlite_path: Optional SQLite file path. ``None`` keeps the
+                in-memory journal. ``:memory:`` requires
+                :attr:`SqliteDurability.Relaxed`.
+            sqlite_durability: Durability policy when ``sqlite_path`` is
+                set. Defaults to :attr:`SqliteDurability.Durable`.
 
         Returns:
             An immutable Rust-owned agent handle.
 
         Raises:
-            ConfigurationError: The callbacks or capability set are invalid.
+            ConfigurationError: The callbacks, capability set, or SQLite
+                store are invalid.
         """
     def capability_catalog(self) -> list[CapabilityCatalogItem]:
         """Return the bounded model-activated catalog in identity order.

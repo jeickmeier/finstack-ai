@@ -17,8 +17,8 @@ NFR-REL-001.
 ## Inspect, do not continue
 
 `Session::open` / `Agent.open_session` rebuilds a handle from the journal
-and does not respawn a parked run. Resume belongs to an explicit workflow
-driver when one is composed. See
+and does not respawn a parked run. Python `Lane.resume` respawns the
+in-process owner after open. See
 [examples/durable-interaction](../../examples/durable-interaction/README.md).
 
 ## Interactions and at-least-once

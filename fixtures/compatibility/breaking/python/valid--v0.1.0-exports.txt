@@ -20,6 +20,7 @@ Run
 RunResult
 RuntimeError
 Session
+SqliteDurability
 TimeoutError
 __version__
 build_metadata

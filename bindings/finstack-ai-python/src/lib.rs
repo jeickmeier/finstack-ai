@@ -16,6 +16,7 @@ mod locator;
 mod protocol;
 mod run;
 mod session;
+mod store;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -35,6 +36,7 @@ use protocol::{
 };
 use run::{PyRun, PyRunResult};
 use session::{PyLane, PyMemoryExternalIdentityMap, PySession};
+use store::PySqliteDurability;
 
 pub(crate) const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -89,6 +91,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PySession>()?;
     module.add_class::<PyLane>()?;
     module.add_class::<PyMemoryExternalIdentityMap>()?;
+    module.add_class::<PySqliteDurability>()?;
     module.add_class::<PyRunResult>()?;
     module.add_class::<PyEvent>()?;
     module.add_class::<PyEventBatch>()?;

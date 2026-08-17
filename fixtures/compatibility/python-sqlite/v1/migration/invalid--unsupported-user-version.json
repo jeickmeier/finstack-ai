@@ -1,0 +1,6 @@
+{
+  "id": "invalid--unsupported-user-version",
+  "user_version": 99,
+  "expect_error_code": "agent_run_invalid_configuration",
+  "expect_reason": "sqlite_schema_unsupported"
+}

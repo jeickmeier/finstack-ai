@@ -248,6 +248,10 @@ impl PyRunResult {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "run request forwards model, bounds, capability, settings, and tenant distinctly"
+)]
 pub(crate) fn run_request(
     model: &ModelName,
     input: String,
@@ -256,6 +260,7 @@ pub(crate) fn run_request(
     max_output_retries: u32,
     capability: Option<String>,
     settings: ModelSettings,
+    tenant_scope: &str,
 ) -> Result<AgentRunRequest, AgentRunError> {
     if !timeout_seconds.is_finite()
         || timeout_seconds <= 0.0
@@ -266,8 +271,8 @@ pub(crate) fn run_request(
         ));
     }
     let security = RunSecurityContext::try_new(
-        "python-local",
-        PrincipalRef::try_new("finstack-ai-python", "local-user", Some("python-local"))
+        tenant_scope,
+        PrincipalRef::try_new("finstack-ai-python", "local-user", Some(tenant_scope))
             .map_err(|error| configuration_error(error.to_string()))?,
         "local",
         "python-embedded",

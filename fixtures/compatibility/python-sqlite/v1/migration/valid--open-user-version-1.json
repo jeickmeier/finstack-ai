@@ -1,0 +1,7 @@
+{
+  "id": "valid--open-user-version-1",
+  "start_user_version": 0,
+  "schema_user_version": 1,
+  "durability": "durable",
+  "expect": "open_and_create_session"
+}

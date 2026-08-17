@@ -32,7 +32,8 @@ does not select a capability.
 ## Does `open_session` continue a parked run?
 
 No. `Session::open` (Rust) and `Agent.open_session` (Python / WASM)
-rebuild a handle from the journal and do not respawn parked runs. See
+rebuild a handle from the journal and do not respawn parked runs. Python
+callers continue a parked run with `await lane.resume(agent)`. See
 [durability](durability.md).
 
 ## Are in-process tools a sandbox?

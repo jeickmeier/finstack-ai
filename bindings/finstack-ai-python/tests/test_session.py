@@ -31,6 +31,51 @@ def test_session_create_lane_inspect_and_identity_bind() -> None:
         opened = await agent.open_session(session.session_id, "tenant-a")
         assert opened.session_id == session.session_id
         assert (await opened.lane("research")).lane_id == research.lane_id
+        by_id = await opened.lane_by_id(research.lane_id)
+        assert by_id.lane_id == research.lane_id
+
+    with _server(_ollama_ndjson(["ok"])) as server:
+        asyncio.run(exercise(server))
+
+
+def test_lane_append_text_does_not_start_a_run() -> None:
+    async def exercise(server: object) -> None:
+        agent = await _agent(server)  # type: ignore[arg-type]
+        session = await agent.create_session("tenant-a")
+        main = await session.lane("main")
+        entry = await main.append_text("note only")
+        inspect = await main.inspect()
+        assert inspect["active_run_id"] is None
+        assert inspect["leaf_id"] == entry
+        assert inspect["history_len"] == 1
+
+    with _server(_ollama_ndjson(["unused"])) as server:
+        asyncio.run(exercise(server))
+
+
+def test_idle_lane_run_returns_a_live_run() -> None:
+    async def exercise(server: object) -> None:
+        agent = await _agent(server)  # type: ignore[arg-type]
+        session = await agent.create_session("tenant-a")
+        main = await session.lane("main")
+        run = main.run(agent, "say hello")
+        assert run.locator.session_id == session.session_id
+        assert run.locator.lane_id == main.lane_id
+        result = await run.result()
+        assert result.text == "hello"
+
+    with _server(_ollama_ndjson(["hello"])) as server:
+        asyncio.run(exercise(server))
+
+
+def test_lane_cancel_is_a_noop_on_an_idle_lane() -> None:
+    async def exercise(server: object) -> None:
+        agent = await _agent(server)  # type: ignore[arg-type]
+        session = await agent.create_session("tenant-a")
+        main = await session.lane("main")
+        await main.cancel()
+        inspect = await main.inspect()
+        assert inspect["active_run_id"] is None
 
     with _server(_ollama_ndjson(["ok"])) as server:
         asyncio.run(exercise(server))

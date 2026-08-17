@@ -16,7 +16,9 @@ defaults it to `None`).
 ## Sessions
 
 `Agent.open_session(session_id, tenant_scope)` still inspects; it does not
-respawn parked runs. IndexedDB remains experimental.
+respawn parked runs. Call `await lane.resume(agent)` to continue a parked
+run. `SqliteDurability` selects Durable or Relaxed when
+`Agent.from_python` opens SQLite. IndexedDB remains experimental.
 
 ## WIT guests
 

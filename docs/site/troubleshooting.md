@@ -34,9 +34,9 @@ ids with `capability_catalog()` / `Agent::capability_catalog`.
 ## Journal cannot be opened / `sqlite_schema_unsupported`
 
 `Session::open` / `Agent.open_session` rebuilds a handle; it does not
-continue a parked run. SQLite user_version must be `0` or `1`. Any other
-version fails closed. See [durability](durability.md) and the SQLite
-crate README.
+continue a parked run. Python `Lane.resume` respawns the owner. SQLite
+user_version must be `0` or `1`. Any other version fails closed. See
+[durability](durability.md) and the SQLite crate README.
 
 ## Plugin lock deny / signature failure
 

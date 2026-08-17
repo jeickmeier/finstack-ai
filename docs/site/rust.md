@@ -24,7 +24,8 @@ run. `Lane::run` starts a new root on an idle lane through
 `Agent::start_on_lane`. `Lane::suspend` parks the in-process driver without
 dropping the journal; `Lane::resume` respawns `RunTaskOwner` through
 `WorkflowSession::with_ports`. `Lane::append_text` still does not start a
-run. Python and WASM expose the same inspect path as `Agent.open_session`.
+run. Python exposes the same lane verbs plus `SqliteDurability`. WASM
+lane verbs remain a tracked deferral (PR-078 exclusion).
 
 ## Starters
 

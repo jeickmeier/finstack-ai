@@ -22,6 +22,9 @@ def test_import_finstack_ai() -> None:
         "anthropic",
         "ollama",
     )
+    assert finstack_ai.SqliteDurability.Durable != finstack_ai.SqliteDurability.Relaxed
+    assert str(finstack_ai.SqliteDurability.Durable) == "Durable"
+    assert str(finstack_ai.SqliteDurability.Relaxed) == "Relaxed"
 
     metadata = finstack_ai.build_metadata()
     assert metadata["version"] == finstack_ai.__version__

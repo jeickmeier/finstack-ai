@@ -1,7 +1,8 @@
 """PR-048 Python durable-restart subset (N1–N2, I1 inspect, A1, completed open).
 
-Interaction resolve-after-open and live external-completion routing stay
-Rust-owned: ``Agent.open_session`` does not respawn parked runs.
+``Agent.open_session`` still inspects only. ``Lane.resume`` respawns the
+parked owner after E3/E4a. Child-run and ``complete_external`` routing
+stay PR-079.
 """
 
 from __future__ import annotations
@@ -94,9 +95,65 @@ def test_awaiting_interaction_lane_survives_open_after_drop() -> None:
         run_id = run.locator.run_id
         del run
         opened = await agent.open_session(session_id, tenant)
-        inspect = await (await opened.lane("main")).inspect()
+        lane = await opened.lane("main")
+        inspect = await lane.inspect()
+        assert inspect["active_run_id"] == run_id
+        await lane.resume(agent)
+        inspect = await lane.inspect()
         assert inspect["active_run_id"] == run_id
         assert _resolution(pending, True)["interaction_id"] == pending["interaction_id"]
+
+    asyncio.run(exercise())
+
+
+def test_resume_respawns_parked_run_and_completes() -> None:
+    model_calls = 0
+
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context, request
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            return {
+                "text": "",
+                "completion_id": "python-resume-write-1",
+                "tool_calls": [{"name": "write", "arguments": {"value": 1}}],
+            }
+        return {"text": "write complete", "completion_id": "python-resume-write-2"}
+
+    async def tool_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        del context
+        return {"output": {"ok": True, "value": request["call"]["arguments"]["value"]}}
+
+    async def exercise() -> None:
+        agent = await finstack_ai.Agent.from_python(
+            finstack_ai.PythonModel(
+                model_callback,
+                component="python.model.resume-write",
+                provider="python-fixture",
+                model="python-fixture-model",
+            ),
+            [
+                finstack_ai.PythonToolset(
+                    tool_callback,
+                    component="python.toolset.resume-write",
+                    name="python-resume-write-tools",
+                    tools=[_write_tool()],
+                )
+            ],
+            "Use tools when needed.",
+        )
+        run = agent.start("write 1")
+        pending = await _wait_for_interaction(run)
+        lane = await run.session.lane("main")
+        await lane.suspend()
+        await lane.resume(agent)
+        await run.resolve_interaction(_resolution(pending, True))
+        assert (await run.result()).text == "write complete"
 
     asyncio.run(exercise())
 

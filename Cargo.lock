@@ -1007,6 +1007,7 @@ dependencies = [
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "futures-util",
  "pyo3",

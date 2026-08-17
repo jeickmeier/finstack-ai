@@ -610,12 +610,15 @@ impl SessionRuntime {
     ///
     /// Returns a recover or commit failure. Unauthorized detach rejects are
     /// ignored so the child remains running.
-    pub async fn cancel_run(
+    pub async fn cancel_run<F>(
         &self,
         run_id: RunId,
         initiator: CancellationInitiator,
-        next_env: &mut dyn FnMut() -> Result<TransitionEnv, SessionError>,
-    ) -> Result<(), SessionError> {
+        next_env: &mut F,
+    ) -> Result<(), SessionError>
+    where
+        F: FnMut() -> Result<TransitionEnv, SessionError> + Send,
+    {
         let projection = self.refresh().await?;
         if let Some(operation) = projection.operations().get(&run_id)
             && !operation.terminal
@@ -740,12 +743,15 @@ impl SessionRuntime {
         Ok(())
     }
 
-    async fn fan_out(
+    async fn fan_out<F>(
         &self,
         parent_run_id: RunId,
         parent_initiator: &CancellationInitiator,
-        next_env: &mut dyn FnMut() -> Result<TransitionEnv, SessionError>,
-    ) -> Result<(), SessionError> {
+        next_env: &mut F,
+    ) -> Result<(), SessionError>
+    where
+        F: FnMut() -> Result<TransitionEnv, SessionError> + Send,
+    {
         let projection = self.projection()?;
         let children: Vec<_> = projection
             .child_mappings()

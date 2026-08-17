@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, JournalStore, Model, ModelName,
-    ModelSettings, RawJson, Version,
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, Model, ModelName, ModelSettings,
+    RawJson, Version,
 };
 use finstack_ai::{Agent, AgentRunError, CapabilitySpec, Session};
 use finstack_ai_provider_anthropic::{
@@ -16,7 +17,6 @@ use finstack_ai_provider_openai::{
     Authentication as OpenAiAuthentication, OpenAiConfig, OpenAiModelConfig, OpenAiProvider,
     SecretString as OpenAiSecret,
 };
-use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -37,7 +37,7 @@ use crate::session::PySession;
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
 const OPENAI_TIMEOUT_SECONDS: f64 = 120.0;
-const DEFAULT_MAX_CYCLES: u64 = 16;
+pub(crate) const DEFAULT_MAX_CYCLES: u64 = 16;
 const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
 const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
 /// Anthropic rejects `max_tokens` above the selected model's own ceiling, and
@@ -226,7 +226,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, sqlite_path = None, sqlite_durability = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -242,6 +242,8 @@ impl PyAgent {
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = model.borrow();
         let model_name = model.model_name();
@@ -264,6 +266,7 @@ impl PyAgent {
                 ports,
                 capabilities,
                 active_capabilities,
+                (sqlite_path, sqlite_durability),
             )
             .await;
             Python::attach(|py| match built {
@@ -355,6 +358,7 @@ impl PyAgent {
                 max_output_retries,
                 capability,
                 settings,
+                "python-local",
             )?;
             let runtime = pyo3_async_runtimes::tokio::get_runtime();
             let _guard = runtime.enter();
@@ -394,6 +398,7 @@ impl PyAgent {
                 max_output_retries,
                 capability,
                 settings,
+                "python-local",
             ) {
                 Ok(request) => request,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
@@ -408,6 +413,57 @@ impl PyAgent {
                 result_to_python_with_locator(py, result, Some(&locator), output_adapter)
             })
         })
+    }
+}
+
+impl PyAgent {
+    pub(crate) fn clone_inner(&self) -> Arc<Agent> {
+        Arc::clone(&self.inner)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "lane start forwards the same bounded run inputs as Agent.start"
+    )]
+    pub(crate) fn start_on_lane(
+        &self,
+        py: Python<'_>,
+        lane: &finstack_ai::Lane,
+        input: String,
+        timeout_seconds: Option<f64>,
+        max_cycles: u64,
+        max_output_retries: u32,
+        capability: Option<String>,
+    ) -> PyResult<PyRun> {
+        let model = self.model.clone();
+        let agent = Arc::clone(&self.inner);
+        let settings = self.settings.clone();
+        let timeout_seconds = timeout_seconds.unwrap_or(self.default_timeout_seconds);
+        let output_adapter = self
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
+        let lane = lane.clone();
+        let tenant_scope = lane.session().tenant_scope().to_string();
+        py.detach(move || {
+            let request = run_request(
+                &model,
+                input,
+                timeout_seconds,
+                max_cycles,
+                max_output_retries,
+                capability,
+                settings,
+                &tenant_scope,
+            )?;
+            let runtime = pyo3_async_runtimes::tokio::get_runtime();
+            let _guard = runtime.enter();
+            lane.run(&agent, request).map(|inner| PyRun {
+                inner,
+                output_adapter,
+            })
+        })
+        .map_err(|error| agent_error(py, &error, None))
     }
 }
 
@@ -441,6 +497,8 @@ async fn build_openai_agent(
         ports,
         settings,
         default_timeout_seconds: OPENAI_TIMEOUT_SECONDS,
+        sqlite_path: None,
+        sqlite_durability: None,
     })
     .await
 }
@@ -485,6 +543,8 @@ async fn build_anthropic_agent(
         ports,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
+        sqlite_path: None,
+        sqlite_durability: None,
     })
     .await
 }
@@ -522,6 +582,8 @@ async fn build_ollama_agent(
         ports,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
+        sqlite_path: None,
+        sqlite_durability: None,
     })
     .await
 }
@@ -580,23 +642,22 @@ struct LinkedAgentSpec {
     ports: LinkedPorts,
     settings: ModelSettings,
     default_timeout_seconds: f64,
+    sqlite_path: Option<String>,
+    sqlite_durability: Option<PySqliteDurability>,
 }
 
 async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunError> {
-    let store: Arc<dyn JournalStore> = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 64,
-            batches_per_session: 256,
-            records_per_session: 4_096,
-            snapshot_bytes: 64 * 1_024,
-        })
-        .map_err(|error| configuration_error(error.to_string()))?,
-    );
+    let store_component = if spec.sqlite_path.is_some() {
+        "python.store.sqlite"
+    } else {
+        "python.store.memory"
+    };
+    let store = open_journal_store(spec.sqlite_path, spec.sqlite_durability)?;
     let mut builder = Agent::builder(
         AgentId::parse(spec.agent_id).map_err(|error| configuration_error(error.to_string()))?,
         BundleId::parse(spec.bundle_id).map_err(|error| configuration_error(error.to_string()))?,
         spec.model,
-        (component("python.store.memory")?, store),
+        (component(store_component)?, store),
     );
     for (component, toolset) in spec.ports.toolsets {
         builder = builder.toolset(component, toolset);
@@ -644,6 +705,7 @@ async fn build_python_agent(
     ports: LinkedPorts,
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
+    sqlite: (Option<String>, Option<PySqliteDurability>),
 ) -> Result<PyAgent, AgentRunError> {
     finish_linked_agent(LinkedAgentSpec {
         agent_id: "python.agent.callbacks",
@@ -656,6 +718,8 @@ async fn build_python_agent(
         ports,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
+        sqlite_path: sqlite.0,
+        sqlite_durability: sqlite.1,
     })
     .await
 }

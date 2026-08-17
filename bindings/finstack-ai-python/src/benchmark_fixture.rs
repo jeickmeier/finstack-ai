@@ -106,6 +106,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             1,
             None,
             empty_model_settings()?,
+            "python-local",
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
