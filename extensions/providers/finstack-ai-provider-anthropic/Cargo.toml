@@ -16,7 +16,6 @@ vendored-tls = ["reqwest/native-tls-vendored"]
 
 [dependencies]
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
-futures-core = { workspace = true }
 futures-util = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

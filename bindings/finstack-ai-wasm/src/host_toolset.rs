@@ -256,7 +256,7 @@ mod tests {
     use crate::fixture::{echo_tool_json, tool_call};
     use crate::host::{JS_HOST_RESULT_INVALID, NativeHostResult};
     use finstack_ai::runtime::{CancellationSignal, ToolStreamItem, Toolset};
-    use futures_core::Stream;
+    use futures_util::Stream;
 
     fn options() -> HostToolsetOptions {
         HostToolsetOptions {

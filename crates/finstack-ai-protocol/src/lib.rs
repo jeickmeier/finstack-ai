@@ -2,9 +2,10 @@
 //!
 //! Production encode validates a value tree, recursively RFC 8949-sorts map
 //! keys, then writes definite lengths and shortest lossless integer/float
-//! forms. `ciborium` is pinned for value interop; its writer is not treated as
-//! canonical by itself. Runtime and default SDK stay protocol-free: they do
-//! not depend on this crate for in-process work.
+//! forms. The project-owned writer is canonical (ADR-015 / ADR-038).
+//! `ciborium` is test-only interop and is not the profile writer. Runtime
+//! and default SDK stay protocol-free: they do not depend on this crate for
+//! in-process work.
 
 #![warn(missing_docs)]
 
@@ -19,8 +20,8 @@ mod wire;
 pub use cbor::{
     APPEND_BATCH_MAX_BYTES, CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_ENVELOPE_MAX_BYTES,
     CANONICAL_MAP_MAX_ENTRIES, CANONICAL_NESTING_DEPTH, CANONICAL_STRING_MAX_BYTES, CanonicalValue,
-    decode, decode_value, encode, encode_value, from_diagnostic_json, to_ciborium,
-    to_diagnostic_json, to_diagnostic_jsonl,
+    decode, decode_value, encode, encode_value, from_diagnostic_json, to_diagnostic_json,
+    to_diagnostic_jsonl,
 };
 pub use error::ProtocolError;
 pub use journal::{

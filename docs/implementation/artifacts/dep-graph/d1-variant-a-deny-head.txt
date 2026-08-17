@@ -1,0 +1,21 @@
+error[rejected]: failed to satisfy license requirements
+   ┌─ /Users/jeickmeier/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webpki-root-certs-1.0.9/Cargo.toml:26:12
+   │
+26 │ license = "CDLA-Permissive-2.0"
+   │            ━━━━━━━━━━━━━━━━━━━
+   │            │
+   │            rejected: license is not explicitly allowed
+   │
+   ├ CDLA-Permissive-2.0 - Community Data License Agreement Permissive 2.0:
+   ├   - No additional metadata available for license
+   ├ webpki-root-certs v1.0.9
+     └── rustls-platform-verifier v0.7.0
+         └── reqwest v0.13.4
+             ├── finstack-ai-provider-anthropic v1.0.0
+             │   └── finstack-ai-python v1.0.0
+             └── finstack-ai-provider-openai-compatible v1.0.0
+                 ├── finstack-ai-native-examples v1.0.0
+                 ├── (dev) finstack-ai-provider-anthropic v1.0.0 (*)
+                 └── finstack-ai-python v1.0.0 (*)
+
+advisories ok, bans ok, licenses FAILED, sources ok

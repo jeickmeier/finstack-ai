@@ -13,8 +13,7 @@ use finstack_ai_runtime::{
     OutputSpec, PendingModelEffect, ProviderIds, RawJson, ReasoningDelta, ReconcileContext,
     TextBlock, TextDelta, ToolCallDelta, Usage, UsageDelta,
 };
-use futures_core::Stream;
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
 use serde::Deserialize;
 use serde_json::Value;

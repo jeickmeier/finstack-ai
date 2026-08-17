@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use crate::error::ProtocolError;
 
 pub use diagnostic::{from_diagnostic_json, to_diagnostic_json, to_diagnostic_jsonl};
-pub use value::{CanonicalValue, decode_value, encode_value, to_ciborium};
+pub use value::{CanonicalValue, decode_value, encode_value};
 
 /// Canonical record-envelope byte ceiling (TDD §6.5).
 pub const CANONICAL_ENVELOPE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -79,7 +79,7 @@ mod tests {
         APPEND_BATCH_MAX_BYTES, CANONICAL_ARRAY_MAX_ITEMS, CANONICAL_ENVELOPE_MAX_BYTES,
         CANONICAL_MAP_MAX_ENTRIES, CANONICAL_NESTING_DEPTH, CANONICAL_STRING_MAX_BYTES,
         CanonicalValue, decode, decode_value, encode, encode_value, from_diagnostic_json,
-        to_ciborium, to_diagnostic_json, to_diagnostic_jsonl,
+        to_diagnostic_json, to_diagnostic_jsonl,
     };
     use crate::error::ProtocolError;
 
@@ -239,6 +239,27 @@ mod tests {
             })
         ));
         assert_eq!(APPEND_BATCH_MAX_BYTES, 16 * 1024 * 1024);
+    }
+
+    fn to_ciborium(value: &CanonicalValue) -> ciborium::value::Value {
+        match value {
+            CanonicalValue::Null => ciborium::value::Value::Null,
+            CanonicalValue::Bool(flag) => ciborium::value::Value::Bool(*flag),
+            CanonicalValue::Unsigned(n) => ciborium::value::Value::Integer((*n).into()),
+            CanonicalValue::Negative(n) => ciborium::value::Value::from(-1_i128 - i128::from(*n)),
+            CanonicalValue::Bytes(bytes) => ciborium::value::Value::Bytes(bytes.clone()),
+            CanonicalValue::Text(text) => ciborium::value::Value::Text(text.clone()),
+            CanonicalValue::Array(items) => {
+                ciborium::value::Value::Array(items.iter().map(to_ciborium).collect())
+            }
+            CanonicalValue::Map(entries) => ciborium::value::Value::Map(
+                entries
+                    .iter()
+                    .map(|(key, value)| (to_ciborium(key), to_ciborium(value)))
+                    .collect(),
+            ),
+            CanonicalValue::Float(bits) => ciborium::value::Value::Float(f64::from_bits(*bits)),
+        }
     }
 
     #[test]

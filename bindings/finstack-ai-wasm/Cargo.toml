@@ -24,7 +24,6 @@ finstack-ai = { workspace = true, default-features = false, features = ["wasm-ho
 finstack-ai-kernel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
-futures-core = { workspace = true }
 futures-util = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }

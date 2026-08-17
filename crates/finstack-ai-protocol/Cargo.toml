@@ -11,11 +11,13 @@ authors.workspace = true
 description = "Envelope, framing, journal, and remote protocol codecs for finstack-ai"
 
 [dependencies]
-ciborium = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+ciborium = { workspace = true }
 
 [lints]
 workspace = true

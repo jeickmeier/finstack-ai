@@ -221,10 +221,13 @@ fn serde_json_string(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).unwrap_or_default()
 }
 
-/// Reports whether the optional OTLP exporter feature is compiled in.
+/// Reports whether an OTLP exporter is compiled in.
+///
+/// The `otlp` feature is retained as an empty alias and does not compile an
+/// exporter, so this function always returns `false`.
 #[must_use]
 pub const fn otlp_feature_enabled() -> bool {
-    cfg!(feature = "otlp")
+    false
 }
 
 /// Default bounded-block timeout used by examples.

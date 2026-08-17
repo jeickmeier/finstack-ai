@@ -110,7 +110,7 @@ struct SingleItemStream<T> {
     item: Option<T>,
 }
 
-impl<T: Unpin> futures_core::Stream for SingleItemStream<T> {
+impl<T: Unpin> futures_util::Stream for SingleItemStream<T> {
     type Item = T;
 
     fn poll_next(

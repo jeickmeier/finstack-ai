@@ -2,7 +2,7 @@
 
 This register is the implementation index for architectural decisions. It does not duplicate decision text or rationale. The canonical decision summaries are in [Architecture Specification section 25](../planning/02-finstack-ai-architecture-specification.md#25-architecture-decision-summary); detailed delivery metadata for ADR-015 through ADR-024 is in [PRD section 18](../planning/01-finstack-ai-product-requirements.md#18-resolved-foundational-product-decisions), and reconsideration conditions for ADR-029 through ADR-037 are in [Technical Design section 37](../planning/03-finstack-ai-technical-design.md#37-technical-decision-status).
 
-There are no open architectural decisions and no recorded supersession relationships in the pre-implementation baseline.
+There are no open architectural decisions and no recorded supersession relationships in the pre-implementation baseline. ADR-039 is a post-baseline Proposed crate-selection record and is open pending acceptance.
 
 ## Status model
 
@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-15 (G4-D-binding-parity-101224c5eb60; G5-D-durable-beta-a9568bd869b5; G6-D-plugin-alpha-018aaea9aa00; G7-D-public-preview-f7c7e70b9e04; Phase 6 through Phase 8 `Done`; ADR-004/008/009/012/013/014/016/020/021/024/025/026/027/028/034/036/037 `Implemented`; G4, G5, G6, and G7 `Passed`; ADR-022 stays `In progress` / `Partial`).
+Index last reconciled: 2026-08-17 (prior 2026-08-15 gate reconciliation unchanged; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -62,6 +62,8 @@ Index last reconciled: 2026-08-15 (G4-D-binding-parity-101224c5eb60; G5-D-durabl
 | ADR-035 | `experimental-wit-versioning` | Runtime/security owner | PR-049–PR-054, PR-062 | Accepted | Standalone | Implemented | Verified ([experimental @0.0.4 worlds and G6](artifacts/pr-054/g6-decision.txt); PR-062 lifts `@1.0.0` beside `@0.0.4` with isolated dual-major linkers; crate/wheel/npm stay `0.1.0`) |
 | ADR-036 | `blob-storage-boundary` | Ecosystem lead | PR-007, PR-022, PR-037, PR-056 | Accepted | Standalone | Implemented | Verified ([PR-007 BlobRef plus PR-022 scoped ArtifactStore plus PR-037 IndexedDB artifact-adapter evidence](artifacts/pr-037/security-review.txt); PR-056 memory/shell ArtifactStore spill; [G7](artifacts/pr-061/g7-decision.txt)) |
 | ADR-037 | `middleware-compaction` | Core/runtime lead | PR-018, PR-023, PR-048, PR-056 | Accepted | Standalone | Implemented | Verified ([PR-018 immutable compaction contract](artifacts/pr-018/README.md), [PR-022 activation rebuild/digest invalidation](artifacts/pr-022/README.md), [PR-023 public adversarial conformance](artifacts/pr-023/README.md), PR-048 recorded-outcome / ArtifactRef restart, PR-056 leaf strategies, and [G7](artifacts/pr-061/g7-decision.txt)) |
+| ADR-038 | `ciborium-test-interop` | Durability/ecosystem lead | Protocol `to_ciborium` unexport; `ciborium` dev-dep | Accepted | Standalone | In progress | Missing |
+| ADR-039 | `jsonschema-crate-selection` | Ecosystem lead | C2 swap blocked until acceptance; recommended outcome is no swap | Proposed | Standalone | Not started | Partial ([C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md)) |
 
 ## Security review seed
 
@@ -89,6 +91,8 @@ Index last reconciled: 2026-08-15 (G4-D-binding-parity-101224c5eb60; G5-D-durabl
 | ADR-034 | SEC-INV-013; TM-21 |
 | ADR-036 | TM-16, TM-20 |
 | ADR-037 | SEC-INV-013; TM-21 |
+| ADR-038 | SEC-INV-007, SEC-INV-010; TM-09, TM-12, TM-16 |
+| ADR-039 | TM-02, TM-16 |
 
 ## Change control
 
@@ -398,6 +402,12 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-15 | ADR-035 | Evidence | me@jeickmeier.com | Verified | Verified | Dual-major adapters, lockfile, cache ABI, and TM-08 review exist at `b76bfca8fcf7e6e7778aa9ee2acd0ca54bc54b8f`; isolated Wasmtime bindgen remains `@0.0.4`; COMP-1.0-D and G8 remain | PR-062-E-candidate-fe6b29ee4400; PR-062-E-security-1bbadf7b2adc | me@jeickmeier.com |
 | 2026-08-15 | ADR-035 | Evidence | me@jeickmeier.com | Verified | Verified | PR-062 local merge lands `@1.0.0` worlds and dual-major adapters on main; crate/wheel/npm stay `0.1.0`; COMP-1.0-D and G8 remain | PR-062-E-integration-5e8cbcf0588d | me@jeickmeier.com |
 | 2026-08-15 | ADR-035 | Evidence | me@jeickmeier.com | Verified | Verified | Isolated Wasmtime now links `@0.0.4` and `@1.0.0`; ABI mismatch fails closed; COMP-1.0-D recorded; G8 remains | PR-062-E-closeout-2b935a5bf981; PR-062-E-security-closeout-b9f5a3319ad2; COMP-1.0-D-contract-freeze-00b78667ecc4 | me@jeickmeier.com |
+| 2026-08-17 | ADR-038 | Decision | me@jeickmeier.com | — | Accepted | Project-owned protocol codec is the canonical CBOR writer; `ciborium` is test-only interop | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-038 | Record | me@jeickmeier.com | — | Standalone | ADR-038-ciborium-test-interop.md | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-038 | Implementation | me@jeickmeier.com | Not started | In progress | Unexport `to_ciborium`; move `ciborium` to protocol `[dev-dependencies]` | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-039 | Decision | me@jeickmeier.com | — | Proposed | Keep `jsonschema` 0.40.2; do not swap the production validator | [C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md) | — |
+| 2026-08-17 | ADR-039 | Record | me@jeickmeier.com | — | Standalone | ADR-039-jsonschema-crate-selection.md | — | — |
+| 2026-08-17 | ADR-039 | Evidence | me@jeickmeier.com | Missing | Partial | Isolated candidate trees, license map, and capability probes; no production swap | [C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md) | — |
 
 ## Current record and evidence links
 
@@ -440,6 +450,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-035 | [ADR-035-experimental-wit-versioning.md](adrs/ADR-035-experimental-wit-versioning.md) | me@jeickmeier.com | Verified: PR-049–PR-054 keep experimental @0.0.4 through G6; PR-062 closeout merge `ecab8484acbed92f6522dc6a3c43b4cec0ea8b31` links isolated `@1.0.0` worlds; `COMP-1.0-D-contract-freeze-00b78667ecc4`; crate/wheel/npm stay `0.1.0` | PR-004 standalone ADR; PR-049–PR-054 local merges; G6 Passed; PR-062 closeout merge | 2026-08-15 |
 | ADR-036 | [ADR-036-blob-storage-boundary.md](adrs/ADR-036-blob-storage-boundary.md) | me@jeickmeier.com | Verified: PR-007 BlobRef boundary plus locally integrated PR-022 scoped ArtifactStore lifecycle/integrity evidence through PR-022-E-integration-f2d6a9c3e174 plus PR-037 experimental IndexedDB artifact-adapter evidence through PR-037-E-integration-6aafae740847 plus PR-056 memory/shell ArtifactStore spill through PR-056-E-integration-cd7c725b3ab6; G7-D-public-preview-f7c7e70b9e04 | PR-004 standalone ADR; PR-007 content/messages; PR-022/PR-037/PR-056 local merges; G7 Passed | 2026-08-15 |
 | ADR-037 | [ADR-037-middleware-compaction.md](adrs/ADR-037-middleware-compaction.md) | me@jeickmeier.com | Verified: PR-018 unique ownership, protected projection, tool pairs, digests/checkpoints, child Model relation, TM-21, and native/WASM; PR-022-E-integration-f2d6a9c3e174; PR-023-E-integration-949f34010a2f; PR-048 recorded-outcome / ArtifactRef restart; G5-D-durable-beta-a9568bd869b5; PR-056 leaf strategies through PR-056-E-integration-cd7c725b3ab6; G7-D-public-preview-f7c7e70b9e04 | PR-004 standalone ADR; PR-018/PR-022/PR-023/PR-048/PR-056 local merges; G5 and G7 Passed | 2026-08-15 |
+| ADR-038 | [ADR-038-ciborium-test-interop.md](adrs/ADR-038-ciborium-test-interop.md) | me@jeickmeier.com | Missing: change-control record accepted; protocol unexport and dev-dep move are in progress and uncommitted | ADR-038 standalone record | 2026-08-17 |
+| ADR-039 | [ADR-039-jsonschema-crate-selection.md](adrs/ADR-039-jsonschema-crate-selection.md) | me@jeickmeier.com | Partial: C1 unique-tree, license, and capability spike; production validator unchanged | ADR-039 standalone Proposed record | 2026-08-17 |
 
 ## Supersession log
 

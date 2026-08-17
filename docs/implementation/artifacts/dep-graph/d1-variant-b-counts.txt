@@ -1,0 +1,47 @@
+=== VARIANT B: rustls-no-provider (workspace ring) ===
+features: http2, json, rustls-no-provider, stream
+vendored-tls: []
+
+=== UNIQUE PACKAGE COUNTS (normal edges) ===
+reqwest: 135
+finstack-ai-provider-openai-compatible: 195
+finstack-ai-provider-anthropic: 195
+finstack-ai-python: 218
+finstack-ai-server: 154
+
+=== INVERT native-tls ===
+error: package ID specification `native-tls` did not match any packages
+
+=== INVERT rustls ===
+finstack-ai-native-examples v1.0.0 (/private/tmp/finstack-d1-tls-spike/examples/rust-minimal)
+finstack-ai-provider-anthropic v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-anthropic)
+finstack-ai-provider-openai-compatible v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-openai-compatible)
+finstack-ai-python v1.0.0 (/private/tmp/finstack-d1-tls-spike/bindings/finstack-ai-python)
+finstack-ai-server v1.0.0 (/private/tmp/finstack-d1-tls-spike/crates/finstack-ai-server)
+hyper-rustls v0.27.9
+hyper-rustls v0.27.9 (*)
+reqwest v0.13.4
+reqwest v0.13.4 (*)
+rustls v0.23.43
+rustls-platform-verifier v0.7.0
+tokio-rustls v0.26.4
+
+=== INVERT aws-lc-rs ===
+error: package ID specification `aws-lc-rs` did not match any packages
+
+=== INVERT webpki-root-certs ===
+finstack-ai-native-examples v1.0.0 (/private/tmp/finstack-d1-tls-spike/examples/rust-minimal)
+finstack-ai-provider-anthropic v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-anthropic)
+finstack-ai-provider-openai-compatible v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-openai-compatible)
+finstack-ai-python v1.0.0 (/private/tmp/finstack-d1-tls-spike/bindings/finstack-ai-python)
+reqwest v0.13.4
+rustls-platform-verifier v0.7.0
+webpki-root-certs v1.0.9
+
+=== INVERT rustls-platform-verifier ===
+finstack-ai-native-examples v1.0.0 (/private/tmp/finstack-d1-tls-spike/examples/rust-minimal)
+finstack-ai-provider-anthropic v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-anthropic)
+finstack-ai-provider-openai-compatible v1.0.0 (/private/tmp/finstack-d1-tls-spike/extensions/providers/finstack-ai-provider-openai-compatible)
+finstack-ai-python v1.0.0 (/private/tmp/finstack-d1-tls-spike/bindings/finstack-ai-python)
+reqwest v0.13.4
+rustls-platform-verifier v0.7.0

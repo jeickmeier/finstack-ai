@@ -909,7 +909,6 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-test",
  "opentelemetry",
- "opentelemetry-otlp",
  "opentelemetry_sdk",
  "serde",
  "serde_json",
@@ -965,7 +964,6 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
- "futures-core",
  "futures-util",
  "reqwest",
  "serde",
@@ -980,8 +978,6 @@ dependencies = [
  "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
- "finstack-ai-test",
- "futures-core",
  "futures-util",
  "reqwest",
  "serde",
@@ -1143,7 +1139,6 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-store-memory",
- "futures-core",
  "futures-util",
  "js-sys",
  "serde",
@@ -2083,28 +2078,6 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror",
-]
-
-[[package]]
-name = "opentelemetry-otlp"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9966929966d17620d7c316c643ba62631826e10021409357772d5eea84f62c35"
-dependencies = [
- "opentelemetry",
- "opentelemetry-proto",
- "opentelemetry_sdk",
- "thiserror",
-]
-
-[[package]]
-name = "opentelemetry-proto"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56d658ba1faf63f7b9c492cfbe6e0ec365440a16132d3270c1065f7b33f1b638"
-dependencies = [
- "opentelemetry",
- "opentelemetry_sdk",
 ]
 
 [[package]]

@@ -60,29 +60,6 @@ pub fn decode_value(bytes: &[u8]) -> Result<CanonicalValue, ProtocolError> {
     Ok(value)
 }
 
-/// Convert a validated tree into `ciborium::value::Value` for the library writer.
-#[must_use]
-pub fn to_ciborium(value: &CanonicalValue) -> ciborium::value::Value {
-    match value {
-        CanonicalValue::Null => ciborium::value::Value::Null,
-        CanonicalValue::Bool(flag) => ciborium::value::Value::Bool(*flag),
-        CanonicalValue::Unsigned(n) => ciborium::value::Value::Integer((*n).into()),
-        CanonicalValue::Negative(n) => ciborium::value::Value::from(-1_i128 - i128::from(*n)),
-        CanonicalValue::Bytes(bytes) => ciborium::value::Value::Bytes(bytes.clone()),
-        CanonicalValue::Text(text) => ciborium::value::Value::Text(text.clone()),
-        CanonicalValue::Array(items) => {
-            ciborium::value::Value::Array(items.iter().map(to_ciborium).collect())
-        }
-        CanonicalValue::Map(entries) => ciborium::value::Value::Map(
-            entries
-                .iter()
-                .map(|(key, value)| (to_ciborium(key), to_ciborium(value)))
-                .collect(),
-        ),
-        CanonicalValue::Float(bits) => ciborium::value::Value::Float(f64::from_bits(*bits)),
-    }
-}
-
 pub(crate) fn sort_map(
     entries: Vec<(CanonicalValue, CanonicalValue)>,
 ) -> Result<Vec<(CanonicalValue, CanonicalValue)>, ProtocolError> {
