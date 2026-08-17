@@ -13,3 +13,11 @@ members = ["bindings/finstack-ai-python"]
 pythonpath = ["bindings/finstack-ai-python/python"]
 python_classes = ["*Tests", "Test*"]
 testpaths = ["bindings/finstack-ai-python/tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["bindings/finstack-ai-python/python/finstack_ai"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+skip_empty = true

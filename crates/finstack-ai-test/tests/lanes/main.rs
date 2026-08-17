@@ -14,7 +14,7 @@ use finstack_ai_runtime::{
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,
 };
-use finstack_ai_test::{classify_phase, LegalRestore};
+use finstack_ai_test::{LegalRestore, classify_phase};
 use proptest::test_runner::{Config as ProptestConfig, RngSeed};
 
 mod helpers;

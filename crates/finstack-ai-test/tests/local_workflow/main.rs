@@ -1,8 +1,8 @@
 //! PR-059 reference-driver proofs (A01, A02, A04, TM-19).
 
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration as StdDuration;
 
 use finstack_ai_kernel::{

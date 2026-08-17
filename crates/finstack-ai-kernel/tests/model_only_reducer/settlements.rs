@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use finstack_ai_kernel::{ArtifactRef, ArtifactTag, BlobRef, Usage};
+use finstack_ai_kernel::{
+    ArtifactRef, ArtifactTag, BlobRef, ExternalEffectCompletedInput, ExternalEffectCompletion,
+    ExternalEffectOutcome, KernelInput, RawJson, Usage,
+};
 
 use super::*;
 
@@ -106,6 +110,51 @@ fn external_completion_with_usage_and_artifacts_is_duplicate_live_and_after_repl
         &replayed
             .decide(&empty_env(1_502), external)
             .expect("equal rich replayed completion"),
+    );
+}
+
+#[test]
+fn external_completion_pins_assistant_message_and_pending_effect_codes() {
+    let mut harness = drive_to_awaiting_model();
+    harness.apply_input(
+        transition_env(1_400, &[7], &[3], &[], &[], &[], &[]),
+        deferred_input(
+            TURN_ONE,
+            MODEL_REQUEST_ONE,
+            EFFECT_ONE,
+            "external-job-codes",
+        ),
+    );
+    assert_error_code(
+        harness.kernel.decide(
+            &empty_env(1_500),
+            KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
+                completion: ExternalEffectCompletion {
+                    effect_id: id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE),
+                    completion_id: Arc::from("missing-assistant"),
+                    outcome: ExternalEffectOutcome::Completed {
+                        output: RawJson::parse(r#"{"text":"hello"}"#).expect("output"),
+                        usage: None,
+                        artifacts: Arc::from([]),
+                    },
+                },
+                assistant_message: None,
+            }),
+        ),
+        "assistant_message_presence_mismatch",
+    );
+    assert_error_code(
+        harness.kernel.decide(
+            &empty_env(1_501),
+            external_completed_input(
+                EFFECT_TWO,
+                FINAL_MESSAGE_ONE,
+                1_501,
+                "wrong-effect",
+                "hello",
+            ),
+        ),
+        "effect_not_pending",
     );
 }
 

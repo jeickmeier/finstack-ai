@@ -17,6 +17,7 @@ use crate::effects::{
 use crate::primitives::Digest;
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::Timestamp;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{EffectId, MessageId, ToolBatchId, ToolCallId, ToolId, TurnId};
 
 /// Scheduling mode frozen on one source tool call.
@@ -147,8 +148,7 @@ pub struct AssignedToolCall {
 }
 
 /// Durable opening of one complete source-ordered batch plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ToolBatchOpened {
     /// Model cycle that produced the calls.
     pub cycle: u64,
@@ -164,6 +164,35 @@ pub struct ToolBatchOpened {
     pub continuation: ToolBatchContinuation,
     /// `tool-batch-plan` schema-1 digest.
     pub plan_digest: Digest,
+}
+
+impl<'de> Deserialize<'de> for ToolBatchOpened {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            cycle: u64,
+            turn_id: TurnId,
+            tool_batch_id: ToolBatchId,
+            source_message_id: MessageId,
+            calls: BoundedVec<AssignedToolCall, SEMANTIC_ARRAY_MAX_ITEMS>,
+            continuation: ToolBatchContinuation,
+            plan_digest: Digest,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            cycle: wire.cycle,
+            turn_id: wire.turn_id,
+            tool_batch_id: wire.tool_batch_id,
+            source_message_id: wire.source_message_id,
+            calls: wire.calls.into_inner().into(),
+            continuation: wire.continuation,
+            plan_digest: wire.plan_digest,
+        })
+    }
 }
 
 /// Durable source-order finalization of one tool call.
@@ -334,4 +363,30 @@ pub struct ToolSettlementFingerprint {
     pub kind: ToolSettlementKind,
     /// `tool-settlement` schema-1 digest.
     pub digest: Digest,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
+    use serde_json::json;
+
+    #[test]
+    fn opened_calls_reject_over_semantic_array_max_before_element_decode() {
+        let calls = vec![json!(null); SEMANTIC_ARRAY_MAX_ITEMS + 1];
+        let opened = json!({
+            "cycle": 0,
+            "turn_id": "01234567-89ab-7cde-89ab-0123456789ad",
+            "tool_batch_id": "01234567-89ab-7cde-89ab-0123456789ae",
+            "source_message_id": "01234567-89ab-7cde-89ab-0123456789af",
+            "calls": calls,
+            "continuation": "finalize",
+            "plan_digest": "00".repeat(32),
+        });
+        let error = serde_json::from_value::<ToolBatchOpened>(opened).expect_err("oversized calls");
+        assert!(
+            error.to_string().contains("array item count"),
+            "expected item-ceiling error, got {error}"
+        );
+    }
 }

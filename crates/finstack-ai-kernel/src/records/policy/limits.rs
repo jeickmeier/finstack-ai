@@ -12,7 +12,9 @@ use crate::primitives::BoundedMap;
 use crate::primitives::Digest;
 use crate::primitives::Duration;
 use crate::primitives::LimitKey;
-use crate::primitives::{CostAmount, RefsError, validated_label};
+use crate::primitives::{
+    CostAmount, RefsError, deserialize_micros, serialize_micros, validated_label,
+};
 
 /// Limit dimension used by reserved limit-reached surfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -372,7 +374,7 @@ impl<'de> Deserialize<'de> for CostLimit {
     }
 }
 
-/// Value-only run limits stored on `RunAccepted` (enforcement is PR-011).
+/// Value-only run limits stored on `RunAccepted`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunLimits {
     /// Max model requests.
@@ -436,11 +438,12 @@ impl RunLimits {
         }
     }
 
-    /// True when every field of `child` is less than or equal to `self` where both are set.
+    /// True when every parent-set ceiling is respected by `child`.
     ///
-    /// Absent parent ceilings do not constrain children. Present child ceilings must not
-    /// exceed the parent. Extension keys present only on the child are allowed only when
-    /// the parent map is empty; otherwise child keys must be a subset and values attenuated.
+    /// Absent parent ceilings do not constrain children. Where the parent sets a
+    /// ceiling, the child must also set that field and must not exceed it.
+    /// Extension counters iterate parent keys only: a child-only key is ignored,
+    /// and each parent key must be present on the child with an attenuated value.
     #[must_use]
     pub fn allows_child_attenuation(&self, child: &Self) -> bool {
         opt_le(self.max_model_requests, child.max_model_requests)
@@ -616,31 +619,6 @@ const fn unknown_usage_rank(policy: UnknownUsagePolicy) -> u8 {
         UnknownUsagePolicy::SuspendForDecision => 1,
         UnknownUsagePolicy::AllowWithinReservedMaximum => 2,
     }
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn serialize_micros<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&value.to_string())
-}
-
-fn deserialize_micros<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let text = String::deserialize(deserializer)?;
-    if text.is_empty()
-        || (text.len() > 1 && text.starts_with('0'))
-        || !text.bytes().all(|b| b.is_ascii_digit())
-    {
-        return Err(de::Error::custom(
-            "micros must be a canonical decimal string",
-        ));
-    }
-    text.parse::<u64>()
-        .map_err(|_| de::Error::custom("micros overflow or invalid"))
 }
 
 #[cfg(test)]

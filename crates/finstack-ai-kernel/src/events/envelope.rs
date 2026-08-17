@@ -248,7 +248,7 @@ impl RunEvent {
             });
         }
         let run_id = record.run_id().ok_or(EventError::CorrelationMismatch {
-            reason: "PR-008 durable event source must be run-scoped",
+            reason: "durable event source must be run-scoped",
         })?;
         let resolved = record_correlations(record.body(), correlations, effect_id_for_body(&body));
         if is_model_effect_record(record.body())

@@ -125,6 +125,7 @@ impl RunAccepted {
                 reason: "non-root run requires parent context",
             })?;
             validate_child_against_parent(
+                run_id,
                 &relation,
                 &security,
                 effective_deadline,
@@ -199,6 +200,7 @@ impl RunAccepted {
             });
         }
         validate_child_against_parent(
+            self.run_id,
             &self.relation,
             &self.security,
             self.effective_deadline,

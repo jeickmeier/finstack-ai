@@ -289,10 +289,8 @@ pub struct ErrorDescriptor {
     /// Whether a generic retry may be appropriate.
     pub retryable: bool,
     /// Optional typed identifier context.
-    #[serde(default)]
     pub identifiers: ErrorIdentifiers,
     /// Non-secret structured details.
-    #[serde(default)]
     pub safe_details: Metadata,
 }
 

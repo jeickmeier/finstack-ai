@@ -1,4 +1,4 @@
-//! Source-discriminated reducer settlement fingerprints through PR-010.
+//! Source-discriminated reducer settlement fingerprints.
 
 mod model;
 mod stage;

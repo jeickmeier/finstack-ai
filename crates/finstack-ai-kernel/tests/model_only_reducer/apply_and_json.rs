@@ -1,4 +1,4 @@
-use finstack_ai_kernel::{ArtifactRef, ArtifactTag, BlobRef, KernelState};
+use finstack_ai_kernel::{ArtifactRef, ArtifactTag, BlobRef, EffectOutputKind, KernelState};
 
 use super::tool_batches::{CALL_A, call, execute};
 use super::*;

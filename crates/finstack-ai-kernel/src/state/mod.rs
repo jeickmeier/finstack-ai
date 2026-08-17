@@ -193,7 +193,10 @@ impl Default for KernelState {
 }
 
 impl KernelState {
-    /// Compute the exact schema-1 JCS state digest under `kernel-state`.
+    /// Compute the versioned JCS state digest under domain `kernel-state`.
+    ///
+    /// The projection schema is selected by [`Self::state_version`] and spans
+    /// versions 1–6.
     ///
     /// # Errors
     ///

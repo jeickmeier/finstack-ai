@@ -915,6 +915,8 @@ mod matrix;
 mod properties;
 #[path = "settlements.rs"]
 mod settlements;
+#[path = "state_hash_oracles.rs"]
+mod state_hash_oracles;
 #[path = "structured_output.rs"]
 mod structured_output;
 #[path = "successful.rs"]

@@ -140,6 +140,36 @@ fn record_creation_rejects_programmatically_invalid_failure_descriptor() {
 }
 
 #[test]
+fn record_creation_rejects_invalid_retry_scheduled_prior_error() {
+    let mut error =
+        crate::ErrorDescriptor::new("retry_failed", "failed", crate::ErrorCategory::Model, true)
+            .expect("descriptor");
+    error.message = Arc::from("x".repeat(crate::TEXT_MAX_BYTES + 1));
+    let result = RecordDraft::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        RecordId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("record"),
+        SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session"),
+        LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("lane"),
+        Some(RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("run")),
+        Timestamp::from_unix_ms(0).expect("timestamp"),
+        vec![],
+        RecordBody::RetryScheduled(crate::RetryScheduled {
+            cycle: 0,
+            attempt: 1,
+            classification: crate::RetryClassification::Model,
+            policy_version: Arc::from("policy-v1"),
+            timer_effect_id: EffectId::parse("01234567-89ab-7cde-89ab-0123456789af")
+                .expect("timer"),
+            due_at: Timestamp::from_unix_ms(1_000).expect("due"),
+            prior_error: error,
+        }),
+    )
+    .expect_err("invalid descriptor");
+    assert_eq!(result.code(), "invalid_error_descriptor");
+}
+
+#[test]
 fn serialized_child_run_record_replays_as_validated_lineage() {
     let parent = sample_run_accepted();
     let child = sample_child_run_accepted(&parent);

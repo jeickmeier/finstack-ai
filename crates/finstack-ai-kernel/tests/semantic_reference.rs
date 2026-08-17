@@ -7,84 +7,30 @@ use finstack_ai_kernel::{
 const REFERENCE: &str =
     include_str!("../../../docs/implementation/kernel-semantics-candidate-v1.md");
 
+macro_rules! named_variants {
+    ($fn:ident, $all:ident, $ty:ty, $($pat:pat => $label:literal),+ $(,)?) => {
+        fn $fn(value: &$ty) -> &'static str {
+            match value {
+                $($pat => $label,)+
+            }
+        }
+        const $all: &[&str] = &[$($label),+];
+    };
+}
+
 #[test]
 fn reference_contains_every_stable_vocabulary_and_invariant() {
-    let required = [
-        "Accepted",
-        "BeforeRun",
-        "PreparingContext",
-        "BeforeModel",
-        "AwaitingModel",
-        "AfterModel",
-        "BeforeToolBatch",
-        "AwaitingTools",
-        "AfterToolBatch",
-        "BeforeFinalize",
-        "AwaitingInteraction",
-        "AwaitingExternal",
-        "Sleeping",
-        "Cancelling",
-        "Suspended",
-        "Completed",
-        "Failed",
-        "Cancelled",
-        "AcceptRun",
-        "StageSettled",
-        "ModelSettled",
-        "ExternalEffectCompleted",
-        "ToolBatchSettled",
-        "CancelRequested",
-        "CancellationReconciled",
-        "TimerFired",
-        "ConfigureOutput",
-        "CapabilitiesActivated",
-        "OutputValidated",
-        "RunAccepted",
-        "EffectRequested",
-        "EffectDeferred",
-        "EffectCompleted",
-        "EffectFailed",
-        "EffectCancelled",
-        "InteractionRequested",
-        "InteractionResolved",
-        "InteractionExpired",
-        "InteractionCancelled",
-        "StageOutcomeRecorded",
-        "ContextPrepared",
-        "EntryAppended",
-        "ToolBatchOpened",
-        "ToolCallSettled",
-        "ToolBatchClosed",
-        "CancellationRequested",
-        "LimitReached",
-        "RetryScheduled",
-        "RunSuspended",
-        "RunCompleted",
-        "RunFailed",
-        "RunCancelled",
-        "OutputConfigured",
-        "FinalResultRecorded",
-        "OutputValidationFailed",
-        "MessageFinalized",
-        "ToolSettled",
-        "ModelTextDelta",
-        "ReasoningDelta",
-        "ToolProgress",
-        "QueueDepthWarning",
-        "ProviderHeartbeat",
-        "Model",
-        "Tool",
-        "Context",
-        "Middleware",
-        "Interaction",
-        "Timer",
-        "ExecuteEffect",
-        "CancelEffect",
-    ];
-    for entry in required {
+    for name in PHASE_NAMES
+        .iter()
+        .chain(INPUT_NAMES)
+        .chain(RECORD_NAMES)
+        .chain(EVENT_NAMES)
+        .chain(EFFECT_NAMES)
+        .chain(ACTION_NAMES)
+    {
         assert!(
-            REFERENCE.contains(entry),
-            "semantic reference missing {entry}"
+            REFERENCE.contains(name),
+            "semantic reference missing {name}"
         );
     }
     for ordinal in 1..=12 {
@@ -99,9 +45,16 @@ fn reference_contains_every_stable_vocabulary_and_invariant() {
             "missing fixture inventory {fixture_family}"
         );
     }
+    let _ = (
+        phase_name as fn(RunPhase) -> &'static str,
+        input_name as fn(&KernelInput) -> &'static str,
+        record_name as fn(&RecordBody) -> &'static str,
+        event_name as fn(&RunEventBody) -> &'static str,
+        effect_name as fn(&EffectInput) -> &'static str,
+        action_name as fn(&PostCommitAction) -> &'static str,
+    );
 }
 
-#[allow(dead_code)]
 const fn phase_name(value: RunPhase) -> &'static str {
     match value {
         RunPhase::Accepted => "Accepted",
@@ -125,116 +78,127 @@ const fn phase_name(value: RunPhase) -> &'static str {
     }
 }
 
-#[allow(dead_code)]
-fn input_name(value: &KernelInput) -> &'static str {
-    match value {
-        KernelInput::AcceptRun(_) => "AcceptRun",
-        KernelInput::StageSettled(_) => "StageSettled",
-        KernelInput::ModelSettled(_) => "ModelSettled",
-        KernelInput::ExternalEffectCompleted(_) => "ExternalEffectCompleted",
-        KernelInput::ToolBatchSettled(_) => "ToolBatchSettled",
-        KernelInput::CancelRequested(_) => "CancelRequested",
-        KernelInput::CancellationReconciled(_) => "CancellationReconciled",
-        KernelInput::TimerFired(_) => "TimerFired",
-        KernelInput::ConfigureOutput(_) => "ConfigureOutput",
-        KernelInput::CapabilitiesActivated(_) => "CapabilitiesActivated",
-        KernelInput::OutputValidated(_) => "OutputValidated",
-        KernelInput::RecordExternalCommandRejected(_) => "RecordExternalCommandRejected",
-        KernelInput::RequestInteraction(_) => "RequestInteraction",
-        KernelInput::InteractionSettled(_) => "InteractionSettled",
-    }
+const PHASE_NAMES: &[&str] = &[
+    phase_name(RunPhase::Accepted),
+    phase_name(RunPhase::BeforeRun),
+    phase_name(RunPhase::PreparingContext),
+    phase_name(RunPhase::BeforeModel),
+    phase_name(RunPhase::AwaitingModel),
+    phase_name(RunPhase::AfterModel),
+    phase_name(RunPhase::BeforeToolBatch),
+    phase_name(RunPhase::AwaitingTools),
+    phase_name(RunPhase::AfterToolBatch),
+    phase_name(RunPhase::BeforeFinalize),
+    phase_name(RunPhase::AwaitingInteraction),
+    phase_name(RunPhase::AwaitingExternal),
+    phase_name(RunPhase::Sleeping),
+    phase_name(RunPhase::Cancelling),
+    phase_name(RunPhase::Suspended),
+    phase_name(RunPhase::Completed),
+    phase_name(RunPhase::Failed),
+    phase_name(RunPhase::Cancelled),
+];
+
+named_variants! {
+    input_name, INPUT_NAMES, KernelInput,
+    KernelInput::AcceptRun(_) => "AcceptRun",
+    KernelInput::StageSettled(_) => "StageSettled",
+    KernelInput::ModelSettled(_) => "ModelSettled",
+    KernelInput::ExternalEffectCompleted(_) => "ExternalEffectCompleted",
+    KernelInput::ToolBatchSettled(_) => "ToolBatchSettled",
+    KernelInput::CancelRequested(_) => "CancelRequested",
+    KernelInput::CancellationReconciled(_) => "CancellationReconciled",
+    KernelInput::TimerFired(_) => "TimerFired",
+    KernelInput::ConfigureOutput(_) => "ConfigureOutput",
+    KernelInput::CapabilitiesActivated(_) => "CapabilitiesActivated",
+    KernelInput::OutputValidated(_) => "OutputValidated",
+    KernelInput::RecordExternalCommandRejected(_) => "RecordExternalCommandRejected",
+    KernelInput::RequestInteraction(_) => "RequestInteraction",
+    KernelInput::InteractionSettled(_) => "InteractionSettled",
 }
 
-#[allow(dead_code)]
-fn record_name(value: &RecordBody) -> &'static str {
-    match value {
-        RecordBody::RunAccepted(_) => "RunAccepted",
-        RecordBody::EffectRequested(_) => "EffectRequested",
-        RecordBody::EffectDeferred(_) => "EffectDeferred",
-        RecordBody::EffectCompleted(_) => "EffectCompleted",
-        RecordBody::EffectFailed(_) => "EffectFailed",
-        RecordBody::EffectCancelled(_) => "EffectCancelled",
-        RecordBody::InteractionRequested(_) => "InteractionRequested",
-        RecordBody::InteractionResolved(_) => "InteractionResolved",
-        RecordBody::InteractionExpired(_) => "InteractionExpired",
-        RecordBody::InteractionCancelled(_) => "InteractionCancelled",
-        RecordBody::StageOutcomeRecorded(_) => "StageOutcomeRecorded",
-        RecordBody::ContextPrepared(_) => "ContextPrepared",
-        RecordBody::EntryAppended(_) => "EntryAppended",
-        RecordBody::ToolBatchOpened(_) => "ToolBatchOpened",
-        RecordBody::ToolCallSettled(_) => "ToolCallSettled",
-        RecordBody::ToolBatchClosed(_) => "ToolBatchClosed",
-        RecordBody::CancellationRequested(_) => "CancellationRequested",
-        RecordBody::CancellationReconciled(_) => "CancellationReconciled",
-        RecordBody::LimitReached(_) => "LimitReached",
-        RecordBody::RetryScheduled(_) => "RetryScheduled",
-        RecordBody::TimerFired(_) => "TimerFired",
-        RecordBody::RunSuspended(_) => "RunSuspended",
-        RecordBody::RunCompleted(_) => "RunCompleted",
-        RecordBody::RunFailed(_) => "RunFailed",
-        RecordBody::RunCancelled(_) => "RunCancelled",
-        RecordBody::OutputConfigured(_) => "OutputConfigured",
-        RecordBody::CapabilitiesActivated(_) => "CapabilitiesActivated",
-        RecordBody::FinalResultRecorded(_) => "FinalResultRecorded",
-        RecordBody::OutputValidationFailed(_) => "OutputValidationFailed",
-        RecordBody::ExternalCommandRejected(_) => "ExternalCommandRejected",
-        RecordBody::ChildRunPrepared(_) => "ChildRunPrepared",
-        RecordBody::BudgetReservationRequested(_) => "BudgetReservationRequested",
-        RecordBody::BudgetReservationSettled(_) => "BudgetReservationSettled",
-        RecordBody::BudgetChargeRecorded(_) => "BudgetChargeRecorded",
-        RecordBody::BudgetReservationReleased(_) => "BudgetReservationReleased",
-        RecordBody::SessionCreated(_) => "SessionCreated",
-        RecordBody::LaneCreated(_) => "LaneCreated",
-        RecordBody::LaneMoved(_) => "LaneMoved",
-        RecordBody::SnapshotWritten(_) => "SnapshotWritten",
-        RecordBody::ConversationEntry(_) => "ConversationEntry",
-    }
+named_variants! {
+    record_name, RECORD_NAMES, RecordBody,
+    RecordBody::RunAccepted(_) => "RunAccepted",
+    RecordBody::EffectRequested(_) => "EffectRequested",
+    RecordBody::EffectDeferred(_) => "EffectDeferred",
+    RecordBody::EffectCompleted(_) => "EffectCompleted",
+    RecordBody::EffectFailed(_) => "EffectFailed",
+    RecordBody::EffectCancelled(_) => "EffectCancelled",
+    RecordBody::InteractionRequested(_) => "InteractionRequested",
+    RecordBody::InteractionResolved(_) => "InteractionResolved",
+    RecordBody::InteractionExpired(_) => "InteractionExpired",
+    RecordBody::InteractionCancelled(_) => "InteractionCancelled",
+    RecordBody::StageOutcomeRecorded(_) => "StageOutcomeRecorded",
+    RecordBody::ContextPrepared(_) => "ContextPrepared",
+    RecordBody::EntryAppended(_) => "EntryAppended",
+    RecordBody::ToolBatchOpened(_) => "ToolBatchOpened",
+    RecordBody::ToolCallSettled(_) => "ToolCallSettled",
+    RecordBody::ToolBatchClosed(_) => "ToolBatchClosed",
+    RecordBody::CancellationRequested(_) => "CancellationRequested",
+    RecordBody::CancellationReconciled(_) => "CancellationReconciled",
+    RecordBody::LimitReached(_) => "LimitReached",
+    RecordBody::RetryScheduled(_) => "RetryScheduled",
+    RecordBody::TimerFired(_) => "TimerFired",
+    RecordBody::RunSuspended(_) => "RunSuspended",
+    RecordBody::RunCompleted(_) => "RunCompleted",
+    RecordBody::RunFailed(_) => "RunFailed",
+    RecordBody::RunCancelled(_) => "RunCancelled",
+    RecordBody::OutputConfigured(_) => "OutputConfigured",
+    RecordBody::CapabilitiesActivated(_) => "CapabilitiesActivated",
+    RecordBody::FinalResultRecorded(_) => "FinalResultRecorded",
+    RecordBody::OutputValidationFailed(_) => "OutputValidationFailed",
+    RecordBody::ExternalCommandRejected(_) => "ExternalCommandRejected",
+    RecordBody::ChildRunPrepared(_) => "ChildRunPrepared",
+    RecordBody::BudgetReservationRequested(_) => "BudgetReservationRequested",
+    RecordBody::BudgetReservationSettled(_) => "BudgetReservationSettled",
+    RecordBody::BudgetChargeRecorded(_) => "BudgetChargeRecorded",
+    RecordBody::BudgetReservationReleased(_) => "BudgetReservationReleased",
+    RecordBody::SessionCreated(_) => "SessionCreated",
+    RecordBody::LaneCreated(_) => "LaneCreated",
+    RecordBody::LaneMoved(_) => "LaneMoved",
+    RecordBody::SnapshotWritten(_) => "SnapshotWritten",
+    RecordBody::ConversationEntry(_) => "ConversationEntry",
 }
 
-#[allow(dead_code)]
-fn event_name(value: &RunEventBody) -> &'static str {
-    match value {
-        RunEventBody::RunAccepted(_) => "RunAccepted",
-        RunEventBody::EffectRequested(_) => "EffectRequested",
-        RunEventBody::EffectDeferred(_) => "EffectDeferred",
-        RunEventBody::EffectCompleted(_) => "EffectCompleted",
-        RunEventBody::EffectFailed(_) => "EffectFailed",
-        RunEventBody::EffectCancelled(_) => "EffectCancelled",
-        RunEventBody::InteractionRequested(_) => "InteractionRequested",
-        RunEventBody::InteractionResolved(_) => "InteractionResolved",
-        RunEventBody::InteractionExpired(_) => "InteractionExpired",
-        RunEventBody::InteractionCancelled(_) => "InteractionCancelled",
-        RunEventBody::MessageFinalized { .. } => "MessageFinalized",
-        RunEventBody::ToolSettled { .. } => "ToolSettled",
-        RunEventBody::LimitReached { .. } => "LimitReached",
-        RunEventBody::RunSuspended { .. } => "RunSuspended",
-        RunEventBody::RunCompleted { .. } => "RunCompleted",
-        RunEventBody::RunFailed { .. } => "RunFailed",
-        RunEventBody::RunCancelled { .. } => "RunCancelled",
-        RunEventBody::ModelTextDelta(_) => "ModelTextDelta",
-        RunEventBody::ReasoningDelta(_) => "ReasoningDelta",
-        RunEventBody::ToolProgress(_) => "ToolProgress",
-        RunEventBody::QueueDepthWarning(_) => "QueueDepthWarning",
-        RunEventBody::ProviderHeartbeat(_) => "ProviderHeartbeat",
-    }
+named_variants! {
+    event_name, EVENT_NAMES, RunEventBody,
+    RunEventBody::RunAccepted(_) => "RunAccepted",
+    RunEventBody::EffectRequested(_) => "EffectRequested",
+    RunEventBody::EffectDeferred(_) => "EffectDeferred",
+    RunEventBody::EffectCompleted(_) => "EffectCompleted",
+    RunEventBody::EffectFailed(_) => "EffectFailed",
+    RunEventBody::EffectCancelled(_) => "EffectCancelled",
+    RunEventBody::InteractionRequested(_) => "InteractionRequested",
+    RunEventBody::InteractionResolved(_) => "InteractionResolved",
+    RunEventBody::InteractionExpired(_) => "InteractionExpired",
+    RunEventBody::InteractionCancelled(_) => "InteractionCancelled",
+    RunEventBody::MessageFinalized { .. } => "MessageFinalized",
+    RunEventBody::ToolSettled { .. } => "ToolSettled",
+    RunEventBody::LimitReached { .. } => "LimitReached",
+    RunEventBody::RunSuspended { .. } => "RunSuspended",
+    RunEventBody::RunCompleted { .. } => "RunCompleted",
+    RunEventBody::RunFailed { .. } => "RunFailed",
+    RunEventBody::RunCancelled { .. } => "RunCancelled",
+    RunEventBody::ModelTextDelta(_) => "ModelTextDelta",
+    RunEventBody::ReasoningDelta(_) => "ReasoningDelta",
+    RunEventBody::ToolProgress(_) => "ToolProgress",
+    RunEventBody::QueueDepthWarning(_) => "QueueDepthWarning",
+    RunEventBody::ProviderHeartbeat(_) => "ProviderHeartbeat",
 }
 
-#[allow(dead_code)]
-fn effect_name(value: &EffectInput) -> &'static str {
-    match value {
-        EffectInput::Model { .. } => "Model",
-        EffectInput::Tool { .. } => "Tool",
-        EffectInput::Context { .. } => "Context",
-        EffectInput::Middleware { .. } => "Middleware",
-        EffectInput::Interaction { .. } => "Interaction",
-        EffectInput::Timer { .. } => "Timer",
-    }
+named_variants! {
+    effect_name, EFFECT_NAMES, EffectInput,
+    EffectInput::Model { .. } => "Model",
+    EffectInput::Tool { .. } => "Tool",
+    EffectInput::Context { .. } => "Context",
+    EffectInput::Middleware { .. } => "Middleware",
+    EffectInput::Interaction { .. } => "Interaction",
+    EffectInput::Timer { .. } => "Timer",
 }
 
-#[allow(dead_code)]
-const fn action_name(value: PostCommitAction) -> &'static str {
-    match value {
-        PostCommitAction::ExecuteEffect { .. } => "ExecuteEffect",
-        PostCommitAction::CancelEffect { .. } => "CancelEffect",
-    }
+named_variants! {
+    action_name, ACTION_NAMES, PostCommitAction,
+    PostCommitAction::ExecuteEffect { .. } => "ExecuteEffect",
+    PostCommitAction::CancelEffect { .. } => "CancelEffect",
 }

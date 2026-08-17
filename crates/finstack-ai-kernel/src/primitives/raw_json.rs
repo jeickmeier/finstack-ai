@@ -3,6 +3,7 @@
 //! Validated values store RFC 8785 canonical UTF-8 bytes in shared [`Bytes`].
 //! Equality and digests use those canonical bytes.
 
+use core::cell::Cell;
 use core::fmt;
 
 use bytes::Bytes;
@@ -240,26 +241,34 @@ impl<'de> Visitor<'de> for RawJsonVisitor {
     where
         A: SeqAccess<'de>,
     {
+        let used = Cell::new(0);
         let value = StrictValue {
             depth: 0,
             max_depth: RAW_JSON_MAX_DEPTH,
+            max_bytes: RAW_JSON_MAX_BYTES,
             max_key_bytes: None,
+            max_top_level_members: None,
+            used: &used,
         }
         .deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-        RawJson::parse(value.to_string()).map_err(de::Error::custom)
+        raw_json_from_value(&value, RAW_JSON_MAX_BYTES).map_err(de::Error::custom)
     }
 
     fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
+        let used = Cell::new(0);
         let value = StrictValue {
             depth: 0,
             max_depth: RAW_JSON_MAX_DEPTH,
+            max_bytes: RAW_JSON_MAX_BYTES,
             max_key_bytes: None,
+            max_top_level_members: None,
+            used: &used,
         }
         .deserialize(de::value::MapAccessDeserializer::new(map))?;
-        RawJson::parse(value.to_string()).map_err(de::Error::custom)
+        raw_json_from_value(&value, RAW_JSON_MAX_BYTES).map_err(de::Error::custom)
     }
 }
 
@@ -367,8 +376,55 @@ impl<'de> Deserialize<'de> for Metadata {
     where
         D: serde::Deserializer<'de>,
     {
-        let raw = RawJson::deserialize(deserializer)?;
-        Self::parse(raw.as_bytes()).map_err(serde::de::Error::custom)
+        deserializer.deserialize_any(MetadataVisitor)
+    }
+}
+
+struct MetadataVisitor;
+
+impl<'de> Visitor<'de> for MetadataVisitor {
+    type Value = Metadata;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("canonical metadata bytes or a JSON object")
+    }
+
+    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
+        Metadata::parse(value).map_err(E::custom)
+    }
+
+    fn visit_byte_buf<E: de::Error>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+        Metadata::parse(value).map_err(E::custom)
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Metadata::parse(value).map_err(E::custom)
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Metadata::parse(value).map_err(E::custom)
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let used = Cell::new(0);
+        let value = StrictValue {
+            depth: 0,
+            max_depth: METADATA_MAX_DEPTH,
+            max_bytes: METADATA_MAX_BYTES,
+            max_key_bytes: Some(METADATA_MAX_KEY_BYTES),
+            max_top_level_members: Some(METADATA_MAX_MEMBERS),
+            used: &used,
+        }
+        .deserialize(de::value::MapAccessDeserializer::new(map))?;
+        if !value.is_object() {
+            return Err(de::Error::custom(RawJsonError::ExpectedObject));
+        }
+        raw_json_from_value(&value, METADATA_MAX_BYTES)
+            .map(Metadata)
+            .map_err(de::Error::custom)
     }
 }
 
@@ -444,12 +500,43 @@ struct Limits {
     max_key_bytes: Option<usize>,
 }
 
+fn raw_json_from_value(value: &Value, max_bytes: usize) -> Result<RawJson, RawJsonError> {
+    let canonical = serde_json_canonicalizer::to_vec(&value)
+        .map_err(|error| RawJsonError::Canonicalize(error.to_string()))?;
+    if canonical.len() > max_bytes {
+        return Err(RawJsonError::CanonicalTooLarge {
+            len: canonical.len(),
+            max: max_bytes,
+        });
+    }
+    Ok(RawJson(Bytes::from(canonical)))
+}
+
+fn charge_bytes<E: de::Error>(used: &Cell<usize>, add: usize, max: usize) -> Result<(), E> {
+    let next = used.get().saturating_add(add);
+    if next > max {
+        return Err(E::custom(format!(
+            "JSON source span too large: {next} > {max}"
+        )));
+    }
+    used.set(next);
+    Ok(())
+}
+
+fn json_number_len(value: &impl ToString) -> usize {
+    value.to_string().len()
+}
+
 fn strict_parse_value(input: &[u8], limits: Limits) -> Result<Value, RawJsonError> {
     let mut de = serde_json::Deserializer::from_slice(input);
+    let used = Cell::new(0);
     let value = StrictValue {
         depth: 0,
         max_depth: limits.max_depth,
+        max_bytes: limits.max_bytes,
         max_key_bytes: limits.max_key_bytes,
+        max_top_level_members: limits.max_top_level_members,
+        used: &used,
     }
     .deserialize(&mut de)
     .map_err(|error| map_de_error(&error))?;
@@ -472,6 +559,14 @@ fn map_de_error(error: &serde_json::Error) -> RawJsonError {
             return RawJsonError::TooDeep { depth, max };
         }
     }
+    if let Some(rest) = text.strip_prefix("JSON source span too large: ") {
+        let head = rest.split(" at line ").next().unwrap_or(rest);
+        if let Some((len, max)) = head.split_once(" > ")
+            && let (Ok(len), Ok(max)) = (len.parse(), max.parse())
+        {
+            return RawJsonError::SourceTooLarge { len, max };
+        }
+    }
     if let Some(rest) = text.strip_prefix("metadata key too long: ") {
         let head = rest.split(" at line ").next().unwrap_or(rest);
         if let Some((len, max)) = head.split_once(" > ")
@@ -483,13 +578,16 @@ fn map_de_error(error: &serde_json::Error) -> RawJsonError {
     RawJsonError::Parse(text)
 }
 
-struct StrictValue {
+struct StrictValue<'a> {
     depth: usize,
     max_depth: usize,
+    max_bytes: usize,
     max_key_bytes: Option<usize>,
+    max_top_level_members: Option<usize>,
+    used: &'a Cell<usize>,
 }
 
-impl<'de> DeserializeSeed<'de> for StrictValue {
+impl<'de> DeserializeSeed<'de> for StrictValue<'_> {
     type Value = Value;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -499,18 +597,24 @@ impl<'de> DeserializeSeed<'de> for StrictValue {
         deserializer.deserialize_any(StrictVisitor {
             depth: self.depth,
             max_depth: self.max_depth,
+            max_bytes: self.max_bytes,
             max_key_bytes: self.max_key_bytes,
+            max_top_level_members: self.max_top_level_members,
+            used: self.used,
         })
     }
 }
 
-struct StrictVisitor {
+struct StrictVisitor<'a> {
     depth: usize,
     max_depth: usize,
+    max_bytes: usize,
     max_key_bytes: Option<usize>,
+    max_top_level_members: Option<usize>,
+    used: &'a Cell<usize>,
 }
 
-impl<'de> Visitor<'de> for StrictVisitor {
+impl<'de> Visitor<'de> for StrictVisitor<'_> {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -521,6 +625,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, if value { 4 } else { 5 }, self.max_bytes)?;
         Ok(Value::Bool(value))
     }
 
@@ -528,6 +633,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
         Ok(Value::from(value))
     }
 
@@ -535,6 +641,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
         Ok(Value::from(value))
     }
 
@@ -545,6 +652,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
         if !value.is_finite() {
             return Err(E::custom("non-finite JSON number"));
         }
+        charge_bytes(self.used, json_number_len(&value), self.max_bytes)?;
         Ok(Value::from(value))
     }
 
@@ -552,6 +660,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, value.len().saturating_add(2), self.max_bytes)?;
         Ok(Value::String(value.to_owned()))
     }
 
@@ -559,6 +668,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, value.len().saturating_add(2), self.max_bytes)?;
         Ok(Value::String(value))
     }
 
@@ -566,6 +676,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, 4, self.max_bytes)?;
         Ok(Value::Null)
     }
 
@@ -573,6 +684,7 @@ impl<'de> Visitor<'de> for StrictVisitor {
     where
         E: de::Error,
     {
+        charge_bytes(self.used, 4, self.max_bytes)?;
         Ok(Value::Null)
     }
 
@@ -587,12 +699,19 @@ impl<'de> Visitor<'de> for StrictVisitor {
                 self.max_depth
             )));
         }
+        charge_bytes(self.used, 2, self.max_bytes)?;
         let mut values = Vec::new();
         while let Some(value) = seq.next_element_seed(StrictValue {
             depth: next_depth,
             max_depth: self.max_depth,
+            max_bytes: self.max_bytes,
             max_key_bytes: self.max_key_bytes,
+            max_top_level_members: None,
+            used: self.used,
         })? {
+            if !values.is_empty() {
+                charge_bytes(self.used, 1, self.max_bytes)?;
+            }
             values.push(value);
         }
         Ok(Value::Array(values))
@@ -609,8 +728,18 @@ impl<'de> Visitor<'de> for StrictVisitor {
                 self.max_depth
             )));
         }
+        charge_bytes(self.used, 2, self.max_bytes)?;
         let mut object = serde_json::Map::new();
         while let Some(key) = map.next_key::<String>()? {
+            if self.depth == 0
+                && let Some(max_members) = self.max_top_level_members
+                && object.len() >= max_members
+            {
+                return Err(de::Error::custom(format!(
+                    "too many metadata members: {} > {max_members}",
+                    object.len().saturating_add(1)
+                )));
+            }
             if let Some(max_key_bytes) = self.max_key_bytes
                 && key.len() > max_key_bytes
             {
@@ -619,15 +748,20 @@ impl<'de> Visitor<'de> for StrictVisitor {
                     key.len()
                 )));
             }
-            // The object under construction is itself the seen-key set; a side
-            // `BTreeSet<String>` would clone every key for no extra signal.
             if object.contains_key(&key) {
                 return Err(de::Error::custom(format!("duplicate object key: {key}")));
             }
+            if !object.is_empty() {
+                charge_bytes(self.used, 1, self.max_bytes)?;
+            }
+            charge_bytes(self.used, key.len().saturating_add(3), self.max_bytes)?;
             let value = map.next_value_seed(StrictValue {
                 depth: next_depth,
                 max_depth: self.max_depth,
+                max_bytes: self.max_bytes,
                 max_key_bytes: self.max_key_bytes,
+                max_top_level_members: None,
+                used: self.used,
             })?;
             object.insert(key, value);
         }
@@ -718,5 +852,46 @@ mod tests {
         );
         let meta = Metadata::parse(r#"{"a":1}"#).expect("meta");
         assert_eq!(serde_json::to_string(&meta).expect("ser"), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn human_map_and_seq_reject_before_full_materialization() {
+        let over = format!(r#"{{"k":"{}"}}"#, "a".repeat(RAW_JSON_MAX_BYTES));
+        assert!(
+            serde_json::from_str::<RawJson>(&over)
+                .expect_err("raw map")
+                .to_string()
+                .contains("source span")
+        );
+        let over_seq = format!(r#"["{}"]"#, "a".repeat(RAW_JSON_MAX_BYTES));
+        assert!(
+            serde_json::from_str::<RawJson>(&over_seq)
+                .expect_err("raw seq")
+                .to_string()
+                .contains("source span")
+        );
+    }
+
+    #[test]
+    fn metadata_deserialize_uses_metadata_ceilings() {
+        let over = format!(r#"{{"k":"{}"}}"#, "a".repeat(METADATA_MAX_BYTES));
+        assert!(
+            serde_json::from_str::<Metadata>(&over)
+                .expect_err("metadata map")
+                .to_string()
+                .contains("source span")
+        );
+        let deep = format!(
+            "{}{}{}",
+            r#"{"k":"#.repeat(METADATA_MAX_DEPTH + 1),
+            "1",
+            "}".repeat(METADATA_MAX_DEPTH + 1)
+        );
+        assert!(
+            serde_json::from_str::<Metadata>(&deep)
+                .expect_err("metadata depth")
+                .to_string()
+                .contains("nesting")
+        );
     }
 }

@@ -83,14 +83,14 @@ where
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
-pub(super) fn serialize_micros<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_micros<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     serializer.serialize_str(&value.to_string())
 }
 
-pub(super) fn deserialize_micros<'de, D>(deserializer: D) -> Result<u64, D::Error>
+pub(crate) fn deserialize_micros<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

@@ -284,7 +284,7 @@ pub(super) fn apply_record(
                 return Err(KernelError::InvalidRecordOrder);
             }
             state.output_configuration = Some(configuration.clone());
-            state.state_version = 4;
+            state.state_version = state.state_version.max(4);
         }
         RecordBody::CapabilitiesActivated(activation) => {
             activation
@@ -295,7 +295,7 @@ pub(super) fn apply_record(
             }
             state.active_capabilities = activation.active.clone();
             state.resolved_plan_digest = Some(activation.resolved_plan_digest);
-            state.state_version = 4;
+            state.state_version = state.state_version.max(4);
         }
         RecordBody::FinalResultRecorded(result) => apply_final_result(state, result)?,
         RecordBody::OutputValidationFailed(failure) => {
@@ -341,7 +341,7 @@ pub(super) fn apply_record(
                         .insert(prepared.parent_effect_id, prepared.clone());
                 }
             }
-            state.state_version = 5;
+            state.state_version = state.state_version.max(5);
         }
         RecordBody::BudgetReservationRequested(requested) => {
             requested
@@ -372,7 +372,7 @@ pub(super) fn apply_record(
                     );
                 }
             }
-            state.state_version = 5;
+            state.state_version = state.state_version.max(5);
         }
         RecordBody::BudgetReservationSettled(settled) => {
             settled
@@ -394,7 +394,7 @@ pub(super) fn apply_record(
                 Some(_) => return Err(KernelError::InvalidRecordOrder),
                 None => replay.settlement = Some(settled.receipt.clone()),
             }
-            state.state_version = 5;
+            state.state_version = state.state_version.max(5);
         }
         RecordBody::BudgetChargeRecorded(charged) => {
             charged
@@ -417,7 +417,7 @@ pub(super) fn apply_record(
                         .insert(charged.receipt.effect_id, charged.receipt.clone());
                 }
             }
-            state.state_version = 5;
+            state.state_version = state.state_version.max(5);
         }
         RecordBody::BudgetReservationReleased(released) => {
             released
@@ -442,7 +442,7 @@ pub(super) fn apply_record(
                 Some(_) => return Err(KernelError::InvalidRecordOrder),
                 None => replay.release = Some(released.receipt.clone()),
             }
-            state.state_version = 5;
+            state.state_version = state.state_version.max(5);
         }
         RecordBody::EffectCancelled(cancelled) => {
             if cancelled.output_contract().kind == EffectOutputKind::InteractionResolution {

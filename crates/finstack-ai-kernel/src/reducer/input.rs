@@ -1,4 +1,4 @@
-//! Normalized reducer inputs owned through PR-010.
+//! Normalized reducer inputs.
 
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ use crate::records::run::{CancellationInitiator, RunAccepted};
 use crate::records::tools::{ToolBatchContinuation, ToolCallPlan};
 use crate::{CapabilitiesActivated, OutputConfiguration, OutputValidated};
 
-/// Complete concrete command vocabulary owned through PR-012.
+/// Complete concrete command vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum KernelInput {
@@ -159,7 +159,7 @@ pub struct StageSettled {
     pub outcome: ReducerStageOutcome,
 }
 
-/// Aggregate outcomes accepted by stages through PR-010.
+/// Aggregate outcomes accepted by stages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReducerStageOutcome {

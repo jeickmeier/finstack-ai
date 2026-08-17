@@ -91,12 +91,10 @@ fn fail_run_waits_for_a_deferred_parallel_call_before_aborting_later_groups() {
             outcome: ToolSettlement::Failed(failure),
         }),
     );
-    assert!(
-        failed
-            .records
-            .iter()
-            .all(|record| !matches!(record.body(), RecordBody::ToolBatchClosed(_)))
-    );
+    assert!(failed
+        .records
+        .iter()
+        .all(|record| !matches!(record.body(), RecordBody::ToolBatchClosed(_))));
     assert_eq!(
         harness.kernel.state().phase,
         Some(RunPhase::AwaitingExternal)
@@ -279,4 +277,106 @@ fn deferred_tool_resumes_externally_and_duplicate_or_conflict_is_stable() {
     );
     assert_tool_golden("valid--pr010-deferred-external.json", &harness);
     assert_tool_golden("valid--pr010-duplicate-conflict.json", &harness);
+}
+
+#[test]
+fn second_defer_on_a_different_call_in_the_same_group_applies() {
+    let calls = vec![call(CALL_A, "alpha"), call(CALL_B, "beta")];
+    let mut harness = model_with_calls(&calls);
+    settle_after_model_for_tools(&mut harness);
+    harness.apply_input(
+        tool_env(
+            1_600,
+            &[5_000, 5_001, 5_002, 5_003],
+            &[5_000, 5_001],
+            &[TOOL_EFFECT_A, TOOL_EFFECT_B],
+            &[],
+            &[BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([
+                    execute(
+                        &calls[0],
+                        ToolExecutionMode::Parallel,
+                        ToolFailurePolicy::ReturnToModel,
+                    ),
+                    execute(
+                        &calls[1],
+                        ToolExecutionMode::Parallel,
+                        ToolFailurePolicy::ReturnToModel,
+                    ),
+                ]),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    let first = deferred_tool(TOOL_EFFECT_A, "external-first");
+    harness.apply_input(
+        tool_env(1_700, &[5_010], &[5_010], &[], &[], &[], &[]),
+        KernelInput::ToolBatchSettled(ToolBatchSettled {
+            tool_batch_id: id::<ToolBatchTag>(BATCH),
+            outcome: ToolSettlement::Deferred(first),
+        }),
+    );
+    assert_eq!(
+        harness.kernel.state().phase,
+        Some(RunPhase::AwaitingExternal)
+    );
+    let second = deferred_tool(TOOL_EFFECT_B, "external-second");
+    let decision = harness.apply_input(
+        tool_env(1_800, &[5_020], &[5_020], &[], &[], &[], &[]),
+        KernelInput::ToolBatchSettled(ToolBatchSettled {
+            tool_batch_id: id::<ToolBatchTag>(BATCH),
+            outcome: ToolSettlement::Deferred(second),
+        }),
+    );
+    assert_eq!(decision.records.len(), 1);
+    assert!(matches!(
+        decision.records[0].body(),
+        RecordBody::EffectDeferred(_)
+    ));
+    assert_eq!(
+        harness.kernel.state().phase,
+        Some(RunPhase::AwaitingExternal)
+    );
+    let active = harness
+        .kernel
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .expect("batch remains active");
+    assert!(matches!(
+        active.calls[0].status,
+        ActiveToolCallStatus::Requested {
+            deferred: Some(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        active.calls[1].status,
+        ActiveToolCallStatus::Requested {
+            deferred: Some(_),
+            ..
+        }
+    ));
+}
+
+fn deferred_tool(effect_ordinal: u64, handle: &str) -> EffectDeferred {
+    EffectDeferred {
+        effect_id: id::<finstack_ai_kernel::EffectTag>(effect_ordinal),
+        handle: ExternalHandleRef::try_new(
+            ComponentId::parse("finstack.tool.fixture").expect("tool component"),
+            handle,
+            RawJson::parse("{}").expect("metadata"),
+        )
+        .expect("external handle"),
+        reconciliation: ReconciliationPolicy::CallbackOrPoll,
+        next_poll_at: None,
+        expires_at: None,
+        output_contract: tool_contract(),
+    }
 }

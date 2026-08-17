@@ -35,7 +35,8 @@ framing, bindings, and plugin hosts remain owned by later phases.
 The complete `KernelInput` vocabulary is `AcceptRun`, `StageSettled`,
 `ModelSettled`, `ExternalEffectCompleted`, `ToolBatchSettled`, `CancelRequested`,
 `CancellationReconciled`, `TimerFired`, `ConfigureOutput`,
-`CapabilitiesActivated`, and `OutputValidated`.
+`CapabilitiesActivated`, `OutputValidated`, `RecordExternalCommandRejected`,
+`RequestInteraction`, and `InteractionSettled`.
 
 | Input | Permitted state | Result class |
 | --- | --- | --- |
@@ -70,6 +71,11 @@ Candidate-v1 `RecordBody` vocabulary:
 - `RunCompleted`, `RunFailed`, `RunCancelled`
 - `OutputConfigured`, `CapabilitiesActivated`, `FinalResultRecorded`,
   `OutputValidationFailed`
+- `ExternalCommandRejected`, `ChildRunPrepared`
+- `BudgetReservationRequested`, `BudgetReservationSettled`,
+  `BudgetChargeRecorded`, `BudgetReservationReleased`
+- `SessionCreated`, `LaneCreated`, `LaneMoved`, `SnapshotWritten`,
+  `ConversationEntry`
 
 Request records precede their `ExecuteEffect` action. Interaction request
 records pair with exactly one matching interaction `EffectRequested` record in

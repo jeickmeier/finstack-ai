@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::apply;
-use crate::content::ContentBlock;
+use super::record::apply_record;
+use crate::content::{ContentBlock, JsonBlock};
 use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
-    ReconciliationPolicy, RetrySafety,
+    InteractionKind, InteractionRequest, ReconciliationPolicy, RetrySafety,
 };
 use crate::primitives::ComponentId;
 use crate::primitives::Digest;
 use crate::primitives::ExternalHandleRef;
 use crate::primitives::Timestamp;
-use crate::primitives::{Metadata, RawJson};
+use crate::primitives::{ComponentRef, Metadata, RawJson, Version};
 use crate::records::lifecycle::EntryAppended;
 use crate::records::{
     APPEND_BATCH_MAX_RECORDS, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
@@ -19,8 +21,12 @@ use crate::records::{
 };
 use crate::state::{
     KernelState, ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
+    TerminalCandidate,
 };
-use crate::{CommittedBatch, KernelError, TextBlock};
+use crate::{
+    CommittedBatch, FinalResultRecorded, JsonSchemaDraft, KernelError, OutputConfiguration,
+    OutputEndStrategy, OutputSpec, SchemaRef, StructuredResultSource, TextBlock,
+};
 
 #[test]
 #[expect(
@@ -213,6 +219,107 @@ fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
         apply(&settled, &conflict_batch, 0),
         Err(KernelError::InvalidRecordOrder)
     );
+}
+
+#[test]
+fn final_result_does_not_demote_interaction_state_version() {
+    let timestamp = Timestamp::from_unix_ms(1_000).expect("timestamp");
+    let turn_id = fixed_id::<crate::TurnTag>(2);
+    let model_request_id = fixed_id::<crate::ModelRequestTag>(3);
+    let effect_id = fixed_id::<crate::EffectTag>(4);
+    let message_id = fixed_id::<crate::MessageTag>(5);
+    let value = RawJson::parse(r#"{"answer":42}"#).expect("value");
+    let schema = SchemaRef {
+        draft: JsonSchemaDraft::Draft202012,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(br#"{"type":"object"}"#),
+    };
+    let message = Message::try_new(
+        message_id,
+        MessageRole::Assistant,
+        vec![ContentBlock::Json(JsonBlock::new(value.clone()))],
+        timestamp,
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("message");
+    let mut state = KernelState {
+        phase: Some(RunPhase::AfterModel),
+        messages: Arc::new(vec![message]),
+        terminal_candidate: Some(TerminalCandidate::Completed {
+            cycle: 0,
+            turn_id,
+            model_request_id,
+            effect_id,
+            message_id,
+            result_digest: value.digest(),
+        }),
+        output_configuration: Some(OutputConfiguration {
+            output: OutputSpec::JsonSchema {
+                schema: schema.clone(),
+            },
+            end_strategy: OutputEndStrategy::Exhaustive,
+        }),
+        ..KernelState::default()
+    };
+    let request = InteractionRequest::try_new(
+        1,
+        fixed_id::<crate::InteractionTag>(6),
+        fixed_id::<crate::EffectTag>(7),
+        InteractionKind::Approval,
+        vec![],
+        RawJson::parse("{}").expect("schema"),
+        ComponentRef::new(
+            ComponentId::parse("policy.approval").expect("component"),
+            None,
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        None,
+        None,
+        false,
+        Metadata::empty(),
+    )
+    .expect("interaction request");
+    apply_record(
+        &mut state,
+        &envelope(1, 1, timestamp, RecordBody::InteractionRequested(request)),
+        None,
+    )
+    .expect("interaction apply");
+    assert_eq!(state.state_version, 6);
+
+    let result = FinalResultRecorded {
+        cycle: 0,
+        turn_id,
+        model_request_id,
+        effect_id,
+        message_id,
+        schema,
+        value_digest: value.digest(),
+        value,
+        source: StructuredResultSource::JsonBlock { content_index: 0 },
+        end_strategy: OutputEndStrategy::Exhaustive,
+        skipped_tool_call_ids: Arc::from([]),
+    };
+    apply_record(
+        &mut state,
+        &composition_envelope(
+            2,
+            timestamp,
+            fixed_id::<crate::SessionTag>(10),
+            fixed_id::<crate::LaneTag>(11),
+            fixed_id::<crate::RunTag>(12),
+            RecordBody::FinalResultRecorded(result),
+        ),
+        None,
+    )
+    .expect("final result apply");
+    assert_eq!(state.state_version, 6);
 }
 
 #[test]

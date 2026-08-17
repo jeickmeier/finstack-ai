@@ -21,7 +21,7 @@ fn external_outcome_vocabulary_rejects_cancelled_and_future_variants() {
 }
 
 #[test]
-fn terminal_state_vocabulary_is_exactly_completed_and_failed() {
+fn terminal_state_vocabulary_is_exactly_completed_failed_and_cancelled() {
     let completed = drive_to_completed();
     let completed_terminal = completed
         .kernel
@@ -30,6 +30,12 @@ fn terminal_state_vocabulary_is_exactly_completed_and_failed() {
         .as_ref()
         .expect("completed terminal");
     assert_json_round_trip_and_unknown_fields(completed_terminal);
+    assert!(
+        serde_json::to_value(completed_terminal)
+            .expect("completed JSON")
+            .get("completed")
+            .is_some()
+    );
 
     let failed = TerminalState::Failed(RunFailed {
         cycle: 0,
@@ -39,6 +45,24 @@ fn terminal_state_vocabulary_is_exactly_completed_and_failed() {
         error: fixture_error("failed"),
     });
     assert_json_round_trip_and_unknown_fields(&failed);
+    assert!(
+        serde_json::to_value(&failed)
+            .expect("failed JSON")
+            .get("failed")
+            .is_some()
+    );
+
+    let cancelled = TerminalState::Cancelled(finstack_ai_kernel::RunCancelled {
+        request_id: id::<finstack_ai_kernel::CancellationRequestTag>(1),
+        reason_code: finstack_ai_kernel::ErrorCode::new("cancelled").expect("code"),
+    });
+    assert_json_round_trip_and_unknown_fields(&cancelled);
+    assert!(
+        serde_json::to_value(&cancelled)
+            .expect("cancelled JSON")
+            .get("cancelled")
+            .is_some()
+    );
     for value in [
         json!({"cancelled": {"reason": null}}),
         json!({"run_cancelled": {}}),
@@ -219,4 +243,3 @@ fn context_and_retained_completion_ids_enforce_bounds_and_semantics() {
         })
     ));
 }
-

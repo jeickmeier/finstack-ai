@@ -108,6 +108,16 @@ fn durable_and_transient_constructors_are_class_safe() {
 }
 
 #[test]
+fn tool_progress_and_provider_heartbeat_accessors() {
+    let progress = ToolProgress::try_new("working", Some(50)).expect("progress");
+    assert_eq!(progress.message(), "working");
+    assert_eq!(progress.percent(), Some(50));
+    let heartbeat = ProviderHeartbeat::try_new("openai", Some("alive")).expect("heartbeat");
+    assert_eq!(heartbeat.provider(), "openai");
+    assert_eq!(heartbeat.detail(), Some("alive"));
+}
+
+#[test]
 fn durable_effect_event_round_trips_human_json_with_raw_input() {
     let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("effect");
     let requested = EffectRequested::try_new(
@@ -406,4 +416,82 @@ fn finalized_message_requires_model_correlations_and_internal_sensitivity() {
         body(),
     )
     .expect("valid message finalized");
+}
+
+#[test]
+fn effect_cancelled_events_require_correlations_and_confidential_sensitivity() {
+    let effect_id = EffectId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("effect");
+    let model = crate::EffectCancelled::try_new(
+        effect_id,
+        EffectOutputContract {
+            kind: EffectOutputKind::ModelResponse,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br#"{"schema":1}"#),
+        },
+        Some("shutdown"),
+        None::<&str>,
+    )
+    .expect("model cancelled");
+    let tool = crate::EffectCancelled::try_new(
+        effect_id,
+        EffectOutputContract {
+            kind: EffectOutputKind::ToolResult,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br#"{"schema":1}"#),
+        },
+        Some("shutdown"),
+        None::<&str>,
+    )
+    .expect("tool cancelled");
+    let event_id = EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("event");
+    let session = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("session");
+    let lane = LaneId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("lane");
+    let run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("run");
+    for body in [
+        RunEventBody::EffectCancelled(model),
+        RunEventBody::EffectCancelled(tool),
+    ] {
+        let durable = RunEvent::try_durable(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Public,
+            body.clone(),
+        )
+        .expect_err("public cancelled effect must be rejected");
+        assert_eq!(durable.code(), "event_correlation_mismatch");
+        let transient = RunEvent::try_transient(
+            RUN_EVENT_SCHEMA_VERSION,
+            RUN_EVENT_KIND_VERSION,
+            event_id,
+            session,
+            lane,
+            run,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            Sensitivity::Public,
+            body,
+        )
+        .expect_err("transient cancelled effect must be rejected");
+        assert!(
+            transient.code() == "event_class_mismatch"
+                || transient.code() == "event_correlation_mismatch"
+        );
+    }
 }

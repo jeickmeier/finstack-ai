@@ -14,11 +14,11 @@ pub const RAW_JSON_DIGEST_SCHEMA_VERSION: u32 = 1;
 pub const DOMAIN_BLOB_CONTENT: &str = "blob-content";
 /// Schema version embedded in the current blob-content digest domain.
 pub const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for record-payload digests (TDD §6.4; bytes owned by PR-039).
+/// Fixed domain name for record-payload digests (TDD §6.4).
 pub const DOMAIN_RECORD_PAYLOAD: &str = "record-payload";
 /// Schema version for the `record-payload` digest domain.
 pub const RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION: u32 = 1;
-/// Fixed domain name for record-envelope checksums (TDD §12.1; PR-039).
+/// Fixed domain name for record-envelope checksums (TDD §12.1).
 pub const DOMAIN_RECORD_ENVELOPE: &str = "record-envelope";
 /// Schema version for the `record-envelope` digest domain.
 pub const RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION: u32 = 1;

@@ -20,6 +20,12 @@ wheels/
 # pytest
 .pytest_cache/
 
+# Coverage
+target/coverage/
+.coverage
+htmlcov/
+coverage.xml
+
 # Local agent working directory (not docs/superpowers/)
 /superpowers/
 

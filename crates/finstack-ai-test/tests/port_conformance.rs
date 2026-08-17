@@ -5,8 +5,8 @@ use std::sync::Arc;
 use finstack_ai_kernel::{
     AppendBatchTag, AuthorizationEvidence, ComponentId, ComponentInvocation, ComponentRef, Digest,
     EffectTag, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget, Id, IdTag,
-    InvocationRecovery, LaneTag, PrincipalRef, RecordBody, RecordDraft, RecordTag, RunTag,
-    SessionTag, Timestamp, Version, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+    InvocationRecovery, LaneTag, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+    RecordBody, RecordDraft, RecordTag, RunTag, SessionTag, Timestamp, Version,
 };
 use finstack_ai_runtime::{
     AuthorizationContext, CancellationSignal, ContextBudget, ContextCallContext,
@@ -17,11 +17,10 @@ use finstack_ai_runtime::{
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
-    check_context_conformance, check_journal_store_conformance, check_middleware_conformance,
-    check_observer_conformance, ContextConformanceCase, FaultJournalStore,
-    JournalStoreConformanceCase, MiddlewareConformanceCase, ScriptedContextAction,
-    ScriptedContextProvider, ScriptedMiddleware, ScriptedMiddlewareAction, ScriptedObserver,
-    StoreOperation,
+    ContextConformanceCase, FaultJournalStore, JournalStoreConformanceCase,
+    MiddlewareConformanceCase, ScriptedContextAction, ScriptedContextProvider, ScriptedMiddleware,
+    ScriptedMiddlewareAction, ScriptedObserver, StoreOperation, check_context_conformance,
+    check_journal_store_conformance, check_middleware_conformance, check_observer_conformance,
 };
 
 fn id<T: IdTag>(ordinal: u64) -> Id<T> {

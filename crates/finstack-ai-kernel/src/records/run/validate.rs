@@ -44,12 +44,16 @@ pub(super) fn validate_relation_shape(
 }
 
 pub(super) fn validate_child_against_parent(
+    run_id: RunId,
     relation: &RunRelation,
     security: &RunSecurityContext,
     effective_deadline: Option<Timestamp>,
     limits: &RunLimits,
     parent: &RunAccepted,
 ) -> Result<(), RunError> {
+    if run_id == parent.run_id() {
+        return Err(RunError::ChildRunIdentityReuse);
+    }
     if relation.root_run_id() != parent.relation().root_run_id() {
         return Err(RunError::NotAttenuated {
             reason: "root_run_id mismatch",

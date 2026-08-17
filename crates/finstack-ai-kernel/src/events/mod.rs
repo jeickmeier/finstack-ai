@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Current runtime-event schema version.
 pub const RUN_EVENT_SCHEMA_VERSION: u16 = 1;
-/// Current runtime-event kind version for PR-008 surfaces.
+/// Current runtime-event kind version.
 pub const RUN_EVENT_KIND_VERSION: u16 = 1;
 
 /// Semantic class of a [`RunEvent`].

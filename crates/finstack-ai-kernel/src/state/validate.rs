@@ -317,7 +317,7 @@ impl KernelState {
                 }
             }
         }
-        if self.state_version == 4 {
+        if self.state_version >= 4 {
             if self
                 .output_configuration
                 .as_ref()

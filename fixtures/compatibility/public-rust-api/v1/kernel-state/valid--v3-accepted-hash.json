@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "subject": "kernel-state",
+  "operation": "v3_accepted_hash",
+  "input": {
+    "state_version": 3
+  },
+  "expect": {
+    "ok": true,
+    "state_hash": "9c17434fae29d0f52cfbf6ad70f7c467461cb37f517455cb47792976ba842677"
+  }
+}

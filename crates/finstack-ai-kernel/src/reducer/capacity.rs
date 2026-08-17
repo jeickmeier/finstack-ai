@@ -20,6 +20,7 @@ pub(super) struct StateGrowth<'a> {
     pub resolution: Option<&'a str>,
     pub tool_calls: &'a [ToolCallId],
     pub tool_settlements: &'a [EffectId],
+    pub extra_tool_settlements: usize,
 }
 
 pub(super) fn preflight_decision(
@@ -91,7 +92,8 @@ pub(super) fn preflight_decision(
         .filter(|key| !state.tool_settlements.contains_key(key))
         .copied()
         .collect::<BTreeSet<_>>()
-        .len();
+        .len()
+        .saturating_add(growth.extra_tool_settlements);
     check(
         "tool_settlements",
         state.tool_settlements.len(),

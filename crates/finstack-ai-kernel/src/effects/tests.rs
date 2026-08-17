@@ -6,7 +6,7 @@ use crate::primitives::Digest;
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::{ArtifactId, ComponentId, EffectId};
 use crate::primitives::{ArtifactRef, ExternalHandleRef};
-use crate::primitives::{Metadata, RawJson};
+use crate::primitives::{AssigneeHint, ComponentRef, InteractionId, Metadata, RawJson, Version};
 
 #[test]
 fn effect_input_external_tag_round_trips_raw_json() {
@@ -210,4 +210,33 @@ fn effect_settlements_must_preserve_originating_output_contract() {
             .code(),
         "effect_settlement_mismatch"
     );
+}
+
+#[test]
+fn interaction_request_rejects_empty_assignee_role() {
+    let interaction = InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("id");
+    let err = InteractionRequest::try_new(
+        1,
+        interaction,
+        effect,
+        InteractionKind::Approval,
+        vec![],
+        RawJson::parse("{}").expect("schema"),
+        ComponentRef::new(
+            ComponentId::parse("policy.approval").expect("component"),
+            None,
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        Some(AssigneeHint::Role(Arc::from(""))),
+        None,
+        false,
+        Metadata::empty(),
+    )
+    .expect_err("empty role");
+    assert_eq!(err.code(), "invalid_label");
 }

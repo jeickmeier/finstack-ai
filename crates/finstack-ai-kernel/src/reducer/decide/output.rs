@@ -237,12 +237,6 @@ fn output_validation_body(
             },
         }),
         crate::ValidationOutcome::Invalid { issues, feedback } => {
-            if issues.is_empty() {
-                return Err(KernelError::InvalidInputPayload {
-                    field: "outcome.issues",
-                    reason_code: "must_not_be_empty",
-                });
-            }
             let error = crate::records::policy::expected_validation_error(
                 state.retry.attempts,
                 state

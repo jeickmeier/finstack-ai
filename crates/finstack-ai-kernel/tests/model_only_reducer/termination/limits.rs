@@ -563,3 +563,107 @@ fn security_validation_precedes_limit_and_hard_deadline_precedes_explicit_cancel
     assert_eq!(failed.error.category, ErrorCategory::Deadline);
     assert!(decision.actions.is_empty());
 }
+
+#[test]
+fn equal_context_prepared_redelivery_does_not_consume_turn_limit() {
+    let mut limits = RunLimits::empty();
+    limits.max_turns = Some(1);
+    let mut harness = Harness::default();
+    accept_with(&mut harness, limits, None);
+    settle_before_run(&mut harness);
+    let input = stage_input(
+        0,
+        Stage::PrepareContext,
+        ReducerStageOutcome::ContextPrepared {
+            messages: Arc::from(context_messages()),
+        },
+    );
+    harness.apply_input(
+        transition_env(1_200, &[3, 4], &[], &[], &[TURN_ONE], &[], &[]),
+        input.clone(),
+    );
+    let usage = harness.kernel.state().limit_usage.clone();
+    assert_eq!(usage.turns, 1);
+    let duplicate = harness
+        .kernel
+        .decide(&empty_env(1_201), input)
+        .expect("equal context redelivery");
+    assert!(duplicate.records.is_empty());
+    assert_eq!(harness.kernel.state().limit_usage, usage);
+    assert!(
+        !duplicate
+            .records
+            .iter()
+            .any(|record| matches!(record.body(), RecordBody::LimitReached(_)))
+    );
+}
+
+#[test]
+fn equal_model_settled_redelivery_does_not_consume_completion_usage() {
+    let mut limits = RunLimits::empty();
+    limits.max_input_tokens = Some(10);
+    let mut harness = drive_to_awaiting_model_with_limits(limits);
+    let usage = finstack_ai_kernel::Usage::try_new(Some(10), None, None, None, BTreeMap::new())
+        .expect("usage");
+    let input = completed_input_with_usage(
+        TURN_ONE,
+        MODEL_REQUEST_ONE,
+        EFFECT_ONE,
+        FINAL_MESSAGE_ONE,
+        1_400,
+        "token-redelivery",
+        usage,
+    );
+    harness.apply_input(
+        transition_env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[FINAL_MESSAGE_ONE]),
+        input.clone(),
+    );
+    let before = harness.kernel.state().limit_usage.clone();
+    assert_eq!(before.input_tokens, 10);
+    let duplicate = harness
+        .kernel
+        .decide(&empty_env(1_401), input)
+        .expect("equal model redelivery");
+    assert!(duplicate.records.is_empty());
+    assert_eq!(harness.kernel.state().limit_usage, before);
+    assert!(
+        !duplicate
+            .records
+            .iter()
+            .any(|record| matches!(record.body(), RecordBody::LimitReached(_)))
+    );
+}
+
+#[test]
+fn decide_limit_counter_overflow_is_terminal_run_failed() {
+    let mut harness = Harness::default();
+    accept_with(&mut harness, RunLimits::empty(), None);
+    settle_before_run(&mut harness);
+    let mut state = harness.kernel.state().clone();
+    state.limit_usage.turns = u64::MAX;
+    let kernel = Kernel::try_restore(state).expect("restore overflow state");
+    let decision = kernel
+        .decide(
+            &transition_env(1_200, &[3], &[2], &[], &[], &[], &[]),
+            stage_input(
+                0,
+                Stage::PrepareContext,
+                ReducerStageOutcome::ContextPrepared {
+                    messages: Arc::from(context_messages()),
+                },
+            ),
+        )
+        .expect("overflow decision");
+    assert_eq!(decision.records.len(), 1);
+    let RecordBody::RunFailed(failed) = decision.records[0].body() else {
+        panic!("overflow must be a terminal RunFailed");
+    };
+    assert_eq!(failed.error.code.as_str(), "turns_overflow");
+    assert_eq!(failed.error.category, ErrorCategory::Limit);
+    assert!(
+        !decision
+            .records
+            .iter()
+            .any(|record| matches!(record.body(), RecordBody::LimitReached(_)))
+    );
+}

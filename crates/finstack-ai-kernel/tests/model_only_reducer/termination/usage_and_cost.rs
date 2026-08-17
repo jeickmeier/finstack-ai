@@ -47,7 +47,22 @@ fn missing_cost_usage_obeys_fail_closed_and_suspend_policies() {
         assert_eq!(decision.records[0].body().kind_name(), expected_kind);
         assert!(decision.actions.is_empty());
         if policy == finstack_ai_kernel::UnknownUsagePolicy::AllowWithinReservedMaximum {
-            assert!(harness.kernel.state().limit_usage.cost.is_none());
+            let cost = harness
+                .kernel
+                .state()
+                .limit_usage
+                .cost
+                .as_ref()
+                .expect("reserved maximum");
+            assert_eq!(cost.unit(), "USD");
+            assert_eq!(cost.micros(), 1_000_000);
+            assert_eq!(cost.pricing_policy_version(), "prices-v1");
+            assert!(
+                !decision
+                    .records
+                    .iter()
+                    .any(|record| matches!(record.body(), RecordBody::RunFailed(_)))
+            );
         }
     }
 }

@@ -77,11 +77,11 @@ fn nested_raw_json_preserves_strict_source_validation() {
     );
     assert!(duplicate.is_err());
 
-    let escaped = r"\u0061".repeat(crate::primitives::RAW_JSON_MAX_BYTES / 6 + 1);
+    let oversized_value = "a".repeat(crate::primitives::RAW_JSON_MAX_BYTES - 1);
     let oversized_source = format!(
         r#"{{
             "kind":"json",
-            "value":"{escaped}"
+            "value":"{oversized_value}"
         }}"#
     );
     let oversized = serde_json::from_str::<ContentBlock>(&oversized_source);
@@ -100,7 +100,7 @@ fn content_block_accepts_owned_and_reader_json_inputs() {
 }
 
 #[test]
-fn nested_tool_kind_is_rejected_before_its_payload_is_decoded() {
+fn nested_tool_kind_is_rejected_after_decode() {
     let error = serde_json::from_str::<ContentBlock>(
         r#"{
             "kind":"tool_result",
@@ -108,7 +108,7 @@ fn nested_tool_kind_is_rejected_before_its_payload_is_decoded() {
             "content":[{
                 "kind":"tool_result",
                 "tool_call_id":"01234567-89ab-7cde-89ab-0123456789cd",
-                "content":[{"kind":"reasoning","text":"must not be reached"}]
+                "content":[{"kind":"text","text":"nested"}]
             }]
         }"#,
     )
@@ -163,4 +163,103 @@ fn bounded_string_checks_escaped_length_before_decoding() {
 
     let over = serde_json::from_str::<BoundedString<4>>(r#""\u0061\u0061\u0061\u0061\u0061""#);
     assert!(over.is_err());
+}
+
+fn content_block_round_trip_cases() -> Vec<(&'static str, ContentBlock)> {
+    let call_id = ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    let media =
+        MediaRef::new(BlobRef::try_new("b1", "image/png", 10, None, None::<&str>).expect("blob"));
+    vec![
+        (
+            "text",
+            ContentBlock::Text(TextBlock::try_new("hello").expect("text")),
+        ),
+        (
+            "json",
+            ContentBlock::Json(JsonBlock::new(RawJson::parse(r#"{"k":1}"#).expect("json"))),
+        ),
+        ("image", ContentBlock::Image(media.clone())),
+        ("audio", ContentBlock::Audio(media.clone())),
+        ("file", ContentBlock::File(media)),
+        (
+            "tool_call",
+            ContentBlock::ToolCall(
+                ToolCallBlock::try_new(
+                    call_id,
+                    "lookup",
+                    RawJson::parse(r#"{"q":1}"#).expect("args"),
+                )
+                .expect("call"),
+            ),
+        ),
+        (
+            "tool_result",
+            ContentBlock::ToolResult(
+                ToolResultBlock::try_new(
+                    call_id,
+                    vec![ContentBlock::Text(TextBlock::try_new("ok").expect("text"))],
+                    false,
+                )
+                .expect("result"),
+            ),
+        ),
+        (
+            "opaque_bytes",
+            ContentBlock::Opaque(
+                OpaqueBlock::try_new(
+                    "application/octet-stream",
+                    OpaquePayload::bytes(vec![0xde, 0xad]).expect("bytes"),
+                )
+                .expect("opaque bytes"),
+            ),
+        ),
+        (
+            "opaque_json",
+            ContentBlock::Opaque(
+                OpaqueBlock::try_new(
+                    "application/vnd.example+json",
+                    OpaquePayload::json(RawJson::parse(r#"{"k":1}"#).expect("json")),
+                )
+                .expect("opaque json"),
+            ),
+        ),
+    ]
+}
+
+#[test]
+fn content_block_json_and_cbor_round_trips() {
+    for (label, block) in content_block_round_trip_cases() {
+        let json = serde_json::to_string(&block).expect(label);
+        let json_round: ContentBlock = serde_json::from_str(&json).expect(label);
+        assert_eq!(json_round, block, "json {label}");
+
+        let cbor = finstack_ai_protocol::encode(&block).expect(label);
+        let cbor_round: ContentBlock = finstack_ai_protocol::decode(&cbor).expect(label);
+        assert_eq!(cbor_round, block, "cbor {label}");
+    }
+}
+
+#[test]
+fn empty_tool_result_and_message_content_cbor_round_trip() {
+    let call_id = ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    let empty =
+        ContentBlock::ToolResult(ToolResultBlock::try_new(call_id, vec![], false).expect("empty"));
+    let encoded = finstack_ai_protocol::encode(&empty).expect("encode empty");
+    let decoded: ContentBlock = finstack_ai_protocol::decode(&encoded).expect("decode empty");
+    assert_eq!(decoded, empty);
+
+    let items = vec![
+        ContentBlock::Text(TextBlock::try_new("hello").expect("text")),
+        ContentBlock::ToolResult(
+            ToolResultBlock::try_new(
+                call_id,
+                vec![ContentBlock::Text(TextBlock::try_new("ok").expect("text"))],
+                false,
+            )
+            .expect("result"),
+        ),
+    ];
+    let encoded = finstack_ai_protocol::encode(&items).expect("encode items");
+    let decoded: Vec<ContentBlock> = finstack_ai_protocol::decode(&encoded).expect("decode items");
+    assert_eq!(decoded, items);
 }

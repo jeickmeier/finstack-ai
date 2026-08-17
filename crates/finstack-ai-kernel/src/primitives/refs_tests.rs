@@ -53,6 +53,20 @@ fn cost_micros_boundary_values_round_trip_as_canonical_decimal_strings() {
 }
 
 #[test]
+fn assignee_hint_rejects_empty_and_nul_labels() {
+    for invalid in [
+        r#"{"role":""}"#,
+        "{\"role\":\"a\\u0000b\"}",
+        r#"{"queue":""}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<AssigneeHint>(invalid).is_err(),
+            "invalid assignee hint was accepted: {invalid}"
+        );
+    }
+}
+
+#[test]
 fn role_and_queue_assignee_hints_round_trip() {
     for hint in [
         AssigneeHint::Role(Arc::<str>::from("reviewer")),

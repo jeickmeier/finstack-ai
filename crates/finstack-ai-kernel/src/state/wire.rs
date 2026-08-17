@@ -57,6 +57,12 @@ struct KernelStateWireV1<'a> {
     completion_identities: Vec<CompletionIdentityHashEntryV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
     terminal: Option<&'a TerminalState>,
+    /// Snapshot-only sidecar; excluded from the v1 hash and from v3 field names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_accepted_at: Option<Timestamp>,
+    /// Snapshot-only sidecar; excluded from the v1 hash and from v3 field names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_limit_usage: Option<&'a LimitUsage>,
 }
 
 #[derive(Serialize)]
@@ -88,6 +94,12 @@ struct KernelStateWireV2<'a> {
     last_tool_batch: Option<&'a ToolBatchClosed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     terminal: Option<&'a TerminalState>,
+    /// Snapshot-only sidecar; excluded from the v2 hash and from v3 field names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_accepted_at: Option<Timestamp>,
+    /// Snapshot-only sidecar; excluded from the v2 hash and from v3 field names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_limit_usage: Option<&'a LimitUsage>,
 }
 
 #[derive(Serialize)]
@@ -258,6 +270,10 @@ struct KernelStateWireOwned {
     last_interaction_terminal: NullableField<InteractionTerminal>,
     #[serde(default)]
     terminal: Option<TerminalState>,
+    #[serde(default)]
+    snapshot_accepted_at: Option<Timestamp>,
+    #[serde(default)]
+    snapshot_limit_usage: Option<LimitUsage>,
 }
 
 #[derive(Default)]
@@ -324,6 +340,8 @@ impl Serialize for KernelState {
                 model_settlements: model_hash_entries(&self.model_settlements),
                 completion_identities: completion_hash_entries(&self.completion_identities),
                 terminal: self.terminal.as_ref(),
+                snapshot_accepted_at: self.accepted_at,
+                snapshot_limit_usage: v1_v2_snapshot_limit_usage(&self.limit_usage),
             }
             .serialize(serializer)
         } else if self.state_version == 2 {
@@ -347,6 +365,8 @@ impl Serialize for KernelState {
                 tool_settlements: tool_settlement_hash_entries(&self.tool_settlements),
                 last_tool_batch: self.last_tool_batch.as_ref(),
                 terminal: self.terminal.as_ref(),
+                snapshot_accepted_at: self.accepted_at,
+                snapshot_limit_usage: v1_v2_snapshot_limit_usage(&self.limit_usage),
             }
             .serialize(serializer)
         } else if self.state_version == 3 {
@@ -714,16 +734,29 @@ impl<'de> Deserialize<'de> for KernelState {
                 return Err(de::Error::custom("duplicate resolution identity"));
             }
         }
+        let accepted_at = if wire.state_version >= 3 {
+            match wire.accepted_at {
+                NullableField::Missing => None,
+                NullableField::Present(value) => value,
+            }
+        } else {
+            wire.snapshot_accepted_at
+        };
+        let limit_usage = if wire.state_version >= 3 {
+            match wire.limit_usage {
+                RequiredField::Missing => LimitUsage::default(),
+                RequiredField::Present(value) => value,
+            }
+        } else {
+            wire.snapshot_limit_usage.unwrap_or_default()
+        };
         let state = Self {
             state_version: wire.state_version,
             last_applied_sequence: wire.last_applied_sequence,
             session_id: wire.session_id,
             lane_id: wire.lane_id,
             accepted: wire.accepted,
-            accepted_at: match wire.accepted_at {
-                NullableField::Missing => None,
-                NullableField::Present(value) => value,
-            },
+            accepted_at,
             phase: wire.phase,
             cycle: wire.cycle,
             current_turn: wire.current_turn,
@@ -752,10 +785,7 @@ impl<'de> Deserialize<'de> for KernelState {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
             },
-            limit_usage: match wire.limit_usage {
-                RequiredField::Missing => LimitUsage::default(),
-                RequiredField::Present(value) => value,
-            },
+            limit_usage,
             cancellation: match wire.cancellation {
                 NullableField::Missing => None,
                 NullableField::Present(value) => value,
@@ -800,4 +830,8 @@ impl<'de> Deserialize<'de> for KernelState {
         state.validate().map_err(de::Error::custom)?;
         Ok(state)
     }
+}
+
+fn v1_v2_snapshot_limit_usage(usage: &LimitUsage) -> Option<&LimitUsage> {
+    (*usage != LimitUsage::default()).then_some(usage)
 }

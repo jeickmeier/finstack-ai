@@ -4,19 +4,30 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::effects::{ComponentInvocation, EffectRelation, EffectRequested, PipelinePosition};
+use crate::effects::{
+    ComponentInvocation, EffectRelation, EffectRequested, InteractionKind, InteractionRequest,
+    PipelinePosition,
+};
 use crate::primitives::Digest;
 use crate::primitives::{
-    BudgetScopeId, EffectId, LimitKey, MessageId, ModelRequestId, RunId, ToolBatchId, ToolCallId,
-    ToolId, TurnId,
+    AssigneeHint, BudgetReservationId, BudgetScopeId, ComponentId, ComponentRef, EffectId,
+    ExternalHandleRef, InteractionId, LimitKey, MessageId, ModelRequestId, RunId, ToolBatchId,
+    ToolCallId, ToolId, TurnId, Version,
 };
 use crate::primitives::{CostAmount, PrincipalRef};
 use crate::primitives::{Duration, Timestamp};
+use crate::primitives::{Metadata, RawJson};
 use crate::records::lifecycle::{
-    ContextPrepared, RunCancelled, RunCompleted, RunFailed, RunSuspended,
+    ContextPrepared, RunCancelled, RunCompleted, RunFailed, RunSuspended, StageCursor,
 };
-use crate::records::policy::{CostLimit, LimitUsage, RunLimits};
+use crate::records::policy::{
+    BudgetChargeReceipt, BudgetReleaseReceipt, BudgetRequest, BudgetReservationReceipt,
+    BudgetReserveRequest, CostLimit, FinalResultRecorded, LimitDimension, LimitReached, LimitUsage,
+    LimitValue, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidationFailed,
+    RunLimits, SchemaRef, StructuredResultSource, ValidationIssue,
+};
 use crate::records::run::{
+    ChildPlacement, ChildRunLocator, ChildRunPrepared, OperationLocator, RemoteRouteRef,
     RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
 use crate::records::tools::{
@@ -25,12 +36,14 @@ use crate::records::tools::{
     ToolFailurePolicy, ValidatedToolCall,
 };
 use crate::state::projection::{
-    ContentProjection, EffectDeferredProjection, ErrorProjection, MessageSeq,
+    ContentProjection, ContentSeq, EffectDeferredProjection, ErrorProjection, MessageSeq,
+    UsageProjection,
 };
 
 use super::super::{
-    CancellationState, CurrentTurn, PendingModelEffect, RetryState, RunPhase, TerminalCandidate,
-    TerminalState,
+    BudgetReservationReplay, CancellationState, CurrentTurn, InteractionTerminal,
+    InteractionTerminalOutcome, PendingInteraction, PendingModelEffect, RetryState, RunPhase,
+    TerminalCandidate, TerminalState,
 };
 
 #[derive(Serialize)]
@@ -730,6 +743,430 @@ impl<'a> From<&'a RunFailed> for RunFailedProjection<'a> {
             model_request_id: value.model_request_id,
             effect_id: value.effect_id,
             error: ErrorProjection::from(&value.error),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct LimitReachedProjection<'a> {
+    dimension: &'a LimitDimension,
+    observed: &'a LimitValue,
+    maximum: &'a LimitValue,
+    usage: LimitUsageProjection<'a>,
+    usage_digest: Digest,
+}
+
+impl<'a> From<&'a LimitReached> for LimitReachedProjection<'a> {
+    fn from(value: &'a LimitReached) -> Self {
+        Self {
+            dimension: &value.dimension,
+            observed: &value.observed,
+            maximum: &value.maximum,
+            usage: LimitUsageProjection::from(&value.usage),
+            usage_digest: value.usage_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct OutputConfigurationProjection<'a> {
+    output: &'a OutputSpec,
+    end_strategy: OutputEndStrategy,
+}
+
+impl<'a> From<&'a OutputConfiguration> for OutputConfigurationProjection<'a> {
+    fn from(value: &'a OutputConfiguration) -> Self {
+        Self {
+            output: &value.output,
+            end_strategy: value.end_strategy,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct FinalResultRecordedProjection<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    model_request_id: ModelRequestId,
+    effect_id: EffectId,
+    message_id: MessageId,
+    schema: &'a SchemaRef,
+    value: &'a RawJson,
+    value_digest: Digest,
+    source: &'a StructuredResultSource,
+    end_strategy: OutputEndStrategy,
+    skipped_tool_call_ids: &'a [ToolCallId],
+}
+
+impl<'a> From<&'a FinalResultRecorded> for FinalResultRecordedProjection<'a> {
+    fn from(value: &'a FinalResultRecorded) -> Self {
+        Self {
+            cycle: value.cycle,
+            turn_id: value.turn_id,
+            model_request_id: value.model_request_id,
+            effect_id: value.effect_id,
+            message_id: value.message_id,
+            schema: &value.schema,
+            value: &value.value,
+            value_digest: value.value_digest,
+            source: &value.source,
+            end_strategy: value.end_strategy,
+            skipped_tool_call_ids: &value.skipped_tool_call_ids,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct OutputValidationFailedProjection<'a> {
+    cycle: u64,
+    turn_id: TurnId,
+    model_request_id: ModelRequestId,
+    effect_id: EffectId,
+    message_id: MessageId,
+    schema: &'a SchemaRef,
+    candidate_digest: Digest,
+    source: &'a StructuredResultSource,
+    issues: Vec<ValidationIssueProjection<'a>>,
+    feedback: &'a str,
+    error: ErrorProjection<'a>,
+    skipped_tool_call_ids: &'a [ToolCallId],
+}
+
+impl<'a> From<&'a OutputValidationFailed> for OutputValidationFailedProjection<'a> {
+    fn from(value: &'a OutputValidationFailed) -> Self {
+        Self {
+            cycle: value.cycle,
+            turn_id: value.turn_id,
+            model_request_id: value.model_request_id,
+            effect_id: value.effect_id,
+            message_id: value.message_id,
+            schema: &value.schema,
+            candidate_digest: value.candidate_digest,
+            source: &value.source,
+            issues: value
+                .issues
+                .iter()
+                .map(ValidationIssueProjection::from)
+                .collect(),
+            feedback: &value.feedback,
+            error: ErrorProjection::from(&value.error),
+            skipped_tool_call_ids: &value.skipped_tool_call_ids,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ValidationIssueProjection<'a> {
+    instance_path: &'a str,
+    schema_path: &'a str,
+    keyword: Option<&'a str>,
+    message: &'a str,
+}
+
+impl<'a> From<&'a ValidationIssue> for ValidationIssueProjection<'a> {
+    fn from(value: &'a ValidationIssue) -> Self {
+        Self {
+            instance_path: &value.instance_path,
+            schema_path: &value.schema_path,
+            keyword: value.keyword.as_deref(),
+            message: &value.message,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ChildRunPreparedProjection<'a> {
+    parent_run_id: RunId,
+    parent_effect_id: EffectId,
+    child: ChildRunLocatorProjection<'a>,
+    request_digest: Digest,
+    placement: ChildPlacement,
+    budget_reservation_id: Option<BudgetReservationId>,
+}
+
+impl<'a> From<&'a ChildRunPrepared> for ChildRunPreparedProjection<'a> {
+    fn from(value: &'a ChildRunPrepared) -> Self {
+        Self {
+            parent_run_id: value.parent_run_id,
+            parent_effect_id: value.parent_effect_id,
+            child: ChildRunLocatorProjection::from(&value.child),
+            request_digest: value.request_digest,
+            placement: value.placement,
+            budget_reservation_id: value.budget_reservation_id,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ChildRunLocatorProjection<'a> {
+    operation: &'a OperationLocator,
+    remote: Option<RemoteRouteRefProjection<'a>>,
+}
+
+impl<'a> From<&'a ChildRunLocator> for ChildRunLocatorProjection<'a> {
+    fn from(value: &'a ChildRunLocator) -> Self {
+        Self {
+            operation: &value.operation,
+            remote: value.remote.as_ref().map(RemoteRouteRefProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct RemoteRouteRefProjection<'a> {
+    service: ComponentRefProjection<'a>,
+    route: &'a ExternalHandleRef,
+}
+
+impl<'a> From<&'a RemoteRouteRef> for RemoteRouteRefProjection<'a> {
+    fn from(value: &'a RemoteRouteRef) -> Self {
+        Self {
+            service: ComponentRefProjection::from(&value.service),
+            route: &value.route,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ComponentRefProjection<'a> {
+    id: &'a ComponentId,
+    version: Option<Version>,
+}
+
+impl<'a> From<&'a ComponentRef> for ComponentRefProjection<'a> {
+    fn from(value: &'a ComponentRef) -> Self {
+        Self {
+            id: value.id(),
+            version: value.version(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct BudgetReservationReplayProjection<'a> {
+    request: BudgetReserveRequestProjection<'a>,
+    settlement: Option<BudgetReservationReceiptProjection<'a>>,
+    release: Option<BudgetReleaseReceiptProjection<'a>>,
+}
+
+impl<'a> From<&'a BudgetReservationReplay> for BudgetReservationReplayProjection<'a> {
+    fn from(value: &'a BudgetReservationReplay) -> Self {
+        Self {
+            request: BudgetReserveRequestProjection::from(&value.request),
+            settlement: value
+                .settlement
+                .as_ref()
+                .map(BudgetReservationReceiptProjection::from),
+            release: value
+                .release
+                .as_ref()
+                .map(BudgetReleaseReceiptProjection::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BudgetReserveRequestProjection<'a> {
+    scope_id: BudgetScopeId,
+    reservation_id: BudgetReservationId,
+    run_id: RunId,
+    amount: BudgetRequestProjection<'a>,
+    request_digest: Digest,
+}
+
+impl<'a> From<&'a BudgetReserveRequest> for BudgetReserveRequestProjection<'a> {
+    fn from(value: &'a BudgetReserveRequest) -> Self {
+        Self {
+            scope_id: value.scope_id,
+            reservation_id: value.reservation_id,
+            run_id: value.run_id,
+            amount: BudgetRequestProjection::from(&value.amount),
+            request_digest: value.request_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BudgetRequestProjection<'a> {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cost: Option<&'a CostLimit>,
+    extension_counters: &'a BTreeMap<LimitKey, u64>,
+}
+
+impl<'a> From<&'a BudgetRequest> for BudgetRequestProjection<'a> {
+    fn from(value: &'a BudgetRequest) -> Self {
+        Self {
+            input_tokens: value.input_tokens,
+            output_tokens: value.output_tokens,
+            cost: value.cost.as_ref(),
+            extension_counters: &value.extension_counters,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BudgetReservationReceiptProjection<'a> {
+    scope_id: BudgetScopeId,
+    reservation_id: BudgetReservationId,
+    reserved: BudgetRequestProjection<'a>,
+    remaining: BudgetRequestProjection<'a>,
+    request_digest: Digest,
+    receipt_digest: Digest,
+}
+
+impl<'a> From<&'a BudgetReservationReceipt> for BudgetReservationReceiptProjection<'a> {
+    fn from(value: &'a BudgetReservationReceipt) -> Self {
+        Self {
+            scope_id: value.scope_id,
+            reservation_id: value.reservation_id,
+            reserved: BudgetRequestProjection::from(&value.reserved),
+            remaining: BudgetRequestProjection::from(&value.remaining),
+            request_digest: value.request_digest,
+            receipt_digest: value.receipt_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BudgetReleaseReceiptProjection<'a> {
+    scope_id: BudgetScopeId,
+    reservation_id: BudgetReservationId,
+    terminal_run_id: RunId,
+    released_unused: BudgetRequestProjection<'a>,
+    request_digest: Digest,
+    receipt_digest: Digest,
+}
+
+impl<'a> From<&'a BudgetReleaseReceipt> for BudgetReleaseReceiptProjection<'a> {
+    fn from(value: &'a BudgetReleaseReceipt) -> Self {
+        Self {
+            scope_id: value.scope_id,
+            reservation_id: value.reservation_id,
+            terminal_run_id: value.terminal_run_id,
+            released_unused: BudgetRequestProjection::from(&value.released_unused),
+            request_digest: value.request_digest,
+            receipt_digest: value.receipt_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct BudgetChargeReceiptProjection<'a> {
+    scope_id: BudgetScopeId,
+    reservation_id: BudgetReservationId,
+    effect_id: EffectId,
+    charged_usage: UsageProjection<'a>,
+    cumulative_usage: UsageProjection<'a>,
+    usage_digest: Digest,
+    receipt_digest: Digest,
+}
+
+impl<'a> From<&'a BudgetChargeReceipt> for BudgetChargeReceiptProjection<'a> {
+    fn from(value: &'a BudgetChargeReceipt) -> Self {
+        Self {
+            scope_id: value.scope_id,
+            reservation_id: value.reservation_id,
+            effect_id: value.effect_id,
+            charged_usage: UsageProjection::from(&value.charged_usage),
+            cumulative_usage: UsageProjection::from(&value.cumulative_usage),
+            usage_digest: value.usage_digest,
+            receipt_digest: value.receipt_digest,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct PendingInteractionProjection<'a> {
+    request: InteractionRequestProjection<'a>,
+    prior_phase: RunPhase,
+    cursor: StageCursor,
+}
+
+impl<'a> From<&'a PendingInteraction> for PendingInteractionProjection<'a> {
+    fn from(value: &'a PendingInteraction) -> Self {
+        Self {
+            request: InteractionRequestProjection::from(&value.request),
+            prior_phase: value.prior_phase,
+            cursor: value.cursor,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct InteractionRequestProjection<'a> {
+    request_version: u16,
+    interaction_id: InteractionId,
+    effect_id: EffectId,
+    kind: &'a InteractionKind,
+    prompt: ContentSeq<'a>,
+    prompt_digest: Digest,
+    response_schema: &'a RawJson,
+    response_schema_digest: Digest,
+    policy_component: ComponentRefProjection<'a>,
+    policy_version: Version,
+    assignee_hint: Option<AssigneeHintProjection<'a>>,
+    expires_at: Option<Timestamp>,
+    delegatable: bool,
+    metadata: &'a Metadata,
+}
+
+impl<'a> From<&'a InteractionRequest> for InteractionRequestProjection<'a> {
+    fn from(value: &'a InteractionRequest) -> Self {
+        Self {
+            request_version: value.request_version(),
+            interaction_id: value.interaction_id(),
+            effect_id: value.effect_id(),
+            kind: value.kind(),
+            prompt: ContentSeq::new(value.prompt()),
+            prompt_digest: value.prompt_digest(),
+            response_schema: value.response_schema(),
+            response_schema_digest: value.response_schema_digest(),
+            policy_component: ComponentRefProjection::from(value.policy_component()),
+            policy_version: value.policy_version(),
+            assignee_hint: value.assignee_hint().map(AssigneeHintProjection::from),
+            expires_at: value.expires_at(),
+            delegatable: value.delegatable(),
+            metadata: value.metadata(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AssigneeHintProjection<'a> {
+    Principal(PrincipalRefProjection<'a>),
+    Role(&'a str),
+    Queue(&'a str),
+}
+
+impl<'a> From<&'a AssigneeHint> for AssigneeHintProjection<'a> {
+    fn from(value: &'a AssigneeHint) -> Self {
+        match value {
+            AssigneeHint::Principal(principal) => {
+                Self::Principal(PrincipalRefProjection::from(principal))
+            }
+            AssigneeHint::Role(role) => Self::Role(role),
+            AssigneeHint::Queue(queue) => Self::Queue(queue),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct InteractionTerminalProjection<'a> {
+    interaction_id: InteractionId,
+    kind: &'a InteractionKind,
+    cursor: StageCursor,
+    outcome: InteractionTerminalOutcome,
+}
+
+impl<'a> From<&'a InteractionTerminal> for InteractionTerminalProjection<'a> {
+    fn from(value: &'a InteractionTerminal) -> Self {
+        Self {
+            interaction_id: value.interaction_id,
+            kind: &value.kind,
+            cursor: value.cursor,
+            outcome: value.outcome,
         }
     }
 }

@@ -139,6 +139,9 @@ pub(super) fn apply_completed_usage(
                 .map_err(|_| KernelError::InvalidRecordOrder)?,
         )
         .ok_or(KernelError::InvalidRecordOrder)?;
+    if completed.usage().and_then(crate::Usage::cost).is_none() {
+        reserve_unknown_cost(state)?;
+    }
     let Some(usage) = completed.usage() else {
         return Ok(());
     };
@@ -184,6 +187,28 @@ pub(super) fn apply_completed_usage(
                 .ok_or(KernelError::InvalidRecordOrder)?,
         );
     }
+    Ok(())
+}
+
+fn reserve_unknown_cost(state: &mut KernelState) -> Result<(), KernelError> {
+    let Some(maximum) = state
+        .accepted
+        .as_ref()
+        .and_then(|accepted| accepted.limits().max_cost.as_ref())
+    else {
+        return Ok(());
+    };
+    if maximum.unknown_usage() != crate::UnknownUsagePolicy::AllowWithinReservedMaximum {
+        return Ok(());
+    }
+    state.limit_usage.cost = Some(
+        crate::CostAmount::try_new(
+            maximum.unit(),
+            maximum.micros(),
+            maximum.pricing_policy_version(),
+        )
+        .map_err(|_| KernelError::InvalidRecordOrder)?,
+    );
     Ok(())
 }
 

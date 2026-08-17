@@ -14,6 +14,10 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `format` | Write-mode `cargo fmt` and `ruff format` |
 | `check` | `cargo fmt --check`, Clippy with warnings denied, `ruff format --check`, `ruff check`, and `mypy --strict` |
 | `test` | `cargo test --workspace` and the Python test suite against an editable binding install |
+| `coverage` | Diagnostic Rust, Python, and WASM reports under `target/coverage/` (not in `ci`) |
+| `coverage-rust` | `cargo llvm-cov` workspace HTML + LCOV |
+| `coverage-python` | pytest-cov HTML + XML for the Python binding |
+| `coverage-wasm` | Scaffold artifact until wasm-bindgen-test coverage exists |
 | `check-wasm` | Type-check the selected wasm-host graph and reject Tokio/native I/O |
 | `generate-wasm` | Regenerate wasm-bindgen glue and the `@finstack/ai` TypeScript facade |
 | `test-browser` | Type-check and run the headless Chromium, Firefox, and WebKit package harness |

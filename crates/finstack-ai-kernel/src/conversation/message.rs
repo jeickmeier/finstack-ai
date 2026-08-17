@@ -386,8 +386,8 @@ impl Message {
     /// * `id` - Stable message identity.
     /// * `role` - Canonical conversation role; it must match the block kinds in
     ///   `content`.
-    /// * `content` - Ordered content blocks. Empty is allowed; nested tool
-    ///   blocks are rejected for [`MessageRole::Tool`].
+    /// * `content` - Ordered content blocks. Empty is allowed except for
+    ///   [`MessageRole::Tool`], which requires at least one tool-result block.
     /// * `created_at` - Environment-supplied creation timestamp.
     /// * `model` - Optional model that produced an assistant message; `None` for
     ///   other roles or when the producer is unknown.

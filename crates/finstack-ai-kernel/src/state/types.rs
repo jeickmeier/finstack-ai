@@ -156,7 +156,7 @@ pub enum ModelSettlementKind {
 pub struct ModelSettlementFingerprint {
     /// Terminal settlement kind.
     pub kind: ModelSettlementKind,
-    /// `model-settlement` schema-1 digest.
+    /// Domain-separated `model-settlement` digest (fingerprint schema 1).
     pub digest: Digest,
 }
 
@@ -220,7 +220,7 @@ pub struct InteractionTerminal {
     pub outcome: InteractionTerminalOutcome,
 }
 
-/// Applied terminal state owned by PR-009.
+/// Applied terminal run state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[expect(

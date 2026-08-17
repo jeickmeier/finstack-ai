@@ -115,6 +115,41 @@ fn apply_rejects_pr009_model_request_relation_and_pipeline_injection() {
 }
 
 #[test]
+fn model_request_contract_mismatch_is_stable() {
+    let mut harness = Harness::default();
+    accept(&mut harness);
+    settle_before_run(&mut harness);
+    prepare_context(&mut harness, 0, false);
+    let mut contract = output_contract();
+    contract.kind = EffectOutputKind::ToolResult;
+    assert_error_code(
+        harness.kernel.decide(
+            &transition_env(
+                1_300,
+                &[5, 6],
+                &[2],
+                &[EFFECT_ONE],
+                &[],
+                &[MODEL_REQUEST_ONE],
+                &[],
+            ),
+            stage_input(
+                0,
+                Stage::BeforeModel,
+                ReducerStageOutcome::ModelRequestPrepared {
+                    request: RawJson::parse(r#"{"messages":[]}"#).expect("request"),
+                    component: None,
+                    output_contract: contract,
+                    retry_safety: RetrySafety::SafeToRetry,
+                    deadline: None,
+                },
+            ),
+        ),
+        "model_request_contract_mismatch",
+    );
+}
+
+#[test]
 fn stage_failure_rejects_programmatically_invalid_descriptor() {
     let mut harness = Harness::default();
     accept(&mut harness);
@@ -317,4 +352,3 @@ fn late_completion_identity_conflict_rolls_back_temporary_apply_state() {
         "conflicting_completion_id",
     );
 }
-

@@ -61,7 +61,9 @@ pub use raw_json::{
     RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH, RawJson, RawJsonError,
 };
 pub use refs_error::RefsError;
-pub(crate) use refs_error::{validated_label, validated_text};
+pub(crate) use refs_error::{
+    deserialize_micros, serialize_micros, validated_label, validated_text,
+};
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,
 };

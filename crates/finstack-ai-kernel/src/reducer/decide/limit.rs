@@ -51,6 +51,7 @@ pub(super) fn decide_limit(
         .accepted
         .as_ref()
         .ok_or(KernelError::InvariantViolation)?;
+    let mut reserve_unknown_cost = false;
     if let Some(policy) = unknown_cost_policy(accepted, input) {
         match policy {
             crate::UnknownUsagePolicy::FailClosed => {
@@ -80,20 +81,30 @@ pub(super) fn decide_limit(
                     diagnostics: Vec::new(),
                 }));
             }
-            crate::UnknownUsagePolicy::AllowWithinReservedMaximum => {}
+            crate::UnknownUsagePolicy::AllowWithinReservedMaximum => {
+                reserve_unknown_cost = true;
+            }
         }
     }
     let mut usage = state.limit_usage.clone();
+    if reserve_unknown_cost {
+        reserve_remaining_cost(&mut usage, accepted.limits())?;
+    }
     if let Some(accepted_at) = state.accepted_at {
-        let elapsed = env
+        let Some(elapsed) = env
             .now
             .as_unix_ms()
             .checked_sub(accepted_at.as_unix_ms())
             .and_then(|value| u64::try_from(value).ok())
-            .ok_or(KernelError::InvalidInputPayload {
-                field: "wall_time",
-                reason_code: "overflow",
-            })?;
+        else {
+            return Ok(Some(control_failure_decision(
+                state,
+                env,
+                "wall_time_overflow",
+                "wall-time accounting overflowed",
+                ErrorCategory::Limit,
+            )?));
+        };
         usage.wall_time = crate::Duration::from_millis(elapsed);
     }
     match input {
@@ -101,63 +112,84 @@ pub(super) fn decide_limit(
             outcome: ReducerStageOutcome::ContextPrepared { .. },
             ..
         }) => {
-            usage.turns = usage
-                .turns
-                .checked_add(1)
-                .ok_or(KernelError::InvalidInputPayload {
-                    field: "turns",
-                    reason_code: "overflow",
-                })?;
+            let Some(turns) = usage.turns.checked_add(1) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "turns_overflow",
+                    "turn accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
+            usage.turns = turns;
             let (_, bytes) = context_canonical.ok_or(KernelError::InvariantViolation)?;
-            usage.context_bytes = usage
-                .context_bytes
-                .checked_add(u64::try_from(bytes).map_err(|_| KernelError::InvariantViolation)?)
-                .ok_or(KernelError::InvalidInputPayload {
-                    field: "context_bytes",
-                    reason_code: "overflow",
-                })?;
+            let added = u64::try_from(bytes).map_err(|_| KernelError::InvariantViolation)?;
+            let Some(context_bytes) = usage.context_bytes.checked_add(added) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "context_bytes_overflow",
+                    "context-byte accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
+            usage.context_bytes = context_bytes;
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ModelRequestPrepared { .. },
             ..
         }) => {
-            usage.model_requests =
-                usage
-                    .model_requests
-                    .checked_add(1)
-                    .ok_or(KernelError::InvalidInputPayload {
-                        field: "model_requests",
-                        reason_code: "overflow",
-                    })?;
+            let Some(model_requests) = usage.model_requests.checked_add(1) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "model_requests_overflow",
+                    "model-request accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
+            usage.model_requests = model_requests;
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ToolBatchPrepared { calls, .. },
             ..
         }) => {
-            usage.tool_calls = usage
-                .tool_calls
-                .checked_add(
-                    u64::try_from(calls.len()).map_err(|_| KernelError::InvariantViolation)?,
-                )
-                .ok_or(KernelError::InvalidInputPayload {
-                    field: "tool_calls",
-                    reason_code: "overflow",
-                })?;
-            let largest = largest_tool_group(calls)?;
+            let added = u64::try_from(calls.len()).map_err(|_| KernelError::InvariantViolation)?;
+            let Some(tool_calls) = usage.tool_calls.checked_add(added) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "tool_calls_overflow",
+                    "tool-call accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
+            usage.tool_calls = tool_calls;
+            let Ok(largest) = largest_tool_group(calls) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "parallel_tools_overflow",
+                    "parallel-tool accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
             usage.max_parallel_tools = usage.max_parallel_tools.max(largest);
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::Retry(_),
             ..
         }) => {
-            usage.retries =
-                usage
-                    .retries
-                    .checked_add(1)
-                    .ok_or(KernelError::InvalidInputPayload {
-                        field: "retries",
-                        reason_code: "overflow",
-                    })?;
+            let Some(retries) = usage.retries.checked_add(1) else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "retries_overflow",
+                    "retry accounting overflowed",
+                    ErrorCategory::Limit,
+                )?));
+            };
+            usage.retries = retries;
         }
         KernelInput::ModelSettled(ModelSettled {
             outcome: ModelSettlement::Completed { completion, .. },
@@ -211,14 +243,19 @@ pub(super) fn decide_limit(
 
     let deadline_crossing = match (state.accepted_at, accepted.effective_deadline()) {
         (Some(accepted_at), Some(deadline)) if env.now >= deadline => {
-            let maximum_ms = deadline
+            let Some(maximum_ms) = deadline
                 .as_unix_ms()
                 .checked_sub(accepted_at.as_unix_ms())
                 .and_then(|value| u64::try_from(value).ok())
-                .ok_or(KernelError::InvalidInputPayload {
-                    field: "deadline",
-                    reason_code: "overflow",
-                })?;
+            else {
+                return Ok(Some(control_failure_decision(
+                    state,
+                    env,
+                    "deadline_overflow",
+                    "deadline accounting overflowed",
+                    ErrorCategory::Deadline,
+                )?));
+            };
             Some((
                 LimitDimension::WallTime,
                 LimitValue::Duration(usage.wall_time),
@@ -312,7 +349,25 @@ fn control_failure_decision(
     })
 }
 
-fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, KernelError> {
+fn reserve_remaining_cost(
+    usage: &mut LimitUsage,
+    limits: &crate::RunLimits,
+) -> Result<(), KernelError> {
+    let Some(maximum) = limits.max_cost.as_ref() else {
+        return Ok(());
+    };
+    usage.cost = Some(
+        crate::CostAmount::try_new(
+            maximum.unit(),
+            maximum.micros(),
+            maximum.pricing_policy_version(),
+        )
+        .map_err(|_| KernelError::InvariantViolation)?,
+    );
+    Ok(())
+}
+
+fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, ()> {
     let mut largest = 0_u32;
     let mut current = 0_u32;
     for (index, call) in calls.iter().enumerate() {
@@ -320,12 +375,7 @@ fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, KernelError>
             || (calls[index - 1].execution() == crate::ToolExecutionMode::Parallel
                 && call.execution() == crate::ToolExecutionMode::Parallel)
         {
-            current = current
-                .checked_add(1)
-                .ok_or(KernelError::InvalidInputPayload {
-                    field: "parallel_tools",
-                    reason_code: "overflow",
-                })?;
+            current = current.checked_add(1).ok_or(())?;
         } else {
             current = 1;
         }

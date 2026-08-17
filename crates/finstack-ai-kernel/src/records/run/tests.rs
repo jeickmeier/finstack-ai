@@ -215,3 +215,71 @@ fn security_context_rejects_mismatched_principal_tenant() {
     .expect_err("tenant mismatch");
     assert_eq!(err.code(), "invalid_run_security_context");
 }
+
+#[test]
+fn child_run_cannot_reuse_parent_run_identity() {
+    let parent_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("parent");
+    let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("effect");
+    let parent = RunAccepted::try_new(
+        parent_run,
+        RunRelation::root(parent_run).expect("root"),
+        sample_security(),
+        None,
+        RunLimits::empty(),
+        RunPropagationPolicy {
+            cancellation: CancellationPropagation::Cascade,
+            deadline: DeadlinePropagation::MinimumOfParentAndChild,
+            budget: BudgetPropagation::SharedScope,
+            principal: PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(br"{}"),
+        None,
+    )
+    .expect("parent");
+    let relation = RunRelation::try_new(
+        parent_run,
+        Some(parent_run),
+        Some(effect),
+        RunRelationKind::ChildAgent,
+        1,
+        None,
+        None::<&str>,
+    )
+    .expect("relation");
+    let err = RunAccepted::try_new(
+        parent_run,
+        relation.clone(),
+        sample_security(),
+        None,
+        RunLimits::empty(),
+        parent.propagation(),
+        Digest::raw_json(br"{}"),
+        Some(&parent),
+    )
+    .expect_err("child must not reuse parent run_id");
+    assert_eq!(err.code(), "child_run_identity_reuse");
+
+    let child_run = RunId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("child");
+    let decoded = RunAccepted::try_new(
+        child_run,
+        relation,
+        sample_security(),
+        None,
+        RunLimits::empty(),
+        parent.propagation(),
+        Digest::raw_json(br"{}"),
+        Some(&parent),
+    )
+    .expect("distinct child");
+    let json = serde_json::to_string(&decoded).expect("serialize");
+    let mut reused: RunAccepted = serde_json::from_str(&json).expect("decode");
+    reused = {
+        let mut value = serde_json::to_value(&reused).expect("child json");
+        value["run_id"] = serde_json::json!(parent_run.to_string());
+        serde_json::from_value(value).expect("structurally valid reuse")
+    };
+    let err = reused
+        .validate_against_parent(&parent)
+        .expect_err("revalidation must reject identity reuse");
+    assert_eq!(err.code(), "child_run_identity_reuse");
+}

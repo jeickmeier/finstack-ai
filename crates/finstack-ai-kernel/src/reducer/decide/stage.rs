@@ -293,10 +293,6 @@ fn stage_bodies(
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "retry admission and its atomic timer-intent record batch are one fail-closed transition"
-)]
 fn retry_bodies(
     state: &KernelState,
     env: &TransitionEnv,
@@ -348,17 +344,6 @@ fn retry_bodies(
             field: "retry.attempt",
             reason_code: "overflow",
         })?;
-    if state
-        .accepted
-        .as_ref()
-        .and_then(|accepted| accepted.limits().max_retries)
-        .is_some_and(|maximum| attempt > maximum)
-    {
-        return Err(KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "retry_limit_reached",
-        });
-    }
     let due_at =
         env.now
             .checked_add(directive.backoff)

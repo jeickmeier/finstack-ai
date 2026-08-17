@@ -62,7 +62,7 @@ pub(super) fn apply_final_result(
         result_digest: result.value_digest,
     });
     state.final_result = Some(result.clone());
-    state.state_version = 4;
+    state.state_version = state.state_version.max(4);
     Ok(())
 }
 
@@ -113,7 +113,6 @@ pub(super) fn apply_validation_failure(
     })?;
     if !candidate_matches
         || &failure.schema != schema
-        || failure.issues.is_empty()
         || failure.error != expected_error
         || structured_source_value(message, &failure.source)
             .is_none_or(|value| value.digest() != failure.candidate_digest)
@@ -131,7 +130,7 @@ pub(super) fn apply_validation_failure(
         error: failure.error.clone(),
     });
     state.validation_failure = Some(failure.clone());
-    state.state_version = 4;
+    state.state_version = state.state_version.max(4);
     Ok(())
 }
 

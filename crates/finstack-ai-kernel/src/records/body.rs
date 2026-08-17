@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use super::RECORD_KIND_VERSION;
 use super::error::RecordError;
 
-/// Complete record bodies owned through PR-022.
+/// Complete durable record-body vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum RecordBody {

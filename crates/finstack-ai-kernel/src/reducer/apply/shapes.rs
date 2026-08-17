@@ -68,7 +68,7 @@ pub(super) fn validate_batch_shape(
             if state.pending_model_effect.is_some() {
                 model_settlement_shape(state, records, false)
             } else {
-                tool_settlement_shape(state, records, false)
+                tool_settlement_shape(state, records)
             }
         }
         Some(RunPhase::AfterModel) => {
@@ -87,7 +87,7 @@ pub(super) fn validate_batch_shape(
                 || one_failed_stage(records, state.cycle, Stage::BeforeToolBatch)
                 || interaction_request_shape(records)
         }
-        Some(RunPhase::AwaitingTools) => tool_settlement_shape(state, records, true),
+        Some(RunPhase::AwaitingTools) => tool_settlement_shape(state, records),
         Some(RunPhase::AfterToolBatch) => {
             one_stage(records, state.cycle, Stage::AfterToolBatch, |disposition| {
                 matches!(
@@ -371,11 +371,7 @@ pub(super) fn tool_batch_open_shape(state: &KernelState, records: &[RecordEnvelo
     clippy::too_many_lines,
     reason = "exact settlement replay mirrors source-prefix finalization, group dispatch, and closure"
 )]
-pub(super) fn tool_settlement_shape(
-    state: &KernelState,
-    records: &[RecordEnvelope],
-    allow_deferred: bool,
-) -> bool {
+pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelope]) -> bool {
     let Some(batch) = state.active_tool_batch.as_ref() else {
         return false;
     };
@@ -405,7 +401,7 @@ pub(super) fn tool_settlement_shape(
             )
         }
         RecordBody::EffectDeferred(value)
-            if allow_deferred && value.output_contract.kind == EffectOutputKind::ToolResult =>
+            if value.output_contract.kind == EffectOutputKind::ToolResult =>
         {
             (value.effect_id, true, false)
         }
@@ -418,15 +414,20 @@ pub(super) fn tool_settlement_shape(
     else {
         return false;
     };
-    if !matches!(
-        batch.calls[target_index].status,
-        ActiveToolCallStatus::Requested { .. }
-    ) || batch.calls[target_index].assigned.group_index != batch.current_group
-    {
+    if batch.calls[target_index].assigned.group_index != batch.current_group {
         return false;
     }
     if deferred {
-        return rest.is_empty();
+        return matches!(
+            batch.calls[target_index].status,
+            ActiveToolCallStatus::Requested { deferred: None, .. }
+        ) && rest.is_empty();
+    }
+    if !matches!(
+        batch.calls[target_index].status,
+        ActiveToolCallStatus::Requested { .. }
+    ) {
+        return false;
     }
 
     let fatal = batch.fatal_error.is_some() || fail_run;

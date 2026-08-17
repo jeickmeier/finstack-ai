@@ -1,4 +1,4 @@
-//! Pure PR-009 transition decisions.
+//! Pure transition decisions.
 
 mod bodies;
 mod cancel;
@@ -10,7 +10,15 @@ mod shared;
 mod stage;
 
 use super::decision::{Decision, KernelError};
-use super::input::{KernelInput, ReducerStageOutcome, StageSettled};
+use super::fingerprint::{
+    direct_digest, direct_tool_digest, external_digest, external_tool_digest, stage_digest,
+};
+use super::input::{
+    ExternalEffectCompletedInput, InteractionSettled, KernelInput, ModelSettled, ModelSettlement,
+    ReducerStageOutcome, StageSettled, ToolBatchSettled, ToolSettlement,
+};
+use super::interaction::resolution_digest;
+use super::tool::is_known_tool_effect;
 use crate::state::{KernelState, TransitionEnv};
 
 use cancel::{
@@ -55,6 +63,9 @@ pub(super) fn decide(
         ),
         _ => None,
     };
+    if let Some(decision) = equal_committed_redelivery(state, &input)? {
+        return Ok(decision);
+    }
     if let Some(decision) = decide_limit(state, env, &input, context_canonical)? {
         return Ok(decision);
     }
@@ -83,5 +94,273 @@ pub(super) fn decide(
         KernelInput::InteractionSettled(input) => {
             super::interaction::decide_settled(state, env, &input)
         }
+    }
+}
+
+fn equal_committed_redelivery(
+    state: &KernelState,
+    input: &KernelInput,
+) -> Result<Option<Decision>, KernelError> {
+    match input {
+        KernelInput::StageSettled(input) => {
+            let Ok(digest) = stage_digest(input) else {
+                return Ok(None);
+            };
+            equal_index_duplicate(
+                state,
+                state.stage_settlements.get(&input.cursor).copied(),
+                digest,
+            )
+        }
+        KernelInput::ModelSettled(input) => {
+            let Ok(digest) = direct_digest(input) else {
+                return Ok(None);
+            };
+            if let Some(decision) = equal_completion_or_model_duplicate(
+                state,
+                model_settlement_completion_id(&input.outcome),
+                model_settlement_effect_id(&input.outcome),
+                digest,
+            )? {
+                return Ok(Some(decision));
+            }
+            equal_model_deferred_duplicate(state, input, digest)
+        }
+        KernelInput::ToolBatchSettled(input) => {
+            let Ok(digest) = direct_tool_digest(input.tool_batch_id, &input.outcome) else {
+                return Ok(None);
+            };
+            if let Some(decision) = equal_completion_or_tool_duplicate(
+                state,
+                tool_settlement_completion_id(&input.outcome),
+                tool_settlement_effect_id(&input.outcome),
+                digest,
+            )? {
+                return Ok(Some(decision));
+            }
+            equal_tool_deferred_duplicate(state, input, digest)
+        }
+        KernelInput::ExternalEffectCompleted(input) => {
+            equal_external_completion_duplicate(state, input)
+        }
+        KernelInput::InteractionSettled(InteractionSettled::Resolved(resolution)) => {
+            let Ok(digest) = resolution_digest(resolution) else {
+                return Ok(None);
+            };
+            equal_index_duplicate(
+                state,
+                state
+                    .resolution_identities
+                    .get(resolution.resolution_id())
+                    .map(|existing| existing.settlement_digest),
+                digest,
+            )
+        }
+        _ => Ok(None),
+    }
+}
+
+fn equal_external_completion_duplicate(
+    state: &KernelState,
+    input: &ExternalEffectCompletedInput,
+) -> Result<Option<Decision>, KernelError> {
+    let effect_id = input.completion.effect_id;
+    let completion_id = input.completion.completion_id.as_ref();
+    if is_known_tool_effect(state, effect_id) {
+        let Some(tool_batch_id) = state
+            .active_tool_batch
+            .as_ref()
+            .map(|batch| batch.opened.tool_batch_id)
+            .or_else(|| {
+                state
+                    .tool_calls
+                    .values()
+                    .find(|identity| identity.effect_id == Some(effect_id))
+                    .and_then(|identity| identity.tool_batch_id)
+            })
+        else {
+            return Ok(None);
+        };
+        let Ok(digest) = external_tool_digest(tool_batch_id, input) else {
+            return Ok(None);
+        };
+        return equal_completion_or_tool_duplicate(state, Some(completion_id), effect_id, digest);
+    }
+    let Ok(digest) = external_digest(input) else {
+        return Ok(None);
+    };
+    equal_completion_or_model_duplicate(state, Some(completion_id), effect_id, digest)
+}
+
+fn equal_completion_or_model_duplicate(
+    state: &KernelState,
+    completion_id: Option<&str>,
+    effect_id: crate::EffectId,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    if let Some(decision) = equal_completion_duplicate(state, completion_id, effect_id, digest)? {
+        return Ok(Some(decision));
+    }
+    equal_index_duplicate(
+        state,
+        state
+            .model_settlements
+            .get(&effect_id)
+            .map(|existing| existing.digest),
+        digest,
+    )
+}
+
+fn equal_completion_or_tool_duplicate(
+    state: &KernelState,
+    completion_id: Option<&str>,
+    effect_id: crate::EffectId,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    if let Some(decision) = equal_completion_duplicate(state, completion_id, effect_id, digest)? {
+        return Ok(Some(decision));
+    }
+    equal_index_duplicate(
+        state,
+        state
+            .tool_settlements
+            .get(&effect_id)
+            .map(|existing| existing.digest),
+        digest,
+    )
+}
+
+fn equal_completion_duplicate(
+    state: &KernelState,
+    completion_id: Option<&str>,
+    effect_id: crate::EffectId,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    let Some(completion_id) = completion_id else {
+        return Ok(None);
+    };
+    let Some(existing) = state.completion_identities.get(completion_id) else {
+        return Ok(None);
+    };
+    if existing.effect_id == effect_id && existing.settlement_digest == digest {
+        duplicate_decision(state).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn equal_index_duplicate(
+    state: &KernelState,
+    existing: Option<crate::primitives::Digest>,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    match existing {
+        Some(existing) if existing == digest => duplicate_decision(state).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn equal_model_deferred_duplicate(
+    state: &KernelState,
+    input: &ModelSettled,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    let ModelSettlement::Deferred(deferred) = &input.outcome else {
+        return Ok(None);
+    };
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return Ok(None);
+    };
+    if pending.requested.effect_id() != deferred.effect_id {
+        return Ok(None);
+    }
+    let Some(existing) = pending.deferred.as_ref() else {
+        return Ok(None);
+    };
+    let Ok(existing_digest) = direct_digest(&ModelSettled {
+        turn_id: pending.turn_id,
+        model_request_id: pending.model_request_id,
+        outcome: ModelSettlement::Deferred(existing.clone()),
+    }) else {
+        return Ok(None);
+    };
+    if existing_digest == digest {
+        duplicate_decision(state).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn equal_tool_deferred_duplicate(
+    state: &KernelState,
+    input: &ToolBatchSettled,
+    digest: crate::primitives::Digest,
+) -> Result<Option<Decision>, KernelError> {
+    let ToolSettlement::Deferred(_) = &input.outcome else {
+        return Ok(None);
+    };
+    let Some(batch) = state.active_tool_batch.as_ref() else {
+        return Ok(None);
+    };
+    if batch.opened.tool_batch_id != input.tool_batch_id {
+        return Ok(None);
+    }
+    let effect_id = tool_settlement_effect_id(&input.outcome);
+    let Some(active) = batch
+        .calls
+        .iter()
+        .find(|call| call.assigned.effect_id == effect_id)
+    else {
+        return Ok(None);
+    };
+    let crate::records::tools::ActiveToolCallStatus::Requested {
+        deferred: Some(existing),
+        ..
+    } = &active.status
+    else {
+        return Ok(None);
+    };
+    let Ok(existing_digest) = direct_tool_digest(
+        input.tool_batch_id,
+        &ToolSettlement::Deferred(existing.clone()),
+    ) else {
+        return Ok(None);
+    };
+    if existing_digest == digest {
+        duplicate_decision(state).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn model_settlement_effect_id(outcome: &ModelSettlement) -> crate::EffectId {
+    match outcome {
+        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
+        ModelSettlement::Deferred(deferred) => deferred.effect_id,
+        ModelSettlement::Failed(failed) => failed.effect_id(),
+    }
+}
+
+fn model_settlement_completion_id(outcome: &ModelSettlement) -> Option<&str> {
+    match outcome {
+        ModelSettlement::Completed { completion, .. } => completion.completion_id(),
+        ModelSettlement::Deferred(_) => None,
+        ModelSettlement::Failed(failed) => failed.completion_id(),
+    }
+}
+
+fn tool_settlement_effect_id(outcome: &ToolSettlement) -> crate::EffectId {
+    match outcome {
+        ToolSettlement::Completed(value) => value.effect_id(),
+        ToolSettlement::Deferred(value) => value.effect_id,
+        ToolSettlement::Failed(value) => value.effect_id(),
+    }
+}
+
+fn tool_settlement_completion_id(outcome: &ToolSettlement) -> Option<&str> {
+    match outcome {
+        ToolSettlement::Completed(value) => value.completion_id(),
+        ToolSettlement::Deferred(_) => None,
+        ToolSettlement::Failed(value) => value.completion_id(),
     }
 }

@@ -1,4 +1,4 @@
-//! Exact typed schema-1 nested fingerprint projections.
+//! Exact typed nested fingerprint projections with recursive explicit nulls.
 
 use core::marker::PhantomData;
 use std::collections::BTreeMap;

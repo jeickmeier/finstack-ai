@@ -162,6 +162,18 @@ impl ToolProgress {
             percent,
         })
     }
+
+    /// Borrow progress text.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Optional completion percent in `0..=100`.
+    #[must_use]
+    pub fn percent(&self) -> Option<u8> {
+        self.percent
+    }
 }
 
 impl<'de> Deserialize<'de> for ToolProgress {
@@ -230,6 +242,18 @@ impl ProviderHeartbeat {
                 None => None,
             },
         })
+    }
+
+    /// Borrow the provider label.
+    #[must_use]
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    /// Optional heartbeat detail text.
+    #[must_use]
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
     }
 }
 

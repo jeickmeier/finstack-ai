@@ -157,6 +157,7 @@ pub(super) fn validate_body_for_creation(body: &RecordBody) -> Result<(), Record
         },
         RecordBody::RunFailed(failed) => Some(&failed.error),
         RecordBody::OutputValidationFailed(failed) => Some(&failed.error),
+        RecordBody::RetryScheduled(retry) => Some(&retry.prior_error),
         _ => None,
     };
     if let Some(error) = error {

@@ -15,6 +15,7 @@ use super::super::decision::KernelError;
 use super::super::fingerprint::{
     completed_tool_record_digest, failed_tool_record_digest, synthetic_tool_digest,
 };
+use super::super::tool::decode_tool_result;
 
 #[expect(
     clippy::too_many_lines,
@@ -178,11 +179,7 @@ pub(super) fn apply_tool_effect_completed(
     completed
         .validate_against(&requested)
         .map_err(|_| KernelError::ToolSettlementMismatch)?;
-    let result = serde_json::from_str::<crate::ToolResultBlock>(completed.output().as_str())
-        .map_err(|_| KernelError::ToolResultMismatch)?;
-    if result.tool_call_id() != planned_call.tool_call_id() {
-        return Err(KernelError::ToolResultMismatch);
-    }
+    let result = decode_tool_result(completed, &planned_call)?;
     let digest = completed_tool_record_digest(batch.opened.tool_batch_id, external, completed)?;
     insert_tool_identity(
         state,

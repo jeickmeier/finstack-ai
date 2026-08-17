@@ -147,7 +147,7 @@ fn duplicate_assistant_call_ids_fail_before_batch_planning() {
             assistant_message: message,
         },
     });
-    assert_eq!(
+    assert_error_code(
         duplicate_harness.kernel.decide(
             &tool_env(
                 1_400,
@@ -160,7 +160,7 @@ fn duplicate_assistant_call_ids_fail_before_batch_planning() {
             ),
             input,
         ),
-        Err(KernelError::DuplicateToolCall)
+        "duplicate_tool_call",
     );
 }
 

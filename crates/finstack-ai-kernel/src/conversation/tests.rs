@@ -5,7 +5,10 @@ use crate::content::{BlobRef, ContentBlock, MediaRef, TextBlock, ToolCallBlock, 
 use crate::primitives::Timestamp;
 use crate::primitives::{Id, IdTag, MessageId, ToolCallId, ToolCallTag};
 use crate::primitives::{Metadata, RawJson};
-use crate::records::{LaneCreated, RecordBody};
+use crate::records::{
+    LaneCreated, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordEnvelope,
+    SnapshotWritten,
+};
 
 fn mid() -> MessageId {
     MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id")
@@ -372,11 +375,31 @@ fn drop_snapshot_records_leaves_the_tree() {
     apply_conversation_entry(&mut projection.entries, user.clone()).expect("entry");
     projection.lanes.get_mut(&id(2)).expect("lane").leaf_id = Some(user.id());
     let without_snapshot = projection.clone();
-    let _ = RecordBody::SnapshotWritten(crate::records::SnapshotWritten::new(
-        9,
-        crate::primitives::Digest::raw_json(b"snap"),
-    ));
+    let snapshot = RecordEnvelope::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        id::<crate::primitives::RecordTag>(20),
+        id::<crate::primitives::SessionTag>(1),
+        id::<crate::primitives::LaneTag>(2),
+        None,
+        4,
+        Timestamp::from_unix_ms(0).expect("ts"),
+        None,
+        crate::primitives::Digest::raw_json(b"payload"),
+        None,
+        crate::primitives::Digest::raw_json(b"checksum"),
+        vec![],
+        RecordBody::SnapshotWritten(SnapshotWritten::new(
+            9,
+            crate::primitives::Digest::raw_json(b"snap"),
+        )),
+    )
+    .expect("snapshot envelope");
+    projection
+        .apply_envelope(&snapshot)
+        .expect("apply snapshot");
     assert_eq!(projection.entries(), without_snapshot.entries());
+    assert_eq!(projection.lanes, without_snapshot.lanes);
     assert_eq!(
         projection.main_lane().expect("main").1.leaf_id,
         Some(user.id())

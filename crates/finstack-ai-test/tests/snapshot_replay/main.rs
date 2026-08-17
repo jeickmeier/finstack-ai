@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{Digest, KernelState, SessionTag};
-use finstack_ai_protocol::{decode_value, encode_snapshot, encode_value, CanonicalValue};
+use finstack_ai_protocol::{CanonicalValue, decode_value, encode_snapshot, encode_value};
 use finstack_ai_runtime::{CommitCoordinator, JournalStore, LoadRequest};
 
 mod helpers;

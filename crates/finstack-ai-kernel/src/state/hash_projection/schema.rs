@@ -6,22 +6,21 @@ use crate::primitives::Digest;
 use crate::primitives::Timestamp;
 use crate::primitives::{LaneId, SessionId};
 use crate::records::policy::ActiveCapability;
-use crate::records::policy::BudgetChargeReceipt;
 use crate::records::policy::LimitReached;
-use crate::records::policy::OutputValidationFailed;
-use crate::records::policy::{FinalResultRecorded, OutputConfiguration};
-use crate::records::run::ChildRunPrepared;
 use crate::state::projection::MessageSeq;
 
 use super::super::{
-    BudgetReservationReplay, CompletionIdentityHashEntryV1, InteractionTerminal, KernelState,
-    ModelSettlementHashEntryV1, PendingInteraction, ResolutionIdentityHashEntryV6, RunPhase,
-    StageSettlementHashEntryV1, ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
+    CompletionIdentityHashEntryV1, KernelState, ModelSettlementHashEntryV1,
+    ResolutionIdentityHashEntryV6, RunPhase, StageSettlementHashEntryV1,
+    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2,
 };
 
 use super::projections::{
-    ActiveToolBatchProjection, CancellationStateProjection, CurrentTurnProjection,
-    LimitUsageProjection, PendingModelEffectProjection, RetryStateProjection,
+    ActiveToolBatchProjection, BudgetChargeReceiptProjection, BudgetReservationReplayProjection,
+    CancellationStateProjection, ChildRunPreparedProjection, CurrentTurnProjection,
+    FinalResultRecordedProjection, InteractionTerminalProjection, LimitReachedProjection,
+    LimitUsageProjection, OutputConfigurationProjection, OutputValidationFailedProjection,
+    PendingInteractionProjection, PendingModelEffectProjection, RetryStateProjection,
     RunAcceptedProjection, RunSuspendedProjection, TerminalCandidateProjection,
     TerminalStateProjection, ToolBatchClosedProjection,
 };
@@ -253,13 +252,13 @@ pub struct KernelStateHashV4<'a> {
     pub limit_usage: LimitUsageProjection<'a>,
     pub cancellation: Option<CancellationStateProjection<'a>>,
     pub retry: RetryStateProjection<'a>,
-    pub last_limit: Option<&'a LimitReached>,
+    pub last_limit: Option<LimitReachedProjection<'a>>,
     pub suspension: Option<RunSuspendedProjection<'a>>,
-    pub output_configuration: Option<&'a OutputConfiguration>,
+    pub output_configuration: Option<OutputConfigurationProjection<'a>>,
     pub active_capabilities: &'a [ActiveCapability],
     pub resolved_plan_digest: Option<Digest>,
-    pub final_result: Option<&'a FinalResultRecorded>,
-    pub validation_failure: Option<&'a OutputValidationFailed>,
+    pub final_result: Option<FinalResultRecordedProjection<'a>>,
+    pub validation_failure: Option<OutputValidationFailedProjection<'a>>,
     pub terminal: Option<TerminalStateProjection<'a>>,
 }
 
@@ -310,13 +309,22 @@ impl<'a> KernelStateHashV4<'a> {
                 .as_ref()
                 .map(CancellationStateProjection::from),
             retry: RetryStateProjection::from(&state.retry),
-            last_limit: state.last_limit.as_ref(),
+            last_limit: state.last_limit.as_ref().map(LimitReachedProjection::from),
             suspension: state.suspension.as_ref().map(RunSuspendedProjection::from),
-            output_configuration: state.output_configuration.as_ref(),
+            output_configuration: state
+                .output_configuration
+                .as_ref()
+                .map(OutputConfigurationProjection::from),
             active_capabilities: &state.active_capabilities,
             resolved_plan_digest: state.resolved_plan_digest,
-            final_result: state.final_result.as_ref(),
-            validation_failure: state.validation_failure.as_ref(),
+            final_result: state
+                .final_result
+                .as_ref()
+                .map(FinalResultRecordedProjection::from),
+            validation_failure: state
+                .validation_failure
+                .as_ref()
+                .map(OutputValidationFailedProjection::from),
             terminal: state.terminal.as_ref().map(TerminalStateProjection::from),
         }
     }
@@ -326,9 +334,9 @@ impl<'a> KernelStateHashV4<'a> {
 pub struct KernelStateHashV5<'a> {
     #[serde(flatten)]
     base: KernelStateHashV4<'a>,
-    child_preparations: Vec<&'a ChildRunPrepared>,
-    budget_reservations: Vec<&'a BudgetReservationReplay>,
-    budget_charges: Vec<&'a BudgetChargeReceipt>,
+    child_preparations: Vec<ChildRunPreparedProjection<'a>>,
+    budget_reservations: Vec<BudgetReservationReplayProjection<'a>>,
+    budget_charges: Vec<BudgetChargeReceiptProjection<'a>>,
 }
 
 impl<'a> KernelStateHashV5<'a> {
@@ -349,9 +357,21 @@ impl<'a> KernelStateHashV5<'a> {
                 tool_calls,
                 tool_settlements,
             ),
-            child_preparations: state.child_preparations.values().collect(),
-            budget_reservations: state.budget_reservations.values().collect(),
-            budget_charges: state.budget_charges.values().collect(),
+            child_preparations: state
+                .child_preparations
+                .values()
+                .map(ChildRunPreparedProjection::from)
+                .collect(),
+            budget_reservations: state
+                .budget_reservations
+                .values()
+                .map(BudgetReservationReplayProjection::from)
+                .collect(),
+            budget_charges: state
+                .budget_charges
+                .values()
+                .map(BudgetChargeReceiptProjection::from)
+                .collect(),
         }
     }
 }
@@ -360,9 +380,9 @@ impl<'a> KernelStateHashV5<'a> {
 pub struct KernelStateHashV6<'a> {
     #[serde(flatten)]
     base: KernelStateHashV5<'a>,
-    pending_interaction: Option<&'a PendingInteraction>,
+    pending_interaction: Option<PendingInteractionProjection<'a>>,
     resolution_identities: Vec<ResolutionIdentityHashEntryV6>,
-    last_interaction_terminal: Option<&'a InteractionTerminal>,
+    last_interaction_terminal: Option<InteractionTerminalProjection<'a>>,
 }
 
 impl<'a> KernelStateHashV6<'a> {
@@ -384,9 +404,15 @@ impl<'a> KernelStateHashV6<'a> {
                 tool_calls,
                 tool_settlements,
             ),
-            pending_interaction: state.pending_interaction.as_ref(),
+            pending_interaction: state
+                .pending_interaction
+                .as_ref()
+                .map(PendingInteractionProjection::from),
             resolution_identities,
-            last_interaction_terminal: state.last_interaction_terminal.as_ref(),
+            last_interaction_terminal: state
+                .last_interaction_terminal
+                .as_ref()
+                .map(InteractionTerminalProjection::from),
         }
     }
 }

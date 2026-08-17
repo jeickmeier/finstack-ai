@@ -14,7 +14,7 @@ use super::error::RecordError;
 use super::validate::validate_body_for_creation;
 use super::validate::{validate_record_run_id, validate_versions_and_events};
 
-/// Committed durable envelope shape (digests filled by protocol/PR-039).
+/// Committed durable envelope shape (digests filled by the protocol layer).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RecordEnvelope {
     /// Envelope format version.
@@ -53,7 +53,7 @@ pub struct RecordEnvelope {
 impl RecordEnvelope {
     /// Construct a committed envelope with validated semantic versions and event ordinals.
     ///
-    /// Digest and checksum calculation/verification remains owned by PR-039.
+    /// Digest and checksum calculation/verification remains owned by the protocol layer.
     ///
     /// # Arguments
     ///

@@ -55,6 +55,19 @@ pub fn decide_batch_prepared(
     let source_calls = assistant_calls(source_message);
     validate_plans(state, &source_calls, calls)?;
     validate_record_batch_bounds(calls)?;
+    let synthetic_prefix = calls
+        .iter()
+        .take_while(|plan| matches!(plan, ToolCallPlan::SyntheticClosure(_)))
+        .count();
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            messages: synthetic_prefix,
+            stage: Some(input.cursor),
+            extra_tool_settlements: synthetic_prefix,
+            ..StateGrowth::default()
+        },
+    )?;
     validate_allocated_ids(&env.ids, opening_id_requirements(calls)?)?;
 
     let tool_batch_id = required(env.ids.tool_batch_ids(), 0, "tool_batch_ids")?;

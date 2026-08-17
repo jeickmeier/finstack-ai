@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{
     AcceptRun, ContextPrepared, ConversationEntry, ConversationError, Digest, KernelInput,
-    LaneCreated, LaneMoved, LaneTag, Message, MessageRole, RecordBody, RecordEnvelope, RunPhase,
-    SessionTag, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
+    LaneCreated, LaneMoved, LaneTag, Message, MessageRole, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RecordBody, RecordEnvelope, RunPhase, SessionTag,
 };
 use finstack_ai_runtime::{
     ChildPlacement, ChildRunContext, ChildRunCoordinator, CommitCoordinator,

@@ -163,6 +163,15 @@ impl InteractionRequest {
         if let InteractionKind::Custom { name } = &kind {
             validated_label(name, "interaction_kind")?;
         }
+        match &assignee_hint {
+            Some(AssigneeHint::Role(role)) => {
+                validated_label(role, "role")?;
+            }
+            Some(AssigneeHint::Queue(queue)) => {
+                validated_label(queue, "queue")?;
+            }
+            Some(AssigneeHint::Principal(_)) | None => {}
+        }
         let prompt_canonical =
             serde_json_canonicalizer::to_vec(&prompt).map_err(|error| EffectError::Serialize {
                 detail: error.to_string(),

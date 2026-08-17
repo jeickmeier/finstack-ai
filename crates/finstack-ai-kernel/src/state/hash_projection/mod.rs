@@ -1,4 +1,4 @@
-//! Dedicated schema-1 state-hash projections with recursive explicit nulls.
+//! Versioned `kernel-state` hash projections (schemas 1–6) with recursive explicit nulls.
 
 mod projections;
 mod schema;

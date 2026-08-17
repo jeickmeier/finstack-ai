@@ -1,11 +1,12 @@
 [tools]
-rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
+rust = { version = "1.97.1", profile = "minimal", components = "rustfmt,clippy,llvm-tools-preview", targets = "wasm32-unknown-unknown" }
 python = "3.14"
 uv = "0.10.11"
 node = "22.18.0"
 "cargo:wasm-bindgen-cli" = "0.2.127"
 "cargo:cargo-fuzz" = "0.13.2"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:taiki-e/cargo-llvm-cov" = { version = "0.8.7", version_prefix = "v" }
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
 # Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
@@ -306,6 +307,60 @@ for target in record_replay_json kernel_transition_json run_event_json message_j
     -max_len=1048576 \
     -rss_limit_mb=2048
 done
+"""
+
+[tasks.coverage-rust]
+description = "Write diagnostic Rust workspace coverage (HTML + LCOV)"
+run = """
+set -euo pipefail
+export PATH="$(mise where github:taiki-e/cargo-llvm-cov):${PATH}"
+mkdir -p target/coverage/rust
+cargo llvm-cov clean --workspace
+cargo llvm-cov --workspace --locked --html --lcov \
+  --output-dir target/coverage/rust/html \
+  --output-path target/coverage/rust/lcov.info
+"""
+
+[tasks.coverage-python]
+description = "Write diagnostic Python binding coverage (HTML + XML)"
+run = """
+set -euo pipefail
+mkdir -p target/coverage/python
+uv run --no-cache --isolated --no-project \
+  --with-editable bindings/finstack-ai-python \
+  --with pytest==9.1.1 \
+  --with pytest-cov==7.1.0 \
+  --with pydantic==2.12.5 \
+  pytest -q \
+    --cov \
+    --cov-report=term \
+    --cov-report=html:target/coverage/python/html \
+    --cov-report=xml:target/coverage/python/coverage.xml
+"""
+
+[tasks.coverage-wasm]
+description = "Write the pending WASM coverage scaffold artifact"
+run = """
+set -euo pipefail
+mkdir -p target/coverage/wasm
+cat > target/coverage/wasm/PENDING.md <<'EOF'
+# WASM coverage pending
+
+Real WASM coverage waits on a `wasm-bindgen-test` (or equivalent) suite
+for `finstack-ai-wasm` and kernel-on-wasm execution.
+
+`mise run check-wasm` remains the compile gate.
+`mise run test-browser` remains the package harness.
+EOF
+"""
+
+[tasks.coverage]
+description = "Write diagnostic Rust, Python, and WASM coverage reports"
+run = """
+set -euo pipefail
+mise run coverage-rust
+mise run coverage-python
+mise run coverage-wasm
 """
 
 [tasks.ci]

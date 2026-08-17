@@ -284,8 +284,12 @@ impl<'de> Deserialize<'de> for AssigneeHint {
 
         Ok(match Wire::deserialize(deserializer)? {
             Wire::Principal(principal) => Self::Principal(principal),
-            Wire::Role(role) => Self::Role(Arc::from(role.into_inner())),
-            Wire::Queue(queue) => Self::Queue(Arc::from(queue.into_inner())),
+            Wire::Role(role) => {
+                Self::Role(validated_label(&role.into_inner(), "role").map_err(de::Error::custom)?)
+            }
+            Wire::Queue(queue) => Self::Queue(
+                validated_label(&queue.into_inner(), "queue").map_err(de::Error::custom)?,
+            ),
         })
     }
 }

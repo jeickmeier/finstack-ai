@@ -22,7 +22,7 @@ mod tests;
 pub const APPEND_BATCH_MAX_RECORDS: usize = 256;
 /// Current record envelope format version.
 pub const RECORD_FORMAT_VERSION: u16 = 1;
-/// Current kind version for PR-008-owned bodies.
+/// Current record-body kind version.
 pub const RECORD_KIND_VERSION: u16 = 1;
 
 pub use append::AppendRequest;

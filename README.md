@@ -35,6 +35,7 @@ Common tasks:
 - `mise run format` — write-mode Rust and Python formatter
 - `mise run check` — formatting, Clippy, Ruff, and mypy
 - `mise run test` — Rust workspace tests and Python tests
+- `mise run coverage` — diagnostic Rust, Python, and WASM coverage reports
 - `mise run ci` — `check` plus `test` (hosted CI)
 - `mise run docs-links` — relative markdown links on the public set
 - `mise run docs-quickstarts` — offline public-package starters
