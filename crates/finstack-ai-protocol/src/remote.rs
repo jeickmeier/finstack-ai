@@ -4,7 +4,7 @@ use finstack_ai_kernel::Digest;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ProtocolError;
-use crate::handshake::VersionOffer;
+use crate::wire::VersionOffer;
 use crate::{decode, encode};
 
 /// Domain for authenticated remote-command digests.
@@ -486,7 +486,7 @@ mod tests {
         RemoteAuthMethod, RemoteCommand, RemoteCommandOp, RemoteLocator, RemotePostAuth,
         RemotePreAuth, decode_remote_post_auth,
     };
-    use crate::handshake::{PayloadFamily, VersionOffer, encode_envelope};
+    use crate::wire::{PayloadFamily, VersionOffer, encode_envelope};
     use crate::{decode, encode};
 
     #[test]

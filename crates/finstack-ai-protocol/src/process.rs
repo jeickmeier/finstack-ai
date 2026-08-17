@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::handshake::VersionOffer;
+use crate::wire::VersionOffer;
 
 /// Process-family pre-auth handshake. Kind names are distinct from remote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,8 +45,8 @@ pub enum ProcessPreAuth {
 #[cfg(test)]
 mod tests {
     use super::ProcessPreAuth;
-    use crate::handshake::{PayloadFamily, VersionOffer, decode_envelope, encode_envelope};
     use crate::remote::{RemotePostAuth, decode_remote_post_auth};
+    use crate::wire::{PayloadFamily, VersionOffer, decode_envelope, encode_envelope};
     use crate::{decode, encode};
 
     #[test]

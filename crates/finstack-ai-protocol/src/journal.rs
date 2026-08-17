@@ -328,3 +328,24 @@ fn domain_digest(
     Digest::domain_separated(domain, schema_version, canonical_bytes)
         .map_err(|error| ProtocolError::codec(error.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use finstack_ai_kernel::{Metadata, RecordBody, SessionCreated};
+
+    use super::{journal_known_answer, payload_digest};
+    use crate::to_diagnostic_json;
+
+    #[test]
+    fn journal_known_answer_matches_direct_digest() {
+        let body = RecordBody::SessionCreated(SessionCreated::new(Metadata::empty()));
+        let json = to_diagnostic_json(&body).expect("json");
+        let answer = journal_known_answer("record_body", &json).expect("answer");
+        assert_eq!(
+            answer.payload_digest,
+            payload_digest(&body).expect("digest").to_hex()
+        );
+        assert!(answer.checksum.is_none());
+        assert!(!answer.cbor_hex.is_empty());
+    }
+}
