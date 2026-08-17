@@ -1,19 +1,19 @@
 ---
 name: finstack-simplify
-description: Simplifies, dedupes, audits, and refactors finstack Rust crates and Python/WASM bindings when the user mentions slop, wrapper bloat, parallel APIs, registry drift, builder sprawl, API-surface reduction, or over-engineering. Runs a phased Audit -> Plan -> Refactor -> Verify loop that preserves Rust-canonical behavior, binding parity, Decimal/currency/serde invariants, and project `mise run` verification.
+description: Simplifies, dedupes, audits, and refactors finstack Rust crates and Python/WASM bindings when the user mentions slop, wrapper bloat, parallel APIs, registry drift, builder sprawl, API-surface reduction, or over-engineering. Runs a phased Audit -> Plan -> Refactor -> Verify loop that preserves Rust-canonical behavior, binding parity, kernel/runtime invariants, and project `mise run` verification.
 ---
 
 # finstack-simplify
 
 A phased simplification workflow for the **finstack** workspace (Rust core + Python PyO3 bindings + WASM wasm-bindgen bindings).
 
-**Goal:** turn sloppy, vibe-coded, multi-pathway, over-abstracted code into **one obvious way to do each thing**, without breaking determinism, Decimal equality, FX policy visibility, serde stability, or Rust ↔ Python ↔ WASM parity.
+**Goal:** turn sloppy, vibe-coded, multi-pathway, over-abstracted code into **one obvious way to do each thing**, without breaking determinism, kernel/runtime invariants, serde stability, or Rust ↔ Python ↔ WASM parity.
 
 ## When to use this skill
 
-Trigger when the user is asking to simplify, audit, refactor, or dedupe _any_ part of finstack_quant. Even weak signals count: "this feels over-engineered", "why are there two ways to build a curve", "the checks module is a mess", "find dead code in margin". If the user is clearly working on something finstack-adjacent (Rust workspace, PyO3 bindings, wasm-bindgen bindings, parity, builders, registries), default to using this skill over a generic simplify skill.
+Trigger when the user is asking to simplify, audit, refactor, or dedupe _any_ part of finstack. Even weak signals count: "this feels over-engineered", "why are there two ways to build this", "this module is a mess", "find dead code". If the user is clearly working on something finstack-adjacent (Rust workspace, PyO3 bindings, wasm-bindgen bindings, public-item parity, builders, registries), default to using this skill over a generic simplify skill.
 
-**Do NOT use** for: generic non-finstack-quant code, pure bug hunting with no simplicity angle (use `finstack-quality-gate-triage`), performance tuning without a simplicity angle (use `finstack-performance-reviewer`), or new feature work.
+**Do NOT use** for: generic non-finstack code, pure bug hunting with no simplicity angle, performance tuning without a simplicity angle (use `finstack-performance-reviewer`), or new feature work.
 
 ## The core loop
 
@@ -38,9 +38,9 @@ Checklist (all must be considered; not all will apply):
 - Dead code (unused variants, unreachable branches, commented blocks, unused helpers).
 - Binding drift (Rust↔PyO3↔WASM mismatches; logic that leaked out of Rust into bindings).
 - Vibe-coding artifacts (half-migrated APIs, speculative abstractions, single-impl traits, single-instantiation generics).
-- Financial-invariant risks (does simplification touch Decimal equality / FX policy / serde names / parity contract?).
+- Behavioral-invariant risks (does simplification touch kernel I/O, commit-before-effect, serde names, public-item inventory, or generated artifacts?).
 
-Rules for what to look for, with concrete examples, are in `references/slop-patterns.md`. Financial safety rules are in `references/financial-invariants.md`. Binding-drift checks are in `references/binding-drift.md`.
+Rules for what to look for, with concrete examples, are in `references/slop-patterns.md`. Behavioral safety rules are in `references/behavioral-invariants.md`. Binding-drift checks are in `references/binding-drift.md`.
 
 Present the report and **stop**. Ask the user to confirm scope and priorities before planning.
 
@@ -52,7 +52,7 @@ Based on the audit + user priorities, produce a **Consolidation Plan** using `ex
 - lists files touched,
 - lists the verify commands that must pass,
 - lists the risk tier (see `references/workflow.md`),
-- calls out any parity-contract / serde-name / binding-shape impact.
+- calls out any public-item / serde-name / binding-shape impact.
 
 Prefer **many small reversible slices** over one heroic PR. Deletes before renames before signature changes.
 
@@ -68,13 +68,12 @@ After the edit, produce a short **Refactor Diff** note in the format of `example
 
 Run the **full finstack verify stack** for the affected layers. These commands are project-specific and non-negotiable:
 
-- Rust touched: `mise run rust-lint && mise run rust-test`
-- WASM touched: `mise run wasm-lint && mise run wasm-test` (and `mise run wasm-build` if you changed WASM bindings)
-- WASM UI touched: `mise run lint-ui && mise run test-ui`
-- Python touched: `mise run python-lint && mise run python-test` (and `mise run python-build` if you changed Rust code that PyO3 binds — debug builds are too slow for portfolio valuation; AGENTS.md mandates release profile)
-- Parity impact: re-run `finstack-quant-py/tests/parity` and check `parity_contract.toml` is still green.
+- Rust touched: `mise run check && mise run test`
+- WASM touched: `mise run check-wasm` (and `mise run generate-wasm` if you changed WASM bindings)
+- Python touched: include the Python portion of `mise run test` (rebuild the editable binding if you changed Rust code that PyO3 binds)
+- Public-surface impact: `mise run check-public-items` and `mise run conformance` when names, signatures, or fixtures changed.
 
-Prefer the repo `mise run` tasks from `AGENTS.md` for verification. Use focused checks while iterating and broader `mise run all-*` gates only when the slice is broad enough to justify them.
+Prefer the repo `mise run` tasks from `AGENTS.md` for verification. Use focused checks while iterating and broader `mise run ci` only when the slice is broad enough to justify it.
 
 All output must be **100% green** before moving to the next slice. Paste the actual command output in your response so the user can verify; never claim green without showing it.
 
@@ -90,15 +89,15 @@ After Verify passes, offer the user three options: (a) continue to the next slic
 - **Private complexity, public simplicity.** Helpers can proliferate privately; public surface stays minimal and unsurprising.
 - **No parallel universes.** `_v2`, `_ex`, `_new`, "advanced" doubles, `try_*` shadow APIs — pick one. Collapse the rest.
 - **Consistency beats flexibility.** Fewer knobs with sharp defaults beats a thousand configs nobody sets.
-- **Determinism is load-bearing.** Decimal results, parallel≡serial, FX policy stamping, serde field names — do not refactor these away. See `references/financial-invariants.md`.
+- **Determinism is load-bearing.** Kernel decisions, durable history, serde field names — do not refactor these away. See `references/behavioral-invariants.md`.
 - **Binding triplets move together.** If you delete a Rust public API, delete its PyO3 wrapper and its WASM wrapper in the same slice. If you can't, the slice isn't done. See `references/binding-drift.md`.
 
 ## Reference files (read these when the audit hits their topic)
 
-- `references/slop-patterns.md` — catalogue of every non-simplicity issue this skill hunts for, with finstack-quant-specific examples (registry sprawl, builder duplication, `_builder.rs` vs `builder/mod.rs` ambiguity, prelude bloat, etc.). **Read before every audit.**
-- `references/binding-drift.md` — how to detect and fix drift between `finstack-quant/` (Rust) and `finstack-quant-py/src/bindings/` + `finstack-quant-wasm/src/api/`. Parity-contract considerations and documented host-language name collisions. **Read whenever bindings are in scope.**
-- `references/financial-invariants.md` — what you're NOT allowed to change while simplifying: Decimal equality, FX policy stamping, serde field names (unknown-field-deny), rounding context metadata, parallel≡serial, ISDA day-counts. **Read before any refactor that touches numerics, FX, or serde.**
-- `references/workflow.md` — the phased loop in detail: risk tiers, commit boundaries, the make targets, when to rebuild bindings, how to handle a failing verify step. **Read at the start of every session.**
+- `references/slop-patterns.md` — catalogue of every non-simplicity issue this skill hunts for, with repo-specific examples (registry sprawl, builder duplication, prelude bloat, etc.). **Read before every audit.**
+- `references/binding-drift.md` — how to detect and fix drift between Rust crates and `bindings/finstack-ai-python` + `bindings/finstack-ai-wasm`. Public-item and conformance considerations. **Read whenever bindings are in scope.**
+- `references/behavioral-invariants.md` — what you're NOT allowed to change while simplifying: kernel I/O-freedom, commit-before-effect, serde field names, generated artifacts, binding codes. **Read before any refactor that touches kernel, protocol, or serde.**
+- `references/workflow.md` — the phased loop in detail: risk tiers, commit boundaries, the mise tasks, when to rebuild bindings, how to handle a failing verify step. **Read at the start of every session.**
 - `references/refactor-tactics.md` — the concrete moves you apply in Phase 3: inline / collapse / delete / generic-to-concrete / trait-to-fn / single-canonical-constructor / etc. Each tactic has a before/after. **Read before every refactor slice.**
 
 ## Example output formats (use these templates verbatim)
@@ -106,7 +105,6 @@ After Verify passes, offer the user three options: (a) continue to the next slic
 - `examples/audit-report.md` — the Phase 1 deliverable format.
 - `examples/consolidation-plan.md` — the Phase 2 deliverable format.
 - `examples/refactor-diff.md` — the per-slice Phase 3 deliverable format.
-- `outputs/completed-audit-report.md` — sample completed audit output.
 - `evals/evals.json` — realistic prompts for trigger and workflow checks.
 
 **Do not invent alternate formats.** The user reviews many of these; consistent shape matters more than creative presentation.
@@ -114,15 +112,15 @@ After Verify passes, offer the user three options: (a) continue to the next slic
 ## Escalation and edge cases
 
 - **If the scope is unclear** ("simplify finstack" with no module target): ask the user to pick a crate or subsystem. Whole-workspace audits balloon to noise; per-crate audits are actionable.
-- **If a refactor would break the parity contract**: stop, flag it explicitly, and ask whether the user wants to (i) update `parity_contract.toml` as part of the slice, or (ii) drop the refactor.
+- **If a refactor would break a frozen public item**: stop, flag it explicitly, and ask whether the user wants to (i) update the public-item inventory as part of the slice, or (ii) drop the refactor.
 - **If you find something scary (panic, unsafe, `unwrap` in binding code, broken determinism)**: surface it in the audit under a "Hazards" heading, but do NOT silently fix it as part of a simplification slice. Hazards get their own slice or escalate to a bug-hunting session.
-- **If the user asks to "just do it" and skip the audit/plan**: push back once. Explain that unreviewed refactors in a multi-binding financial library destroy more value than they create. If they insist after that, comply — but insist on small slices + Verify between each.
+- **If the user asks to "just do it" and skip the audit/plan**: push back once. Explain that unreviewed refactors in a multi-binding library destroy more value than they create. If they insist after that, comply — but insist on small slices + Verify between each.
 - **If you find yourself writing a new abstraction to simplify things**: stop and re-read `references/refactor-tactics.md`. The answer is almost always to delete, not add.
 
 ## What this skill is NOT
 
 - Not a code generator. Outputs are audits, plans, and targeted diffs.
 - Not a performance optimizer — use `finstack-performance-reviewer` for that.
-- Not a bug finder — use `finstack-quality-gate-triage` for that.
+- Not a bug finder first — surface hazards, then stop or schedule a separate fix.
 - Not a generic simplifier — use `finstack-refactor` for behavior-preserving implementation or `finstack-senior-code-review` for broad fallback review.
 - Not a rewrite-the-world tool. If the answer is "rewrite this crate from scratch", this skill has failed; surface that as a finding and stop.

@@ -18,7 +18,7 @@ After each review cycle, re-check the code and update the review. Continue itera
 
 **Philosophy**: Optimize for simplicity first, performance second. The fastest code is often the simplest code. Avoid premature optimization—measure before optimizing, and only optimize what matters.
 
-Use this skill, not a separate benchmark skill, for benchmark regression review. Open the benchmark resources when the task mentions Criterion, portfolio-scale runtime, release-profile Python builds, flamegraphs, allocation profiling, or baseline comparisons.
+Use this skill, not a separate benchmark skill, for benchmark regression review. Open the benchmark resources when the task mentions Criterion, release-profile Python builds, flamegraphs, allocation profiling, or baseline comparisons.
 
 ## Severity rubric
 
@@ -75,7 +75,7 @@ Use this skill, not a separate benchmark skill, for benchmark regression review.
 - Prefer arrays/vectors over linked structures (Vec > LinkedList).
 - Check struct field ordering for padding minimization.
 - Identify pointer-chasing patterns (nested Box, Rc, Arc indirection).
-- Look for AoS vs SoA opportunities in numerical code.
+- Look for AoS vs SoA opportunities in numerical or high-volume record code.
 - Verify hot data fits in cache; consider data splitting.
 
 ### Numerical computation
@@ -105,7 +105,7 @@ Use this skill, not a separate benchmark skill, for benchmark regression review.
 ### Benchmark regression
 
 - Check whether a benchmark baseline exists and whether the changed code is on the measured path.
-- Prefer release-profile measurements for PyO3 and portfolio-scale workloads.
+- Prefer release-profile measurements for PyO3 and production-scale workloads.
 - Distinguish wall-clock noise from material regressions; flag >10% regressions unless the repo has a stricter threshold.
 - Pair every optimization recommendation with a benchmark or profiling command.
 
@@ -167,4 +167,4 @@ Explicitly flag these anti-patterns:
 - For detailed patterns and Rust-specific guidance, see [reference.md](reference.md).
 - For code examples of common issues, see [examples.md](examples.md).
 - For benchmark regression workflow, see [benchmark-regression.md](benchmark-regression.md).
-- For finstack-quant hot-path examples, see [examples/finstack-hot-paths.md](examples/finstack-hot-paths.md).
+- For repo hot-path examples, see [examples/finstack-hot-paths.md](examples/finstack-hot-paths.md).

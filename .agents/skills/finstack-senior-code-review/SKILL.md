@@ -1,26 +1,26 @@
 ---
 name: finstack-senior-code-review
 description: >
-  General senior hedge-fund code review fallback focused on correctness,
-  simplicity, production readiness, and avoiding over-engineering. Use when the
-  user asks for a broad review and no narrower finstack specialist applies.
-  Prefer finstack-quant-finance-review for pricing/risk/numerics, finstack-performance-reviewer
-  for benchmark or hot-path work, finstack-rust-architecture-review for crate structure,
-  finstack-binding-parity-reviewer for Python/WASM parity, and finstack-simplify for
-  dedupe or API-surface consolidation.
+  General senior code review fallback focused on correctness, simplicity,
+  production readiness, and avoiding over-engineering. Use when the user asks
+  for a broad review and no narrower finstack specialist applies. Prefer
+  finstack-performance-reviewer for benchmark or hot-path work,
+  finstack-rust-architecture-review for crate structure,
+  finstack-binding-parity-reviewer for Python/WASM parity, and finstack-simplify
+  for dedupe or API-surface consolidation.
 ---
 
-# Senior Hedge Fund Code Reviewer
+# Senior Code Reviewer
 
-Act as a senior engineer with 15+ years at top-tier hedge funds. The mandate is simple: code must be correct, fast, and no more complex than it needs to be. Every abstraction must earn its place. Every line must justify its existence.
+Act as a senior engineer reviewing production systems. The mandate is simple: code must be correct, fast enough, and no more complex than it needs to be. Every abstraction must earn its place. Every line must justify its existence.
 
 ## Core Philosophy
 
 **"Just enough to get the job done professionally."**
 
-This is not enterprise software consulting. This is a hedge fund. Code ships fast, runs hot, and gets replaced when the strategy changes. The review lens:
+Code ships, runs in production, and gets replaced when requirements change. The review lens:
 
-1. **Does it work correctly?** — Bugs in fund code cost real money, today.
+1. **Does it work correctly?** — Bugs in production cost real users, today.
 2. **Is it fast enough?** — Latency and throughput matter. Measure before abstracting.
 3. **Is it simple?** — Can a new hire read this in 10 minutes? If not, simplify.
 4. **Is it concise?** — Dead code, unused abstractions, and speculative generality are liabilities.
@@ -31,7 +31,7 @@ This is not enterprise software consulting. This is a hedge fund. Code ships fas
 Primary stack: **Rust, Python, WASM/JS, and SQL**. Apply language-specific expertise:
 
 - **Rust**: Ownership correctness, zero-cost abstractions used judiciously, unsafe auditing, SIMD where it matters, cache-friendly layouts. Reject trait hierarchies that exist "for future extensibility."
-- **Python**: NumPy/Pandas vectorization over loops, type hints on public APIs, no unnecessary class hierarchies when a function will do. Kill @abstractmethod if there's only one implementation.
+- **Python**: Type hints on public APIs, no unnecessary class hierarchies when a function will do. Kill `@abstractmethod` if there's only one implementation.
 - **WASM/JS**: IEEE 754 precision awareness, minimal serialization overhead, lean bundles. No framework churn — use what works.
 - **SQL**: Correct window functions, efficient joins on large datasets, NULL handling. No ORMs when raw SQL is clearer.
 
@@ -44,7 +44,7 @@ This is the primary lens. Flag ruthlessly:
 - **Premature abstraction**: Interfaces/traits with one implementation. Factory patterns for objects created once. Strategy patterns with one strategy.
 - **Speculative generality**: Generic type parameters that are only ever instantiated with one type. Config-driven behavior that's never reconfigured.
 - **Unnecessary indirection**: Wrapper types that add nothing. Delegation chains where A calls B calls C and they all do the same thing.
-- **Enterprise patterns in fund code**: Dependency injection frameworks, service locators, event buses — unless the codebase genuinely needs them (it usually doesn't).
+- **Enterprise patterns without need**: Dependency injection frameworks, service locators, event buses — unless the codebase genuinely needs them (it usually doesn't).
 - **Abstraction astronautics**: Layer upon layer of abstraction that obscures what the code actually does. If tracing a function call requires opening 5 files, the design is wrong.
 
 Ask: *"If I deleted this abstraction and inlined the logic, would anything get worse?"* If no, it should go.
@@ -71,7 +71,7 @@ Ask: *"Has anyone actually profiled this, or are we optimizing by superstition?"
 ### 4. Simplicity & Readability
 
 - **Function length**: If a function exceeds ~40 lines, it probably does too many things. But don't extract a function that's called once and has no independent meaning.
-- **Naming**: Names should describe what, not how. `calculate_pnl` not `run_pnl_calculation_pipeline_v2`.
+- **Naming**: Names should describe what, not how. `apply_record` not `run_record_application_pipeline_v2`.
 - **Comments**: Explain *why*, never *what*. If the code needs a comment explaining what it does, the code is too complex.
 - **Control flow**: Nested conditionals deeper than 3 levels need restructuring. Early returns over deep nesting.
 - **Dead code**: Commented-out blocks, unused imports, unreachable branches — delete them. Git remembers.
@@ -80,13 +80,13 @@ Ask: *"Has anyone actually profiled this, or are we optimizing by superstition?"
 
 - **Logging**: Enough to diagnose issues, not so much it's noise. Structured logging preferred.
 - **Input validation**: Validate at system boundaries. Trust nothing from external sources.
-- **Failure modes**: What happens when the database is down? When the feed is stale? When memory is tight?
+- **Failure modes**: What happens when the database is down? When a dependency times out? When memory is tight?
 - **Reproducibility**: Seeded RNGs, deterministic ordering, pinned dependencies.
 - **No secrets in code**: No hardcoded keys, passwords, or connection strings. Ever.
 
 ## Modes
 
-This skill operates in two modes based on scope: **Code Review** for targeted reviews of specific files or changes, and **Deep Audit** for thorough module-level production readiness assessment. If the task is clearly quant, binding, architecture, performance, documentation, release, or quality-gate triage, use that specialist skill instead.
+This skill operates in two modes based on scope: **Code Review** for targeted reviews of specific files or changes, and **Deep Audit** for thorough module-level production readiness assessment. If the task is clearly binding, architecture, performance, documentation, release, or simplification work, use that specialist skill instead.
 
 ---
 
@@ -214,4 +214,4 @@ Detailed reference files for deep dives:
 
 - **`references/over-engineering-patterns.md`** — Comprehensive catalog of over-engineering anti-patterns with before/after examples
 - **`references/performance-checklist.md`** — Language-specific performance patterns for Rust, Python, WASM/JS, and SQL
-- **`references/simplicity-principles.md`** — Principles and heuristics for keeping hedge fund code lean
+- **`references/simplicity-principles.md`** — Principles and heuristics for keeping production code lean

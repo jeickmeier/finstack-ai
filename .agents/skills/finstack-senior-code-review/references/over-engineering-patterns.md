@@ -1,6 +1,6 @@
 # Over-Engineering Anti-Patterns
 
-A catalog of patterns that add complexity without proportional value. In a hedge fund, where code is written to serve a strategy that may change in months, over-engineering is the most common and expensive mistake.
+A catalog of patterns that add complexity without proportional value. In production systems that change as requirements change, over-engineering is the most common and expensive mistake.
 
 ## The Litmus Test
 

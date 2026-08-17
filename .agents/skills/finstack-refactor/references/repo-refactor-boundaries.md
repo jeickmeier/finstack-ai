@@ -4,13 +4,12 @@ Use this reference when deciding where code should live and what surfaces must r
 
 ## Core ownership
 
-Business logic, valuation rules, validation rules, pricing behavior, and domain invariants belong in the Rust core crates:
+Semantic state, lifecycle rules, validation rules, and domain invariants belong in the Rust core crates:
 
-- `finstack-quant/core`
-- `finstack-quant/valuations`
-- `finstack-quant/statements`
-- `finstack-quant/scenarios`
-- `finstack-quant/portfolio`
+- `crates/finstack-ai-kernel`
+- `crates/finstack-ai-runtime`
+- `crates/finstack-ai`
+- `crates/finstack-ai-protocol` for codecs and journal frames only
 
 Move logic into core when any of these are true:
 
@@ -21,7 +20,7 @@ Move logic into core when any of these are true:
 
 ## Binding ownership
 
-`finstack-quant-py` and `finstack-quant-wasm` should stay thin. They should primarily do:
+`bindings/finstack-ai-python` and `bindings/finstack-ai-wasm` should stay thin. They should primarily do:
 
 - type conversion
 - wrapper construction
@@ -42,23 +41,22 @@ Do not leave domain logic in bindings just because the binding currently owns th
 
 Treat these as public surfaces even if the Rust refactor is internal:
 
-- Python extension exports in `finstack-quant-py/src/lib.rs`
-- per-module `register()` wiring in `finstack-quant-py/src/**`
-- Python package re-exports such as `finstack-quant-py/finstack_quant/valuations/__init__.py`
-- manually maintained `.pyi` stubs under `finstack-quant-py/finstack_quant/`
-- WASM bindings if the API shape is shared
-- parity tests under `finstack-quant-py/tests/parity`
+- Python package exports in `bindings/finstack-ai-python/python/finstack_ai/__init__.py`
+- Python stubs under `bindings/finstack-ai-python/python/finstack_ai/`
+- WASM/JS facade under `bindings/finstack-ai-wasm/js/src/`
+- frozen public items checked by `mise run check-public-items`
+- conformance fixtures checked by `mise run conformance`
 
 ## Good boundary moves
 
-- Move pricing or validation logic from a Python wrapper into a Rust core function.
+- Move validation or lifecycle logic from a Python wrapper into a Rust core function.
 - Extract data-shaping helpers inside a binding module while keeping the binding API stable.
 - Split a large Rust module internally while preserving the existing exported function or type names.
 - Introduce a params struct in core when it simplifies call sites across bindings.
 
 ## Bad boundary moves
 
-- Add Python-only financial logic that cannot be shared with WASM.
+- Add Python-only or JS-only domain logic that cannot be shared with the other host.
 - Hide a domain behavior change behind a refactor label.
 - Move logic from core into bindings just to avoid touching Rust.
 - Change public names or module layout casually without following the sync surfaces.

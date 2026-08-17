@@ -6,13 +6,13 @@ This is the procedural spine of the skill. Read it at the start of every session
 
 ## Phase 1 — Audit (read-only)
 
-**Inputs:** a scope (usually a crate or subsystem, e.g., `statements/checks/`, `margin/`, `core/market_data/surfaces/`).
+**Inputs:** a scope (usually a crate or subsystem, e.g., `crates/finstack-ai-kernel/src/reducer/`, `bindings/finstack-ai-python/`).
 
 **Actions:**
-1. Read every file in the scope. Also read the binding counterparts under `finstack-quant-py/src/bindings/` and `finstack-quant-wasm/src/api/` for the same crate domain.
+1. Read every file in the scope. Also read the binding counterparts under `bindings/finstack-ai-python/` and `bindings/finstack-ai-wasm/` for the same crate domain.
 2. Apply every category from `slop-patterns.md`. For each finding, collect: file, line, pattern category, brief explanation, proposed fix, impact (H/M/L), risk (H/M/L).
 3. Apply `binding-drift.md` checks if the scope has bindings.
-4. Cross-check against `financial-invariants.md` — every finding that touches numerics, FX, serde, parity, or parallelism must be flagged as invariant-sensitive.
+4. Cross-check against `behavioral-invariants.md` — every finding that touches kernel I/O, commit-before-effect, serde, public items, or generated artifacts must be flagged as invariant-sensitive.
 5. Produce the **Audit Report** using `examples/audit-report.md`.
 
 **Deliverable:** one markdown report. Nothing else.
@@ -34,10 +34,10 @@ This is the procedural spine of the skill. Read it at the start of every session
 4. Produce the **Consolidation Plan** using `examples/consolidation-plan.md`.
 
 **Risk tiers:**
-- **Tier 1 — Delete-only:** removing dead code, unused variants, orphaned files. No call-sites change semantically. Verify: `mise run rust-lint && mise run rust-test`.
+- **Tier 1 — Delete-only:** removing dead code, unused variants, orphaned files. No call-sites change semantically. Verify: `mise run check && mise run test`.
 - **Tier 2 — Internal collapse:** inlining private wrappers, collapsing internal single-impl traits, merging duplicate private helpers. No public surface change. Verify: Rust-side only.
 - **Tier 3 — Public surface simplification:** removing public parallel APIs, collapsing `try_*` shadows, renaming public symbols. Binding updates required. Verify: full stack.
-- **Tier 4 — Invariant-sensitive:** anything that touches serde, Decimal math, FX policy, parity contract, evaluator precedence. Verify: full stack + golden tests + parity tests + explicit user sign-off before merge.
+- **Tier 4 — Invariant-sensitive:** anything that touches serde, kernel decide/apply, commit-before-effect, public-item inventory, or generated artifacts. Verify: full stack + conformance + explicit user sign-off before merge.
 
 **Deliverable:** one markdown plan with slice-by-slice breakdown.
 
@@ -55,7 +55,7 @@ This is the procedural spine of the skill. Read it at the start of every session
 1. Re-read the files touched by this slice (don't rely on stale memory — the tree may have changed since the audit).
 2. Apply the relevant tactic(s) from `refactor-tactics.md`.
 3. Edit only the files in the slice. If you find yourself reaching outside the slice boundary, stop and re-scope with the user.
-4. Binding rule: if the slice touches a public Rust symbol, it also touches the Python binding, the WASM binding, `.pyi`, and `parity_contract.toml` in the same commit — or the slice isn't done.
+4. Binding rule: if the slice touches a public Rust symbol, it also touches the Python binding, the WASM binding, `.pyi`, and public-item inventory in the same commit — or the slice isn't done.
 5. Produce the **Refactor Diff** note using `examples/refactor-diff.md`.
 
 **Deliverable:** the edits + a short refactor-diff note.
@@ -75,44 +75,29 @@ This is the procedural spine of the skill. Read it at the start of every session
 ### Every slice
 
 ```bash
-mise run rust-lint
-mise run rust-test
+mise run check
+mise run test
 ```
 
 Prefer the repo's `mise run` tasks from `AGENTS.md`. Use focused checks while iterating, then broader lint/test gates when the refactor slice crosses crate or binding boundaries.
 
 ### If the slice touches Rust that is bound to Python
 
-```bash
-mise run python-build       # release profile — debug is too slow for portfolio
-mise run python-lint
-mise run python-test
-```
-
-(Note: `AGENTS.md` warns that debug Python builds are "too slow for portfolio valuation." The Makefile uses `MATURIN_PROFILE=release` for `python-dev` by design.)
+Rebuild the editable Python package, then re-run the Python portion of `mise run test`.
 
 ### If the slice touches Rust that is bound to WASM
 
 ```bash
-mise run wasm-build
-mise run wasm-lint
-mise run wasm-test
-```
-
-### If the slice touches the WASM UI layer
-
-```bash
-mise run lint-ui
-mise run test-ui
+mise run generate-wasm
+mise run check-wasm
 ```
 
 ### If the slice is Tier 3 or Tier 4 (any public surface change or invariant-sensitive)
 
 ```bash
-uv run pytest finstack-quant-py/tests/parity -x
+mise run check-public-items
+mise run conformance
 ```
-
-Plus: diff golden test outputs serial vs parallel for any invariant-sensitive slice.
 
 ### Output rule
 
@@ -128,8 +113,8 @@ Paste the actual last-10 lines of each command you ran into your response. **Nev
 4. Wait for the user's decision.
 
 Root causes are usually one of:
-- Parity drift: a public symbol changed and bindings/parity weren't updated.
-- Golden test divergence: numerical behavior changed; the simplification was not behavior-preserving.
+- Parity drift: a public symbol changed and bindings/public items weren't updated.
+- Golden test divergence: behavior changed; the simplification was not behavior-preserving.
 - Lint: a new `#[allow(...)]` is needed, OR (more likely) the refactor can be done without one.
 - Serde fixture: an inbound field was renamed without an alias.
 
@@ -154,14 +139,13 @@ The slice is done when:
 
 Example:
 ```
-refactor(statements): collapse dual check runners
+refactor(kernel): collapse dual apply helpers
 
-Audit cluster 3 (checks/runner.rs vs checks/suite.rs). Collapsed runner
-into suite; runner.rs deleted. All call-sites updated. Binding surface
+Audit cluster 3 (apply/legacy.rs vs apply/shapes.rs). Collapsed legacy
+into shapes; legacy.rs deleted. All call-sites updated. Binding surface
 unchanged.
 
-Verified: mise run rust-lint, mise run rust-test, mise run python-lint,
-mise run python-test, mise run wasm-lint, mise run wasm-test. All green.
+Verified: mise run check, mise run test. All green.
 ```
 
 **Do not squash multiple slices into one commit.** The user reviews slices one at a time; squashing defeats the point.
@@ -170,12 +154,12 @@ mise run python-test, mise run wasm-lint, mise run wasm-test. All green.
 
 ## When to rebuild the bindings
 
-Per `.cursor/rules/project-rules.md`: **if you change the Rust library, you will need to rebuild the Python and WASM bindings before using in python/wasm.**
+If you change the Rust library, rebuild the Python and WASM bindings before using them in python/wasm.
 
-- Rebuild Python: `mise run python-build` (release).
-- Rebuild WASM: `mise run wasm-build`.
+- Rebuild Python: reinstall the editable package used by `mise run test`.
+- Rebuild WASM: `mise run generate-wasm`.
 
-If your slice touched `finstack-quant/*` but not the binding crates, you still need to rebuild **if you want the binding tests to pick up the change.** Always rebuild before running `mise run python-test` or `mise run wasm-test`.
+If your slice touched `crates/*` but not the binding crates, you still need to rebuild **if you want the binding tests to pick up the change.** Always rebuild before running binding tests.
 
 ---
 
@@ -217,4 +201,4 @@ Don't power through a slice that's gone wrong — the cost of a bad commit is hi
 - **"Run tests at the end"**: no. Verify after every slice. Batched verification hides which slice broke what.
 - **"Minor cleanup while I'm here"**: no. Every change that's not in the current slice goes in its own slice. This keeps diffs reviewable and rollbacks cheap.
 - **"Ship a half-migration"**: no. A slice that leaves the tree in an intermediate state (old path deprecated but not deleted, new path not wired everywhere) is a landmine. Either fully migrate or don't start.
-- **"Skip parity tests because it's 'just' a rename"**: no. Renames are exactly the change parity tests exist to catch.
+- **"Skip public-item checks because it's 'just' a rename"**: no. Renames are exactly the change those checks exist to catch.

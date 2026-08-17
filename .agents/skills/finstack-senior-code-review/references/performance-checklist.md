@@ -47,14 +47,14 @@ fn active_indices(data: &[Record]) -> Vec<usize> {
 
 ```rust
 // BAD: array of structs for columnar access
-struct Tick { timestamp: i64, price: f64, volume: f64 }
-let ticks: Vec<Tick> = ...;  // cache-unfriendly if only accessing prices
+struct Sample { timestamp: i64, value: f64, weight: f64 }
+let samples: Vec<Sample> = ...;  // cache-unfriendly if only accessing values
 
 // GOOD: struct of arrays when accessing one field at a time
-struct TickData {
+struct SampleData {
     timestamps: Vec<i64>,
-    prices: Vec<f64>,
-    volumes: Vec<f64>,
+    values: Vec<f64>,
+    weights: Vec<f64>,
 }
 ```
 
@@ -77,20 +77,20 @@ struct TickData {
 ```python
 # BAD: Python loop over numeric data
 result = []
-for i in range(len(prices)):
-    result.append(prices[i] * quantities[i])
+for i in range(len(values)):
+    result.append(values[i] * weights[i])
 
 # GOOD: NumPy vectorized
-result = prices * quantities
+result = values * weights
 ```
 
 ```python
 # BAD: iterating a DataFrame row by row
 for idx, row in df.iterrows():
-    df.loc[idx, "pnl"] = row["price"] * row["quantity"]
+    df.loc[idx, "total"] = row["count"] * row["weight"]
 
 # GOOD: vectorized column operation
-df["pnl"] = df["price"] * df["quantity"]
+df["total"] = df["count"] * df["weight"]
 ```
 
 ### Memory
@@ -101,7 +101,7 @@ df = pd.read_csv("massive_file.csv")  # 10GB in memory
 result = df[df["date"] == today]
 
 # GOOD: filter during read or use chunked processing
-df = pd.read_csv("massive_file.csv", usecols=["date", "price", "qty"], dtype={"price": "float32", "qty": "int32"})
+df = pd.read_csv("massive_file.csv", usecols=["date", "value", "weight"], dtype={"value": "float32", "weight": "int32"})
 ```
 
 ### Avoid These
@@ -127,9 +127,9 @@ df = pd.read_csv("massive_file.csv", usecols=["date", "price", "qty"], dtype={"p
 // BAD: IEEE 754 surprise
 0.1 + 0.2  // 0.30000000000000004
 
-// GOOD: use integer arithmetic for money
-const priceInCents = 10 + 20;  // 30
-// Or use a decimal library for financial calculations
+// GOOD: use integer arithmetic when exact sums matter
+const totalCents = 10 + 20;  // 30
+// Or use a decimal library when the domain requires exact decimal math
 ```
 
 ### WASM Interop
@@ -151,22 +151,22 @@ const priceInCents = 10 + 20;  // 30
 ```sql
 -- BAD: correlated subquery
 SELECT t.*,
-    (SELECT MAX(price) FROM prices p WHERE p.symbol = t.symbol AND p.date <= t.date)
-FROM trades t;
+    (SELECT MAX(value) FROM samples s WHERE s.key = t.key AND s.ts <= t.ts)
+FROM events t;
 
 -- GOOD: window function
 SELECT t.*,
-    MAX(price) OVER (PARTITION BY symbol ORDER BY date ROWS UNBOUNDED PRECEDING)
-FROM trades t
-JOIN prices p ON t.symbol = p.symbol AND t.date = p.date;
+    MAX(value) OVER (PARTITION BY key ORDER BY ts ROWS UNBOUNDED PRECEDING)
+FROM events t
+JOIN samples s ON t.key = s.key AND t.ts = s.ts;
 ```
 
 ```sql
 -- BAD: SELECT * when you need 3 columns
-SELECT * FROM positions WHERE date = CURRENT_DATE;
+SELECT * FROM sessions WHERE date = CURRENT_DATE;
 
 -- GOOD: select only what you need
-SELECT symbol, quantity, market_value FROM positions WHERE date = CURRENT_DATE;
+SELECT id, status, updated_at FROM sessions WHERE date = CURRENT_DATE;
 ```
 
 ### Index Awareness

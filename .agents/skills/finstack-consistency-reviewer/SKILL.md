@@ -1,6 +1,6 @@
 ---
 name: finstack-consistency-reviewer
-description: Reviews finstack-quant code for cross-module consistency: naming conventions, pattern drift, Rust/Python/WASM naming triplets, builder/error/module conventions, and convention inventory updates. Use when the user asks to make patterns consistent, unify naming, check conventions, or find pattern drift. Prefer finstack-simplify for dedupe/API-surface consolidation and finstack-refactor for implementation changes.
+description: Reviews finstack code for cross-module consistency: naming conventions, pattern drift, Rust/Python/WASM naming triplets, builder/error/module conventions, and convention inventory updates. Use when the user asks to make patterns consistent, unify naming, check conventions, or find pattern drift. Prefer finstack-simplify for dedupe/API-surface consolidation and finstack-refactor for implementation changes.
 ---
 
 # Consistency Reviewer
@@ -45,36 +45,36 @@ Work through each category. For every check, compare **at least 3 instances** ac
 - [ ] Functions: `snake_case` consistently (no camelCase leaks)
 - [ ] Types/Structs/Enums: `PascalCase` consistently
 - [ ] Constants: `SCREAMING_SNAKE_CASE` for all `pub const`, including private constants within the same scope
-- [ ] Builder methods: either all use `set_` prefix or none do (check `set_interp()` vs `base_date()` patterns)
+- [ ] Builder methods: either all use `set_` prefix or none do
 - [ ] Error constructors: consistent pattern (`Type::new()` vs `Type::variant_name()` vs helper methods)
-- [ ] Trait names: consistent verb/noun form (e.g., `Discounting` vs `Discount` vs `Discountable`)
-- [ ] Module names: consistent singular vs plural (`instrument` vs `instruments`)
+- [ ] Trait names: consistent verb/noun form
+- [ ] Module names: consistent singular vs plural
 
 **Python bindings:**
-- [ ] Wrapper types: `Py{Type}` prefix consistently (no `Python{Type}` or bare names)
+- [ ] Wrapper types: consistent prefix/naming relative to the Rust type
 - [ ] Method names: `snake_case` matching Rust names where possible
 - [ ] `__repr__` / `__str__`: consistent format across all `#[pyclass]` types
 
 **WASM bindings:**
-- [ ] Wrapper types: `Js{Type}` prefix consistently
+- [ ] Wrapper types: consistent prefix/naming relative to the Rust type
 - [ ] `js_name`: `camelCase` for functions, `PascalCase` for types
 - [ ] Constructor naming: consistent `new()` vs `create()` vs `from_*()` patterns
 
 **Cross-binding:**
 - [ ] Same concept uses same name in Rust, Python, and WASM (modulo casing rules)
 - [ ] Feature parity: if Rust has it, bindings should expose it (or document why not)
+- [ ] Error `code` strings and record/event kind names are identical across bindings
 
 ### 2. Pattern Consistency
 
 **Error handling:**
-- [ ] All crate error enums use `#[non_exhaustive]`
-- [ ] All crates define `pub type Result<T> = std::result::Result<T, Error>`
 - [ ] Error location pattern: consistent `error.rs` vs `error/mod.rs` across crates
 - [ ] Error variant naming: consistent `{Source}Error` vs `{Description}` style
 - [ ] `#[from]` and `#[error(transparent)]` used consistently for wrapped errors
+- [ ] Stable machine-readable codes stay identical across languages
 
 **Builders:**
-- [ ] Entry point: `Type::builder(id)` consistently (vs `TypeBuilder::new()` vs `TypeBuilder::default()`)
+- [ ] Entry point: `Type::builder(...)` consistently (vs `TypeBuilder::new()` vs `TypeBuilder::default()`)
 - [ ] Terminal method: `.build()` consistently (vs `.finish()` vs `.create()`)
 - [ ] Required vs optional fields: same validation approach across all builders
 - [ ] Return types: `Result<T>` vs `T` consistent for similar builder complexity
@@ -111,7 +111,7 @@ Work through each category. For every check, compare **at least 3 instances** ac
 
 ### 4. Duplicate & Near-Duplicate Functionality
 
-- [ ] Utility functions: same logic implemented in multiple modules (date helpers, math utils)
+- [ ] Utility functions: same logic implemented in multiple modules
 - [ ] Type aliases: same type aliased differently in different modules
 - [ ] Validation logic: same checks repeated instead of shared validators
 - [ ] Configuration parsing: same config patterns re-implemented per module
@@ -120,10 +120,10 @@ Work through each category. For every check, compare **at least 3 instances** ac
 
 ### 5. API Surface Consistency
 
-- [ ] Similar instruments expose similar method sets (e.g., all bonds have `coupon_rate()`)
-- [ ] Similar pricers accept similar parameters and return similar result types
-- [ ] Curve types expose consistent query interfaces (`.discount()`, `.forward()`, etc.)
-- [ ] All public types implement the same baseline traits (`Clone`, `Debug`, `Serialize`, `Deserialize`)
+- [ ] Similar types expose similar method sets
+- [ ] Similar constructors accept similar parameters and return similar result types
+- [ ] Related query types expose consistent interfaces
+- [ ] All public types implement the same baseline traits (`Clone`, `Debug`, `Serialize`, `Deserialize`) when they are part of the same family
 - [ ] Error messages follow consistent formatting patterns
 
 ### 6. Documentation Consistency
@@ -132,7 +132,6 @@ Work through each category. For every check, compare **at least 3 instances** ac
 - [ ] Doc comment style: `///` vs `//!` used consistently
 - [ ] Examples in docs: consistent format (`# Examples` section with fenced Rust code blocks)
 - [ ] Module-level docs: consistent presence and format across similar modules
-- [ ] Math notation: consistent use of LaTeX/Unicode across doc comments
 
 ## Review Process
 
@@ -162,13 +161,13 @@ Found X findings (Y blocker, Z major, W minor, V nit) across N files.
 ### Findings
 
 #### [BLOCKER] Naming: Builder method prefix inconsistency
-**Where:** discount_curve.rs:L1012 (`set_interp()`), hazard_curve.rs:L45 (`knots()`)
+**Where:** agent.rs:L120 (`set_timeout()`), session.rs:L45 (`timeout()`)
 **Pattern A:** `set_` prefix on setter methods (3 occurrences)
 **Pattern B:** bare name for setter methods (12 occurrences)
 **Recommendation:** Standardize on bare names (majority pattern, more ergonomic)
 
 #### [MAJOR] Pattern: Error module location
-**Where:** core/src/error/mod.rs, portfolio/src/error.rs, scenarios/src/error.rs
+**Where:** kernel/src/error.rs, runtime/src/error.rs, protocol/src/error.rs
 **Pattern A:** `error/mod.rs` with submodules (1 crate)
 **Pattern B:** `error.rs` flat file (3 crates)
 **Recommendation:** Use `error.rs` for crates with <5 error variants, `error/mod.rs` for larger

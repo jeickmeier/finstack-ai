@@ -1,6 +1,6 @@
 # Refactor tactics: the concrete moves
 
-Each tactic has: **when to use**, **when NOT to use**, and a **before/after** in finstack-quant idiom.
+Each tactic has: **when to use**, **when NOT to use**, and a **before/after** in finstack idiom.
 
 Apply tactics one at a time per slice. Don't chain multiple tactics unless the chain is the slice — e.g., "Inline the single-impl trait AND delete the resulting wrapper" is a reasonable coupled slice.
 
@@ -40,28 +40,28 @@ Delete `runner.rs`. Remove `pub mod runner;` from `checks/mod.rs`. Remove any re
 
 *Before:*
 ```rust
-// in analytics/src/sharpe.rs
-pub fn sharpe(returns: &[f64], rf: f64) -> f64 {
-    sharpe_impl(returns, rf)
+// in runtime/src/start.rs
+pub fn start_run(spec: &AgentSpec) -> Result<Run, Error> {
+    start_run_impl(spec)
 }
 
-fn sharpe_impl(returns: &[f64], rf: f64) -> f64 {
-    sharpe_core(returns, rf, 252.0)
+fn start_run_impl(spec: &AgentSpec) -> Result<Run, Error> {
+    start_run_core(spec, StartRunOptions::default())
 }
 
-fn sharpe_core(returns: &[f64], rf: f64, annualization: f64) -> f64 {
+fn start_run_core(spec: &AgentSpec, options: StartRunOptions) -> Result<Run, Error> {
     // real work
 }
 ```
 
 *After:*
 ```rust
-pub fn sharpe(returns: &[f64], rf: f64, annualization: f64) -> f64 {
+pub fn start_run(spec: &AgentSpec, options: StartRunOptions) -> Result<Run, Error> {
     // real work inlined
 }
 ```
 
-If call-sites always pass `252.0`, keep the signature but document the default expectation; don't hide it behind a wrapper.
+If call-sites always pass the default options, keep the signature but document the default expectation; don't hide it behind a wrapper.
 
 ---
 
@@ -107,39 +107,39 @@ Delete the trait. Tests that needed polymorphism can use a test-specific mock by
 
 **When:** A type has multiple `new`-ish constructors (`new`, `from_parts`, `try_new`, `build_new`, `create`) that do overlapping work.
 
-**Not when:** Each constructor has a genuinely different input type and the difference encodes a precondition (e.g., `Currency::from_iso_str(&str)` vs `Currency::from_validated(ValidatedIso)` — the latter can't fail because the input is pre-validated).
+**Not when:** Each constructor has a genuinely different input type and the difference encodes a precondition (e.g., `ErrorCode::from_str(&str)` vs `ErrorCode::from_validated(ValidatedCode)` — the latter can't fail because the input is pre-validated).
 
 **Example:**
 
 *Before:*
 ```rust
-impl DiscountCurve {
-    pub fn new(pillars: Vec<Pillar>) -> Self { /* panics on bad input */ }
-    pub fn try_new(pillars: Vec<Pillar>) -> Result<Self, Error> { /* Result version */ }
-    pub fn from_market_data(md: &MarketData) -> Self { /* calls new() */ }
-    pub fn build(builder: CurveBuilder) -> Self { /* calls new() */ }
+impl Agent {
+    pub fn new(spec: AgentSpec) -> Self { /* panics on bad input */ }
+    pub fn try_new(spec: AgentSpec) -> Result<Self, Error> { /* Result version */ }
+    pub fn from_spec(spec: &AgentSpec) -> Self { /* calls new() */ }
+    pub fn build(builder: AgentBuilder) -> Self { /* calls new() */ }
 }
 ```
 
 *After:*
 ```rust
-impl DiscountCurve {
-    pub fn new(pillars: Vec<Pillar>) -> Result<Self, Error> {
+impl Agent {
+    pub fn new(spec: AgentSpec) -> Result<Self, Error> {
         // Validate input, construct.
     }
 }
 
-impl From<MarketData> for DiscountCurve {
+impl TryFrom<AgentSpec> for Agent {
     type Error = Error;
-    fn try_from(md: MarketData) -> Result<Self, Self::Error> {
-        Self::new(md.into_pillars())
+    fn try_from(spec: AgentSpec) -> Result<Self, Self::Error> {
+        Self::new(spec)
     }
 }
 ```
 
 - One `new`, returns `Result`. The panicking variant is gone (per clippy rules in bindings, it's unusable anyway).
 - `From`/`TryFrom` impls for conversion sources.
-- `CurveBuilder` becomes an internal helper that ultimately calls `DiscountCurve::new`.
+- `AgentBuilder` becomes an internal helper that ultimately calls `Agent::new`.
 
 ---
 
@@ -153,13 +153,13 @@ impl From<MarketData> for DiscountCurve {
 
 *Before:*
 ```rust
-pub fn evaluate_period<T: Numeric>(ctx: &Context<T>, period: Period) -> T { /* ... */ }
-// Only ever called with T = Decimal.
+pub fn apply_record<T: RecordLike>(ctx: &Context<T>, record: T) -> T { /* ... */ }
+// Only ever called with T = Record.
 ```
 
 *After:*
 ```rust
-pub fn evaluate_period(ctx: &Context, period: Period) -> Decimal { /* ... */ }
+pub fn apply_record(ctx: &Context, record: Record) -> Record { /* ... */ }
 ```
 
 Delete the `Numeric` trait if nothing else uses it. Update bindings — generics can't be exposed through PyO3 or wasm-bindgen anyway, so this usually *improves* the binding layer too.
@@ -174,20 +174,20 @@ Delete the `Numeric` trait if nothing else uses it. Update bindings — generics
 
 *Before:*
 ```rust
-impl Currency {
-    pub fn new(iso: &str) -> Self { Self::try_new(iso).expect("bad ISO") }
-    pub fn try_new(iso: &str) -> Result<Self, ParseCurrencyError> { /* ... */ }
+impl ErrorCode {
+    pub fn new(code: &str) -> Self { Self::try_new(code).expect("bad code") }
+    pub fn try_new(code: &str) -> Result<Self, ErrorCodeError> { /* ... */ }
 }
 ```
 
 *After:*
 ```rust
-impl Currency {
-    pub fn new(iso: &str) -> Result<Self, ParseCurrencyError> { /* ... */ }
+impl ErrorCode {
+    pub fn new(code: &str) -> Result<Self, ErrorCodeError> { /* ... */ }
 }
 
 // If the user wants an infallible construction from a validated source:
-impl From<KnownCurrency> for Currency { /* infallible by type */ }
+impl From<KnownErrorCode> for ErrorCode { /* infallible by type */ }
 ```
 
 Use distinct input types, not distinct function names, to express the precondition difference.
@@ -203,35 +203,35 @@ Use distinct input types, not distinct function names, to express the preconditi
 *Before (Python binding):*
 ```rust
 #[pyfunction]
-fn compute_sharpe_from_df(df: &PyAny, rf: f64) -> PyResult<f64> {
-    let returns: Vec<f64> = df.call_method0("to_list")?.extract()?;
-    if returns.is_empty() { return Ok(0.0); }
-    let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-    let var = returns.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / returns.len() as f64;
-    let std = var.sqrt();
-    if std == 0.0 { return Ok(0.0); }
-    Ok((mean - rf) / std * 252f64.sqrt())
+fn start_run_from_dict(spec: &PyAny, timeout_ms: u64) -> PyResult<PyRun> {
+    let agent_id: String = spec.get_item("agent_id")?.extract()?;
+    if agent_id.is_empty() { return Err(py_err("missing agent_id")); }
+    let timeout = Duration::from_millis(timeout_ms);
+    let rust_spec = AgentSpec::parse(&agent_id)?;
+    finstack_ai::start_run(&rust_spec, timeout).map(PyRun::from_inner).map_err(core_to_py)
 }
 ```
 
 *After (Rust canonical):*
 ```rust
-// in analytics/src/sharpe.rs
-pub fn sharpe(returns: &[f64], rf: f64, annualization: f64) -> Option<f64> {
-    if returns.is_empty() { return Some(0.0); }
-    // ...standard sharpe...
+// in crates/finstack-ai/src/run.rs
+pub fn start_run(spec: &AgentSpec, options: StartRunOptions) -> Result<Run, Error> {
+    if spec.agent_id().is_empty() { return Err(Error::missing_agent()); }
+    // ...canonical start...
 }
 ```
 
 *After (Python binding):*
 ```rust
 #[pyfunction]
-fn sharpe(returns: Vec<f64>, rf: f64, annualization: f64) -> PyResult<f64> {
-    Ok(finstack_quant_analytics::sharpe(&returns, rf, annualization).unwrap_or(0.0))
+fn start_run(spec: PyAgentSpec, options: PyStartRunOptions) -> PyResult<PyRun> {
+    finstack_ai::start_run(&spec.inner, options.into_inner())
+        .map(PyRun::from_inner)
+        .map_err(core_to_py)
 }
 ```
 
-Same refactor applied to WASM binding. `.pyi` updated. Parity contract updated.
+Same refactor applied to WASM binding. `.pyi` updated. Public-item inventory updated.
 
 ---
 
@@ -305,18 +305,18 @@ Usually a safe, instant, Tier 2 refactor.
 
 *Before:*
 ```rust
-pub struct CurveHandle {
-    inner: Arc<DiscountCurve>,
+pub struct AgentHandle {
+    inner: Arc<Agent>,
 }
-impl CurveHandle {
-    pub fn new(c: DiscountCurve) -> Self { Self { inner: Arc::new(c) } }
-    pub fn discount(&self, t: f64) -> f64 { self.inner.discount(t) }
-    pub fn forward(&self, t: f64) -> f64 { self.inner.forward(t) }
+impl AgentHandle {
+    pub fn new(agent: Agent) -> Self { Self { inner: Arc::new(agent) } }
+    pub fn id(&self) -> AgentId { self.inner.id() }
+    pub fn spec(&self) -> &AgentSpec { self.inner.spec() }
 }
 ```
 
 *After:*
-Use `Arc<DiscountCurve>` directly at call-sites, or add `#[derive(Clone)]` to `DiscountCurve` if appropriate. Delete `CurveHandle`.
+Use `Arc<Agent>` directly at call-sites, or add `#[derive(Clone)]` to `Agent` if appropriate. Delete `AgentHandle`.
 
 **Not when:** The wrapper is there specifically for FFI safety (`#[pyclass]` or `#[wasm_bindgen]`) — those are load-bearing for the binding layer, not simplifications to remove.
 
@@ -332,7 +332,7 @@ Use `Arc<DiscountCurve>` directly at call-sites, or add `#[derive(Clone)]` to `D
 3. Migrate call-sites.
 4. Delete the losers.
 
-**Watch out for:** `RoundingConfig` vs `RoundingContext` in finstack-quant — they *look* like duplicates, but one is input and the other is output metadata. They are deliberately separate. See `financial-invariants.md`.
+**Watch out for:** input config vs output metadata that *look* like duplicates. They can be deliberately separate. See `behavioral-invariants.md`.
 
 ---
 
@@ -342,11 +342,11 @@ Use `Arc<DiscountCurve>` directly at call-sites, or add `#[derive(Clone)]` to `D
 
 *Before:*
 ```rust
-pub fn find_curve(id: &str, market: &Market) -> Option<Curve> {
-    if let Some(section) = market.discount_curves.get(id) {
-        if let Some(curve) = section.active() {
-            if curve.is_valid() {
-                return Some(curve.clone());
+pub fn find_session(id: &str, store: &SessionStore) -> Option<Session> {
+    if let Some(section) = store.by_id.get(id) {
+        if let Some(session) = section.active() {
+            if session.is_open() {
+                return Some(session.clone());
             }
         }
     }
@@ -356,10 +356,10 @@ pub fn find_curve(id: &str, market: &Market) -> Option<Curve> {
 
 *After:*
 ```rust
-pub fn find_curve(id: &str, market: &Market) -> Option<Curve> {
-    let section = market.discount_curves.get(id)?;
-    let curve = section.active()?;
-    curve.is_valid().then(|| curve.clone())
+pub fn find_session(id: &str, store: &SessionStore) -> Option<Session> {
+    let section = store.by_id.get(id)?;
+    let session = section.active()?;
+    session.is_open().then(|| session.clone())
 }
 ```
 

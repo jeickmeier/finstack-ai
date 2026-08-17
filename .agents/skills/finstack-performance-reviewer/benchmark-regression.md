@@ -1,6 +1,6 @@
 # Benchmark Regression Workflow
 
-Use when reviewing runtime or allocation changes in performance-sensitive finstack-quant code.
+Use when reviewing runtime or allocation changes in performance-sensitive finstack code.
 
 ## Default Evidence
 
@@ -11,15 +11,14 @@ Use when reviewing runtime or allocation changes in performance-sensitive finsta
 
 ## Finstack Commands
 
-- Rust benchmarks: `mise run rust-bench`
-- Saved baseline comparison: `mise run rust-bench-compare` if configured for the branch
-- Python extension build: `mise run python-build -- --release` for runtime-sensitive Python benchmarks
-- Broad final checks: `mise run all-lint` and relevant targeted tests after code changes
+- WASM package size: `mise run check-size-budgets`
+- WASM benches: `mise run benchmark-wasm` when the host or JS facade changed
+- Broad final checks: `mise run check` and relevant targeted tests after code changes
 
 ## Review Questions
 
-- Is the algorithmic complexity appropriate for portfolio-scale inputs?
-- Are allocations inside pricing, attribution, scenario, or Monte Carlo loops justified?
-- Does parallelism preserve deterministic results and avoid contention?
+- Is the algorithmic complexity appropriate for production-scale inputs?
+- Are allocations inside kernel decide/apply, runtime dispatch, or binding conversion loops justified?
+- Does parallelism preserve deterministic durable history and avoid contention?
 - Are serialization and binding conversions outside hot loops?
 - Does the benchmark measure the same path users care about?

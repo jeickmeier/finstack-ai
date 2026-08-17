@@ -1,10 +1,10 @@
 # Simplicity Principles
 
-Heuristics for keeping hedge fund code lean, readable, and replaceable.
+Heuristics for keeping production code lean, readable, and replaceable.
 
-## The Fund Code Mindset
+## The Production Code Mindset
 
-Hedge fund code exists to serve a strategy. Strategies change. Markets shift. The code that survives isn't the most "architecturally pure" — it's the code that can be understood, modified, or replaced quickly by whoever inherits it.
+Production code exists to serve current requirements. Requirements change. The code that survives isn't the most "architecturally pure" — it's the code that can be understood, modified, or replaced quickly by whoever inherits it.
 
 **Build for the next person, not the next decade.**
 
@@ -63,34 +63,34 @@ Deep nesting obscures control flow. Refactor with early returns.
 
 ```python
 # BAD: deep nesting
-def process_trade(trade):
-    if trade is not None:
-        if trade.is_valid():
-            if trade.quantity > 0:
-                if trade.price > 0:
-                    execute(trade)
+def process_record(record):
+    if record is not None:
+        if record.is_valid():
+            if record.size > 0:
+                if record.kind:
+                    apply(record)
                 else:
-                    log.error("bad price")
+                    log.error("missing kind")
             else:
-                log.error("bad quantity")
+                log.error("empty record")
         else:
-            log.error("invalid trade")
+            log.error("invalid record")
 
 
 # GOOD: early returns
-def process_trade(trade):
-    if trade is None:
+def process_record(record):
+    if record is None:
         return
-    if not trade.is_valid():
-        log.error("invalid trade")
+    if not record.is_valid():
+        log.error("invalid record")
         return
-    if trade.quantity <= 0:
-        log.error("bad quantity")
+    if record.size <= 0:
+        log.error("empty record")
         return
-    if trade.price <= 0:
-        log.error("bad price")
+    if not record.kind:
+        log.error("missing kind")
         return
-    execute(trade)
+    apply(record)
 ```
 
 ### 5. Boring Technology
@@ -120,12 +120,12 @@ If you need a comment to explain a variable or function name, the name is wrong.
 
 ```python
 # BAD
-x = get_data()  # fetches daily P&L from the database
-transform(x)  # converts to USD
+x = get_data()  # fetches the latest session from the store
+transform(x)  # converts to the public handle
 
 # GOOD
-daily_pnl = fetch_daily_pnl()
-pnl_in_usd = convert_to_usd(daily_pnl)
+session = fetch_latest_session()
+handle = to_public_handle(session)
 ```
 
 ### 8. Tests That Prove Behavior, Not Implementation
@@ -135,16 +135,16 @@ Test what the code does, not how it does it.
 ```python
 # BAD: testing implementation
 def test_uses_cache():
-    service = PricingService()
-    service.price(option)
+    service = SessionService()
+    service.open(spec)
     assert service._cache._store.__len__() == 1  # tied to internals
 
 
 # GOOD: testing behavior
 def test_same_result_on_repeated_call():
-    service = PricingService()
-    first = service.price(option)
-    second = service.price(option)
+    service = SessionService()
+    first = service.open(spec)
+    second = service.open(spec)
     assert first == second  # tests the contract, not the mechanism
 ```
 

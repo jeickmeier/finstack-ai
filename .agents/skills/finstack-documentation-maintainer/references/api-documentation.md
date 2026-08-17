@@ -97,8 +97,8 @@ pub trait MyTrait {
 /// # Errors
 ///
 /// Returns `Err` if:
-/// - Input is negative
-/// - Curve lookup fails
+/// - Input is empty
+/// - Required lookup fails
 ///
 /// # Panics
 ///
@@ -115,30 +115,28 @@ that accepts a caller-supplied input must have a `# Arguments` section. Use the
 exact Rust parameter names and give each entry a substantive description:
 
 ```rust
-/// Reprice a bond at a settlement date.
+/// Start a run from a resolved agent spec.
 ///
 /// # Arguments
 ///
-/// * `bond` - Instrument whose contractual cashflows and conventions are used.
-/// * `settlement` - Settlement date; cashflows before this date are excluded.
-/// * `discount_curve` - Curve supplying discount factors in the bond's payment
-///   currency. Its curve ID must match the valuation context lookup.
+/// * `spec` - Resolved agent specification used to construct the run.
+/// * `timeout` - Wall-clock deadline; expired runs fail closed.
+/// * `cancellation` - Token checked before privileged dispatch.
 ///
 /// # Errors
 ///
-/// Returns an error when the required discount curve is unavailable.
-pub fn price(bond: &Bond, settlement: Date, discount_curve: &DiscountCurve) -> Result<f64> {
+/// Returns an error when the spec is incomplete or the run cannot be authorized.
+pub fn start_run(spec: &AgentSpec, timeout: Duration, cancellation: &CancellationToken) -> Result<Run> {
     // ...
 }
 ```
 
 Do not substitute a type repetition (for example, "the input value") for an
-explanation. State units and representation for numerical values, market
-conventions for financial values, accepted shapes and alignment for collections,
-and the fallback behavior of `Option` inputs. Document mutation, ownership, or
-lookup effects when they are visible to the caller. The public-API verifier
-checks that every documented callable has a substantive entry for each input;
-reviewers remain responsible for the semantic accuracy of those entries.
+explanation. State units and representation for numerical values, accepted
+shapes and alignment for collections, and the fallback behavior of `Option`
+inputs. Document mutation, ownership, or lookup effects when they are visible
+to the caller. Reviewers remain responsible for the semantic accuracy of those
+entries.
 
 ## Python documentation conventions
 
@@ -165,17 +163,16 @@ contract and state the condition that raises each type. Do not use generic
 Match the docstring flavor already used in the module (NumPy `Parameters`
 sections or Google `Args:` sections); do not mix flavors within one module.
 
-Pure-Python binding modules (`.py` files, e.g. pandas convenience layers like
-`features/dataframe.py`) have no separate stub; document them to the same bar
+Pure-Python binding modules (`.py` files, e.g. host-language adapters like
+`_pydantic.py`) have no separate stub; document them to the same bar
 directly in their function and class docstrings, since those are the only IDE
 surface. Thin re-export shims that only rebind compiled types need just a module
 docstring — the symbol docs come from the compiled extension.
 
 ### NumPy docstring style
 
-This project uses NumPy-style docstrings for Python in most modules; some
-modules (e.g. `features`, `portfolio`, `monte_carlo`) use Google-style
-`Args:`/`Returns:`/`Raises:` sections. Follow the module you are editing.
+This project uses NumPy-style or Google-style docstrings depending on the
+module. Follow the flavor already used in the file you are editing.
 
 ### Class documentation
 
@@ -217,130 +214,62 @@ class MyClass:
 ### Method documentation
 
 ```python
-def calculate_price(
+def start_run(
     self,
-    spot: float,
-    strike: float,
-    time_to_expiry: float,
-    volatility: float,
-) -> float:
-    """Calculate the option price using Black-Scholes.
-
-    Computes the price of a European call option under the
-    Black-Scholes-Merton framework with continuous dividend yield.
+    spec: AgentSpec,
+    timeout_ms: int,
+) -> Run:
+    """Start a run from a resolved agent spec.
 
     Parameters
     ----------
-    spot : float
-        Current spot price of the underlying.
-    strike : float
-        Option strike price.
-    time_to_expiry : float
-        Time to expiry in years (ACT/365 basis).
-    volatility : float
-        Annualized volatility (e.g., 0.20 for 20%).
+    spec : AgentSpec
+        Resolved agent specification used to construct the run.
+    timeout_ms : int
+        Wall-clock deadline in milliseconds; expired runs fail closed.
 
     Returns
     -------
-    float
-        Option price in the same units as spot.
+    Run
+        The started run handle.
 
     Raises
     ------
-    ValueError
-        If time_to_expiry is negative.
-    ValueError
-        If volatility is non-positive.
+    ConfigurationError
+        If the spec is incomplete.
+    TimeoutError
+        If timeout_ms is negative.
 
     Examples
     --------
-    >>> pricer = OptionPricer(rate=0.05, dividend_yield=0.02)
-    >>> price = pricer.calculate_price(100.0, 100.0, 1.0, 0.20)
-    >>> round(price, 4)
-    10.4506
-
-    Sources
-    -------
-    - Black-Scholes (1973): see docs/REFERENCES.md#blackScholes1973
-    - Merton (1973): see docs/REFERENCES.md#merton1973
+    >>> agent = Agent.from_spec(spec)
+    >>> run = agent.start_run(spec, timeout_ms=30_000)
+    >>> run.id
+    'run_...'
     """
 ```
-
-## Academic reference format
-
-### In-code references
-
-Reference the canonical entry in `docs/REFERENCES.md`:
-
-**Rust:**
-```rust
-/// # References
-///
-/// - Black (1976): see docs/REFERENCES.md#black1976
-/// - Hull: Options, Futures, and Other Derivatives, Ch. 19
-```
-
-**Python:**
-```python
-"""
-Sources
--------
-- Black (1976): see docs/REFERENCES.md#black1976
-- Hull: Options, Futures, and Other Derivatives, Ch. 19
-"""
-```
-
-### When to add references
-
-| Code type | Reference required |
-|-----------|-------------------|
-| Pricing model | Yes - cite original paper |
-| Day count convention | Yes - cite ISDA or market standard |
-| Greeks formula | Yes - cite derivation source |
-| Monte Carlo technique | Yes - cite methodology paper |
-| Curve interpolation | Yes if non-trivial (e.g., monotonic cubic) |
-| Standard algorithm | Only if non-obvious implementation |
-
-### Standard reference keys
-
-Use these anchor keys from `docs/REFERENCES.md`:
-
-| Model | Key |
-|-------|-----|
-| Black-Scholes | `#blackScholes1973` |
-| Black-76 | `#black1976` |
-| Merton | `#merton1973` |
-| Bachelier | `#bachelier1900` |
-| ISDA definitions | `#isda2006Definitions` |
-| Garman-Kohlhagen | `#garmanKohlhagen1983` |
-| Heston | `#heston1993` |
-| SABR | `#haganSABR2002` |
-| Hull textbook | `#hullOptionsFuturesDerivatives` |
-| Brigo-Mercurio | `#brigoMercurio2006` |
-| O'Kane credit | `#okane2008` |
-| Variance swaps | `#demeterfiVarianceSwaps1999` |
 
 ## Quality standards
 
 ### Description quality
 
 **Good:**
-> Calculate the present value of a fixed-rate bond by discounting
-> projected cashflows using the provided discount curve.
+> Start a run from a resolved agent spec and fail closed when the
+> deadline or cancellation token is already expired.
 
 **Bad:**
-> Calculate PV.
+> Start a run.
 
 ### Argument documentation quality
 
 **Good:**
 ```
-* `settlement` - Settlement date; cashflows before this date are excluded
+* `timeout` - Wall-clock deadline; expired runs fail closed
 ```
 
 **Bad:**
 ```
-* `settlement` - The settlement date
+* `timeout` - The timeout
 ```
 
 ### Example quality
@@ -348,14 +277,14 @@ Use these anchor keys from `docs/REFERENCES.md`:
 **Good:**
 ```rust
 /// ```rust
-/// use finstack_quant_valuations::pricer::PricerRegistry;
+/// use finstack_ai::Agent;
 ///
-/// let registry = PricerRegistry::builder()
-///     .with_rates()
-///     .with_credit()
-///     .build();
+/// let agent = Agent::builder()
+///     .with_model(model)
+///     .with_toolset(tools)
+///     .build()?;
 ///
-/// assert!(registry.get(InstrumentType::Bond, ModelKey::Discounting).is_some());
+/// assert!(agent.spec().model().is_some());
 /// ```
 ```
 
@@ -368,16 +297,16 @@ Use these anchor keys from `docs/REFERENCES.md`:
 
 ## Documenting conventions
 
-When code relies on financial conventions, document them explicitly:
+When code relies on protocol or lifecycle conventions, document them explicitly:
 
 ```rust
-/// Calculate accrued interest.
+/// Commit recoverable effect intent before execution.
 ///
 /// # Conventions
 ///
-/// - Day count: ACT/ACT (ISDA) per `isda2006Definitions`
-/// - Settlement: T+2 business days
-/// - Accrual direction: buyer pays seller
+/// - Commit happens before privileged dispatch
+/// - Duplicate effect IDs are idempotent
+/// - Conflicts fail closed
 ///
 /// # Arguments
 /// ...
@@ -388,14 +317,13 @@ When code relies on financial conventions, document them explicitly:
 For numerical code, note precision characteristics:
 
 ```rust
-/// Compute implied volatility via Newton-Raphson.
+/// Encode a bounded label.
 ///
 /// # Numerical notes
 ///
-/// - Convergence tolerance: 1e-8 relative
-/// - Maximum iterations: 100
-/// - Initial guess: Brenner-Subrahmanyam approximation
-/// - May not converge for deep OTM options
+/// - Maximum length: `LABEL_MAX_BYTES`
+/// - Encoding: UTF-8
+/// - Empty input is rejected
 ///
 /// # Arguments
 /// ...

@@ -1,6 +1,6 @@
 ---
 name: finstack-production-release-prep
-description: Prepares finstack for production release by orchestrating deprecated API removal, documentation readiness, semver review, dependency/security audits, performance regression checks, version metadata, release notes, and final quality gates. Use for release readiness, tagging, or publish-prep work; use finstack-quality-gate-triage or finstack-simplify for narrow failure or cleanup tasks.
+description: Prepares finstack for production release by orchestrating deprecated API removal, documentation readiness, semver review, dependency/security audits, performance regression checks, version metadata, release notes, and final quality gates. Use for release readiness, tagging, or publish-prep work; use finstack-simplify for narrow cleanup tasks.
 ---
 
 # Production Release Preparation
@@ -20,7 +20,7 @@ Release Prep Progress:
 - [ ] Phase 7: Final verification & tagging
 ```
 
-After each phase, run `mise run all-ci` to confirm nothing is broken before proceeding.
+After each phase, run `mise run ci` to confirm nothing is broken before proceeding.
 
 ## Phase 1: Dead code audit
 
@@ -41,13 +41,13 @@ cargo build --workspace 2>&1 | grep "never used\|never read"
 **Python** - Check for unused imports and variables:
 
 ```bash
-uv run ruff check finstack-quant-py --select F401,F841 --no-fix
+uv run --no-project --with ruff==0.12.11 ruff check bindings/finstack-ai-python --select F401,F841 --no-fix
 ```
 
-**TypeScript/UI** - Unused exports and variables:
+**TypeScript** - Unused exports and variables:
 
 ```bash
-cd finstack-ui && npx tsc --noEmit 2>&1 | grep -i "declared but"
+cd bindings/finstack-ai-wasm/js && npx tsc --noEmit 2>&1 | grep -i "declared but"
 ```
 
 ### 1b. Deep dead code detection
@@ -74,11 +74,8 @@ rg -n "TODO|FIXME|HACK|XXX" --type rust --type python --type ts -g '!target/' -g
 # Rust — find deps declared but not imported
 cargo install cargo-machete 2>/dev/null; cargo machete
 
-# Python — check for unused requirements
-uv run ruff check finstack-quant-py --select F401
-
-# UI
-cd finstack-ui && npx depcheck
+# Python — check for unused imports
+uv run --no-project --with ruff==0.12.11 ruff check bindings/finstack-ai-python --select F401
 ```
 
 ### Severity guide
@@ -138,10 +135,11 @@ Quick automated check:
 
 ```bash
 # Rust — build docs and check for missing doc warnings
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude finstack-quant-py --exclude finstack-quant-wasm --no-deps 2>&1 | head -50
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps 2>&1 | head -50
 
 # Python — type-check bindings
-uv run --no-sync ty check finstack-quant-py/finstack_quant
+uv run --isolated --no-project --with mypy==2.3.0 \
+  mypy --strict bindings/finstack-ai-python/python
 ```
 
 ### 3b. README and high-level docs
@@ -160,10 +158,9 @@ Verify these files are current and accurate:
 All examples must compile and produce correct output:
 
 ```bash
-# Python notebook examples
-uv run python finstack-quant-py/examples/notebooks/run_all_notebooks.py
+mise run docs-quickstarts
 # Check for examples referencing deprecated/removed APIs
-rg -l 'deprecated_function_name' finstack-quant/examples/ finstack-quant-py/examples/
+rg -l 'deprecated_function_name' examples/ docs/
 ```
 
 ### 3d. Migration guides
@@ -183,7 +180,7 @@ Determines the correct version bump (patch / minor / major).
 ```bash
 # Compare current branch against the last release tag
 cargo install cargo-semver-checks --locked 2>/dev/null
-cargo semver-checks check-release -p finstack-quant-core --baseline-rev <last-release-tag>
+cargo semver-checks check-release -p finstack-ai-kernel --baseline-rev <last-release-tag>
 ```
 
 If semver-checks reports breaking changes, the release must be a **major** bump. If new public API was added, at least **minor**. Otherwise **patch**.
@@ -194,7 +191,7 @@ Semver-checks catches type/signature changes but misses behavioral breaks. Also 
 
 - Default values that changed (e.g., strict mode on/off)
 - Error conditions that changed (functions that now return `Err` where they previously returned `Ok`)
-- Numerical precision changes in pricing (golden test drift)
+- Deterministic output changes (golden test drift, journal/record shape)
 - Removed or renamed feature flags
 
 ### 4c. Feature flag matrix
@@ -203,46 +200,48 @@ Verify the crate builds under key feature combinations:
 
 ```bash
 # Default features only
-cargo build --workspace --exclude finstack-quant-py --exclude finstack-quant-wasm
+cargo build --workspace --locked
 
-# All features
-cargo build --workspace --exclude finstack-quant-py --exclude finstack-quant-wasm --all-features
-
-# Key individual feature flags
-cargo build -p finstack-quant-valuations --features mc
-cargo build -p finstack-quant-valuations --features test-utils
+# WASM host graph
+mise run check-wasm
 ```
+
+### 4d. Frozen public items
+
+```bash
+mise run check-public-items
+```
+
+A removed frozen public item is a breaking change unless the inventory is intentionally updated in the same release.
 
 ## Phase 5: Performance regression check
 
 ### 5a. Run benchmarks against baseline
 
 ```bash
-# If a saved baseline exists from the last release
-mise run rust-bench-compare
-
-# Or run fresh and inspect absolute numbers
-mise run rust-bench
+# WASM package size and browser benches when the release touches host or bindings
+mise run check-size-budgets
+mise run benchmark-wasm
 ```
 
 ### 5b. Review for regressions
 
 Flag any benchmark that regressed >10% from the saved baseline. Common causes:
 - New allocations in hot paths
-- Changed interpolation algorithms
-- Additional validation in pricing loops
+- Additional validation in kernel or runtime loops
+- Extra serialization or binding conversions on the turn path
 
-### 5c. Numerical accuracy (golden tests)
+### 5c. Deterministic fixtures
 
-For a quant library, pricing drift is a release blocker. Verify:
+Behavioral drift is a release blocker. Verify:
 
-- Golden file tests pass (QuantLib parity tests, reference prices)
-- Bootstrap calibration convergence unchanged
-- Greeks finite-difference stability unchanged
+- Conformance fixtures still pass
+- Journal/record replay tests still match
+- Golden or snapshot tests are unchanged unless the release notes the change
 
 ```bash
-# Run QuantLib parity and calibration tests specifically
-cargo nextest run --workspace -E 'test(quantlib) | test(parity) | test(golden) | test(calibration)' --no-fail-fast
+mise run conformance
+mise run test
 ```
 
 ## Phase 6: Release hygiene
@@ -259,77 +258,47 @@ cargo nextest run --workspace -E 'test(quantlib) | test(parity) | test(golden) |
 
 ```bash
 # cargo-deny: licenses, advisories, bans, and sources (uses deny.toml)
-cargo deny check
-
-# Security-specific audit
-mise run all-audit
+mise run supply-chain
 
 # Lint all components (no auto-fix — must pass clean)
-mise run all-lint
+mise run check
 ```
 
-### 6c. MSRV verification
-
-Confirm the crate compiles on the declared minimum supported Rust version:
-
-```bash
-# rust-version = "1.90" declared in Cargo.toml
-rustup run 1.90.0 cargo check --workspace --exclude finstack-quant-py --exclude finstack-quant-wasm
-```
-
-### 6d. Publish dry-run
+### 6c. Publish dry-run
 
 Verify crate packaging is correct (metadata, included files, no missing deps):
 
 ```bash
-cargo publish -p finstack-quant-core --dry-run
+cargo publish -p finstack-ai-kernel --dry-run
 ```
 
-### 6e. Lock file hygiene
+### 6d. Lock file hygiene
 
-- [ ] `uv.lock` is committed and up to date (`uv lock --check`)
-- [ ] `package-lock.json` is committed and up to date (`cd finstack-ui && npm ci`)
+- [ ] `uv.lock` is committed and up to date when the repo uses one
+- [ ] `package-lock.json` / `pnpm-lock.yaml` is committed and up to date when present
 - [ ] `Cargo.lock` is committed and current so CI's explicit OSV scan can read it
 
-### 6f. Binary size check
+### 6e. Binary and package size check
 
 ```bash
-# Representative Rust executable/example targets. `cargo bloat` cannot inspect
-# the mixed `rlib`/PyO3 extension target in `finstack-quant-py`.
-cargo bloat --release --crates -p finstack-quant-valuations --bin gen_schemas
-cargo bloat --release --crates -p finstack-quant-portfolio --example portfolio_optimization
-
-# Python binding size: build the real PyO3 extension via maturin, then inspect
-# the native extension file stored in the wheel.
-mise run wheel-local
-uv run python - <<'PY'
-from pathlib import Path
-from zipfile import ZipFile
-
-for wheel in sorted(Path("target/wheels").glob("finstack_quant_py-*.whl")):
-    with ZipFile(wheel) as archive:
-        for member in archive.infolist():
-            is_native_extension = member.filename.endswith((".so", ".pyd", ".dll", ".dylib"))
-            if member.filename.startswith("finstack_quant/") and is_native_extension:
-                size_mib = member.file_size / (1024 * 1024)
-                print(f"{wheel.name} {member.filename} {size_mib:.2f} MiB")
-PY
+mise run check-size-budgets
 ```
 
-Review the `cargo bloat` crate tables and Python native extension size for unexpected regressions from the previous release.
+Review wheel, WASM, and CLI size budgets for unexpected regressions from the previous release.
 
-### 6g. API parity
+### 6f. API parity
 
 ```bash
-mise run python-build
-mise run wasm-build
+mise run check-public-items
+mise run generate-wasm
+mise run check-wasm
 ```
 
 Verify Python and WASM bindings expose all intended public APIs.
 
-### 6h. Release notes
+### 6g. Release notes
 
-Create `RELEASE_NOTES_X.Y.Z.md` following the established template (see `RELEASE_NOTES_0.8.0.md`). Include:
+Create `RELEASE_NOTES_X.Y.Z.md` following the established template if one exists. Include:
 
 - Executive summary and "who should upgrade"
 - Breaking changes with migration code snippets
@@ -342,13 +311,13 @@ Create `RELEASE_NOTES_X.Y.Z.md` following the established template (see `RELEASE
 ### 7a. Full test suite
 
 ```bash
-mise run all-test
+mise run test
 ```
 
 ### 7b. CI and quality gates
 
 ```bash
-mise run all-ci
+mise run ci
 ```
 
 ### 7c. Pre-release checklist
@@ -374,7 +343,6 @@ gh release create vX.Y.Z --title "Finstack vX.Y.Z" --notes-file RELEASE_NOTES_X.
 
 ### 7e. Post-release
 
-- [ ] Save benchmark baseline for the new release: `mise run rust-bench-baseline`
 - [ ] Add new `[Unreleased]` section to `CHANGELOG.md`
 - [ ] Bump version to next dev pre-release if desired
 
@@ -408,21 +376,20 @@ After completing the audit, produce a release readiness report:
 
 ### Performance
 - Benchmarks: no regressions / <list regressions>
-- Golden tests: all passing / <N> failures
-- Binary size delta: +/- <KB>
+- Conformance/golden tests: all passing / <N> failures
+- Package size delta: +/- <KB>
 
 ### Quality gates
 | Check | Status |
 |-------|--------|
-| `mise run all-ci` | pass/fail |
-| `mise run all-lint` | pass/fail |
-| `cargo deny check` | pass/fail |
-| `mise run all-audit` | pass/fail |
-| `mise run all-test` | pass/fail |
-| MSRV check | pass/fail |
+| `mise run ci` | pass/fail |
+| `mise run check` | pass/fail |
+| `mise run supply-chain` | pass/fail |
+| `mise run test` | pass/fail |
+| `mise run check-wasm` | pass/fail |
 | Publish dry-run | pass/fail |
 | Semver checks | pass/fail |
-| API parity | pass/fail |
+| `mise run check-public-items` | pass/fail |
 | Feature flag matrix | pass/fail |
 
 ### Remaining items
@@ -434,4 +401,4 @@ After completing the audit, produce a release readiness report:
 - Dead code and simplification: see [finstack-simplify](../finstack-simplify/SKILL.md)
 - API documentation standards: see [finstack-documentation-maintainer](../finstack-documentation-maintainer/SKILL.md)
 - Naming and pattern consistency: see [finstack-consistency-reviewer](../finstack-consistency-reviewer/SKILL.md)
-- Release checklist: see [release-checklist-finstack-quant.md](references/release-checklist-finstack-quant.md)
+- Release checklist: see [release-checklist.md](references/release-checklist.md)

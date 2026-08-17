@@ -3,23 +3,23 @@
   "evals": [
     {
       "id": 1,
-      "name": "statements-checks-audit",
-      "prompt": "The finstack-quant/statements/src/checks/ module feels like a mess — I keep forgetting whether CheckSuite or CheckRunner is the canonical path, and I think there's leftover stuff from an aborted migration. Can you audit it and show me what's actually slop vs. what's real? Scope is just that module. Don't touch any code yet.",
-      "expected_output": "Phase 1 Audit Report following examples/audit-report.md format. Should cover: surface area per capability, specific findings (expected: duplicate registries, runner vs suite pathway, possible trait drift), binding drift check (finstack-quant-py/src/bindings/statements/checks.rs if exists), hazards section, scorecard, top-5 ranked changes. Must stop after Phase 1 and ask for user confirmation before planning.",
+      "name": "kernel-reducer-audit",
+      "prompt": "The crates/finstack-ai-kernel/src/reducer/ module feels like a mess — I keep forgetting whether apply_record or the legacy helper is the canonical path, and I think there's leftover stuff from an aborted migration. Can you audit it and show me what's actually slop vs. what's real? Scope is just that module. Don't touch any code yet.",
+      "expected_output": "Phase 1 Audit Report following examples/audit-report.md format. Should cover: surface area per capability, specific findings (expected: duplicate helpers, legacy vs shapes pathway, possible trait drift), binding drift check, hazards section, scorecard, top-5 ranked changes. Must stop after Phase 1 and ask for user confirmation before planning.",
       "files": []
     },
     {
       "id": 2,
-      "name": "margin-csa-otc-simplify",
-      "prompt": "look at finstack-quant/margin/src/types/ — csa.rs and otc.rs look like they might have overlapping structure. also the enums.rs might be bloated. run your simplify workflow on the whole margin types module, audit then plan, don't execute anything without me looking",
-      "expected_output": "Phase 1 Audit Report followed by Phase 2 Consolidation Plan (only if the user's 'audit then plan' is interpreted as wanting both phases). Should properly check PyO3 bindings in finstack-quant-py/src/bindings/margin/ and WASM in finstack-quant-wasm/src/api/margin/. Should flag any ISDA-SIMM or CSA serde fields under financial-invariants. Must stop before Phase 3 (finstack-refactor).",
+      "name": "runtime-error-simplify",
+      "prompt": "look at crates/finstack-ai-runtime/src/ — the error modules look like they might have overlapping structure. also some enums might be bloated. run your simplify workflow on the runtime error types, audit then plan, don't execute anything without me looking",
+      "expected_output": "Phase 1 Audit Report followed by Phase 2 Consolidation Plan (only if the user's 'audit then plan' is interpreted as wanting both phases). Should properly check Python and WASM bindings. Should flag any serde or public-item fields under behavioral-invariants. Must stop before Phase 3.",
       "files": []
     },
     {
       "id": 3,
-      "name": "core-surfaces-full-loop",
-      "prompt": "/simplify-finstack core/market_data/surfaces",
-      "expected_output": "Slash command invocation. Must load the skill, read every reference and example file (per command instructions), then produce Phase 1 audit of vol_surface.rs, delta_vol_surface.rs, fx_delta_vol_surface.rs, vol_cube.rs. Should flag: parallel constructors on VolSurface variants, potential single-impl traits, binding drift in finstack-quant-py/src/bindings/core/ and finstack-quant-wasm/src/api/core_ns/. Must stop after Phase 1.",
+      "name": "agent-constructors-full-loop",
+      "prompt": "simplify the Agent constructors across Rust and bindings",
+      "expected_output": "Must load the skill, read relevant reference and example files, then produce Phase 1 audit of Agent constructors. Should flag: parallel constructors, potential single-impl traits, binding drift in bindings/finstack-ai-python and bindings/finstack-ai-wasm. Must stop after Phase 1.",
       "files": []
     }
   ]

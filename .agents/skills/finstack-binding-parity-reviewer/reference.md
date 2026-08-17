@@ -3,26 +3,14 @@
 ## Codebase Structure
 
 ```
-finstack-quant-py/
-├── src/                    # Rust binding code (PyO3)
+bindings/finstack-ai-python/
+├── src/                    # Rust binding code (PyO3), if present
 │   ├── lib.rs             # Main entry, module registration
-│   ├── errors.rs          # Exception hierarchy, error mapping
-│   ├── bindings/          # Rust binding modules
-│   │   ├── common/        # Shared argument extraction helpers
-│   │   ├── core/          # Core domain bindings
-│   │   ├── currency.rs
-│   │   ├── money.rs
-│   │   ├── dates/
-│   │   └── market_data/
-│   │   ├── valuations/    # Instrument bindings
-│   │   ├── statements/    # Statement evaluation
-│   │   ├── scenarios/     # Scenario engine
-│   │   └── portfolio/     # Portfolio management
-└── finstack-quant/              # Python package
-    ├── __init__.py        # Package initialization
-    ├── *.pyi              # Type stubs (auto-generated)
-    └── core/
-        └── expr_helpers.py # Ergonomic wrapper (acceptable)
+│   └── errors.rs          # Exception hierarchy, error mapping
+└── python/finstack_ai/    # Python package
+    ├── __init__.py        # Package exports
+    ├── _finstack_ai.pyi   # IDE-facing stubs
+    └── _pydantic.py       # Host-language ergonomic adapters
 ```
 
 ## Standard Patterns
@@ -33,41 +21,41 @@ Every Rust type exposed to Python follows this pattern:
 
 ```rust
 use pyo3::prelude::*;
-use finstack_quant_core::money::Money;
+use finstack_ai::Agent;
 
-#[pyclass(name = "Money", module = "finstack_quant.core.money", frozen)]
-pub struct PyMoney {
-    pub(crate) inner: Money,  // Always named "inner"
+#[pyclass(name = "Agent", module = "finstack_ai", frozen)]
+pub struct PyAgent {
+    pub(crate) inner: Agent,  // Always named "inner"
 }
 
-impl PyMoney {
+impl PyAgent {
     /// Internal constructor - used by other bindings
-    pub(crate) fn from_inner(inner: Money) -> Self {
+    pub(crate) fn from_inner(inner: Agent) -> Self {
         Self { inner }
     }
 }
 
 #[pymethods]
-impl PyMoney {
+impl PyAgent {
     /// Python constructor
     #[new]
-    fn new(amount: f64, currency: CurrencyArg) -> PyResult<Self> {
-        Ok(Self {
-            inner: Money::new(amount, currency.0),
-        })
+    fn new(spec: PyAgentSpec) -> PyResult<Self> {
+        Agent::new(spec.inner)
+            .map(Self::from_inner)
+            .map_err(crate::errors::map_error)
     }
 
     /// Getter - just exposes Rust data
     #[getter]
-    fn amount(&self) -> f64 {
-        self.inner.amount()
+    fn id(&self) -> String {
+        self.inner.id().to_string()
     }
 
     /// Method - delegates to Rust, maps error
-    fn convert(&self, target: CurrencyArg, fx: &PyFxMatrix) -> PyResult<Self> {
+    fn start_run(&self, options: PyStartRunOptions) -> PyResult<PyRun> {
         self.inner
-            .convert(target.0, &fx.inner)
-            .map(Self::from_inner)
+            .start_run(options.into_inner())
+            .map(PyRun::from_inner)
             .map_err(crate::errors::map_error)
     }
 }
@@ -79,173 +67,65 @@ Accept multiple Python types for better ergonomics:
 
 ```rust
 use pyo3::prelude::*;
-use pyo3::types::PyString;
 
-/// Wrapper for flexible Currency argument
-pub struct CurrencyArg(pub Currency);
+/// Wrapper for flexible timeout argument
+pub struct TimeoutArg(pub Duration);
 
-impl<'py> FromPyObject<'py> for CurrencyArg {
+impl<'py> FromPyObject<'py> for TimeoutArg {
     fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        // Try 1: Direct PyCurrency extraction
-        if let Ok(ccy) = obj.extract::<PyRef<PyCurrency>>() {
-            return Ok(CurrencyArg(ccy.inner));
+        if let Ok(ms) = obj.extract::<u64>() {
+            return Ok(TimeoutArg(Duration::from_millis(ms)));
         }
-
-        // Try 2: String parsing
-        if let Ok(code) = obj.extract::<&str>() {
-            return Currency::from_str(code)
-                .map(CurrencyArg)
-                .map_err(|_| crate::errors::unknown_currency(code));
+        if let Ok(secs) = obj.extract::<f64>() {
+            return Ok(TimeoutArg(Duration::from_secs_f64(secs)));
         }
-
-        // Fallback: Type error
-        Err(PyTypeError::new_err(
-            "Expected Currency instance or ISO currency code string"
-        ))
-    }
-}
-
-// Usage: Accept both Currency objects and strings
-#[pymethods]
-impl PyMoney {
-    fn convert(&self, target: CurrencyArg) -> PyResult<Self> {
-        // Works with: money.convert(Currency.USD) or money.convert("USD")
-        ...
+        Err(PyTypeError::new_err("Expected timeout as milliseconds int or seconds float"))
     }
 }
 ```
 
 ### 3. Error Mapping
 
-Centralized error conversion in `errors.rs`:
+Centralized error conversion:
 
 ```rust
 use pyo3::prelude::*;
-use pyo3::exceptions::*;
-use finstack_quant_core::error::Error as CoreError;
+use finstack_ai_kernel::Error as CoreError;
 
-// Custom exception hierarchy
-pyo3::create_exception!(finstack, FinstackError, PyException);
-pyo3::create_exception!(finstack, ConfigurationError, FinstackError);
-pyo3::create_exception!(finstack, ComputationError, FinstackError);
-pyo3::create_exception!(finstack, CalibrationError, FinstackError);
+pyo3::create_exception!(finstack_ai, FinstackError, PyException);
+pyo3::create_exception!(finstack_ai, ConfigurationError, FinstackError);
 
-/// Map core error to Python exception
 pub fn map_error(e: CoreError) -> PyErr {
     match e {
         CoreError::Configuration(msg) => ConfigurationError::new_err(msg),
-        CoreError::Computation(msg) => ComputationError::new_err(msg),
-        CoreError::Calibration(msg) => CalibrationError::new_err(msg),
-        CoreError::Currency(msg) => CurrencyError::new_err(msg),
-        CoreError::Interpolation(msg) => InterpolationError::new_err(msg),
-        CoreError::Internal(msg) => InternalError::new_err(msg),
         _ => FinstackError::new_err(e.to_string()),
     }
 }
-
-// Convenience helpers for specific errors
-pub fn unknown_currency(code: &str) -> PyErr {
-    CurrencyError::new_err(format!("Unknown currency code: {}", code))
-}
-
-pub fn invalid_date(s: &str) -> PyErr {
-    ConfigurationError::new_err(format!("Invalid date format: {}", s))
-}
 ```
+
+Preserve stable error `code` strings from Rust. Do not invent a parallel code namespace in the binding.
 
 ### 4. Module Registration
 
-Each module has a consistent registration pattern:
+Keep package exports stable:
 
 ```rust
-use pyo3::prelude::*;
-
 pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
-    let m = PyModule::new(parent.py(), "currency")?;
-
-    // Add classes
-    m.add_class::<PyCurrency>()?;
-
-    // Add functions
-    m.add_function(wrap_pyfunction!(parse_currency, &m)?)?;
-
-    // Set module metadata
-    m.setattr("__all__", vec!["Currency", "parse_currency"])?;
-    m.setattr("__doc__", "Currency types and utilities")?;
-
-    // Register as submodule
-    parent.add_submodule(&m)?;
-
+    parent.add_class::<PyAgent>()?;
+    parent.add_class::<PySession>()?;
+    parent.add_class::<PyRun>()?;
+    parent.setattr("__all__", vec!["Agent", "Session", "Run"])?;
     Ok(())
 }
 ```
 
 ### 5. Builder Pattern
 
-For complex objects with many optional parameters:
-
-```rust
-#[pyclass(name = "BondBuilder", module = "finstack_quant.valuations.bond", unsendable)]
-pub struct PyBondBuilder {
-    inner: BondBuilder,
-}
-
-#[pymethods]
-impl PyBondBuilder {
-    #[new]
-    fn new() -> Self {
-        Self { inner: BondBuilder::new() }
-    }
-
-    fn notional(mut slf: PyRefMut<'_, Self>, value: f64) -> PyRefMut<'_, Self> {
-        slf.inner = slf.inner.clone().notional(value);
-        slf
-    }
-
-    fn coupon(mut slf: PyRefMut<'_, Self>, rate: f64) -> PyRefMut<'_, Self> {
-        slf.inner = slf.inner.clone().coupon(rate);
-        slf
-    }
-
-    fn build(&self) -> PyResult<PyBond> {
-        self.inner.build()
-            .map(PyBond::from_inner)
-            .map_err(crate::errors::map_error)
-    }
-}
-```
+For complex objects with many optional parameters, expose the same builder shape as Rust. Do not add binding-only required fields.
 
 ### 6. Python Special Methods
 
-Implement standard Python protocols:
-
-```rust
-#[pymethods]
-impl PyCurrency {
-    fn __repr__(&self) -> String {
-        format!("Currency('{}')", self.inner.code())
-    }
-
-    fn __str__(&self) -> String {
-        self.inner.code().to_string()
-    }
-
-    fn __hash__(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.inner.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    fn __richcmp__(&self, other: &Self, op: pyo3::basic::CompareOp) -> bool {
-        match op {
-            CompareOp::Eq => self.inner == other.inner,
-            CompareOp::Ne => self.inner != other.inner,
-            _ => false,
-        }
-    }
-}
-```
+Implement standard Python protocols (`__repr__`, `__str__`, `__hash__`, `__richcmp__`) by delegating to Rust. Do not reimplement equality in the binding.
 
 ## WASM Binding Comparison
 
@@ -256,8 +136,8 @@ Both Python and WASM bindings should expose identical functionality:
 | Wrapper struct | `pub(crate) inner: T` | `pub(crate) inner: T` |
 | Constructor | `from_inner(inner: T)` | `from_inner(inner: T)` |
 | Error handling | `.map_err(map_error)` | `.map_err(core_to_js)` |
-| String parsing | `FromPyObject` trait | `ParseFromString` trait |
-| Module structure | Submodules via `register()` | Flat exports in `lib.rs` |
+| Naming | `snake_case` | `camelCase` via `js_name` |
+| Facade | `__init__.py` + `.pyi` | `js/src/` over generated glue |
 
 ## Rust Core Crates
 
@@ -265,10 +145,9 @@ Bindings wrap these core crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `finstack_quant_core` | Dates, money, currency, market data, math |
-| `finstack_quant_valuations` | Instruments, pricers, metrics, Greeks |
-| `finstack_quant_portfolio` | Portfolio management, aggregation |
-| `finstack_quant_statements` | Financial statement modeling |
-| `finstack_quant_scenarios` | Scenario engine, stress testing |
+| `finstack-ai-kernel` | Deterministic state, records, events, effects |
+| `finstack-ai-runtime` | Ports and effect execution |
+| `finstack-ai` | SDK composition and public APIs |
+| `finstack-ai-protocol` | Codecs and journal frames |
 
-All computation lives in these crates. Bindings only wrap and expose.
+All domain decisions live in these crates. Bindings only wrap and expose.

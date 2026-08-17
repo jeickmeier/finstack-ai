@@ -45,7 +45,7 @@ First determine what is being reviewed:
 - Single crate, binary + library, or workspace.
 - Library API, application internals, bindings, service runtime, or all of the above.
 - Stable shipped interface vs. branch-local work that can be changed freely.
-- Performance-sensitive or financial/numerical code that needs stricter invariants.
+- Performance-sensitive or deterministic/numerical code that needs stricter invariants.
 
 If the user gives a broad target like "review this Rust workspace", start by mapping structure before judging quality. If the scope is too large for one useful pass, propose a focused slice.
 
@@ -161,4 +161,3 @@ These are review shortcuts. Replace them with source, caller, and test evidence.
 ## Resources
 
 - `references/finstack-workspace-map.md` - crate roles, dependency direction, binding surfaces, and common architecture risks.
-- `outputs/architecture-review.md` - example architecture review output.

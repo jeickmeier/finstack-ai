@@ -6,10 +6,10 @@ Use this format verbatim. The user will read many of these; consistency matters.
 
 # Audit Report: `<crate>::<module>`
 
-**Scope:** `<relative path, e.g. finstack-quant/statements/src/checks/>`
+**Scope:** `<relative path, e.g. crates/finstack-ai-kernel/src/reducer/>`
 **Bindings in scope:**
-- `finstack-quant-py/src/bindings/statements/checks.rs` (exists / missing)
-- `finstack-quant-wasm/src/api/statements/checks.rs` (exists / missing)
+- `bindings/finstack-ai-python/...` (exists / missing)
+- `bindings/finstack-ai-wasm/...` (exists / missing)
 **Date:** YYYY-MM-DD
 **Auditor:** finstack-simplify / Phase 1 (read-only)
 
@@ -18,7 +18,7 @@ Use this format verbatim. The user will read many of these; consistency matters.
 Two or three sentences. What's the shape of the problem? How many findings at each impact tier? What's the single highest-leverage move?
 
 Example:
-> The `checks/` module has three parallel pathways for running check suites (`runner.rs`, `suite.rs`, and an ad-hoc `CheckRegistry`) that were introduced during a stalled migration. Collapsing these into a single `CheckSuite` entry point would remove ~340 lines, eliminate a name collision that currently forces callers to qualify imports, and let us delete a single-impl trait. Highest-leverage move: delete `runner.rs` and the `LegacyCheckRegistry` it carries.
+> The `reducer/` module has three parallel pathways for applying records (`legacy.rs`, `shapes.rs`, and an ad-hoc helper) that were introduced during a stalled migration. Collapsing these into a single `apply_record` entry point would remove ~340 lines, eliminate a name collision that currently forces callers to qualify imports, and let us delete a single-impl trait. Highest-leverage move: delete `legacy.rs` and the unused registry it carries.
 
 ## Surface area inventory
 
@@ -41,7 +41,7 @@ One H2 per finding. Sort by (Impact desc, Risk asc).
 
 **Files:**
 - `path/to/file.rs:L123-L160`
-- `finstack-quant-py/src/bindings/.../file.rs:L12-L28`
+- `bindings/finstack-ai-python/.../file.rs:L12-L28`
 
 **What:** One or two sentences. The reader should understand the issue without having to open the files.
 
@@ -49,7 +49,7 @@ One H2 per finding. Sort by (Impact desc, Risk asc).
 
 **Proposed fix:** One or two sentences. Which tactic from `refactor-tactics.md` applies? What gets deleted, merged, or moved?
 
-**Invariants touched:** [none | Decimal | FX | serde | parity | parallelism | ISDA | precedence]
+**Invariants touched:** [none | kernel | commit-before-effect | serde | public-items | generated | observers]
 
 **Impact:** [H / M / L] — how much does the fix simplify things
 **Risk:** [H / M / L] — how likely is the fix to break something
@@ -67,7 +67,7 @@ If multiple findings interact (e.g., a single-impl trait wraps a parallel-API wr
 
 **Includes findings:** F3, F5, F7.
 
-**Why it's a cluster:** They all involve the `DiscountCurveBuilder` path. Fixing one without the others would leave orphans.
+**Why it's a cluster:** They all involve the same builder path. Fixing one without the others would leave orphans.
 
 **Recommended consolidation:** <one paragraph>.
 
@@ -81,8 +81,8 @@ Even if bindings don't show major findings, include this section — absent drif
 **Logic drift (logic that leaked into bindings):**
 - <finding or "none">.
 
-**Parity contract impact:**
-- <list of symbols that would need parity updates when the findings above are fixed, or "none">.
+**Public-item impact:**
+- <list of symbols that would need inventory updates when the findings above are fixed, or "none">.
 
 ## Hazards (non-simplicity problems discovered incidentally)
 

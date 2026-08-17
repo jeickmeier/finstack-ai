@@ -1,6 +1,6 @@
 # Slop patterns: the catalogue
 
-Every category below is something this skill hunts for during Phase 1 (Audit). Each entry has: **what it looks like**, **how to detect it**, a **finstack-quant-specific example shape**, and **how to fix**. "Fix" always defaults to *delete*.
+Every category below is something this skill hunts for during Phase 1 (Audit). Each entry has: **what it looks like**, **how to detect it**, a **repo-specific example shape**, and **how to fix**. "Fix" always defaults to *delete*.
 
 If you find a pattern that isn't in this catalogue, add it here in your audit report under "New pattern observed" with the same shape.
 
@@ -15,14 +15,14 @@ If you find a pattern that isn't in this catalogue, add it here in your audit re
 - Look for multiple `impl Foo { pub fn ... }` blocks with similar signatures and overlapping bodies.
 - Any time you see a `match version { .. }` or `if legacy { .. }` inside a public function, suspect a parallel universe.
 
-**Finstack Quant-specific shape:**
-- Curve builders: `DiscountCurveBuilder::new` + `DiscountCurveBuilder::from_market_data` + `build_discount_curve()` free function — three entry points doing substantively the same job.
-- Surface construction: `VolSurface::new` + `VolSurface::from_grid` + `vol_surface_from_points()`.
-- Multiple `forecast_eval_*` functions that differ only in which subset of inputs they accept.
+**Repo-specific shape:**
+- Agent builders: `Agent::new` + `Agent::from_spec` + `build_agent()` free function — three entry points doing substantively the same job.
+- Session construction: `Session::new` + `Session::from_handle` + `open_session()`.
+- Multiple `start_run_*` functions that differ only in which subset of inputs they accept.
 
-**Fix:** Pick the canonical entry point (usually the one with the richest signature + `Result` return). Collapse everything else into it. Convert the others to private helpers or delete outright. Update call-sites in the binding layer (`finstack-quant-py/src/bindings/`, `finstack-quant-wasm/src/api/`) in the **same slice** — don't leave orphans.
+**Fix:** Pick the canonical entry point (usually the one with the richest signature + `Result` return). Collapse everything else into it. Convert the others to private helpers or delete outright. Update call-sites in the binding layer (`bindings/finstack-ai-python/`, `bindings/finstack-ai-wasm/`) in the **same slice** — don't leave orphans.
 
-**Bias:** prefer the one that already takes `&MarketData` or another strongly-typed context object. Infallible shortcuts that hide a `.unwrap()` are traps; delete them.
+**Bias:** prefer the one that already takes a strongly-typed context object. Infallible shortcuts that hide a `.unwrap()` are traps; delete them.
 
 ---
 
@@ -30,20 +30,20 @@ If you find a pattern that isn't in this catalogue, add it here in your audit re
 
 **Looks like:**
 ```rust
-pub fn compute_sharpe(returns: &[f64], rf: f64) -> f64 {
-    sharpe_ratio_internal(returns, rf, AnnualizationFactor::default())
+pub fn start_run_default(spec: &AgentSpec) -> Result<Run, Error> {
+    start_run_internal(spec, StartRunOptions::default())
 }
 ```
-…where `sharpe_ratio_internal` is also public. Or: a method that calls another method and does nothing else. Or: a builder that only sets two fields and calls `.build()`.
+…where `start_run_internal` is also public. Or: a method that calls another method and does nothing else. Or: a builder that only sets two fields and calls `.build()`.
 
 **Detect:**
 - One-line function bodies that delegate to another function in the same module.
 - Functions whose body is `return other_fn(args)` with no transformation.
 - Wrappers that "just provide a default" when the default is already `Default::default()` on the param type.
 
-**Finstack Quant-specific shape:**
-- `analytics::portfolio_sharpe(r)` that just forwards to `analytics::sharpe(r, 1.0)`.
-- `valuations::price_bond(b)` that forwards to `valuations::price_bond_with_curve(b, default_curve())`.
+**Repo-specific shape:**
+- `runtime::start_run_default(spec)` that just forwards to `runtime::start_run(spec, StartRunOptions::default())`.
+- `sdk::open_session(id)` that forwards to `sdk::open_session_with_options(id, SessionOptions::default())`.
 
 **Fix:** If the wrapper doesn't add semantic value (naming, type conversion, error translation, defaulting a non-trivial value), **delete it**. Inline into call-sites if needed, or make the inner function's default more convenient.
 
@@ -59,7 +59,7 @@ pub fn compute_sharpe(returns: &[f64], rf: f64) -> f64 {
 - Pairs of functions `x` and `try_x` in the same module.
 - `fn x(...) -> T { Self::try_x(...).expect(...) }`.
 
-**Finstack Quant-specific shape:** Constructors on primitives. `Currency::new` panicking and `Currency::try_new` returning `Result`, with `new` implemented via `try_new().unwrap()`. Both are public.
+**Repo-specific shape:** Constructors on primitives. `ErrorCode::new` panicking and `ErrorCode::try_new` returning `Result`, with `new` implemented via `try_new().unwrap()`. Both are public.
 
 **Fix:** **Collapse to one.** The binding crate has `#![deny(clippy::unwrap_used)]` and `#![deny(clippy::panic)]` — the panicking sibling is already unusable from bindings. Delete it. Keep only the `Result`-returning one. If the user really wants an infallible version, give it a distinct name that reflects a genuinely infallible input type (e.g., a validated newtype), not a `try_`/`_` pair.
 
@@ -72,18 +72,18 @@ pub fn compute_sharpe(returns: &[f64], rf: f64) -> f64 {
 **Looks like:** Two functions in two modules that implement the same algorithm with minor variations — usually because someone copied and tweaked instead of refactoring.
 
 **Detect:**
-- Grep for distinctive constants or formula fragments (e.g., `(1.0 - returns)`, `252.0`, `sqrt(`, `ln(` with similar neighborhood).
-- Two functions with the same numerical output on test vectors but different code paths.
-- Structural review: list all `max_drawdown`, `sharpe`, `sortino`, `var_*`, `cs01_*` in the workspace. If there's more than one of any of them, suspect duplication.
+- Grep for distinctive constants or formula fragments with similar neighborhood.
+- Two functions with the same output on test vectors but different code paths.
+- Structural review: list all `apply_record`, `start_run`, `map_error` helpers in the workspace. If there's more than one of any of them, suspect duplication.
 
-**Finstack Quant-specific shape:**
-- `analytics::drawdown::max_drawdown()` and `portfolio::drawdown::max_drawdown()` with subtly different handling of NaN / empty input.
-- Two z-spread solvers in `valuations/pricing/bond.rs` and `valuations/pricing/loan.rs`.
-- CS01 computed differently for corporates vs. private-credit.
+**Repo-specific shape:**
+- `kernel::apply_record()` and `runtime::apply_record()` with subtly different handling of empty batches.
+- Two error mappers in Python and WASM that reconstruct messages differently.
+- Duplicate session-open helpers in SDK and bindings.
 
-**Fix:** Pick the canonical implementation (usually the one with better tests and clearer docstring). Move it to the most natural crate (usually `core` or `analytics`). Delete the others. Update call-sites. Run the full numerical-parity tests — if they diverge, investigate *which* one was right; don't paper over the difference.
+**Fix:** Pick the canonical implementation (usually the one with better tests and clearer docstring). Move it to the most natural crate (usually kernel or runtime). Delete the others. Update call-sites. Run the full conformance tests — if they diverge, investigate *which* one was right; don't paper over the difference.
 
-**Caution:** sometimes what looks like duplication is actually a deliberate differentiation (e.g., continuous vs discrete compounding). Confirm by reading docstrings and tests before collapsing. Cite the finding in the audit report.
+**Caution:** sometimes what looks like duplication is actually a deliberate differentiation (e.g., native vs WASM host constraints). Confirm by reading docstrings and tests before collapsing. Cite the finding in the audit report.
 
 ---
 
@@ -91,16 +91,16 @@ pub fn compute_sharpe(returns: &[f64], rf: f64) -> f64 {
 
 **Looks like:**
 ```rust
-pub trait CurveBuilder { fn build(&self) -> Curve; }
-impl CurveBuilder for DiscountCurveBuilder { ... }
-// ... and nothing else in the workspace implements CurveBuilder.
+pub trait SessionBuilder { fn build(&self) -> Session; }
+impl SessionBuilder for LocalSessionBuilder { ... }
+// ... and nothing else in the workspace implements SessionBuilder.
 ```
 
 **Detect:**
 - `grep -r "impl.*for" | awk` to count impls per trait. Any trait with exactly one impl is suspect.
 - Traits defined in a module that also contains the only impl.
 
-**Finstack Quant-specific shape:** "Pluggable" abstractions added speculatively during vibe-coding. `trait ScenarioAdapter` with only `MarketAdapter` implementing it. `trait Evaluator` with only `StatementEvaluator` implementing it.
+**Repo-specific shape:** "Pluggable" abstractions added speculatively during vibe-coding. `trait HostAdapter` with only `NativeHost` implementing it. `trait JournalWriter` with only `MemoryJournal` implementing it.
 
 **Fix:** Collapse the trait away. Use the concrete type directly. If the user *plans* to add a second impl, defer the trait until the second impl exists — speculative traits are a tax on every reader until that day comes.
 
@@ -112,15 +112,15 @@ impl CurveBuilder for DiscountCurveBuilder { ... }
 
 **Looks like:**
 ```rust
-pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
-// ...but `evaluate` is only ever called with T = Decimal.
+pub fn evaluate<T: RecordLike>(input: &[T]) -> T { ... }
+// ...but `evaluate` is only ever called with T = Record.
 ```
 
 **Detect:**
 - Grep for callers of a generic function. If every call site uses the same concrete type, it's single-instantiation.
 - PhantomData fields in structs, especially if the type parameter is never used in a meaningful way.
 
-**Finstack Quant-specific shape:** `fn price<P: Pricer>(p: P)` where only `BondPricer` ever gets passed. `struct Cache<K, V>` where `K = String, V = Decimal` everywhere.
+**Repo-specific shape:** `fn dispatch<P: Port>(p: P)` where only `NativePort` ever gets passed. `struct Cache<K, V>` where `K = String, V = RecordId` everywhere.
 
 **Fix:** Delete the type parameter. Use the concrete type. Keep the generic only when you have two concrete instantiations *today* or when the caller (downstream Rust user, Python, or WASM) genuinely needs to pick. Note: PyO3 and wasm-bindgen can't expose generics anyway — any generic in code that feeds a binding is a strong delete signal.
 
@@ -135,10 +135,10 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Look for two modules with similar names (`checks/` and `checks_v2/`, or `runner.rs` and `suite.rs`).
 - `git log -- path/` showing a rename-in-progress.
 
-**Finstack Quant-specific shape:**
-- `statements/src/checks/runner.rs` (deleted in status but referenced?) alongside `checks/suite.rs`.
+**Repo-specific shape:**
+- `kernel/src/reducer/legacy.rs` alongside `reducer/apply/shapes.rs`.
 - `registry/dynamic.rs` alongside `registry/mod.rs` with overlapping responsibilities.
-- Anywhere `forecast_eval.rs` imports from both a new and old forecast module.
+- Anywhere a module imports from both a new and old path for the same capability.
 
 **Fix:** Pick the side that's "newer and working." Migrate remaining call-sites. Delete the legacy side in its entirety in the same slice. Update bindings. Update parity contract if needed.
 
@@ -155,10 +155,10 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Look for `pub fn register_root(...)` in more than one place per crate.
 - Builders that have more than one `pub fn build(...)` variant.
 
-**Finstack Quant-specific shape:**
-- `statements/src/registry/mod.rs` + `statements/src/registry/dynamic.rs` + an ad-hoc `HashMap<String, ...>` elsewhere.
-- `ModelBuilder::build()` that coexists with `ModelBuilder::finalize()` and `ModelBuilder::into_model()`.
-- Check registration via `suite.add_check(...)` AND `checks::register_builtin(...)` AND `#[check]` proc-macros.
+**Repo-specific shape:**
+- `runtime/src/registry/mod.rs` + `runtime/src/registry/dynamic.rs` + an ad-hoc `HashMap<String, ...>` elsewhere.
+- `AgentBuilder::build()` that coexists with `AgentBuilder::finalize()` and `AgentBuilder::into_agent()`.
+- Registration via `sdk.register(...)` AND `runtime::register_builtin(...)` AND a proc-macro.
 
 **Fix:** One registry per thing. One builder method name (`.build()` is the Rust convention; pick it and stick). Route all registration through a single point. Bindings should only expose the single point.
 
@@ -175,7 +175,7 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Variants with identical field shapes and similar names (e.g., `InvalidCurve`, `BadCurve`, `MalformedCurve`).
 - Variants that are only used once and could be replaced with a `source()` chain.
 
-**Finstack Quant-specific shape:** Per-crate `Error` enums in `analytics`, `valuations`, `statements` that each have their own `ParseError`, `ValidationError`, `InvalidInput`, etc., with no shared structure. Bindings then map them all to the same Python/JS error anyway via `core_to_py()` / `JsValue::from_str`.
+**Repo-specific shape:** Per-crate `Error` enums in kernel, runtime, and protocol that each have their own `ParseError`, `ValidationError`, `InvalidInput`, etc., with no shared structure. Bindings then map them all to the same Python/JS error anyway.
 
 **Fix:**
 - Delete unused variants.
@@ -192,9 +192,9 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 **Detect:**
 - Count items in each crate's `prelude` / `lib.rs` `pub use`.
 - Look for `pub use foo::*` patterns (glob re-exports).
-- Any re-export of a `*Builder` intermediate state (e.g., re-exporting `DiscountCurveBuilderStage1`) is a smell.
+- Any re-export of a `*Builder` intermediate state (e.g., re-exporting `AgentBuilderStage1`) is a smell.
 
-**Finstack Quant-specific shape:** `statements/src/prelude.rs` exporting internal evaluator types used by no one outside the crate. `core` re-exporting Polars' entire API.
+**Repo-specific shape:** A crate prelude exporting internal apply types used by no one outside the crate. SDK re-exporting an entire dependency's API.
 
 **Fix:** Reduce the prelude to the types downstream users actually construct or match on. Remove internal-only re-exports. Cross-check by grepping every item in the prelude — if it's never imported outside the crate, demote it.
 
@@ -209,7 +209,7 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - `cargo-udeps` or `cargo-machete` for unused dependencies.
 - Grep for function names and see if there are any non-definition hits.
 
-**Finstack Quant-specific shape:** Test utility functions left in `src/` instead of `tests/` or `mod tests`. Old scenario-engine types never wired into the builder.
+**Repo-specific shape:** Test utility functions left in `src/` instead of `tests/` or `mod tests`. Old host types never wired into the builder.
 
 **Fix:** Delete. If it's "might be useful someday", it goes; `git` remembers.
 
@@ -223,7 +223,7 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Any `pub struct Foo { pub x: ..., pub y: ..., pub z: ... }` that also has a builder. The fields probably shouldn't both be `pub` AND have a builder; pick one.
 - Grep for each `pub fn` to see if any caller outside the defining crate uses it.
 
-**Finstack Quant-specific shape:** Wrapper types in bindings (`pub(crate) inner: RustType`) that then expose `pub fn inner()` accessors. Internal error types re-exported at the crate root.
+**Repo-specific shape:** Wrapper types in bindings (`pub(crate) inner: RustType`) that then expose `pub fn inner()` accessors. Internal error types re-exported at the crate root.
 
 **Fix:** Tighten visibility to the minimum necessary. Public surface area is a contract; smaller contract = less to break.
 
@@ -237,11 +237,11 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Grep for `Config`, `Options`, `Settings`, `Params` suffixes on structs in the same module.
 - Multiple `Default` impls that produce subtly different defaults.
 
-**Finstack Quant-specific shape:** `ScenarioConfig` vs `ScenarioOptions` in `scenarios/`. `RoundingConfig` vs `RoundingContext`.
+**Repo-specific shape:** `RunConfig` vs `RunOptions` in runtime. `AgentSpec` vs `AgentSettings` for the same capability.
 
 **Fix:** One config type per capability. Pick the most complete and delete the others. If sub-configs are needed for different phases, they should be composable (struct-of-substructs) not parallel.
 
-**Exception:** `RoundingContext` is metadata about an executed operation (stamped into results) — that's distinct from `RoundingConfig` which is an input. That distinction is load-bearing. Don't collapse it without checking with the user.
+**Exception:** Input config and output metadata that look similar can be deliberately separate. Don't collapse them without checking with the user. See `behavioral-invariants.md`.
 
 ---
 
@@ -254,7 +254,7 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 - Any abstraction added for "future flexibility" that has no current second user.
 - Documentation that says "extensible" without showing what currently extends it.
 
-**Finstack Quant-specific shape:** `ScenarioEngineFactory` that returns `ScenarioEngine` and nothing else. `StatementEvaluatorStrategy` with one strategy implemented.
+**Repo-specific shape:** `HostFactory` that returns `NativeHost` and nothing else. `JournalStrategy` with one strategy implemented.
 
 **Fix:** Inline the factory. Remove the abstract base. Kill the event bus. Re-introduce the abstraction the day a second user appears; until then, every reader is paying the cost.
 
@@ -265,11 +265,11 @@ pub fn evaluate<T: Numeric>(input: &[T]) -> T { ... }
 **Looks like:** A Python or WASM binding that does more than type conversion — e.g., validates input, computes something, or calls multiple Rust functions in sequence before returning.
 
 **Detect:**
-- In `finstack-quant-py/src/bindings/*.rs`, look for functions longer than ~20 lines, or with any arithmetic, or with any non-trivial control flow.
-- In `finstack-quant-wasm/src/api/*.rs`, same test.
+- In `bindings/finstack-ai-python/**/*.rs`, look for functions longer than ~20 lines, or with any arithmetic, or with any non-trivial control flow.
+- In `bindings/finstack-ai-wasm/**/*.rs`, same test.
 - Any binding that calls more than one Rust function is suspect.
 
-**Finstack Quant-specific shape:** A Python binding that takes `curve: &PyAny`, extracts fields, constructs a Rust `Curve`, *then* computes the discount factor inline — instead of calling a single Rust function.
+**Repo-specific shape:** A Python binding that takes `spec: &PyAny`, extracts fields, constructs a Rust `AgentSpec`, *then* applies a policy inline — instead of calling a single Rust function.
 
 **Fix:** Move the logic into a Rust function. Reduce the binding to: extract params → call the Rust fn → wrap the result → map errors. See `references/binding-drift.md` for the full procedure.
 

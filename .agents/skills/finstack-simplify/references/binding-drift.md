@@ -2,8 +2,7 @@
 
 The triplet is **load-bearing**. Rust is canonical; Python and WASM must match in names and semantics, per `AGENTS.md`:
 
-> Rust is the canonical API design. Type and function names in Python/WASM must match Rust exactly (exceptions only for documented host-language collisions).
-> All logic stays in Rust crates; bindings do only type conversion, wrapper construction, error mapping.
+> Rust owns continuation, recovery, interaction, lineage, ordering, and error semantics. Python and JavaScript adapters perform coarse conversion and host calls only.
 
 Drift has two flavors:
 
@@ -16,14 +15,14 @@ Both flavors are simplification opportunities. This reference tells you how to d
 
 ## Map the triplet
 
-For any Rust type or function `Foo` in `finstack-quant/<crate>/src/...`:
+For any Rust type or function `Foo` in `crates/<crate>/src/...`:
 
-- **Python binding** lives under `finstack-quant-py/src/bindings/<crate>/` (mirrors Rust crate tree exactly).
-- **WASM binding** lives under `finstack-quant-wasm/src/api/<crate_ns>/` where `<crate_ns>` is e.g. `core_ns`, `analytics`, `margin`, etc.
-- **Python type stubs** are at `finstack-quant-py/finstack_quant/*.pyi` — derived from the binding code and the parity contract.
-- **JS facade** is at `finstack-quant-wasm/index.js` — hand-written, not auto-generated from pkg/.
-- **Parity contract** is at `finstack-quant-py/parity_contract.toml`.
-- **Parity tests** are in `finstack-quant-py/tests/parity/`.
+- **Python binding** lives under `bindings/finstack-ai-python/`.
+- **WASM binding** lives under `bindings/finstack-ai-wasm/`.
+- **Python type stubs** are at `bindings/finstack-ai-python/python/finstack_ai/*.pyi`.
+- **JS facade** is at `bindings/finstack-ai-wasm/js/src/` — hand-written over generated glue.
+- **Public items** are checked by `mise run check-public-items`.
+- **Conformance** is checked by `mise run conformance`.
 
 Before doing any binding-touching work, list these paths for the scope you're auditing. Put the list in the audit report.
 
@@ -35,23 +34,23 @@ Before doing any binding-touching work, list these paths for the scope you're au
 
 1. Enumerate Rust `pub struct`/`pub enum` in the target module.
 2. For each, check whether it has a counterpart:
-   - `finstack-quant-py/src/bindings/<crate>/<module>.rs` — typically a `#[pyclass] pub struct PyFoo { pub(crate) inner: Foo }`
-   - `finstack-quant-wasm/src/api/<crate_ns>/<module>.rs` — typically `#[wasm_bindgen] pub struct Foo { inner: RustFoo }` or similar
-3. Flag each missing binding. Flag each binding without a Rust source. Flag name mismatches (e.g., Rust `VolSurface` but Python `VolatilitySurface`).
+   - Python: typically a `#[pyclass] pub struct PyFoo { pub(crate) inner: Foo }` or a re-export from `__init__.py`
+   - WASM/JS: typically `#[wasm_bindgen] pub struct Foo { inner: RustFoo }` plus a JS facade type
+3. Flag each missing binding. Flag each binding without a Rust source. Flag name mismatches (e.g., Rust `Session` but Python `Conversation`).
 
 ### Functions
 
 1. Enumerate Rust `pub fn` in the module that are not on a struct (free functions) and public methods.
-2. For each, check whether it's exposed to Python (as a free function in the submodule, or as a method on the binding struct) and to WASM.
+2. For each, check whether it's exposed to Python and to WASM.
 3. Flag asymmetries.
 
 ### Fields / accessors
 
-Rust convention uses `get_*` for accessors (per `AGENTS.md`). Check that Python and WASM follow the same convention — `get_discount()`, not `.discount` on the binding. A binding that exposes raw fields where Rust uses `get_*` is drifted.
+Check that Python and WASM follow the same accessor convention as Rust. A binding that exposes raw fields where Rust uses `get_*` is drifted.
 
-### Metric keys
+### Stable codes and kinds
 
-Per `AGENTS.md`, metric keys are fully qualified: `bucketed_dv01::USD-OIS::10y`, `cs01::ACME-HZD`, `pv01::usd_ois`. If a binding constructs keys in a different format than Rust, that's drift.
+Error `code` strings and durable record/event kind names must be identical across bindings. If a binding constructs codes in a different format than Rust, that's drift.
 
 ---
 
@@ -71,8 +70,8 @@ Binding code should read like this:
 
 ```rust
 #[pyfunction]
-fn sharpe(returns: Vec<f64>, rf: f64) -> PyResult<f64> {
-    finstack_quant_analytics::sharpe(&returns, rf).map_err(core_to_py)
+fn start_run(params: StartRunArg) -> PyResult<PyRun> {
+    finstack_ai::start_run(params.into_inner()).map_err(core_to_py)
 }
 ```
 
@@ -81,7 +80,7 @@ Three jobs: extract → call → map error. Anything beyond that is logic drift.
 **Red flags** in a binding function:
 
 - `if` / `match` beyond trivial input normalization.
-- Any arithmetic.
+- Any arithmetic or policy decision.
 - More than one call into a `finstack_*` crate.
 - Construction of intermediate Rust types that could be done inside the Rust fn.
 - Re-implementing validation that already exists in the Rust function.
@@ -96,29 +95,28 @@ When you find these, the refactor is:
 
 ---
 
-## Parity contract and parity tests
+## Public items and conformance
 
-`finstack-quant-py/parity_contract.toml` is the source of truth for what must be equal across Rust / Python / WASM. Treat it like an API contract file.
+`mise run check-public-items` is the source of truth for frozen public names. Treat it like an API contract.
 
 During a refactor:
 
-- If you delete a Rust public symbol, remove its parity entry.
-- If you rename a Rust public symbol, rename the parity entry.
-- If the parity test suite fails after your changes, stop. Either your refactor broke an invariant or the parity entry is stale — figure out which before "fixing" the test.
-
-Run the parity tests with:
+- If you delete a Rust public symbol, remove or update its public-item entry in the same slice.
+- If you rename a Rust public symbol, rename the inventory entry.
+- If conformance fixtures fail after your changes, stop. Either your refactor broke an invariant or the fixture is stale — figure out which before "fixing" the test.
 
 ```bash
-uv run pytest finstack-quant-py/tests/parity -x
+mise run check-public-items
+mise run conformance
 ```
 
-If you added a new canonical API, add it to the parity contract in the same slice.
+If you added a new canonical API, add it to the public-item inventory in the same slice when it is intended to be frozen.
 
 ---
 
 ## The .pyi stub layer
 
-`finstack-quant-py/finstack_quant/*.pyi` is derived from the binding code and the parity contract. If you change binding shapes, regenerate or update the stubs in the same slice. Don't leave `.pyi` lying about types that no longer exist — type-checker consumers will catch it later and you'll own the bug.
+`bindings/finstack-ai-python/python/finstack_ai/*.pyi` is the IDE-facing surface. If you change binding shapes, regenerate or update the stubs in the same slice. Don't leave `.pyi` lying about types that no longer exist.
 
 ---
 
@@ -128,7 +126,7 @@ If you added a new canonical API, add it to the parity contract in the same slic
 
 Rust added a new `Config` field. Python binding still constructs `Config` without it. Python users effectively get a silent default. WASM users too.
 
-**Fix:** Thread the field through both bindings in one slice. Update `.pyi`. Update parity.
+**Fix:** Thread the field through both bindings in one slice. Update `.pyi`. Update public items if frozen.
 
 ### Pattern B — "Binding evolved, Rust didn't"
 
@@ -140,13 +138,13 @@ Someone wanted a "convenience" Python helper: `from_yaml_file(path)`. They added
 
 A Rust function was removed or renamed. The binding still has a function with the old name, now implemented inline or calling something unrelated.
 
-**Fix:** Delete the binding stub. Update parity. Update `.pyi`. The user of the binding should update; that's what breaking changes are for.
+**Fix:** Delete the binding stub. Update public items. Update `.pyi`. The user of the binding should update; that's what breaking changes are for.
 
 ### Pattern D — "Both sides evolved independently"
 
-The worst case. Rust has `compute_cs01(&bond, &curve)`, Python has `compute_cs01(bond, curve, hazard_curve=None)`, WASM has `cs01(bond, curve)`. Each has a different calling convention and the Python one accepts an extra arg that Rust doesn't.
+The worst case. Rust has `start_run(&spec)`, Python has `start_run(spec, timeout=None)`, WASM has `startRun(spec)`. Each has a different calling convention and the Python one accepts an extra arg that Rust doesn't.
 
-**Fix:** Converge on the Rust signature. Update both bindings. Delete the extra Python arg (or add it to Rust if it's real). Update parity. This is a medium-risk refactor and should go in its own slice with explicit user sign-off.
+**Fix:** Converge on the Rust signature. Update both bindings. Delete the extra Python arg (or add it to Rust if it's real). This is a medium-risk refactor and should go in its own slice with explicit user sign-off.
 
 ---
 
@@ -156,8 +154,8 @@ The worst case. Rust has `compute_cs01(&bond, &curve)`, Python has `compute_cs01
 2. **Read** both binding directories. Diff against the Rust shape.
 3. **Categorize** each difference as: structural drift, logic drift, intentional (name collision), or unknown.
 4. **Plan** the fix as part of the larger refactor slice — binding changes and their Rust sources go in the same commit.
-5. **Implement** Rust-first, then Python binding, then WASM binding, then `.pyi`, then parity contract.
-6. **Verify** in order: `mise run rust-lint && mise run rust-test` → `mise run python-build` → `mise run python-lint && mise run python-test` → `mise run wasm-build` → `mise run wasm-lint && mise run wasm-test` → run parity tests.
+5. **Implement** Rust-first, then Python binding, then WASM binding, then `.pyi`, then public items.
+6. **Verify** in order: `mise run check && mise run test` → `mise run generate-wasm` → `mise run check-wasm` → `mise run check-public-items` → `mise run conformance`.
 
 **Do not batch multiple binding-drift slices into one commit.** Each drift repair is a discrete before/after; keeping them separate makes review tractable and rollback cheap.
 
@@ -165,13 +163,13 @@ The worst case. Rust has `compute_cs01(&bond, &curve)`, Python has `compute_cs01
 
 ## Sanity check before you call a binding slice "done"
 
-- [ ] Rust public surface matches Python binding symbol-for-symbol (modulo Python naming like `get_*` and snake_case).
+- [ ] Rust public surface matches Python binding symbol-for-symbol (modulo Python naming and snake_case).
 - [ ] Rust public surface matches WASM binding symbol-for-symbol (modulo documented JS naming conventions).
 - [ ] No binding function exceeds ~20 lines unless it's doing a legitimate type-conversion batch.
 - [ ] No binding function contains arithmetic or non-trivial control flow.
-- [ ] `parity_contract.toml` is in sync; `mise run python-test` passes; parity tests pass.
+- [ ] Public-item inventory is in sync; `mise run check-public-items` passes.
 - [ ] `.pyi` stubs type-check cleanly.
-- [ ] `index.js` facade exposes the new surface; no raw pkg/ leaks.
-- [ ] `__all__` is set in every Python submodule `register()`; no dynamic export discovery.
+- [ ] JS facade exposes the new surface; no raw generated-glue leaks.
+- [ ] `__all__` or package exports are set; no dynamic export discovery.
 
 If any of the above are false, the slice is not done — regardless of what the test runner says.

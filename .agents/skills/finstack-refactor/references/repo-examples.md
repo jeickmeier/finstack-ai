@@ -6,17 +6,17 @@ Use these examples as shape guides. They are intentionally short and operational
 
 ### Before
 
-A `#[pyfunction]` in `finstack-quant-py` parses Python inputs and also decides a pricing or validation rule before calling core.
+A `#[pyfunction]` in `bindings/finstack-ai-python` parses Python inputs and also decides a validation or lifecycle rule before calling core.
 
 ```rust
 #[pyfunction]
-fn price_like_python_api(...) -> PyResult<f64> {
-    let bump = if use_market_convention {
-        choose_bump_from_python_inputs(...)
+fn start_run_like_python_api(...) -> PyResult<PyRun> {
+    let policy = if use_host_default {
+        choose_policy_from_python_inputs(...)
     } else {
-        fallback_bump(...)
+        fallback_policy(...)
     };
-    finstack_quant_valuations::price_with_bump(..., bump).map_err(core_to_py)
+    finstack_ai::start_run_with_policy(..., policy).map_err(core_to_py)
 }
 ```
 
@@ -26,9 +26,9 @@ Move the rule into core, keep the binding focused on conversion and error mappin
 
 ```rust
 #[pyfunction]
-fn price_like_python_api(...) -> PyResult<f64> {
-    let params = PriceParams { ... };
-    finstack_quant_valuations::price_like_api(params).map_err(core_to_py)
+fn start_run_like_python_api(...) -> PyResult<PyRun> {
+    let params = StartRunParams { ... };
+    finstack_ai::start_run(params).map_err(core_to_py)
 }
 ```
 
@@ -45,16 +45,15 @@ Why this is the right refactor:
 A core function grows past the repo's argument threshold and callers keep passing the same group of values together.
 
 ```rust
-pub fn build_curve(
-    id: CurveId,
-    currency: Currency,
-    day_count: DayCount,
-    calendar: Calendar,
-    convention: BusinessDayConvention,
-    nodes: Vec<Node>,
-    interp: Interpolator,
-    extrap: Extrapolator,
-) -> Result<Curve, Error>
+pub fn start_run(
+    session_id: SessionId,
+    agent_id: AgentId,
+    timeout: Duration,
+    cancellation: CancellationToken,
+    metadata: Metadata,
+    lane: LaneId,
+    budget: BudgetScopeId,
+) -> Result<Run, Error>
 ```
 
 ### After
@@ -62,18 +61,17 @@ pub fn build_curve(
 Introduce a cohesive params struct and keep callers explicit.
 
 ```rust
-pub struct CurveBuildParams {
-    pub id: CurveId,
-    pub currency: Currency,
-    pub day_count: DayCount,
-    pub calendar: Calendar,
-    pub convention: BusinessDayConvention,
-    pub nodes: Vec<Node>,
-    pub interp: Interpolator,
-    pub extrap: Extrapolator,
+pub struct StartRunParams {
+    pub session_id: SessionId,
+    pub agent_id: AgentId,
+    pub timeout: Duration,
+    pub cancellation: CancellationToken,
+    pub metadata: Metadata,
+    pub lane: LaneId,
+    pub budget: BudgetScopeId,
 }
 
-pub fn build_curve(params: CurveBuildParams) -> Result<Curve, Error>
+pub fn start_run(params: StartRunParams) -> Result<Run, Error>
 ```
 
 Also inspect:
@@ -92,17 +90,15 @@ A binding module mixes wrapper types, extraction helpers, registration, and unre
 
 Split internals by responsibility, but keep the same external package shape:
 
-- keep `register()` behavior stable
+- keep export behavior stable
 - keep `__all__` stable unless the user asked for a public-surface cleanup
-- keep package-level imports working through `finstack-quant-py/src/lib.rs` and Python `__init__.py`
-
-This is the model used throughout the binding tree registered from `finstack-quant-py/src/lib.rs`.
+- keep package-level imports working through `bindings/finstack-ai-python/python/finstack_ai/__init__.py`
 
 ## Example 4: rename toward repo conventions and update mirrored surfaces
 
 ### Before
 
-A Python-visible accessor or helper uses a one-off name that drifts from the repo's `get_*` convention.
+A Python-visible accessor or helper uses a one-off name that drifts from the repo's shared semantic vocabulary.
 
 ### After
 
@@ -112,6 +108,6 @@ Rename it toward the shared convention, then update every mirrored surface in on
 - PyO3 registration and export lists
 - Python package re-export file if relevant
 - `.pyi` stub
-- parity tests or docs that reference the old name
+- public-item inventory or docs that reference the old name
 
 If the rename is not user-approved, keep the public name stable and do only internal cleanup.

@@ -69,16 +69,15 @@ fn find_duplicates(items: &[String]) -> Vec<String> {
 ### Code under review
 
 ```rust
-fn compute_portfolio_values(
-    positions: &[Position],
-    prices: &HashMap<String, f64>,
+fn lookup_session_scores(
+    sessions: &[Session],
+    scores: &HashMap<String, f64>,
 ) -> Vec<f64> {
-    positions
+    sessions
         .iter()
-        .map(|pos| {
-            let key = format!("{}:{}", pos.exchange, pos.symbol);
-            let price = prices.get(&key).unwrap_or(&0.0);
-            pos.quantity * price
+        .map(|session| {
+            let key = format!("{}:{}", session.tenant, session.id);
+            *scores.get(&key).unwrap_or(&0.0)
         })
         .collect()
 }
@@ -87,12 +86,12 @@ fn compute_portfolio_values(
 ### Review output
 
 ## Summary
-- Portfolio valuation function called frequently
-- **Major** performance risk: allocation per position
+- Session score lookup called frequently
+- **Major** performance risk: allocation per session
 
 ## Performance concerns
-- `format!()` allocates a new String for every position
-- With 10K positions at 60Hz, that's 600K allocations/second
+- `format!()` allocates a new String for every session
+- With 10K sessions at 60Hz, that's 600K allocations/second
 - Key computation is repeated; should be cached or restructured
 
 ## Findings
@@ -104,11 +103,11 @@ fn compute_portfolio_values(
 - **HashMap key type**: If this is a hot path, consider using a numeric ID instead of string keys, or use `FxHashMap` with a composite key struct.
 
 ## Benchmarking recommendations
-- Measure with realistic position counts (100, 1K, 10K)
+- Measure with realistic session counts (100, 1K, 10K)
 - Profile allocation rate with DHAT or similar
 
 ## Action items
-- [ ] Pre-compute keys in Position struct or use numeric IDs
+- [ ] Pre-compute keys in Session struct or use numeric IDs
 - [ ] If keys must be computed, use a reusable buffer
 - [ ] Consider FxHashMap if string keys are necessary
 
@@ -116,39 +115,37 @@ fn compute_portfolio_values(
 
 ```rust
 // Option A: Pre-computed key
-struct Position {
-    exchange: String,
-    symbol: String,
-    quantity: f64,
-    price_key: String,  // Pre-computed: "{exchange}:{symbol}"
+struct Session {
+    tenant: String,
+    id: String,
+    score_key: String,  // Pre-computed: "{tenant}:{id}"
 }
 
 // Option B: Numeric lookup
-fn compute_portfolio_values(
-    positions: &[Position],
-    prices: &[f64],  // Indexed by position_id
+fn lookup_session_scores(
+    sessions: &[Session],
+    scores: &[f64],  // Indexed by session_id
 ) -> Vec<f64> {
-    positions
+    sessions
         .iter()
-        .map(|pos| pos.quantity * prices[pos.price_index])
+        .map(|session| scores[session.score_index])
         .collect()
 }
 
 // Option C: Reusable buffer (if restructuring not possible)
-fn compute_portfolio_values(
-    positions: &[Position],
-    prices: &HashMap<String, f64>,
+fn lookup_session_scores(
+    sessions: &[Session],
+    scores: &HashMap<String, f64>,
 ) -> Vec<f64> {
     let mut key_buf = String::with_capacity(64);
-    positions
+    sessions
         .iter()
-        .map(|pos| {
+        .map(|session| {
             key_buf.clear();
-            key_buf.push_str(&pos.exchange);
+            key_buf.push_str(&session.tenant);
             key_buf.push(':');
-            key_buf.push_str(&pos.symbol);
-            let price = prices.get(&key_buf).unwrap_or(&0.0);
-            pos.quantity * price
+            key_buf.push_str(&session.id);
+            *scores.get(&key_buf).unwrap_or(&0.0)
         })
         .collect()
 }
@@ -161,40 +158,40 @@ fn compute_portfolio_values(
 ### Code under review
 
 ```rust
-struct Instrument {
+struct Record {
     id: u64,
     name: String,
-    currency: String,
-    market_data: Box<MarketData>,  // 200+ bytes
-    pricing_params: Box<PricingParams>,  // 500+ bytes
+    kind: String,
+    payload: Box<Payload>,  // 200+ bytes
+    metadata: Box<Metadata>,  // 500+ bytes
     // ... many more fields
 }
 
-fn sum_notionals(instruments: &[Instrument]) -> f64 {
-    instruments.iter().map(|i| i.market_data.notional).sum()
+fn sum_payload_sizes(records: &[Record]) -> usize {
+    records.iter().map(|r| r.payload.size).sum()
 }
 ```
 
 ### Review output
 
 ## Summary
-- Simple aggregation over instrument collection
+- Simple aggregation over record collection
 - **Major** performance risk: cache-hostile memory layout
 
 ## Performance concerns
-- Each `Instrument` is large; iterating loads entire struct into cache
-- `market_data` is behind a Box, causing pointer chase per instrument
-- Only accessing `notional` but loading hundreds of bytes per item
+- Each `Record` is large; iterating loads entire struct into cache
+- `payload` is behind a Box, causing pointer chase per record
+- Only accessing `size` but loading hundreds of bytes per item
 - Poor cache utilization will dominate for large collections
 
 ## Findings
 
 ### Majors
-- **Pointer chasing**: `Box<MarketData>` requires dereferencing a pointer for each instrument, destroying spatial locality. For hot-path aggregations, consider storing frequently-accessed fields directly or using SoA layout.
-- **Cold data in hot path**: Large struct with many unused fields loaded into cache. Consider separating hot fields (notional, id) from cold fields (name, pricing_params).
+- **Pointer chasing**: `Box<Payload>` requires dereferencing a pointer for each record, destroying spatial locality. For hot-path aggregations, consider storing frequently-accessed fields directly or using SoA layout.
+- **Cold data in hot path**: Large struct with many unused fields loaded into cache. Consider separating hot fields (size, id) from cold fields (name, metadata).
 
 ## Action items
-- [ ] Store `notional` directly in `Instrument` if accessed frequently
+- [ ] Store `size` directly in `Record` if accessed frequently
 - [ ] Consider SoA layout for hot-path aggregations
 - [ ] Profile with `perf stat` to measure cache misses
 
@@ -202,31 +199,31 @@ fn sum_notionals(instruments: &[Instrument]) -> f64 {
 
 ```rust
 // Option A: Inline hot field
-struct Instrument {
+struct Record {
     id: u64,
-    notional: f64,  // Moved from MarketData to avoid indirection
+    size: usize,  // Moved from Payload to avoid indirection
     name: String,
-    currency: String,
-    market_data: Box<MarketData>,
-    pricing_params: Box<PricingParams>,
+    kind: String,
+    payload: Box<Payload>,
+    metadata: Box<Metadata>,
 }
 
 // Option B: Struct of Arrays for hot-path operations
-struct InstrumentStore {
+struct RecordStore {
     // Hot data (used in aggregations)
     ids: Vec<u64>,
-    notionals: Vec<f64>,
+    sizes: Vec<usize>,
 
     // Cold data (used occasionally)
     names: Vec<String>,
-    currencies: Vec<String>,
-    market_data: Vec<MarketData>,
-    pricing_params: Vec<PricingParams>,
+    kinds: Vec<String>,
+    payloads: Vec<Payload>,
+    metadata: Vec<Metadata>,
 }
 
-impl InstrumentStore {
-    fn sum_notionals(&self) -> f64 {
-        self.notionals.iter().sum()  // Cache-friendly sequential access
+impl RecordStore {
+    fn sum_payload_sizes(&self) -> usize {
+        self.sizes.iter().sum()  // Cache-friendly sequential access
     }
 }
 ```
@@ -238,18 +235,18 @@ impl InstrumentStore {
 ### Code under review
 
 ```rust
-fn price_instruments(
-    instruments: &[Instrument],
-    market_data: &MarketData,
-) -> Vec<PricingResult> {
-    instruments
+fn apply_records(
+    records: &[Record],
+    context: &ApplyContext,
+) -> Vec<ApplyResult> {
+    records
         .iter()
-        .map(|inst| price_single(inst, market_data))
+        .map(|record| apply_single(record, context))
         .collect()
 }
 
-fn price_single(inst: &Instrument, market_data: &MarketData) -> PricingResult {
-    // Complex pricing logic, ~1ms per instrument
+fn apply_single(record: &Record, context: &ApplyContext) -> ApplyResult {
+    // Complex apply logic, ~1ms per record
     // ...
 }
 ```
@@ -257,43 +254,43 @@ fn price_single(inst: &Instrument, market_data: &MarketData) -> PricingResult {
 ### Review output
 
 ## Summary
-- Prices collection of instruments sequentially
+- Applies a collection of records sequentially
 - **Major** performance opportunity: embarrassingly parallel workload
 
 ## Performance concerns
-- Each pricing is independent (~1ms each)
-- 1000 instruments = 1 second sequential, could be ~125ms on 8 cores
+- Each apply is independent (~1ms each)
+- 1000 records = 1 second sequential, could be ~125ms on 8 cores
 - No shared mutable state prevents parallelization
 
 ## Findings
 
 ### Majors
-- **Missing parallelization**: Independent pricing operations with significant per-item cost. This is an ideal candidate for `rayon::par_iter()`.
+- **Missing parallelization**: Independent apply operations with significant per-item cost. This is an ideal candidate for `rayon::par_iter()`.
 
 ### Minors
-- Ensure `MarketData` is `Sync` (read-only access is safe to share).
+- Ensure `ApplyContext` is `Sync` (read-only access is safe to share).
 
 ## Benchmarking recommendations
-- Measure single-instrument pricing time to confirm parallelization is worthwhile (>1μs)
-- Test with realistic instrument counts
+- Measure single-record apply time to confirm parallelization is worthwhile (>1μs)
+- Test with realistic record counts
 
 ## Action items
 - [ ] Add rayon dependency if not present
 - [ ] Replace `iter()` with `par_iter()`
-- [ ] Verify `MarketData` is thread-safe for concurrent reads
+- [ ] Verify `ApplyContext` is thread-safe for concurrent reads
 
 ### Fixed implementation
 
 ```rust
 use rayon::prelude::*;
 
-fn price_instruments(
-    instruments: &[Instrument],
-    market_data: &MarketData,  // Must be Sync
-) -> Vec<PricingResult> {
-    instruments
+fn apply_records(
+    records: &[Record],
+    context: &ApplyContext,  // Must be Sync
+) -> Vec<ApplyResult> {
+    records
         .par_iter()  // Parallel iteration
-        .map(|inst| price_single(inst, market_data))
+        .map(|record| apply_single(record, context))
         .collect()
 }
 ```

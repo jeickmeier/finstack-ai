@@ -1,18 +1,16 @@
 # Binding-layer patterns
 
-Use this reference when refactoring `finstack-quant-py` code or anything that changes Python-facing API shape.
+Use this reference when refactoring `bindings/finstack-ai-python` code or anything that changes Python-facing API shape.
 
 ## Thin-binding rule
 
-The binding crate should not accumulate financial logic or policy decisions. The Python layer should mainly:
+The binding crate should not accumulate domain logic or policy decisions. The Python layer should mainly:
 
 - extract Python inputs
 - build or unwrap wrapper types
 - call Rust core functions
 - map core errors into Python exceptions
 - register Python modules, docs, and exports
-
-The module docs in `finstack-quant-py/src/lib.rs` already state this boundary explicitly.
 
 ## Wrapper pattern
 
@@ -34,19 +32,11 @@ Good wrapper refactors:
 
 ## Registration pattern
 
-Python modules are typically assembled with a `register()` function that:
-
-- creates the submodule
-- sets `__doc__`
-- adds classes and functions
-- sets `__all__`
-- attaches the submodule to its parent
-
-Keep this pattern stable when splitting modules internally. Internal reorganization is usually cheaper than changing registration shape.
+Python modules are typically assembled by exporting compiled types from `__init__.py` and documenting them in `_finstack_ai.pyi`. Keep this pattern stable when splitting modules internally. Internal reorganization is usually cheaper than changing export shape.
 
 ## Error mapping pattern
 
-Prefer the centralized conversion functions in `finstack-quant-py/src/errors.rs`, especially `core_to_py`, rather than ad hoc mapping at each call site.
+Prefer centralized conversion into the published exception types (`FinstackError`, `ConfigurationError`, and siblings) rather than ad hoc mapping at each call site.
 
 Good refactor:
 
@@ -66,16 +56,16 @@ The central mapping preserves the Python exception hierarchy and keeps behavior 
 
 Two export surfaces matter:
 
-- the PyO3 module tree in `finstack-quant-py/src/lib.rs`
-- Python package re-export files such as `finstack-quant-py/finstack_quant/valuations/__init__.py`
+- the PyO3 module tree in the binding crate
+- Python package re-export files such as `bindings/finstack-ai-python/python/finstack_ai/__init__.py`
 
 A refactor may be internal in Rust but still require export updates if names or module layout move.
 
 ## Binding-specific examples from this repo
 
-- `finstack-quant-py/src/lib.rs` registers core and package-level exports through explicit `register()` calls and `__all__` lists.
-- `finstack-quant-py/src/bindings/core/currency.rs` shows the thin wrapper pattern, local extraction helper, and module registration flow.
-- `finstack-quant-py/finstack_quant/valuations/__init__.py` shows the Python-side re-export surface that can drift if a Rust module layout changes.
+- `bindings/finstack-ai-python/python/finstack_ai/__init__.py` re-exports compiled types and version metadata.
+- `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi` is the IDE-facing stub surface.
+- `bindings/finstack-ai-wasm/js/src/` is the hand-authored JS facade over generated wasm-bindgen glue.
 
 ## Common mistakes during refactor
 

@@ -15,7 +15,7 @@ Use this format verbatim.
 - One theme per slice.
 - Tier 1 (delete-only) slices first.
 - Within a tier, deletions → internal collapses → public surface changes.
-- Every binding-sensitive slice updates Rust + Python + WASM + `.pyi` + parity in one commit.
+- Every binding-sensitive slice updates Rust + Python + WASM + `.pyi` + public items in one commit.
 - Target size: 1–5 files per slice, <300 LOC net change. Larger slices get broken up.
 
 ## Slice 1 — <theme>
@@ -23,10 +23,9 @@ Use this format verbatim.
 **Tier:** 1 (delete-only)
 **Estimated net LOC:** −180
 **Files touched:**
-- `finstack-quant/statements/src/checks/runner.rs` (DELETE)
-- `finstack-quant/statements/src/checks/mod.rs` (remove `pub mod runner;`)
-- `finstack-quant/statements/src/prelude.rs` (remove re-export)
-- `finstack-quant/statements/tests/spec/registry_tests.rs` (remove one unreferenced test)
+- `crates/finstack-ai-kernel/src/reducer/legacy.rs` (DELETE)
+- `crates/finstack-ai-kernel/src/reducer/mod.rs` (remove `pub mod legacy;`)
+- `crates/finstack-ai-kernel/tests/legacy_apply.rs` (remove one unreferenced test)
 
 **Addresses findings:** F1, F2
 
@@ -36,7 +35,7 @@ Use this format verbatim.
 
 **Verify:**
 ```bash
-mise run rust-lint && mise run rust-test
+mise run check && mise run test
 ```
 
 **Bindings touched:** none. Python/WASM tests don't need to re-run.
@@ -48,19 +47,18 @@ mise run rust-lint && mise run rust-test
 **Tier:** 2 (internal collapse)
 **Estimated net LOC:** −95
 **Files touched:**
-- `finstack-quant/statements/src/checks/suite.rs`
-- `finstack-quant/statements/src/checks/traits.rs` (single-impl trait deleted)
-- `finstack-quant/statements/src/checks/builtins/*.rs` (update to use concrete type)
+- `crates/finstack-ai-kernel/src/reducer/apply/shapes.rs`
+- `crates/finstack-ai-kernel/src/reducer/apply/traits.rs` (single-impl trait deleted)
 
 **Addresses findings:** F3
 
 **Invariants touched:** none
 
-**Rationale:** Applying tactic T3 (inline single-impl trait). The `CheckRunner` trait has exactly one impl; removing it simplifies every call-site.
+**Rationale:** Applying tactic T3 (inline single-impl trait). The trait has exactly one impl; removing it simplifies every call-site.
 
 **Verify:**
 ```bash
-mise run rust-lint && mise run rust-test
+mise run check && mise run test
 ```
 
 **Bindings touched:** none (the trait was internal).
@@ -74,78 +72,66 @@ mise run rust-lint && mise run rust-test
 **Tier:** 3 (public surface change)
 **Estimated net LOC:** −160
 **Files touched:**
-- `finstack-quant/core/src/market_data/surfaces/vol_surface.rs`
-- `finstack-quant/core/src/market_data/surfaces/mod.rs`
-- `finstack-quant-py/src/bindings/core/market_data/surfaces.rs`
-- `finstack-quant-wasm/src/api/core_ns/market_data/surfaces.rs`
-- `finstack-quant-py/finstack_quant/core.pyi`
-- `parity_contract.toml`
+- `crates/finstack-ai/src/agent.rs`
+- `bindings/finstack-ai-python/python/finstack_ai/__init__.py`
+- `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi`
+- `bindings/finstack-ai-wasm/js/src/agent.ts`
 
 **Addresses findings:** F4, F5 (cluster A)
 
-**Invariants touched:** none directly, but any numerical test that hits `VolSurface::new` needs to keep passing.
+**Invariants touched:** none directly, but any test that hits `Agent::new` needs to keep passing.
 
-**Rationale:** Applying tactic T4 (collapse parallel constructors) + T7 (move binding logic to Rust). Currently `VolSurface::new`, `VolSurface::from_grid`, and free fn `vol_surface_from_points` are three paths to the same struct. Collapse to `VolSurface::new(VolSurfaceInput) -> Result<Self, Error>`.
+**Rationale:** Applying tactic T4 (collapse parallel constructors). Currently `Agent::new`, `Agent::from_spec`, and a free fn are three paths to the same struct. Collapse to `Agent::new(AgentSpec) -> Result<Self, Error>`.
 
 **Verify:**
 ```bash
-mise run rust-lint && mise run rust-test
-mise run python-build
-mise run python-lint && mise run python-test
-mise run wasm-build
-mise run wasm-lint && mise run wasm-test
-uv run pytest finstack-quant-py/tests/parity -x
+mise run check && mise run test
+mise run generate-wasm && mise run check-wasm
+mise run check-public-items
 ```
 
-**Bindings touched:** Python + WASM both updated. Parity contract updated.
+**Bindings touched:** Python + WASM both updated. Public-item inventory updated.
 
-**Rollback:** revert requires reverting parity + `.pyi` too. Keep as one commit.
+**Rollback:** revert requires reverting stubs too. Keep as one commit.
 
-**Depends on:** Slice 2 (this slice removes a trait internal to surfaces; doing it after the internal cleanup reduces blast radius).
+**Depends on:** Slice 2.
 
 ## Slice 4 — <theme>
 
 **Tier:** 4 (invariant-sensitive)
 **Estimated net LOC:** −50 (but high diff surface)
 **Files touched:**
-- `finstack-quant/analytics/src/drawdown.rs`
-- `finstack-quant/portfolio/src/drawdown.rs` (DELETE — merges into analytics)
-- Various call-sites in `valuations/`, `statements-analytics/`
-- Python + WASM bindings for both `analytics.drawdown` and `portfolio.drawdown`
-- `parity_contract.toml`
-- `finstack-quant-py/finstack_quant/*.pyi`
+- `crates/finstack-ai-kernel/src/effects/`
+- Various call-sites in runtime
+- Python + WASM bindings for the same surface
 
 **Addresses findings:** F6
 
-**Invariants touched:** Decimal equality (numerical output must not change).
+**Invariants touched:** commit-before-effect (ordering must not change).
 
-**Rationale:** Two drawdown implementations with subtle differences in NaN handling. Merge into one in `analytics/`, delete the `portfolio/` version. Needs explicit user sign-off before execution — the merge could expose existing consumers to NaN-handling changes.
+**Rationale:** Two dispatch helpers with subtle differences in commit ordering. Merge into one. Needs explicit user sign-off before execution.
 
 **Verify:**
 ```bash
-mise run rust-lint && mise run rust-test
-# Run golden tests twice, diff:
-mise run rust-test  # serial
-RAYON_NUM_THREADS=1 mise run rust-test  # explicit serial
-mise run python-build && mise run python-lint && mise run python-test
-mise run wasm-build && mise run wasm-lint && mise run wasm-test
-uv run pytest finstack-quant-py/tests/parity -x
-# Review golden diffs for all drawdown tests in analytics/ and portfolio/.
+mise run check && mise run test
+mise run generate-wasm && mise run check-wasm
+mise run check-public-items
+mise run conformance
 ```
 
 **Bindings touched:** Yes, full stack.
 
-**Rollback:** Hard — touches parity. Keep as one atomic commit.
+**Rollback:** Hard — touches public items. Keep as one atomic commit.
 
 **Depends on:** user sign-off. Do not execute without explicit "go."
 
 ## Slice dependency graph
 
 ```
-Slice 1 (delete dead) ───► Slice 2 (collapse trait) ───► Slice 3 (surface constructor)
+Slice 1 (delete dead) ───► Slice 2 (collapse trait) ───► Slice 3 (constructor)
                                                                 │
                                                                 ▼
-Slice 4 (drawdown merge, needs user sign-off) ◄──────────────── │
+Slice 4 (dispatch merge, needs user sign-off) ◄──────────────── │
 ```
 
 ## Not in this plan
@@ -153,8 +139,8 @@ Slice 4 (drawdown merge, needs user sign-off) ◄──────────�
 Findings explicitly excluded:
 
 - **F8 (documentation gaps):** out of scope; suggest running `finstack-documentation-maintainer` skill separately.
-- **F9 (performance concern in surface interp):** out of scope; suggest running `finstack-performance-reviewer` separately.
-- **H1 (`.unwrap()` in binding):** this is a bug, not slop. Suggest running `finstack-quality-gate-triage` skill separately.
+- **F9 (performance concern):** out of scope; suggest running `finstack-performance-reviewer` separately.
+- **H1 (`.unwrap()` in binding):** this is a bug, not slop. Schedule a separate fix.
 
 ## What we expect at the end
 

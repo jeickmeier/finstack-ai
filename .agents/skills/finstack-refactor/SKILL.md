@@ -13,9 +13,9 @@ Preserve behavior while making the next change cheaper, safer, and easier to rea
 
 Do not load every reference by default. Open only the file that matches the current refactor.
 
-- `references/repo-refactor-boundaries.md`: open when deciding whether code belongs in Rust core crates, bindings, stubs, exports, or parity surfaces.
+- `references/repo-refactor-boundaries.md`: open when deciding whether code belongs in Rust core crates, bindings, stubs, exports, or public-item surfaces.
 - `references/rust-refactor-heuristics.md`: open when refactoring Rust internals or choosing between helpers, structs, enums, params structs, modules, or traits.
-- `references/binding-layer-patterns.md`: open when touching `finstack-quant-py` binding code, Python-facing API shape, registration, or error mapping.
+- `references/binding-layer-patterns.md`: open when touching `bindings/finstack-ai-python` binding code, Python-facing API shape, registration, or error mapping.
 - `references/refactor-sync-checklist.md`: open before finishing a refactor that changes public APIs, exports, module layout, names, or cross-language surfaces.
 - `references/repo-examples.md`: open when you want a repo-shaped example before choosing the operation.
 
@@ -66,7 +66,7 @@ Do not load every reference by default. Open only the file that matches the curr
 - Primitive obsession: introduce a domain type only when it clarifies meaning or enforces an invariant used in multiple places.
 - Nested branching: prefer guard clauses, focused validation helpers, or a simple dispatch table; do not reach for polymorphism by default.
 - Indirection overload: inline wrappers that add no policy, safety, or reuse value.
-- Dead code: remove it once live callers are understood; use `finstack-quality-gate-triage` for failure-driven cleanup or `finstack-production-release-prep` for release-wide dead-code sweeps.
+- Dead code: remove it once live callers are understood; use `finstack-production-release-prep` for release-wide dead-code sweeps.
 - API surface bloat: converge on one obvious path and remove wrappers when the user scope allows it.
 
 ## Pattern selection rules
@@ -80,11 +80,11 @@ Do not load every reference by default. Open only the file that matches the curr
 
 ## Repo-specific constraints
 
-- Keep business and valuation logic in the Rust core crates. Keep Python and WASM bindings thin: conversion, wrapper construction, registration, and error mapping only.
+- Keep semantic and lifecycle logic in the Rust kernel, runtime, and SDK crates. Keep Python and WASM bindings thin: conversion, wrapper construction, registration, and error mapping only.
 - Maintain parity across Rust, Python, and WASM surfaces when refactoring shared API shape.
-- Keep manually maintained `.pyi` stubs in sync when binding signatures, names, or exports change.
-- Respect Python binding module conventions: `register()`, `__all__`, `__doc__`, wrapper types with `inner`, and centralized error conversion.
-- Follow existing API conventions such as `get_*` accessors, builder chaining, and established metric-key formats.
+- Keep `.pyi` stubs in sync when binding signatures, names, or exports change.
+- Respect Python binding module conventions: package exports, wrapper types with `inner`, and centralized error conversion.
+- Follow existing API conventions such as `get_*` accessors, builder chaining, and stable error codes.
 - In Rust, prefer small private helpers or focused structs over macro-heavy or pattern-heavy abstractions.
 - Do not introduce `unwrap`, `expect`, or panic-based flows into non-test binding code.
 
@@ -102,7 +102,6 @@ Do not load every reference by default. Open only the file that matches the curr
 
 - Use `finstack-simplify` when the primary goal is converging multiple finstack pathways into one obvious path.
 - Use `finstack-consistency-reviewer` when the main problem is cross-module naming or pattern drift.
-- Use `finstack-quality-gate-triage` when the task is driven by a failing lint/test/pre-commit/CI output.
 - Use `finstack-documentation-maintainer` when the refactor changes public APIs, docs, examples, or stub surfaces significantly.
 
 ## Output expectations

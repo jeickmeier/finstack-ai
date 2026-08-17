@@ -15,21 +15,20 @@ One of these per slice. Short. The code is the source of truth; this note explai
 
 Bullet list of things deleted. Each bullet: **what** and **why it was redundant**.
 
-- `finstack-quant/statements/src/checks/runner.rs` (186 lines) — orphaned `LegacyCheckRunner`, zero callers. Pattern: dead code (slop-patterns §11).
-- `CheckRunner` trait in `traits.rs` (22 lines) — single-impl trait, inlined into `CheckSuite`. Pattern: single-impl trait (slop-patterns §5).
-- `pub use checks::runner::*` in `prelude.rs` — re-export of deleted module.
+- `crates/finstack-ai-kernel/src/reducer/legacy.rs` (186 lines) — orphaned helper, zero callers. Pattern: dead code (slop-patterns §11).
+- Single-impl trait in `traits.rs` (22 lines) — inlined into the concrete type. Pattern: single-impl trait (slop-patterns §5).
 
 ## What moved
 
 Bullet list of things relocated or renamed. For each: `from` → `to` and why.
 
-- `CheckSuite::add_check` → `CheckSuite::register` — rename to match the only remaining registration convention in the crate.
+- `ApplyHelper::add` → `ApplyHelper::register` — rename to match the only remaining registration convention in the crate.
 
 ## What changed shape
 
 Bullet list of signature / behavior changes on items that survived.
 
-- `CheckSuite::run` was `fn run(&self, ctx: &Context) -> Vec<CheckResult>`; now `fn run(&self, ctx: &Context) -> Result<Vec<CheckResult>, CheckError>`. Previously swallowed per-check errors silently.
+- `apply_record` was `fn apply_record(&self, rec: &Record) -> Vec<Event>`; now `fn apply_record(&self, rec: &Record) -> Result<Vec<Event>, Error>`. Previously swallowed errors silently.
 
 ## Before → after at the main call-site
 
@@ -37,36 +36,35 @@ Show the most representative call-site's diff. Not the whole codebase — just t
 
 **Before:**
 ```rust
-let runner = LegacyCheckRunner::new(config);
-let suite = CheckSuite::from_runner(&runner);
-let results = suite.run_all();
-for r in &results {
-    if r.is_err() { /* silently lost — logged only */ }
+let helper = LegacyApply::new(config);
+let events = helper.apply_all();
+for e in &events {
+    if e.is_err() { /* silently lost — logged only */ }
 }
 ```
 
 **After:**
 ```rust
-let suite = CheckSuite::new(config);
-let results = suite.run(&ctx)?;
+let helper = ApplyHelper::new(config);
+let events = helper.apply_record(&record)?;
 ```
 
 ## Wrappers that survived (if any)
 
 For each wrapper you decided to keep, one sentence justifying it.
 
-- `CheckSuite::new` stays because `CheckSuite` has 8 fields (> AGENTS.md threshold of 7), so a constructor-with-params pattern is warranted.
+- `ApplyHelper::new` stays because the type has many fields, so a constructor-with-params pattern is warranted.
 
 If the list is empty, write "None."
 
 ## Invariants checked
 
-- [ ] Decimal equality: not touched by this slice.
-- [ ] FX policy: not touched.
+- [ ] Kernel I/O-freedom: not touched by this slice.
+- [ ] Commit-before-effect: not touched.
 - [ ] Serde field names: not touched.
-- [ ] Parity contract: no public Rust symbol changed that's in the contract.
-- [ ] Parallel ≡ serial: not touched.
-- [ ] Evaluator precedence: not touched.
+- [ ] Public items: no public Rust symbol changed that's in the inventory.
+- [ ] Generated artifacts: not touched.
+- [ ] Observer/compaction ownership: not touched.
 
 Mark [x] for "actually verified" not just "I think it's fine." If the slice touches an invariant, it should show up in the Verify output below.
 
@@ -75,16 +73,14 @@ Mark [x] for "actually verified" not just "I think it's fine." If the slice touc
 Paste the last 5–10 lines of each command. **Do not paraphrase.**
 
 ```
-$ mise run rust-lint
+$ mise run check
 ... last lines ...
-Finished `release` profile [optimized] target(s) in 12.34s
-cargo clippy --workspace -- -D warnings: no warnings emitted
 ```
 
 ```
-$ mise run rust-test
+$ mise run test
 ... last lines ...
-test result: ok. 847 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. N passed; 0 failed
 ```
 
 Repeat for every relevant verify command in the slice's plan entry.
@@ -99,7 +95,7 @@ If anything surprised you during the refactor (e.g., a call-site that was reachi
 
 - [ ] All verify commands green.
 - [ ] Binding triplet is consistent (if applicable).
-- [ ] Parity contract updated (if applicable).
+- [ ] Public-item inventory updated (if applicable).
 - [ ] `.pyi` stubs updated (if applicable).
 - [ ] Commit message drafted.
 

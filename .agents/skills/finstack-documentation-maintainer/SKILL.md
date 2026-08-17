@@ -1,6 +1,6 @@
 ---
 name: finstack-documentation-maintainer
-description: Maintains finstack documentation across API docs, README/spec/changelog cleanup, stale reference audits, generated docs, examples, notebooks, and financial/math references. Use when adding or reviewing documentation, cleaning AI/process language, validating code references, completing public API docs, or checking docs against current source and tests.
+description: Maintains finstack documentation across API docs, README/spec/changelog cleanup, stale reference audits, generated docs, examples, and notebooks. Use when adding or reviewing documentation, cleaning AI/process language, validating code references, completing public API docs, or checking docs against current source and tests.
 ---
 
 # Documentation Maintainer
@@ -11,11 +11,11 @@ Use this skill to make documentation accurate, concise, source-backed, and usefu
 
 ### API Documentation
 
-Use when public Rust/Python/WASM APIs lack descriptions, arguments, returns, examples, error behavior, or references. Public financial/math APIs should cite canonical sources through `docs/REFERENCES.md` when applicable.
+Use when public Rust/Python/WASM APIs lack descriptions, arguments, returns, examples, error behavior, or references.
 
 Python `.pyi` stubs are the primary IDE-facing surface (hover, signature help, mypy), and Python users cannot see the Rust source. Give every public binding a detailed stub docstring — summary plus documented parameters, return value, raised exceptions, and behavioral notes (units, conventions, missing-data handling, supported `op`/`method` strings) — not a one-line summary, even for thin wrappers that delegate to Rust. Match the docstring flavor (NumPy or Google) already used in the module.
 
-The same bar applies to pure-Python binding modules (`.py` files such as pandas convenience layers): they have no separate stub, so their own function and class docstrings are the only IDE help and must document parameters, returns, raises, and behavioral notes in full.
+The same bar applies to pure-Python binding modules (`.py` files): they have no separate stub, so their own function and class docstrings are the only IDE help and must document parameters, returns, raises, and behavioral notes in full.
 
 ### Cleanup And Stale-Reference Audit
 
@@ -33,11 +33,10 @@ Use when examples, snippets, notebooks, or command docs need validation against 
 
 Good finstack docs are:
 
-- accurate to source, tests, parity contracts, generated bindings, and examples,
+- accurate to source, tests, public-item inventories, generated bindings, and examples,
 - concise enough that every paragraph earns its place,
 - explicit about behavior, constraints, inputs, outputs, errors, and invariants,
-- free of process commentary, AI phrasing, and implementation-history chatter unless the document is a changelog, plan, or migration guide,
-- clear about financial conventions, formulas, units, and sources.
+- free of process commentary, AI phrasing, and implementation-history chatter unless the document is a changelog, plan, or migration guide.
 
 ## Workflow
 
@@ -47,7 +46,7 @@ Good finstack docs are:
 4. Choose the mode: API docs, cleanup, generated docs, examples, or mixed.
 5. Rewrite in present tense around current behavior.
 6. Remove or narrow claims that cannot be verified.
-7. Run the smallest relevant docs, lint, build, parity, doctest, notebook, or targeted unit check.
+7. Run the smallest relevant docs, lint, build, conformance, doctest, notebook, or targeted unit check.
 8. Report what changed, what was checked, and what remains unverified.
 
 ## Remove Or Rewrite
@@ -87,4 +86,3 @@ Good finstack docs are:
 - `references/api-documentation.md` - API doc coverage standards.
 - `examples/api-documentation.md` - API documentation examples.
 - `references/finstack-doc-surfaces.md` - repo-specific doc surfaces and verification hints.
-- `outputs/documentation-report.md` - example completed documentation report.

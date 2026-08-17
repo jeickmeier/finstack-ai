@@ -1,27 +1,26 @@
-# Finstack Quant Documentation Surfaces
+# Finstack Documentation Surfaces
 
 Use this reference to choose the right verification depth for documentation changes.
 
 ## Canonical Inputs
 
 - `AGENTS.md`: project structure, workflows, binding conventions, naming strategy, and quality gates.
-- `finstack-quant-py/DOCS_STYLE.md`: Python documentation style and generated-doc expectations.
-- `docs/REFERENCES.md`: canonical academic and market references for formulas and conventions.
-- `finstack-quant-py/parity_contract.toml`: binding parity source of truth.
-- `docs/superpowers/specs/`: design specs and implementation notes; preserve status/history where relevant.
+- `.agents/rules/04-python-coding.md`: Python documentation style and IDE-facing stub expectations.
+- `.agents/rules/05-typescript-coding.md`: TypeScript/JS documentation style.
+- `docs/planning/`: design contract; read-only during normal coding.
+- `docs/implementation/`: current work and proof.
 
 ## Derived Or Mirrored Docs
 
-- Python `.pyi` stubs under `finstack-quant-py/finstack_quant/`
+- Python `.pyi` stubs under `bindings/finstack-ai-python/python/finstack_ai/`
 - PyO3 docstrings and module `__doc__` assignments
-- WASM TypeScript declarations and JS facades
-- Example notebooks under `finstack-quant-py/examples/notebooks/`
+- WASM TypeScript declarations and JS facades under `bindings/finstack-ai-wasm/js/`
+- Example crates and docs under `examples/` and `docs/`
 - README or crate-level docs that mirror public API names
 
 ## Verification Hints
 
-- Public API docs: check Rust source, PyO3/WASM bindings, stubs, exports, examples, and parity tests.
+- Public API docs: check Rust source, PyO3/WASM bindings, stubs, exports, examples, and public-item inventory.
 - Command docs: confirm task names against `mise.toml` or `AGENTS.md`.
-- Notebook docs: prefer `uv run python finstack-quant-py/examples/notebooks/run_all_notebooks.py` when scope justifies it.
-- Financial formulas: cite `docs/REFERENCES.md` anchors or remove unsupported citations.
+- Example docs: prefer `mise run docs-quickstarts` when scope justifies it.
 - Generated docs: update the source contract or generator where practical.
