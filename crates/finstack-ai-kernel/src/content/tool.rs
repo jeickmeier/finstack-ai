@@ -3,8 +3,8 @@
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::ToolCallId;
-use crate::raw_json::RawJson;
+use crate::primitives::RawJson;
+use crate::primitives::ToolCallId;
 
 use super::content_block::ToolResultContentItems;
 use super::error::ContentError;

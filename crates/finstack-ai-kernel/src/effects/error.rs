@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 use crate::content::ContentError;
-use crate::error::ErrorDescriptorError;
+use crate::primitives::ErrorDescriptorError;
 use crate::refs::RefsError;
 
 /// Effect/interaction errors.

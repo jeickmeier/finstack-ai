@@ -100,7 +100,7 @@ pub(super) fn apply_validation_failure(
         .last()
         .filter(|message| *message.id() == failure.message_id)
         .ok_or(KernelError::InvalidRecordOrder)?;
-    let expected_error = crate::validation::expected_validation_error(
+    let expected_error = crate::policy::expected_validation_error(
         state.retry.attempts,
         state
             .accepted

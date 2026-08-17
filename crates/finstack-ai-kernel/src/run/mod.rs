@@ -4,6 +4,7 @@ mod accepted;
 mod cancellation;
 mod child;
 mod error;
+mod external;
 mod propagation;
 mod relation;
 mod security;
@@ -21,6 +22,11 @@ pub use cancellation::{
 };
 pub use child::{ChildPlacement, ChildRunLocator, ChildRunPrepared, RemoteRouteRef};
 pub use error::RunError;
+pub use external::{
+    ExternalCommandError, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
+    ExternalEffectCompletionCommand, InteractionResolutionCommand, OperationLocator,
+    RecordExternalCommandRejected,
+};
 pub use propagation::{
     BudgetPropagation, CancellationPropagation, DeadlinePropagation, PrincipalPropagation,
     RunPropagationPolicy,

@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::limits::LimitsError;
+use crate::policy::LimitsError;
 use crate::refs::RefsError;
 
 /// Run lineage / acceptance errors.

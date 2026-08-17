@@ -50,7 +50,7 @@ pub(super) fn decide(
             outcome: ReducerStageOutcome::ContextPrepared { messages },
             ..
         }) => Some(
-            crate::entries::context_digest_and_len(messages)
+            crate::lifecycle::context_digest_and_len(messages)
                 .map_err(|_| KernelError::ContextDigestMismatch)?,
         ),
         _ => None,

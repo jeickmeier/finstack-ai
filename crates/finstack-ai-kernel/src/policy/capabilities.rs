@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
-use crate::digest::Digest;
-use crate::ids::CapabilityId;
+use crate::primitives::CapabilityId;
+use crate::primitives::Digest;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 
 /// Source that selected an active capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

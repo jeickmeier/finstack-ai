@@ -7,12 +7,12 @@ use super::decide::{draft_for_state, duplicate_decision, expected_stage_cursor, 
 use super::decision::{Decision, KernelError};
 use super::input::{InteractionSettled, RequestInteraction};
 use crate::Digest;
+use crate::conversation::ProviderIds;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputContract,
     EffectOutputKind, EffectRequested, InteractionKind, InteractionResolution, RetrySafety,
 };
-use crate::error::{ErrorCategory, ErrorDescriptor};
-use crate::message::ProviderIds;
+use crate::primitives::{ErrorCategory, ErrorDescriptor};
 use crate::records::RecordBody;
 use crate::state::{
     InteractionTerminal, InteractionTerminalOutcome, KernelState, PendingInteraction, RunPhase,

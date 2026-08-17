@@ -1,9 +1,9 @@
 use crate::EffectOutputContract;
-use crate::digest::Digest;
 use crate::effects::EffectOutputKind;
-use crate::entries::{
+use crate::lifecycle::{
     RunCompleted, RunFailed, Stage, StageCursor, StageDisposition, StageOutcomeRecorded,
 };
+use crate::primitives::Digest;
 use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
 use crate::refs::{Diagnostic, DiagnosticSeverity};
 use crate::state::{KernelState, RunPhase, TerminalCandidate, TransitionEnv};

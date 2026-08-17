@@ -1,6 +1,6 @@
 use super::*;
-use crate::ids::ToolCallId;
-use crate::raw_json::RawJson;
+use crate::primitives::RawJson;
+use crate::primitives::ToolCallId;
 use serde::de::Deserialize;
 use serde::de::value::SeqDeserializer;
 
@@ -77,7 +77,7 @@ fn nested_raw_json_preserves_strict_source_validation() {
     );
     assert!(duplicate.is_err());
 
-    let escaped = r"\u0061".repeat(crate::raw_json::RAW_JSON_MAX_BYTES / 6 + 1);
+    let escaped = r"\u0061".repeat(crate::primitives::RAW_JSON_MAX_BYTES / 6 + 1);
     let oversized_source = format!(
         r#"{{
             "kind":"json",

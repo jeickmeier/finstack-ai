@@ -10,9 +10,9 @@ mod tool;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use crate::bounds::BoundedString;
+pub(crate) use crate::primitives::BoundedString;
 
-pub(crate) type ContentItems = crate::bounds::BoundedVec<ContentBlock, CONTENT_MAX_ITEMS>;
+pub(crate) type ContentItems = crate::primitives::BoundedVec<ContentBlock, CONTENT_MAX_ITEMS>;
 
 pub use blob::{BlobRef, MediaRef};
 pub use content_block::ContentBlock;

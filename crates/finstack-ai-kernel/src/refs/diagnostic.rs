@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 
 use super::error::{RefsError, validated_label};
-use crate::raw_json::Metadata;
+use crate::primitives::Metadata;
 
 /// Sensitivity classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

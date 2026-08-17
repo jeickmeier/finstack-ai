@@ -7,12 +7,12 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::bounds::BoundedMap;
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
-use crate::ids::LimitKey;
+use crate::primitives::BoundedMap;
+use crate::primitives::Digest;
+use crate::primitives::Duration;
+use crate::primitives::LimitKey;
 use crate::refs::{CostAmount, RefsError, validated_label};
-use crate::time::Duration;
 
 /// Limit dimension used by reserved limit-reached surfaces.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

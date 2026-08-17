@@ -23,8 +23,8 @@ pub use input::{
     ToolBatchSettled, ToolSettlement,
 };
 
-use crate::entries::RunFailed;
 use crate::events::RunEvent;
+use crate::lifecycle::RunFailed;
 use crate::state::{KernelState, TransitionEnv};
 use crate::{Digest, ErrorDescriptor};
 
@@ -43,8 +43,8 @@ fn canonical_digest_and_len<T: Serialize>(
     domain: &'static str,
     value: &T,
 ) -> Result<(Digest, usize), KernelError> {
-    let mut writer =
-        crate::digest::DigestWriter::new(domain, 1).map_err(|_| KernelError::InvariantViolation)?;
+    let mut writer = crate::primitives::DigestWriter::new(domain, 1)
+        .map_err(|_| KernelError::InvariantViolation)?;
     serde_json_canonicalizer::to_writer(value, &mut writer)
         .map_err(|_| KernelError::InvariantViolation)?;
     Ok(writer.finish())

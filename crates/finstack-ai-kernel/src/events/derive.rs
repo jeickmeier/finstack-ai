@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::effects::EffectOutputKind;
-use crate::ids::{EffectId, ModelRequestId, RunId, ToolBatchId, ToolCallId, TurnId};
+use crate::primitives::{EffectId, ModelRequestId, RunId, ToolBatchId, ToolCallId, TurnId};
 use crate::records::{RECORD_KIND_VERSION, RecordBody};
 use crate::refs::Sensitivity;
 

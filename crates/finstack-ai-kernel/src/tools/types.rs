@@ -5,14 +5,14 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{ToolCallBlock, ToolResultBlock};
-use crate::digest::Digest;
+use crate::conversation::Message;
 use crate::effects::{
     ComponentInvocation, EffectDeferred, EffectOutputContract, EffectRequested, RetrySafety,
 };
-use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, MessageId, ToolBatchId, ToolCallId, ToolId, TurnId};
-use crate::message::Message;
-use crate::time::Timestamp;
+use crate::primitives::Digest;
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::Timestamp;
+use crate::primitives::{EffectId, MessageId, ToolBatchId, ToolCallId, ToolId, TurnId};
 
 /// Scheduling mode frozen on one source tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

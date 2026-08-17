@@ -5,10 +5,10 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
-use crate::ids::{EventId, LaneId, RecordId, RunId, SessionId};
+use crate::primitives::Timestamp;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{EventId, LaneId, RecordId, RunId, SessionId};
 use crate::run::{RunAccepted, RunRelationKind};
-use crate::time::Timestamp;
 
 use super::body::RecordBody;
 use super::error::RecordError;

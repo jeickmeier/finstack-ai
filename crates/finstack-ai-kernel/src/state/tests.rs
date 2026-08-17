@@ -8,9 +8,9 @@ mod validate_tool_state_tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::ids::MessageId;
-    use crate::message::{Message, MessageRole, ProviderIds};
-    use crate::raw_json::{Metadata, RawJson};
+    use crate::conversation::{Message, MessageRole, ProviderIds};
+    use crate::primitives::MessageId;
+    use crate::primitives::{Metadata, RawJson};
     use crate::tools::ToolCallIdentity;
 
     /// Reference implementation of the authorship check: the nested scan the
@@ -206,7 +206,7 @@ mod kernel_state_eq_tests {
             "wire Serialize and hash projection must stay distinct"
         );
 
-        let mut writer = crate::digest::DigestWriter::new("kernel-state", 1).expect("writer");
+        let mut writer = crate::primitives::DigestWriter::new("kernel-state", 1).expect("writer");
         serde_json_canonicalizer::to_writer(&hash_projection, &mut writer).expect("hash write");
         let (digest, _) = writer.finish();
         assert_eq!(left.state_hash().expect("hash"), digest);

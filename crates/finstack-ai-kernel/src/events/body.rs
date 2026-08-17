@@ -5,14 +5,14 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,
     InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
 };
-use crate::error::ErrorDescriptor;
-use crate::ids::{CancellationRequestId, MessageId, ToolCallId};
-use crate::limits::LimitDimension;
+use crate::policy::LimitDimension;
+use crate::primitives::Digest;
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::{CancellationRequestId, MessageId, ToolCallId};
 use crate::run::RunAccepted;
 
 use super::{

@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
-use crate::digest::Digest;
-use crate::ids::{EffectId, MessageId, ModelRequestId, ToolCallId, TurnId};
-use crate::raw_json::RawJson;
+use crate::primitives::Digest;
+use crate::primitives::RawJson;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{EffectId, MessageId, ModelRequestId, ToolCallId, TurnId};
 
 /// Reserved namespace for framework-owned tools.
 pub const INTERNAL_TOOL_NAMESPACE: &str = "finstack.internal.";

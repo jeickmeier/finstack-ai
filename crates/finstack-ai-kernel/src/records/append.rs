@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AppendBatchId, SessionId};
+use crate::primitives::{AppendBatchId, SessionId};
 
 use super::APPEND_BATCH_MAX_RECORDS;
 use super::draft::RecordDraft;
 use super::error::RecordError;
 use super::validate::validate_interaction_request_pairs;
-use crate::bounds::BoundedVec;
+use crate::primitives::BoundedVec;
 use serde::de;
 use std::sync::Arc;
 

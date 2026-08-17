@@ -3,11 +3,11 @@
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
-use crate::ids::{
+use crate::primitives::{
     AppendBatchId, CancellationRequestId, EffectId, EventId, InteractionId, MessageId,
     ModelRequestId, RecordId, ToolBatchId, ToolCallId, TurnId,
 };
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 
 use super::error::RefsError;
 

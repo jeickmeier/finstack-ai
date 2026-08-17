@@ -5,13 +5,15 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
-use crate::error::{ErrorCode, ErrorDescriptor};
-use crate::ids::{CancellationRequestId, EffectId, MessageId, ModelRequestId, ToolBatchId, TurnId};
-use crate::message::Message;
-use crate::time::{Duration, Timestamp};
+use crate::conversation::Message;
+use crate::primitives::Digest;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{
+    CancellationRequestId, EffectId, MessageId, ModelRequestId, ToolBatchId, TurnId,
+};
+use crate::primitives::{Duration, Timestamp};
+use crate::primitives::{ErrorCode, ErrorDescriptor};
 
 /// One of the seven normalized middleware boundaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -431,7 +433,7 @@ pub(crate) fn context_digest_and_len(
     if messages.len() > SEMANTIC_ARRAY_MAX_ITEMS {
         return Err(ContextPreparedError::TooManyMessages);
     }
-    let mut writer = crate::digest::DigestWriter::new("model-context", 1)
+    let mut writer = crate::primitives::DigestWriter::new("model-context", 1)
         .map_err(|_| ContextPreparedError::CanonicalizationFailed)?;
     serde_json_canonicalizer::to_writer(&messages, &mut writer)
         .map_err(|_| ContextPreparedError::CanonicalizationFailed)?;

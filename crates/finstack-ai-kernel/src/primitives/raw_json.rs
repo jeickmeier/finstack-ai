@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::digest::Digest;
+use crate::primitives::Digest;
 
 /// V1 `RawJson` source-span and canonical-JCS byte ceiling (1 MiB).
 pub const RAW_JSON_MAX_BYTES: usize = 1_048_576;
@@ -152,7 +152,7 @@ impl Serialize for RawJson {
             // Human/diagnostic JSON emits the structured value. Stored bytes are
             // already canonical, so stream them straight through instead of
             // rebuilding a `serde_json::Value` to emit the same tokens.
-            crate::transcode::CanonicalJson(self.as_bytes()).serialize(serializer)
+            crate::primitives::CanonicalJson(self.as_bytes()).serialize(serializer)
         } else {
             // Durable CBOR carries the canonical JCS UTF-8 bytes as a byte string.
             serializer.serialize_bytes(self.as_bytes())

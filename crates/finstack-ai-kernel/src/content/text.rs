@@ -7,7 +7,7 @@ use bytes::Bytes;
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::raw_json::RawJson;
+use crate::primitives::RawJson;
 
 use super::BoundedString;
 use super::error::ContentError;

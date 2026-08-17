@@ -3,6 +3,7 @@
 mod env;
 mod hash_entries;
 mod hash_projection;
+pub(crate) mod projection;
 mod types;
 mod validate;
 mod wire;
@@ -13,19 +14,19 @@ mod tests;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::agent::{FinalResultRecorded, OutputConfiguration};
-use crate::budget::BudgetChargeReceipt;
-use crate::capabilities::ActiveCapability;
-use crate::digest::Digest;
-use crate::entries::{RunSuspended, StageCursor};
-use crate::ids::{BudgetReservationId, EffectId, LaneId, SessionId, ToolCallId};
-use crate::limits::{LimitReached, LimitUsage};
-use crate::message::Message;
+use crate::conversation::Message;
+use crate::lifecycle::{RunSuspended, StageCursor};
+use crate::policy::ActiveCapability;
+use crate::policy::BudgetChargeReceipt;
+use crate::policy::OutputValidationFailed;
+use crate::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::policy::{LimitReached, LimitUsage};
+use crate::primitives::Digest;
+use crate::primitives::Timestamp;
+use crate::primitives::{BudgetReservationId, EffectId, LaneId, SessionId, ToolCallId};
 use crate::reducer::KernelError;
 use crate::run::{ChildRunPrepared, RunAccepted};
-use crate::time::Timestamp;
 use crate::tools::{ActiveToolBatch, ToolBatchClosed, ToolCallIdentity, ToolSettlementFingerprint};
-use crate::validation::OutputValidationFailed;
 
 use hash_entries::{
     completion_hash_entries, model_hash_entries, resolution_hash_entries, stage_hash_entries,
@@ -202,7 +203,7 @@ impl KernelState {
         // state projection is the largest single canonical payload the kernel
         // produces, and buffering it grew a fresh allocation every call.
         let mut writer =
-            crate::digest::DigestWriter::new("kernel-state", u32::from(self.state_version))
+            crate::primitives::DigestWriter::new("kernel-state", u32::from(self.state_version))
                 .map_err(|_| KernelError::StateHashFailed)?;
         if self.state_version == 1 {
             serde_json_canonicalizer::to_writer(

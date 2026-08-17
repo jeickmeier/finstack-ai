@@ -60,8 +60,9 @@ pub(super) fn apply_record(
             // Verifying the digest and measuring the context are the same
             // canonicalization; doing them separately walked the whole
             // conversation twice per turn.
-            let (digest, context_bytes) = crate::entries::context_digest_and_len(&context.messages)
-                .map_err(|_| KernelError::ContextDigestMismatch)?;
+            let (digest, context_bytes) =
+                crate::lifecycle::context_digest_and_len(&context.messages)
+                    .map_err(|_| KernelError::ContextDigestMismatch)?;
             if digest != context.context_digest {
                 return Err(KernelError::ContextDigestMismatch);
             }

@@ -2,10 +2,10 @@
 
 use super::super::decision::KernelError;
 use super::super::input::{ReducerStageOutcome, StageSettled};
-use crate::digest::Digest;
 use crate::effects::{EffectInput, EffectRequested};
-use crate::entries::{ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded};
-use crate::projection::{ErrorProjection, MessageSeq};
+use crate::lifecycle::{ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded};
+use crate::primitives::Digest;
+use crate::state::projection::{ErrorProjection, MessageSeq};
 
 use super::types::{
     ModelRequestPreparedFingerprintV1, StageFailFingerprintV1, StageSettlementFingerprintV1,

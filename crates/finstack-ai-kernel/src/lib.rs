@@ -98,64 +98,29 @@
 
 #![warn(missing_docs)]
 
-mod agent;
-mod bounds;
-mod budget;
-mod capabilities;
 mod content;
 mod conversation;
-mod digest;
 mod effects;
-mod entries;
-mod error;
 mod events;
-mod external;
-mod ids;
-mod limits;
-mod message;
-mod projection;
-mod raw_json;
+mod lifecycle;
+mod policy;
+mod primitives;
 mod records;
 mod reducer;
 mod refs;
 mod run;
-mod session;
 mod state;
-mod time;
 mod tools;
-mod transcode;
-mod validation;
 
-pub use agent::{
-    FinalResultRecorded, INTERNAL_TOOL_NAMESPACE, JsonSchemaDraft, LOAD_CAPABILITY_TOOL,
-    OutputConfiguration, OutputEndStrategy, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef,
-    StructuredResultSource, is_internal_tool_name,
-};
-pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
-pub use budget::{
-    BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetRecordError,
-    BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest, BudgetReservationReceipt,
-    BudgetReservationReleased, BudgetReservationRequested, BudgetReservationSettled,
-    BudgetReserveRequest,
-};
-pub use capabilities::{ActiveCapability, CapabilitiesActivated, CapabilityActivationSource};
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,
     hex_nibble, label_is_valid,
 };
 pub use conversation::{
-    ConversationEntry, ConversationError, EntryBody, LaneProjection, OperationSummary,
-    SessionProjection, apply_conversation_entry, extract_history, walk_conversation,
-};
-pub use digest::{
-    AGENT_SPEC_DIGEST_SCHEMA_VERSION, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, DOMAIN_AGENT_SPEC,
-    DOMAIN_BLOB_CONTENT, DOMAIN_EFFECT_INPUT, DOMAIN_EFFECT_OUTPUT, DOMAIN_MIDDLEWARE_CHAIN,
-    DOMAIN_RAW_JSON, DOMAIN_RECORD_ENVELOPE, DOMAIN_RECORD_PAYLOAD, DOMAIN_SNAPSHOT_STATE, Digest,
-    DigestError, EFFECT_INPUT_DIGEST_SCHEMA_VERSION, EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION,
-    MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION, RAW_JSON_DIGEST_SCHEMA_VERSION,
-    RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION, RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION,
-    SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
+    ConversationEntry, ConversationError, EntryBody, LaneProjection, MODEL_CONTEXT_LENGTH_MAX,
+    Message, MessageError, MessageRole, ModelRef, OperationSummary, ProviderIds, SessionProjection,
+    ThinkingLevel, apply_conversation_entry, extract_history, walk_conversation,
 };
 pub use effects::{
     ComponentInvocation, EffectCancelled, EffectCompleted, EffectDeferred, EffectError,
@@ -164,51 +129,53 @@ pub use effects::{
     InteractionRequest, InteractionResolution, InvocationRecovery, PipelinePosition,
     ReconciliationPolicy, RetrySafety,
 };
-pub use entries::{
-    ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
-    RetryDirective, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
-    StageCursor, StageDisposition, StageOutcomeRecorded, TimerFired,
-};
-pub use error::{
-    ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorDescriptorError,
-    ErrorIdentifiers,
-};
 pub use events::{
     EventError, ModelTextDelta, ProviderHeartbeat, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, ReasoningDelta, RunEvent, RunEventBody, RunEventClass, RunEventKind,
     ToolProgress, derived_event_kind,
 };
-pub use external::{
-    ExternalCommandError, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
-    ExternalEffectCompletionCommand, InteractionResolutionCommand, OperationLocator,
-    RecordExternalCommandRejected,
+pub use lifecycle::{
+    ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
+    RetryDirective, RetryScheduled, RunCancelled, RunCompleted, RunFailed, RunSuspended, Stage,
+    StageCursor, StageDisposition, StageOutcomeRecorded, TimerFired,
 };
-pub use ids::{
-    AgentId, AgentTag, AppendBatchId, AppendBatchTag, ArtifactId, ArtifactTag, BudgetReservationId,
-    BudgetReservationTag, BudgetScopeId, BudgetScopeTag, BundleId, BundleTag,
-    CancellationRequestId, CancellationRequestTag, CapabilityId, CapabilityTag, ComponentId,
-    ComponentTag, EffectId, EffectOutputKey, EffectOutputTag, EffectTag, EntryId, EntryTag,
-    EventId, EventTag, Id, IdParseError, IdTag, InteractionId, InteractionTag, KEY_MAX_BYTES, Key,
-    KeyParseError, KeyParseErrorKind, KeyTag, LaneId, LaneTag, LimitKey, LimitTag, MessageId,
-    MessageTag, ModelRequestId, ModelRequestTag, RecordId, RecordTag, RunId, RunTag, SessionId,
-    SessionTag, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
-    TurnTag,
+pub use policy::{
+    ActiveCapability, BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest,
+    BudgetRecordError, BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest,
+    BudgetReservationReceipt, BudgetReservationReleased, BudgetReservationRequested,
+    BudgetReservationSettled, BudgetReserveRequest, CapabilitiesActivated,
+    CapabilityActivationSource, CostLimit, FinalResultRecorded, INTERNAL_TOOL_NAMESPACE,
+    JsonSchemaDraft, LOAD_CAPABILITY_TOOL, LimitDimension, LimitReached, LimitUsage, LimitValue,
+    LimitsError, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
+    OutputValidationFailed, RunLimits, SUBMIT_FINAL_OUTPUT_TOOL, SchemaRef, StructuredResultSource,
+    UnknownUsagePolicy, ValidationIssue, ValidationOutcome, is_internal_tool_name,
 };
-pub use limits::{
-    CostLimit, LimitDimension, LimitReached, LimitUsage, LimitValue, LimitsError, RunLimits,
-    UnknownUsagePolicy,
-};
-pub use message::{
-    MODEL_CONTEXT_LENGTH_MAX, Message, MessageError, MessageRole, ModelRef, ProviderIds,
-    ThinkingLevel,
-};
-pub use raw_json::{
-    METADATA_MAX_BYTES, METADATA_MAX_DEPTH, METADATA_MAX_KEY_BYTES, METADATA_MAX_MEMBERS, Metadata,
-    RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH, RawJson, RawJsonError,
+pub use primitives::{
+    AGENT_SPEC_DIGEST_SCHEMA_VERSION, AgentId, AgentTag, AppendBatchId, AppendBatchTag, ArtifactId,
+    ArtifactTag, BLOB_CONTENT_DIGEST_SCHEMA_VERSION, BudgetReservationId, BudgetReservationTag,
+    BudgetScopeId, BudgetScopeTag, BundleId, BundleTag, CancellationRequestId,
+    CancellationRequestTag, CapabilityId, CapabilityTag, ComponentId, ComponentTag,
+    DOMAIN_AGENT_SPEC, DOMAIN_BLOB_CONTENT, DOMAIN_EFFECT_INPUT, DOMAIN_EFFECT_OUTPUT,
+    DOMAIN_MIDDLEWARE_CHAIN, DOMAIN_RAW_JSON, DOMAIN_RECORD_ENVELOPE, DOMAIN_RECORD_PAYLOAD,
+    DOMAIN_SNAPSHOT_STATE, DURATION_JS_SAFE_MAX_MS, Digest, DigestError, Duration,
+    EFFECT_INPUT_DIGEST_SCHEMA_VERSION, EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION, EffectId,
+    EffectOutputKey, EffectOutputTag, EffectTag, EntryId, EntryTag, ErrorCategory, ErrorCode,
+    ErrorCodeError, ErrorDescriptor, ErrorDescriptorError, ErrorIdentifiers, EventId, EventTag, Id,
+    IdParseError, IdTag, InteractionId, InteractionTag, KEY_MAX_BYTES, Key, KeyParseError,
+    KeyParseErrorKind, KeyTag, LaneId, LaneTag, LimitKey, LimitTag, METADATA_MAX_BYTES,
+    METADATA_MAX_DEPTH, METADATA_MAX_KEY_BYTES, METADATA_MAX_MEMBERS,
+    MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION, MessageId, MessageTag, Metadata, ModelRequestId,
+    ModelRequestTag, RAW_JSON_DIGEST_SCHEMA_VERSION, RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH,
+    RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION, RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION, RawJson,
+    RawJsonError, RecordId, RecordTag, RunId, RunTag, SEMANTIC_ARRAY_MAX_ITEMS,
+    SEMANTIC_MAP_MAX_ENTRIES, SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION, SessionId, SessionTag,
+    TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp, ToolBatchId, ToolBatchTag,
+    ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId, TurnTag,
 };
 pub use records::{
-    APPEND_BATCH_MAX_RECORDS, AppendRequest, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION,
-    RecordBody, RecordDraft, RecordEnvelope, RecordError,
+    APPEND_BATCH_MAX_RECORDS, AppendRequest, LaneCreated, LaneMoved, RECORD_FORMAT_VERSION,
+    RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordEnvelope, RecordError, SessionCreated,
+    SessionRecordError, SnapshotWritten,
 };
 pub use reducer::{
     AcceptRun, CancelRequested, CancellationReconciledInput, CommittedBatch, Decision,
@@ -225,10 +192,12 @@ pub use refs::{
 pub use run::{
     BudgetPropagation, CancellationInitiator, CancellationPropagation, CancellationReconciled,
     CancellationRequest, CancellationRequested, ChildPlacement, ChildRunLocator, ChildRunPrepared,
-    DeadlinePropagation, MAX_RUN_RELATION_DEPTH, PrincipalPropagation, RemoteRouteRef, RunAccepted,
-    RunError, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
+    DeadlinePropagation, ExternalCommandError, ExternalCommandKind, ExternalCommandRejected,
+    ExternalCommandTarget, ExternalEffectCompletionCommand, InteractionResolutionCommand,
+    MAX_RUN_RELATION_DEPTH, OperationLocator, PrincipalPropagation, RecordExternalCommandRejected,
+    RemoteRouteRef, RunAccepted, RunError, RunPropagationPolicy, RunRelation, RunRelationKind,
+    RunSecurityContext,
 };
-pub use session::{LaneCreated, LaneMoved, SessionCreated, SessionRecordError, SnapshotWritten};
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
     CurrentTurn, InteractionTerminal, InteractionTerminalOutcome, KernelState,
@@ -237,13 +206,9 @@ pub use state::{
     RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
     ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
 };
-pub use time::{
-    DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,
-};
 pub use tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
     ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome, ToolCallIdentity,
     ToolCallPlan, ToolCallSettled, ToolExecutionMode, ToolFailurePolicy, ToolSettlementFingerprint,
     ToolSettlementKind, ValidatedToolCall,
 };
-pub use validation::{OutputValidated, OutputValidationFailed, ValidationIssue, ValidationOutcome};

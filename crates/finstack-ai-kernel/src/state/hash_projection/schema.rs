@@ -2,16 +2,16 @@
 
 use serde::Serialize;
 
-use crate::agent::{FinalResultRecorded, OutputConfiguration};
-use crate::budget::BudgetChargeReceipt;
-use crate::capabilities::ActiveCapability;
-use crate::digest::Digest;
-use crate::ids::{LaneId, SessionId};
-use crate::limits::LimitReached;
-use crate::projection::MessageSeq;
+use crate::policy::ActiveCapability;
+use crate::policy::BudgetChargeReceipt;
+use crate::policy::LimitReached;
+use crate::policy::OutputValidationFailed;
+use crate::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::primitives::Digest;
+use crate::primitives::Timestamp;
+use crate::primitives::{LaneId, SessionId};
 use crate::run::ChildRunPrepared;
-use crate::time::Timestamp;
-use crate::validation::OutputValidationFailed;
+use crate::state::projection::MessageSeq;
 
 use super::super::{
     BudgetReservationReplay, CompletionIdentityHashEntryV1, InteractionTerminal, KernelState,

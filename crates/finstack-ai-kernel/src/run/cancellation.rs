@@ -6,7 +6,7 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::ids::{CancellationRequestId, EffectId, RunId};
+use crate::primitives::{CancellationRequestId, EffectId, RunId};
 use crate::refs::{AuthorizationEvidence, PrincipalRef, validated_label};
 
 use super::error::RunError;

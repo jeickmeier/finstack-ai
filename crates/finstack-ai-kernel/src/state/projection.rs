@@ -9,18 +9,18 @@ use serde::ser::SerializeSeq;
 use crate::content::{
     BlobRef, ContentBlock, MediaRef, OpaquePayload, ToolCallBlock, ToolResultBlock,
 };
-use crate::digest::Digest;
+use crate::conversation::{Message, MessageRole, ModelRef, ProviderIds, ThinkingLevel};
 use crate::effects::{EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract};
-use crate::error::{ErrorCategory, ErrorCode, ErrorDescriptor, ErrorIdentifiers};
-use crate::ids::{
+use crate::primitives::Digest;
+use crate::primitives::Timestamp;
+use crate::primitives::{
     AppendBatchId, ArtifactId, BudgetReservationId, BudgetScopeId, CancellationRequestId, EffectId,
     EventId, InteractionId, LaneId, LimitKey, MessageId, ModelRequestId, RecordId, RunId,
     SessionId, ToolBatchId, ToolCallId, TurnId,
 };
-use crate::message::{Message, MessageRole, ModelRef, ProviderIds, ThinkingLevel};
-use crate::raw_json::{Metadata, RawJson};
+use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor, ErrorIdentifiers};
+use crate::primitives::{Metadata, RawJson};
 use crate::refs::{ArtifactRef, CostAmount, ExternalHandleRef, Usage};
-use crate::time::Timestamp;
 
 /// Serializes a borrowed slice through a per-element projection, lazily.
 ///

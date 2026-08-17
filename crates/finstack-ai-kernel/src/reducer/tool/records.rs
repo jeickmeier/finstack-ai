@@ -5,9 +5,9 @@ use super::super::decision::{KernelError, PostCommitAction};
 use super::super::fingerprint::tool_batch_close_digest;
 use super::super::input::ToolSettlement;
 use crate::content::{ContentBlock, JsonBlock, ToolCallBlock, ToolResultBlock};
+use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{EffectCompleted, EffectInput, EffectKind, EffectRequested};
-use crate::message::{Message, MessageRole, ProviderIds};
-use crate::raw_json::{Metadata, RawJson};
+use crate::primitives::{Metadata, RawJson};
 use crate::records::RecordBody;
 use crate::state::TransitionEnv;
 use crate::tools::{

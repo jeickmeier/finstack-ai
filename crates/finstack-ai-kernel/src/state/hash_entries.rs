@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::digest::Digest;
-use crate::entries::{Stage, StageCursor};
-use crate::ids::{EffectId, ToolCallId};
+use crate::lifecycle::{Stage, StageCursor};
+use crate::primitives::Digest;
+use crate::primitives::{EffectId, ToolCallId};
 use crate::tools::{ToolCallIdentity, ToolSettlementFingerprint};
 
 use super::{

@@ -1,6 +1,6 @@
-use crate::digest::Digest;
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::entries::{RetryClassification, RetryScheduled, Stage, StageCursor, StageDisposition};
+use crate::lifecycle::{RetryClassification, RetryScheduled, Stage, StageCursor, StageDisposition};
+use crate::primitives::Digest;
 use crate::records::{RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft};
 use crate::state::{KernelState, TerminalCandidate, TransitionEnv};
 use crate::{OutputConfiguration, OutputSpec, RetrySafety};
@@ -20,8 +20,8 @@ use super::{
     draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence, reject_terminal,
     required,
 };
-use crate::bounds::SEMANTIC_ARRAY_MAX_ITEMS;
 use crate::content::TEXT_MAX_BYTES;
+use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
 pub(super) fn decide_accept(
     state: &KernelState,

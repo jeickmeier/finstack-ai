@@ -1,10 +1,10 @@
 use super::*;
-use crate::digest::Digest;
-use crate::ids::EffectId;
-use crate::ids::RunId;
-use crate::limits::RunLimits;
+use crate::policy::RunLimits;
+use crate::primitives::Digest;
+use crate::primitives::EffectId;
+use crate::primitives::RunId;
+use crate::primitives::Timestamp;
 use crate::refs::PrincipalRef;
-use crate::time::Timestamp;
 
 fn sample_security() -> RunSecurityContext {
     RunSecurityContext::try_new(

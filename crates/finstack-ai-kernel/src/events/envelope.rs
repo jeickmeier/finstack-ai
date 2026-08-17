@@ -3,12 +3,12 @@
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{
+use crate::primitives::Timestamp;
+use crate::primitives::{
     EffectId, EventId, LaneId, ModelRequestId, RunId, SessionId, ToolBatchId, ToolCallId, TurnId,
 };
 use crate::records::RecordEnvelope;
 use crate::refs::Sensitivity;
-use crate::time::Timestamp;
 
 use super::body::RunEventBody;
 use super::derive::{

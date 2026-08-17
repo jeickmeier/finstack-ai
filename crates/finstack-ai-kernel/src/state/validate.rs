@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::agent::OutputConfiguration;
-use crate::bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::content::{ContentBlock, LABEL_MAX_BYTES, ToolCallBlock};
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::ids::{MessageId, ToolCallId};
+use crate::policy::OutputConfiguration;
+use crate::primitives::{MessageId, ToolCallId};
+use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::reducer::KernelError;
 use crate::tools::{ActiveToolBatch, ActiveToolCallStatus, ToolCallPlan, ToolSettlementKind};
 

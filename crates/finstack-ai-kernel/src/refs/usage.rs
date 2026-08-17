@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
 
 use super::error::{RefsError, deserialize_micros, serialize_micros, validated_label};
-use crate::bounds::BoundedMap;
-use crate::ids::LimitKey;
+use crate::primitives::BoundedMap;
+use crate::primitives::LimitKey;
 use std::collections::BTreeMap;
 
 /// Recorded cost amount (integer millionths; JSON decimal string).

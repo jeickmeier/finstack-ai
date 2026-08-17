@@ -2,10 +2,10 @@
 
 use super::super::decision::KernelError;
 use super::super::input::{ExternalEffectCompletedInput, ExternalEffectOutcome, ToolSettlement};
-use crate::digest::Digest;
 use crate::effects::{EffectCompleted, EffectFailed};
-use crate::ids::{EffectId, ToolBatchId, ToolCallId, TurnId};
-use crate::projection::{
+use crate::primitives::Digest;
+use crate::primitives::{EffectId, ToolBatchId, ToolCallId, TurnId};
+use crate::state::projection::{
     ArtifactSeq, EffectCompletedProjection, EffectDeferredProjection, EffectFailedProjection,
     ErrorProjection, UsageProjection,
 };

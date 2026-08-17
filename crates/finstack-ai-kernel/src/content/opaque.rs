@@ -9,7 +9,7 @@ use super::BoundedString;
 use super::content_block::StrictOpaquePayload;
 use super::error::ContentError;
 use super::text::{LABEL_MAX_BYTES, TEXT_MAX_BYTES, hex_encode, validated_label};
-use crate::raw_json::RawJson;
+use crate::primitives::RawJson;
 use core::fmt;
 use serde::de::{Deserializer, Visitor};
 use std::sync::Arc;

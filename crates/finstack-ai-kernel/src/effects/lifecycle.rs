@@ -5,14 +5,14 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
-use crate::error::ErrorDescriptor;
-use crate::ids::{BudgetReservationId, EffectId};
-use crate::raw_json::RawJson;
+use crate::primitives::Digest;
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::RawJson;
+use crate::primitives::Timestamp;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{BudgetReservationId, EffectId};
 use crate::refs::{ArtifactRef, ExternalHandleRef, Usage, validated_label, validated_text};
-use crate::time::Timestamp;
 
 use super::EffectError;
 use super::kinds::{
@@ -239,7 +239,7 @@ pub struct EffectCompleted {
     #[serde(skip_serializing_if = "Option::is_none")]
     usage_digest: Option<Digest>,
     artifacts: Arc<[ArtifactRef]>,
-    provider_ids: crate::message::ProviderIds,
+    provider_ids: crate::conversation::ProviderIds,
     #[serde(skip_serializing_if = "Option::is_none")]
     completion_id: Option<Arc<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -259,7 +259,7 @@ impl EffectCompleted {
         output: RawJson,
         usage: Option<Usage>,
         artifacts: Vec<ArtifactRef>,
-        provider_ids: crate::message::ProviderIds,
+        provider_ids: crate::conversation::ProviderIds,
         completion_id: Option<impl AsRef<str>>,
         reservation_id: Option<BudgetReservationId>,
     ) -> Result<Self, EffectError> {
@@ -339,7 +339,7 @@ impl EffectCompleted {
 
     /// Provider/tool identifiers.
     #[must_use]
-    pub fn provider_ids(&self) -> &crate::message::ProviderIds {
+    pub fn provider_ids(&self) -> &crate::conversation::ProviderIds {
         &self.provider_ids
     }
 
@@ -383,7 +383,7 @@ impl<'de> Deserialize<'de> for EffectCompleted {
             usage_digest: Option<Digest>,
             #[serde(default)]
             artifacts: BoundedVec<ArtifactRef, SEMANTIC_ARRAY_MAX_ITEMS>,
-            provider_ids: crate::message::ProviderIds,
+            provider_ids: crate::conversation::ProviderIds,
             #[serde(default)]
             completion_id: Option<BoundedString<LABEL_MAX_BYTES>>,
             #[serde(default)]

@@ -2,10 +2,10 @@
 
 use crate::Digest;
 use crate::content::ContentBlock;
+use crate::conversation::{Message, MessageRole};
 use crate::effects::EffectCompleted;
-use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, MessageId, ToolCallId};
-use crate::message::{Message, MessageRole};
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::{EffectId, MessageId, ToolCallId};
 use crate::state::{KernelState, TransitionEnv};
 
 use super::KernelError;

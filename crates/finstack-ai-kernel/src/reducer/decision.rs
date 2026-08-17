@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::StageCursor;
-use crate::bounds::BoundedVec;
-use crate::ids::{AppendBatchId, EffectId};
+use crate::primitives::BoundedVec;
+use crate::primitives::{AppendBatchId, EffectId};
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RecordDraft, RecordEnvelope};
 use crate::refs::Diagnostic;
 use crate::state::RunPhase;

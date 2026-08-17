@@ -2,9 +2,9 @@
 
 use thiserror::Error;
 
-use crate::error::ErrorDescriptorError;
+use crate::primitives::ErrorDescriptorError;
+use crate::records::SessionRecordError;
 use crate::run::RunError;
-use crate::session::SessionRecordError;
 
 /// Record construction errors.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

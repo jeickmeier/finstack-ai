@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::content::{
     BoundedString, ContentBlock, ContentItems, LABEL_MAX_BYTES, validate_content_items,
 };
-use crate::digest::Digest;
-use crate::ids::{EffectId, InteractionId};
-use crate::raw_json::{Metadata, RawJson};
+use crate::primitives::Digest;
+use crate::primitives::Timestamp;
+use crate::primitives::{EffectId, InteractionId};
+use crate::primitives::{Metadata, RawJson};
 use crate::refs::{
     AssigneeHint, AuthorizationEvidence, ComponentRef, PrincipalRef, Version, validated_label,
 };
-use crate::time::Timestamp;
 
 use super::EffectError;
 

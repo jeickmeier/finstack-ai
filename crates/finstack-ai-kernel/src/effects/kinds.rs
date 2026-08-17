@@ -6,11 +6,11 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, ToolCallBlock};
-use crate::digest::Digest;
-use crate::ids::{ComponentId, EffectId, EffectOutputKey, InteractionId};
-use crate::raw_json::RawJson;
+use crate::primitives::Digest;
+use crate::primitives::RawJson;
+use crate::primitives::Timestamp;
+use crate::primitives::{ComponentId, EffectId, EffectOutputKey, InteractionId};
 use crate::refs::{Version, validated_text};
-use crate::time::Timestamp;
 
 use super::EffectError;
 

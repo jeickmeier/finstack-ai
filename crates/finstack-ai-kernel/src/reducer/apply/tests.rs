@@ -2,15 +2,16 @@ use std::collections::BTreeMap;
 
 use super::apply;
 use crate::content::ContentBlock;
-use crate::digest::Digest;
+use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{
     EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested,
     ReconciliationPolicy, RetrySafety,
 };
-use crate::entries::EntryAppended;
-use crate::ids::ComponentId;
-use crate::message::{Message, MessageRole, ProviderIds};
-use crate::raw_json::{Metadata, RawJson};
+use crate::lifecycle::EntryAppended;
+use crate::primitives::ComponentId;
+use crate::primitives::Digest;
+use crate::primitives::Timestamp;
+use crate::primitives::{Metadata, RawJson};
 use crate::records::{
     APPEND_BATCH_MAX_RECORDS, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
     RecordEnvelope,
@@ -19,7 +20,6 @@ use crate::refs::ExternalHandleRef;
 use crate::state::{
     KernelState, ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
 };
-use crate::time::Timestamp;
 use crate::{CommittedBatch, KernelError, TextBlock};
 
 #[test]

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::*;
-use crate::ids::{ComponentId, LimitKey, RecordId};
+use crate::primitives::{ComponentId, LimitKey, RecordId};
 
 #[test]
 fn principal_and_usage_roundtrip() {

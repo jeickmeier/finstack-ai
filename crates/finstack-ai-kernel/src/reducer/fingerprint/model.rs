@@ -4,14 +4,14 @@ use super::super::decision::KernelError;
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ModelSettled, ModelSettlement,
 };
-use crate::digest::Digest;
+use crate::conversation::Message;
 use crate::effects::{EffectCompleted, EffectFailed};
-use crate::message::Message;
-use crate::projection::{
+use crate::primitives::Digest;
+use crate::state::PendingModelEffect;
+use crate::state::projection::{
     ArtifactSeq, EffectCompletedProjection, EffectDeferredProjection, EffectFailedProjection,
     ErrorProjection, MessageProjection, UsageProjection,
 };
-use crate::state::PendingModelEffect;
 
 use super::types::{
     DirectModelCompletedFingerprintV1, DirectModelDeferredFingerprintV1,

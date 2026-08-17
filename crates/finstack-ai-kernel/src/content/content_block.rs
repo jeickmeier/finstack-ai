@@ -3,8 +3,8 @@
 use serde::de::{self, IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::ids::ToolCallId;
-use crate::raw_json::RawJson;
+use crate::primitives::RawJson;
+use crate::primitives::ToolCallId;
 
 use super::blob::BlobRef;
 use super::blob::MediaRef;

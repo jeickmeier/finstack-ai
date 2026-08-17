@@ -6,13 +6,13 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BlobRef, BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
-use crate::ids::ArtifactId;
-use crate::raw_json::Metadata;
+use crate::primitives::ArtifactId;
+use crate::primitives::Digest;
+use crate::primitives::Metadata;
 
 use super::error::{RefsError, validated_label};
-use crate::ids::ComponentId;
-use crate::raw_json::RawJson;
+use crate::primitives::ComponentId;
+use crate::primitives::RawJson;
 
 /// Non-secret external handle for deferred effects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

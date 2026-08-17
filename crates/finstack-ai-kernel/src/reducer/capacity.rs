@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 
 use crate::StageCursor;
-use crate::bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::content::ContentBlock;
-use crate::ids::{EffectId, ToolCallId};
+use crate::primitives::{EffectId, ToolCallId};
+use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::KernelState;
 
@@ -245,14 +245,14 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::conversation::{Message, MessageRole, ProviderIds};
     use crate::effects::{EffectCompleted, EffectOutputContract, EffectOutputKind};
-    use crate::entries::EntryAppended;
-    use crate::ids::{
+    use crate::lifecycle::EntryAppended;
+    use crate::primitives::{
         EffectId, EventId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId,
         ToolCallId, TurnId,
     };
-    use crate::message::{Message, MessageRole, ProviderIds};
-    use crate::raw_json::{Metadata, RawJson};
+    use crate::primitives::{Metadata, RawJson};
     use crate::state::{CompletionIdentity, ModelSettlementFingerprint, ModelSettlementKind};
     use crate::tools::{ToolCallIdentity, ToolSettlementFingerprint, ToolSettlementKind};
     use crate::{

@@ -8,22 +8,22 @@ use super::decision::KernelError;
 use crate::RecordExternalCommandRejected;
 use crate::RetryDirective;
 use crate::StageCursor;
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
+use crate::conversation::Message;
 use crate::effects::{
     ComponentInvocation, EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract,
     InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
     RetrySafety,
 };
-use crate::error::ErrorDescriptor;
-use crate::ids::{
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::RawJson;
+use crate::primitives::Timestamp;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{
     CancellationRequestId, EffectId, LaneId, ModelRequestId, SessionId, ToolBatchId, TurnId,
 };
-use crate::message::Message;
-use crate::raw_json::RawJson;
 use crate::refs::{ArtifactRef, Usage};
 use crate::run::{CancellationInitiator, RunAccepted};
-use crate::time::Timestamp;
 use crate::tools::{ToolBatchContinuation, ToolCallPlan};
 use crate::{CapabilitiesActivated, OutputConfiguration, OutputValidated};
 

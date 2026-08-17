@@ -5,9 +5,9 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
-use crate::ids::{EventId, LaneId, RecordId, RunId, SessionId};
-use crate::time::Timestamp;
+use crate::primitives::Timestamp;
+use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
+use crate::primitives::{EventId, LaneId, RecordId, RunId, SessionId};
 
 use super::body::RecordBody;
 use super::error::RecordError;
@@ -38,12 +38,12 @@ pub struct RecordEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) committed_at: Option<Timestamp>,
     /// Payload digest (protocol-computed).
-    pub(super) payload_digest: crate::digest::Digest,
+    pub(super) payload_digest: crate::primitives::Digest,
     /// Previous checksum.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) previous_checksum: Option<crate::digest::Digest>,
+    pub(super) previous_checksum: Option<crate::primitives::Digest>,
     /// Envelope checksum (protocol-computed).
-    pub(super) checksum: crate::digest::Digest,
+    pub(super) checksum: crate::primitives::Digest,
     /// Derived event ids.
     pub(super) derived_event_ids: Arc<[EventId]>,
     /// Body.
@@ -69,9 +69,9 @@ impl RecordEnvelope {
         sequence: u64,
         timestamp: Timestamp,
         committed_at: Option<Timestamp>,
-        payload_digest: crate::digest::Digest,
-        previous_checksum: Option<crate::digest::Digest>,
-        checksum: crate::digest::Digest,
+        payload_digest: crate::primitives::Digest,
+        previous_checksum: Option<crate::primitives::Digest>,
+        checksum: crate::primitives::Digest,
         derived_event_ids: Vec<EventId>,
         body: RecordBody,
     ) -> Result<Self, RecordError> {
@@ -152,19 +152,19 @@ impl RecordEnvelope {
 
     /// Protocol-computed payload digest.
     #[must_use]
-    pub fn payload_digest(&self) -> crate::digest::Digest {
+    pub fn payload_digest(&self) -> crate::primitives::Digest {
         self.payload_digest
     }
 
     /// Previous envelope checksum.
     #[must_use]
-    pub fn previous_checksum(&self) -> Option<crate::digest::Digest> {
+    pub fn previous_checksum(&self) -> Option<crate::primitives::Digest> {
         self.previous_checksum
     }
 
     /// Protocol-computed envelope checksum.
     #[must_use]
-    pub fn checksum(&self) -> crate::digest::Digest {
+    pub fn checksum(&self) -> crate::primitives::Digest {
         self.checksum
     }
 
@@ -200,10 +200,10 @@ impl<'de> Deserialize<'de> for RecordEnvelope {
             timestamp: Timestamp,
             #[serde(default)]
             committed_at: Option<Timestamp>,
-            payload_digest: crate::digest::Digest,
+            payload_digest: crate::primitives::Digest,
             #[serde(default)]
-            previous_checksum: Option<crate::digest::Digest>,
-            checksum: crate::digest::Digest,
+            previous_checksum: Option<crate::primitives::Digest>,
+            checksum: crate::primitives::Digest,
             derived_event_ids: BoundedVec<EventId, SEMANTIC_ARRAY_MAX_ITEMS>,
             body: RecordBody,
         }

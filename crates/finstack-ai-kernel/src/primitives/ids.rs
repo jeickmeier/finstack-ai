@@ -221,8 +221,8 @@ impl UuidBuffer {
             for offset in 0..count {
                 let byte = bytes[byte_start + offset];
                 let position = text_start + offset * 2;
-                self.0[position] = crate::digest::HEX_DIGITS[usize::from(byte >> 4)];
-                self.0[position + 1] = crate::digest::HEX_DIGITS[usize::from(byte & 0x0f)];
+                self.0[position] = crate::primitives::HEX_DIGITS[usize::from(byte >> 4)];
+                self.0[position + 1] = crate::primitives::HEX_DIGITS[usize::from(byte & 0x0f)];
             }
         }
         // Only ASCII hex digits and the pre-set hyphens are ever written.

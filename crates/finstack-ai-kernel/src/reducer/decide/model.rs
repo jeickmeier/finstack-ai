@@ -1,7 +1,7 @@
 use crate::content::LABEL_MAX_BYTES;
-use crate::digest::Digest;
 use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
-use crate::entries::EntryAppended;
+use crate::lifecycle::EntryAppended;
+use crate::primitives::Digest;
 use crate::records::RecordBody;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 
@@ -17,7 +17,7 @@ use super::super::validation::{
     validate_assistant_tool_call_ids, validate_completion_identity, validate_error_descriptor,
 };
 use super::{draft_for_state, duplicate_decision, next_sequence, reject_terminal, required};
-use crate::bounds::SEMANTIC_ARRAY_MAX_ITEMS;
+use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
 pub(super) fn decide_model(
     state: &KernelState,

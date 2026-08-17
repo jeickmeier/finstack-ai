@@ -1,9 +1,9 @@
+use crate::conversation::MessageRole;
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind};
-use crate::entries::{
+use crate::lifecycle::{
     EntryAppended, RunCompleted, RunFailed, Stage, StageCursor, StageDisposition,
     StageOutcomeRecorded,
 };
-use crate::message::MessageRole;
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::{KernelState, PendingModelEffect, RunPhase, TerminalCandidate};
 use crate::tools::{ActiveToolCall, ActiveToolCallStatus, ToolCallPlan};

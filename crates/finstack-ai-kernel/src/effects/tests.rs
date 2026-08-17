@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::content::BlobRef;
-use crate::digest::Digest;
-use crate::error::ErrorDescriptor;
-use crate::ids::{ArtifactId, ComponentId, EffectId};
-use crate::raw_json::{Metadata, RawJson};
+use crate::primitives::Digest;
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::{ArtifactId, ComponentId, EffectId};
+use crate::primitives::{Metadata, RawJson};
 use crate::refs::{ArtifactRef, ExternalHandleRef};
 
 #[test]
@@ -108,7 +108,7 @@ fn effect_completion_rejects_oversized_artifact_array() {
         RawJson::parse("{}").expect("output"),
         None,
         vec![artifact; crate::content::CONTENT_MAX_ITEMS + 1],
-        crate::message::ProviderIds::empty(),
+        crate::conversation::ProviderIds::empty(),
         None::<&str>,
         None,
     )
@@ -122,7 +122,7 @@ fn failed_effect_rejects_programmatically_invalid_descriptor() {
     let mut error = ErrorDescriptor::new(
         "provider_failed",
         "failed",
-        crate::error::ErrorCategory::Model,
+        crate::primitives::ErrorCategory::Model,
         false,
     )
     .expect("descriptor");
@@ -173,7 +173,7 @@ fn effect_settlements_must_preserve_originating_output_contract() {
         RawJson::parse("{}").expect("output"),
         None,
         vec![],
-        crate::message::ProviderIds::empty(),
+        crate::conversation::ProviderIds::empty(),
         None::<&str>,
         None,
     )

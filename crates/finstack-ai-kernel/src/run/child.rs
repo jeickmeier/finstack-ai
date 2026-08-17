@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::digest::Digest;
-use crate::external::OperationLocator;
-use crate::ids::{EffectId, RunId};
+use crate::primitives::Digest;
+use crate::primitives::{EffectId, RunId};
 use crate::refs::ComponentRef;
+use crate::run::OperationLocator;
 
 use super::error::RunError;
-use crate::ids::BudgetReservationId;
+use crate::primitives::BudgetReservationId;
 use crate::refs::ExternalHandleRef;
 
 /// Placement selected before a child mapping is committed.

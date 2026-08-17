@@ -1,26 +1,26 @@
 //! Owned record bodies.
 
-use crate::agent::{FinalResultRecorded, OutputConfiguration};
-use crate::budget::{
-    BudgetChargeRecorded, BudgetReservationReleased, BudgetReservationRequested,
-    BudgetReservationSettled,
-};
-use crate::capabilities::CapabilitiesActivated;
 use crate::conversation::ConversationEntry;
 use crate::effects::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,
     InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
 };
-use crate::entries::{
+use crate::lifecycle::{
     ContextPrepared, EntryAppended, RetryScheduled, RunCancelled, RunCompleted, RunFailed,
     RunSuspended, StageOutcomeRecorded, TimerFired,
 };
-use crate::external::ExternalCommandRejected;
-use crate::limits::LimitReached;
+use crate::policy::CapabilitiesActivated;
+use crate::policy::LimitReached;
+use crate::policy::OutputValidationFailed;
+use crate::policy::{
+    BudgetChargeRecorded, BudgetReservationReleased, BudgetReservationRequested,
+    BudgetReservationSettled,
+};
+use crate::policy::{FinalResultRecorded, OutputConfiguration};
+use crate::records::{LaneCreated, LaneMoved, SessionCreated, SnapshotWritten};
+use crate::run::ExternalCommandRejected;
 use crate::run::{CancellationReconciled, CancellationRequested, ChildRunPrepared, RunAccepted};
-use crate::session::{LaneCreated, LaneMoved, SessionCreated, SnapshotWritten};
 use crate::tools::{ToolBatchClosed, ToolBatchOpened, ToolCallSettled};
-use crate::validation::OutputValidationFailed;
 use serde::{Deserialize, Serialize};
 
 use super::RECORD_KIND_VERSION;

@@ -3,20 +3,20 @@ use super::super::input::{
     ToolSettlement,
 };
 use super::*;
-use crate::digest::Digest;
+use crate::conversation::Message;
 use crate::effects::{EffectCompleted, EffectFailed, EffectOutputContract};
-use crate::ids::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
-use crate::message::Message;
-use crate::raw_json::RawJson;
-use crate::time::Timestamp;
+use crate::primitives::Digest;
+use crate::primitives::RawJson;
+use crate::primitives::Timestamp;
+use crate::primitives::{EffectId, ModelRequestId, ToolBatchId, ToolCallId, TurnId};
 use crate::tools::{ToolBatchContinuation, ToolBatchOutcome};
 use std::sync::Arc;
 
+use crate::conversation::{MessageRole, ProviderIds};
 use crate::effects::{EffectDeferred, EffectOutputKind, ReconciliationPolicy};
-use crate::error::{ErrorCategory, ErrorDescriptor};
-use crate::ids::{ArtifactId, ComponentId, MessageId};
-use crate::message::{MessageRole, ProviderIds};
-use crate::raw_json::Metadata;
+use crate::primitives::Metadata;
+use crate::primitives::{ArtifactId, ComponentId, MessageId};
+use crate::primitives::{ErrorCategory, ErrorDescriptor};
 use crate::refs::{ExternalHandleRef, Usage};
 use crate::{ArtifactRef, BlobRef, ContentBlock, TextBlock};
 

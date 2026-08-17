@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::content::LABEL_MAX_BYTES;
-use crate::digest::Digest;
-use crate::ids::EntryId;
-use crate::raw_json::Metadata;
+use crate::primitives::Digest;
+use crate::primitives::EntryId;
+use crate::primitives::Metadata;
 
 /// Session-creation body. Labels live in [`Metadata`] (Architecture §9.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -196,7 +196,7 @@ impl SessionRecordError {
 mod tests {
     use super::*;
     use crate::content::LABEL_MAX_BYTES;
-    use crate::ids::{EntryId, Id};
+    use crate::primitives::{EntryId, Id};
 
     fn entry(ordinal: u64) -> EntryId {
         let mut bytes = [0_u8; 16];

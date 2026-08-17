@@ -7,14 +7,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::content::ContentBlock;
-use crate::ids::{EffectId, EntryId, LaneId, RunId, SessionId};
-use crate::message::{Message, MessageRole};
-use crate::raw_json::Metadata;
-use crate::records::{RecordBody, RecordEnvelope};
+use crate::conversation::{Message, MessageRole};
+use crate::primitives::Metadata;
+use crate::primitives::{EffectId, EntryId, LaneId, RunId, SessionId};
+use crate::records::{LaneCreated, LaneMoved, RecordBody, RecordEnvelope};
 use crate::run::{
     ChildRunPrepared, RunAccepted, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
-use crate::session::{LaneCreated, LaneMoved};
 use crate::tools::ToolCallSettled;
 
 /// Canonical conversation entry with an immutable parent link.
@@ -372,8 +371,8 @@ impl OperationSummary {
 pub struct SessionProjection {
     session_id: Option<SessionId>,
     metadata: Metadata,
-    lanes: BTreeMap<LaneId, LaneProjection>,
-    entries: BTreeMap<EntryId, ConversationEntry>,
+    pub(crate) lanes: BTreeMap<LaneId, LaneProjection>,
+    pub(crate) entries: BTreeMap<EntryId, ConversationEntry>,
     operations: BTreeMap<RunId, OperationSummary>,
     child_mappings: BTreeMap<(RunId, EffectId), ChildRunPrepared>,
 }
@@ -539,7 +538,7 @@ impl SessionProjection {
         Ok(())
     }
 
-    fn apply_lane_created(&mut self, lane_id: LaneId, created: &LaneCreated) {
+    pub(crate) fn apply_lane_created(&mut self, lane_id: LaneId, created: &LaneCreated) {
         self.lanes.entry(lane_id).or_insert(LaneProjection {
             name: std::sync::Arc::from(created.name()),
             leaf_id: None,
@@ -618,219 +617,5 @@ impl SessionProjection {
                 propagation: accepted.propagation(),
                 terminal: false,
             });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::content::{TextBlock, ToolCallBlock, ToolResultBlock};
-    use crate::ids::Id;
-    use crate::message::ProviderIds;
-    use crate::raw_json::RawJson;
-    use crate::time::Timestamp;
-
-    fn id<T: crate::ids::IdTag>(ordinal: u64) -> Id<T> {
-        let mut bytes = [0_u8; 16];
-        bytes[6] = 0x70;
-        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        Id::from_bytes(bytes)
-    }
-
-    fn text_message(ordinal: u64, role: MessageRole, text: &str) -> Message {
-        Message::try_new(
-            id(ordinal),
-            role,
-            vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
-            Timestamp::from_unix_ms(0).expect("ts"),
-            None,
-            ProviderIds::empty(),
-            Metadata::empty(),
-        )
-        .expect("message")
-    }
-
-    fn entry(
-        ordinal: u64,
-        parent: Option<u64>,
-        sequence: u64,
-        role: MessageRole,
-        text: &str,
-    ) -> ConversationEntry {
-        let message = text_message(ordinal, role, text);
-        ConversationEntry::from_message(&message, parent.map(id), id(2), sequence).expect("entry")
-    }
-
-    #[test]
-    fn parent_chain_is_immutable_and_equal_replay_is_idempotent() {
-        let mut entries = BTreeMap::new();
-        let a = entry(10, None, 1, MessageRole::User, "a");
-        apply_conversation_entry(&mut entries, a.clone()).expect("a");
-        apply_conversation_entry(&mut entries, a.clone()).expect("equal");
-        let rewritten = ConversationEntry::try_new(
-            a.id(),
-            a.parent_id(),
-            a.lane_id(),
-            a.sequence(),
-            crate::conversation::EntryBody::Message(text_message(10, MessageRole::User, "changed")),
-        )
-        .expect("rewrite");
-        assert_eq!(
-            apply_conversation_entry(&mut entries, rewritten),
-            Err(ConversationError::ImmutableConflict)
-        );
-        assert_eq!(entries.get(&a.id()).expect("kept").parent_id(), None);
-        let same_body_later_sequence =
-            ConversationEntry::try_new(a.id(), a.parent_id(), a.lane_id(), 9, a.body().clone())
-                .expect("later sequence");
-        apply_conversation_entry(&mut entries, same_body_later_sequence).expect("sequence");
-    }
-
-    #[test]
-    fn branch_foundation_does_not_rewrite_the_shared_parent() {
-        let mut entries = BTreeMap::new();
-        let a = entry(10, None, 1, MessageRole::User, "a");
-        let b = entry(11, Some(10), 2, MessageRole::Assistant, "b");
-        let c = entry(12, Some(11), 3, MessageRole::User, "c");
-        let d = entry(13, Some(11), 4, MessageRole::User, "d");
-        for item in [a, b.clone(), c.clone(), d.clone()] {
-            apply_conversation_entry(&mut entries, item).expect("apply");
-        }
-        assert_eq!(entries.get(&b.id()).expect("b").parent_id(), Some(id(10)));
-        let history_d = extract_history(&entries, d.id()).expect("d");
-        let history_c = extract_history(&entries, c.id()).expect("c");
-        assert_eq!(
-            history_d
-                .iter()
-                .map(ConversationEntry::id)
-                .collect::<Vec<_>>(),
-            vec![id(10), id(11), id(13)]
-        );
-        assert_eq!(
-            history_c
-                .iter()
-                .map(ConversationEntry::id)
-                .collect::<Vec<_>>(),
-            vec![id(10), id(11), id(12)]
-        );
-    }
-
-    #[test]
-    fn extract_history_rejects_an_incomplete_tool_pair() {
-        let mut entries = BTreeMap::new();
-        let user = text_message(10, MessageRole::User, "q");
-        let call = ToolCallBlock::try_new(
-            id::<crate::ids::ToolCallTag>(20),
-            "lookup",
-            RawJson::parse(r#"{"q":1}"#).expect("json"),
-        )
-        .expect("call");
-        let assistant = Message::try_new(
-            id(11),
-            MessageRole::Assistant,
-            vec![ContentBlock::ToolCall(call)],
-            Timestamp::from_unix_ms(0).expect("ts"),
-            None,
-            ProviderIds::empty(),
-            Metadata::empty(),
-        )
-        .expect("assistant");
-        apply_conversation_entry(
-            &mut entries,
-            ConversationEntry::from_message(&user, None, id(2), 1).expect("user"),
-        )
-        .expect("user");
-        apply_conversation_entry(
-            &mut entries,
-            ConversationEntry::from_message(&assistant, Some(id(10)), id(2), 2).expect("asst"),
-        )
-        .expect("asst");
-        assert_eq!(
-            extract_history(&entries, id(11)),
-            Err(ConversationError::InvalidToolPair)
-        );
-        assert_eq!(walk_conversation(&entries, id(11)).expect("walk").len(), 2);
-    }
-
-    #[test]
-    fn extract_history_accepts_a_closed_tool_pair() {
-        let mut entries = BTreeMap::new();
-        let call_id = id::<crate::ids::ToolCallTag>(20);
-        let user = text_message(10, MessageRole::User, "q");
-        let call = ToolCallBlock::try_new(
-            call_id,
-            "lookup",
-            RawJson::parse(r#"{"q":1}"#).expect("json"),
-        )
-        .expect("call");
-        let assistant = Message::try_new(
-            id(11),
-            MessageRole::Assistant,
-            vec![ContentBlock::ToolCall(call)],
-            Timestamp::from_unix_ms(0).expect("ts"),
-            None,
-            ProviderIds::empty(),
-            Metadata::empty(),
-        )
-        .expect("assistant");
-        let result = ToolResultBlock::try_new(
-            call_id,
-            vec![ContentBlock::Text(TextBlock::try_new("ok").expect("text"))],
-            false,
-        )
-        .expect("result");
-        let tool = Message::try_new(
-            id(12),
-            MessageRole::Tool,
-            vec![ContentBlock::ToolResult(result)],
-            Timestamp::from_unix_ms(0).expect("ts"),
-            None,
-            ProviderIds::empty(),
-            Metadata::empty(),
-        )
-        .expect("tool");
-        apply_conversation_entry(
-            &mut entries,
-            ConversationEntry::from_message(&user, None, id(2), 1).expect("user"),
-        )
-        .expect("user");
-        apply_conversation_entry(
-            &mut entries,
-            ConversationEntry::from_message(&assistant, Some(id(10)), id(2), 2).expect("asst"),
-        )
-        .expect("asst");
-        apply_conversation_entry(
-            &mut entries,
-            ConversationEntry::from_message(&tool, Some(id(11)), id(2), 3).expect("tool"),
-        )
-        .expect("tool");
-        let history = extract_history(&entries, id(12)).expect("history");
-        assert_eq!(history.len(), 3);
-    }
-
-    #[test]
-    fn drop_snapshot_records_leaves_the_tree() {
-        let mut projection = SessionProjection::new(id(1));
-        let user = entry(10, None, 3, MessageRole::User, "hello");
-        projection.apply_lane_created(id(2), &LaneCreated::try_new("main").expect("lane"));
-        apply_conversation_entry(&mut projection.entries, user.clone()).expect("entry");
-        projection.lanes.get_mut(&id(2)).expect("lane").leaf_id = Some(user.id());
-        let without_snapshot = projection.clone();
-        let _ = RecordBody::SnapshotWritten(crate::session::SnapshotWritten::new(
-            9,
-            crate::digest::Digest::raw_json(b"snap"),
-        ));
-        assert_eq!(projection.entries(), without_snapshot.entries());
-        assert_eq!(
-            projection.main_lane().expect("main").1.leaf_id,
-            Some(user.id())
-        );
-        assert_eq!(
-            projection.lane("main").expect("named").0,
-            projection.main_lane().expect("main").0
-        );
-        assert!(projection.lane("research").is_none());
-        assert!(projection.lane_by_id(id(2)).is_some());
     }
 }

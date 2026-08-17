@@ -6,7 +6,7 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
-use crate::ids::ComponentId;
+use crate::primitives::ComponentId;
 
 use super::error::{RefsError, validate_label_ref, validated_label, validated_text};
 

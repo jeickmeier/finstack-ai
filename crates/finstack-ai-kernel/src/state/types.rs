@@ -4,16 +4,16 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::budget::{BudgetReleaseReceipt, BudgetReservationReceipt, BudgetReserveRequest};
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::digest::Digest;
 use crate::effects::{EffectDeferred, EffectRequested, InteractionKind, InteractionRequest};
-use crate::entries::{
+use crate::lifecycle::{
     ContextPrepared, RetryScheduled, RunCancelled, RunCompleted, RunFailed, Stage, StageCursor,
     TimerFired,
 };
-use crate::error::ErrorDescriptor;
-use crate::ids::{EffectId, InteractionId, MessageId, ModelRequestId, ToolCallId, TurnId};
+use crate::policy::{BudgetReleaseReceipt, BudgetReservationReceipt, BudgetReserveRequest};
+use crate::primitives::Digest;
+use crate::primitives::ErrorDescriptor;
+use crate::primitives::{EffectId, InteractionId, MessageId, ModelRequestId, ToolCallId, TurnId};
 use crate::run::CancellationRequest;
 use crate::tools::ToolSettlementKind;
 

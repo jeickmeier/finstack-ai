@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::content::ContentBlock;
-use crate::digest::Digest;
+use crate::conversation::MessageRole;
 use crate::effects::EffectOutputKind;
-use crate::message::MessageRole;
+use crate::primitives::Digest;
 use crate::records::RecordEnvelope;
 use crate::state::{CompletionIdentity, KernelState, RunPhase, TerminalCandidate};
 use crate::tools::{

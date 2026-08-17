@@ -11,8 +11,8 @@ use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ToolBatchSettled, ToolSettlement,
 };
 use super::super::validation::{validate_completion_identity, validate_error_descriptor};
+use crate::conversation::ProviderIds;
 use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
-use crate::message::ProviderIds;
 use crate::records::RecordBody;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 use crate::tools::{ActiveToolCallStatus, ToolFailurePolicy};

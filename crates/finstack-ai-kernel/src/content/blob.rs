@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::digest::Digest;
+use crate::primitives::Digest;
 
 use super::BoundedString;
 use super::error::ContentError;

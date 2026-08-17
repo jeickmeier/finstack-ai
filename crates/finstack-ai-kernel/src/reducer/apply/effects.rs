@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::content::ContentBlock;
-use crate::digest::Digest;
 use crate::effects::{EffectKind, EffectOutputKind};
-use crate::entries::EntryAppended;
+use crate::lifecycle::EntryAppended;
+use crate::primitives::Digest;
 use crate::records::RecordBody;
 use crate::state::{
     CompletionIdentity, KernelState, ModelSettlementFingerprint, ModelSettlementKind,

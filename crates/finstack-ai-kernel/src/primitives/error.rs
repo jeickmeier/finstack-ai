@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
-use crate::ids::{
+use crate::primitives::Metadata;
+use crate::primitives::{
     AppendBatchId, ArtifactId, BudgetReservationId, BudgetScopeId, CancellationRequestId, EffectId,
     EventId, InteractionId, LaneId, MessageId, ModelRequestId, RecordId, RunId, SessionId,
     ToolBatchId, ToolCallId, TurnId,
 };
-use crate::raw_json::Metadata;
 
 /// Stable machine-readable error code string.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -386,7 +386,7 @@ impl fmt::Display for ErrorDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::RunId;
+    use crate::primitives::RunId;
 
     #[test]
     fn error_descriptor_json_round_trip_preserves_stable_fields() {

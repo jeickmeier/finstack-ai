@@ -1,6 +1,6 @@
 use crate::effects::{EffectCancelled, InteractionCancelled};
-use crate::entries::{RunCancelled, RunSuspended, TimerFired};
-use crate::error::ErrorCode;
+use crate::lifecycle::{RunCancelled, RunSuspended, TimerFired};
+use crate::primitives::ErrorCode;
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RECORD_KIND_VERSION, RecordBody};
 use crate::state::{KernelState, TransitionEnv};
 use crate::{
@@ -16,7 +16,7 @@ use super::{
     draft_for_state, duplicate_decision, next_sequence, outstanding_requested_effects,
     reject_terminal, required,
 };
-use crate::bounds::SEMANTIC_ARRAY_MAX_ITEMS;
+use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
 pub(super) fn decide_cancel(
     state: &KernelState,

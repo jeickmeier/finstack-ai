@@ -1,7 +1,7 @@
-use crate::digest::Digest;
-use crate::entries::RunSuspended;
-use crate::error::{ErrorCategory, ErrorCode, ErrorDescriptor};
-use crate::limits::{LimitDimension, LimitReached, LimitUsage, LimitValue};
+use crate::lifecycle::RunSuspended;
+use crate::policy::{LimitDimension, LimitReached, LimitUsage, LimitValue};
+use crate::primitives::Digest;
+use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor};
 use crate::records::RecordBody;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 

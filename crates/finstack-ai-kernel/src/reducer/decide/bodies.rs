@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::digest::Digest;
 use crate::effects::{EffectInput, EffectKind, EffectOutputKind, EffectRequested};
-use crate::entries::{ContextPrepared, Stage, StageCursor, StageDisposition};
+use crate::lifecycle::{ContextPrepared, Stage, StageCursor, StageDisposition};
+use crate::primitives::Digest;
 use crate::records::RecordBody;
 use crate::state::{KernelState, TransitionEnv};
 

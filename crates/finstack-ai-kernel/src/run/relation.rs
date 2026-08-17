@@ -3,12 +3,12 @@
 use serde::de;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{EffectId, RunId};
+use crate::primitives::{EffectId, RunId};
 
 use super::error::RunError;
 use super::validate::validate_relation_shape;
 use crate::content::{BoundedString, LABEL_MAX_BYTES};
-use crate::ids::BudgetScopeId;
+use crate::primitives::BudgetScopeId;
 use crate::refs::validated_label;
 use std::sync::Arc;
 

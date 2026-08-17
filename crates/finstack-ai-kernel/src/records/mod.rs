@@ -5,6 +5,7 @@ mod body;
 mod draft;
 mod envelope;
 mod error;
+mod session;
 mod validate;
 
 #[cfg(test)]
@@ -22,3 +23,4 @@ pub use body::RecordBody;
 pub use draft::RecordDraft;
 pub use envelope::RecordEnvelope;
 pub use error::RecordError;
+pub use session::{LaneCreated, LaneMoved, SessionCreated, SessionRecordError, SnapshotWritten};
