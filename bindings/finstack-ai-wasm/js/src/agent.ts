@@ -159,6 +159,11 @@ export class Agent {
     this.#handle = handle;
   }
 
+  /** @internal */
+  handle(): WasmAgent {
+    return this.#handle;
+  }
+
   /**
    * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
    *
@@ -741,6 +746,63 @@ export class Lane {
   async inspect(): Promise<LaneInspectSnapshot> {
     try {
       return (await this.#handle.inspect()) as LaneInspectSnapshot;
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Start a new root run on this idle lane.
+   *
+   * @param agent - Agent that owns the run plan and ports.
+   * @param input - Plain-text user input.
+   * @param options - Optional timeout, cycle, retry, and capability selection.
+   * @returns A shared run handle.
+   * @throws {FinstackError} When the lane is busy or the request is invalid.
+   * @example
+   * ```ts
+   * const run = await research.run(agent, "hello");
+   * ```
+   */
+  run(agent: Agent, input: string, options?: RunOptions): Run {
+    try {
+      return new Run(
+        this.#handle.run(
+          agent.handle(),
+          input,
+          options?.timeoutSeconds,
+          options?.maxCycles,
+          options?.maxOutputRetries,
+          options?.capability,
+        ),
+      );
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Park is unsupported on wasm-host.
+   *
+   * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
+   */
+  async suspend(): Promise<void> {
+    try {
+      await this.#handle.suspend();
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
+   * Resume is unsupported on wasm-host.
+   *
+   * @param _agent - Accepted for API parity with native `Lane.resume`.
+   * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
+   */
+  async resume(_agent: Agent): Promise<void> {
+    try {
+      await this.#handle.resume(_agent.handle());
     } catch (error) {
       throw FinstackError.fromUnknown(error);
     }

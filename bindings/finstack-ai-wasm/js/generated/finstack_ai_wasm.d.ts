@@ -325,6 +325,31 @@ export class Lane {
      */
     navigate(entry_id: string): Promise<any>;
     /**
+     * Resume is unsupported on wasm-host; there is no truthful respawn path.
+     *
+     * # Errors
+     *
+     * Always returns `agent_run_unsupported_plan`.
+     */
+    resume(_agent: Agent): Promise<any>;
+    /**
+     * Start a new root run on this idle lane.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane is busy or the agent
+     * cannot start.
+     */
+    run(agent: Agent, input: string, timeout_seconds?: number | null, max_cycles?: number | null, max_output_retries?: number | null, capability?: string | null): Run;
+    /**
+     * Park is unsupported on wasm-host; there is no truthful respawn path.
+     *
+     * # Errors
+     *
+     * Always returns `agent_run_unsupported_plan`.
+     */
+    suspend(): Promise<any>;
+    /**
      * Durable lane identity.
      */
     readonly laneId: string;
@@ -683,7 +708,10 @@ export interface InitOutput {
     readonly lane_inspect: (a: number) => number;
     readonly lane_laneId: (a: number, b: number) => void;
     readonly lane_navigate: (a: number, b: number, c: number) => number;
+    readonly lane_resume: (a: number, b: number) => number;
+    readonly lane_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => void;
     readonly lane_session: (a: number) => number;
+    readonly lane_suspend: (a: number) => number;
     readonly locator_laneId: (a: number, b: number) => void;
     readonly locator_runId: (a: number, b: number) => void;
     readonly locator_sessionId: (a: number, b: number) => void;
@@ -717,9 +745,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1768: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1782: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_404: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1781: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1795: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_406: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

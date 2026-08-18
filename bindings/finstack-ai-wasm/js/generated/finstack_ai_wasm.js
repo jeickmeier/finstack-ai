@@ -956,12 +956,73 @@ export class Lane {
         return takeObject(ret);
     }
     /**
+     * Resume is unsupported on wasm-host; there is no truthful respawn path.
+     *
+     * # Errors
+     *
+     * Always returns `agent_run_unsupported_plan`.
+     * @param {Agent} _agent
+     * @returns {Promise<any>}
+     */
+    resume(_agent) {
+        _assertClass(_agent, Agent);
+        const ret = wasm.lane_resume(this.__wbg_ptr, _agent.__wbg_ptr);
+        return takeObject(ret);
+    }
+    /**
+     * Start a new root run on this idle lane.
+     *
+     * # Errors
+     *
+     * Returns a structured host error when the lane is busy or the agent
+     * cannot start.
+     * @param {Agent} agent
+     * @param {string} input
+     * @param {number | null} [timeout_seconds]
+     * @param {number | null} [max_cycles]
+     * @param {number | null} [max_output_retries]
+     * @param {string | null} [capability]
+     * @returns {Run}
+     */
+    run(agent, input, timeout_seconds, max_cycles, max_output_retries, capability) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            _assertClass(agent, Agent);
+            const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            var ptr1 = isLikeNone(capability) ? 0 : passStringToWasm0(capability, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            var len1 = WASM_VECTOR_LEN;
+            wasm.lane_run(retptr, this.__wbg_ptr, agent.__wbg_ptr, ptr0, len0, !isLikeNone(timeout_seconds), isLikeNone(timeout_seconds) ? 0 : timeout_seconds, !isLikeNone(max_cycles), isLikeNone(max_cycles) ? 0 : max_cycles, !isLikeNone(max_output_retries), isLikeNone(max_output_retries) ? 0 : max_output_retries, ptr1, len1);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return Run.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Session that owns this lane.
      * @returns {Session}
      */
     get session() {
         const ret = wasm.lane_session(this.__wbg_ptr);
         return Session.__wrap(ret);
+    }
+    /**
+     * Park is unsupported on wasm-host; there is no truthful respawn path.
+     *
+     * # Errors
+     *
+     * Always returns `agent_run_unsupported_plan`.
+     * @returns {Promise<any>}
+     */
+    suspend() {
+        const ret = wasm.lane_suspend(this.__wbg_ptr);
+        return takeObject(ret);
     }
 }
 if (Symbol.dispose) Lane.prototype[Symbol.dispose] = Lane.prototype.free;
@@ -1919,7 +1980,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1782(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1795(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2001,13 +2062,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 549, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1768);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 555, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1781);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_404);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_406);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -2039,14 +2100,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_404(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_404(arg0, arg1);
+function __wasm_bindgen_func_elem_406(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_406(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1768(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1781(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1768(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1781(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2057,8 +2118,8 @@ function __wasm_bindgen_func_elem_1768(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1782(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1782(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1795(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1795(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

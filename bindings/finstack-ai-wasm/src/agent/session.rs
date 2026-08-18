@@ -1,9 +1,12 @@
-use finstack_ai::OperationLocator;
+use finstack_ai::{AGENT_RUN_UNSUPPORTED_PLAN, AgentRunError, OperationLocator};
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
 
-use super::errors::{locator_object, session_error};
+use super::agent::Agent;
+use super::errors::{agent_error, locator_object, session_error};
+use super::request::run_request;
+use super::run::Run;
 
 /// Read-only operation locator.
 #[wasm_bindgen(js_name = Locator)]
@@ -225,6 +228,63 @@ impl Lane {
                 .map_err(|error| session_error(&error))
         })
     }
+
+    /// Start a new root run on this idle lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured host error when the lane is busy or the agent
+    /// cannot start.
+    pub fn run(
+        &self,
+        agent: &Agent,
+        input: String,
+        timeout_seconds: Option<f64>,
+        max_cycles: Option<f64>,
+        max_output_retries: Option<f64>,
+        capability: Option<String>,
+    ) -> Result<Run, JsValue> {
+        let request = run_request(
+            &agent.model,
+            input,
+            timeout_seconds,
+            max_cycles,
+            max_output_retries,
+            capability,
+        )?;
+        self.inner
+            .run(agent.inner.as_ref(), request)
+            .map(|inner| Run { inner })
+            .map_err(|error| agent_error(&error, None))
+    }
+
+    /// Park is unsupported on wasm-host; there is no truthful respawn path.
+    ///
+    /// # Errors
+    ///
+    /// Always returns `agent_run_unsupported_plan`.
+    pub fn suspend(&self) -> js_sys::Promise {
+        executor::drive(async { Err(park_unsupported("suspend")) })
+    }
+
+    /// Resume is unsupported on wasm-host; there is no truthful respawn path.
+    ///
+    /// # Errors
+    ///
+    /// Always returns `agent_run_unsupported_plan`.
+    pub fn resume(&self, _agent: &Agent) -> js_sys::Promise {
+        executor::drive(async { Err(park_unsupported("resume")) })
+    }
+}
+
+fn park_unsupported(verb: &str) -> JsValue {
+    agent_error(
+        &AgentRunError::Configuration {
+            code: AGENT_RUN_UNSUPPORTED_PLAN,
+            message: format!("lane {verb} is not supported on wasm-host"),
+        },
+        None,
+    )
 }
 
 /// In-process external identity map.

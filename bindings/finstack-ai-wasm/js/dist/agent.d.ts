@@ -103,6 +103,8 @@ export interface SessionInspectSnapshot {
 export declare class Agent {
     #private;
     constructor(handle: WasmAgent);
+    /** @internal */
+    handle(): WasmAgent;
     /**
      * Construct an Agent over a trusted {@link JsModel} and optional toolsets.
      *
@@ -428,6 +430,33 @@ export declare class Lane {
      * ```
      */
     inspect(): Promise<LaneInspectSnapshot>;
+    /**
+     * Start a new root run on this idle lane.
+     *
+     * @param agent - Agent that owns the run plan and ports.
+     * @param input - Plain-text user input.
+     * @param options - Optional timeout, cycle, retry, and capability selection.
+     * @returns A shared run handle.
+     * @throws {FinstackError} When the lane is busy or the request is invalid.
+     * @example
+     * ```ts
+     * const run = await research.run(agent, "hello");
+     * ```
+     */
+    run(agent: Agent, input: string, options?: RunOptions): Run;
+    /**
+     * Park is unsupported on wasm-host.
+     *
+     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
+     */
+    suspend(): Promise<void>;
+    /**
+     * Resume is unsupported on wasm-host.
+     *
+     * @param _agent - Accepted for API parity with native `Lane.resume`.
+     * @throws {FinstackError} Always, with code `agent_run_unsupported_plan`.
+     */
+    resume(_agent: Agent): Promise<void>;
 }
 /**
  * In-process external identity map.
