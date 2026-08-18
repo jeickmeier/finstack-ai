@@ -66,7 +66,10 @@ impl AgentRun {
     /// Start or attach a child run for a parent effect via [`ChildRunCoordinator`].
     ///
     /// This is the effect-binding facade used by deferred child settlement.
-    /// The Agent-based [`Self::start_child`] remains the composition path.
+    /// It is named `start_or_attach_child` because [`Self::start_child`] is
+    /// already the pre-Phase-B composition API
+    /// (`&Agent`, [`AgentRunRequest`], [`ChildPlacement`] → [`AgentRun`])
+    /// from PR-079. Those signatures cannot share a name.
     /// Authorization is copied from the recovered accepted run, matching
     /// runtime dispatch security context.
     ///
@@ -356,7 +359,12 @@ impl AgentRun {
     /// Route one authenticated external completion through ingress.
     ///
     /// The command locator must match this run. Submission time is the
-    /// current native clock.
+    /// current native clock. This one-argument signature is the pre-Phase-B
+    /// public API from PR-079 (Python `Run.complete_external` and existing
+    /// callers). The timestamped form matching
+    /// [`finstack_ai_runtime::WorkflowSession::complete_external`] is
+    /// [`Self::complete_external_at`]; adding `submitted_at` here would
+    /// break that existing method.
     ///
     /// # Arguments
     ///
@@ -376,6 +384,11 @@ impl AgentRun {
     }
 
     /// Route one authenticated external completion at an explicit timestamp.
+    ///
+    /// Named separately from [`Self::complete_external`] because that
+    /// one-argument method already existed before Phase B. Callers that
+    /// need a host-supplied [`Timestamp`] use this method, matching
+    /// [`finstack_ai_runtime::WorkflowSession::complete_external`].
     ///
     /// # Errors
     ///
