@@ -14,9 +14,11 @@ deny-by-default allowlist at construction.
 
 ## Scope
 
-Implemented: `tools/list` at construction and `Toolset::call` for
-`tools/call`; `resources/list` at construction and a `ContextProvider`
-that `resources/read`s only the frozen names.
+Implemented: `tools/list` and `prompts/list` at construction;
+`Toolset::call` for `tools/call`; `resources/list` and
+`resources/templates` at construction and a `ContextProvider` that
+`resources/read`s only the frozen names; `input_required` mapped onto
+existing `InteractionRequest` (`Form` or `FreeText`).
 
 Not implemented:
 
@@ -24,10 +26,11 @@ Not implemented:
   request from inside a committed tool effect with no locked context
   profile, no budget parent, and an effect graph the kernel cannot
   linearize. Sampling is unsupported and will stay unsupported.
-- Elicitation / MRTR (`input_required`).
 - Mid-run catalog mutation. `notifications/tools/list_changed` and
   `notifications/resources/list_changed` are observer-only; adopters who
-  need new tools or resources re-resolve the agent.
+  need new tools or resources re-resolve the agent. The crate emits a
+  non-semantic `McpListChangedObserver` event and does not change the
+  lock.
 
 An MCP server is not an application-instruction authority. Every MCP
 resource provider sets `trusted_application_instructions` to `false`.

@@ -11,9 +11,10 @@ use finstack_ai_runtime::{
     PortFuture, ReconcileContext, Sensitivity, TextBlock, Version,
 };
 
-use crate::classify::MAX_LIST_PAGES;
+use crate::classify::{MAX_LIST_PAGES, optional_catalog_missing};
 use crate::protocol::{
-    ListResourcesResult, ReadResourceResult, Resource, ResourceContents, ResultType,
+    ListResourceTemplatesResult, ListResourcesResult, ReadResourceResult, Resource,
+    ResourceContents, ResourceTemplate, ResultType,
 };
 use crate::transport::McpTransport;
 use crate::{
@@ -22,11 +23,12 @@ use crate::{
 
 const RESOURCE_SOURCE_ID: &str = "finstack.context.mcp";
 
-/// One name/URI pair frozen from `resources/list`.
+/// One name/URI pair frozen from `resources/list` or `resources/templates`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FrozenResource {
     name: Arc<str>,
     uri: Arc<str>,
+    template: bool,
 }
 
 impl FrozenResource {
@@ -61,22 +63,45 @@ impl McpContextProvider {
     pub(crate) async fn connect(
         transport: Arc<dyn McpTransport>,
         config: &McpConfig,
+        list_changed: Option<Arc<dyn crate::McpListChangedObserver>>,
     ) -> Result<Self, McpError> {
         let listed = enumerate_resources(transport.as_ref()).await?;
-        let snapshot = listed
+        crate::emit_list_changed(transport.as_ref(), list_changed.as_deref());
+        let templates = enumerate_templates(transport.as_ref()).await?;
+        crate::emit_list_changed(transport.as_ref(), list_changed.as_deref());
+        let mut snapshot = listed
             .iter()
             .map(|resource| FrozenResource {
                 name: Arc::from(resource.name.as_str()),
                 uri: Arc::from(resource.uri.as_str()),
+                template: false,
             })
-            .collect::<Arc<[_]>>();
+            .collect::<Vec<_>>();
+        for template in &templates {
+            snapshot.push(FrozenResource {
+                name: Arc::from(template.name.as_str()),
+                uri: Arc::from(template.uri_template.as_str()),
+                template: true,
+            });
+        }
+        let mut seen = BTreeSet::new();
+        for resource in &snapshot {
+            if !seen.insert(resource.name()) {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "resources snapshot has a duplicate name across list and templates",
+                ));
+            }
+        }
+        let snapshot = snapshot.into();
         let identity = config.identity();
-        let digest = resource_snapshot_digest(&identity, &listed);
+        let digest = resource_snapshot_digest(&identity, &listed, &templates);
         let metadata = Metadata::parse(
             serde_json::to_vec(&serde_json::json!({
                 "protocol": crate::protocol::PROTOCOL_VERSION,
                 "server": config.identity(),
                 "resources": listed.iter().map(|resource| resource.name.as_str()).collect::<Vec<_>>(),
+                "templates": templates.iter().map(|template| template.name.as_str()).collect::<Vec<_>>(),
                 "snapshot_digest": digest.to_string(),
             }))
             .unwrap_or_else(|_| Vec::from(b"{}")),
@@ -106,6 +131,16 @@ impl McpContextProvider {
             transport,
             inline_result_bytes: config.inline_result_bytes(),
         })
+    }
+
+    /// Frozen `resources/templates` names in list order.
+    #[must_use]
+    pub fn frozen_template_names(&self) -> Vec<&str> {
+        self.snapshot
+            .iter()
+            .filter(|resource| resource.template)
+            .map(FrozenResource::name)
+            .collect::<Vec<_>>()
     }
 
     /// Frozen resource names in list order.
@@ -209,14 +244,80 @@ pub(crate) async fn enumerate_resources(
     ))
 }
 
-pub(crate) fn resource_snapshot_digest(server_identity: &str, resources: &[Resource]) -> Digest {
+pub(crate) async fn enumerate_templates(
+    transport: &dyn McpTransport,
+) -> Result<Vec<ResourceTemplate>, McpError> {
+    let mut templates = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_LIST_PAGES {
+        let mut params = serde_json::json!({});
+        if let Some(cursor) = cursor.as_ref() {
+            params.as_object_mut().expect("object").insert(
+                "cursor".to_owned(),
+                serde_json::Value::String(cursor.clone()),
+            );
+        }
+        let value = match transport.request("resources/templates", params).await {
+            Ok(value) => value,
+            Err(error) if optional_catalog_missing(&error) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let page: ListResourceTemplatesResult = serde_json::from_value(value).map_err(|error| {
+            McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                format!("resources/templates result is invalid: {error}"),
+            )
+        })?;
+        if page.result_type != ResultType::Complete {
+            return Err(McpError::stable(
+                MCP_RESULT_UNSUPPORTED,
+                "resources/templates resultType is not complete",
+            ));
+        }
+        for template in page.resource_templates {
+            if template.name.is_empty() || template.uri_template.is_empty() {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "resources/templates returned an empty name or uriTemplate",
+                ));
+            }
+            if !seen.insert(template.name.clone()) {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "resources/templates returned a duplicate template name",
+                ));
+            }
+            templates.push(template);
+        }
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => return Ok(templates),
+        }
+    }
+    Err(McpError::stable(
+        MCP_PROTOCOL_VIOLATION,
+        "resources/templates exceeded the page cap",
+    ))
+}
+
+pub(crate) fn resource_snapshot_digest(
+    server_identity: &str,
+    resources: &[Resource],
+    templates: &[ResourceTemplate],
+) -> Digest {
     let names = resources
         .iter()
         .map(|resource| serde_json::json!([resource.name, resource.uri]))
         .collect::<Vec<_>>();
+    let template_names = templates
+        .iter()
+        .map(|template| serde_json::json!([template.name, template.uri_template]))
+        .collect::<Vec<_>>();
     let payload = serde_json::json!({
         "server": server_identity,
         "resources": names,
+        "templates": template_names,
     });
     let bytes = serde_json_canonicalizer::to_vec(&payload).unwrap_or_else(|_| Vec::from(b"{}"));
     Digest::raw_json(&bytes)

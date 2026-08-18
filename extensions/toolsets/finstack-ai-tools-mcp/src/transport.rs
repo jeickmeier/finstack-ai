@@ -40,6 +40,23 @@ pub(crate) trait McpTransport: Send + Sync {
         let _ = id;
         self.request(method, params)
     }
+
+    /// Drain transport-delivered MCP notifications. Default is none.
+    fn take_notifications(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[cfg(test)]
+fn optional_list_response(
+    queue: &mut VecDeque<Result<serde_json::Value, McpError>>,
+    items_key: &str,
+) -> Result<serde_json::Value, McpError> {
+    let queued = queue.front().and_then(|entry| entry.as_ref().ok());
+    if queued.is_some_and(|value| value.get(items_key).is_some()) {
+        return queue.pop_front().expect("front exists");
+    }
+    Ok(serde_json::json!({"resultType":"complete"}))
 }
 
 /// Merge required metadata into a params object.
@@ -57,6 +74,7 @@ pub(crate) fn with_meta(mut params: serde_json::Value) -> serde_json::Value {
 pub(crate) struct ScriptedTransport {
     responses: Mutex<VecDeque<Result<serde_json::Value, McpError>>>,
     methods: Mutex<Vec<String>>,
+    notifications: Mutex<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -65,6 +83,7 @@ impl ScriptedTransport {
         Self {
             responses: Mutex::new(responses.into_iter().map(Ok).collect()),
             methods: Mutex::new(Vec::new()),
+            notifications: Mutex::new(Vec::new()),
         }
     }
 
@@ -75,7 +94,15 @@ impl ScriptedTransport {
                 format!("jsonrpc {code} {message}"),
             ))])),
             methods: Mutex::new(Vec::new()),
+            notifications: Mutex::new(Vec::new()),
         }
+    }
+
+    pub(crate) fn with_pending_notifications(self, notifications: Vec<String>) -> Self {
+        if let Ok(mut queued) = self.notifications.lock() {
+            *queued = notifications;
+        }
+        self
     }
 
     pub(crate) fn called_methods(&self) -> Vec<String> {
@@ -96,7 +123,7 @@ impl McpTransport for ScriptedTransport {
         let method = method.to_owned();
         Box::pin(async move {
             if let Ok(mut methods) = self.methods.lock() {
-                methods.push(method);
+                methods.push(method.clone());
             }
             let params = with_meta(params);
             let version = params
@@ -112,6 +139,12 @@ impl McpTransport for ScriptedTransport {
             let mut queue = self.responses.lock().map_err(|_| {
                 McpError::stable(MCP_TRANSPORT_ERROR, "scripted transport lock is poisoned")
             })?;
+            if method == "prompts/list" {
+                return optional_list_response(&mut queue, "prompts");
+            }
+            if method == "resources/templates" {
+                return optional_list_response(&mut queue, "resourceTemplates");
+            }
             queue.pop_front().unwrap_or_else(|| {
                 Err(McpError::stable(
                     MCP_TRANSPORT_ERROR,
@@ -119,6 +152,13 @@ impl McpTransport for ScriptedTransport {
                 ))
             })
         })
+    }
+
+    fn take_notifications(&self) -> Vec<String> {
+        self.notifications
+            .lock()
+            .map(|mut queued| std::mem::take(&mut *queued))
+            .unwrap_or_default()
     }
 }
 
@@ -184,43 +224,40 @@ pub(crate) struct StdioTransport {
 
 impl StdioTransport {
     pub(crate) fn try_spawn(config: &StdioConfig) -> Result<Self, McpError> {
-        let mut child = match &config.confinement {
-            Some((confinement, profile)) => {
-                if confinement.is_unavailable() {
-                    return Err(McpError::stable(
-                        finstack_ai_runtime::CONFINEMENT_UNAVAILABLE,
-                        "MCP stdio confinement was requested and is unavailable",
-                    ));
-                }
-                let mut command = std::process::Command::new(&config.program);
-                command
-                    .args(&config.args)
-                    .env_clear()
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-                confinement
-                    .configure(&mut command, profile)
-                    .map_err(|error| McpError::stable(error.code(), error.message().to_string()))?;
-                let mut command = Command::from(command);
-                command.kill_on_drop(true);
-                command.spawn().map_err(|error| {
-                    McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
-                })?
+        let mut child = if let Some((confinement, profile)) = &config.confinement {
+            if confinement.is_unavailable() {
+                return Err(McpError::stable(
+                    finstack_ai_runtime::CONFINEMENT_UNAVAILABLE,
+                    "MCP stdio confinement was requested and is unavailable",
+                ));
             }
-            None => {
-                let mut command = Command::new(&config.program);
-                command
-                    .args(&config.args)
-                    .env_clear()
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .kill_on_drop(true);
-                command.spawn().map_err(|error| {
-                    McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
-                })?
-            }
+            let mut command = std::process::Command::new(&config.program);
+            command
+                .args(&config.args)
+                .env_clear()
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            confinement
+                .configure(&mut command, profile)
+                .map_err(|error| McpError::stable(error.code(), error.message().to_string()))?;
+            let mut command = Command::from(command);
+            command.kill_on_drop(true);
+            command.spawn().map_err(|error| {
+                McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
+            })?
+        } else {
+            let mut command = Command::new(&config.program);
+            command
+                .args(&config.args)
+                .env_clear()
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            command.spawn().map_err(|error| {
+                McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
+            })?
         };
         let stdin = child.stdin.take().ok_or_else(|| {
             McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdin is unavailable")

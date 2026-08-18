@@ -2,7 +2,8 @@
 //! `ContextProvider` ports.
 //!
 //! Protocol revision `2026-07-28`. There is no `initialize` handshake.
-//! Sampling and elicitation are not implemented. An MCP server is not an
+//! Sampling is not implemented. Elicitation / `input_required` maps onto
+//! existing [`InteractionRequest`]. An MCP server is not an
 //! application-instruction authority.
 
 #![warn(missing_docs)]
@@ -19,6 +20,7 @@ use futures_util::stream;
 use thiserror::Error;
 
 mod classify;
+mod interaction;
 mod protocol;
 mod resources;
 mod transport;
@@ -29,7 +31,10 @@ mod tests;
 pub use resources::McpContextProvider;
 pub use transport::{HttpConfig, StdioConfig};
 
-use classify::{catalog_digest, enumerate_catalog, invocation_digest, to_tool_spec};
+use classify::{
+    catalog_digest, enumerate_catalog, enumerate_prompts, invocation_digest, to_tool_spec,
+};
+use finstack_ai_runtime::InteractionRequest;
 use protocol::{CallToolResult, ResultType, content_to_json};
 use transport::{HttpTransport, McpTransport, StdioTransport, authorize_http, authorize_stdio};
 
@@ -47,9 +52,40 @@ pub const MCP_RESULT_UNSUPPORTED: &str = "mcp_result_unsupported";
 pub const MCP_LIMIT_EXCEEDED: &str = "mcp_limit_exceeded";
 /// Stable required-artifact-service code.
 pub const MCP_ARTIFACT_REQUIRED: &str = "mcp_artifact_required";
+/// Stable code when a tool parks on MCP elicitation / `input_required`.
+pub const MCP_INPUT_REQUIRED: &str = "mcp_input_required";
 
 const DEFAULT_INLINE_RESULT_BYTES: u64 = 64 * 1024;
 const CONTEXT_PROVIDER_COMPONENT: &str = "finstack.context.mcp";
+
+/// One prompt frozen from construct-time `prompts/list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpPrompt {
+    name: Arc<str>,
+    text: Arc<str>,
+}
+
+impl McpPrompt {
+    /// Prompt name from the frozen snapshot.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Untrusted instruction text (`description`, then `title`, then `name`).
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+/// Non-semantic observer for mid-run MCP `list_changed` notifications.
+///
+/// Implementations must not mutate the frozen catalog or lock.
+pub trait McpListChangedObserver: Send + Sync {
+    /// Observe one notification method name.
+    fn on_list_changed(&self, method: &str);
+}
 
 /// Host-supplied MCP client configuration.
 ///
@@ -221,22 +257,44 @@ enum McpServerSpec {
 }
 
 /// Construction-time factory. Enumerates and freezes the catalog once.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct McpToolsetFactory {
     config: McpConfig,
+    list_changed: Option<Arc<dyn McpListChangedObserver>>,
+}
+
+impl std::fmt::Debug for McpToolsetFactory {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpToolsetFactory")
+            .field("config", &self.config)
+            .field("list_changed", &self.list_changed.is_some())
+            .finish()
+    }
 }
 
 impl McpToolsetFactory {
     /// Bind one host configuration.
     #[must_use]
     pub const fn new(config: McpConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            list_changed: None,
+        }
+    }
+
+    /// Observe `list_changed` without mutating the frozen catalog.
+    #[must_use]
+    pub fn with_list_changed_observer(mut self, observer: Arc<dyn McpListChangedObserver>) -> Self {
+        self.list_changed = Some(observer);
+        self
     }
 
     /// Construct the toolset. This is the catalog-freeze point.
     ///
     /// Hosts should call this from `ComponentFactory::construct`. Mid-run
-    /// `list_changed` notifications are not applied.
+    /// `list_changed` notifications are observer-only and do not mutate the
+    /// frozen catalog.
     ///
     /// # Errors
     ///
@@ -244,7 +302,7 @@ impl McpToolsetFactory {
     /// `tools/list` violates protocol rules.
     pub async fn construct(&self) -> Result<McpToolset, McpError> {
         let transport = self.open_transport()?;
-        McpToolset::connect(transport, self.config.clone()).await
+        McpToolset::connect(transport, self.config.clone(), self.list_changed.clone()).await
     }
 
     /// Enumerate `resources/list` once and freeze the context-provider snapshot.
@@ -258,7 +316,7 @@ impl McpToolsetFactory {
     /// `resources/list` violates protocol rules.
     pub async fn construct_context_provider(&self) -> Result<McpContextProvider, McpError> {
         let transport = self.open_transport()?;
-        McpContextProvider::connect(transport, &self.config).await
+        McpContextProvider::connect(transport, &self.config, self.list_changed.clone()).await
     }
 
     /// Enumerate tools and resources on one shared transport.
@@ -270,8 +328,14 @@ impl McpToolsetFactory {
         &self,
     ) -> Result<(McpToolset, McpContextProvider), McpError> {
         let transport = self.open_transport()?;
-        let toolset = McpToolset::connect(Arc::clone(&transport), self.config.clone()).await?;
-        let provider = McpContextProvider::connect(transport, &self.config).await?;
+        let toolset = McpToolset::connect(
+            Arc::clone(&transport),
+            self.config.clone(),
+            self.list_changed.clone(),
+        )
+        .await?;
+        let provider =
+            McpContextProvider::connect(transport, &self.config, self.list_changed.clone()).await?;
         Ok((toolset, provider))
     }
 
@@ -291,10 +355,12 @@ impl McpToolsetFactory {
 pub struct McpToolset {
     descriptor: ToolsetDescriptor,
     tools: Arc<[ToolSpec]>,
+    prompts: Arc<[McpPrompt]>,
     catalog_digest: Digest,
     invocation_digest: Digest,
     transport: Arc<dyn McpTransport>,
     config: McpConfig,
+    list_changed: Option<Arc<dyn McpListChangedObserver>>,
 }
 
 impl McpToolset {
@@ -306,8 +372,25 @@ impl McpToolset {
     pub(crate) async fn connect(
         transport: Arc<dyn McpTransport>,
         config: McpConfig,
+        list_changed: Option<Arc<dyn McpListChangedObserver>>,
     ) -> Result<Self, McpError> {
         let listed = enumerate_catalog(transport.as_ref()).await?;
+        emit_list_changed(transport.as_ref(), list_changed.as_deref());
+        let prompts = enumerate_prompts(transport.as_ref())
+            .await?
+            .into_iter()
+            .map(|prompt| McpPrompt {
+                text: Arc::from(
+                    prompt
+                        .description
+                        .as_deref()
+                        .or(prompt.title.as_deref())
+                        .unwrap_or(prompt.name.as_str()),
+                ),
+                name: Arc::from(prompt.name),
+            })
+            .collect::<Arc<[_]>>();
+        emit_list_changed(transport.as_ref(), list_changed.as_deref());
         let tools = listed
             .iter()
             .map(|tool| to_tool_spec(tool, &config))
@@ -319,6 +402,7 @@ impl McpToolset {
                 "protocol": protocol::PROTOCOL_VERSION,
                 "server": config.identity(),
                 "tools": listed.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
+                "prompts": prompts.iter().map(McpPrompt::name).collect::<Vec<_>>(),
                 "catalog_digest": catalog.to_string(),
                 "invocation_digest": invocation.to_string(),
             }))
@@ -331,11 +415,21 @@ impl McpToolset {
                 metadata,
             },
             tools: tools.into(),
+            prompts,
             catalog_digest: catalog,
             invocation_digest: invocation,
             transport,
             config,
+            list_changed,
         })
+    }
+
+    /// Frozen `prompts/list` snapshot. Hosts map [`McpPrompt::text`] onto an
+    /// untrusted `InstructionSpec`; this crate cannot set
+    /// `trusted_application_instructions`.
+    #[must_use]
+    pub fn frozen_prompts(&self) -> &[McpPrompt] {
+        &self.prompts
     }
 
     /// Frozen catalog digest over `(name, input_schema, output_schema)`.
@@ -367,6 +461,7 @@ impl Toolset for McpToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let transport = Arc::clone(&self.transport);
         let max_bytes = self.config.inline_result_bytes();
+        let list_changed = self.list_changed.clone();
         Box::pin(async move {
             let name = call.call.tool_name();
             let arguments: serde_json::Value =
@@ -389,6 +484,16 @@ impl Toolset for McpToolset {
                 )
                 .await
                 .map_err(tool_error_from_mcp)?;
+            emit_list_changed(transport.as_ref(), list_changed.as_deref());
+            if value.get("method").and_then(serde_json::Value::as_str)
+                == Some("sampling/createMessage")
+            {
+                return Err(tool_error(
+                    MCP_RESULT_UNSUPPORTED,
+                    ErrorCategory::Validation,
+                    "MCP sampling is not supported",
+                ));
+            }
             let result: CallToolResult = serde_json::from_value(value).map_err(|_| {
                 tool_error(
                     MCP_PROTOCOL_VIOLATION,
@@ -396,6 +501,12 @@ impl Toolset for McpToolset {
                     "tools/call result is invalid",
                 )
             })?;
+            if result.result_type == ResultType::InputRequired {
+                let request =
+                    interaction::interaction_from_input_required(ctx.run.effect_id, &result)
+                        .map_err(tool_error_from_mcp)?;
+                return Err(interaction_required_error(&request));
+            }
             if result.result_type != ResultType::Complete {
                 return Err(tool_error(
                     MCP_RESULT_UNSUPPORTED,
@@ -483,6 +594,47 @@ fn completed(output: RawJson, is_error: bool) -> ToolEventStream {
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
+}
+
+/// Reconstruct the mapped HITL request from [`MCP_INPUT_REQUIRED`].
+#[must_use]
+pub fn interaction_request_from_tool_error(error: &ToolError) -> Option<InteractionRequest> {
+    if error.code() != MCP_INPUT_REQUIRED {
+        return None;
+    }
+    serde_json::from_slice(error.metadata().as_bytes()).ok()
+}
+
+fn interaction_required_error(request: &InteractionRequest) -> ToolError {
+    let metadata = serde_json::to_vec(request)
+        .ok()
+        .and_then(|bytes| Metadata::parse(bytes).ok())
+        .unwrap_or_else(Metadata::empty);
+    ToolError::try_new(
+        MCP_INPUT_REQUIRED,
+        ErrorCategory::Tool,
+        false,
+        "MCP tool requested elicitation",
+        metadata,
+    )
+    .unwrap_or_else(Into::into)
+}
+
+pub(crate) fn emit_list_changed(
+    transport: &dyn McpTransport,
+    observer: Option<&dyn McpListChangedObserver>,
+) {
+    let Some(observer) = observer else {
+        return;
+    };
+    for method in transport.take_notifications() {
+        if method == "notifications/tools/list_changed"
+            || method == "notifications/resources/list_changed"
+            || method == "notifications/prompts/list_changed"
+        {
+            observer.on_list_changed(&method);
+        }
+    }
 }
 
 fn tool_error_from_mcp(error: McpError) -> ToolError {

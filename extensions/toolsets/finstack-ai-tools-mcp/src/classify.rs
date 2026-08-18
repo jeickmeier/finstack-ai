@@ -8,7 +8,7 @@ use finstack_ai_runtime::{
     ToolExecutionMode, ToolId, ToolSpec,
 };
 
-use crate::protocol::{ListToolsResult, ResultType, Tool};
+use crate::protocol::{ListPromptsResult, ListToolsResult, Prompt, ResultType, Tool};
 use crate::transport::McpTransport;
 use crate::{MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError};
 
@@ -68,6 +68,68 @@ pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Ve
         MCP_PROTOCOL_VIOLATION,
         "tools/list exceeded the page cap",
     ))
+}
+
+pub(crate) async fn enumerate_prompts(
+    transport: &dyn McpTransport,
+) -> Result<Vec<Prompt>, McpError> {
+    let mut prompts = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_LIST_PAGES {
+        let mut params = serde_json::json!({});
+        if let Some(cursor) = cursor.as_ref() {
+            params.as_object_mut().expect("object").insert(
+                "cursor".to_owned(),
+                serde_json::Value::String(cursor.clone()),
+            );
+        }
+        let value = match transport.request("prompts/list", params).await {
+            Ok(value) => value,
+            Err(error) if optional_catalog_missing(&error) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let page: ListPromptsResult = serde_json::from_value(value).map_err(|error| {
+            McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                format!("prompts/list result is invalid: {error}"),
+            )
+        })?;
+        if page.result_type != ResultType::Complete {
+            return Err(McpError::stable(
+                MCP_RESULT_UNSUPPORTED,
+                "prompts/list resultType is not complete",
+            ));
+        }
+        for prompt in page.prompts {
+            if prompt.name.is_empty() {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "prompts/list returned an empty prompt name",
+                ));
+            }
+            if !seen.insert(prompt.name.clone()) {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "prompts/list returned a duplicate prompt name",
+                ));
+            }
+            prompts.push(prompt);
+        }
+        match page.next_cursor {
+            Some(next) => cursor = Some(next),
+            None => return Ok(prompts),
+        }
+    }
+    Err(McpError::stable(
+        MCP_PROTOCOL_VIOLATION,
+        "prompts/list exceeded the page cap",
+    ))
+}
+
+pub(crate) fn optional_catalog_missing(error: &McpError) -> bool {
+    let message = error.message();
+    message.contains("-32601") || message.contains("Method not found")
 }
 
 pub(crate) fn catalog_digest(tools: &[Tool]) -> Digest {

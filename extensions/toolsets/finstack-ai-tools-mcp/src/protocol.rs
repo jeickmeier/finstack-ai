@@ -167,6 +167,48 @@ pub(crate) struct CallToolResult {
     /// SUCCESS response, not in the `error` member.
     #[serde(default)]
     pub(crate) is_error: bool,
+    /// Present when `result_type` is `input_required`.
+    #[serde(default)]
+    pub(crate) input_requests: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListPromptsResult {
+    #[serde(default)]
+    pub(crate) result_type: ResultType,
+    #[serde(default)]
+    pub(crate) prompts: Vec<Prompt>,
+    #[serde(default)]
+    pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Prompt {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListResourceTemplatesResult {
+    #[serde(default)]
+    pub(crate) result_type: ResultType,
+    #[serde(default)]
+    pub(crate) resource_templates: Vec<ResourceTemplate>,
+    #[serde(default)]
+    pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResourceTemplate {
+    pub(crate) name: String,
+    pub(crate) uri_template: String,
 }
 
 /// Exactly five spec variants plus a forward-compatible fallback.

@@ -115,7 +115,7 @@ async fn connected_toolset() -> McpToolset {
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),
         serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"pong"}],"isError":false}),
     ]);
-    McpToolset::connect(Arc::new(transport), McpConfig::default())
+    McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
         .await
         .expect("connects")
 }
@@ -202,7 +202,7 @@ async fn is_error_result_becomes_a_tool_error() {
         serde_json::json!({"resultType":"complete","tools":[{"name":"boom","description":"Boom","inputSchema":{"type":"object"}}]}),
         serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"failed"}],"isError":true}),
     ]);
-    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default())
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
         .await
         .expect("connects");
     let error = call(&toolset, "boom", serde_json::json!({}))
@@ -212,18 +212,29 @@ async fn is_error_result_becomes_a_tool_error() {
 }
 
 #[tokio::test]
-async fn input_required_result_is_rejected() {
+async fn input_required_maps_to_form_interaction() {
     let transport = ScriptedTransport::new(vec![
         serde_json::json!({"resultType":"complete","tools":[{"name":"ask","description":"Ask","inputSchema":{"type":"object"}}]}),
-        serde_json::json!({"resultType":"input_required","inputRequests":{}}),
+        serde_json::json!({
+            "resultType":"input_required",
+            "content":[{"type":"text","text":"Need a city"}],
+            "inputRequests":{"type":"object","properties":{"city":{"type":"string"}}}
+        }),
+        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"resolved"}],"isError":false}),
     ]);
-    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default())
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
         .await
         .expect("connects");
     let error = call(&toolset, "ask", serde_json::json!({}))
         .await
-        .expect_err("MRTR is not supported");
-    assert!(format!("{error}").contains(MCP_RESULT_UNSUPPORTED));
+        .expect_err("elicitation parks the tool");
+    assert!(format!("{error}").contains(MCP_INPUT_REQUIRED));
+    let request = interaction_request_from_tool_error(&error).expect("mapped request");
+    assert_eq!(request.kind(), &finstack_ai_runtime::InteractionKind::Form);
+    let output = call(&toolset, "ask", serde_json::json!({"city":"oslo"}))
+        .await
+        .expect("host resolution completes the tool");
+    assert!(output.contains("resolved"));
 }
 
 #[tokio::test]
@@ -233,7 +244,7 @@ async fn oversize_result_truncates_with_a_recorded_marker() {
         serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"abcdefghijklmnopqrstuvwxyz"}],"isError":false}),
     ]);
     let config = McpConfig::default().with_inline_result_bytes(32);
-    let toolset = McpToolset::connect(Arc::new(transport), config)
+    let toolset = McpToolset::connect(Arc::new(transport), config, None)
         .await
         .expect("connects");
     let result = call(&toolset, "big", serde_json::json!({}))
@@ -296,7 +307,7 @@ async fn toolset_satisfies_the_published_port_conformance_suite() {
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),
         serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"pong"}],"isError":false}),
     ]);
-    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default())
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
         .await
         .expect("connects");
     let spec = toolset.tools()[0].clone();
@@ -425,7 +436,7 @@ fn mcp_resource_provider_is_never_trusted_application_instructions() {
     let provider = runtime.block_on(async {
         let transport =
             ScriptedTransport::new(vec![listed_resource("notes", "mcp://fixture/notes")]);
-        McpContextProvider::connect(Arc::new(transport), &McpConfig::default())
+        McpContextProvider::connect(Arc::new(transport), &McpConfig::default(), None)
             .await
             .expect("connects")
     });
@@ -478,6 +489,7 @@ async fn mid_run_resource_list_changes_are_ignored() {
     let provider = McpContextProvider::connect(
         Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
         &McpConfig::default(),
+        None,
     )
     .await
     .expect("connects");
@@ -495,7 +507,7 @@ async fn mid_run_resource_list_changes_are_ignored() {
     );
     assert_eq!(
         transport.called_methods(),
-        ["resources/list", "resources/read"]
+        ["resources/list", "resources/templates", "resources/read"]
     );
 }
 
@@ -504,7 +516,7 @@ async fn notes_provider() -> McpContextProvider {
         listed_resource("notes", "mcp://fixture/notes"),
         read_resource("mcp://fixture/notes", "remember this note"),
     ]);
-    McpContextProvider::connect(Arc::new(transport), &McpConfig::default())
+    McpContextProvider::connect(Arc::new(transport), &McpConfig::default(), None)
         .await
         .expect("connects")
 }
@@ -685,6 +697,7 @@ async fn production_driver_collects_frozen_mcp_resources() {
     let provider = McpContextProvider::connect(
         Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
         &McpConfig::default(),
+        None,
     )
     .await
     .expect("driver provider");
@@ -698,8 +711,97 @@ async fn production_driver_collects_frozen_mcp_resources() {
     assert_eq!(texts.last().map(String::as_str), Some("hello"));
     assert_eq!(
         transport.called_methods(),
-        ["resources/list", "resources/read"]
+        ["resources/list", "resources/templates", "resources/read"]
     );
     assert_eq!(expected.items[0].kind, ContextItemKind::QuotedSource);
     assert_eq!(expected.items[0].authority, ContextAuthority::Untrusted);
+}
+
+#[tokio::test]
+async fn sampling_create_message_is_rejected() {
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({"method":"sampling/createMessage","params":{}}),
+    ]);
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
+        .await
+        .expect("connects");
+    let error = call(&toolset, "echo", serde_json::json!({}))
+        .await
+        .expect_err("sampling stays rejected");
+    assert!(format!("{error}").contains(MCP_RESULT_UNSUPPORTED));
+    assert!(format!("{error}").contains("sampling"));
+}
+
+#[tokio::test]
+async fn prompts_list_freezes_untrusted_instruction_text() {
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({
+            "resultType":"complete",
+            "prompts":[{"name":"reviewer","description":"Cite primary sources."}]
+        }),
+    ]);
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
+        .await
+        .expect("connects");
+    assert_eq!(toolset.frozen_prompts().len(), 1);
+    assert_eq!(toolset.frozen_prompts()[0].name(), "reviewer");
+    let instruction =
+        finstack_ai::InstructionSpec::try_new(toolset.frozen_prompts()[0].text()).expect("spec");
+    assert_eq!(instruction.text(), "Cite primary sources.");
+}
+
+#[tokio::test]
+async fn resource_templates_are_frozen_and_collect_reads_only_those_names() {
+    let transport = ScriptedTransport::new(vec![
+        listed_resource("notes", "mcp://fixture/notes"),
+        serde_json::json!({
+            "resultType":"complete",
+            "resourceTemplates":[{"name":"ticket","uriTemplate":"mcp://fixture/ticket"}]
+        }),
+        read_resource("mcp://fixture/notes", "remember this note"),
+        read_resource("mcp://fixture/ticket", "ticket body"),
+    ]);
+    let provider = McpContextProvider::connect(Arc::new(transport), &McpConfig::default(), None)
+        .await
+        .expect("connects");
+    assert_eq!(provider.frozen_names(), ["notes", "ticket"]);
+    assert_eq!(provider.frozen_template_names(), ["ticket"]);
+    let contribution = provider
+        .collect(context_call(), context_request())
+        .await
+        .expect("collect");
+    assert_eq!(contribution.items.len(), 2);
+}
+
+struct CaptureListChanged(std::sync::Mutex<Vec<String>>);
+
+impl McpListChangedObserver for CaptureListChanged {
+    fn on_list_changed(&self, method: &str) {
+        self.0.lock().expect("lock").push(method.to_owned());
+    }
+}
+
+#[tokio::test]
+async fn list_changed_is_observed_and_does_not_add_a_tool() {
+    let observer = Arc::new(CaptureListChanged(std::sync::Mutex::new(Vec::new())));
+    let transport = ScriptedTransport::new(vec![serde_json::json!({
+        "resultType":"complete",
+        "tools":[{"name":"echo","inputSchema":{"type":"object"}}]
+    })])
+    .with_pending_notifications(vec!["notifications/tools/list_changed".to_owned()]);
+    let toolset = McpToolset::connect(
+        Arc::new(transport),
+        McpConfig::default(),
+        Some(Arc::clone(&observer) as Arc<dyn McpListChangedObserver>),
+    )
+    .await
+    .expect("connects");
+    assert_eq!(toolset.tools().len(), 1);
+    assert_eq!(toolset.tools()[0].model_name.as_ref(), "echo");
+    assert_eq!(
+        observer.0.lock().expect("lock").as_slice(),
+        ["notifications/tools/list_changed"]
+    );
 }
