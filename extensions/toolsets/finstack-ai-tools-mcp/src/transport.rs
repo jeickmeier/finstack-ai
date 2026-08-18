@@ -5,19 +5,26 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-#[cfg(test)]
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
-use crate::{MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TRANSPORT_ERROR, McpError};
+use crate::{
+    MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TRANSPORT_ERROR,
+    McpError,
+};
+
+const MAX_LINE_BYTES: u64 = 1024 * 1024;
+const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
+const MAX_NOTIFICATIONS_PER_ROUND_TRIP: usize = 32;
 
 /// One MCP request/response round trip.
 ///
@@ -92,7 +99,8 @@ impl ScriptedTransport {
             responses: Mutex::new(VecDeque::from([Err(McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
                 format!("jsonrpc {code} {message}"),
-            ))])),
+            )
+            .with_jsonrpc(code))])),
             methods: Mutex::new(Vec::new()),
             notifications: Mutex::new(Vec::new()),
         }
@@ -229,6 +237,8 @@ enum StdioState {
 pub(crate) struct StdioTransport {
     state: tokio::sync::Mutex<StdioState>,
     next_id: AtomicU64,
+    notifications: Mutex<Vec<String>>,
+    poisoned: AtomicBool,
 }
 
 impl StdioTransport {
@@ -300,6 +310,8 @@ impl StdioTransport {
         Ok(Self {
             state: tokio::sync::Mutex::new(state),
             next_id: AtomicU64::new(1),
+            notifications: Mutex::new(Vec::new()),
+            poisoned: AtomicBool::new(false),
         })
     }
 
@@ -330,20 +342,42 @@ impl StdioTransport {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, McpError> {
+        if self.poisoned.load(Ordering::SeqCst) {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "stdio transport is poisoned",
+            ));
+        }
         let params = with_meta(params);
         let message = jsonrpc_request(&id, method, &params);
         let line = Self::encode_line(&message)?;
         let mut state = self.state.lock().await;
         write_stdio_line(&mut state, line.as_bytes()).await?;
-        let mut response = String::new();
-        let read = read_stdio_line(&mut state, &mut response).await?;
-        if read == 0 {
-            return Err(McpError::stable(
-                MCP_TRANSPORT_ERROR,
-                "stdio server closed stdout",
-            ));
+        let mut dispatch = FrameDispatch::new(&id, &self.notifications);
+        loop {
+            let frame = match read_stdio_frame(&mut state).await {
+                Ok(frame) => frame,
+                Err(error) => {
+                    self.poisoned.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+            };
+            let value = match decode_frame(&frame) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.poisoned.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+            };
+            match dispatch.push(&value) {
+                Ok(Some(result)) => return Ok(result),
+                Ok(None) => {}
+                Err(error) => {
+                    self.poisoned.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+            }
         }
-        parse_jsonrpc_response(&response)
     }
 }
 
@@ -366,17 +400,34 @@ async fn write_stdio_line(state: &mut StdioState, line: &[u8]) -> Result<(), Mcp
     }
 }
 
-async fn read_stdio_line(state: &mut StdioState, response: &mut String) -> Result<usize, McpError> {
+async fn read_stdio_frame(state: &mut StdioState) -> Result<String, McpError> {
     match state {
-        StdioState::Unconfined { stdout, .. } => stdout
-            .read_line(response)
-            .await
-            .map_err(|error| stdio_io(&error)),
-        StdioState::Confined { stdout, .. } => stdout
-            .read_line(response)
-            .await
-            .map_err(|error| stdio_io(&error)),
+        StdioState::Unconfined { stdout, .. } => read_limited_line(stdout).await,
+        StdioState::Confined { stdout, .. } => read_limited_line(stdout).await,
     }
+}
+
+async fn read_limited_line<R: AsyncBufReadExt + Unpin>(stdout: &mut R) -> Result<String, McpError> {
+    let mut buf = Vec::new();
+    let read = stdout
+        .take(MAX_LINE_BYTES)
+        .read_until(b'\n', &mut buf)
+        .await
+        .map_err(|error| stdio_io(&error))?;
+    if read == 0 {
+        return Err(McpError::stable(
+            MCP_TRANSPORT_ERROR,
+            "stdio server closed stdout",
+        ));
+    }
+    if !buf.ends_with(b"\n") {
+        return Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "stdio line exceeds the configured byte limit",
+        ));
+    }
+    String::from_utf8(buf)
+        .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "stdio line is not valid utf-8"))
 }
 
 fn stdio_io(error: &std::io::Error) -> McpError {
@@ -460,6 +511,13 @@ impl McpTransport for StdioTransport {
         let method = method.to_owned();
         Box::pin(async move { self.round_trip(id, &method, params).await })
     }
+
+    fn take_notifications(&self) -> Vec<String> {
+        self.notifications
+            .lock()
+            .map(|mut queued| std::mem::take(&mut *queued))
+            .unwrap_or_default()
+    }
 }
 
 /// Allowlisted streamable-HTTP MCP server.
@@ -485,18 +543,6 @@ impl HttpConfig {
         Ok(Self { url })
     }
 
-    /// SSE-only servers are rejected. Streamable HTTP is POST-only.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`MCP_PROTOCOL_VIOLATION`].
-    pub fn sse_only(_url: impl Into<String>) -> Result<Self, McpError> {
-        Err(McpError::stable(
-            MCP_PROTOCOL_VIOLATION,
-            "sse-only transports are rejected",
-        ))
-    }
-
     pub(crate) fn url(&self) -> &str {
         &self.url
     }
@@ -507,6 +553,7 @@ pub(crate) struct HttpTransport {
     url: String,
     client: reqwest::Client,
     next_id: AtomicU64,
+    notifications: Mutex<Vec<String>>,
 }
 
 impl HttpTransport {
@@ -521,6 +568,7 @@ impl HttpTransport {
             url: config.url.clone(),
             client,
             next_id: AtomicU64::new(1),
+            notifications: Mutex::new(Vec::new()),
         })
     }
 
@@ -577,13 +625,18 @@ impl HttpTransport {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_owned();
-        let text = response.text().await.map_err(|error| {
-            McpError::stable(MCP_TRANSPORT_ERROR, format!("http body failed: {error}"))
-        })?;
+        let text = read_bounded_body(response).await?;
         if content_type.starts_with("text/event-stream") {
-            return parse_sse_jsonrpc(&text);
+            return parse_sse_jsonrpc(&text, &id, &self.notifications);
         }
-        parse_jsonrpc_response(&text)
+        let value = decode_frame(&text)?;
+        match FrameDispatch::new(&id, &self.notifications).push(&value)? {
+            Some(result) => Ok(result),
+            None => Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "http response contained only notifications",
+            )),
+        }
     }
 }
 
@@ -607,6 +660,13 @@ impl McpTransport for HttpTransport {
         let method = method.to_owned();
         Box::pin(async move { self.round_trip(id, &method, params).await })
     }
+
+    fn take_notifications(&self) -> Vec<String> {
+        self.notifications
+            .lock()
+            .map(|mut queued| std::mem::take(&mut *queued))
+            .unwrap_or_default()
+    }
 }
 
 /// Non-ASCII or unsafe header values use the sentinel encoding
@@ -618,13 +678,16 @@ fn encode_header_value(value: &str) -> HeaderValue {
     })
 }
 
-fn parse_jsonrpc_response(text: &str) -> Result<serde_json::Value, McpError> {
-    let value: serde_json::Value = serde_json::from_str(text.trim()).map_err(|error| {
+fn decode_frame(text: &str) -> Result<serde_json::Value, McpError> {
+    serde_json::from_str(text.trim()).map_err(|error| {
         McpError::stable(
             MCP_PROTOCOL_VIOLATION,
             format!("jsonrpc response is not json: {error}"),
         )
-    })?;
+    })
+}
+
+fn interpret_result(value: &serde_json::Value) -> Result<serde_json::Value, McpError> {
     if let Some(error) = value.get("error") {
         let code = error
             .get("code")
@@ -634,19 +697,95 @@ fn parse_jsonrpc_response(text: &str) -> Result<serde_json::Value, McpError> {
             .get("message")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("jsonrpc error");
-        return Err(McpError::stable(
-            MCP_PROTOCOL_VIOLATION,
-            format!("jsonrpc {code} {message}"),
-        ));
+        return Err(
+            McpError::stable(MCP_PROTOCOL_VIOLATION, format!("jsonrpc {code} {message}"))
+                .with_jsonrpc(code),
+        );
     }
     value.get("result").cloned().ok_or_else(|| {
         McpError::stable(MCP_PROTOCOL_VIOLATION, "jsonrpc response is missing result")
     })
 }
 
-fn parse_sse_jsonrpc(text: &str) -> Result<serde_json::Value, McpError> {
+fn jsonrpc_id(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    match value.get("id") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(id) => Some(id),
+    }
+}
+
+struct FrameDispatch<'a> {
+    expected_id: &'a serde_json::Value,
+    notifications: &'a Mutex<Vec<String>>,
+    notification_count: usize,
+}
+
+impl<'a> FrameDispatch<'a> {
+    fn new(expected_id: &'a serde_json::Value, notifications: &'a Mutex<Vec<String>>) -> Self {
+        Self {
+            expected_id,
+            notifications,
+            notification_count: 0,
+        }
+    }
+
+    fn push(&mut self, value: &serde_json::Value) -> Result<Option<serde_json::Value>, McpError> {
+        let method = value.get("method").and_then(serde_json::Value::as_str);
+        match (jsonrpc_id(value), method) {
+            (None, Some(method)) => {
+                self.notification_count = self.notification_count.saturating_add(1);
+                if self.notification_count > MAX_NOTIFICATIONS_PER_ROUND_TRIP {
+                    return Err(McpError::stable(
+                        MCP_PROTOCOL_VIOLATION,
+                        "notification count exceeds the round-trip cap",
+                    ));
+                }
+                if let Ok(mut queued) = self.notifications.lock() {
+                    queued.push(method.to_owned());
+                }
+                Ok(None)
+            }
+            (Some(id), _) if id == self.expected_id => interpret_result(value).map(Some),
+            _ => Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "jsonrpc frame id does not match the pending request",
+            )),
+        }
+    }
+}
+
+fn parse_sse_jsonrpc(
+    text: &str,
+    expected_id: &serde_json::Value,
+    notifications: &Mutex<Vec<String>>,
+) -> Result<serde_json::Value, McpError> {
+    let mut dispatch = FrameDispatch::new(expected_id, notifications);
+    let mut saw_data = false;
+    for event in text.split("\n\n") {
+        let Some(data) = sse_event_data(event) else {
+            continue;
+        };
+        saw_data = true;
+        let value = decode_frame(&data)?;
+        if let Some(result) = dispatch.push(&value)? {
+            return Ok(result);
+        }
+    }
+    if !saw_data {
+        return Err(McpError::stable(
+            MCP_TRANSPORT_ERROR,
+            "sse stream contained no data event",
+        ));
+    }
+    Err(McpError::stable(
+        MCP_PROTOCOL_VIOLATION,
+        "sse stream contained no matching response",
+    ))
+}
+
+fn sse_event_data(event: &str) -> Option<String> {
     let mut data = String::new();
-    for line in text.lines() {
+    for line in event.lines() {
         if line.starts_with(':') {
             continue;
         }
@@ -657,13 +796,26 @@ fn parse_sse_jsonrpc(text: &str) -> Result<serde_json::Value, McpError> {
             data.push_str(payload.trim_start());
         }
     }
-    if data.is_empty() {
-        return Err(McpError::stable(
-            MCP_TRANSPORT_ERROR,
-            "sse stream contained no data event",
-        ));
+    if data.is_empty() { None } else { Some(data) }
+}
+
+async fn read_bounded_body(response: reqwest::Response) -> Result<String, McpError> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| {
+            McpError::stable(MCP_TRANSPORT_ERROR, format!("http body failed: {error}"))
+        })?;
+        if body.len().saturating_add(chunk.len()) > MAX_HTTP_BODY_BYTES {
+            return Err(McpError::stable(
+                MCP_LIMIT_EXCEEDED,
+                "http body exceeds the configured byte limit",
+            ));
+        }
+        body.extend_from_slice(&chunk);
     }
-    parse_jsonrpc_response(&data)
+    String::from_utf8(body)
+        .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "http body is not valid utf-8"))
 }
 
 pub(crate) fn authorize_stdio(allowed: &[Arc<str>], program: &Path) -> Result<(), McpError> {
@@ -745,9 +897,85 @@ mod tests {
     }
 
     #[test]
-    fn sse_only_transport_is_rejected() {
-        let error = HttpConfig::sse_only("https://example.invalid/sse")
-            .expect_err("sse-only must be rejected");
+    fn notification_before_response_pairs_and_leaves_the_next_request_aligned() {
+        let notifications = Mutex::new(Vec::new());
+        let expected = serde_json::json!(1);
+        let mut dispatch = FrameDispatch::new(&expected, &notifications);
+        assert!(
+            dispatch
+                .push(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/tools/list_changed"
+                }))
+                .expect("notification")
+                .is_none()
+        );
+        let result = dispatch
+            .push(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"ok": true}
+            }))
+            .expect("result")
+            .expect("paired");
+        assert_eq!(result["ok"], serde_json::json!(true));
+        assert_eq!(
+            notifications.lock().expect("lock").as_slice(),
+            ["notifications/tools/list_changed"]
+        );
+        let next = serde_json::json!(2);
+        let mut next_dispatch = FrameDispatch::new(&next, &notifications);
+        let next_result = next_dispatch
+            .push(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"ok": false}
+            }))
+            .expect("next")
+            .expect("paired");
+        assert_eq!(next_result["ok"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn foreign_id_is_a_protocol_violation() {
+        let notifications = Mutex::new(Vec::new());
+        let expected = serde_json::json!(1);
+        let mut dispatch = FrameDispatch::new(&expected, &notifications);
+        let error = dispatch
+            .push(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 99,
+                "result": {}
+            }))
+            .expect_err("foreign id");
         assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
+    }
+
+    #[tokio::test]
+    async fn oversized_line_poisons_without_resync() {
+        let oversized = usize::try_from(MAX_LINE_BYTES).expect("line cap") + 8;
+        let mut reader = BufReader::new(std::io::Cursor::new(vec![b'x'; oversized]));
+        let error = read_limited_line(&mut reader).await.expect_err("oversize");
+        assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
+    }
+
+    #[test]
+    fn sse_events_are_dispatched_separately() {
+        let notifications = Mutex::new(Vec::new());
+        let expected = serde_json::json!(7);
+        let text = concat!(
+            "event: message\n",
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n",
+            "\n",
+            "event: message\n",
+            "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"pong\":true}}\n",
+            "\n"
+        );
+        let result = parse_sse_jsonrpc(text, &expected, &notifications).expect("sse");
+        assert_eq!(result["pong"], serde_json::json!(true));
+        assert_eq!(
+            notifications.lock().expect("lock").as_slice(),
+            ["notifications/tools/list_changed"]
+        );
     }
 }

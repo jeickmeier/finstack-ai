@@ -105,6 +105,8 @@ impl BudgetError {
 
 #[cfg(test)]
 mod tests {
+    use finstack_ai_kernel::BoundedMap;
+
     use crate::{BudgetRequest, LimitKey};
 
     #[test]
@@ -113,7 +115,7 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(20),
             cost: None,
-            extension_counters: Default::default(),
+            extension_counters: BoundedMap::default(),
         };
         let encoded = serde_json::to_vec(&request).expect("JSON");
         let decoded: BudgetRequest = serde_json::from_slice(&encoded).expect("request");

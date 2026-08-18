@@ -1,0 +1,120 @@
+pub mod finstack_ai_tools_mcp
+pub use finstack_ai_tools_mcp::MCP_SAMPLING_REQUIRED
+pub struct finstack_ai_tools_mcp::HttpConfig
+impl finstack_ai_tools_mcp::HttpConfig
+pub fn finstack_ai_tools_mcp::HttpConfig::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+impl core::clone::Clone for finstack_ai_tools_mcp::HttpConfig
+pub fn finstack_ai_tools_mcp::HttpConfig::clone(&self) -> finstack_ai_tools_mcp::HttpConfig
+impl core::cmp::Eq for finstack_ai_tools_mcp::HttpConfig
+impl core::cmp::PartialEq for finstack_ai_tools_mcp::HttpConfig
+pub fn finstack_ai_tools_mcp::HttpConfig::eq(&self, &finstack_ai_tools_mcp::HttpConfig) -> bool
+impl core::fmt::Debug for finstack_ai_tools_mcp::HttpConfig
+pub fn finstack_ai_tools_mcp::HttpConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_mcp::HttpConfig
+pub struct finstack_ai_tools_mcp::McpConfig
+impl finstack_ai_tools_mcp::McpConfig
+pub fn finstack_ai_tools_mcp::McpConfig::allow_command(self, impl core::convert::AsRef<str>) -> Self
+pub fn finstack_ai_tools_mcp::McpConfig::allow_url(self, impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpConfig::http(self, finstack_ai_tools_mcp::HttpConfig) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpConfig::stdio(self, finstack_ai_tools_mcp::StdioConfig) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpConfig::stdio_confined(self, finstack_ai_tools_mcp::StdioConfig, finstack_ai_runtime::services::process_confinement::ProcessConfinement, finstack_ai_runtime::services::process_confinement::ConfinementProfile) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpConfig::try_from_mcp_json(&str) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpConfig::with_idempotent_tools<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn finstack_ai_tools_mcp::McpConfig::with_inline_result_bytes(self, u64) -> Self
+pub fn finstack_ai_tools_mcp::McpConfig::with_read_only_tools<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+impl core::clone::Clone for finstack_ai_tools_mcp::McpConfig
+pub fn finstack_ai_tools_mcp::McpConfig::clone(&self) -> finstack_ai_tools_mcp::McpConfig
+impl core::default::Default for finstack_ai_tools_mcp::McpConfig
+pub fn finstack_ai_tools_mcp::McpConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_mcp::McpConfig
+pub fn finstack_ai_tools_mcp::McpConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_mcp::McpContextProvider
+impl finstack_ai_tools_mcp::McpContextProvider
+pub fn finstack_ai_tools_mcp::McpContextProvider::frozen_names(&self) -> alloc::vec::Vec<&str>
+pub fn finstack_ai_tools_mcp::McpContextProvider::frozen_template_names(&self) -> alloc::vec::Vec<&str>
+pub async fn finstack_ai_tools_mcp::McpContextProvider::subscribe(&self, &str) -> core::result::Result<(), finstack_ai_tools_mcp::McpError>
+impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_tools_mcp::McpContextProvider
+pub fn finstack_ai_tools_mcp::McpContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
+pub fn finstack_ai_tools_mcp::McpContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
+pub fn finstack_ai_tools_mcp::McpContextProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::context::port::PendingContextEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::port::ContextReconcileResult, finstack_ai_runtime::ports::context::error::ContextError>>
+pub fn finstack_ai_tools_mcp::McpContextProvider::reconstruct(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>, finstack_ai_runtime::ports::context::error::ContextError>>
+pub struct finstack_ai_tools_mcp::McpError
+impl finstack_ai_tools_mcp::McpError
+pub const fn finstack_ai_tools_mcp::McpError::code(&self) -> &'static str
+pub fn finstack_ai_tools_mcp::McpError::message(&self) -> &str
+impl core::clone::Clone for finstack_ai_tools_mcp::McpError
+pub fn finstack_ai_tools_mcp::McpError::clone(&self) -> finstack_ai_tools_mcp::McpError
+impl core::cmp::Eq for finstack_ai_tools_mcp::McpError
+impl core::cmp::PartialEq for finstack_ai_tools_mcp::McpError
+pub fn finstack_ai_tools_mcp::McpError::eq(&self, &finstack_ai_tools_mcp::McpError) -> bool
+impl core::convert::From<finstack_ai_tools_mcp::McpError> for finstack_ai_runtime::ports::tool::error::ToolError
+pub fn finstack_ai_runtime::ports::tool::error::ToolError::from(finstack_ai_tools_mcp::McpError) -> Self
+impl core::error::Error for finstack_ai_tools_mcp::McpError
+impl core::fmt::Debug for finstack_ai_tools_mcp::McpError
+pub fn finstack_ai_tools_mcp::McpError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_mcp::McpError
+pub fn finstack_ai_tools_mcp::McpError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_mcp::McpError
+pub struct finstack_ai_tools_mcp::McpPrompt
+impl finstack_ai_tools_mcp::McpPrompt
+pub fn finstack_ai_tools_mcp::McpPrompt::name(&self) -> &str
+pub fn finstack_ai_tools_mcp::McpPrompt::text(&self) -> &str
+impl core::clone::Clone for finstack_ai_tools_mcp::McpPrompt
+pub fn finstack_ai_tools_mcp::McpPrompt::clone(&self) -> finstack_ai_tools_mcp::McpPrompt
+impl core::cmp::Eq for finstack_ai_tools_mcp::McpPrompt
+impl core::cmp::PartialEq for finstack_ai_tools_mcp::McpPrompt
+pub fn finstack_ai_tools_mcp::McpPrompt::eq(&self, &finstack_ai_tools_mcp::McpPrompt) -> bool
+impl core::fmt::Debug for finstack_ai_tools_mcp::McpPrompt
+pub fn finstack_ai_tools_mcp::McpPrompt::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_mcp::McpPrompt
+pub struct finstack_ai_tools_mcp::McpToolset
+impl finstack_ai_tools_mcp::McpToolset
+pub const fn finstack_ai_tools_mcp::McpToolset::catalog_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub fn finstack_ai_tools_mcp::McpToolset::frozen_prompts(&self) -> &[finstack_ai_tools_mcp::McpPrompt]
+pub const fn finstack_ai_tools_mcp::McpToolset::invocation_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_mcp::McpToolset
+pub fn finstack_ai_tools_mcp::McpToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_mcp::McpToolset::complete_nested_sample(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall, finstack_ai_runtime::ports::tool::types::NestedSample) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_mcp::McpToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_mcp::McpToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_mcp::McpToolset::reconstruct(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>>, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_mcp::McpToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_tools_mcp::McpToolsetFactory
+impl finstack_ai_tools_mcp::McpToolsetFactory
+pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct(&self) -> core::result::Result<finstack_ai_tools_mcp::McpToolset, finstack_ai_tools_mcp::McpError>
+pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct_context_provider(&self) -> core::result::Result<finstack_ai_tools_mcp::McpContextProvider, finstack_ai_tools_mcp::McpError>
+pub async fn finstack_ai_tools_mcp::McpToolsetFactory::construct_with_context(&self) -> core::result::Result<(finstack_ai_tools_mcp::McpToolset, finstack_ai_tools_mcp::McpContextProvider), finstack_ai_tools_mcp::McpError>
+pub const fn finstack_ai_tools_mcp::McpToolsetFactory::new(finstack_ai_tools_mcp::McpConfig) -> Self
+pub async fn finstack_ai_tools_mcp::McpToolsetFactory::reconstruct(&self) -> core::result::Result<finstack_ai_tools_mcp::McpToolset, finstack_ai_tools_mcp::McpError>
+pub async fn finstack_ai_tools_mcp::McpToolsetFactory::reconstruct_context_provider(&self) -> core::result::Result<finstack_ai_tools_mcp::McpContextProvider, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::McpToolsetFactory::with_list_changed_observer(self, alloc::sync::Arc<dyn finstack_ai_tools_mcp::McpListChangedObserver>) -> Self
+impl core::clone::Clone for finstack_ai_tools_mcp::McpToolsetFactory
+pub fn finstack_ai_tools_mcp::McpToolsetFactory::clone(&self) -> finstack_ai_tools_mcp::McpToolsetFactory
+impl core::fmt::Debug for finstack_ai_tools_mcp::McpToolsetFactory
+pub fn finstack_ai_tools_mcp::McpToolsetFactory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_mcp::StdioConfig
+pub finstack_ai_tools_mcp::StdioConfig::args: alloc::vec::Vec<alloc::string::String>
+pub finstack_ai_tools_mcp::StdioConfig::program: std::path::PathBuf
+impl finstack_ai_tools_mcp::StdioConfig
+pub fn finstack_ai_tools_mcp::StdioConfig::new(impl core::convert::Into<std::path::PathBuf>, impl core::convert::Into<alloc::vec::Vec<alloc::string::String>>) -> Self
+pub fn finstack_ai_tools_mcp::StdioConfig::with_confinement(self, finstack_ai_runtime::services::process_confinement::ProcessConfinement, finstack_ai_runtime::services::process_confinement::ConfinementProfile) -> Self
+impl core::clone::Clone for finstack_ai_tools_mcp::StdioConfig
+pub fn finstack_ai_tools_mcp::StdioConfig::clone(&self) -> finstack_ai_tools_mcp::StdioConfig
+impl core::cmp::Eq for finstack_ai_tools_mcp::StdioConfig
+impl core::cmp::PartialEq for finstack_ai_tools_mcp::StdioConfig
+pub fn finstack_ai_tools_mcp::StdioConfig::eq(&self, &finstack_ai_tools_mcp::StdioConfig) -> bool
+impl core::fmt::Debug for finstack_ai_tools_mcp::StdioConfig
+pub fn finstack_ai_tools_mcp::StdioConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_mcp::StdioConfig
+pub const finstack_ai_tools_mcp::MCP_ARTIFACT_REQUIRED: &str
+pub const finstack_ai_tools_mcp::MCP_CATALOG_DRIFT: &str
+pub const finstack_ai_tools_mcp::MCP_INPUT_REQUIRED: &str
+pub const finstack_ai_tools_mcp::MCP_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_mcp::MCP_PROTOCOL_VIOLATION: &str
+pub const finstack_ai_tools_mcp::MCP_RESULT_UNSUPPORTED: &str
+pub const finstack_ai_tools_mcp::MCP_SERVER_NOT_ALLOWLISTED: &str
+pub const finstack_ai_tools_mcp::MCP_SUBSCRIBE_UNKNOWN: &str
+pub const finstack_ai_tools_mcp::MCP_TRANSPORT_ERROR: &str
+pub trait finstack_ai_tools_mcp::McpListChangedObserver: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_tools_mcp::McpListChangedObserver::on_list_changed(&self, &str)
+pub fn finstack_ai_tools_mcp::interaction_request_from_tool_error(&finstack_ai_runtime::ports::tool::error::ToolError) -> core::option::Option<finstack_ai_kernel::effects::interaction::InteractionRequest>

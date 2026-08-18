@@ -6,7 +6,7 @@ use finstack_ai_runtime::{
     ResolvedToolCatalog, WorkflowDriverError, WorkflowSession,
 };
 
-use crate::cron::{CronError, CronExpression, CronFire, CronSchedule, validate_schedule_id};
+use crate::cron::{CronError, CronFire, CronSchedule, IntervalSchedule, validate_schedule_id};
 use crate::store::CronScheduleStore;
 
 /// Shipped in-process driver of [`WorkflowSession`] plus adapter-owned cron.
@@ -92,7 +92,7 @@ impl LocalWorkflowDriver {
     pub fn schedule_cron(
         &self,
         schedule_id: &str,
-        expression: CronExpression,
+        expression: IntervalSchedule,
     ) -> Result<CronSchedule, CronError> {
         let schedule_id = validate_schedule_id(schedule_id)?;
         let now = self
@@ -139,17 +139,27 @@ impl LocalWorkflowDriver {
             .map_err(|_| CronError::TimeOverflow)?;
         let tenant = self.session.tenant_scope();
         let mut fires = Vec::new();
-        for mut schedule in self.cron.load_tenant(tenant)? {
+        for schedule in self.cron.load_tenant(tenant)? {
             if schedule.next_fire_at > now {
                 continue;
             }
-            schedule.last_fired_at = Some(now);
-            schedule.fire_count = schedule.fire_count.saturating_add(1);
-            schedule.next_fire_at = schedule.expression.next_after(schedule.origin, now)?;
-            self.cron.upsert(&schedule)?;
+            let expected_next = schedule.next_fire_at.as_unix_ms();
+            let mut claimed = schedule.clone();
+            claimed.last_fired_at = Some(now);
+            claimed.fire_count = claimed.fire_count.saturating_add(1);
+            claimed.next_fire_at = claimed.expression.next_after(claimed.origin, now)?;
+            if !self.cron.try_claim(
+                tenant,
+                claimed.schedule_id.as_ref(),
+                expected_next,
+                now,
+                &claimed,
+            )? {
+                continue;
+            }
             fires.push(CronFire {
-                tenant_scope: Arc::clone(&schedule.tenant_scope),
-                schedule_id: Arc::clone(&schedule.schedule_id),
+                tenant_scope: Arc::clone(&claimed.tenant_scope),
+                schedule_id: Arc::clone(&claimed.schedule_id),
                 fired_at: now,
             });
         }

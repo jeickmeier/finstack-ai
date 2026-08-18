@@ -1,0 +1,38 @@
+pub mod finstack_ai_observer_otel
+pub enum finstack_ai_observer_otel::OtelObserverError
+pub finstack_ai_observer_otel::OtelObserverError::Configuration
+pub finstack_ai_observer_otel::OtelObserverError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_observer_otel::OtelObserverError
+pub fn finstack_ai_observer_otel::OtelObserverError::clone(&self) -> finstack_ai_observer_otel::OtelObserverError
+impl core::cmp::Eq for finstack_ai_observer_otel::OtelObserverError
+impl core::cmp::PartialEq for finstack_ai_observer_otel::OtelObserverError
+pub fn finstack_ai_observer_otel::OtelObserverError::eq(&self, &finstack_ai_observer_otel::OtelObserverError) -> bool
+impl core::error::Error for finstack_ai_observer_otel::OtelObserverError
+impl core::fmt::Debug for finstack_ai_observer_otel::OtelObserverError
+pub fn finstack_ai_observer_otel::OtelObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_observer_otel::OtelObserverError
+pub fn finstack_ai_observer_otel::OtelObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_otel::OtelObserverError
+pub struct finstack_ai_observer_otel::CapturedSpan
+pub finstack_ai_observer_otel::CapturedSpan::attributes: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub finstack_ai_observer_otel::CapturedSpan::name: alloc::string::String
+impl core::clone::Clone for finstack_ai_observer_otel::CapturedSpan
+pub fn finstack_ai_observer_otel::CapturedSpan::clone(&self) -> finstack_ai_observer_otel::CapturedSpan
+impl core::cmp::Eq for finstack_ai_observer_otel::CapturedSpan
+impl core::cmp::PartialEq for finstack_ai_observer_otel::CapturedSpan
+pub fn finstack_ai_observer_otel::CapturedSpan::eq(&self, &finstack_ai_observer_otel::CapturedSpan) -> bool
+impl core::fmt::Debug for finstack_ai_observer_otel::CapturedSpan
+pub fn finstack_ai_observer_otel::CapturedSpan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_otel::CapturedSpan
+pub struct finstack_ai_observer_otel::OtelObserver
+impl finstack_ai_observer_otel::OtelObserver
+pub fn finstack_ai_observer_otel::OtelObserver::dropped(&self) -> u64
+pub fn finstack_ai_observer_otel::OtelObserver::force_flush(&self)
+pub fn finstack_ai_observer_otel::OtelObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic>
+pub fn finstack_ai_observer_otel::OtelObserver::snapshot(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_observer_otel::CapturedSpan>, finstack_ai_runtime::ports::observer::ObserverError>
+pub fn finstack_ai_observer_otel::OtelObserver::try_new(finstack_ai_runtime::ports::observer::ObserverPayloadMode, usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_otel::OtelObserverError>
+pub fn finstack_ai_observer_otel::OtelObserver::try_redacted(usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_otel::OtelObserverError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_otel::OtelObserver
+pub fn finstack_ai_observer_otel::OtelObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_observer_otel::OtelObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub const fn finstack_ai_observer_otel::default_block_timeout() -> core::time::Duration

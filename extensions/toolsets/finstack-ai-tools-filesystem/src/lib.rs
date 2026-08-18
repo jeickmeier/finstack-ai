@@ -24,6 +24,7 @@ use finstack_ai_runtime::{
     ErrorCategory, Metadata, PortFuture, RawJson, RetrySafety, Sensitivity, SideEffectClass,
     ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionMode, ToolId,
     ToolResult, ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    verify_authority,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -377,23 +378,6 @@ async fn normalize_output(
     })
 }
 
-fn verify_authority(ctx: &ToolCallContext) -> Result<(), ToolError> {
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != ctx.run.locator.tenant_scope.as_ref())
-    {
-        return Err(fs_tool_error(
-            FILESYSTEM_POLICY_DENIED,
-            ErrorCategory::Validation,
-            "filesystem principal scope does not match the committed effect",
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PathArguments {
@@ -629,7 +613,11 @@ fn build_tools() -> Result<BuiltTools, FileSystemError> {
                 }
             })?,
             output_schema: None,
-            execution: ToolExecutionMode::Parallel,
+            execution: if id.as_str() == WRITE_ID || id.as_str() == EDIT_ID {
+                ToolExecutionMode::Sequential
+            } else {
+                ToolExecutionMode::Parallel
+            },
             side_effect,
             retry_safety,
             approval: ApprovalMetadata {

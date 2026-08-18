@@ -1,14 +1,5 @@
 //! Shared SSE framing and event-field parsing.
 
-/// Maximum accepted provider secret length.
-pub const SECRET_MAX_BYTES: usize = 16 * 1_024;
-
-/// Whether a configured secret is non-empty, bounded, and NUL-free.
-#[must_use]
-pub fn secret_is_valid(value: &str) -> bool {
-    !value.is_empty() && value.len() <= SECRET_MAX_BYTES && !value.as_bytes().contains(&0)
-}
-
 /// Incremental SSE frame splitter. Event interpretation stays in the caller.
 #[derive(Debug)]
 pub struct SseFrameParser {

@@ -49,7 +49,9 @@ Frozen names:
 Implementation of HTTP, process, and E2B I/O lives in leaf crates
 compiled only under `native-tokio`:
 
-- `finstack-ai-provider-gateway` (existing)
+- `finstack-ai-provider-openai`, `finstack-ai-provider-anthropic`,
+  `finstack-ai-provider-ollama`. `Agent::gateway` remains a thin
+  dispatcher onto those three crates (ADR-047).
 - `finstack-ai-remote-child` at `extensions/interop/finstack-ai-remote-child`
 - `finstack-ai-sandbox-e2b` at `extensions/toolsets/finstack-ai-sandbox-e2b`
 
@@ -57,8 +59,8 @@ The `wasm-host` inherent methods still exist. They return one stable
 code, `agent_run_unsupported_plan`. Bindings must not special-case
 “method missing.”
 
-`FORBIDDEN_WASM` must include the gateway, remote-child, and E2B
-crates (gateway is already listed).
+`FORBIDDEN_WASM` must include the dedicated provider crates,
+remote-child, and E2B crates.
 `cargo tree -p finstack-ai --features wasm-host` stays free of them,
 Temporal, Wasmtime, and `finstack-ai-server`.
 

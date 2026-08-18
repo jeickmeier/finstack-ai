@@ -4,7 +4,7 @@ use core::fmt;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_runtime::{
     AnthropicMessagesAssembly, ErrorCategory, Metadata, Model, ModelCapabilities, ModelDescriptor,
@@ -21,7 +21,7 @@ use crate::error::{
     CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, response_error,
     stream_error,
 };
-use crate::request::{MessagesRequest, serialize_request, tool_catalog_digest};
+use crate::request::{MessagesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::{AnthropicConfig, AnthropicModelConfig};
 
@@ -33,7 +33,6 @@ pub struct AnthropicProvider {
     endpoint: reqwest::Url,
     config: AnthropicConfig,
     models: RwLock<BTreeMap<ModelName, AnthropicModelConfig>>,
-    last_tool_catalog: Mutex<Option<finstack_ai_runtime::Digest>>,
 }
 
 impl fmt::Debug for AnthropicProvider {
@@ -100,7 +99,6 @@ impl AnthropicProvider {
             endpoint,
             config,
             models: RwLock::new(by_name),
-            last_tool_catalog: Mutex::new(None),
         })
     }
 
@@ -196,15 +194,19 @@ impl Model for AnthropicProvider {
                     audio: false,
                     files: false,
                 },
-                context_profile: models
-                    .values()
-                    .next()
-                    .expect("provider model catalog is non-empty")
-                    .capabilities()
-                    .context_profile,
+                context_profile: finstack_ai_runtime::ModelContextProfile {
+                    provider: Arc::from("anthropic"),
+                    model: model.clone(),
+                    hard_input_bytes: 0,
+                    context_window_tokens: 0,
+                    max_output_tokens: 0,
+                    reserved_output_tokens: 0,
+                    provider_overhead_tokens: 0,
+                    estimator: estimator_ref(),
+                },
                 native_tool_calls: false,
                 parallel_tool_calls: false,
-                structured_output: finstack_ai_runtime::StructuredOutputCapability::Unsupported,
+                structured_output: finstack_ai_runtime::StructuredOutputCapability::Prompted,
                 reasoning: false,
                 prompt_cache: false,
                 resumable_stream: false,
@@ -244,23 +246,9 @@ impl Model for AnthropicProvider {
         let timeout = self.config.request_timeout();
         let max_event_bytes = self.config.max_event_bytes();
         let max_stream_bytes = self.config.max_stream_bytes();
-        let digest = tool_catalog_digest(&request.draft.tools);
-        let changed = {
-            let mut last = self
-                .last_tool_catalog
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let changed = last.as_ref().is_some_and(|previous| previous != &digest);
-            *last = Some(digest);
-            changed
-        };
         Box::pin(async move {
             let model = model?;
-            let wire = if changed {
-                MessagesRequest::try_from_draft_with_cache(&request.draft, &model, false)?
-            } else {
-                MessagesRequest::try_from_draft(&request.draft, &model)?
-            };
+            let wire = MessagesRequest::try_from_draft(&request.draft, &model)?;
             let payload = serialize_request(&wire)?;
             let request_id = request.call.request_id.to_string();
             let cancellation = request.call.run.cancellation;
@@ -571,5 +559,22 @@ mod tests {
         assert!(response.usage.extension_counters().is_empty());
         assert_eq!(response.usage.input_tokens(), Some(608));
         assert_eq!(response.usage.output_tokens(), Some(69));
+    }
+
+    #[test]
+    fn unknown_model_uses_a_zeroed_profile_and_prompted_structured_output() {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9").expect("config");
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+        let unknown = ModelName::try_new("claude-unknown").expect("name");
+        let capabilities = provider.capabilities(&unknown);
+        assert_eq!(capabilities.context_profile.model, unknown);
+        assert_eq!(capabilities.context_profile.context_window_tokens, 0);
+        assert_eq!(
+            capabilities.structured_output,
+            finstack_ai_runtime::StructuredOutputCapability::Prompted
+        );
     }
 }

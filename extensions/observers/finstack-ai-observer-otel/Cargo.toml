@@ -10,10 +10,6 @@ authors.workspace = true
 description = "OpenTelemetry observer for finstack-ai"
 readme = "README.md"
 
-[features]
-default = []
-otlp = []
-
 [dependencies]
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 opentelemetry = { workspace = true, default-features = false, features = ["trace"] }

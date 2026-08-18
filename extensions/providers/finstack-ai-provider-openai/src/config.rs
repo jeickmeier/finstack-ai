@@ -6,8 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    InputCapabilities, ModelCapabilities, ModelContextProfile, ModelError, ModelName,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, secret_is_valid,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
+    ModelContextProfile, ModelError, ModelName, SecretString, StructuredOutputCapability,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -19,52 +20,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
 
-/// Opaque configured secret whose formatting is always redacted.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretString(Arc<str>);
-
-impl SecretString {
-    /// Construct a non-empty bounded secret.
-    ///
-    /// # Errors
-    ///
-    /// Returns `openai_config_invalid` for an empty, oversized, or NUL-bearing value.
-    pub fn try_new(value: impl AsRef<str>) -> Result<Self, ModelError> {
-        let value = value.as_ref();
-        if !secret_is_valid(value) {
-            return Err(config_error("provider secret is invalid"));
-        }
-        Ok(Self(Arc::from(value)))
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for SecretString {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SecretString([REDACTED])")
-    }
-}
-
-/// Explicit provider authentication configuration.
-#[derive(Clone, PartialEq, Eq)]
-pub enum Authentication {
-    /// No credential, suitable for keyless local loopback.
-    None,
-    /// `OpenAI`-style bearer credential.
-    Bearer(SecretString),
-}
-
-impl fmt::Debug for Authentication {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::None => formatter.write_str("None"),
-            Self::Bearer(_) => formatter.write_str("Bearer([REDACTED])"),
-        }
-    }
-}
+const DEFAULT_CREDENTIAL_NAME: &str = "default";
 
 /// One configured header whose value is always treated as secret.
 #[derive(Clone, PartialEq, Eq)]
@@ -111,7 +67,8 @@ impl fmt::Debug for SecretHeader {
 pub struct OpenAiConfig {
     base_url: Arc<str>,
     responses_path: Arc<str>,
-    authentication: Authentication,
+    credentials: CredentialStore,
+    credential: Option<CredentialReference>,
     headers: Arc<[SecretHeader]>,
     request_timeout: Duration,
     max_event_bytes: usize,
@@ -124,7 +81,8 @@ impl fmt::Debug for OpenAiConfig {
             .debug_struct("OpenAiConfig")
             .field("base_url", &self.base_url)
             .field("responses_path", &self.responses_path)
-            .field("authentication", &self.authentication)
+            .field("credentials", &self.credentials)
+            .field("credential", &self.credential)
             .field("headers", &self.headers)
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
@@ -156,7 +114,8 @@ impl OpenAiConfig {
         Ok(Self {
             base_url: Arc::from(base_url),
             responses_path: Arc::from(DEFAULT_RESPONSES_PATH),
-            authentication: Authentication::None,
+            credentials: CredentialStore::empty(),
+            credential: None,
             headers: Arc::from([]),
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
@@ -164,10 +123,32 @@ impl OpenAiConfig {
         })
     }
 
-    /// Set explicit authentication.
+    /// Insert one named credential entry and select it.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the reserved `default` credential name is rejected.
     #[must_use]
-    pub fn with_authentication(mut self, authentication: Authentication) -> Self {
-        self.authentication = authentication;
+    pub fn with_authentication(self, authentication: Authentication) -> Self {
+        let mut store = CredentialStore::empty();
+        store
+            .insert(DEFAULT_CREDENTIAL_NAME, authentication)
+            .expect("default credential name");
+        self.with_credential_store(
+            store,
+            CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME).expect("default credential name"),
+        )
+    }
+
+    /// Bind an explicit host-supplied credential store and reference.
+    #[must_use]
+    pub fn with_credential_store(
+        mut self,
+        store: CredentialStore,
+        reference: CredentialReference,
+    ) -> Self {
+        self.credentials = store;
+        self.credential = Some(reference);
         self
     }
 
@@ -209,6 +190,16 @@ impl OpenAiConfig {
         Ok(self)
     }
 
+    fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
+        let Some(reference) = &self.credential else {
+            return Ok(Authentication::None);
+        };
+        self.credentials
+            .resolve(reference)
+            .cloned()
+            .ok_or_else(|| config_error("named credential is missing"))
+    }
+
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
@@ -219,21 +210,25 @@ impl OpenAiConfig {
     pub(crate) fn header_map(&self) -> Result<HeaderMap, ModelError> {
         let url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
+        let authentication = self.resolved_authentication()?;
         if url.scheme() != "https"
-            && (!matches!(self.authentication, Authentication::None) || !self.headers.is_empty())
+            && (!matches!(authentication, Authentication::None) || !self.headers.is_empty())
         {
             return Err(config_error(
                 "provider credentials and secret headers require HTTPS",
             ));
         }
         let mut headers = HeaderMap::new();
-        match &self.authentication {
+        match authentication {
             Authentication::None => {}
             Authentication::Bearer(value) => {
                 let mut header = HeaderValue::from_str(&format!("Bearer {}", value.expose()))
                     .map_err(|_| config_error("bearer credential is not a valid header value"))?;
                 header.set_sensitive(true);
                 headers.insert(reqwest::header::AUTHORIZATION, header);
+            }
+            Authentication::ApiKey(_) => {
+                return Err(config_error("openai authentication must be bearer"));
             }
         }
         for custom in self.headers.iter() {
@@ -438,8 +433,8 @@ mod tests {
             format!("{config:?}"),
         ] {
             assert!(!rendered.contains(CANARY));
-            assert!(rendered.contains("REDACTED"));
         }
+        assert!(format!("{header:?}").contains("REDACTED"));
     }
 
     #[test]
@@ -468,5 +463,28 @@ mod tests {
             crate::error::CONFIG_INVALID
         );
         assert!(SecretHeader::try_new("authorization", secret).is_err());
+    }
+
+    #[test]
+    fn unresolved_named_credential_fails_closed() {
+        let store = CredentialStore::empty();
+        let reference = CredentialReference::try_new("missing").expect("reference");
+        let config = OpenAiConfig::try_new("https://api.openai.test")
+            .expect("config")
+            .with_credential_store(store, reference);
+        assert_eq!(
+            config.header_map().expect_err("missing").code(),
+            crate::error::CONFIG_INVALID
+        );
+    }
+
+    #[test]
+    fn try_new_keeps_the_stable_openai_config_code() {
+        assert_eq!(
+            OpenAiConfig::try_new("ftp://example.test")
+                .expect_err("scheme")
+                .code(),
+            crate::error::CONFIG_INVALID
+        );
     }
 }

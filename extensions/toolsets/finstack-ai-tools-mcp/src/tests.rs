@@ -161,6 +161,22 @@ async fn network_ref_in_input_schema_is_rejected() {
     assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
 }
 
+#[tokio::test]
+async fn colliding_sanitized_tool_ids_fail_closed() {
+    let transport = ScriptedTransport::new(vec![serde_json::json!({
+        "resultType":"complete",
+        "tools":[
+            {"name":"Foo!","inputSchema":{"type":"object"}},
+            {"name":"foo-","inputSchema":{"type":"object"}}
+        ]
+    })]);
+    let Err(error) = McpToolset::connect(Arc::new(transport), McpConfig::default(), None).await
+    else {
+        panic!("collision");
+    };
+    assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
+}
+
 #[test]
 fn annotations_alone_never_grant_retry_safety() {
     let mut listed = tool("weather");
@@ -896,7 +912,7 @@ async fn subscribe_then_collect_rereads_frozen_uri_bytes() {
 }
 
 #[tokio::test]
-async fn reconstruct_snapshot_includes_the_new_tool() {
+async fn reconstruct_signals_catalog_drift() {
     let transport = Arc::new(ScriptedTransport::new(vec![
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}},{"name":"extra","inputSchema":{"type":"object"}}]}),
@@ -909,13 +925,11 @@ async fn reconstruct_snapshot_includes_the_new_tool() {
     .await
     .expect("connects");
     assert_eq!(live.tools().len(), 1);
-    let rebuilt = live
-        .reconstruct()
-        .await
-        .expect("reconstruct")
-        .expect("new toolset");
+    let Err(error) = live.reconstruct().await else {
+        panic!("catalog drift");
+    };
+    assert_eq!(error.code(), MCP_CATALOG_DRIFT);
     assert_eq!(live.tools().len(), 1, "live catalog stays frozen");
-    assert_eq!(rebuilt.tools().len(), 2);
 }
 
 #[tokio::test]
@@ -984,8 +998,13 @@ async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
         .tools()
         .len();
     assert_eq!(live_tools, 1);
-    let live_resolved = Arc::as_ptr(agent.resolved());
-    let rebuilt = agent.re_resolve().await.expect("re_resolve");
+    let Err(error) = agent.re_resolve().await else {
+        panic!("catalog drift");
+    };
+    assert!(
+        format!("{error}").contains(MCP_CATALOG_DRIFT) || error.to_string().contains("catalog"),
+        "{error}"
+    );
     assert_eq!(
         agent.resolved().run_plan().toolsets()[0]
             .handle()
@@ -993,14 +1012,6 @@ async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
             .len(),
         1
     );
-    assert_eq!(
-        rebuilt.resolved().run_plan().toolsets()[0]
-            .handle()
-            .tools()
-            .len(),
-        2
-    );
-    assert_ne!(Arc::as_ptr(rebuilt.resolved()), live_resolved);
 }
 
 fn memory_journal_store() -> Arc<dyn finstack_ai::runtime::JournalStore> {

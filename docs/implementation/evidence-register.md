@@ -18,7 +18,7 @@ The final 12 lowercase hexadecimal characters are generated randomly when the re
 
 An ordinal identifies the criterion at its linked version of the plan. Do not copy criterion prose into this register. If a plan amendment adds, removes, or reorders criteria, record the old-to-new ID mapping before updating coverage totals.
 
-PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.24 inventory is 408 logical-PR criteria and 94 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
+PLAN-0.6 began with 342 logical-PR acceptance-evidence bullets and 62 phase entrance/exit bullets. The current PLAN-0.25 inventory is 451 logical-PR criteria and 100 phase criteria. Rows are added when their scope becomes active, keeping this register useful without maintaining a duplicate plan.
 
 ## Plan baseline and criterion migration
 
@@ -43,7 +43,8 @@ The current ordinal namespace is bound to this exact plan artifact:
 | PLAN-0.21 | 0.21 | `6bf69f396046e3cc3ddd0992aa4919b37b03f9579cf5d9f3f96ae66fff2b9172` | 2026-08-15 | 73 | 355 | 76 | Pack v0.23 ADR-040 / Phase 11 / PR-068–PR-073. Recovered from `c34043a`. Headers include PR-068–PR-073; the exec line still said 67 / eleven. Counts are artifact-true (header and bullet inventory); the exec-line staleness is recorded, not corrected. | Superseded |
 | PLAN-0.22 | 0.22 | `ec4c7685b82efbff55d80e39e705f88ea87bae1cd2534f8c2d7499bf2b8d1b23` | 2026-08-17 | 79 | 379 | 84 | Pack v0.24 Phase 12 / PR-074–PR-079 1.0 production drivers. Recovered from `2bab15e`. | Superseded |
 | PLAN-0.23 | 0.23 | `e434e3d02ce69f9681dcf874a93e086c8839103fb587629aa555d374b5e0e596` | 2026-08-18 | 79 | 379 | 84 | Pack v0.25 B1 freeze-gate correction: `tools/compat/public_items.py --check` fails on removed and added public names; no signature extraction, so signatures, additive fields, and inherent methods are named review. Three frozen baselines regenerated (+53 Rust, +1 Python). Counts recomputed from the artifact; PLAN-0.8–PLAN-0.19 carried a stale `345` PR-criteria figure (true count reached 346 by PLAN-0.15). Baselines 0.20–0.22 were never rowed in this table. | Superseded |
-| PLAN-0.24 | 0.24 | `36cfb47a5c1b4976930ef5f6c8fb2afc9de3e2c05f333c1c2474fc2e634ec3ba` | 2026-08-18 | 84 | 408 | 94 | Pack v0.26 Phase 13 / PR-080–PR-084 1.0.x kernel remediation. Recovers PLAN-0.20–0.22 above PLAN-0.23. TDD remains 0.19. B1 is not re-landed. | Current |
+| PLAN-0.24 | 0.24 | `36cfb47a5c1b4976930ef5f6c8fb2afc9de3e2c05f333c1c2474fc2e634ec3ba` | 2026-08-18 | 84 | 408 | 94 | Pack v0.26 Phase 13 / PR-080–PR-084 1.0.x kernel remediation. Recovers PLAN-0.20–0.22 above PLAN-0.23. TDD remains 0.19. B1 is not re-landed. | Superseded |
+| PLAN-0.25 | 0.25 | `1ed44ee8b871544b2928d8ab23e52dfa8b1996ae9ed034ce2eed44d86310b6fc` | 2026-08-18 | 98 | 451 | 100 | Pack v0.27 Phase 14 / PR-085–PR-098 extensions remediation. Remaps draft Phase 13 / PR-080–PR-093. ADR-047/048. cargo-public-api gate. | Current |
 
 When a versioned amendment changes criterion order or inventory, append every affected mapping before updating delivery totals or acceptance rows. `Removed` and `Replaced` dispositions require the amendment that authorized the scope change.
 
@@ -114,6 +115,30 @@ When a versioned amendment changes criterion order or inventory, append every af
 | 2026-08-18 | PLAN-0.23 | PLAN-0.24 / same digest | — | PR-084-A04 (added) | Pack v0.26 Phase 13 authorization | Pack v0.26 amendment |
 | 2026-08-18 | PLAN-0.23 | PLAN-0.24 / same digest | — | PR-084-A05 (added) | Pack v0.26 Phase 13 authorization | Pack v0.26 amendment |
 | 2026-08-18 | PLAN-0.23 | PLAN-0.24 / same digest | — | PR-084-A06 (added) | Pack v0.26 Phase 13 authorization | Pack v0.26 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / `1ed44ee8b871544b2928d8ab23e52dfa8b1996ae9ed034ce2eed44d86310b6fc` | — | PH14-ENT-A01 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PH14-ENT-A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PH14-EXIT-A01 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PH14-EXIT-A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PH14-EXIT-A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PH14-EXIT-A04 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-085-A01 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-085-A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-085-A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-085-A04 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-085-A05 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-086-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-087-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-088-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-089-A01–A04 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-090-A01–A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-091-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-092-A01–A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-093-A01–A04 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-094-A01–A04 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-095-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-096-A01–A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-097-A01–A02 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
+| 2026-08-18 | PLAN-0.24 | PLAN-0.25 / same digest | — | PR-098-A01–A03 (added) | Pack v0.27 Phase 14 authorization | Pack v0.27 amendment |
 
 ## Acceptance dispositions
 

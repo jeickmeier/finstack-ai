@@ -1,0 +1,26 @@
+pub mod finstack_ai_tools_subagent
+pub enum finstack_ai_tools_subagent::SubagentError
+pub finstack_ai_tools_subagent::SubagentError::Configuration
+pub finstack_ai_tools_subagent::SubagentError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_subagent::SubagentError
+pub fn finstack_ai_tools_subagent::SubagentError::clone(&self) -> finstack_ai_tools_subagent::SubagentError
+impl core::cmp::Eq for finstack_ai_tools_subagent::SubagentError
+impl core::cmp::PartialEq for finstack_ai_tools_subagent::SubagentError
+pub fn finstack_ai_tools_subagent::SubagentError::eq(&self, &finstack_ai_tools_subagent::SubagentError) -> bool
+impl core::error::Error for finstack_ai_tools_subagent::SubagentError
+impl core::fmt::Debug for finstack_ai_tools_subagent::SubagentError
+pub fn finstack_ai_tools_subagent::SubagentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_subagent::SubagentError
+pub fn finstack_ai_tools_subagent::SubagentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_subagent::SubagentError
+pub struct finstack_ai_tools_subagent::SubagentToolset
+impl finstack_ai_tools_subagent::SubagentToolset
+pub fn finstack_ai_tools_subagent::SubagentToolset::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, impl core::convert::Into<alloc::sync::Arc<[finstack_ai_runtime::services::agent_invoker::AgentRef]>>) -> core::result::Result<Self, finstack_ai_tools_subagent::SubagentError>
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_subagent::SubagentToolset
+pub fn finstack_ai_tools_subagent::SubagentToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_subagent::SubagentToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_subagent::SubagentToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_subagent::SUBAGENT_AGENT_NOT_ALLOWED: &str
+pub const finstack_ai_tools_subagent::SUBAGENT_CHILD_NOT_FOUND: &str
+pub const finstack_ai_tools_subagent::SUBAGENT_CONFIGURATION_INVALID: &str
+pub const finstack_ai_tools_subagent::SUBAGENT_INVALID_ARGUMENTS: &str

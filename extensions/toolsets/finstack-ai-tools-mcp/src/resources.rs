@@ -402,8 +402,26 @@ async fn collect_frozen(
             .filter(|resource| subscribed.contains(resource.name()))
             .collect()
     };
+    if selected.len() > request.budget.max_items
+        && matches!(request.budget.overflow, ContextOverflowPolicy::Reject)
+    {
+        return Err(context_error(
+            finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
+            ErrorCategory::Limit,
+            "MCP resource contribution exceeds the committed budget",
+        ));
+    }
+    let selected = selected
+        .into_iter()
+        .take(request.budget.max_items)
+        .collect::<Vec<_>>();
     let mut items = Vec::with_capacity(selected.len());
+    let mut tokens = 0_u64;
+    let mut bytes = 0_u64;
     for resource in selected {
+        if tokens >= request.budget.max_tokens || bytes >= request.budget.max_bytes {
+            return apply_overflow(items, request);
+        }
         let value = transport
             .request(
                 "resources/read",
@@ -428,9 +446,33 @@ async fn collect_frozen(
                 "resources/read resultType is not complete",
             ));
         }
-        items.push(item_from_read(resource, &result.contents, max_bytes)?);
+        let item = item_from_read(resource, &result.contents, max_bytes)?;
+        let next_tokens = tokens.saturating_add(item.estimated_tokens);
+        let next_bytes = bytes.saturating_add(item.bytes);
+        if next_tokens > request.budget.max_tokens || next_bytes > request.budget.max_bytes {
+            return apply_overflow(items, request);
+        }
+        tokens = next_tokens;
+        bytes = next_bytes;
+        items.push(item);
     }
-    apply_budget(items, request)
+    ContextContribution::try_new(items, Some("finstack.context.mcp"))
+}
+
+fn apply_overflow(
+    items: Vec<ContextItem>,
+    request: &ContextRequest,
+) -> Result<ContextContribution, ContextError> {
+    match request.budget.overflow {
+        ContextOverflowPolicy::Reject => Err(context_error(
+            finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
+            ErrorCategory::Limit,
+            "MCP resource contribution exceeds the committed budget",
+        )),
+        ContextOverflowPolicy::TruncateWithDiagnostic => {
+            ContextContribution::try_new(items, Some("finstack.context.mcp"))
+        }
+    }
 }
 
 fn item_from_read(
@@ -465,7 +507,7 @@ fn render_contents(
     let mut parts = Vec::new();
     for content in contents {
         if let Some(text) = &content.text {
-            parts.push(truncate(text, max_bytes));
+            parts.push(text.clone());
             continue;
         }
         if content.blob.is_some() {
@@ -479,11 +521,12 @@ fn render_contents(
             ));
         }
     }
-    if parts.is_empty() {
+    let joined = if parts.is_empty() {
         format!("empty resource {}", resource.name())
     } else {
         parts.join("\n")
-    }
+    };
+    truncate(&joined, max_bytes)
 }
 
 fn truncate(text: &str, max_bytes: u64) -> String {
@@ -496,37 +539,6 @@ fn truncate(text: &str, max_bytes: u64) -> String {
         end -= 1;
     }
     format!("{}…[truncated]", &text[..end])
-}
-
-fn apply_budget(
-    items: Vec<ContextItem>,
-    request: &ContextRequest,
-) -> Result<ContextContribution, ContextError> {
-    let mut accepted = Vec::new();
-    let mut tokens = 0_u64;
-    let mut bytes = 0_u64;
-    for item in items {
-        let next_tokens = tokens.saturating_add(item.estimated_tokens);
-        let next_bytes = bytes.saturating_add(item.bytes);
-        if accepted.len() >= request.budget.max_items
-            || next_tokens > request.budget.max_tokens
-            || next_bytes > request.budget.max_bytes
-        {
-            return match request.budget.overflow {
-                ContextOverflowPolicy::Reject => Err(context_error(
-                    finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
-                    ErrorCategory::Limit,
-                    "MCP resource contribution exceeds the committed budget",
-                )),
-                ContextOverflowPolicy::TruncateWithDiagnostic => break,
-            };
-        }
-        tokens = next_tokens;
-        bytes = next_bytes;
-        accepted.push(item);
-    }
-    let _ = (tokens, bytes);
-    ContextContribution::try_new(accepted, Some("finstack.context.mcp"))
 }
 
 fn estimate_tokens(text: &str) -> u64 {

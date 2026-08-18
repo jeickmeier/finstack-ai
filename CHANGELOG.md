@@ -16,6 +16,8 @@ unpublished.
 
 ### Added
 
+- `verify_authority(&ToolCallContext)` on the runtime Tool port (ADR-048).
+- `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `tools/compat/public_items.py`.
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.
 - `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run (PR-079 Rust half).
 - Derived poll scheduling from committed `EffectDeferred` (`due_polls` / `drive_due_polls`); expiry uses `tool_deferral_expired`.
@@ -34,11 +36,9 @@ unpublished.
   commits a child model effect under `EffectPurpose::CompactionSummary`,
   charges the same run budget, and re-enters the chain with the summary.
   Middleware stays non-effect-bearing.
-- `finstack-ai-provider-gateway` is a config-driven `Model` adapter over
-  `openai_responses`, `openai_chat`, `anthropic_messages`, and
-  `ollama_chat`. Required profile fields fail at construction; credential
-  references resolve per request with no environment fallback. Official
-  vendor crates stay as reference implementations.
+- Named credentials (`SecretString`, `Authentication`, `CredentialStore`)
+  live in `provider_util` and are re-exported by the dedicated OpenAI,
+  Anthropic, and Ollama crates.
 - Native mid-run capability activation (`capability_list` /
   `capability_activate` in `finstack-ai-tools-skills`) unions onto the
   run-start variant without re-resolving the agent (ADR-041). Python
@@ -72,6 +72,10 @@ unpublished.
 - Official OpenAI integration now uses stateless Responses requests through
   `finstack-ai-provider-openai` and Python `Agent.openai`. Ollama now uses its
   native `/api/chat` protocol through `finstack-ai-provider-ollama`.
+- `Agent.gateway` is a thin dispatcher onto the three dedicated providers.
+  `openai_chat` is a configuration error.
+- Subagent tool `subagent_await` is renamed `subagent_status`.
+- `finstack-ai-middleware-verify` is an in-repo fixture (`publish = false`).
 
 ### Removed
 
@@ -81,6 +85,9 @@ unpublished.
 - Removed the generic OpenAI-compatible Chat Completions crate, Python factory,
   browser adapter, and vLLM/LM Studio/gateway endpoint surface. This breaking
   migration remains unpublished.
+- Removed `finstack-ai-provider-gateway`, `OpenAiChatAssembly`, and
+  `provider_util/openai_chat.rs`.
+- Removed the non-engine `finstack-ai-workflow-temporal` shim.
 
 ### Fixed
 

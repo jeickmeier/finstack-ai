@@ -142,7 +142,8 @@ pub struct GatewayAgentSpec {
     pub endpoint: String,
     /// Configured model name.
     pub model: String,
-    /// Wire protocol: `openai_responses`, `openai_chat`, `anthropic_messages`, or `ollama_chat`.
+    /// Wire protocol: `openai_responses`, `anthropic_messages`, or `ollama_chat`.
+    /// `openai_chat` is a configuration error.
     pub wire_protocol: String,
     /// Named credential reference. Never a secret literal.
     pub credential_name: String,
@@ -229,9 +230,10 @@ impl Agent {
 
     /// Construct a config-driven gateway agent.
     ///
-    /// Reuses `finstack-ai-provider-gateway` under `native-tokio` only. Does
-    /// not read environment variables. HTTPS is required off loopback and
-    /// whenever a credential is set.
+    /// Dispatches onto the dedicated openai, anthropic, or ollama provider
+    /// under `native-tokio` only. Does not read environment variables. HTTPS
+    /// is required off loopback and whenever a credential is set. `openai_chat`
+    /// is a configuration error.
     ///
     /// # Errors
     ///
@@ -271,8 +273,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     let config = OpenAiConfig::try_new("https://api.openai.com")
         .map_err(|error| model_configuration_error(&error))?
         .with_authentication(Authentication::Bearer(
-            SecretString::try_new(spec.api_key)
-                .map_err(|error| model_configuration_error(&error))?,
+            SecretString::try_new(spec.api_key).map_err(|_| secret_configuration_error())?,
         ));
     let mut model_config = OpenAiModelConfig::try_new(
         &spec.model,
@@ -316,7 +317,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         .map_err(|error| model_configuration_error(&error))?;
     if let Some(api_key) = spec.api_key {
         config = config.with_authentication(Authentication::ApiKey(
-            SecretString::try_new(api_key).map_err(|error| model_configuration_error(&error))?,
+            SecretString::try_new(api_key).map_err(|_| secret_configuration_error())?,
         ));
     }
     let model_config = AnthropicModelConfig::try_new(
@@ -389,13 +390,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
 
 #[cfg(feature = "native-tokio")]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    use finstack_ai_provider_gateway::{
-        Authentication, CredentialReference, CredentialStore, GatewayCapabilityFlags,
-        GatewayModelConfig, GatewayModelSpec, GatewayProvider, GatewayRouteConfig,
-    };
-    use finstack_ai_runtime::{
-        InputCapabilities, StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
-    };
+    use finstack_ai_runtime::{Authentication, CredentialReference, CredentialStore};
 
     let hard_input_bytes = spec.hard_input_bytes.ok_or_else(|| {
         AgentRunError::configuration(
@@ -404,54 +399,56 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
         )
     })?;
     let authentication = gateway_authentication(spec.auth_kind.as_deref(), spec.api_key)?;
+    require_https_or_loopback(&spec.endpoint)?;
     require_https_for_credentials(
         &spec.endpoint,
         !matches!(authentication, Authentication::None),
     )?;
-    let wire_protocol = parse_wire_protocol(&spec.wire_protocol)?;
-    let credential = CredentialReference::try_new(&spec.credential_name)
-        .map_err(|error| model_configuration_error(&error))?;
-    let route = GatewayRouteConfig::try_new(wire_protocol, &spec.endpoint, credential)
-        .map_err(|error| model_configuration_error(&error))?;
-    let model_spec = GatewayModelSpec::try_from_config(GatewayModelConfig {
-        name: Some(spec.model),
-        hard_input_bytes: Some(hard_input_bytes),
-        context_window_tokens: Some(LINKED_CONTEXT_WINDOW_TOKENS),
-        max_output_tokens: Some(LINKED_RESERVED_OUTPUT_TOKENS),
-        reserved_output_tokens: Some(LINKED_RESERVED_OUTPUT_TOKENS),
-        provider_overhead_tokens: Some(LINKED_PROVIDER_OVERHEAD_TOKENS),
-        estimator: Some(TokenEstimatorRef {
-            id: Arc::from("gateway.utf8-byte-upper-bound"),
-            version: Arc::from("1"),
-            source: TokenEstimatorSource::ConservativeUpperBound,
-        }),
-        capabilities: Some(GatewayCapabilityFlags {
-            input: InputCapabilities {
-                text: true,
-                json: true,
-                images: false,
-                audio: false,
-                files: false,
-            },
-            native_tool_calls: true,
-            parallel_tool_calls: false,
-            structured_output: StructuredOutputCapability::Unsupported,
-            reasoning: false,
-            prompt_cache: false,
-            resumable_stream: false,
-            idempotent_requests: false,
-        }),
-    })
-    .map_err(|error| model_configuration_error(&error))?;
-    let model_name = model_spec.name().clone();
+    if spec.wire_protocol == "openai_chat" {
+        return Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "gateway wire_protocol openai_chat is not supported",
+        ));
+    }
+    let authentication = match spec.wire_protocol.as_str() {
+        "openai_responses" | "ollama_chat" => match authentication {
+            Authentication::ApiKey(secret) => Authentication::Bearer(secret),
+            other => other,
+        },
+        "anthropic_messages" => match authentication {
+            Authentication::Bearer(secret) => Authentication::ApiKey(secret),
+            other => other,
+        },
+        _ => {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "gateway wire_protocol must be openai_responses, anthropic_messages, or ollama_chat",
+            ));
+        }
+    };
+    let reference = CredentialReference::try_new(&spec.credential_name).map_err(|_| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "gateway credential_name is invalid",
+        )
+    })?;
     let mut store = CredentialStore::empty();
     store
         .insert(&spec.credential_name, authentication)
-        .map_err(|error| model_configuration_error(&error))?;
-    let provider: Arc<dyn Model> = Arc::new(
-        GatewayProvider::try_new(route, vec![model_spec], store)
-            .map_err(|error| model_configuration_error(&error))?,
-    );
+        .map_err(|_| {
+            AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "gateway credential_name is invalid",
+            )
+        })?;
+    let (provider, model_name) = gateway_provider(
+        &spec.wire_protocol,
+        &spec.endpoint,
+        &spec.model,
+        hard_input_bytes,
+        store,
+        reference,
+    )?;
     finish_linked_agent(
         "python.agent.gateway",
         "python.bundle.gateway",
@@ -467,6 +464,94 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
         OPENAI_TIMEOUT,
     )
     .await
+}
+
+#[cfg(feature = "native-tokio")]
+fn gateway_provider(
+    wire_protocol: &str,
+    endpoint: &str,
+    model: &str,
+    hard_input_bytes: u64,
+    store: finstack_ai_runtime::CredentialStore,
+    reference: finstack_ai_runtime::CredentialReference,
+) -> Result<(Arc<dyn Model>, ModelName), AgentRunError> {
+    match wire_protocol {
+        "openai_responses" => {
+            use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
+            let config = OpenAiConfig::try_new(endpoint)
+                .map_err(|error| model_configuration_error(&error))?
+                .with_credential_store(store, reference);
+            let model = OpenAiModelConfig::try_new(
+                model,
+                hard_input_bytes,
+                LINKED_CONTEXT_WINDOW_TOKENS,
+                LINKED_RESERVED_OUTPUT_TOKENS,
+                LINKED_RESERVED_OUTPUT_TOKENS,
+                LINKED_PROVIDER_OVERHEAD_TOKENS,
+            )
+            .map_err(|error| model_configuration_error(&error))?;
+            let model_name = model.name.clone();
+            Ok((
+                Arc::new(
+                    OpenAiProvider::try_new(config, vec![model])
+                        .map_err(|error| model_configuration_error(&error))?,
+                ),
+                model_name,
+            ))
+        }
+        "anthropic_messages" => {
+            use finstack_ai_provider_anthropic::{
+                AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
+            };
+            let config = AnthropicConfig::try_new(endpoint)
+                .map_err(|error| model_configuration_error(&error))?
+                .with_credential_store(store, reference);
+            let model = AnthropicModelConfig::try_new(
+                model,
+                hard_input_bytes,
+                LINKED_CONTEXT_WINDOW_TOKENS,
+                LINKED_ANTHROPIC_OUTPUT_TOKENS,
+                LINKED_ANTHROPIC_OUTPUT_TOKENS,
+                LINKED_PROVIDER_OVERHEAD_TOKENS,
+            )
+            .map_err(|error| model_configuration_error(&error))?;
+            let model_name = model.name.clone();
+            Ok((
+                Arc::new(
+                    AnthropicProvider::try_new(config, vec![model])
+                        .map_err(|error| model_configuration_error(&error))?,
+                ),
+                model_name,
+            ))
+        }
+        "ollama_chat" => {
+            use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
+            let config = OllamaConfig::try_new(endpoint)
+                .map_err(|error| model_configuration_error(&error))?
+                .with_credential_store(store, reference);
+            let model = OllamaModelConfig::try_new(
+                model,
+                hard_input_bytes,
+                LINKED_CONTEXT_WINDOW_TOKENS,
+                LINKED_RESERVED_OUTPUT_TOKENS,
+                LINKED_RESERVED_OUTPUT_TOKENS,
+                LINKED_PROVIDER_OVERHEAD_TOKENS,
+            )
+            .map_err(|error| model_configuration_error(&error))?;
+            let model_name = model.name.clone();
+            Ok((
+                Arc::new(
+                    OllamaProvider::try_new(config, vec![model])
+                        .map_err(|error| model_configuration_error(&error))?,
+                ),
+                model_name,
+            ))
+        }
+        _ => Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "gateway wire_protocol must be openai_responses, anthropic_messages, or ollama_chat",
+        )),
+    }
 }
 
 #[cfg(feature = "native-tokio")]
@@ -676,37 +761,27 @@ fn model_configuration_error(error: &finstack_ai_runtime::ModelError) -> AgentRu
 }
 
 #[cfg(feature = "native-tokio")]
-fn parse_wire_protocol(
-    name: &str,
-) -> Result<finstack_ai_provider_gateway::WireProtocol, AgentRunError> {
-    use finstack_ai_provider_gateway::WireProtocol;
-
-    match name {
-        "openai_responses" => Ok(WireProtocol::OpenaiResponses),
-        "openai_chat" => Ok(WireProtocol::OpenaiChat),
-        "anthropic_messages" => Ok(WireProtocol::AnthropicMessages),
-        "ollama_chat" => Ok(WireProtocol::OllamaChat),
-        _ => Err(AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "gateway wire_protocol must be openai_responses, openai_chat, anthropic_messages, or ollama_chat",
-        )),
-    }
+fn secret_configuration_error() -> AgentRunError {
+    AgentRunError::configuration(
+        AGENT_RUN_INVALID_CONFIGURATION,
+        "provider secret is invalid",
+    )
 }
 
 #[cfg(feature = "native-tokio")]
 fn gateway_authentication(
     kind: Option<&str>,
     api_key: Option<String>,
-) -> Result<finstack_ai_provider_gateway::Authentication, AgentRunError> {
-    use finstack_ai_provider_gateway::{Authentication, SecretString};
+) -> Result<finstack_ai_runtime::Authentication, AgentRunError> {
+    use finstack_ai_runtime::{Authentication, SecretString};
 
     match (kind, api_key) {
         (None | Some("none"), None) => Ok(Authentication::None),
         (None | Some("bearer"), Some(key)) => Ok(Authentication::Bearer(
-            SecretString::try_new(key).map_err(|error| model_configuration_error(&error))?,
+            SecretString::try_new(key).map_err(|_| secret_configuration_error())?,
         )),
         (Some("api_key"), Some(key)) => Ok(Authentication::ApiKey(
-            SecretString::try_new(key).map_err(|error| model_configuration_error(&error))?,
+            SecretString::try_new(key).map_err(|_| secret_configuration_error())?,
         )),
         (Some("none"), Some(_)) => Err(AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
@@ -721,6 +796,29 @@ fn gateway_authentication(
             "gateway auth must be none, bearer, or api_key",
         )),
     }
+}
+
+#[cfg(feature = "native-tokio")]
+fn require_https_or_loopback(endpoint: &str) -> Result<(), AgentRunError> {
+    let Some(rest) = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("HTTP://"))
+    else {
+        return Ok(());
+    };
+    let host = rest
+        .split(['/', ':', '?'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if matches!(host, "127.0.0.1" | "localhost" | "::1") {
+        return Ok(());
+    }
+    Err(AgentRunError::configuration(
+        AGENT_RUN_INVALID_CONFIGURATION,
+        "plaintext HTTP is allowed only for loopback endpoints",
+    ))
 }
 
 #[cfg(feature = "native-tokio")]
@@ -1040,6 +1138,15 @@ mod tests {
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("HTTPS"));
         assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
+    async fn gateway_rejects_openai_chat() {
+        let mut spec = gateway_spec();
+        spec.wire_protocol = "openai_chat".into();
+        let error = Agent::gateway(spec).await.err().expect("openai_chat");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("openai_chat"));
     }
 
     fn e2b_spec() -> E2bSandboxAgentSpec {

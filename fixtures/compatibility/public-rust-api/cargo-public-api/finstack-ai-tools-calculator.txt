@@ -1,0 +1,51 @@
+pub mod finstack_ai_tools_calculator
+pub enum finstack_ai_tools_calculator::CalculatorError
+pub finstack_ai_tools_calculator::CalculatorError::Arithmetic
+pub finstack_ai_tools_calculator::CalculatorError::Arithmetic::reason: &'static str
+pub finstack_ai_tools_calculator::CalculatorError::Configuration
+pub finstack_ai_tools_calculator::CalculatorError::Configuration::reason: &'static str
+pub finstack_ai_tools_calculator::CalculatorError::InvalidArguments
+pub finstack_ai_tools_calculator::CalculatorError::InvalidArguments::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_calculator::CalculatorError
+pub fn finstack_ai_tools_calculator::CalculatorError::clone(&self) -> finstack_ai_tools_calculator::CalculatorError
+impl core::cmp::Eq for finstack_ai_tools_calculator::CalculatorError
+impl core::cmp::PartialEq for finstack_ai_tools_calculator::CalculatorError
+pub fn finstack_ai_tools_calculator::CalculatorError::eq(&self, &finstack_ai_tools_calculator::CalculatorError) -> bool
+impl core::error::Error for finstack_ai_tools_calculator::CalculatorError
+impl core::fmt::Debug for finstack_ai_tools_calculator::CalculatorError
+pub fn finstack_ai_tools_calculator::CalculatorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_calculator::CalculatorError
+pub fn finstack_ai_tools_calculator::CalculatorError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_calculator::CalculatorError
+pub enum finstack_ai_tools_calculator::Operation
+pub finstack_ai_tools_calculator::Operation::Add
+pub finstack_ai_tools_calculator::Operation::Divide
+pub finstack_ai_tools_calculator::Operation::Multiply
+pub finstack_ai_tools_calculator::Operation::Subtract
+impl core::clone::Clone for finstack_ai_tools_calculator::Operation
+pub fn finstack_ai_tools_calculator::Operation::clone(&self) -> finstack_ai_tools_calculator::Operation
+impl core::cmp::Eq for finstack_ai_tools_calculator::Operation
+impl core::cmp::PartialEq for finstack_ai_tools_calculator::Operation
+pub fn finstack_ai_tools_calculator::Operation::eq(&self, &finstack_ai_tools_calculator::Operation) -> bool
+impl core::fmt::Debug for finstack_ai_tools_calculator::Operation
+pub fn finstack_ai_tools_calculator::Operation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_calculator::Operation
+impl core::marker::StructuralPartialEq for finstack_ai_tools_calculator::Operation
+impl serde_core::ser::Serialize for finstack_ai_tools_calculator::Operation
+pub fn finstack_ai_tools_calculator::Operation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_calculator::Operation
+pub fn finstack_ai_tools_calculator::Operation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_tools_calculator::CalculatorToolset
+impl finstack_ai_tools_calculator::CalculatorToolset
+pub fn finstack_ai_tools_calculator::CalculatorToolset::try_new() -> core::result::Result<Self, finstack_ai_tools_calculator::CalculatorError>
+impl core::clone::Clone for finstack_ai_tools_calculator::CalculatorToolset
+pub fn finstack_ai_tools_calculator::CalculatorToolset::clone(&self) -> finstack_ai_tools_calculator::CalculatorToolset
+impl core::fmt::Debug for finstack_ai_tools_calculator::CalculatorToolset
+pub fn finstack_ai_tools_calculator::CalculatorToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_calculator::CalculatorToolset
+pub fn finstack_ai_tools_calculator::CalculatorToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_calculator::CalculatorToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_calculator::CalculatorToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_calculator::CALCULATOR_ARITHMETIC_ERROR: &str
+pub const finstack_ai_tools_calculator::CALCULATOR_INVALID_ARGUMENTS: &str
+pub fn finstack_ai_tools_calculator::evaluate(finstack_ai_tools_calculator::Operation, &[f64]) -> core::result::Result<f64, finstack_ai_tools_calculator::CalculatorError>

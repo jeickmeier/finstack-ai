@@ -30,7 +30,7 @@ use finstack_ai_test::{
     ScriptedToolset,
 };
 use finstack_ai_workflow_local::{
-    CronExpression, CronSchedule, CronScheduleStore, LocalWorkflowDriver, SqliteCronStore,
+    CronSchedule, CronScheduleStore, IntervalSchedule, LocalWorkflowDriver, SqliteCronStore,
 };
 use tempfile::TempDir;
 
@@ -38,5 +38,6 @@ mod helpers;
 use helpers::*;
 
 include!("driver.rs");
+include!("loop_parity.rs");
 include!("restart.rs");
 include!("tenant.rs");

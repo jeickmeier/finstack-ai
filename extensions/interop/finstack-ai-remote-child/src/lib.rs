@@ -81,6 +81,82 @@ mod tests {
         server.await.expect("server");
     }
 
+    #[tokio::test]
+    async fn cancel_rejects_a_locator_that_was_never_accepted() {
+        let invoker = RemoteChildInvoker::try_new(RemoteChildRoute {
+            endpoint: "127.0.0.1:9".into(),
+            service: "finstack.remote.worker".into(),
+            route: "route-1".into(),
+            token: None,
+        })
+        .expect("invoker");
+        let error = invoker
+            .cancel(&child_request().locator)
+            .await
+            .expect_err("never accepted");
+        assert!(error.to_string().contains("never accepted"));
+    }
+
+    #[tokio::test]
+    async fn peer_that_never_sends_command_result_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = listener.local_addr().expect("addr").to_string();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            handshake_stream(&mut stream).await;
+            let _command = read_post(&mut stream).await;
+            // Keep the socket open so the client hits the read timeout, not EOF.
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        });
+        let invoker = RemoteChildInvoker::try_new(RemoteChildRoute {
+            endpoint,
+            service: "finstack.remote.worker".into(),
+            route: "route-1".into(),
+            token: None,
+        })
+        .expect("invoker");
+        let error = invoker
+            .start_or_attach(child_context(), child_request())
+            .await
+            .expect_err("timeout");
+        assert!(error.to_string().contains("timed out") || error.to_string().contains("bound"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn ten_thousand_event_batches_fail_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = listener.local_addr().expect("addr").to_string();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            handshake_stream(&mut stream).await;
+            let _command = read_post(&mut stream).await;
+            for _ in 0..10_000 {
+                write_post(
+                    &mut stream,
+                    &RemotePostAuth::EventBatch {
+                        live: false,
+                        events: Vec::new(),
+                    },
+                )
+                .await;
+            }
+        });
+        let invoker = RemoteChildInvoker::try_new(RemoteChildRoute {
+            endpoint,
+            service: "finstack.remote.worker".into(),
+            route: "route-1".into(),
+            token: None,
+        })
+        .expect("invoker");
+        let error = invoker
+            .start_or_attach(child_context(), child_request())
+            .await
+            .expect_err("bounded");
+        assert!(error.to_string().contains("bound"));
+        server.abort();
+    }
+
     fn child_request() -> ChildRunRequest {
         let locator = ChildRunLocator {
             operation: OperationLocator::try_new(
@@ -156,34 +232,38 @@ mod tests {
         }
     }
 
-    async fn serve_one_command(mut stream: tokio::net::TcpStream) {
+    async fn handshake_stream(stream: &mut tokio::net::TcpStream) {
         let offer = VersionOffer::try_new(
             vec![PROTOCOL_VERSION_V1],
             PROTOCOL_VERSION_V1,
             vec!["auth".into()],
         )
         .expect("offer");
-        let _hello = read_pre(&mut stream).await;
+        let _hello = read_pre(stream).await;
         write_pre(
-            &mut stream,
+            stream,
             &RemotePreAuth::ServerHello {
                 selected_version: PROTOCOL_VERSION_V1,
                 offer,
             },
         )
         .await;
-        let _auth = read_pre(&mut stream).await;
+        let _auth = read_pre(stream).await;
         write_pre(
-            &mut stream,
+            stream,
             &RemotePreAuth::AuthResult {
                 accepted: true,
                 reason_code: None,
             },
         )
         .await;
-        let _open = read_post(&mut stream).await;
-        write_post(&mut stream, &RemotePostAuth::NoSnapshot { sequence: 0 }).await;
-        write_post(&mut stream, &RemotePostAuth::SyncBarrier { sequence: 0 }).await;
+        let _open = read_post(stream).await;
+        write_post(stream, &RemotePostAuth::NoSnapshot { sequence: 0 }).await;
+        write_post(stream, &RemotePostAuth::SyncBarrier { sequence: 0 }).await;
+    }
+
+    async fn serve_one_command(mut stream: tokio::net::TcpStream) {
+        handshake_stream(&mut stream).await;
         let RemotePostAuth::Command { command } = read_post(&mut stream).await else {
             panic!("expected command");
         };

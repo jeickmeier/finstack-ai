@@ -39,7 +39,7 @@ If implementation reveals a required design change, mark the affected work `Bloc
 
 ## Current baseline
 
-The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.26 / PLAN-0.24, G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, and G8-D-general-availability-a889a29a3f54 on 2026-08-18:
+The registers were initialized from documentation pack v0.8 and are reconciled through documentation pack v0.27 / PLAN-0.25, G4-D-binding-parity-101224c5eb60, G5-D-durable-beta-a9568bd869b5, G6-D-plugin-alpha-018aaea9aa00, G7-D-public-preview-f7c7e70b9e04, and G8-D-general-availability-a889a29a3f54 on 2026-08-18:
 
 - 37 decisions are accepted and indexed. ADR-001 through ADR-021 and ADR-023 through ADR-037 are `Implemented` / `Verified` through their mapped phase evidence and named gate decisions. ADR-022 stays `In progress` / `Partial` because browser/WASM binding peers remain. SharedArrayBuffer is documented as post-preview reconsideration. ADR-024 is `Implemented` / `Verified` for governance files only (RFC/license/contribution links).
 - Phase 0 through Phase 9 are `Done`. PR-001–PR-066 are `Done`. Phase 10 and PR-067 are `In progress` on local `main` (hardening slices at HEAD; acceptance recorded 9/9 locally; no candidate). Phase 8 and Phase 9 entrance and exit are `Passed`. G0–G8 are `Passed`.

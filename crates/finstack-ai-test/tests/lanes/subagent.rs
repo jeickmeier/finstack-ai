@@ -290,7 +290,13 @@ async fn subagent_start_await_incorporates_child_text() {
     assert!(!started.is_error, "{}", started.output.as_str());
     let started_json: serde_json::Value =
         serde_json::from_slice(started.output.as_bytes()).expect("start json");
-    let awaited = invoke(&toolset, &parent, "subagent_await", serde_json::json!({})).await;
+    let awaited = invoke(
+        &toolset,
+        &parent,
+        "subagent_status",
+        serde_json::json!({ "run_id": started_json["run_id"] }),
+    )
+    .await;
     assert!(!awaited.is_error, "{}", awaited.output.as_str());
     let kinds = journal_kind_names(&store_port, parent.locator().session_id).await;
     assert!(

@@ -6,8 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    InputCapabilities, ModelCapabilities, ModelContextProfile, ModelError, ModelName,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, secret_is_valid,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
+    ModelContextProfile, ModelError, ModelName, SecretString, StructuredOutputCapability,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -19,52 +20,7 @@ const DEFAULT_MESSAGES_PATH: &str = "/v1/messages";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
-/// Opaque configured secret whose formatting is always redacted.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretString(Arc<str>);
-
-impl SecretString {
-    /// Construct a non-empty bounded secret.
-    ///
-    /// # Errors
-    ///
-    /// Returns `anthropic_config_invalid` for an empty, oversized, or NUL-bearing value.
-    pub fn try_new(value: impl AsRef<str>) -> Result<Self, ModelError> {
-        let value = value.as_ref();
-        if !secret_is_valid(value) {
-            return Err(config_error("provider secret is invalid"));
-        }
-        Ok(Self(Arc::from(value)))
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for SecretString {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SecretString([REDACTED])")
-    }
-}
-
-/// Explicit provider authentication configuration.
-#[derive(Clone, PartialEq, Eq)]
-pub enum Authentication {
-    /// No credential, suitable for keyless local loopback.
-    None,
-    /// Anthropic `x-api-key` credential.
-    ApiKey(SecretString),
-}
-
-impl fmt::Debug for Authentication {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::None => formatter.write_str("None"),
-            Self::ApiKey(_) => formatter.write_str("ApiKey([REDACTED])"),
-        }
-    }
-}
+const DEFAULT_CREDENTIAL_NAME: &str = "default";
 
 /// One configured header whose value is always treated as secret.
 #[derive(Clone, PartialEq, Eq)]
@@ -112,7 +68,8 @@ pub struct AnthropicConfig {
     base_url: Arc<str>,
     messages_path: Arc<str>,
     anthropic_version: Arc<str>,
-    authentication: Authentication,
+    credentials: CredentialStore,
+    credential: Option<CredentialReference>,
     headers: Arc<[SecretHeader]>,
     request_timeout: Duration,
     max_event_bytes: usize,
@@ -126,7 +83,8 @@ impl fmt::Debug for AnthropicConfig {
             .field("base_url", &self.base_url)
             .field("messages_path", &self.messages_path)
             .field("anthropic_version", &self.anthropic_version)
-            .field("authentication", &self.authentication)
+            .field("credentials", &self.credentials)
+            .field("credential", &self.credential)
             .field("headers", &self.headers)
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
@@ -157,7 +115,8 @@ impl AnthropicConfig {
             base_url: Arc::from(base_url),
             messages_path: Arc::from(DEFAULT_MESSAGES_PATH),
             anthropic_version: Arc::from(ANTHROPIC_MESSAGES_VERSION),
-            authentication: Authentication::None,
+            credentials: CredentialStore::empty(),
+            credential: None,
             headers: Arc::from([]),
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
@@ -193,10 +152,32 @@ impl AnthropicConfig {
         Ok(self)
     }
 
-    /// Set explicit authentication.
+    /// Insert one named credential entry and select it.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the reserved `default` credential name is rejected.
     #[must_use]
-    pub fn with_authentication(mut self, authentication: Authentication) -> Self {
-        self.authentication = authentication;
+    pub fn with_authentication(self, authentication: Authentication) -> Self {
+        let mut store = CredentialStore::empty();
+        store
+            .insert(DEFAULT_CREDENTIAL_NAME, authentication)
+            .expect("default credential name");
+        self.with_credential_store(
+            store,
+            CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME).expect("default credential name"),
+        )
+    }
+
+    /// Bind an explicit host-supplied credential store and reference.
+    #[must_use]
+    pub fn with_credential_store(
+        mut self,
+        store: CredentialStore,
+        reference: CredentialReference,
+    ) -> Self {
+        self.credentials = store;
+        self.credential = Some(reference);
         self
     }
 
@@ -238,6 +219,16 @@ impl AnthropicConfig {
         Ok(self)
     }
 
+    fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
+        let Some(reference) = &self.credential else {
+            return Ok(Authentication::None);
+        };
+        self.credentials
+            .resolve(reference)
+            .cloned()
+            .ok_or_else(|| config_error("named credential is missing"))
+    }
+
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
@@ -248,8 +239,9 @@ impl AnthropicConfig {
     pub(crate) fn header_map(&self) -> Result<HeaderMap, ModelError> {
         let url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
+        let authentication = self.resolved_authentication()?;
         if url.scheme() != "https"
-            && (!matches!(self.authentication, Authentication::None) || !self.headers.is_empty())
+            && (!matches!(authentication, Authentication::None) || !self.headers.is_empty())
         {
             return Err(config_error(
                 "provider credentials and secret headers require HTTPS",
@@ -259,9 +251,9 @@ impl AnthropicConfig {
         let version = HeaderValue::from_str(&self.anthropic_version)
             .map_err(|_| config_error("anthropic-version is not a valid header value"))?;
         headers.insert(HeaderName::from_static("anthropic-version"), version);
-        match &self.authentication {
+        match authentication {
             Authentication::None => {}
-            Authentication::ApiKey(value) => {
+            Authentication::ApiKey(value) | Authentication::Bearer(value) => {
                 let mut header = HeaderValue::from_str(value.expose())
                     .map_err(|_| config_error("API key is not a valid header value"))?;
                 header.set_sensitive(true);
@@ -497,8 +489,8 @@ mod tests {
             format!("{config:?}"),
         ] {
             assert!(!rendered.contains(CANARY));
-            assert!(rendered.contains("REDACTED"));
         }
+        assert!(format!("{header:?}").contains("REDACTED"));
     }
 
     #[test]

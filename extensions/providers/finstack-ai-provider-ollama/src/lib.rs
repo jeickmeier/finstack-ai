@@ -8,5 +8,9 @@ mod ndjson;
 mod provider;
 mod request;
 
-pub use config::{Authentication, OllamaConfig, OllamaModelConfig, SecretString};
+pub use config::{OllamaConfig, OllamaModelConfig};
+pub use finstack_ai_runtime::{
+    Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
+    SecretString,
+};
 pub use provider::OllamaProvider;

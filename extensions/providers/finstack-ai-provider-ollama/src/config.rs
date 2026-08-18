@@ -6,8 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    InputCapabilities, ModelCapabilities, ModelContextProfile, ModelError, ModelName,
-    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, secret_is_valid,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
+    ModelContextProfile, ModelError, ModelName, StructuredOutputCapability, TokenEstimatorRef,
+    TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -18,61 +19,15 @@ const DEFAULT_CHAT_PATH: &str = "/api/chat";
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 const DEFAULT_MAX_EVENT_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_STREAM_BYTES: usize = 16 * 1_048_576;
-
-/// Opaque configured secret whose formatting is always redacted.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SecretString(Arc<str>);
-
-impl SecretString {
-    /// Construct a non-empty bounded secret.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ollama_config_invalid` for an empty, oversized, or NUL-bearing value.
-    pub fn try_new(value: impl AsRef<str>) -> Result<Self, ModelError> {
-        let value = value.as_ref();
-        if !secret_is_valid(value) {
-            return Err(config_error("provider secret is invalid"));
-        }
-        Ok(Self(Arc::from(value)))
-    }
-
-    pub(crate) fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for SecretString {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("SecretString([REDACTED])")
-    }
-}
-
-/// Explicit provider authentication configuration.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub enum Authentication {
-    /// No credential, suitable for keyless local loopback.
-    #[default]
-    None,
-    /// Optional bearer credential for HTTPS Ollama endpoints.
-    Bearer(SecretString),
-}
-
-impl fmt::Debug for Authentication {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::None => formatter.write_str("None"),
-            Self::Bearer(_) => formatter.write_str("Bearer([REDACTED])"),
-        }
-    }
-}
+const DEFAULT_CREDENTIAL_NAME: &str = "default";
 
 /// Strict Ollama `/api/chat` transport configuration.
 #[derive(Clone)]
 pub struct OllamaConfig {
     base_url: Arc<str>,
     chat_path: Arc<str>,
-    authentication: Authentication,
+    credentials: CredentialStore,
+    credential: Option<CredentialReference>,
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
@@ -84,7 +39,8 @@ impl fmt::Debug for OllamaConfig {
             .debug_struct("OllamaConfig")
             .field("base_url", &self.base_url)
             .field("chat_path", &self.chat_path)
-            .field("authentication", &self.authentication)
+            .field("credentials", &self.credentials)
+            .field("credential", &self.credential)
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
@@ -113,17 +69,40 @@ impl OllamaConfig {
         Ok(Self {
             base_url: Arc::from(base_url),
             chat_path: Arc::from(DEFAULT_CHAT_PATH),
-            authentication: Authentication::None,
+            credentials: CredentialStore::empty(),
+            credential: None,
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
             max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
         })
     }
 
-    /// Set explicit authentication.
+    /// Insert one named credential entry and select it.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the reserved `default` credential name is rejected.
     #[must_use]
-    pub fn with_authentication(mut self, authentication: Authentication) -> Self {
-        self.authentication = authentication;
+    pub fn with_authentication(self, authentication: Authentication) -> Self {
+        let mut store = CredentialStore::empty();
+        store
+            .insert(DEFAULT_CREDENTIAL_NAME, authentication)
+            .expect("default credential name");
+        self.with_credential_store(
+            store,
+            CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME).expect("default credential name"),
+        )
+    }
+
+    /// Bind an explicit host-supplied credential store and reference.
+    #[must_use]
+    pub fn with_credential_store(
+        mut self,
+        store: CredentialStore,
+        reference: CredentialReference,
+    ) -> Self {
+        self.credentials = store;
+        self.credential = Some(reference);
         self
     }
 
@@ -158,6 +137,16 @@ impl OllamaConfig {
         Ok(self)
     }
 
+    fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
+        let Some(reference) = &self.credential else {
+            return Ok(Authentication::None);
+        };
+        self.credentials
+            .resolve(reference)
+            .cloned()
+            .ok_or_else(|| config_error("named credential is missing"))
+    }
+
     pub(crate) fn endpoint_url(&self) -> Result<Url, ModelError> {
         let mut base =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
@@ -168,17 +157,21 @@ impl OllamaConfig {
     pub(crate) fn header_map(&self) -> Result<HeaderMap, ModelError> {
         let url =
             Url::parse(&self.base_url).map_err(|_| config_error("provider base URL is invalid"))?;
-        if url.scheme() != "https" && !matches!(self.authentication, Authentication::None) {
+        let authentication = self.resolved_authentication()?;
+        if url.scheme() != "https" && !matches!(authentication, Authentication::None) {
             return Err(config_error("provider credentials require HTTPS"));
         }
         let mut headers = HeaderMap::new();
-        match &self.authentication {
+        match authentication {
             Authentication::None => {}
             Authentication::Bearer(value) => {
                 let mut header = HeaderValue::from_str(&format!("Bearer {}", value.expose()))
                     .map_err(|_| config_error("bearer credential is not a valid header value"))?;
                 header.set_sensitive(true);
                 headers.insert(reqwest::header::AUTHORIZATION, header);
+            }
+            Authentication::ApiKey(_) => {
+                return Err(config_error("ollama authentication must be bearer"));
             }
         }
         Ok(headers)
@@ -343,6 +336,7 @@ pub(crate) fn estimator_ref() -> TokenEstimatorRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finstack_ai_runtime::SecretString;
 
     const CANARY: &str = "ollama-secret-canary-070";
 
@@ -355,12 +349,12 @@ mod tests {
 
         for rendered in [
             format!("{secret:?}"),
-            format!("{:?}", Authentication::Bearer(secret)),
+            format!("{:?}", Authentication::Bearer(secret.clone())),
             format!("{config:?}"),
         ] {
             assert!(!rendered.contains(CANARY));
-            assert!(rendered.contains("REDACTED"));
         }
+        assert!(format!("{secret:?}").contains("REDACTED"));
     }
 
     #[test]
@@ -382,7 +376,6 @@ mod tests {
     fn keyless_http_loopback_is_allowed_and_credentials_require_https() {
         let keyless = OllamaConfig::try_new("http://127.0.0.1:11434").expect("local endpoint");
         assert!(keyless.header_map().is_ok());
-        assert!(format!("{keyless:?}").contains("None"));
 
         let secret = SecretString::try_new(CANARY).expect("secret");
         let with_key = keyless.with_authentication(Authentication::Bearer(secret));

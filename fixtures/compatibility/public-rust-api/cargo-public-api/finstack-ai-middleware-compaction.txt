@@ -1,0 +1,60 @@
+pub mod finstack_ai_middleware_compaction
+pub enum finstack_ai_middleware_compaction::CompactionError
+pub finstack_ai_middleware_compaction::CompactionError::Configuration
+pub finstack_ai_middleware_compaction::CompactionError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_compaction::CompactionError
+pub fn finstack_ai_middleware_compaction::CompactionError::clone(&self) -> finstack_ai_middleware_compaction::CompactionError
+impl core::cmp::Eq for finstack_ai_middleware_compaction::CompactionError
+impl core::cmp::PartialEq for finstack_ai_middleware_compaction::CompactionError
+pub fn finstack_ai_middleware_compaction::CompactionError::eq(&self, &finstack_ai_middleware_compaction::CompactionError) -> bool
+impl core::error::Error for finstack_ai_middleware_compaction::CompactionError
+impl core::fmt::Debug for finstack_ai_middleware_compaction::CompactionError
+pub fn finstack_ai_middleware_compaction::CompactionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_compaction::CompactionError
+pub fn finstack_ai_middleware_compaction::CompactionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_compaction::CompactionError
+pub enum finstack_ai_middleware_compaction::CompactionStrategy
+pub finstack_ai_middleware_compaction::CompactionStrategy::LargeToolOutput
+pub finstack_ai_middleware_compaction::CompactionStrategy::SlidingWindow
+pub finstack_ai_middleware_compaction::CompactionStrategy::Summarize
+impl core::clone::Clone for finstack_ai_middleware_compaction::CompactionStrategy
+pub fn finstack_ai_middleware_compaction::CompactionStrategy::clone(&self) -> finstack_ai_middleware_compaction::CompactionStrategy
+impl core::cmp::Eq for finstack_ai_middleware_compaction::CompactionStrategy
+impl core::cmp::PartialEq for finstack_ai_middleware_compaction::CompactionStrategy
+pub fn finstack_ai_middleware_compaction::CompactionStrategy::eq(&self, &finstack_ai_middleware_compaction::CompactionStrategy) -> bool
+impl core::fmt::Debug for finstack_ai_middleware_compaction::CompactionStrategy
+pub fn finstack_ai_middleware_compaction::CompactionStrategy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_middleware_compaction::CompactionStrategy
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_compaction::CompactionStrategy
+impl serde_core::ser::Serialize for finstack_ai_middleware_compaction::CompactionStrategy
+pub fn finstack_ai_middleware_compaction::CompactionStrategy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_compaction::CompactionConfig
+pub finstack_ai_middleware_compaction::CompactionConfig::budget_scope_id: core::option::Option<finstack_ai_kernel::primitives::ids::BudgetScopeId>
+pub finstack_ai_middleware_compaction::CompactionConfig::hysteresis_tokens: u64
+pub finstack_ai_middleware_compaction::CompactionConfig::large_tool_output_bytes: usize
+pub finstack_ai_middleware_compaction::CompactionConfig::residency_policy_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_middleware_compaction::CompactionConfig::secondary_model_authorized: bool
+pub finstack_ai_middleware_compaction::CompactionConfig::strategy: finstack_ai_middleware_compaction::CompactionStrategy
+pub finstack_ai_middleware_compaction::CompactionConfig::summarize_model: core::option::Option<finstack_ai_kernel::primitives::identity::ComponentRef>
+pub finstack_ai_middleware_compaction::CompactionConfig::threshold_tokens: u64
+impl finstack_ai_middleware_compaction::CompactionConfig
+pub fn finstack_ai_middleware_compaction::CompactionConfig::sliding_window(u64, u64) -> Self
+impl core::clone::Clone for finstack_ai_middleware_compaction::CompactionConfig
+pub fn finstack_ai_middleware_compaction::CompactionConfig::clone(&self) -> finstack_ai_middleware_compaction::CompactionConfig
+impl core::fmt::Debug for finstack_ai_middleware_compaction::CompactionConfig
+pub fn finstack_ai_middleware_compaction::CompactionConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_middleware_compaction::CompactionConfig
+pub fn finstack_ai_middleware_compaction::CompactionConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_compaction::CompactionMiddleware
+impl finstack_ai_middleware_compaction::CompactionMiddleware
+pub fn finstack_ai_middleware_compaction::CompactionMiddleware::try_new(finstack_ai_middleware_compaction::CompactionConfig) -> core::result::Result<Self, finstack_ai_middleware_compaction::CompactionError>
+impl core::clone::Clone for finstack_ai_middleware_compaction::CompactionMiddleware
+pub fn finstack_ai_middleware_compaction::CompactionMiddleware::clone(&self) -> finstack_ai_middleware_compaction::CompactionMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_compaction::CompactionMiddleware
+pub fn finstack_ai_middleware_compaction::CompactionMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_compaction::CompactionMiddleware
+pub fn finstack_ai_middleware_compaction::CompactionMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_compaction::CompactionMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
+pub const finstack_ai_middleware_compaction::LARGE_TOOL_OUTPUT: &str
+pub const finstack_ai_middleware_compaction::SLIDING_WINDOW: &str
+pub const finstack_ai_middleware_compaction::SUMMARIZE: &str

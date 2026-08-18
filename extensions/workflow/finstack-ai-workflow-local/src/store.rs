@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_runtime::Timestamp;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 
-use crate::cron::{CronError, CronExpression, CronSchedule};
+use crate::cron::{CronError, CronSchedule, IntervalSchedule};
 
 /// Adapter-owned schedule table. Not part of the journal schema version.
 pub trait CronScheduleStore: Send + Sync {
@@ -23,6 +23,35 @@ pub trait CronScheduleStore: Send + Sync {
     ///
     /// Returns store-unavailable or integrity failures.
     fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<CronSchedule>, CronError>;
+
+    /// Compare-and-set claim for one due tick.
+    ///
+    /// Wins only when the stored `next_fire_unix_ms` still equals
+    /// `expected_next_unix_ms` and is at or before `now`. Third-party
+    /// stores fail closed unless they override this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CronError::StoreUnavailable`] by default.
+    fn try_claim(
+        &self,
+        tenant_scope: &str,
+        schedule_id: &str,
+        expected_next_unix_ms: i64,
+        now: Timestamp,
+        claimed: &CronSchedule,
+    ) -> Result<bool, CronError> {
+        let _ = (
+            tenant_scope,
+            schedule_id,
+            expected_next_unix_ms,
+            now,
+            claimed,
+        );
+        Err(CronError::StoreUnavailable {
+            code: "try_claim_unsupported",
+        })
+    }
 }
 
 type MemoryCronRows = BTreeMap<(Arc<str>, Arc<str>), CronSchedule>;
@@ -66,6 +95,27 @@ impl CronScheduleStore for MemoryCronStore {
             .cloned()
             .collect())
     }
+
+    fn try_claim(
+        &self,
+        tenant_scope: &str,
+        schedule_id: &str,
+        expected_next_unix_ms: i64,
+        now: Timestamp,
+        claimed: &CronSchedule,
+    ) -> Result<bool, CronError> {
+        let mut inner = self.inner.lock().map_err(|_| CronError::StoreUnavailable {
+            code: "memory_cron_lock_poisoned",
+        })?;
+        let Some(row) = inner.get_mut(&(Arc::from(tenant_scope), Arc::from(schedule_id))) else {
+            return Ok(false);
+        };
+        if row.next_fire_at.as_unix_ms() != expected_next_unix_ms || row.next_fire_at > now {
+            return Ok(false);
+        }
+        *row = claimed.clone();
+        Ok(true)
+    }
 }
 
 const CRON_DDL: &str = "
@@ -87,6 +137,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_local_cron (
 /// not kernel records.
 pub struct SqliteCronStore {
     path: PathBuf,
+    conn: Mutex<Connection>,
 }
 
 impl SqliteCronStore {
@@ -98,9 +149,27 @@ impl SqliteCronStore {
     /// or the table cannot be created.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CronError> {
         let path = path.as_ref().to_path_buf();
-        let store = Self { path };
-        store.with_conn(|_| Ok(()))?;
-        Ok(store)
+        let conn = Connection::open(&path).map_err(|_| CronError::StoreUnavailable {
+            code: "sqlite_cron_open",
+        })?;
+        conn.busy_timeout(Duration::from_secs(1))
+            .map_err(|_| CronError::StoreUnavailable {
+                code: "sqlite_cron_busy_timeout",
+            })?;
+        if !is_memory_path(&path) {
+            conn.pragma_update(None, "journal_mode", "WAL")
+                .map_err(|_| CronError::StoreUnavailable {
+                    code: "sqlite_cron_wal",
+                })?;
+        }
+        conn.execute_batch(CRON_DDL)
+            .map_err(|_| CronError::StoreUnavailable {
+                code: "sqlite_cron_schema",
+            })?;
+        Ok(Self {
+            path,
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Configured journal file, including `:memory:`.
@@ -113,24 +182,20 @@ impl SqliteCronStore {
         &self,
         body: impl FnOnce(&Connection) -> Result<T, CronError>,
     ) -> Result<T, CronError> {
-        let conn = Connection::open(&self.path).map_err(|_| CronError::StoreUnavailable {
-            code: "sqlite_cron_open",
+        let conn = self.conn.lock().map_err(|_| CronError::StoreUnavailable {
+            code: "sqlite_cron_lock_poisoned",
         })?;
-        conn.busy_timeout(Duration::from_secs(1))
-            .map_err(|_| CronError::StoreUnavailable {
-                code: "sqlite_cron_busy_timeout",
-            })?;
-        if !is_memory_path(&self.path) {
-            conn.pragma_update(None, "journal_mode", "WAL")
-                .map_err(|_| CronError::StoreUnavailable {
-                    code: "sqlite_cron_wal",
-                })?;
-        }
-        conn.execute_batch(CRON_DDL)
-            .map_err(|_| CronError::StoreUnavailable {
-                code: "sqlite_cron_schema",
-            })?;
         body(&conn)
+    }
+
+    fn with_conn_mut<T>(
+        &self,
+        body: impl FnOnce(&mut Connection) -> Result<T, CronError>,
+    ) -> Result<T, CronError> {
+        let mut conn = self.conn.lock().map_err(|_| CronError::StoreUnavailable {
+            code: "sqlite_cron_lock_poisoned",
+        })?;
+        body(&mut conn)
     }
 }
 
@@ -195,7 +260,7 @@ impl CronScheduleStore for SqliteCronStore {
                 schedules.push(CronSchedule {
                     tenant_scope: Arc::from(tenant_scope),
                     schedule_id: Arc::from(schedule_id),
-                    expression: CronExpression::parse(&expression)?,
+                    expression: IntervalSchedule::parse(&expression)?,
                     origin: Timestamp::from_unix_ms(origin).map_err(|_| {
                         CronError::StoreIntegrity {
                             code: "sqlite_cron_origin",
@@ -216,6 +281,46 @@ impl CronScheduleStore for SqliteCronStore {
                 });
             }
             Ok(schedules)
+        })
+    }
+
+    fn try_claim(
+        &self,
+        tenant_scope: &str,
+        schedule_id: &str,
+        expected_next_unix_ms: i64,
+        now: Timestamp,
+        claimed: &CronSchedule,
+    ) -> Result<bool, CronError> {
+        self.with_conn_mut(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| CronError::StoreUnavailable {
+                    code: "sqlite_cron_begin_immediate",
+                })?;
+            tx.execute(
+                "UPDATE finstack_workflow_local_cron
+                 SET last_fired_unix_ms = ?1, fire_count = ?2, next_fire_unix_ms = ?3
+                 WHERE tenant_scope = ?4 AND schedule_id = ?5
+                   AND next_fire_unix_ms = ?6 AND next_fire_unix_ms <= ?7",
+                params![
+                    claimed.last_fired_at.map(Timestamp::as_unix_ms),
+                    i64_from_u64(claimed.fire_count)?,
+                    claimed.next_fire_at.as_unix_ms(),
+                    tenant_scope,
+                    schedule_id,
+                    expected_next_unix_ms,
+                    now.as_unix_ms(),
+                ],
+            )
+            .map_err(|_| CronError::StoreUnavailable {
+                code: "sqlite_cron_claim",
+            })?;
+            let won = tx.changes() == 1;
+            tx.commit().map_err(|_| CronError::StoreUnavailable {
+                code: "sqlite_cron_commit",
+            })?;
+            Ok(won)
         })
     }
 }
@@ -262,7 +367,7 @@ mod tests {
             .upsert(&CronSchedule {
                 tenant_scope: Arc::from("tenant-a"),
                 schedule_id: Arc::from("tick"),
-                expression: CronExpression::parse("every 10ms").expect("expr"),
+                expression: IntervalSchedule::parse("every 10ms").expect("expr"),
                 origin,
                 next_fire_at: Timestamp::from_unix_ms(2_010).expect("next"),
                 last_fired_at: None,
@@ -273,7 +378,7 @@ mod tests {
             .upsert(&CronSchedule {
                 tenant_scope: Arc::from("tenant-b"),
                 schedule_id: Arc::from("tick"),
-                expression: CronExpression::parse("every 10ms").expect("expr"),
+                expression: IntervalSchedule::parse("every 10ms").expect("expr"),
                 origin,
                 next_fire_at: Timestamp::from_unix_ms(2_010).expect("next"),
                 last_fired_at: None,
@@ -286,6 +391,42 @@ mod tests {
             load_one(&store, "tenant-a", "missing")
                 .expect("miss")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn two_sqlite_stores_claim_exactly_one_fire() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("cron.sqlite");
+        let first = SqliteCronStore::open(&path).expect("first");
+        let second = SqliteCronStore::open(&path).expect("second");
+        let origin = Timestamp::from_unix_ms(2_000).expect("origin");
+        let due = Timestamp::from_unix_ms(2_010).expect("due");
+        let schedule = CronSchedule {
+            tenant_scope: Arc::from("tenant-a"),
+            schedule_id: Arc::from("tick"),
+            expression: IntervalSchedule::parse("every 10ms").expect("expr"),
+            origin,
+            next_fire_at: due,
+            last_fired_at: None,
+            fire_count: 0,
+        };
+        first.upsert(&schedule).expect("upsert");
+        let now = Timestamp::from_unix_ms(2_025).expect("now");
+        let mut claimed = schedule.clone();
+        claimed.last_fired_at = Some(now);
+        claimed.fire_count = 1;
+        claimed.next_fire_at = claimed.expression.next_after(origin, now).expect("next");
+        let won_first = first
+            .try_claim("tenant-a", "tick", due.as_unix_ms(), now, &claimed)
+            .expect("first claim");
+        let won_second = second
+            .try_claim("tenant-a", "tick", due.as_unix_ms(), now, &claimed)
+            .expect("second claim");
+        assert_eq!(usize::from(won_first) + usize::from(won_second), 1);
+        assert_eq!(
+            first.load_tenant("tenant-a").expect("load")[0].fire_count,
+            1
         );
     }
 }

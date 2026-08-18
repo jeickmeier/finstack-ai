@@ -1,0 +1,64 @@
+pub mod finstack_ai_provider_openai
+pub use finstack_ai_provider_openai::Authentication
+pub use finstack_ai_provider_openai::CredentialReference
+pub use finstack_ai_provider_openai::CredentialRejected
+pub use finstack_ai_provider_openai::CredentialStore
+pub use finstack_ai_provider_openai::SecretRejected
+pub use finstack_ai_provider_openai::SecretString
+pub struct finstack_ai_provider_openai::OpenAiConfig
+impl finstack_ai_provider_openai::OpenAiConfig
+pub fn finstack_ai_provider_openai::OpenAiConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_headers(self, alloc::vec::Vec<finstack_ai_provider_openai::SecretHeader>) -> Self
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_openai::OpenAiConfig
+pub fn finstack_ai_provider_openai::OpenAiConfig::clone(&self) -> finstack_ai_provider_openai::OpenAiConfig
+impl core::fmt::Debug for finstack_ai_provider_openai::OpenAiConfig
+pub fn finstack_ai_provider_openai::OpenAiConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_provider_openai::OpenAiModelConfig
+pub finstack_ai_provider_openai::OpenAiModelConfig::context_window_tokens: u64
+pub finstack_ai_provider_openai::OpenAiModelConfig::hard_input_bytes: u64
+pub finstack_ai_provider_openai::OpenAiModelConfig::max_output_tokens: u64
+pub finstack_ai_provider_openai::OpenAiModelConfig::name: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai_provider_openai::OpenAiModelConfig::parallel_tool_calls: bool
+pub finstack_ai_provider_openai::OpenAiModelConfig::provider_overhead_tokens: u64
+pub finstack_ai_provider_openai::OpenAiModelConfig::reasoning: bool
+pub finstack_ai_provider_openai::OpenAiModelConfig::reserved_output_tokens: u64
+impl finstack_ai_provider_openai::OpenAiModelConfig
+pub fn finstack_ai_provider_openai::OpenAiModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_parallel_tool_calls(self, bool) -> Self
+pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_reasoning(self, bool) -> Self
+impl core::clone::Clone for finstack_ai_provider_openai::OpenAiModelConfig
+pub fn finstack_ai_provider_openai::OpenAiModelConfig::clone(&self) -> finstack_ai_provider_openai::OpenAiModelConfig
+impl core::cmp::Eq for finstack_ai_provider_openai::OpenAiModelConfig
+impl core::cmp::PartialEq for finstack_ai_provider_openai::OpenAiModelConfig
+pub fn finstack_ai_provider_openai::OpenAiModelConfig::eq(&self, &finstack_ai_provider_openai::OpenAiModelConfig) -> bool
+impl core::fmt::Debug for finstack_ai_provider_openai::OpenAiModelConfig
+pub fn finstack_ai_provider_openai::OpenAiModelConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_openai::OpenAiModelConfig
+pub struct finstack_ai_provider_openai::OpenAiProvider
+impl finstack_ai_provider_openai::OpenAiProvider
+pub fn finstack_ai_provider_openai::OpenAiProvider::refresh_model_metadata(&self, &finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::profile::ModelCapabilities) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openai::OpenAiProvider::replace_model_catalog(&self, alloc::vec::Vec<finstack_ai_provider_openai::OpenAiModelConfig>) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openai::OpenAiProvider::try_new(finstack_ai_provider_openai::OpenAiConfig, alloc::vec::Vec<finstack_ai_provider_openai::OpenAiModelConfig>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::fmt::Debug for finstack_ai_provider_openai::OpenAiProvider
+pub fn finstack_ai_provider_openai::OpenAiProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::model::port::Model for finstack_ai_provider_openai::OpenAiProvider
+pub fn finstack_ai_provider_openai::OpenAiProvider::capabilities(&self, &finstack_ai_runtime::ports::model::identity::ModelName) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_openai::OpenAiProvider::descriptor(&self) -> finstack_ai_runtime::ports::model::identity::ModelDescriptor
+pub fn finstack_ai_provider_openai::OpenAiProvider::estimate_input_tokens(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelTokenEstimate, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_openai::OpenAiProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::context::ModelReconcileResult, finstack_ai_runtime::ports::model::error::ModelError>>
+pub fn finstack_ai_provider_openai::OpenAiProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>
+pub struct finstack_ai_provider_openai::SecretHeader
+impl finstack_ai_provider_openai::SecretHeader
+pub fn finstack_ai_provider_openai::SecretHeader::try_new(impl core::convert::AsRef<str>, finstack_ai_runtime::ports::model::provider_util::secret::SecretString) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_openai::SecretHeader
+pub fn finstack_ai_provider_openai::SecretHeader::clone(&self) -> finstack_ai_provider_openai::SecretHeader
+impl core::cmp::Eq for finstack_ai_provider_openai::SecretHeader
+impl core::cmp::PartialEq for finstack_ai_provider_openai::SecretHeader
+pub fn finstack_ai_provider_openai::SecretHeader::eq(&self, &finstack_ai_provider_openai::SecretHeader) -> bool
+impl core::fmt::Debug for finstack_ai_provider_openai::SecretHeader
+pub fn finstack_ai_provider_openai::SecretHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_openai::SecretHeader

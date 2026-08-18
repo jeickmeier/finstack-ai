@@ -1,0 +1,27 @@
+pub mod finstack_ai_observer_log
+pub enum finstack_ai_observer_log::LogObserverError
+pub finstack_ai_observer_log::LogObserverError::BundleUnavailable
+pub finstack_ai_observer_log::LogObserverError::Configuration
+pub finstack_ai_observer_log::LogObserverError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_observer_log::LogObserverError
+pub fn finstack_ai_observer_log::LogObserverError::clone(&self) -> finstack_ai_observer_log::LogObserverError
+impl core::cmp::Eq for finstack_ai_observer_log::LogObserverError
+impl core::cmp::PartialEq for finstack_ai_observer_log::LogObserverError
+pub fn finstack_ai_observer_log::LogObserverError::eq(&self, &finstack_ai_observer_log::LogObserverError) -> bool
+impl core::error::Error for finstack_ai_observer_log::LogObserverError
+impl core::fmt::Debug for finstack_ai_observer_log::LogObserverError
+pub fn finstack_ai_observer_log::LogObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_observer_log::LogObserverError
+pub fn finstack_ai_observer_log::LogObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_log::LogObserverError
+pub struct finstack_ai_observer_log::LogObserver
+impl finstack_ai_observer_log::LogObserver
+pub fn finstack_ai_observer_log::LogObserver::dropped(&self) -> u64
+pub fn finstack_ai_observer_log::LogObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic>
+pub fn finstack_ai_observer_log::LogObserver::try_new(finstack_ai_runtime::ports::observer::ObserverPayloadMode, alloc::sync::Arc<std::sync::poison::mutex::Mutex<(dyn core::io::write::Write + core::marker::Send)>>, usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_log::LogObserverError>
+pub fn finstack_ai_observer_log::LogObserver::try_redacted(alloc::sync::Arc<std::sync::poison::mutex::Mutex<(dyn core::io::write::Write + core::marker::Send)>>, usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_log::LogObserverError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_log::LogObserver
+pub fn finstack_ai_observer_log::LogObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_observer_log::LogObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub const fn finstack_ai_observer_log::default_block_timeout() -> core::time::Duration
+pub fn finstack_ai_observer_log::write_support_bundle(&std::path::Path, &[finstack_ai_kernel::events::envelope::RunEvent], &[impl serde_core::ser::Serialize], core::option::Option<&str>) -> core::result::Result<(), finstack_ai_observer_log::LogObserverError>

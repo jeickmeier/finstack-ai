@@ -211,14 +211,18 @@ fn sliding_window(
         .max(1);
     let required = required_indices(&input.source_entries);
     let mut retained: BTreeSet<usize> = (0..input.source_entries.len()).collect();
+    let mut current = before;
     for index in 0..input.source_entries.len() {
-        if required.contains(&index) || estimate_indices(&input.source_entries, &retained) <= target
-        {
+        if current <= target {
+            break;
+        }
+        if required.contains(&index) || !retained.contains(&index) {
             continue;
         }
-        drop_with_pair(index, &input.source_entries, &mut retained);
+        current =
+            current.saturating_sub(drop_with_pair(index, &input.source_entries, &mut retained));
     }
-    let after = estimate_indices(&input.source_entries, &retained);
+    let after = current;
     if after > input.hard_input_tokens {
         return Err(budget_error());
     }
@@ -309,7 +313,7 @@ fn summarize(
             budget_scope_id,
             source_sensitivity,
             residency_policy_digest: config.residency_policy_digest,
-            resume_state: RawJson::parse(b"{\"depth\":1}").map_err(|_| {
+            resume_state: RawJson::parse(b"{}").map_err(|_| {
                 middleware_error(
                     COMPACTION_MODEL_NOT_AUTHORIZED,
                     ErrorCategory::Internal,
@@ -507,18 +511,27 @@ fn collect_pairs(entries: &[CompactionSourceEntry]) -> BTreeMap<usize, Option<us
         .collect()
 }
 
-fn drop_with_pair(index: usize, entries: &[CompactionSourceEntry], retained: &mut BTreeSet<usize>) {
-    retained.remove(&index);
+fn drop_with_pair(
+    index: usize,
+    entries: &[CompactionSourceEntry],
+    retained: &mut BTreeSet<usize>,
+) -> u64 {
+    let mut subtracted = 0_u64;
+    if retained.remove(&index) {
+        subtracted = subtracted.saturating_add(estimate_message(&entries[index].message));
+    }
     for (call, result) in collect_pairs(entries) {
         if call == index
             && let Some(result) = result
+            && retained.remove(&result)
         {
-            retained.remove(&result);
+            subtracted = subtracted.saturating_add(estimate_message(&entries[result].message));
         }
-        if result == Some(index) {
-            retained.remove(&call);
+        if result == Some(index) && retained.remove(&call) {
+            subtracted = subtracted.saturating_add(estimate_message(&entries[call].message));
         }
     }
+    subtracted
 }
 
 fn retained_messages(
@@ -606,13 +619,6 @@ fn estimate_entries(entries: &[CompactionSourceEntry]) -> u64 {
     entries
         .iter()
         .map(|entry| estimate_message(&entry.message))
-        .sum()
-}
-
-fn estimate_indices(entries: &[CompactionSourceEntry], retained: &BTreeSet<usize>) -> u64 {
-    retained
-        .iter()
-        .map(|index| estimate_message(&entries[*index].message))
         .sum()
 }
 

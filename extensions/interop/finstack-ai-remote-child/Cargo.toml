@@ -15,11 +15,10 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "rt", "sync"] }
-uuid = { workspace = true, features = ["v7"] }
+tokio = { workspace = true, features = ["io-util", "net", "rt", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [lints]
 workspace = true

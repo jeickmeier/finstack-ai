@@ -1,5 +1,6 @@
 //! Target-neutral Toolset port, offline schema resolution, and stream normalization.
 
+mod authority;
 mod catalog;
 mod error;
 mod port;
@@ -11,6 +12,7 @@ mod validator;
 #[cfg(test)]
 mod tests;
 
+pub use authority::verify_authority;
 pub use catalog::{
     ResolvedTool, ResolvedToolCatalog, ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision,
     ToolsetRegistration,

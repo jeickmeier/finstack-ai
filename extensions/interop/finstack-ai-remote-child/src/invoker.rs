@@ -13,6 +13,8 @@ use finstack_ai_runtime::{
 use crate::route::{RemoteChildRoute, invalid, parse_endpoint, route_ref, unavailable};
 use crate::transport::exchange;
 
+const MAX_ACCEPTED: usize = 1_024;
+
 /// Remote child invoker bound to one explicit route.
 pub struct RemoteChildInvoker {
     route: RemoteChildRoute,
@@ -68,7 +70,7 @@ impl AgentInvoker for RemoteChildInvoker {
         ctx: ChildRunContext,
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
-        let route = clone_route(&self.route);
+        let route = self.route.clone();
         let accepted = Arc::clone(&self.accepted);
         Box::pin(async move {
             request.validate()?;
@@ -89,7 +91,13 @@ impl AgentInvoker for RemoteChildInvoker {
                     submitted: request.request_digest,
                 });
             }
-            let result = exchange(&route, &request.locator, RemoteCommandOp::Start).await?;
+            let result = exchange(
+                &route,
+                &request.locator,
+                RemoteCommandOp::Start,
+                &request.request_digest.to_string(),
+            )
+            .await?;
             if !result.accepted() {
                 return Err(unavailable(
                     result
@@ -118,10 +126,20 @@ impl AgentInvoker for RemoteChildInvoker {
     }
 
     fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
-        let route = clone_route(&self.route);
+        let route = self.route.clone();
         let locator = locator.clone();
+        let accepted = Arc::clone(&self.accepted);
         Box::pin(async move {
-            let result = exchange(&route, &locator, RemoteCommandOp::Cancel).await?;
+            if lookup(&accepted, locator.operation.run_id)?.is_none() {
+                return Err(invalid("remote child locator was never accepted"));
+            }
+            let result = exchange(
+                &route,
+                &locator,
+                RemoteCommandOp::Cancel,
+                &locator.operation.run_id.to_string(),
+            )
+            .await?;
             if result.accepted() {
                 Ok(())
             } else {
@@ -132,15 +150,6 @@ impl AgentInvoker for RemoteChildInvoker {
                 ))
             }
         })
-    }
-}
-
-fn clone_route(route: &RemoteChildRoute) -> RemoteChildRoute {
-    RemoteChildRoute {
-        endpoint: route.endpoint.clone(),
-        service: route.service.clone(),
-        route: route.route.clone(),
-        token: route.token.clone(),
     }
 }
 
@@ -162,6 +171,9 @@ fn insert_accepted(
     let mut accepted = accepted
         .lock()
         .map_err(|_| unavailable("remote child acceptance lock is poisoned"))?;
+    if accepted.len() >= MAX_ACCEPTED && !accepted.contains_key(&run_id) {
+        return Err(unavailable("remote child accepted map is full"));
+    }
     accepted.insert(run_id, child);
     Ok(())
 }

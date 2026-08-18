@@ -16,7 +16,7 @@ use finstack_ai_runtime::{
     Digest, ErrorCategory, Metadata, NestedSample, PendingToolEffect, PortFuture, RawJson,
     ReconcileContext, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, ToolCallContext, ToolError,
     ToolEventStream, ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, ValidatedToolCall,
+    ToolsetDescriptor, ValidatedToolCall, verify_authority,
 };
 use futures_util::stream;
 use thiserror::Error;
@@ -244,10 +244,6 @@ impl McpConfig {
 
     pub(crate) const fn inline_result_bytes(&self) -> u64 {
         self.inline_result_bytes
-    }
-
-    pub(crate) fn is_retry_safe(&self, name: &str) -> bool {
-        self.is_read_only(name) || self.is_idempotent(name)
     }
 
     /// Snapshot one `mcp.json` document at construction. Not a run-time scan.
@@ -507,6 +503,15 @@ impl McpToolset {
             .iter()
             .map(|tool| to_tool_spec(tool, &config))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut seen_ids = BTreeSet::new();
+        for spec in &tools {
+            if !seen_ids.insert(spec.id.clone()) {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "tools/list returned colliding sanitized tool ids",
+                ));
+            }
+        }
         let catalog = catalog_digest(&listed);
         let invocation = invocation_digest(&config.identity(), &listed);
         let metadata = Metadata::parse(
@@ -575,6 +580,7 @@ impl Toolset for McpToolset {
         let max_bytes = self.config.inline_result_bytes();
         let list_changed = self.list_changed.clone();
         Box::pin(async move {
+            verify_authority(&ctx)?;
             let name = call.call.tool_name();
             let arguments: serde_json::Value =
                 serde_json::from_slice(call.call.arguments().as_bytes()).map_err(|_| {
@@ -639,7 +645,8 @@ impl Toolset for McpToolset {
         _ctx: ReconcileContext,
         effect: PendingToolEffect,
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
-        let retry_safe = self.config.is_retry_safe(effect.call.call.tool_name());
+        let name = effect.call.call.tool_name();
+        let retry_safe = self.config.is_read_only(name) || self.config.is_idempotent(name);
         Box::pin(async move {
             if retry_safe {
                 Ok(ToolReconcileResult::Unknown)
@@ -653,10 +660,18 @@ impl Toolset for McpToolset {
         let transport = Arc::clone(&self.transport);
         let config = self.config.clone();
         let list_changed = self.list_changed.clone();
+        let frozen = self.invocation_digest;
         Box::pin(async move {
             let toolset = McpToolset::connect(transport, config, list_changed)
                 .await
                 .map_err(tool_error_from_mcp)?;
+            if toolset.invocation_digest != frozen {
+                return Err(tool_error(
+                    MCP_CATALOG_DRIFT,
+                    ErrorCategory::Validation,
+                    "reconstructed MCP catalog does not match the frozen invocation digest",
+                ));
+            }
             Ok(Some(Arc::new(toolset) as Arc<dyn Toolset>))
         })
     }
@@ -728,21 +743,27 @@ fn normalize_call_result(result: &CallToolResult, max_bytes: u64) -> Result<RawJ
     })?;
     let max = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     if bytes.len() > max {
-        let preview_len = max.saturating_sub(128).min(bytes.len());
-        let preview = String::from_utf8_lossy(&bytes[..preview_len]).into_owned();
-        output = serde_json::json!({
-            "truncated": true,
-            "marker": MCP_LIMIT_EXCEEDED,
-            "max_result_bytes": max_bytes,
-            "preview": preview,
-        });
-        bytes = serde_json::to_vec(&output).map_err(|_| {
-            tool_error(
-                MCP_LIMIT_EXCEEDED,
-                ErrorCategory::Limit,
-                "MCP truncated marker serialization failed",
-            )
-        })?;
+        let mut preview_cap = max.saturating_div(2).max(1);
+        loop {
+            let preview = utf8_prefix(&bytes, preview_cap);
+            output = serde_json::json!({
+                "truncated": true,
+                "marker": MCP_LIMIT_EXCEEDED,
+                "max_result_bytes": max_bytes,
+                "preview": preview,
+            });
+            bytes = serde_json::to_vec(&output).map_err(|_| {
+                tool_error(
+                    MCP_LIMIT_EXCEEDED,
+                    ErrorCategory::Limit,
+                    "MCP truncated marker serialization failed",
+                )
+            })?;
+            if bytes.len() <= max || preview_cap <= 8 {
+                break;
+            }
+            preview_cap = preview_cap.saturating_div(2).max(1);
+        }
     }
     RawJson::parse(bytes).map_err(|_| {
         tool_error(
@@ -751,6 +772,17 @@ fn normalize_call_result(result: &CallToolResult, max_bytes: u64) -> Result<RawJ
             "MCP result normalization failed",
         )
     })
+}
+
+fn utf8_prefix(bytes: &[u8], max: usize) -> String {
+    let end = max.min(bytes.len());
+    match std::str::from_utf8(&bytes[..end]) {
+        Ok(text) => text.to_owned(),
+        Err(error) => {
+            let valid = error.valid_up_to();
+            String::from_utf8_lossy(&bytes[..valid]).into_owned()
+        }
+    }
 }
 
 fn completed(output: RawJson, is_error: bool) -> ToolEventStream {
@@ -841,6 +873,7 @@ fn tool_error_from_mcp(error: McpError) -> ToolError {
 pub struct McpError {
     code: &'static str,
     message: String,
+    jsonrpc_code: Option<i64>,
 }
 
 impl McpError {
@@ -848,7 +881,17 @@ impl McpError {
         Self {
             code,
             message: message.into(),
+            jsonrpc_code: None,
         }
+    }
+
+    pub(crate) fn with_jsonrpc(mut self, jsonrpc_code: i64) -> Self {
+        self.jsonrpc_code = Some(jsonrpc_code);
+        self
+    }
+
+    pub(crate) const fn jsonrpc_code(&self) -> Option<i64> {
+        self.jsonrpc_code
     }
 
     /// Stable machine-readable code.

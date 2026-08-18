@@ -8,7 +8,7 @@ use finstack_ai_runtime::{
     BlobRef, CancellationSignal, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId,
     OperationLocator, PendingToolEffect, PortFuture, PrincipalRef, ReconcileContext, RetrySafety,
     RunCallContext, RunId, SessionId, SideEffectClass, ToolBatchId, ToolCallBlock, ToolCallId,
-    ToolFailurePolicy, ToolReconcileResult, ToolStreamItem, Toolset,
+    ToolExecutionMode, ToolFailurePolicy, ToolReconcileResult, ToolStreamItem, Toolset,
 };
 use futures_util::StreamExt;
 use tempfile::TempDir;
@@ -126,6 +126,21 @@ fn specifications_are_generated_once_and_reused() {
     let second = toolset.tools();
     assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(first.len(), 6);
+    let write = first
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "filesystem_write")
+        .expect("write");
+    let edit = first
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "filesystem_edit")
+        .expect("edit");
+    let read = first
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == "filesystem_read")
+        .expect("read");
+    assert_eq!(write.execution, ToolExecutionMode::Sequential);
+    assert_eq!(edit.execution, ToolExecutionMode::Sequential);
+    assert_eq!(read.execution, ToolExecutionMode::Parallel);
 }
 
 #[tokio::test]
@@ -207,6 +222,25 @@ async fn read_write_edit_list_glob_and_search_use_public_tool_calls() {
     .expect("search");
     assert!(search.output.as_str().contains("\"line\":1"));
     assert!(search.output.as_str().contains("\"line\":2"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn chmod_zero_entry_does_not_break_listing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("visible.txt"), "ok").expect("visible");
+    let denied = root.path().join("denied.bin");
+    std::fs::write(&denied, "secret").expect("denied");
+    std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    let toolset = FileSystemToolset::try_new(root.path()).expect("filesystem");
+    let list = invoke(&toolset, 3, serde_json::json!({"path": ""}))
+        .await
+        .expect("list");
+    let listed = list.output.as_str();
+    assert!(listed.contains("visible.txt"));
+    std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o644)).expect("restore");
 }
 
 #[cfg(unix)]

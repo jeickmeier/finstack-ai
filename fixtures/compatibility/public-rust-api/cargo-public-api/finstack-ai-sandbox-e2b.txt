@@ -1,0 +1,39 @@
+pub mod finstack_ai_sandbox_e2b
+pub enum finstack_ai_sandbox_e2b::E2bSandboxError
+pub finstack_ai_sandbox_e2b::E2bSandboxError::CredentialRequired
+pub finstack_ai_sandbox_e2b::E2bSandboxError::EndpointInvalid
+pub finstack_ai_sandbox_e2b::E2bSandboxError::EndpointInvalid::reason: &'static str
+impl core::clone::Clone for finstack_ai_sandbox_e2b::E2bSandboxError
+pub fn finstack_ai_sandbox_e2b::E2bSandboxError::clone(&self) -> finstack_ai_sandbox_e2b::E2bSandboxError
+impl core::cmp::Eq for finstack_ai_sandbox_e2b::E2bSandboxError
+impl core::cmp::PartialEq for finstack_ai_sandbox_e2b::E2bSandboxError
+pub fn finstack_ai_sandbox_e2b::E2bSandboxError::eq(&self, &finstack_ai_sandbox_e2b::E2bSandboxError) -> bool
+impl core::error::Error for finstack_ai_sandbox_e2b::E2bSandboxError
+impl core::fmt::Debug for finstack_ai_sandbox_e2b::E2bSandboxError
+pub fn finstack_ai_sandbox_e2b::E2bSandboxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_sandbox_e2b::E2bSandboxError
+pub fn finstack_ai_sandbox_e2b::E2bSandboxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_sandbox_e2b::E2bSandboxError
+pub struct finstack_ai_sandbox_e2b::E2bSandboxConfig
+pub finstack_ai_sandbox_e2b::E2bSandboxConfig::api_key: alloc::string::String
+pub finstack_ai_sandbox_e2b::E2bSandboxConfig::endpoint: alloc::string::String
+pub finstack_ai_sandbox_e2b::E2bSandboxConfig::template: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_sandbox_e2b::E2bSandboxConfig
+pub fn finstack_ai_sandbox_e2b::E2bSandboxConfig::clone(&self) -> finstack_ai_sandbox_e2b::E2bSandboxConfig
+impl core::fmt::Debug for finstack_ai_sandbox_e2b::E2bSandboxConfig
+pub fn finstack_ai_sandbox_e2b::E2bSandboxConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_sandbox_e2b::E2bSandboxToolset
+impl finstack_ai_sandbox_e2b::E2bSandboxToolset
+pub fn finstack_ai_sandbox_e2b::E2bSandboxToolset::try_new(finstack_ai_sandbox_e2b::E2bSandboxConfig) -> core::result::Result<Self, finstack_ai_sandbox_e2b::E2bSandboxError>
+impl core::fmt::Debug for finstack_ai_sandbox_e2b::E2bSandboxToolset
+pub fn finstack_ai_sandbox_e2b::E2bSandboxToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_sandbox_e2b::E2bSandboxToolset
+pub fn finstack_ai_sandbox_e2b::E2bSandboxToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_sandbox_e2b::E2bSandboxToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_sandbox_e2b::E2bSandboxToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_sandbox_e2b::E2B_CREDENTIAL_REQUIRED: &str
+pub const finstack_ai_sandbox_e2b::E2B_ENDPOINT_INVALID: &str
+pub const finstack_ai_sandbox_e2b::E2B_INVALID_ARGUMENTS: &str
+pub const finstack_ai_sandbox_e2b::E2B_LIMIT_EXCEEDED: &str
+pub const finstack_ai_sandbox_e2b::E2B_TIMEOUT: &str
+pub const finstack_ai_sandbox_e2b::E2B_TRANSPORT_FAILED: &str

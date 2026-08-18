@@ -206,7 +206,7 @@ impl Root {
             }
             let opened = match openat(&fd, name, READ_FLAGS, Mode::empty()) {
                 Ok(opened) => opened,
-                Err(error) if error == rustix::io::Errno::LOOP => continue,
+                Err(error) if skippable_child_open(error) => continue,
                 Err(error) => return Err(map_open_error(error)),
             };
             let kind = opened_kind(&opened)?;
@@ -322,7 +322,7 @@ impl Root {
                 }
                 let opened = match openat(&fd, name, READ_FLAGS, Mode::empty()) {
                     Ok(opened) => opened,
-                    Err(error) if error == rustix::io::Errno::LOOP => continue,
+                    Err(error) if skippable_child_open(error) => continue,
                     Err(_) => return Err(io_error("filesystem entry open failed")),
                 };
                 let kind = opened_kind(&opened)?;
@@ -406,6 +406,12 @@ impl ValidatedPath {
             .join("/");
         Self::from_validated_parts(Arc::from(components.to_vec()), Arc::from(normalized))
     }
+}
+
+fn skippable_child_open(error: rustix::io::Errno) -> bool {
+    error == rustix::io::Errno::LOOP
+        || error == rustix::io::Errno::ACCESS
+        || error == rustix::io::Errno::PERM
 }
 
 fn map_open_error(error: rustix::io::Errno) -> ToolError {

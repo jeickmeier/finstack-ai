@@ -4,14 +4,16 @@ use finstack_ai_kernel::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, ComponentId, Digest,
     EffectDeferred, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
     EffectRequested, ErrorCategory, ErrorDescriptor, ExternalHandleRef, Id, IdTag, KernelState,
-    Metadata, RawJson, ReconciliationPolicy, RetrySafety, SyntheticToolClosure, Timestamp,
-    ToolBatchContinuation, ToolBatchOpened, ToolCallBlock, ToolCallPlan, ToolExecutionMode,
-    ToolFailurePolicy, ToolId, ToolSettlementFingerprint, ToolSettlementKind, ValidatedToolCall,
+    Metadata, OperationLocator, PrincipalRef, RawJson, ReconciliationPolicy, RetrySafety,
+    SyntheticToolClosure, Timestamp, ToolBatchContinuation, ToolBatchOpened, ToolCallBlock,
+    ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolSettlementFingerprint,
+    ToolSettlementKind, ValidatedToolCall,
 };
 use futures_util::stream;
 
 use crate::{
-    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal,
+    RunCallContext, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolSpec,
 };
 
 use super::*;
@@ -585,5 +587,48 @@ fn synthetic_closure_is_recorded_and_never_reconciled() {
     assert_eq!(
         tool_resume_action(&state_with(vec![call], &[]), id(4)),
         ToolResumeAction::UseRecorded
+    );
+}
+
+fn tool_ctx(principal_tenant: Option<&str>, locator_tenant: &str) -> ToolCallContext {
+    ToolCallContext {
+        run: RunCallContext {
+            locator: OperationLocator::try_new(locator_tenant, id(1), id(2), id(3))
+                .expect("locator"),
+            authorization: AuthorizationContext {
+                principal: PrincipalRef::try_new("issuer", "subject", principal_tenant)
+                    .expect("principal"),
+                authentication_method: Arc::from("fixture"),
+                assurance_level: Arc::from("high"),
+                roles: Arc::from([]),
+                permitted_scopes: Arc::from([Arc::from(locator_tenant)]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from("v1"),
+                decision_id: Arc::from("decision-1"),
+            },
+            effect_id: id(4),
+            attempt: 1,
+            deadline: None,
+            budget_scope_id: None,
+            cancellation: CancellationSignal::new(),
+        },
+        tool_batch_id: id(5),
+        tool_call_id: id(6),
+    }
+}
+
+#[test]
+fn verify_authority_accepts_matching_or_unscoped_principal() {
+    assert!(verify_authority(&tool_ctx(Some("tenant-a"), "tenant-a")).is_ok());
+    assert!(verify_authority(&tool_ctx(None, "tenant-a")).is_ok());
+}
+
+#[test]
+fn verify_authority_rejects_mismatched_principal_scope() {
+    let error = verify_authority(&tool_ctx(Some("tenant-b"), "tenant-a")).expect_err("denied");
+    assert_eq!(error.code(), TOOL_POLICY_DENIED);
+    assert_eq!(
+        error.message(),
+        "principal scope does not match the committed effect"
     );
 }

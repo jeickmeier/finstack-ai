@@ -1,4 +1,4 @@
-//! Example `before_finalize` verification middleware.
+//! Fixture `before_finalize` verification middleware.
 
 #![warn(missing_docs)]
 
@@ -12,6 +12,12 @@ use finstack_ai_runtime::{
     StageInput, StageMask, StageOutcome, Version,
 };
 use thiserror::Error;
+
+const VERIFY_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
 
 /// Verification decision selected at construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +41,7 @@ pub enum VerifyError {
     },
 }
 
-/// Example `before_finalize` verifier. It never writes a store.
+/// Fixture `before_finalize` verifier. It never writes a store.
 #[derive(Debug, Clone)]
 pub struct VerifyMiddleware {
     descriptor: MiddlewareDescriptor,
@@ -66,11 +72,7 @@ impl VerifyMiddleware {
                             reason: "invalid_component_id",
                         }
                     })?,
-                    version: Version {
-                        major: 0,
-                        minor: 0,
-                        patch: 4,
-                    },
+                    version: VERIFY_VERSION,
                     configuration_digest: Digest::raw_json(match decision {
                         VerifyDecision::Accept => b"accept",
                         VerifyDecision::Fail => b"fail",
@@ -136,7 +138,7 @@ impl Middleware for VerifyMiddleware {
                 VerifyDecision::RequestInteraction => {
                     let request = InteractionRequest::try_new(
                         1,
-                        InteractionId::from_bytes([1; 16]),
+                        InteractionId::from_bytes(ctx.run.effect_id.to_bytes()),
                         ctx.run.effect_id,
                         InteractionKind::Approval,
                         vec![finstack_ai_runtime::ContentBlock::Text(
@@ -147,17 +149,9 @@ impl Middleware for VerifyMiddleware {
                         finstack_ai_runtime::ComponentRef::new(
                             ComponentId::parse("finstack.middleware.verify")
                                 .map_err(|_| interaction_error())?,
-                            Some(Version {
-                                major: 0,
-                                minor: 0,
-                                patch: 4,
-                            }),
+                            Some(VERIFY_VERSION),
                         ),
-                        Version {
-                            major: 0,
-                            minor: 0,
-                            patch: 4,
-                        },
+                        VERIFY_VERSION,
                         None,
                         None,
                         false,

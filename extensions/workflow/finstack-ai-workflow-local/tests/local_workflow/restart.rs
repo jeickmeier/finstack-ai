@@ -387,7 +387,7 @@ async fn cron_schedule_survives_worker_restart() {
         .expect("attach")
         .with_ports(Arc::clone(&model), locked_profile(), None);
         let scheduled = driver
-            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .schedule_cron("tick", IntervalSchedule::parse("every 10ms").expect("expr"))
             .expect("schedule");
         first_next = scheduled.next_fire_at;
         assert_eq!(scheduled.fire_count, 0);
@@ -431,7 +431,7 @@ async fn cron_catch_up_fires_once_then_advances() {
         .expect("attach")
         .with_ports(Arc::clone(&model), locked_profile(), None);
         driver
-            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .schedule_cron("tick", IntervalSchedule::parse("every 10ms").expect("expr"))
             .expect("schedule");
     }
 
@@ -480,7 +480,7 @@ async fn cron_second_attach_does_not_catch_up_again() {
         .expect("attach")
         .with_ports(Arc::clone(&model), locked_profile(), None);
         driver
-            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .schedule_cron("tick", IntervalSchedule::parse("every 10ms").expect("expr"))
             .expect("schedule");
     }
     clock.jump(25).expect("jump");
@@ -531,12 +531,12 @@ async fn cron_catch_up_is_tenant_scoped() {
         .expect("attach")
         .with_ports(Arc::clone(&model), locked_profile(), None);
         driver
-            .schedule_cron("tick", CronExpression::parse("every 10ms").expect("expr"))
+            .schedule_cron("tick", IntervalSchedule::parse("every 10ms").expect("expr"))
             .expect("schedule");
         cron.upsert(&CronSchedule {
             tenant_scope: Arc::from("tenant-b"),
             schedule_id: Arc::from("tick"),
-            expression: CronExpression::parse("every 10ms").expect("expr"),
+            expression: IntervalSchedule::parse("every 10ms").expect("expr"),
             origin: timestamp(2_000),
             next_fire_at: timestamp(2_010),
             last_fired_at: None,

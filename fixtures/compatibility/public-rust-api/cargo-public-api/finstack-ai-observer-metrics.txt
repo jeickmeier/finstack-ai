@@ -1,0 +1,30 @@
+pub mod finstack_ai_observer_metrics
+pub enum finstack_ai_observer_metrics::MetricsObserverError
+pub finstack_ai_observer_metrics::MetricsObserverError::Configuration
+pub finstack_ai_observer_metrics::MetricsObserverError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_observer_metrics::MetricsObserverError
+pub fn finstack_ai_observer_metrics::MetricsObserverError::clone(&self) -> finstack_ai_observer_metrics::MetricsObserverError
+impl core::cmp::Eq for finstack_ai_observer_metrics::MetricsObserverError
+impl core::cmp::PartialEq for finstack_ai_observer_metrics::MetricsObserverError
+pub fn finstack_ai_observer_metrics::MetricsObserverError::eq(&self, &finstack_ai_observer_metrics::MetricsObserverError) -> bool
+impl core::error::Error for finstack_ai_observer_metrics::MetricsObserverError
+impl core::fmt::Debug for finstack_ai_observer_metrics::MetricsObserverError
+pub fn finstack_ai_observer_metrics::MetricsObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_observer_metrics::MetricsObserverError
+pub fn finstack_ai_observer_metrics::MetricsObserverError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_observer_metrics::MetricsObserverError
+pub struct finstack_ai_observer_metrics::MetricsObserver
+impl finstack_ai_observer_metrics::MetricsObserver
+pub fn finstack_ai_observer_metrics::MetricsObserver::dropped(&self) -> u64
+pub fn finstack_ai_observer_metrics::MetricsObserver::encode_prometheus(&self) -> alloc::string::String
+pub fn finstack_ai_observer_metrics::MetricsObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::queue::ObserverDiagnostic>
+pub fn finstack_ai_observer_metrics::MetricsObserver::record_compaction(&self, &finstack_ai_runtime::ports::middleware::types::CompactionEvidence)
+pub fn finstack_ai_observer_metrics::MetricsObserver::record_compaction_failure(&self)
+pub fn finstack_ai_observer_metrics::MetricsObserver::record_compaction_result(&self, &finstack_ai_runtime::ports::middleware::types::CompactionResult)
+pub fn finstack_ai_observer_metrics::MetricsObserver::record_compaction_summary_latency(&self, f64)
+pub fn finstack_ai_observer_metrics::MetricsObserver::record_store_latency(&self, f64)
+pub fn finstack_ai_observer_metrics::MetricsObserver::try_new(usize, finstack_ai_runtime::ports::observer::queue::ObserverBackpressure) -> core::result::Result<Self, finstack_ai_observer_metrics::MetricsObserverError>
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_metrics::MetricsObserver
+pub fn finstack_ai_observer_metrics::MetricsObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_observer_metrics::MetricsObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub const fn finstack_ai_observer_metrics::default_block_timeout() -> core::time::Duration

@@ -21,11 +21,11 @@ for ownership boundaries.
 
 ```rust
 use finstack_ai_runtime::WorkflowSession;
-use finstack_ai_workflow_local::{CronExpression, LocalWorkflowDriver, MemoryCronStore};
+use finstack_ai_workflow_local::{IntervalSchedule, LocalWorkflowDriver, MemoryCronStore};
 
 // `session` is a recovered `WorkflowSession`. Cron state is loaded from
 // the adapter table on `LocalWorkflowDriver::attach`.
 let cron = MemoryCronStore::new();
-let expr = CronExpression::parse("every 10ms").expect("expr");
+let expr = IntervalSchedule::parse("every 10ms").expect("expr");
 let _ = (session, cron, expr);
 ```

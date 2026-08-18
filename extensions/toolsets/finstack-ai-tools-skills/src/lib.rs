@@ -13,7 +13,7 @@ use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ErrorCategory, Metadata, PortFuture, RawJson,
     RetrySafety, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
     ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    ValidatedToolCall,
+    ValidatedToolCall, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -129,6 +129,9 @@ impl Toolset for SkillsToolset {
         ctx: ToolCallContext,
         call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
+        if let Err(error) = verify_authority(&ctx) {
+            return Box::pin(async move { Err(error) });
+        }
         let name = call.call.tool_name().to_string();
         let run_id = ctx.run.locator.run_id;
         match name.as_str() {

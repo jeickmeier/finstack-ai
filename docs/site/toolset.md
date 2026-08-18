@@ -10,7 +10,9 @@ and policy surface is intended to stay under 100 lines (NFR-DX-002).
 | `finstack-ai-tools-mcp` | Allowlisted MCP servers; tools and untrusted `ContextProvider`; `construct_with_context` is the one-connection constructor |
 | `finstack-ai-sandbox-e2b` | T4 remote sandbox leaf; `Agent.e2b_sandbox()` / `Agent.e2bSandbox()` on both bindings |
 | `finstack-ai-tools-shell` | Deny-by-default argv, empty env, timeout |
+| `finstack-ai-tools-subagent` | `subagent_start` / `subagent_status` / `subagent_cancel` over `AgentInvoker` |
 | `finstack-ai-tools-skills` | `capability_list` / additions-only `capability_activate` |
+| `finstack-ai-tools-skill-import` | Composition-time `SKILL.md` importer; catalog default-off |
 
 MCP sampling is a nested committed model child of the open tool
 (ADR-046). `resources/subscribe` accepts only names already in the

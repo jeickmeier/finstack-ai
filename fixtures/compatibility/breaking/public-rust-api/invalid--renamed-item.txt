@@ -621,7 +621,6 @@ finstack-ai-runtime::OpaqueBlock
 finstack-ai-runtime::OpaquePayload
 finstack-ai-runtime::OpaqueProviderEvent
 finstack-ai-runtime::OpaqueSnapshot
-finstack-ai-runtime::OpenAiChatAssembly
 finstack-ai-runtime::OpenAiResponsesAssembly
 finstack-ai-runtime::OperationLocator
 finstack-ai-runtime::OrderTier

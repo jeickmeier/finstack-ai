@@ -11,6 +11,7 @@ use finstack_ai_runtime::AgentInvokeError;
 /// Explicit route and credential used to construct a remote invoker.
 ///
 /// The invoker never reads environment variables and never discovers peers.
+#[derive(Clone)]
 pub struct RemoteChildRoute {
     /// Loopback `host:port` or `unix:/absolute/path`.
     pub endpoint: String,

@@ -157,6 +157,22 @@ def test_gateway_constructs_without_a_request() -> None:
     asyncio.run(construct())
 
 
+def test_gateway_rejects_openai_chat() -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="openai_chat"):
+            await finstack_ai.Agent.gateway(
+                "https://api.example.test/v1/responses",
+                "fixture-model",
+                wire_protocol="openai_chat",
+                credential_name="prod",
+                hard_input_bytes=1_000_000,
+                auth="bearer",
+                api_key="sk-gateway-secret-canary-045",
+            )
+
+    asyncio.run(construct())
+
+
 def test_gateway_rejects_missing_hard_input_bytes() -> None:
     async def construct() -> None:
         with pytest.raises(finstack_ai.ConfigurationError, match="hard_input_bytes"):

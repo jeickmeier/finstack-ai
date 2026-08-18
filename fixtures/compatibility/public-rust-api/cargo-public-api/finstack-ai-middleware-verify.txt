@@ -1,0 +1,39 @@
+pub mod finstack_ai_middleware_verify
+pub enum finstack_ai_middleware_verify::VerifyDecision
+pub finstack_ai_middleware_verify::VerifyDecision::Accept
+pub finstack_ai_middleware_verify::VerifyDecision::Fail
+pub finstack_ai_middleware_verify::VerifyDecision::RequestInteraction
+impl core::clone::Clone for finstack_ai_middleware_verify::VerifyDecision
+pub fn finstack_ai_middleware_verify::VerifyDecision::clone(&self) -> finstack_ai_middleware_verify::VerifyDecision
+impl core::cmp::Eq for finstack_ai_middleware_verify::VerifyDecision
+impl core::cmp::PartialEq for finstack_ai_middleware_verify::VerifyDecision
+pub fn finstack_ai_middleware_verify::VerifyDecision::eq(&self, &finstack_ai_middleware_verify::VerifyDecision) -> bool
+impl core::fmt::Debug for finstack_ai_middleware_verify::VerifyDecision
+pub fn finstack_ai_middleware_verify::VerifyDecision::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_middleware_verify::VerifyDecision
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_verify::VerifyDecision
+pub enum finstack_ai_middleware_verify::VerifyError
+pub finstack_ai_middleware_verify::VerifyError::Configuration
+pub finstack_ai_middleware_verify::VerifyError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_verify::VerifyError
+pub fn finstack_ai_middleware_verify::VerifyError::clone(&self) -> finstack_ai_middleware_verify::VerifyError
+impl core::cmp::Eq for finstack_ai_middleware_verify::VerifyError
+impl core::cmp::PartialEq for finstack_ai_middleware_verify::VerifyError
+pub fn finstack_ai_middleware_verify::VerifyError::eq(&self, &finstack_ai_middleware_verify::VerifyError) -> bool
+impl core::error::Error for finstack_ai_middleware_verify::VerifyError
+impl core::fmt::Debug for finstack_ai_middleware_verify::VerifyError
+pub fn finstack_ai_middleware_verify::VerifyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_verify::VerifyError
+pub fn finstack_ai_middleware_verify::VerifyError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_verify::VerifyError
+pub struct finstack_ai_middleware_verify::VerifyMiddleware
+impl finstack_ai_middleware_verify::VerifyMiddleware
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::try_accept() -> core::result::Result<Self, finstack_ai_middleware_verify::VerifyError>
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::try_new(finstack_ai_middleware_verify::VerifyDecision) -> core::result::Result<Self, finstack_ai_middleware_verify::VerifyError>
+impl core::clone::Clone for finstack_ai_middleware_verify::VerifyMiddleware
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::clone(&self) -> finstack_ai_middleware_verify::VerifyMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_verify::VerifyMiddleware
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_verify::VerifyMiddleware
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_verify::VerifyMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>

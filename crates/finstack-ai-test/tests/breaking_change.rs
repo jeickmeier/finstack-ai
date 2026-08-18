@@ -123,7 +123,10 @@ fn public_item_lists_reject_renames() {
         .current_dir(repo_root())
         .status()
         .expect("public items");
-    assert!(status.success(), "public-item baseline must stay a subset");
+    assert!(
+        status.success(),
+        "public-item baselines must match (Python/JS names + cargo-public-api)"
+    );
 }
 
 #[test]

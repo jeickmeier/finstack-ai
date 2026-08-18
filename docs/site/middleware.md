@@ -76,7 +76,7 @@ settlement that can carry them.
 
 | Leaf | Status |
 | --- | --- |
-| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
+| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | In-repo fixture. Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
 | [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
 
 ### How summarize compaction completes

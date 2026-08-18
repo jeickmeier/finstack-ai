@@ -1,0 +1,113 @@
+pub mod finstack_ai_tools_shell
+pub enum finstack_ai_tools_shell::ProcessSandboxKind
+pub finstack_ai_tools_shell::ProcessSandboxKind::Confined
+pub finstack_ai_tools_shell::ProcessSandboxKind::UnconfinedStdProcess
+impl core::clone::Clone for finstack_ai_tools_shell::ProcessSandboxKind
+pub fn finstack_ai_tools_shell::ProcessSandboxKind::clone(&self) -> finstack_ai_tools_shell::ProcessSandboxKind
+impl core::cmp::Eq for finstack_ai_tools_shell::ProcessSandboxKind
+impl core::cmp::PartialEq for finstack_ai_tools_shell::ProcessSandboxKind
+pub fn finstack_ai_tools_shell::ProcessSandboxKind::eq(&self, &finstack_ai_tools_shell::ProcessSandboxKind) -> bool
+impl core::fmt::Debug for finstack_ai_tools_shell::ProcessSandboxKind
+pub fn finstack_ai_tools_shell::ProcessSandboxKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_shell::ProcessSandboxKind
+impl core::marker::StructuralPartialEq for finstack_ai_tools_shell::ProcessSandboxKind
+pub enum finstack_ai_tools_shell::ShellError
+pub finstack_ai_tools_shell::ShellError::Configuration
+pub finstack_ai_tools_shell::ShellError::Configuration::reason: &'static str
+pub finstack_ai_tools_shell::ShellError::RootUnavailable
+pub finstack_ai_tools_shell::ShellError::Unsupported
+impl core::clone::Clone for finstack_ai_tools_shell::ShellError
+pub fn finstack_ai_tools_shell::ShellError::clone(&self) -> finstack_ai_tools_shell::ShellError
+impl core::cmp::Eq for finstack_ai_tools_shell::ShellError
+impl core::cmp::PartialEq for finstack_ai_tools_shell::ShellError
+pub fn finstack_ai_tools_shell::ShellError::eq(&self, &finstack_ai_tools_shell::ShellError) -> bool
+impl core::error::Error for finstack_ai_tools_shell::ShellError
+impl core::fmt::Debug for finstack_ai_tools_shell::ShellError
+pub fn finstack_ai_tools_shell::ShellError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_shell::ShellError
+pub fn finstack_ai_tools_shell::ShellError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_shell::ShellError
+pub struct finstack_ai_tools_shell::ProcessCommandSandbox
+impl finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::confined(finstack_ai_runtime::services::process_confinement::ConfinementProfile) -> core::result::Result<Self, finstack_ai_runtime::services::process_confinement::ConfinementError>
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::kind(&self) -> finstack_ai_tools_shell::ProcessSandboxKind
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::unconfined() -> Self
+impl core::clone::Clone for finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::clone(&self) -> finstack_ai_tools_shell::ProcessCommandSandbox
+impl core::default::Default for finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_tools_shell::CommandSandbox for finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::run(&self, finstack_ai_tools_shell::SandboxedCommand, finstack_ai_runtime::ports::model::context::CancellationSignal, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_tools_shell::SandboxedOutput, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub struct finstack_ai_tools_shell::SandboxedCommand
+pub finstack_ai_tools_shell::SandboxedCommand::argv: alloc::sync::Arc<[alloc::sync::Arc<str>]>
+pub finstack_ai_tools_shell::SandboxedCommand::cwd: core::option::Option<std::path::PathBuf>
+pub finstack_ai_tools_shell::SandboxedCommand::env: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub finstack_ai_tools_shell::SandboxedCommand::max_output_bytes: usize
+pub finstack_ai_tools_shell::SandboxedCommand::program: std::path::PathBuf
+pub finstack_ai_tools_shell::SandboxedCommand::timeout: core::time::Duration
+impl core::clone::Clone for finstack_ai_tools_shell::SandboxedCommand
+pub fn finstack_ai_tools_shell::SandboxedCommand::clone(&self) -> finstack_ai_tools_shell::SandboxedCommand
+impl core::fmt::Debug for finstack_ai_tools_shell::SandboxedCommand
+pub fn finstack_ai_tools_shell::SandboxedCommand::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_shell::SandboxedOutput
+pub finstack_ai_tools_shell::SandboxedOutput::exit_code: i32
+pub finstack_ai_tools_shell::SandboxedOutput::stderr: alloc::vec::Vec<u8>
+pub finstack_ai_tools_shell::SandboxedOutput::stdout: alloc::vec::Vec<u8>
+impl core::clone::Clone for finstack_ai_tools_shell::SandboxedOutput
+pub fn finstack_ai_tools_shell::SandboxedOutput::clone(&self) -> finstack_ai_tools_shell::SandboxedOutput
+impl core::cmp::Eq for finstack_ai_tools_shell::SandboxedOutput
+impl core::cmp::PartialEq for finstack_ai_tools_shell::SandboxedOutput
+pub fn finstack_ai_tools_shell::SandboxedOutput::eq(&self, &finstack_ai_tools_shell::SandboxedOutput) -> bool
+impl core::fmt::Debug for finstack_ai_tools_shell::SandboxedOutput
+pub fn finstack_ai_tools_shell::SandboxedOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_shell::SandboxedOutput
+pub struct finstack_ai_tools_shell::ShellLimits
+pub finstack_ai_tools_shell::ShellLimits::inline_result_bytes: usize
+pub finstack_ai_tools_shell::ShellLimits::max_output_bytes: usize
+pub finstack_ai_tools_shell::ShellLimits::timeout: core::time::Duration
+impl core::clone::Clone for finstack_ai_tools_shell::ShellLimits
+pub fn finstack_ai_tools_shell::ShellLimits::clone(&self) -> finstack_ai_tools_shell::ShellLimits
+impl core::cmp::Eq for finstack_ai_tools_shell::ShellLimits
+impl core::cmp::PartialEq for finstack_ai_tools_shell::ShellLimits
+pub fn finstack_ai_tools_shell::ShellLimits::eq(&self, &finstack_ai_tools_shell::ShellLimits) -> bool
+impl core::default::Default for finstack_ai_tools_shell::ShellLimits
+pub fn finstack_ai_tools_shell::ShellLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_shell::ShellLimits
+pub fn finstack_ai_tools_shell::ShellLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_shell::ShellLimits
+impl core::marker::StructuralPartialEq for finstack_ai_tools_shell::ShellLimits
+pub struct finstack_ai_tools_shell::ShellPolicy
+impl finstack_ai_tools_shell::ShellPolicy
+pub fn finstack_ai_tools_shell::ShellPolicy::try_new<I, S>(I) -> core::result::Result<Self, finstack_ai_tools_shell::ShellError> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn finstack_ai_tools_shell::ShellPolicy::try_with_path_search<I, S>(self, I) -> core::result::Result<Self, finstack_ai_tools_shell::ShellError> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn finstack_ai_tools_shell::ShellPolicy::with_locale_env(self) -> Self
+impl core::clone::Clone for finstack_ai_tools_shell::ShellPolicy
+pub fn finstack_ai_tools_shell::ShellPolicy::clone(&self) -> finstack_ai_tools_shell::ShellPolicy
+impl core::fmt::Debug for finstack_ai_tools_shell::ShellPolicy
+pub fn finstack_ai_tools_shell::ShellPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_shell::ShellToolset
+impl finstack_ai_tools_shell::ShellToolset
+pub fn finstack_ai_tools_shell::ShellToolset::try_new(finstack_ai_tools_shell::ShellPolicy, core::option::Option<&std::path::Path>) -> core::result::Result<Self, finstack_ai_tools_shell::ShellError>
+pub fn finstack_ai_tools_shell::ShellToolset::try_with_confinement(self) -> core::result::Result<Self, finstack_ai_tools_shell::ShellError>
+pub fn finstack_ai_tools_shell::ShellToolset::try_with_limits(self, finstack_ai_tools_shell::ShellLimits) -> core::result::Result<Self, finstack_ai_tools_shell::ShellError>
+pub fn finstack_ai_tools_shell::ShellToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_kernel::primitives::diagnostic::Sensitivity) -> Self
+pub fn finstack_ai_tools_shell::ShellToolset::with_sandbox(self, alloc::sync::Arc<dyn finstack_ai_tools_shell::CommandSandbox>) -> Self
+impl core::fmt::Debug for finstack_ai_tools_shell::ShellToolset
+pub fn finstack_ai_tools_shell::ShellToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_shell::ShellToolset
+pub fn finstack_ai_tools_shell::ShellToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_shell::ShellToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_shell::ShellToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_shell::SHELL_ARTIFACT_REQUIRED: &str
+pub const finstack_ai_tools_shell::SHELL_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_shell::SHELL_IO_ERROR: &str
+pub const finstack_ai_tools_shell::SHELL_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_shell::SHELL_POLICY_DENIED: &str
+pub const finstack_ai_tools_shell::SHELL_TIMEOUT: &str
+pub const finstack_ai_tools_shell::SHELL_UNSUPPORTED: &str
+pub trait finstack_ai_tools_shell::CommandSandbox: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_tools_shell::CommandSandbox::run(&self, finstack_ai_tools_shell::SandboxedCommand, finstack_ai_runtime::ports::model::context::CancellationSignal, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_tools_shell::SandboxedOutput, finstack_ai_runtime::ports::tool::error::ToolError>>
+impl finstack_ai_tools_shell::CommandSandbox for finstack_ai_tools_shell::ProcessCommandSandbox
+pub fn finstack_ai_tools_shell::ProcessCommandSandbox::run(&self, finstack_ai_tools_shell::SandboxedCommand, finstack_ai_runtime::ports::model::context::CancellationSignal, core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_tools_shell::SandboxedOutput, finstack_ai_runtime::ports::tool::error::ToolError>>

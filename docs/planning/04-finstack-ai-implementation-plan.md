@@ -13,7 +13,7 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.24 |
+| Version | 0.25 |
 | Status | Implementation baseline |
 | Date | 2026-08-18 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
@@ -48,7 +48,7 @@ Python bindings       Browser WASM       Durability/recovery
             1.0.x reliability / 1.0 production drivers
 ```
 
-The plan contains **84 logical pull requests** across thirteen phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
+The plan contains **98 logical pull requests** across fourteen phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
 
 # 1. Purpose and use of this plan
 
@@ -92,6 +92,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 2.0 provider migration | Phase 11 | Responses + native Ollama; Chat Completions removed | Major public break; publication is a later named action |
 | 1.0 production drivers | Phase 12 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | SemVer additive or new-package; freeze gate must see additions |
 | 1.0.x kernel remediation | Phase 13 | Decide/apply/cost/validator/wire fixes from the checked-in kernel reviews | 1.0.0 pre-publication source-breaking or patch; freeze gate sees added and removed names only; signatures stay named review |
+| Extensions remediation | Phase 14 | cargo-public-api gate, ADR-047/048, then audit waves; gateway deleted not centralized | Pre-1.0 extensions source-breaking allowed; freeze gate sees signatures |
 
 ## 2.1 MVP and preview boundary
 
@@ -134,6 +135,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 11. 2.0 provider migration | 2-4 weeks | Sequential after ADR-040; publication excluded |
 | 12. 1.0 production drivers | 2-4 weeks | E1 parallel with E3 after authorization; E4 sequential on E3 |
 | 13. Kernel remediation | 2-3 weeks | Authorization first; PR-081 may start beside PR-082; PR-083 after PR-082; PR-084 last |
+| 14. Extensions remediation | 3-5 weeks | Authorization first; PR-086–PR-093 after PR-085; PR-089 after PR-088; PR-095 after PR-094; PR-098 last |
 
 ## 3.1 Staffing scenarios
 
@@ -210,6 +212,8 @@ Phase 4: Python     Phase 5: WASM      Phase 6: durability
                           ---------------------|---------------------
                           v                    v                    v
                    Phase 11: 2.0 providers   Phase 12: 1.0 drivers   Phase 13: kernel remediation
+                                                                        |
+                                                              Phase 14: extensions remediation
 ```
 
 Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
@@ -3358,6 +3362,377 @@ A separate ADR is required before merging a change that:
 
 **Explicitly excluded.** `#13b` `InvariantViolation` reshape. `#21` `request_version` removal. New `KernelError` variants. Journal `RecordBody`, WIT, or remote-protocol meaning change. Inventing a major version bump.
 
+# 17E. Phase 14: extensions remediation
+
+**Outcome.** Instrument the public-API gate, land ADR-047 and ADR-048, then execute the extensions audit waves. The gateway is deleted, not centralized. Named credentials are promoted into `provider_util`. `subagent_await` becomes `subagent_status`. The Anthropic process-global prompt-cache mutex is deleted. e2b compensating DELETE and `AgentInvoker::join` stay out of scope.
+
+**Planning range.** 3-5 weeks
+
+**Traceability.** FR-EXT, FR-TLS, FR-MDL, FR-SEC; ADR-040, ADR-045, ADR-047, ADR-048; TM-01, TM-02, TM-03, TM-04, TM-06, TM-10; 1.0 compatibility policy.
+
+## Entrance criteria
+
+- Documentation pack v0.27 / Implementation Plan 0.25 authorizes this section. Phase 13 / PR-080–PR-084 may remain in progress; this phase does not reuse PR-001–PR-084 envelopes.
+- The cargo-public-api freeze gate is landed by PR-085 and sees kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Phase 10 / PR-067, Phase 11 / PR-068–PR-073, Phase 12 / PR-074–PR-079, and Phase 13 / PR-080–PR-084 may proceed in parallel; this phase does not implement kernel remediation, provider-publication, or production drivers.
+
+## Exit criteria
+
+- `finstack-ai-provider-gateway` is deleted. `Agent::gateway` remains a thin dispatcher. `openai_chat` is a configuration error.
+- Shared `verify_authority` is called from the leaf toolsets that had a local copy or an inlined twin.
+- `mise run check-public-api` is green against the frozen dumps, including extension crates.
+- Delivery-ledger and site docs match the surviving constructors and tool names. No invented evidence ids.
+
+## Pull request sequence
+
+### PR-085 - Authorize Phase 14, ADRs, and the public-API gate
+
+**Purpose.** Authorize pre-1.0 extensions remediation as Phase 14, accept ADR-047 and ADR-048, land the cargo-public-api freeze gate, and add `verify_authority` on the runtime Tool port. This slice does not delete the gateway or migrate leaf crates.
+
+**Principal changes.**
+
+- Add §17E with PR-085–PR-098; update the exec line, §2, §3, §5.1, and §22; bump Plan 0.24→0.25 and pack v0.26→v0.27.
+- Author ADR-047 and ADR-048. Update `adr-register.md` and `adrs/README.md`.
+- Write the PR-085 envelope. Record the remapping from the draft Phase 13 / PR-080–PR-093 IDs.
+- Pin `cargo-public-api` via mise. Add check-only nightly only if rustdoc JSON still requires it. Do not set `RUSTC_BOOTSTRAP`.
+- Add baselines under `fixtures/compatibility/public-rust-api/` for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Add `mise run check-public-api`. Retire or delegate the Rust `pub use` scrape.
+- Land `verify_authority(&ToolCallContext)` on the runtime Tool port. Optionally land `provider_util` secret and credential types without crate-root re-exports and without retargeting `Agent::gateway`.
+
+**Acceptance evidence.**
+
+- Implementation Plan 0.25 contains §17E with PR-085–PR-098, each with Purpose, Principal changes, Acceptance evidence, Dependencies, Explicitly excluded, and Traceability.
+
+- Pack README is v0.27 and lists Implementation Plan 0.25.
+
+- ADR-047 and ADR-048 exist and are indexed. ADR-047 keeps `Agent::gateway` and makes `openai_chat` a configuration error. ADR-048 rejects `ReceiverModelStream`, `apply_budget`, and `tool_catalog_digest`.
+
+- Envelope exists at `docs/implementation/artifacts/pr-085/plan.md` and records the ID remapping. Kernel `pr-080` through `pr-084` envelopes are unchanged.
+
+- `mise run check-public-api` exists. `verify_authority` is a public runtime add visible to that gate. NFR-PORT-* is unchanged.
+
+**Dependencies.** Phase 9 / G8. Phase 13 / PR-080–PR-084 may remain in progress. Pack v0.26 is already landed.
+
+**Traceability.** FR-EXT; ADR-047; ADR-048; NFR-COMP; TM-02, TM-04.
+
+**Explicitly excluded.** PR-086–PR-098 leaf code. Gateway deletion. `Agent::gateway` retarget. Leaf secret/credential usage. e2b compensating DELETE. `AgentInvoker::join`. Temporal engine. Encoder centralization. NFR-PORT-* amendment. Overwriting Phase 13.
+
+### PR-086 - W1 shell
+
+**Purpose.** Make large-output shell runs fail closed instead of hanging, walk cwd through the retained root fd, and switch to shared `verify_authority`.
+
+**Principal changes.**
+
+- Drain both pipes before the wait loop; cap output and return `SHELL_LIMIT_EXCEEDED` when the cap is crossed.
+- `run_process` does the authoritative per-component `openat` walk, then `fchdir`.
+- Switch to shared `verify_authority`. Add `check_toolset_conformance`.
+- Complete §18 + security-review before merge.
+
+**Acceptance evidence.**
+
+- 1 MiB stdout returns `SHELL_LIMIT_EXCEEDED` or a staged artifact, not a hang; the existing 8 KiB case stays green.
+
+- A cwd test with a symlinked intermediate component passes.
+
+- The crate has `check_toolset_conformance`.
+
+**Dependencies.** PR-085. Independent of PR-087–PR-093.
+
+**Traceability.** FR-TLS; TM-03; ADR-048; ADR-043.
+
+**Explicitly excluded.** Windows cwd expansion. e2b lifecycle. Gateway deletion.
+
+### PR-087 - W2 subagent
+
+**Purpose.** Isolate child lookup by tenant, delete `last_run_id`, call `verify_authority` before the name check, and rename `subagent_await` to `subagent_status`.
+
+**Principal changes.**
+
+- Key the child map by `{ tenant_scope, session_id, run_id }`. Cross-tenant lookup → `SUBAGENT_CHILD_NOT_FOUND`.
+- Delete `last_run_id`. `status` with no `run_id` is invalid arguments.
+- `verify_authority(&ctx)` before the name check. Rename `subagent_await` → `subagent_status` in the same change, including bindings and site docs.
+- Complete §18 + security-review before merge.
+
+**Acceptance evidence.**
+
+- Start under tenant A, `cancel`/`status` under B → `SUBAGENT_CHILD_NOT_FOUND`.
+
+- `status` with no `run_id` → invalid arguments, not another tenant's `session_id`.
+
+- Bindings and site docs use `subagent_status`.
+
+**Dependencies.** PR-085. Independent of PR-086.
+
+**Traceability.** FR-TLS; TM-02; ADR-048.
+
+**Explicitly excluded.** `AgentInvoker::join`. Nested-effect await. Gateway deletion.
+
+### PR-088 - W3a MCP transport
+
+**Purpose.** Make MCP stdio/HTTP transport fail closed on foreign ids, bound reads, and split JSON-RPC decode from result interpretation.
+
+**Principal changes.**
+
+- Rewrite `round_trip` as a dispatch loop. Foreign id poisons the transport.
+- Bound line reads and HTTP bodies. Implement `take_notifications` on `StdioTransport`.
+- Split `parse_jsonrpc_response` into `decode_frame` + `interpret_result`. SSE splits on blank lines into events.
+- Delete `HttpConfig::sse_only`.
+
+**Acceptance evidence.**
+
+- Notification-before-response still pairs; the next request is not off-by-one.
+
+- Oversized line poisons. Observer fires.
+
+- `HttpConfig::sse_only` is gone.
+
+**Dependencies.** PR-085. Sequential predecessor of PR-089.
+
+**Traceability.** FR-TLS; TM-01, TM-10.
+
+**Explicitly excluded.** Classify/lib/resources edits (PR-089). Shared fixture coupling.
+
+### PR-089 - W3b MCP classify / lib / resources
+
+**Purpose.** Close MCP catalog-collision, truncation, resource-budget, and ADR-046 drift gaps, and add `verify_authority` on mcp and skills.
+
+**Principal changes.**
+
+- Dedup sanitized `tool_id` and fail closed on collision.
+- Truncate then re-measure the serialized envelope. Apply resource budget before fetch.
+- Wire `MCP_CATALOG_DRIFT` against the frozen `invocation_digest`.
+- Keep `ToolDeferralSupport::Never` on every MCP `ToolSpec`. `verify_authority` on mcp and skills.
+
+**Acceptance evidence.**
+
+- Sanitized-id collision fails closed. Oversized result still records a truncation marker.
+
+- Reconstructed `invocation_digest` mismatch emits `MCP_CATALOG_DRIFT`.
+
+- `mise run conformance` passes. `deferral` remains `Never`.
+
+- mcp and skills call `verify_authority`.
+
+**Dependencies.** PR-088.
+
+**Traceability.** FR-TLS; ADR-046; ADR-048; TM-01, TM-10.
+
+**Explicitly excluded.** Transport rewrite (PR-088). Nested sampling behavior change.
+
+### PR-090 - W4 workflow-local
+
+**Purpose.** Hold one SQLite connection, claim cron ticks with a compare-and-set update, and rename `CronExpression` to `IntervalSchedule`.
+
+**Principal changes.**
+
+- One `Mutex<Connection>`; open + pragma + DDL once.
+- Conditional `UPDATE` inside `BEGIN IMMEDIATE`. `CronScheduleStore::try_claim` defaults to `Err(StoreUnavailable)`.
+- `checked_mul` on `next_after`. Rename `CronExpression` → `IntervalSchedule`.
+
+**Acceptance evidence.**
+
+- Two `LocalWorkflowDriver`s on one file both calling `fire_due` emit exactly one `CronFire`.
+
+- Third-party stores that omit `try_claim` fail closed.
+
+**Dependencies.** PR-085. Independent of PR-086–PR-089.
+
+**Traceability.** FR-DUR; TM-12.
+
+**Explicitly excluded.** Temporal engine. Distributed multi-writer.
+
+### PR-091 - W5 e2b
+
+**Purpose.** Recheck cancel/deadline before each POST, bound the response body, fix IPv6 loopback detection, and switch to shared `verify_authority`. Do not add compensating DELETE.
+
+**Principal changes.**
+
+- Recheck cancellation/deadline before each POST and race sends with `tokio::select!`.
+- Stream `Response::chunk()` into a bounded `Vec`.
+- Special-case a leading `[` in `is_loopback_host`. Switch to shared `verify_authority`.
+- Record orphaned sandboxes as a residual. Do not split create/run/destroy.
+
+**Acceptance evidence.**
+
+- Cancelled signal → no HTTP request reaches the fixture listener.
+
+- Oversized JSON → limit error, not an unbounded parse.
+
+- Shared `verify_authority` is used. No DELETE assertion.
+
+**Dependencies.** PR-085. Independent of PR-086–PR-090.
+
+**Traceability.** FR-TLS; SEC-INV-003; TM-03; ADR-048.
+
+**Explicitly excluded.** Compensating DELETE. Explicit sandbox lifecycle. ADR-049.
+
+### PR-092 - W6 remote-child
+
+**Purpose.** Bound remote-child connect/read loops, derive command ids from the request digest, and reject cancel of a never-accepted locator.
+
+**Principal changes.**
+
+- Connect timeout and per-read deadline. Bound remote-driven frame loops by count and elapsed time.
+- Derive `RemoteCommand` id from `request.request_digest`. `cancel` rejects a locator never accepted.
+- `#[derive(Clone)]` on `RemoteChildRoute`; delete `clone_route`.
+- Complete §18 (protocol) before merge.
+
+**Acceptance evidence.**
+
+- Peer that never sends `CommandResult` → timeout.
+
+- 10k `EventBatch` frames → bounded failure.
+
+**Dependencies.** PR-085. Independent of PR-086–PR-091.
+
+**Traceability.** FR-DUR; TM-06.
+
+**Explicitly excluded.** Marketplace. New remote protocol family.
+
+### PR-093 - W7 independent small fixes
+
+**Purpose.** Bound otel capture, move log writes off the runtime worker, fix compaction estimate cost, correct filesystem skip-vs-fail and write-tool execution mode, and derive verify `InteractionId` from the effect.
+
+**Principal changes.**
+
+- observer-otel: bound `captured` or gate accumulation; delete no-op `otlp`. Telemetry-retention → §18; blocks merge.
+- observer-log: move blocking `write_all` to `spawn_blocking`.
+- middleware-compaction: hoist `estimate_indices`, track the total incrementally, `break` instead of `continue`.
+- tools-filesystem: skip-vs-fail consistency; write/edit `Sequential`; shared `verify_authority`.
+- middleware-verify: `InteractionId` from `ctx.run.effect_id`; fix the stale `Version`.
+
+**Acceptance evidence.**
+
+- otel `captured()` is bounded past the cap.
+
+- Compaction terminates on 5k entries with O(n) estimate calls.
+
+- Two verify runs yield distinct `InteractionId`s.
+
+- One `chmod 000` entry does not break a listing.
+
+**Dependencies.** PR-085. Independent of PR-086–PR-092 except merge conflicts.
+
+**Traceability.** FR-OBS, FR-TLS, FR-MW; TM-04; ADR-048.
+
+**Explicitly excluded.** Shipping verify as a battery (PR-097). Gateway deletion.
+
+### PR-094 - W8 delete the gateway
+
+**Purpose.** Retarget `Agent::gateway` onto the three dedicated providers, land shared credentials, and delete the gateway crate plus `OpenAiChatAssembly`.
+
+**Principal changes.**
+
+- Port cross-protocol tool-role replay tests and `check_model_conformance` into openai / anthropic / ollama.
+- Re-export shared credentials + `SecretString`. `with_credential_store(store, reference)` on dedicated configs.
+- Retarget `gateway_inner`. `openai_chat` → configuration error. Pass `spec.endpoint`. No public `GatewayAgentSpec` field change.
+- Delete `finstack-ai-provider-gateway`, `OpenAiChatAssembly`, and `provider_util/openai_chat.rs`.
+
+**Acceptance evidence.**
+
+- Request-body goldens match after retarget for the three surviving protocols.
+
+- Each crate's `try_new` still returns its own stable code.
+
+- `Agent.gateway(..., wire_protocol="openai_chat")` fails closed.
+
+- `mise run conformance` passes.
+
+**Dependencies.** PR-085. Independent of PR-086–PR-093 except merge conflicts.
+
+**Traceability.** ADR-040; ADR-047; ADR-048; FR-MDL.
+
+**Explicitly excluded.** `.expect` / unknown-model / structured-capability fixes (PR-095). Removing `Agent::gateway`. Encoder centralization.
+
+### PR-095 - W9 Anthropic prompt cache
+
+**Purpose.** Delete the Anthropic process-global prompt-cache mutex and fix the three surviving providers' catalog/capability holes.
+
+**Principal changes.**
+
+- Delete the Anthropic process-global mutex. Re-home the catalog-change test in the anthropic crate.
+- Replace `.expect("provider model catalog is non-empty")` with a conservative zeroed profile in all three providers.
+- Unknown model must not inherit the first catalog entry. Stop declaring `structured_output: Unsupported` while plumbing `structured`.
+- Do not copy the gateway `prompt_cache_key` insert onto openai.
+
+**Acceptance evidence.**
+
+- Catalog-change omits stale `cache_control` without a process-global mutex.
+
+- Empty or unknown catalog no longer panics or inherits the first profile.
+
+- Structured capability matches what the adapter actually sends.
+
+**Dependencies.** PR-094.
+
+**Traceability.** FR-MDL; ADR-047.
+
+**Explicitly excluded.** Reintroducing a global cache key. Gateway crate revival.
+
+### PR-096 - W10 delete Temporal shim
+
+**Purpose.** Move Temporal-crate tests that prove runtime retry parity into workflow-local, then delete the non-engine Temporal shim.
+
+**Principal changes.**
+
+- Move `loop_parity.rs` and `retry_policy.rs` into `workflow-local`.
+- Delete `finstack-ai-workflow-temporal`.
+
+**Acceptance evidence.**
+
+- Moved tests still prove `retry_decision` parity.
+
+- The Temporal crate, workspace member, and in-repo references are gone.
+
+**Dependencies.** PR-085. Prefer after PR-090 so workflow-local already holds one connection.
+
+**Traceability.** FR-DUR.
+
+**Explicitly excluded.** Temporal engine integration. Bookmark navigation.
+
+### PR-097 - W11 verify fixture
+
+**Purpose.** Keep `finstack-ai-middleware-verify` but stop shipping it as an example battery.
+
+**Principal changes.**
+
+- `publish = false`. Docs role becomes fixture, not “Example battery”.
+- Keep the crate. It remains the in-repo `Middleware` that exercises all three `StageOutcome` arms at `before_finalize`.
+
+**Acceptance evidence.**
+
+- Manifest is `publish = false`. Site docs call it a fixture.
+
+- `examples/rust-minimal` and the runtime middleware-driver reference still compile.
+
+**Dependencies.** PR-093 (InteractionId fix).
+
+**Traceability.** FR-MW.
+
+**Explicitly excluded.** Deleting the crate. Changing `StageOutcome` semantics.
+
+### PR-098 - W12 docs and register facts
+
+**Purpose.** Reconcile extension READMEs, site/provider docs, and delivery registers for facts this phase created. Do not invent evidence ids.
+
+**Principal changes.**
+
+- `extensions/toolsets/README.md` lists e2b and skill-import. Add `extensions/stores/README.md`.
+- Reconcile `delivery-ledger.md` and `evidence-register.md` only for facts this work creates. Correct Phase 11 “Todo” vs dedicated crates already on `main` without marking PR-068–073 `Done` without candidates.
+- Site/provider docs: `openai_chat` gone; `Agent.gateway` still exists and dispatches to the three leaves; `subagent_status` name.
+
+**Acceptance evidence.**
+
+- Toolset and store READMEs list the in-tree crates.
+
+- Ledger status text matches `main` without manufactured evidence ids.
+
+- Site docs no longer advertise `openai_chat` or `subagent_await`.
+
+**Dependencies.** PR-094, PR-095, PR-096, PR-097.
+
+**Traceability.** NFR-DX; ADR-045; ADR-047.
+
+**Explicitly excluded.** Inventing evidence ids. Folding this work into open PR-067. Marking PR-068–073 `Done` without candidates.
+
 # 18. Cross-phase quality plan
 
 ## 18.1 Test layers by phase
@@ -3486,6 +3861,7 @@ PRD lettered phases are capability groupings; the numbered phases and logical PR
 | 2.0 provider migration | Phase 11, PR-068–PR-073 | Responses + native Ollama; Chat Completions removed | — |
 | 1.0 production drivers | Phase 12, PR-074–PR-079 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | — |
 | 1.0.x kernel remediation | Phase 13, PR-080–PR-084 | Decide/apply/cost/validator/wire review closeout | — |
+| Extensions remediation | Phase 14, PR-085–PR-098 | cargo-public-api gate; ADR-047/048; gateway deleted | — |
 
 A family traceability reference such as `NFR-PERF` expands to every numbered requirement in that family unless the entry names a narrower range. This convention avoids duplicating requirement prose while preserving ownership.
 
@@ -3505,6 +3881,7 @@ A family traceability reference such as `NFR-PERF` expands to every numbered req
 | 2.0 provider migration | PR-068 to PR-073 | FR-MDL; ADR-040; NFR-COMP | Responses, native Ollama, Chat Completions removed |
 | 1.0 production drivers | PR-074 to PR-079 | FR-CTX, FR-DUR, FR-PY; UC-05/08/09 | Context driver, workflow-local cron, Lane verbs, Python SQLite, child-runs |
 | Kernel remediation | PR-080 to PR-084 | FR-KRN; NFR-COMP; NFR-REL | Limit/redelivery, capacity preflight, validators, hash/wire surfaces |
+| Extensions remediation | PR-085 to PR-098 | FR-EXT, FR-TLS, FR-MDL; ADR-047, ADR-048 | Public-api gate, shared authority/secret, leaf audit waves |
 
 # 23. First 30 days
 

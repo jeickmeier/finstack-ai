@@ -171,6 +171,10 @@ impl AgentRun {
 
     /// Borrow the journal store that owns this run.
     #[must_use]
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        allow(dead_code)
+    )]
     pub(crate) fn journal_store(&self) -> &Arc<dyn finstack_ai_runtime::JournalStore> {
         &self.inner.store
     }

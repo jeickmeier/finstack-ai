@@ -1,0 +1,196 @@
+//! Model-port conformance for Anthropic Messages (ported from the deleted
+//! gateway `assert_protocol` / `check_model_conformance` caller).
+
+use std::sync::Arc;
+
+use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
+use finstack_ai_runtime::{
+    AnthropicMessagesAssembly, AuthorizationContext, CancellationSignal, ContentBlock, EffectId,
+    LaneId, Message, MessageId, MessageRole, Metadata, Model, ModelCallContext, ModelName,
+    ModelRequest, ModelRequestDraft, ModelRequestId, ModelRequestLimits, ModelSettings,
+    ModelStreamItem, ModelTerminal, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
+    RawJson, RunCallContext, RunId, SessionId, TextBlock, Timestamp,
+};
+use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+const ANTHROPIC_SSE: &str =
+    include_str!("../../../../fixtures/compatibility/providers/v1/anthropic/valid--text.sse");
+const REQUEST_ID: &str = "01234567-89ab-7cde-89ab-0123456789a5";
+
+fn fixture_model() -> AnthropicModelConfig {
+    AnthropicModelConfig::try_new("fixture-model", 1_000_000, 8_192, 1_024, 1_024, 64)
+        .expect("model")
+}
+
+fn provider(base_url: &str) -> AnthropicProvider {
+    let config = AnthropicConfig::try_new(base_url).expect("config");
+    AnthropicProvider::try_new(config, vec![fixture_model()]).expect("provider")
+}
+
+fn request() -> ModelRequest {
+    let selected = ModelName::try_new("fixture-model").expect("name");
+    ModelRequest {
+        call: ModelCallContext {
+            run: RunCallContext {
+                locator: OperationLocator::try_new(
+                    "tenant-a",
+                    SessionId::parse("01234567-89ab-7cde-89ab-0123456789a1").expect("session"),
+                    LaneId::parse("01234567-89ab-7cde-89ab-0123456789a2").expect("lane"),
+                    RunId::parse("01234567-89ab-7cde-89ab-0123456789a3").expect("run"),
+                )
+                .expect("locator"),
+                authorization: AuthorizationContext {
+                    principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                        .expect("principal"),
+                    authentication_method: Arc::from("fixture"),
+                    assurance_level: Arc::from("test"),
+                    roles: Arc::from([]),
+                    permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                    safe_claims: Metadata::empty(),
+                    policy_version: Arc::from("policy-v1"),
+                    decision_id: Arc::from("decision-v1"),
+                },
+                effect_id: EffectId::parse("01234567-89ab-7cde-89ab-0123456789a4").expect("effect"),
+                attempt: 1,
+                deadline: None,
+                budget_scope_id: None,
+                cancellation: CancellationSignal::new(),
+            },
+            request_id: ModelRequestId::parse(REQUEST_ID).expect("request id"),
+        },
+        draft: ModelRequestDraft {
+            model: selected,
+            messages: Arc::from([Message::try_new(
+                MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message"),
+                MessageRole::User,
+                vec![ContentBlock::Text(
+                    TextBlock::try_new("hello").expect("text"),
+                )],
+                Timestamp::from_unix_ms(1).expect("ts"),
+                None,
+                ProviderIds::empty(),
+                Metadata::empty(),
+            )
+            .expect("message")]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_024,
+                max_input_tokens: 1_024,
+                max_output_tokens: 128,
+            },
+        },
+        continuation_state: None,
+    }
+}
+
+fn expected_anthropic() -> ModelTerminal {
+    let mut assembly = AnthropicMessagesAssembly::new(REQUEST_ID.to_owned(), false);
+    let events = [
+        (
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"msg-text-1","type":"message","role":"assistant","content":[],"model":"fixture-model","stop_reason":null,"usage":{"input_tokens":4,"output_tokens":1,"cache_creation_input_tokens":2,"cache_read_input_tokens":1}}}"#,
+        ),
+        (
+            "content_block_start",
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        ),
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello "}}"#,
+        ),
+        (
+            "content_block_delta",
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}"#,
+        ),
+        (
+            "content_block_stop",
+            r#"{"type":"content_block_stop","index":0}"#,
+        ),
+        (
+            "message_delta",
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}"#,
+        ),
+        ("message_stop", r#"{"type":"message_stop"}"#),
+    ];
+    for (name, data) in events {
+        let items = assembly.consume(name, data).expect("anthropic event");
+        if let Some(ModelStreamItem::Completed(response)) = items.into_iter().last() {
+            return ModelTerminal::Completed(response);
+        }
+    }
+    panic!("anthropic fixture omitted a completion");
+}
+
+async fn serve_body(content_type: &str, body: &str) -> (String, tokio::task::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+    let address = listener.local_addr().expect("address");
+    let content_type = content_type.to_owned();
+    let body = body.as_bytes().to_vec();
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4_096];
+        let header_end = loop {
+            let count = socket.read(&mut buffer).await.expect("read request");
+            assert!(count > 0, "request closed before headers");
+            request.extend_from_slice(&buffer[..count]);
+            if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break end + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length: ")
+                    .and_then(|value| value.parse::<usize>().ok())
+            })
+            .expect("content length");
+        while request.len() < header_end + content_length {
+            let count = socket.read(&mut buffer).await.expect("read body");
+            assert!(count > 0, "request closed before body");
+            request.extend_from_slice(&buffer[..count]);
+        }
+        let response_headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        socket
+            .write_all(response_headers.as_bytes())
+            .await
+            .expect("write headers");
+        socket.write_all(&body).await.expect("write body");
+        String::from_utf8(request).expect("request UTF-8")
+    });
+    (format!("http://{address}"), task)
+}
+
+async fn assert_protocol(content_type: &str, body: &str, expected: ModelTerminal) {
+    let (base, server) = serve_body(content_type, body).await;
+    let model = provider(&base);
+    let selected = model.descriptor().models[0].clone();
+    check_model_conformance(
+        &model,
+        ModelConformanceCase {
+            model: selected,
+            request: request(),
+            expected_terminal: expected,
+            stream_limits: finstack_ai_runtime::ModelStreamLimits::default(),
+        },
+    )
+    .await
+    .expect("public Model contract");
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn anthropic_messages_conformance() {
+    assert_protocol("text/event-stream", ANTHROPIC_SSE, expected_anthropic()).await;
+}

@@ -1,21 +1,20 @@
 //! Shared provider helpers for secret validation and stream normalization.
 
 mod anthropic_messages;
+mod credentials;
 mod ndjson;
 mod ollama_chat;
-mod openai_chat;
 mod openai_responses;
+mod secret;
 mod sse;
 
 pub use anthropic_messages::AnthropicMessagesAssembly;
+pub use credentials::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
 pub use ndjson::{NdjsonError, NdjsonParser};
 pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
-pub use openai_chat::OpenAiChatAssembly;
 pub use openai_responses::OpenAiResponsesAssembly;
-pub use sse::{
-    SECRET_MAX_BYTES, SseEvent, SseEventParser, SseFrameError, SseFrameParser, SseParseError,
-    secret_is_valid,
-};
+pub use secret::{SECRET_MAX_BYTES, SecretRejected, SecretString, secret_is_valid};
+pub use sse::{SseEvent, SseEventParser, SseFrameError, SseFrameParser, SseParseError};
 
 /// Kind of a shared stream-normalization failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 # finstack-ai-tools-subagent
 
 Model-facing subagent battery over the host `AgentInvoker`. It exposes
-`subagent_start`, `subagent_await`, and `subagent_cancel` and holds no
+`subagent_start`, `subagent_status`, and `subagent_cancel` and holds no
 invocation authority of its own.
 
 `ChildRunPolicy` is enforced by the runtime accept path, not this crate. Policy,

@@ -128,8 +128,7 @@ pub(crate) async fn enumerate_prompts(
 }
 
 pub(crate) fn optional_catalog_missing(error: &McpError) -> bool {
-    let message = error.message();
-    message.contains("-32601") || message.contains("Method not found")
+    error.jsonrpc_code() == Some(-32601)
 }
 
 pub(crate) fn catalog_digest(tools: &[Tool]) -> Digest {

@@ -10,9 +10,12 @@
 )]
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
@@ -23,6 +26,7 @@ use finstack_ai_runtime::{
     ProcessConfinement, RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext,
     ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult,
     ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    verify_authority,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -264,6 +268,8 @@ pub enum ProcessSandboxKind {
 #[derive(Debug, Clone)]
 pub struct ProcessCommandSandbox {
     confinement: Option<(ProcessConfinement, ConfinementProfile)>,
+    #[cfg(unix)]
+    root: Option<Arc<rustix::fd::OwnedFd>>,
 }
 
 impl Default for ProcessCommandSandbox {
@@ -276,7 +282,11 @@ impl ProcessCommandSandbox {
     /// Labeled unconfined `std::process` runner.
     #[must_use]
     pub fn unconfined() -> Self {
-        Self { confinement: None }
+        Self {
+            confinement: None,
+            #[cfg(unix)]
+            root: None,
+        }
     }
 
     /// Confine children with the runtime service and `profile`.
@@ -294,7 +304,15 @@ impl ProcessCommandSandbox {
         }
         Ok(Self {
             confinement: Some((confinement, profile)),
+            #[cfg(unix)]
+            root: None,
         })
+    }
+
+    /// Retain the authorized cwd root fd for the per-component `openat` walk.
+    #[cfg(unix)]
+    pub(crate) fn set_root(&mut self, root: Arc<rustix::fd::OwnedFd>) {
+        self.root = Some(root);
     }
 
     /// Label for the selected runner.
@@ -316,9 +334,18 @@ impl CommandSandbox for ProcessCommandSandbox {
         deadline: Option<Timestamp>,
     ) -> PortFuture<Result<SandboxedOutput, ToolError>> {
         let confinement = self.confinement.clone();
+        #[cfg(unix)]
+        let root = self.root.clone();
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                run_process(&request, &cancellation, deadline, confinement.as_ref())
+                run_process(
+                    &request,
+                    &cancellation,
+                    deadline,
+                    confinement.as_ref(),
+                    #[cfg(unix)]
+                    root.as_deref(),
+                )
             })
             .await
             .map_err(|_| {
@@ -385,6 +412,11 @@ impl ShellToolset {
     #[cfg(unix)]
     pub fn try_new(policy: ShellPolicy, root: Option<&Path>) -> Result<Self, ShellError> {
         let (tools, tool_id) = build_tools()?;
+        let root = root.map(unix::Root::open).transpose()?;
+        let mut sandbox = ProcessCommandSandbox::unconfined();
+        if let Some(opened) = &root {
+            sandbox.set_root(opened.fd());
+        }
         Ok(Self {
             descriptor: ToolsetDescriptor {
                 name: Arc::from("finstack-shell"),
@@ -394,10 +426,10 @@ impl ShellToolset {
             tool_id,
             policy,
             limits: ShellLimits::default(),
-            sandbox: Arc::new(ProcessCommandSandbox::unconfined()),
+            sandbox: Arc::new(sandbox),
             artifact_store: None,
             sensitivity: Sensitivity::Internal,
-            root: root.map(unix::Root::open).transpose()?,
+            root,
         })
     }
 
@@ -460,9 +492,10 @@ impl ShellToolset {
                     reason: "invalid_confinement_root",
                 }
             })?;
-            self.sandbox = Arc::new(
-                ProcessCommandSandbox::confined(profile).map_err(|_| ShellError::Unsupported)?,
-            );
+            let mut sandbox =
+                ProcessCommandSandbox::confined(profile).map_err(|_| ShellError::Unsupported)?;
+            sandbox.set_root(root.fd());
+            self.sandbox = Arc::new(sandbox);
             Ok(self)
         }
     }
@@ -563,8 +596,8 @@ fn authorize_command(
     let cwd = match arguments.cwd.as_deref() {
         None => None,
         Some(path) => {
-            let root = root.ok_or_else(|| policy_error("shell cwd requires an authorized root"))?;
-            Some(root.authorize_cwd(path)?)
+            root.ok_or_else(|| policy_error("shell cwd requires an authorized root"))?;
+            Some(unix::authorize_cwd(path)?)
         }
     };
     Ok(SandboxedCommand {
@@ -587,6 +620,7 @@ fn run_process(
     cancellation: &finstack_ai_runtime::CancellationSignal,
     deadline: Option<Timestamp>,
     confinement: Option<&(ProcessConfinement, ConfinementProfile)>,
+    #[cfg(unix)] root: Option<&rustix::fd::OwnedFd>,
 ) -> Result<SandboxedOutput, ToolError> {
     if cancellation.is_cancelled() || deadline_elapsed(deadline) {
         return Err(timeout_error());
@@ -601,13 +635,24 @@ fn run_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
+    let cwd_fd = match request.cwd.as_deref() {
+        None => None,
+        Some(relative) => {
+            let root = root.ok_or_else(|| policy_error("shell cwd requires an authorized root"))?;
+            Some(unix::walk_cwd(root, relative)?)
+        }
+    };
     let mut child = if let Some((service, profile)) = confinement {
         let mut profile = profile.clone();
-        if let Some(cwd) = &request.cwd {
+        if let Some(relative) = &request.cwd {
+            let authorized = profile.root().join(relative);
             profile = profile
-                .with_authorized_cwd(cwd)
+                .with_authorized_cwd(authorized)
                 .map_err(|error| map_confinement(&error))?;
         }
+        #[cfg(unix)]
+        drop(cwd_fd);
         RunningChild::Confined(
             service
                 .spawn(command, &profile)
@@ -615,8 +660,8 @@ fn run_process(
         )
     } else {
         #[cfg(unix)]
-        if let Some(cwd) = &request.cwd {
-            apply_authorized_cwd(&mut command, cwd)?;
+        if let Some(fd) = cwd_fd {
+            apply_authorized_cwd(&mut command, fd);
         }
         RunningChild::Plain(command.spawn().map_err(|_| {
             tool_error(
@@ -626,32 +671,32 @@ fn run_process(
             )
         })?)
     };
+    let mut pumps = PipePumps::start(child.stdout(), child.stderr());
     let started = Instant::now();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
     loop {
+        pumps.drain(&mut stdout, &mut stderr);
+        if stdout.len().saturating_add(stderr.len()) > request.max_output_bytes {
+            let _ = child.kill();
+            let _ = child.wait();
+            pumps.abort();
+            return Err(limit_error());
+        }
         if cancellation.is_cancelled()
             || deadline_elapsed(deadline)
             || started.elapsed() >= request.timeout
         {
             let _ = child.kill();
             let _ = child.wait();
+            pumps.abort();
             return Err(timeout_error());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout() {
-                    std::io::Read::read_to_end(&mut pipe, &mut stdout).ok();
-                }
-                if let Some(mut pipe) = child.stderr() {
-                    std::io::Read::read_to_end(&mut pipe, &mut stderr).ok();
-                }
+                pumps.finish(&mut stdout, &mut stderr);
                 if stdout.len().saturating_add(stderr.len()) > request.max_output_bytes {
-                    return Err(tool_error(
-                        SHELL_LIMIT_EXCEEDED,
-                        ErrorCategory::Limit,
-                        "shell output exceeds the configured byte limit",
-                    ));
+                    return Err(limit_error());
                 }
                 return Ok(SandboxedOutput {
                     stdout,
@@ -662,6 +707,7 @@ fn run_process(
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(_) => {
                 let _ = child.kill();
+                pumps.abort();
                 return Err(tool_error(
                     SHELL_IO_ERROR,
                     ErrorCategory::Tool,
@@ -669,6 +715,98 @@ fn run_process(
                 ));
             }
         }
+    }
+}
+
+struct PipePumps {
+    stdout_rx: Option<Receiver<Vec<u8>>>,
+    stderr_rx: Option<Receiver<Vec<u8>>>,
+    stdout_thread: Option<JoinHandle<()>>,
+    stderr_thread: Option<JoinHandle<()>>,
+}
+
+impl PipePumps {
+    fn start(stdout: Option<ChildStdout>, stderr: Option<ChildStderr>) -> Self {
+        let (stdout_rx, stdout_thread) = spawn_pipe_pump(stdout);
+        let (stderr_rx, stderr_thread) = spawn_pipe_pump(stderr);
+        Self {
+            stdout_rx: Some(stdout_rx),
+            stderr_rx: Some(stderr_rx),
+            stdout_thread,
+            stderr_thread,
+        }
+    }
+
+    fn drain(&self, stdout: &mut Vec<u8>, stderr: &mut Vec<u8>) {
+        if let Some(rx) = &self.stdout_rx {
+            drain_pipe(rx, stdout);
+        }
+        if let Some(rx) = &self.stderr_rx {
+            drain_pipe(rx, stderr);
+        }
+    }
+
+    fn finish(&mut self, stdout: &mut Vec<u8>, stderr: &mut Vec<u8>) {
+        while self
+            .stdout_thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
+            || self
+                .stderr_thread
+                .as_ref()
+                .is_some_and(|thread| !thread.is_finished())
+        {
+            self.drain(stdout, stderr);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if let Some(thread) = self.stdout_thread.take() {
+            let _ = thread.join();
+        }
+        if let Some(thread) = self.stderr_thread.take() {
+            let _ = thread.join();
+        }
+        self.drain(stdout, stderr);
+    }
+
+    fn abort(&mut self) {
+        self.stdout_rx = None;
+        self.stderr_rx = None;
+        if let Some(thread) = self.stdout_thread.take() {
+            let _ = thread.join();
+        }
+        if let Some(thread) = self.stderr_thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn spawn_pipe_pump<R: Read + Send + 'static>(
+    pipe: Option<R>,
+) -> (Receiver<Vec<u8>>, Option<JoinHandle<()>>) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(4);
+    let Some(pipe) = pipe else {
+        return (rx, None);
+    };
+    (rx, Some(std::thread::spawn(move || pump_pipe(pipe, &tx))))
+}
+
+fn pump_pipe<R: Read>(mut pipe: R, tx: &SyncSender<Vec<u8>>) {
+    let mut buf = [0_u8; 8_192];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn drain_pipe(rx: &Receiver<Vec<u8>>, dest: &mut Vec<u8>) {
+    while let Ok(chunk) = rx.try_recv() {
+        dest.extend_from_slice(&chunk);
     }
 }
 
@@ -716,20 +854,19 @@ impl RunningChild {
 
 #[cfg(unix)]
 #[allow(unsafe_code)]
-fn apply_authorized_cwd(command: &mut Command, cwd: &Path) -> Result<(), ToolError> {
+fn apply_authorized_cwd(command: &mut Command, fd: rustix::fd::OwnedFd) {
     use std::os::unix::process::CommandExt;
 
-    let fd = unix::open_no_follow_dir(cwd)?;
     // SAFETY: `pre_exec` runs only in the forked child before `exec`. `fchdir`
     // changes that child's working directory using an already-authorized
-    // directory file descriptor. No parent memory is mutated.
+    // directory file descriptor from the per-component `openat` walk. No
+    // parent memory is mutated.
     unsafe {
         command.pre_exec(move || {
             rustix::process::fchdir(&fd).map_err(std::io::Error::from)?;
             Ok(())
         });
     }
-    Ok(())
 }
 
 fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
@@ -826,21 +963,6 @@ async fn normalize_output(
     })
 }
 
-fn verify_authority(ctx: &ToolCallContext) -> Result<(), ToolError> {
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != ctx.run.locator.tenant_scope.as_ref())
-    {
-        return Err(policy_error(
-            "shell principal scope does not match the committed effect",
-        ));
-    }
-    Ok(())
-}
-
 fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {
     let tool_id = ToolId::parse(TOOL_ID).map_err(|_| ShellError::Configuration {
         reason: "invalid_tool_id",
@@ -893,6 +1015,14 @@ fn timeout_error() -> ToolError {
     )
 }
 
+fn limit_error() -> ToolError {
+    tool_error(
+        SHELL_LIMIT_EXCEEDED,
+        ErrorCategory::Limit,
+        "shell output exceeds the configured byte limit",
+    )
+}
+
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
@@ -941,32 +1071,43 @@ mod unix {
             &self.path
         }
 
-        pub(super) fn authorize_cwd(&self, relative: &str) -> Result<PathBuf, ToolError> {
-            if relative.is_empty()
-                || relative.starts_with('/')
-                || relative.contains('\\')
-                || relative.contains("//")
-                || relative.as_bytes().contains(&0)
-                || relative
-                    .split('/')
-                    .any(|component| component.is_empty() || component == "." || component == "..")
-            {
-                return Err(invalid_error("shell cwd is invalid"));
-            }
-            let mut current = rustix::io::dup(&self.fd)
-                .map_err(|_| tool_io("shell cwd root could not be duplicated"))?;
-            for component in relative.split('/') {
-                current = openat(&current, component, DIRECTORY_FLAGS, Mode::empty())
-                    .map_err(|_| policy_error("shell cwd is not an authorized directory"))?;
-            }
-            drop(current);
-            Ok(self.path.join(relative))
+        pub(super) fn fd(&self) -> Arc<OwnedFd> {
+            Arc::clone(&self.fd)
         }
     }
 
-    pub(super) fn open_no_follow_dir(path: &Path) -> Result<OwnedFd, ToolError> {
-        open(path, DIRECTORY_FLAGS, Mode::empty())
-            .map_err(|_| policy_error("shell cwd could not be reopened safely"))
+    pub(super) fn authorize_cwd(relative: &str) -> Result<PathBuf, ToolError> {
+        if !cwd_relative_is_valid(relative) {
+            return Err(invalid_error("shell cwd is invalid"));
+        }
+        Ok(PathBuf::from(relative))
+    }
+
+    pub(super) fn walk_cwd(root: &OwnedFd, relative: &Path) -> Result<OwnedFd, ToolError> {
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| invalid_error("shell cwd is invalid"))?;
+        if !cwd_relative_is_valid(relative) {
+            return Err(invalid_error("shell cwd is invalid"));
+        }
+        let mut current =
+            rustix::io::dup(root).map_err(|_| tool_io("shell cwd root could not be duplicated"))?;
+        for component in relative.split('/') {
+            current = openat(&current, component, DIRECTORY_FLAGS, Mode::empty())
+                .map_err(|_| policy_error("shell cwd is not an authorized directory"))?;
+        }
+        Ok(current)
+    }
+
+    fn cwd_relative_is_valid(relative: &str) -> bool {
+        !relative.is_empty()
+            && !relative.starts_with('/')
+            && !relative.contains('\\')
+            && !relative.contains("//")
+            && !relative.as_bytes().contains(&0)
+            && !relative
+                .split('/')
+                .any(|component| component.is_empty() || component == "." || component == "..")
     }
 
     fn tool_io(message: &'static str) -> ToolError {

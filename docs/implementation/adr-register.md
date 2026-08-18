@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-18 (ADR-046 accepted for MCP nested sampling and catalog re-resolve; ADR-045 accepted for first-class SDK constructors; ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044 evidence stays Missing; ADR-045–ADR-046 evidence is Partial with local D1–D6 SHAs. No invented evidence or review ids.
+Index last reconciled: 2026-08-18 (ADR-048 accepted for shared authority and provider secret; ADR-047 accepted and amends ADR-040 to retire the multi-protocol gateway; ADR-046 accepted for MCP nested sampling and catalog re-resolve; ADR-045 accepted for first-class SDK constructors; ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044 evidence stays Missing; ADR-045–ADR-046 evidence is Partial with local D1–D6 SHAs; ADR-047–ADR-048 evidence is Missing. No invented evidence or review ids.
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -71,6 +71,8 @@ Index last reconciled: 2026-08-18 (ADR-046 accepted for MCP nested sampling and 
 | ADR-044 | `skills-first-load-time-import` | Ecosystem lead | FR-10 G8 | Accepted | Standalone | In progress | Missing (local G8 `f370fb9b2ef7042de4c8171b3b71d24a9c7ffc86`; no published evidence id) |
 | ADR-045 | `first-class-sdk-constructors` | Bindings lead | D1–D4 constructor waves | Accepted | Standalone | In progress | Partial (local D1 `e8caa09` / `df03258`, D2 `445c409` / `d4e7e0e`, D3 `295919b` / `bc2469f`, D4 `e246384` / `5448e37`; wasm-host fail-closed from Rust; no evidence id) |
 | ADR-046 | `mcp-nested-sampling-and-catalog` | Core/runtime lead | D5–D6 MCP sampling and re-resolve | Accepted | Standalone | In progress | Partial (local D5 `eafd8ea` / `bcc35b0`, D6 `b25fd95` / `66d108b`; no evidence id) |
+| ADR-047 | `retire-multi-protocol-gateway` | Ecosystem lead | Phase 14 / PR-094 | Accepted | Standalone | In progress | Missing (local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id) |
+| ADR-048 | `shared-authority-and-provider-secret` | Core/runtime lead | Phase 14 / PR-085 then leaf waves | Accepted | Standalone | In progress | Missing (local types only; no evidence id) |
 
 ## Security review seed
 
@@ -103,6 +105,8 @@ Index last reconciled: 2026-08-18 (ADR-046 accepted for MCP nested sampling and 
 | ADR-039 | TM-02, TM-16 |
 | ADR-045 | SEC-INV-005; TM-04, TM-06, TM-09 |
 | ADR-046 | SEC-INV-003, SEC-INV-004; TM-01, TM-10 |
+| ADR-047 | SEC-INV-005; TM-04 |
+| ADR-048 | SEC-INV-001, SEC-INV-004; TM-02, TM-04 |
 
 ## Change control
 
@@ -445,6 +449,12 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-18 | ADR-045 | Evidence | me@jeickmeier.com | Missing | Partial | Local D1 `e8caa09` / `df03258`, D2 `445c409` / `d4e7e0e`, D3 `295919b` / `bc2469f`, D4 `e246384` / `5448e37`; wasm-host fail-closed from Rust; no invented evidence id | — | — |
 | 2026-08-18 | ADR-046 | Implementation | me@jeickmeier.com | Not started | In progress | D5–D6 MCP sampling and re-resolve landed locally; no published evidence id | — | — |
 | 2026-08-18 | ADR-046 | Evidence | me@jeickmeier.com | Missing | Partial | Local D5 `eafd8ea` / `bcc35b0`, D6 `b25fd95` / `66d108b`; no invented evidence id | — | — |
+| 2026-08-18 | ADR-047 | Decision | me@jeickmeier.com | — | Accepted | Delete the gateway crate; keep `Agent::gateway` as a thin dispatcher; `openai_chat` is a configuration error | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-047 | Record | me@jeickmeier.com | — | Standalone | ADR-047-retire-multi-protocol-gateway.md | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-047 | Implementation | me@jeickmeier.com | — | In progress | Local uncommitted PR-094 deletion; `Agent::gateway` dispatches to dedicated crates; no candidate; no evidence id | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-048 | Decision | me@jeickmeier.com | — | Accepted | `verify_authority` on the Tool port; `SecretString`/`SecretRejected` and named credentials in `provider_util`; no shared stable secret code | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-048 | Record | me@jeickmeier.com | — | Standalone | ADR-048-shared-authority-and-provider-secret.md | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-048 | Implementation | me@jeickmeier.com | — | In progress | `verify_authority` and `provider_util` types land with PR-085; leaf crates now call them; no evidence id | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -496,6 +506,8 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-044 | [ADR-044-skills-first-load-time-import.md](adrs/ADR-044-skills-first-load-time-import.md) | me@jeickmeier.com | Missing: FR-10 first cut landed locally; no evidence id | ADR-044 standalone record | 2026-08-17 |
 | ADR-045 | [ADR-045-first-class-sdk-constructors.md](adrs/ADR-045-first-class-sdk-constructors.md) | me@jeickmeier.com | Partial: local D1 `e8caa09` / `df03258`, D2 `445c409` / `d4e7e0e`, D3 `295919b` / `bc2469f`, D4 `e246384` / `5448e37`; wasm-host fail-closed from Rust; no evidence id | ADR-045 standalone record; D1–D4 local merges | 2026-08-18 |
 | ADR-046 | [ADR-046-mcp-nested-sampling-and-catalog.md](adrs/ADR-046-mcp-nested-sampling-and-catalog.md) | me@jeickmeier.com | Partial: local D5 `eafd8ea` / `bcc35b0`, D6 `b25fd95` / `66d108b`; no evidence id | ADR-046 standalone record; D5–D6 local merges | 2026-08-18 |
+| ADR-047 | [ADR-047-retire-multi-protocol-gateway.md](adrs/ADR-047-retire-multi-protocol-gateway.md) | me@jeickmeier.com | Missing: local uncommitted crate deletion; `Agent::gateway` remains a dispatcher; no evidence id | ADR-047 standalone record; Phase 14 / PR-094 | 2026-08-18 |
+| ADR-048 | [ADR-048-shared-authority-and-provider-secret.md](adrs/ADR-048-shared-authority-and-provider-secret.md) | me@jeickmeier.com | Missing: local `verify_authority`, `provider_util` types, and leaf usage; no evidence id | ADR-048 standalone record; Phase 14 / PR-085 | 2026-08-18 |
 
 ## Supersession log
 

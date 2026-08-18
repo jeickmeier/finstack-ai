@@ -16,7 +16,7 @@ use finstack_ai_runtime::{
     IdGenerationError, Metadata, OperationLocator, OsRandomSource, PortFuture, RawJson,
     RetrySafety, SideEffectClass, SystemClock, TextBlock, ToolCallContext, ToolDeferralSupport,
     ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem,
-    Toolset, ToolsetDescriptor, UuidV7Generator, ValidatedToolCall,
+    Toolset, ToolsetDescriptor, UuidV7Generator, ValidatedToolCall, verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -26,10 +26,10 @@ use thiserror::Error;
 mod tests;
 
 const START_ID: &str = "finstack.tools.subagent.start";
-const AWAIT_ID: &str = "finstack.tools.subagent.await";
+const STATUS_ID: &str = "finstack.tools.subagent.status";
 const CANCEL_ID: &str = "finstack.tools.subagent.cancel";
 const START_NAME: &str = "subagent_start";
-const AWAIT_NAME: &str = "subagent_await";
+const STATUS_NAME: &str = "subagent_status";
 const CANCEL_NAME: &str = "subagent_cancel";
 
 /// Stable constructor failure when the allow-list is empty or a spec is invalid.
@@ -57,8 +57,14 @@ pub struct SubagentToolset {
     tools: Arc<[ToolSpec]>,
     invoker: Arc<dyn AgentInvoker>,
     allow_list: Arc<[AgentRef]>,
-    children: Arc<Mutex<BTreeMap<Arc<str>, StartedChild>>>,
-    last_run_id: Arc<Mutex<Option<Arc<str>>>>,
+    children: Arc<Mutex<BTreeMap<ChildKey, StartedChild>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ChildKey {
+    tenant_scope: Arc<str>,
+    session_id: Arc<str>,
+    run_id: Arc<str>,
 }
 
 #[derive(Clone)]
@@ -92,10 +98,10 @@ impl SubagentToolset {
                 br#"{"additionalProperties":false,"properties":{"agent_id":{"type":"string"},"input":{"type":"string"},"placement":{"enum":["compatible_lane_in_parent_session","isolated_child_session"],"type":"string"}},"required":["agent_id","input"],"type":"object"}"#,
             )?,
             tool_spec(
-                AWAIT_ID,
-                AWAIT_NAME,
-                "Await one previously started child run.",
-                br#"{"additionalProperties":false,"properties":{"run_id":{"type":"string"}},"type":"object"}"#,
+                STATUS_ID,
+                STATUS_NAME,
+                "Report status for one previously started child run without waiting.",
+                br#"{"additionalProperties":false,"properties":{"run_id":{"type":"string"}},"required":["run_id"],"type":"object"}"#,
             )?,
             tool_spec(
                 CANCEL_ID,
@@ -113,7 +119,6 @@ impl SubagentToolset {
             invoker,
             allow_list,
             children: Arc::new(Mutex::new(BTreeMap::new())),
-            last_run_id: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -151,10 +156,10 @@ impl Toolset for SubagentToolset {
         let invoker = Arc::clone(&self.invoker);
         let allow_list = Arc::clone(&self.allow_list);
         let table = Arc::clone(&self.children);
-        let last_run_id = Arc::clone(&self.last_run_id);
         Box::pin(async move {
+            verify_authority(&ctx)?;
             let name = call.call.tool_name();
-            if name != START_NAME && name != AWAIT_NAME && name != CANCEL_NAME {
+            if name != START_NAME && name != STATUS_NAME && name != CANCEL_NAME {
                 return Err(tool_error(
                     SUBAGENT_INVALID_ARGUMENTS,
                     ErrorCategory::Validation,
@@ -162,20 +167,16 @@ impl Toolset for SubagentToolset {
                 ));
             }
             let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
-            let last = last_run_id.lock().ok().and_then(|guard| guard.clone());
             let result = match name {
                 START_NAME => start_child(&invoker, &allow_list, &ctx, &call).await,
-                AWAIT_NAME => await_child(&snapshot, last.as_ref(), &call),
-                CANCEL_NAME => cancel_child(&invoker, &snapshot, &call).await,
+                STATUS_NAME => status_child(&snapshot, &ctx, &call),
+                CANCEL_NAME => cancel_child(&invoker, &snapshot, &ctx, &call).await,
                 _ => unreachable!("name checked above"),
             }?;
-            if let Some(started) = result.started {
-                if let Ok(mut children) = table.lock() {
-                    children.insert(Arc::clone(&started.run_key), started.child);
-                }
-                if let Ok(mut last) = last_run_id.lock() {
-                    *last = Some(started.run_key);
-                }
+            if let Some(started) = result.started
+                && let Ok(mut children) = table.lock()
+            {
+                children.insert(started.key, started.child);
             }
             Ok(completed(result.output, result.is_error))
         })
@@ -189,7 +190,7 @@ struct CallOutcome {
 }
 
 struct StartedRecord {
-    run_key: Arc<str>,
+    key: ChildKey,
     child: StartedChild,
 }
 
@@ -260,17 +261,22 @@ async fn start_child(
     };
     match invoker.start_or_attach(context, request).await {
         Ok(handle) => {
-            let run_key = Arc::<str>::from(handle.locator.operation.run_id.to_string());
+            let run_id = Arc::<str>::from(handle.locator.operation.run_id.to_string());
+            let key = ChildKey {
+                tenant_scope: Arc::clone(&handle.locator.operation.tenant_scope),
+                session_id: Arc::<str>::from(handle.locator.operation.session_id.to_string()),
+                run_id: Arc::clone(&run_id),
+            };
             let output = result_json(&serde_json::json!({
-                "run_id": run_key.as_ref(),
-                "session_id": handle.locator.operation.session_id.to_string(),
+                "run_id": run_id.as_ref(),
+                "session_id": key.session_id.as_ref(),
                 "status": "accepted",
             }))?;
             Ok(CallOutcome {
                 output,
                 is_error: false,
                 started: Some(StartedRecord {
-                    run_key,
+                    key,
                     child: StartedChild { handle, placement },
                 }),
             })
@@ -279,27 +285,27 @@ async fn start_child(
     }
 }
 
-fn await_child(
-    children: &BTreeMap<Arc<str>, StartedChild>,
-    last_run_id: Option<&Arc<str>>,
+fn status_child(
+    children: &BTreeMap<ChildKey, StartedChild>,
+    ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
     let arguments: RunIdArguments = parse_args(call)?;
-    let run_id = arguments.run_id.as_ref().or(last_run_id);
-    let Some(run_id) = run_id else {
+    let Some(run_id) = arguments.run_id.as_ref() else {
         return Ok(error_result(
-            SUBAGENT_CHILD_NOT_FOUND,
-            "no started child matches run_id",
+            SUBAGENT_INVALID_ARGUMENTS,
+            "status requires run_id",
         ));
     };
-    let Some(child) = children.get(run_id) else {
+    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
+    else {
         return Ok(error_result(
             SUBAGENT_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
     let output = result_json(&serde_json::json!({
-        "run_id": run_id.as_ref(),
+        "run_id": key.run_id.as_ref(),
         "session_id": child.handle.locator.operation.session_id.to_string(),
         "status": "accepted",
     }))?;
@@ -310,9 +316,20 @@ fn await_child(
     })
 }
 
+fn lookup_child<'a>(
+    children: &'a BTreeMap<ChildKey, StartedChild>,
+    tenant_scope: &str,
+    run_id: &str,
+) -> Option<(&'a ChildKey, &'a StartedChild)> {
+    children
+        .iter()
+        .find(|(key, _)| key.tenant_scope.as_ref() == tenant_scope && key.run_id.as_ref() == run_id)
+}
+
 async fn cancel_child(
     invoker: &Arc<dyn AgentInvoker>,
-    children: &BTreeMap<Arc<str>, StartedChild>,
+    children: &BTreeMap<ChildKey, StartedChild>,
+    ctx: &ToolCallContext,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
     let arguments: RunIdArguments = parse_args(call)?;
@@ -322,12 +339,14 @@ async fn cancel_child(
             "cancel requires run_id",
         ));
     };
-    let Some(child) = children.get(run_id) else {
+    let Some((key, child)) = lookup_child(children, ctx.run.locator.tenant_scope.as_ref(), run_id)
+    else {
         return Ok(error_result(
             SUBAGENT_CHILD_NOT_FOUND,
             "no started child matches run_id",
         ));
     };
+    let run_id = &key.run_id;
     if let Err(error) = invoker.cancel(&child.handle.locator).await {
         return Ok(invoke_error_result(&error));
     }

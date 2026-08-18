@@ -140,16 +140,20 @@ impl Observer for LogObserver {
             Err(error) => return Box::pin(async move { Err(error) }),
         };
         Box::pin(async move {
-            let Ok(mut sink) = writer.lock() else {
-                return Err(ObserverError::Unavailable);
-            };
-            for line in drained {
-                sink.write_all(line.as_bytes())
-                    .map_err(|_| ObserverError::Unavailable)?;
-                sink.write_all(b"\n")
-                    .map_err(|_| ObserverError::Unavailable)?;
-            }
-            Ok(())
+            tokio::task::spawn_blocking(move || {
+                let Ok(mut sink) = writer.lock() else {
+                    return Err(ObserverError::Unavailable);
+                };
+                for line in drained {
+                    sink.write_all(line.as_bytes())
+                        .map_err(|_| ObserverError::Unavailable)?;
+                    sink.write_all(b"\n")
+                        .map_err(|_| ObserverError::Unavailable)?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|_| ObserverError::Unavailable)?
         })
     }
 }

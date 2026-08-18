@@ -41,6 +41,7 @@ pub struct OtelObserver {
     provider: SdkTracerProvider,
     queue: ObserverQueue<CapturedSpan>,
     captured: Mutex<Vec<CapturedSpan>>,
+    capture_capacity: usize,
     diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
@@ -92,6 +93,7 @@ impl OtelObserver {
                 }
             })?,
             captured: Mutex::new(Vec::new()),
+            capture_capacity: queue_capacity,
             diagnostic: Mutex::new(None),
         })
     }
@@ -199,6 +201,11 @@ impl Observer for OtelObserver {
         }
         if let Ok(mut captured) = self.captured.lock() {
             captured.extend(accepted);
+            if captured.len() > self.capture_capacity {
+                let overflow = captured.len().saturating_sub(self.capture_capacity);
+                captured.drain(..overflow);
+                self.record_overflow();
+            }
         }
         self.force_flush();
         Box::pin(async { Ok(()) })
@@ -219,15 +226,6 @@ fn span_name(kind: RunEventKind) -> &'static str {
 
 fn serde_json_string(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).unwrap_or_default()
-}
-
-/// Reports whether an OTLP exporter is compiled in.
-///
-/// The `otlp` feature is retained as an empty alias and does not compile an
-/// exporter, so this function always returns `false`.
-#[must_use]
-pub const fn otlp_feature_enabled() -> bool {
-    false
 }
 
 /// Default bounded-block timeout used by examples.

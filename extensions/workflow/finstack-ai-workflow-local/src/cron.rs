@@ -55,9 +55,9 @@ impl CronError {
 ///
 /// ```
 /// use finstack_ai_runtime::Timestamp;
-/// use finstack_ai_workflow_local::CronExpression;
+/// use finstack_ai_workflow_local::IntervalSchedule;
 ///
-/// let expr = CronExpression::parse("every 10ms").expect("expr");
+/// let expr = IntervalSchedule::parse("every 10ms").expect("expr");
 /// assert_eq!(expr.period_ms(), 10);
 /// let origin = Timestamp::from_unix_ms(2_000).expect("origin");
 /// let now = Timestamp::from_unix_ms(2_000).expect("now");
@@ -67,11 +67,11 @@ impl CronError {
 /// );
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CronExpression {
+pub struct IntervalSchedule {
     period_ms: u64,
 }
 
-impl CronExpression {
+impl IntervalSchedule {
     /// Construct a positive millisecond interval.
     ///
     /// # Errors
@@ -166,7 +166,13 @@ impl CronExpression {
             .ok_or(CronError::TimeOverflow)?;
         let steps = elapsed / period;
         let next_ms = origin_ms
-            .checked_add(steps.checked_add(1).ok_or(CronError::TimeOverflow)? * period)
+            .checked_add(
+                steps
+                    .checked_add(1)
+                    .ok_or(CronError::TimeOverflow)?
+                    .checked_mul(period)
+                    .ok_or(CronError::TimeOverflow)?,
+            )
             .ok_or(CronError::TimeOverflow)?;
         Timestamp::from_unix_ms(next_ms).map_err(|_| CronError::TimeOverflow)
     }
@@ -180,7 +186,7 @@ pub struct CronSchedule {
     /// Caller-chosen schedule identity, unique per tenant.
     pub schedule_id: Arc<str>,
     /// Interval expression.
-    pub expression: CronExpression,
+    pub expression: IntervalSchedule,
     /// Alignment origin used to recompute future ticks.
     pub origin: Timestamp,
     /// Next fire instant against the injected clock.
@@ -242,24 +248,26 @@ mod tests {
     #[test]
     fn parse_rejects_zero_and_unknown() {
         assert_eq!(
-            CronExpression::parse("").expect_err("empty").code(),
+            IntervalSchedule::parse("").expect_err("empty").code(),
             "empty_expression"
         );
         assert_eq!(
-            CronExpression::parse("0 * * * *")
+            IntervalSchedule::parse("0 * * * *")
                 .expect_err("unknown")
                 .code(),
             "unknown_expression"
         );
         assert_eq!(
-            CronExpression::parse("every 0ms").expect_err("zero").code(),
+            IntervalSchedule::parse("every 0ms")
+                .expect_err("zero")
+                .code(),
             "zero_period"
         );
     }
 
     #[test]
     fn next_after_is_strictly_future_and_aligned() {
-        let expr = CronExpression::parse("every 10ms").expect("expr");
+        let expr = IntervalSchedule::parse("every 10ms").expect("expr");
         let origin = Timestamp::from_unix_ms(2_000).expect("origin");
         assert_eq!(
             expr.next_after(origin, origin)

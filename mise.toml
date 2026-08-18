@@ -8,6 +8,10 @@ node = "22.18.0"
 "cargo:cargo-fuzz" = "0.13.2"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
 "github:taiki-e/cargo-llvm-cov" = { version = "0.8.7", version_prefix = "v" }
+"cargo:cargo-public-api" = "0.52.0"
+# rust@nightly-2025-08-02 is the check-only rustdoc JSON pin for
+# cargo-public-api 0.52. It is installed by `mise run check-public-api`.
+# Do not use it for crate builds. Do not set RUSTC_BOOTSTRAP.
 
 # Prefer bash so multiline tasks stay portable on Windows CI runners.
 # Requires mise >= ~2026.7 (`task_config.shell`); workflows pin 2026.8.3.
@@ -389,4 +393,13 @@ mise run build-wasm -- release
 cd bindings/finstack-ai-wasm/js
 npx playwright install --with-deps chromium
 npx playwright test src/benchmark.test.ts --project=chromium
+"""
+
+[tasks.check-public-api]
+description = "Compare cargo-public-api dumps and Python/JS name lists to frozen baselines"
+run = """
+set -euo pipefail
+mise install cargo:cargo-public-api rust@nightly-2025-08-02
+export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
+uv run --no-project python tools/compat/public_items.py --check
 """

@@ -9,5 +9,9 @@ mod request;
 mod sse;
 mod stream;
 
-pub use config::{Authentication, OpenAiConfig, OpenAiModelConfig, SecretHeader, SecretString};
+pub use config::{OpenAiConfig, OpenAiModelConfig, SecretHeader};
+pub use finstack_ai_runtime::{
+    Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
+    SecretString,
+};
 pub use provider::OpenAiProvider;

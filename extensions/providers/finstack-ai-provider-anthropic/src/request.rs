@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use finstack_ai_runtime::{
-    ContentBlock, Digest, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec,
-    SUBMIT_FINAL_OUTPUT_TOOL, ToolSpec,
+    ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec,
+    SUBMIT_FINAL_OUTPUT_TOOL,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -204,17 +204,6 @@ fn parse_settings(
 fn raw_value(value: &finstack_ai_runtime::RawJson) -> Result<Value, ModelError> {
     serde_json::from_slice(value.as_bytes())
         .map_err(|_| request_error("canonical provider JSON could not be decoded"))
-}
-
-pub(crate) fn tool_catalog_digest(tools: &[ToolSpec]) -> Digest {
-    let mut bytes = Vec::new();
-    for tool in tools {
-        bytes.extend_from_slice(tool.model_name.as_bytes());
-        bytes.push(0);
-        bytes.extend_from_slice(tool.input_schema.as_bytes());
-        bytes.push(0);
-    }
-    Digest::raw_json(&bytes)
 }
 
 fn map_messages(

@@ -1,0 +1,50 @@
+pub mod finstack_ai_provider_ollama
+pub use finstack_ai_provider_ollama::Authentication
+pub use finstack_ai_provider_ollama::CredentialReference
+pub use finstack_ai_provider_ollama::CredentialRejected
+pub use finstack_ai_provider_ollama::CredentialStore
+pub use finstack_ai_provider_ollama::SecretRejected
+pub use finstack_ai_provider_ollama::SecretString
+pub struct finstack_ai_provider_ollama::OllamaConfig
+impl finstack_ai_provider_ollama::OllamaConfig
+pub fn finstack_ai_provider_ollama::OllamaConfig::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_ollama::OllamaConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
+pub fn finstack_ai_provider_ollama::OllamaConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
+pub fn finstack_ai_provider_ollama::OllamaConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_ollama::OllamaConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::clone::Clone for finstack_ai_provider_ollama::OllamaConfig
+pub fn finstack_ai_provider_ollama::OllamaConfig::clone(&self) -> finstack_ai_provider_ollama::OllamaConfig
+impl core::fmt::Debug for finstack_ai_provider_ollama::OllamaConfig
+pub fn finstack_ai_provider_ollama::OllamaConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_provider_ollama::OllamaModelConfig
+pub finstack_ai_provider_ollama::OllamaModelConfig::context_window_tokens: u64
+pub finstack_ai_provider_ollama::OllamaModelConfig::hard_input_bytes: u64
+pub finstack_ai_provider_ollama::OllamaModelConfig::max_output_tokens: u64
+pub finstack_ai_provider_ollama::OllamaModelConfig::name: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai_provider_ollama::OllamaModelConfig::provider_overhead_tokens: u64
+pub finstack_ai_provider_ollama::OllamaModelConfig::reasoning: bool
+pub finstack_ai_provider_ollama::OllamaModelConfig::reserved_output_tokens: u64
+impl finstack_ai_provider_ollama::OllamaModelConfig
+pub fn finstack_ai_provider_ollama::OllamaModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub const fn finstack_ai_provider_ollama::OllamaModelConfig::with_reasoning(self, bool) -> Self
+impl core::clone::Clone for finstack_ai_provider_ollama::OllamaModelConfig
+pub fn finstack_ai_provider_ollama::OllamaModelConfig::clone(&self) -> finstack_ai_provider_ollama::OllamaModelConfig
+impl core::cmp::Eq for finstack_ai_provider_ollama::OllamaModelConfig
+impl core::cmp::PartialEq for finstack_ai_provider_ollama::OllamaModelConfig
+pub fn finstack_ai_provider_ollama::OllamaModelConfig::eq(&self, &finstack_ai_provider_ollama::OllamaModelConfig) -> bool
+impl core::fmt::Debug for finstack_ai_provider_ollama::OllamaModelConfig
+pub fn finstack_ai_provider_ollama::OllamaModelConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_ollama::OllamaModelConfig
+pub struct finstack_ai_provider_ollama::OllamaProvider
+impl finstack_ai_provider_ollama::OllamaProvider
+pub fn finstack_ai_provider_ollama::OllamaProvider::refresh_model_metadata(&self, &finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::profile::ModelCapabilities) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_ollama::OllamaProvider::replace_model_catalog(&self, alloc::vec::Vec<finstack_ai_provider_ollama::OllamaModelConfig>) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_ollama::OllamaProvider::try_new(finstack_ai_provider_ollama::OllamaConfig, alloc::vec::Vec<finstack_ai_provider_ollama::OllamaModelConfig>) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+impl core::fmt::Debug for finstack_ai_provider_ollama::OllamaProvider
+pub fn finstack_ai_provider_ollama::OllamaProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::model::port::Model for finstack_ai_provider_ollama::OllamaProvider
+pub fn finstack_ai_provider_ollama::OllamaProvider::capabilities(&self, &finstack_ai_runtime::ports::model::identity::ModelName) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_ollama::OllamaProvider::descriptor(&self) -> finstack_ai_runtime::ports::model::identity::ModelDescriptor
+pub fn finstack_ai_provider_ollama::OllamaProvider::estimate_input_tokens(&self, &finstack_ai_runtime::ports::model::identity::ModelName, &[u8]) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelTokenEstimate, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_ollama::OllamaProvider::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_kernel::state::types::PendingModelEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::context::ModelReconcileResult, finstack_ai_runtime::ports::model::error::ModelError>>
+pub fn finstack_ai_provider_ollama::OllamaProvider::request(&self, finstack_ai_runtime::ports::model::context::ModelRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::model::stream::ModelEventStream, finstack_ai_runtime::ports::model::error::ModelError>>

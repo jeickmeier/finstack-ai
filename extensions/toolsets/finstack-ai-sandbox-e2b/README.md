@@ -5,6 +5,10 @@ Construction requires an explicit API key and never reads environment
 variables. Non-loopback endpoints must be HTTPS. This leaf is not Landlock
 and is not isolated. Shell stays T1.
 
+Residual: cancel after create can leave an orphaned remote sandbox.
+This crate does not issue a compensating DELETE and does not own an
+explicit create / run / destroy lifecycle.
+
 ```rust
 use finstack_ai_sandbox_e2b::{E2bSandboxConfig, E2bSandboxToolset};
 

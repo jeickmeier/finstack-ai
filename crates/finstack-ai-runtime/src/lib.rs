@@ -160,14 +160,14 @@ pub use native::manual_drive::{
     ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
     ManualDrivePermit,
 };
-// The chain driver's supported entry points, re-exported so
-// `tools/compat/public_items.py` tracks them: it scrapes braced `pub use`
-// blocks only, so the rest of `middleware_driver`'s `pub` surface is public
-// through `pub mod` but unfrozen. See the module contract.
+// The chain driver's supported entry points stay crate-root re-exports.
+// Rust public-API freeze is `mise run check-public-api` (cargo-public-api).
+// See the module contract.
 pub use middleware_driver::{MiddlewareStageContext, invoke_middleware_stage};
 pub use model::{
     AnthropicMessagesAssembly, ApprovalMetadata, ApprovalRequirement, AssembledModelStream,
-    AuthorizationContext, CancellationSignal, InputCapabilities, LockedModelContextProfile,
+    Authentication, AuthorizationContext, CancellationSignal, CredentialReference,
+    CredentialRejected, CredentialStore, InputCapabilities, LockedModelContextProfile,
     MODEL_CONTEXT_LIMIT_EXCEEDED, MODEL_ESTIMATOR_MISMATCH, MODEL_PROFILE_INVALID,
     MODEL_PROFILE_OVERRIDE_NOT_ALLOWED, MODEL_PROFILE_RELAXATION, MODEL_RECONCILIATION_UNSUPPORTED,
     MODEL_REQUEST_INVALID, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
@@ -180,12 +180,13 @@ pub use model::{
     ModelRequestLimits, ModelRequestValidation, ModelResponse, ModelResumeAction, ModelSettings,
     ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTerminal, ModelTokenEstimate,
     ModelToolCall, ModelWarmupContext, NdjsonError, NdjsonParser, OllamaChatAssembly,
-    OllamaReplayEntry, OpaqueProviderEvent, OpenAiChatAssembly, OpenAiResponsesAssembly,
-    ReasoningDelta, ReconcileContext, RunCallContext, SECRET_MAX_BYTES, SideEffectClass, SseEvent,
-    SseEventParser, SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind,
-    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolDeferralSupport, ToolSpec, UsageDelta, map_model_reconcile_result, model_resume_action,
-    model_retry_allowed, resolve_model_context_profile, secret_is_valid, validate_model_request,
+    OllamaReplayEntry, OpaqueProviderEvent, OpenAiResponsesAssembly, ReasoningDelta,
+    ReconcileContext, RunCallContext, SECRET_MAX_BYTES, SecretRejected, SecretString,
+    SideEffectClass, SseEvent, SseEventParser, SseFrameError, SseFrameParser, SseParseError,
+    StreamNormError, StreamNormKind, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec, UsageDelta,
+    map_model_reconcile_result, model_resume_action, model_retry_allowed,
+    resolve_model_context_profile, secret_is_valid, validate_model_request,
 };
 pub use observer::export::{
     diagnostic_contains, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,
@@ -212,7 +213,7 @@ pub use tool::{
     ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler,
     ToolStreamItem, ToolStreamLimits, ToolTerminal, ToolValidator, ToolValidatorCompiler, Toolset,
     ToolsetDescriptor, ToolsetRegistration, UNKNOWN_TOOL, map_tool_reconcile_result,
-    normalize_tool_result, tool_resume_action, tool_retry_allowed,
+    normalize_tool_result, tool_resume_action, tool_retry_allowed, verify_authority,
 };
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]

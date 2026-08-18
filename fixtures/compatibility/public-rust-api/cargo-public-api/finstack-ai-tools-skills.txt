@@ -1,0 +1,43 @@
+pub mod finstack_ai_tools_skills
+pub enum finstack_ai_tools_skills::SkillsError
+pub finstack_ai_tools_skills::SkillsError::Configuration
+pub finstack_ai_tools_skills::SkillsError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_skills::SkillsError
+pub fn finstack_ai_tools_skills::SkillsError::clone(&self) -> finstack_ai_tools_skills::SkillsError
+impl core::cmp::Eq for finstack_ai_tools_skills::SkillsError
+impl core::cmp::PartialEq for finstack_ai_tools_skills::SkillsError
+pub fn finstack_ai_tools_skills::SkillsError::eq(&self, &finstack_ai_tools_skills::SkillsError) -> bool
+impl core::error::Error for finstack_ai_tools_skills::SkillsError
+impl core::fmt::Debug for finstack_ai_tools_skills::SkillsError
+pub fn finstack_ai_tools_skills::SkillsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_skills::SkillsError
+pub fn finstack_ai_tools_skills::SkillsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skills::SkillsError
+pub enum finstack_ai_tools_skills::SkillsHostError
+pub finstack_ai_tools_skills::SkillsHostError::Bound
+pub finstack_ai_tools_skills::SkillsHostError::Failed
+pub finstack_ai_tools_skills::SkillsHostError::Failed::reason: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_tools_skills::SkillsHostError
+pub fn finstack_ai_tools_skills::SkillsHostError::clone(&self) -> finstack_ai_tools_skills::SkillsHostError
+impl core::cmp::Eq for finstack_ai_tools_skills::SkillsHostError
+impl core::cmp::PartialEq for finstack_ai_tools_skills::SkillsHostError
+pub fn finstack_ai_tools_skills::SkillsHostError::eq(&self, &finstack_ai_tools_skills::SkillsHostError) -> bool
+impl core::fmt::Debug for finstack_ai_tools_skills::SkillsHostError
+pub fn finstack_ai_tools_skills::SkillsHostError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skills::SkillsHostError
+pub struct finstack_ai_tools_skills::SkillsHost
+pub finstack_ai_tools_skills::SkillsHost::activate: alloc::sync::Arc<(dyn core::ops::function::Fn(finstack_ai_kernel::primitives::ids::RunId, alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>) -> core::result::Result<(), finstack_ai_tools_skills::SkillsHostError> + core::marker::Send + core::marker::Sync)>
+pub finstack_ai_tools_skills::SkillsHost::active: alloc::sync::Arc<(dyn core::ops::function::Fn(finstack_ai_kernel::primitives::ids::RunId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>, finstack_ai_tools_skills::SkillsHostError> + core::marker::Send + core::marker::Sync)>
+pub finstack_ai_tools_skills::SkillsHost::catalog: alloc::string::String
+pub struct finstack_ai_tools_skills::SkillsToolset
+impl finstack_ai_tools_skills::SkillsToolset
+pub fn finstack_ai_tools_skills::SkillsToolset::try_new(finstack_ai_tools_skills::SkillsHost) -> core::result::Result<Self, finstack_ai_tools_skills::SkillsError>
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_skills::SkillsToolset
+pub fn finstack_ai_tools_skills::SkillsToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_skills::SkillsToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_skills::SkillsToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_skills::SKILLS_ACTIVATION_BOUND: &str
+pub const finstack_ai_tools_skills::SKILLS_ACTIVATION_FAILED: &str
+pub const finstack_ai_tools_skills::SKILLS_CONFIGURATION_INVALID: &str
+pub const finstack_ai_tools_skills::SKILLS_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_skills::SKILLS_UNKNOWN_CAPABILITY: &str

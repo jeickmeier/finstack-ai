@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
-    AcceptRun, AllocatedIds, AppendRequest, BudgetChargeReceipt, BudgetChargeRequest,
+    AcceptRun, AllocatedIds, AppendRequest, BoundedMap, BudgetChargeReceipt, BudgetChargeRequest,
     BudgetPropagation, BudgetReleaseReceipt, BudgetReleaseRequest, CancellationPropagation,
     ContentBlock, DeadlinePropagation, Digest, EffectCompleted, EffectOutputContract,
     EffectOutputKind, Id, IdTag, LaneCreated, LaneTag, Message, MessageRole, Metadata,

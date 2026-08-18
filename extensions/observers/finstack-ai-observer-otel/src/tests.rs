@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{Observer, ObserverBackpressure, RunEvent, Sensitivity};
 use finstack_ai_test::check_observer_conformance;
 
-use super::{OtelObserver, otlp_feature_enabled};
+use super::OtelObserver;
 
 const CANARY: &str = "CANARY_SECRET_VALUE";
 
@@ -47,7 +47,6 @@ async fn conformance_accepts_an_empty_batch() {
     check_observer_conformance(&observer, Arc::from([]))
         .await
         .expect("conformance");
-    assert!(!otlp_feature_enabled());
 }
 
 #[tokio::test]
@@ -110,4 +109,17 @@ async fn block_bounded_timeout_does_not_hang() {
         .await
         .expect("observe");
     assert!(observer.dropped() >= 1);
+}
+
+#[tokio::test]
+async fn captured_spans_stay_within_the_queue_capacity() {
+    let observer = OtelObserver::try_redacted(2, ObserverBackpressure::DropProgress).expect("otel");
+    for _ in 0..8 {
+        observer
+            .observe(Arc::from([event(Sensitivity::Public)]))
+            .await
+            .expect("observe");
+    }
+    let spans = observer.snapshot().expect("snapshot");
+    assert!(spans.len() <= 2);
 }

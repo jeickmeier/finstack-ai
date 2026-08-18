@@ -3,11 +3,13 @@ use std::time::Duration;
 
 use finstack_ai_runtime::{
     ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope, ArtifactStore,
-    AuthorizationContext, BlobRef, Bytes, CancellationSignal, Digest, EffectId,
-    EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PortFuture, PrincipalRef,
-    RawJson, RunCallContext, RunId, Sensitivity, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
-    ToolFailurePolicy, ToolStreamItem, Toolset,
+    AssembledToolStream, AuthorizationContext, BlobRef, Bytes, CancellationSignal, Digest,
+    EffectId, EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PortFuture,
+    PrincipalRef, RawJson, RunCallContext, RunId, Sensitivity, SessionId, ToolBatchId,
+    ToolCallBlock, ToolCallId, ToolFailurePolicy, ToolStreamItem, ToolStreamLimits, ToolTerminal,
+    Toolset,
 };
+use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
 use futures_util::StreamExt;
 use tempfile::TempDir;
 
@@ -266,6 +268,93 @@ async fn echo_under_policy_returns_stdout() {
     .expect("echo");
     assert!(result.output.as_str().contains("hello-shell"));
     assert!(!result.is_error);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn one_mib_stdout_fails_closed_without_hanging() {
+    let started = std::time::Instant::now();
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("huge1m.txt"), "x".repeat(1024 * 1024)).expect("huge");
+    let huge = root.path().join("huge1m.txt");
+    let toolset = ShellToolset::try_new(echo_policy(), Some(root.path()))
+        .expect("shell")
+        .try_with_limits(ShellLimits {
+            timeout: Duration::from_secs(2),
+            max_output_bytes: 64 * 1024,
+            inline_result_bytes: 256,
+        })
+        .expect("limits");
+    let flood = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/cat", huge.to_string_lossy()]}),
+    )
+    .await
+    .expect_err("flood");
+    assert_eq!(flood.code(), SHELL_LIMIT_EXCEEDED);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "large stdout must not hang for the historical 5s pipe deadlock"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cwd_rejects_symlinked_intermediate_and_accepts_real_nested() {
+    let root = TempDir::new().expect("root");
+    let nested = root.path().join("nested").join("dir");
+    std::fs::create_dir_all(&nested).expect("nested");
+    std::fs::write(nested.join("marker.txt"), "cwd-ok").expect("marker");
+    std::os::unix::fs::symlink(root.path().join("nested"), root.path().join("link")).expect("link");
+    let toolset = ShellToolset::try_new(echo_policy(), Some(root.path())).expect("shell");
+
+    let denied = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/cat","marker.txt"],"cwd":"link/dir"}),
+    )
+    .await
+    .expect_err("symlink intermediate");
+    assert_eq!(denied.code(), SHELL_POLICY_DENIED);
+
+    let accepted = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/cat","marker.txt"],"cwd":"nested/dir"}),
+    )
+    .await
+    .expect("real nested cwd");
+    assert!(accepted.output.as_str().contains("cwd-ok"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn published_toolset_conformance_suite() {
+    let toolset = ShellToolset::try_new(echo_policy(), None).expect("shell");
+    let spec = toolset.tools()[0].clone();
+    let result = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/echo","hello-conformance"]}),
+    )
+    .await
+    .expect("echo");
+    check_toolset_conformance(
+        &toolset,
+        ToolsetConformanceCase {
+            context: context(),
+            call: call(
+                &toolset,
+                &serde_json::json!({"argv":["/bin/echo","hello-conformance"]}),
+            ),
+            expected: AssembledToolStream {
+                progress: Arc::from([]),
+                usage: None,
+                terminal: ToolTerminal::Completed(result),
+            },
+            stream_limits: ToolStreamLimits::default(),
+            max_result_bytes: spec.max_result_bytes,
+        },
+    )
+    .await
+    .expect("published toolset conformance suite");
 }
 
 #[derive(Clone, Default)]

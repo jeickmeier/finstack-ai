@@ -1,0 +1,25 @@
+pub mod finstack_ai_context_repository
+pub enum finstack_ai_context_repository::RepositoryError
+pub finstack_ai_context_repository::RepositoryError::Configuration
+pub finstack_ai_context_repository::RepositoryError::Configuration::reason: &'static str
+pub finstack_ai_context_repository::RepositoryError::RootUnavailable
+pub finstack_ai_context_repository::RepositoryError::Unsupported
+impl core::clone::Clone for finstack_ai_context_repository::RepositoryError
+pub fn finstack_ai_context_repository::RepositoryError::clone(&self) -> finstack_ai_context_repository::RepositoryError
+impl core::cmp::Eq for finstack_ai_context_repository::RepositoryError
+impl core::cmp::PartialEq for finstack_ai_context_repository::RepositoryError
+pub fn finstack_ai_context_repository::RepositoryError::eq(&self, &finstack_ai_context_repository::RepositoryError) -> bool
+impl core::error::Error for finstack_ai_context_repository::RepositoryError
+impl core::fmt::Debug for finstack_ai_context_repository::RepositoryError
+pub fn finstack_ai_context_repository::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_context_repository::RepositoryError
+pub fn finstack_ai_context_repository::RepositoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_context_repository::RepositoryError
+pub struct finstack_ai_context_repository::RepositoryContextProvider
+impl finstack_ai_context_repository::RepositoryContextProvider
+pub fn finstack_ai_context_repository::RepositoryContextProvider::try_new(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_context_repository::RepositoryError>
+pub fn finstack_ai_context_repository::RepositoryContextProvider::try_with_allowlist<I, S>(impl core::convert::AsRef<std::path::Path>, I) -> core::result::Result<Self, finstack_ai_context_repository::RepositoryError> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+impl finstack_ai_runtime::ports::context::port::ContextProvider for finstack_ai_context_repository::RepositoryContextProvider
+pub fn finstack_ai_context_repository::RepositoryContextProvider::collect(&self, finstack_ai_runtime::ports::context::port::ContextCallContext, finstack_ai_runtime::ports::context::types::ContextRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::context::types::ContextContribution, finstack_ai_runtime::ports::context::error::ContextError>>
+pub fn finstack_ai_context_repository::RepositoryContextProvider::descriptor(&self) -> finstack_ai_runtime::ports::context::port::ContextProviderDescriptor
+pub const finstack_ai_context_repository::REPOSITORY_UNSUPPORTED: &str

@@ -1,0 +1,53 @@
+pub mod finstack_ai_tools_filesystem
+pub enum finstack_ai_tools_filesystem::FileSystemError
+pub finstack_ai_tools_filesystem::FileSystemError::Configuration
+pub finstack_ai_tools_filesystem::FileSystemError::Configuration::reason: &'static str
+pub finstack_ai_tools_filesystem::FileSystemError::RootUnavailable
+pub finstack_ai_tools_filesystem::FileSystemError::Unsupported
+impl core::clone::Clone for finstack_ai_tools_filesystem::FileSystemError
+pub fn finstack_ai_tools_filesystem::FileSystemError::clone(&self) -> finstack_ai_tools_filesystem::FileSystemError
+impl core::cmp::Eq for finstack_ai_tools_filesystem::FileSystemError
+impl core::cmp::PartialEq for finstack_ai_tools_filesystem::FileSystemError
+pub fn finstack_ai_tools_filesystem::FileSystemError::eq(&self, &finstack_ai_tools_filesystem::FileSystemError) -> bool
+impl core::error::Error for finstack_ai_tools_filesystem::FileSystemError
+impl core::fmt::Debug for finstack_ai_tools_filesystem::FileSystemError
+pub fn finstack_ai_tools_filesystem::FileSystemError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_filesystem::FileSystemError
+pub fn finstack_ai_tools_filesystem::FileSystemError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_filesystem::FileSystemError
+pub struct finstack_ai_tools_filesystem::FileSystemLimits
+pub finstack_ai_tools_filesystem::FileSystemLimits::file_bytes: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::inline_result_bytes: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::recursion_depth: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::search_matches: usize
+pub finstack_ai_tools_filesystem::FileSystemLimits::visited_entries: usize
+impl core::clone::Clone for finstack_ai_tools_filesystem::FileSystemLimits
+pub fn finstack_ai_tools_filesystem::FileSystemLimits::clone(&self) -> finstack_ai_tools_filesystem::FileSystemLimits
+impl core::cmp::Eq for finstack_ai_tools_filesystem::FileSystemLimits
+impl core::cmp::PartialEq for finstack_ai_tools_filesystem::FileSystemLimits
+pub fn finstack_ai_tools_filesystem::FileSystemLimits::eq(&self, &finstack_ai_tools_filesystem::FileSystemLimits) -> bool
+impl core::default::Default for finstack_ai_tools_filesystem::FileSystemLimits
+pub fn finstack_ai_tools_filesystem::FileSystemLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_filesystem::FileSystemLimits
+pub fn finstack_ai_tools_filesystem::FileSystemLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_filesystem::FileSystemLimits
+impl core::marker::StructuralPartialEq for finstack_ai_tools_filesystem::FileSystemLimits
+pub struct finstack_ai_tools_filesystem::FileSystemToolset
+impl finstack_ai_tools_filesystem::FileSystemToolset
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_new(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError>
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_with_limits(self, finstack_ai_tools_filesystem::FileSystemLimits) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError>
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::try_with_protected_paths<I, S>(self, I) -> core::result::Result<Self, finstack_ai_tools_filesystem::FileSystemError> where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_kernel::primitives::diagnostic::Sensitivity) -> Self
+impl core::fmt::Debug for finstack_ai_tools_filesystem::FileSystemToolset
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_filesystem::FileSystemToolset
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_filesystem::FileSystemToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_filesystem::FILESYSTEM_ARTIFACT_REQUIRED: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_IO_ERROR: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_NOT_FOUND: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_POLICY_DENIED: &str
+pub const finstack_ai_tools_filesystem::FILESYSTEM_UNSUPPORTED: &str

@@ -61,9 +61,11 @@ pub use profile::{
     TokenEstimatorSource, resolve_model_context_profile,
 };
 pub use provider_util::{
-    AnthropicMessagesAssembly, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
-    OpenAiChatAssembly, OpenAiResponsesAssembly, SECRET_MAX_BYTES, SseEvent, SseEventParser,
-    SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind, secret_is_valid,
+    AnthropicMessagesAssembly, Authentication, CredentialReference, CredentialRejected,
+    CredentialStore, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
+    OpenAiResponsesAssembly, SECRET_MAX_BYTES, SecretRejected, SecretString, SseEvent,
+    SseEventParser, SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind,
+    secret_is_valid,
 };
 pub use request::{
     ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft, ModelRequestLimits,

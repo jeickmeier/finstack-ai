@@ -186,15 +186,19 @@ impl Model for OpenAiProvider {
                     audio: false,
                     files: false,
                 },
-                context_profile: models
-                    .values()
-                    .next()
-                    .expect("provider model catalog is non-empty")
-                    .capabilities()
-                    .context_profile,
+                context_profile: finstack_ai_runtime::ModelContextProfile {
+                    provider: Arc::from("openai"),
+                    model: model.clone(),
+                    hard_input_bytes: 0,
+                    context_window_tokens: 0,
+                    max_output_tokens: 0,
+                    reserved_output_tokens: 0,
+                    provider_overhead_tokens: 0,
+                    estimator: estimator_ref(),
+                },
                 native_tool_calls: false,
                 parallel_tool_calls: false,
-                structured_output: finstack_ai_runtime::StructuredOutputCapability::Unsupported,
+                structured_output: finstack_ai_runtime::StructuredOutputCapability::Native,
                 reasoning: false,
                 prompt_cache: false,
                 resumable_stream: false,
@@ -398,5 +402,27 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
             true,
             "OpenAI transport failed",
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use finstack_ai_runtime::StructuredOutputCapability;
+
+    #[test]
+    fn unknown_model_uses_a_zeroed_profile_and_native_structured_output() {
+        let config = OpenAiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OpenAiProvider::try_new(config, vec![model]).expect("provider");
+        let unknown = ModelName::try_new("gpt-unknown").expect("name");
+        let capabilities = provider.capabilities(&unknown);
+        assert_eq!(capabilities.context_profile.model, unknown);
+        assert_eq!(capabilities.context_profile.context_window_tokens, 0);
+        assert_eq!(
+            capabilities.structured_output,
+            StructuredOutputCapability::Native
+        );
     }
 }

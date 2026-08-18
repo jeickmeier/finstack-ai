@@ -9,23 +9,32 @@ use finstack_ai_protocol::{
 };
 use finstack_ai_runtime::AgentInvokeError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use uuid::Uuid;
+use tokio::time::{Duration, Instant};
 
 use crate::route::{RemoteChildRoute, RemoteEndpoint, parse_endpoint, unavailable};
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_OPEN_FRAMES: usize = 64;
+const MAX_COMMAND_FRAMES: usize = 64;
 
 pub(crate) async fn exchange(
     route: &RemoteChildRoute,
     locator: &ChildRunLocator,
     op: RemoteCommandOp,
+    command_id: &str,
 ) -> Result<RemoteCommandResult, AgentInvokeError> {
     match parse_endpoint(&route.endpoint)? {
         RemoteEndpoint::Tcp(addr) => {
-            let stream = tokio::net::TcpStream::connect(addr)
-                .await
-                .map_err(|error| unavailable(error.to_string()))?;
-            exchange_on(stream, route, locator, op).await
+            let stream =
+                tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(addr))
+                    .await
+                    .map_err(|_| unavailable("remote child connect timed out"))?
+                    .map_err(|error| unavailable(error.to_string()))?;
+            exchange_on(stream, route, locator, op, command_id).await
         }
-        RemoteEndpoint::Unix(path) => unix_exchange(path, route, locator, op).await,
+        RemoteEndpoint::Unix(path) => unix_exchange(path, route, locator, op, command_id).await,
     }
 }
 
@@ -35,11 +44,13 @@ async fn unix_exchange(
     route: &RemoteChildRoute,
     locator: &ChildRunLocator,
     op: RemoteCommandOp,
+    command_id: &str,
 ) -> Result<RemoteCommandResult, AgentInvokeError> {
-    let stream = tokio::net::UnixStream::connect(path)
+    let stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::UnixStream::connect(path))
         .await
+        .map_err(|_| unavailable("remote child connect timed out"))?
         .map_err(|error| unavailable(error.to_string()))?;
-    exchange_on(stream, route, locator, op).await
+    exchange_on(stream, route, locator, op, command_id).await
 }
 
 #[cfg(not(unix))]
@@ -48,6 +59,7 @@ async fn unix_exchange(
     _route: &RemoteChildRoute,
     _locator: &ChildRunLocator,
     _op: RemoteCommandOp,
+    _command_id: &str,
 ) -> Result<RemoteCommandResult, AgentInvokeError> {
     Err(unavailable("unix remote child endpoints are not supported"))
 }
@@ -57,6 +69,7 @@ pub(crate) async fn exchange_on<S>(
     route: &RemoteChildRoute,
     locator: &ChildRunLocator,
     op: RemoteCommandOp,
+    command_id: &str,
 ) -> Result<RemoteCommandResult, AgentInvokeError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -101,7 +114,13 @@ where
         },
     )
     .await?;
+    let started = Instant::now();
+    let mut open_frames = 0_usize;
     loop {
+        open_frames = open_frames.saturating_add(1);
+        if open_frames > MAX_OPEN_FRAMES || started.elapsed() > EXCHANGE_TIMEOUT {
+            return Err(unavailable("remote child open exceeded the frame bound"));
+        }
         match read_post_auth(&mut stream).await? {
             RemotePostAuth::SyncBarrier { .. } => break,
             RemotePostAuth::Snapshot { .. }
@@ -121,14 +140,19 @@ where
         }
     }
     let command = RemoteCommand::try_new(
-        Uuid::now_v7().to_string(),
+        command_id,
         remote_locator,
         locator.operation.tenant_scope.as_ref(),
         op,
     )
     .map_err(|error| unavailable(error.to_string()))?;
     write_post_auth(&mut stream, &RemotePostAuth::Command { command }).await?;
+    let mut command_frames = 0_usize;
     loop {
+        command_frames = command_frames.saturating_add(1);
+        if command_frames > MAX_COMMAND_FRAMES || started.elapsed() > EXCHANGE_TIMEOUT {
+            return Err(unavailable("remote child command exceeded the frame bound"));
+        }
         match read_post_auth(&mut stream).await? {
             RemotePostAuth::CommandResult { result } => return Ok(result),
             RemotePostAuth::EventBatch { .. } | RemotePostAuth::Grant { .. } => {}
@@ -147,17 +171,17 @@ async fn read_frame<R: AsyncRead + Unpin>(
     ceiling: usize,
 ) -> Result<Vec<u8>, AgentInvokeError> {
     let mut header = [0_u8; FRAME_LENGTH_BYTES];
-    reader
-        .read_exact(&mut header)
+    tokio::time::timeout(READ_TIMEOUT, reader.read_exact(&mut header))
         .await
+        .map_err(|_| unavailable("remote child read timed out"))?
         .map_err(|error| unavailable(error.to_string()))?;
     let declared =
         decode_frame_len(header, ceiling).map_err(|error| unavailable(error.to_string()))?;
     let mut payload = vec![0_u8; declared];
     if declared > 0 {
-        reader
-            .read_exact(&mut payload)
+        tokio::time::timeout(READ_TIMEOUT, reader.read_exact(&mut payload))
             .await
+            .map_err(|_| unavailable("remote child read timed out"))?
             .map_err(|error| unavailable(error.to_string()))?;
     }
     Ok(payload)

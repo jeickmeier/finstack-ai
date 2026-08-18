@@ -8,15 +8,15 @@
 
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ErrorCategory, Metadata, PortFuture, RawJson,
-    RetrySafety, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    ValidatedToolCall,
+    RetrySafety, SideEffectClass, Timestamp, ToolCallContext, ToolDeferralSupport, ToolError,
+    ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor, ValidatedToolCall, verify_authority,
 };
-use futures_util::stream;
+use futures_util::{StreamExt, stream};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -25,6 +25,7 @@ const TOOL_NAME: &str = "e2b_run";
 const DEFAULT_ENDPOINT: &str = "https://api.e2b.dev";
 const DEFAULT_TEMPLATE: &str = "base";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_RESULT_BYTES: usize = 64 * 1_024;
 
 /// Stable missing-credential code.
 pub const E2B_CREDENTIAL_REQUIRED: &str = "e2b_credential_required";
@@ -34,6 +35,10 @@ pub const E2B_ENDPOINT_INVALID: &str = "e2b_endpoint_invalid";
 pub const E2B_INVALID_ARGUMENTS: &str = "e2b_invalid_arguments";
 /// Stable remote-transport code.
 pub const E2B_TRANSPORT_FAILED: &str = "e2b_transport_failed";
+/// Stable output-limit code.
+pub const E2B_LIMIT_EXCEEDED: &str = "e2b_limit_exceeded";
+/// Stable cancellation/deadline code.
+pub const E2B_TIMEOUT: &str = "e2b_timeout";
 
 /// Explicit E2B route. Never populated from the environment.
 #[derive(Clone)]
@@ -142,7 +147,7 @@ impl E2bSandboxToolset {
                 reason: Some(Arc::from("T4 remote E2B sandbox")),
                 attributes: Metadata::empty(),
             },
-            max_result_bytes: 64 * 1_024,
+            max_result_bytes: u64::try_from(MAX_RESULT_BYTES).unwrap_or(u64::MAX),
             metadata: Metadata::empty(),
             deferral: ToolDeferralSupport::Never,
         };
@@ -209,25 +214,12 @@ impl Toolset for E2bSandboxToolset {
         let endpoint = self.endpoint.clone();
         let template = self.template.clone();
         Box::pin(async move {
+            verify_authority(&ctx)?;
             if call.tool_id != expected_id || call.call.tool_name() != TOOL_NAME {
                 return Err(tool_error(
                     E2B_INVALID_ARGUMENTS,
                     ErrorCategory::Validation,
                     "e2b call identity is invalid",
-                ));
-            }
-            let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-            if ctx
-                .run
-                .authorization
-                .principal
-                .tenant_scope()
-                .is_some_and(|scope| scope != locator_scope)
-            {
-                return Err(tool_error(
-                    E2B_INVALID_ARGUMENTS,
-                    ErrorCategory::Validation,
-                    "e2b principal scope does not match the committed effect",
                 ));
             }
             let arguments: E2bRunArguments =
@@ -250,6 +242,7 @@ impl Toolset for E2bSandboxToolset {
                 &api_key,
                 &format!("{endpoint}/sandboxes"),
                 &serde_json::json!({ "template": template }),
+                &ctx,
             )
             .await?;
             if created.sandbox_id.is_empty() {
@@ -264,6 +257,7 @@ impl Toolset for E2bSandboxToolset {
                 &api_key,
                 &format!("{endpoint}/sandboxes/{}/run", created.sandbox_id),
                 &serde_json::json!({ "command": arguments.command }),
+                &ctx,
             )
             .await?;
             let output = serde_json::to_vec(&serde_json::json!({
@@ -300,21 +294,28 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
     api_key: &str,
     url: &str,
     body: &serde_json::Value,
+    ctx: &ToolCallContext,
 ) -> Result<T, ToolError> {
-    let response = client
+    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
+        return Err(timeout_error());
+    }
+    let send = client
         .post(url)
         .header("X-API-Key", api_key)
         .header("Content-Type", "application/json")
         .json(body)
-        .send()
-        .await
-        .map_err(|_| {
+        .send();
+    let response = tokio::select! {
+        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
+        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        result = send => result.map_err(|_| {
             tool_error(
                 E2B_TRANSPORT_FAILED,
                 ErrorCategory::Tool,
                 "e2b request failed",
             )
-        })?;
+        })?,
+    };
     let status = response.status();
     if !status.is_success() {
         return Err(tool_error(
@@ -323,13 +324,75 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
             "e2b endpoint rejected the request",
         ));
     }
-    response.json::<T>().await.map_err(|_| {
+    read_bounded_json(response).await
+}
+
+async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
+    response: reqwest::Response,
+) -> Result<T, ToolError> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| {
+            tool_error(
+                E2B_TRANSPORT_FAILED,
+                ErrorCategory::Tool,
+                "e2b response is invalid",
+            )
+        })?;
+        if body.len().saturating_add(chunk.len()) > MAX_RESULT_BYTES {
+            return Err(tool_error(
+                E2B_LIMIT_EXCEEDED,
+                ErrorCategory::Limit,
+                "e2b response exceeds the configured byte limit",
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| {
         tool_error(
             E2B_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "e2b response is invalid",
         )
     })
+}
+
+fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
+    let Some(deadline) = deadline else {
+        return false;
+    };
+    now_unix_ms() >= deadline.as_unix_ms()
+}
+
+async fn wait_deadline(deadline: Option<Timestamp>) {
+    let Some(deadline) = deadline else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
+    let millis = u64::try_from(remaining).unwrap_or(0);
+    if millis == 0 {
+        return;
+    }
+    tokio::time::sleep(Duration::from_millis(millis)).await;
+}
+
+fn now_unix_ms() -> i64 {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis()),
+    )
+    .unwrap_or(i64::MAX)
+}
+
+fn timeout_error() -> ToolError {
+    tool_error(
+        E2B_TIMEOUT,
+        ErrorCategory::Deadline,
+        "e2b request was cancelled or exceeded its deadline",
+    )
 }
 
 fn validate_endpoint(value: &str) -> Result<(), E2bSandboxError> {
@@ -348,13 +411,9 @@ fn validate_endpoint(value: &str) -> Result<(), E2bSandboxError> {
             reason: "endpoint contains forbidden components",
         });
     }
-    let host = rest
-        .split(['/', ':'])
-        .next()
-        .filter(|value| !value.is_empty())
-        .ok_or(E2bSandboxError::EndpointInvalid {
-            reason: "endpoint host is missing",
-        })?;
+    let host = endpoint_host(rest).ok_or(E2bSandboxError::EndpointInvalid {
+        reason: "endpoint host is missing",
+    })?;
     if scheme.eq_ignore_ascii_case("http") && !is_loopback_host(host) {
         return Err(E2bSandboxError::EndpointInvalid {
             reason: "plaintext HTTP is allowed only for loopback endpoints",
@@ -363,7 +422,19 @@ fn validate_endpoint(value: &str) -> Result<(), E2bSandboxError> {
     Ok(())
 }
 
+fn endpoint_host(rest: &str) -> Option<&str> {
+    if let Some(rest) = rest.strip_prefix('[') {
+        return rest.split(']').next().filter(|host| !host.is_empty());
+    }
+    rest.split(['/', ':'])
+        .next()
+        .filter(|host| !host.is_empty())
+}
+
 fn is_loopback_host(host: &str) -> bool {
+    let host = host
+        .strip_prefix('[')
+        .map_or(host, |rest| rest.strip_suffix(']').unwrap_or(rest));
     host.eq_ignore_ascii_case("localhost")
         || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
 }
@@ -440,6 +511,116 @@ mod tests {
             "e2b must stay off the wasm-host feature graph"
         );
         assert!(manifest.contains("dep:finstack-ai-sandbox-e2b"));
+    }
+
+    #[test]
+    fn loopback_ipv6_http_is_accepted() {
+        E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: "http://[::1]".into(),
+            template: None,
+        })
+        .expect("ipv6 loopback");
+    }
+
+    #[tokio::test]
+    async fn cancelled_call_does_not_reach_the_fixture() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0_u8; 256];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let _ = seen_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            }
+        });
+        let tools = E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: format!("http://{addr}"),
+            template: None,
+        })
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let ctx = tool_context();
+        ctx.run.cancellation.cancel();
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let Err(error) = tools.call(ctx, call).await else {
+            panic!("cancelled");
+        };
+        assert_eq!(error.code(), crate::E2B_TIMEOUT);
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "no HTTP must reach the fixture"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn oversized_json_fails_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let huge = format!(r#"{{"sandbox_id":"{}","stdout":"x"}}"#, "s".repeat(70_000));
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = vec![0_u8; 8_192];
+            let _ = stream.read(&mut buf).await;
+            let response = format!(
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{huge}",
+                huge.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        });
+        let tools = E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: format!("http://{addr}"),
+            template: None,
+        })
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("oversize");
+        };
+        assert_eq!(error.code(), crate::E2B_LIMIT_EXCEEDED);
+        server.abort();
     }
 
     #[tokio::test]

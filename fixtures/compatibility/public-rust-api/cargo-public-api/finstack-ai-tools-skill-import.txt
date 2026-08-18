@@ -1,0 +1,57 @@
+pub mod finstack_ai_tools_skill_import
+pub struct finstack_ai_tools_skill_import::ImportedSkill
+impl finstack_ai_tools_skill_import::ImportedSkill
+pub const fn finstack_ai_tools_skill_import::ImportedSkill::content_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub const fn finstack_ai_tools_skill_import::ImportedSkill::spec(&self) -> &finstack_ai::spec::CapabilitySpec
+impl core::clone::Clone for finstack_ai_tools_skill_import::ImportedSkill
+pub fn finstack_ai_tools_skill_import::ImportedSkill::clone(&self) -> finstack_ai_tools_skill_import::ImportedSkill
+impl core::cmp::Eq for finstack_ai_tools_skill_import::ImportedSkill
+impl core::cmp::PartialEq for finstack_ai_tools_skill_import::ImportedSkill
+pub fn finstack_ai_tools_skill_import::ImportedSkill::eq(&self, &finstack_ai_tools_skill_import::ImportedSkill) -> bool
+impl core::fmt::Debug for finstack_ai_tools_skill_import::ImportedSkill
+pub fn finstack_ai_tools_skill_import::ImportedSkill::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skill_import::ImportedSkill
+pub struct finstack_ai_tools_skill_import::SkillCatalog
+impl finstack_ai_tools_skill_import::SkillCatalog
+pub fn finstack_ai_tools_skill_import::SkillCatalog::content_digests(&self) -> alloc::vec::Vec<finstack_ai_kernel::primitives::digest::Digest>
+pub fn finstack_ai_tools_skill_import::SkillCatalog::disabled() -> Self
+pub fn finstack_ai_tools_skill_import::SkillCatalog::specs(&self) -> alloc::vec::Vec<&finstack_ai::spec::CapabilitySpec>
+pub fn finstack_ai_tools_skill_import::SkillCatalog::try_import(bool, &[finstack_ai_tools_skill_import::SkillMarkdown]) -> core::result::Result<Self, finstack_ai_tools_skill_import::SkillImportError>
+impl core::clone::Clone for finstack_ai_tools_skill_import::SkillCatalog
+pub fn finstack_ai_tools_skill_import::SkillCatalog::clone(&self) -> finstack_ai_tools_skill_import::SkillCatalog
+impl core::cmp::Eq for finstack_ai_tools_skill_import::SkillCatalog
+impl core::cmp::PartialEq for finstack_ai_tools_skill_import::SkillCatalog
+pub fn finstack_ai_tools_skill_import::SkillCatalog::eq(&self, &finstack_ai_tools_skill_import::SkillCatalog) -> bool
+impl core::default::Default for finstack_ai_tools_skill_import::SkillCatalog
+pub fn finstack_ai_tools_skill_import::SkillCatalog::default() -> finstack_ai_tools_skill_import::SkillCatalog
+impl core::fmt::Debug for finstack_ai_tools_skill_import::SkillCatalog
+pub fn finstack_ai_tools_skill_import::SkillCatalog::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skill_import::SkillCatalog
+pub struct finstack_ai_tools_skill_import::SkillImportError
+impl finstack_ai_tools_skill_import::SkillImportError
+pub const fn finstack_ai_tools_skill_import::SkillImportError::reason(&self) -> &'static str
+impl core::clone::Clone for finstack_ai_tools_skill_import::SkillImportError
+pub fn finstack_ai_tools_skill_import::SkillImportError::clone(&self) -> finstack_ai_tools_skill_import::SkillImportError
+impl core::cmp::Eq for finstack_ai_tools_skill_import::SkillImportError
+impl core::cmp::PartialEq for finstack_ai_tools_skill_import::SkillImportError
+pub fn finstack_ai_tools_skill_import::SkillImportError::eq(&self, &finstack_ai_tools_skill_import::SkillImportError) -> bool
+impl core::error::Error for finstack_ai_tools_skill_import::SkillImportError
+impl core::fmt::Debug for finstack_ai_tools_skill_import::SkillImportError
+pub fn finstack_ai_tools_skill_import::SkillImportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_skill_import::SkillImportError
+pub fn finstack_ai_tools_skill_import::SkillImportError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skill_import::SkillImportError
+pub struct finstack_ai_tools_skill_import::SkillMarkdown
+impl finstack_ai_tools_skill_import::SkillMarkdown
+pub fn finstack_ai_tools_skill_import::SkillMarkdown::from_text(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub fn finstack_ai_tools_skill_import::SkillMarkdown::text(&self) -> &str
+impl core::clone::Clone for finstack_ai_tools_skill_import::SkillMarkdown
+pub fn finstack_ai_tools_skill_import::SkillMarkdown::clone(&self) -> finstack_ai_tools_skill_import::SkillMarkdown
+impl core::cmp::Eq for finstack_ai_tools_skill_import::SkillMarkdown
+impl core::cmp::PartialEq for finstack_ai_tools_skill_import::SkillMarkdown
+pub fn finstack_ai_tools_skill_import::SkillMarkdown::eq(&self, &finstack_ai_tools_skill_import::SkillMarkdown) -> bool
+impl core::fmt::Debug for finstack_ai_tools_skill_import::SkillMarkdown
+pub fn finstack_ai_tools_skill_import::SkillMarkdown::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_skill_import::SkillMarkdown
+pub const finstack_ai_tools_skill_import::SKILL_IMPORT_INVALID: &str
+pub fn finstack_ai_tools_skill_import::import_skill_markdown(&str) -> core::result::Result<finstack_ai_tools_skill_import::ImportedSkill, finstack_ai_tools_skill_import::SkillImportError>

@@ -82,6 +82,30 @@ async fn fail_and_interaction_are_allowed_before_finalize() {
 }
 
 #[tokio::test]
+async fn interaction_ids_follow_the_run_effect_id() {
+    let interact = VerifyMiddleware::try_new(VerifyDecision::RequestInteraction).expect("interact");
+    let first = match interact
+        .invoke(ctx(), finalize_input())
+        .await
+        .expect("first")
+    {
+        StageOutcome::RequestInteraction(request) => request.interaction_id(),
+        other => panic!("expected interaction, got {other:?}"),
+    };
+    let mut second_ctx = ctx();
+    second_ctx.run.effect_id = id(40, |value| EffectId::parse(value).expect("effect"));
+    let second = match interact
+        .invoke(second_ctx, finalize_input())
+        .await
+        .expect("second")
+    {
+        StageOutcome::RequestInteraction(request) => request.interaction_id(),
+        other => panic!("expected interaction, got {other:?}"),
+    };
+    assert_ne!(first, second);
+}
+
+#[tokio::test]
 async fn middleware_satisfies_the_published_port_conformance_suite() {
     let middleware = VerifyMiddleware::try_accept().expect("verify");
     let outcome = check_middleware_conformance(

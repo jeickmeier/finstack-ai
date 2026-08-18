@@ -210,10 +210,11 @@ impl PyAgent {
         })
     }
 
-    /// Construct a Rust-backed config-driven gateway agent.
+    /// Construct a Rust-backed agent that dispatches to a dedicated provider.
     ///
     /// `hard_input_bytes`, `wire_protocol`, and `credential_name` are
-    /// required. The binding does not read environment variables.
+    /// required. `openai_chat` is a configuration error. The binding does
+    /// not read environment variables.
     #[staticmethod]
     #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(

@@ -886,11 +886,13 @@ class Agent:
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
     ) -> Agent:
-        """Build a Rust-backed config-driven gateway agent.
+        """Build a Rust-backed agent that dispatches to a dedicated provider.
 
-        Reuses the native gateway leaf. This factory does not read
+        ``Agent.gateway`` stays as a thin dispatcher onto the OpenAI,
+        Anthropic, and Ollama crates. This factory does not read
         environment variables. HTTPS is required off loopback and whenever
         ``api_key`` is set. Construction fails without ``hard_input_bytes``.
+        ``openai_chat`` is a configuration error.
 
         Args:
             endpoint: Provider endpoint URL.
@@ -898,8 +900,8 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
-            wire_protocol: ``openai_responses``, ``openai_chat``,
-                ``anthropic_messages``, or ``ollama_chat``.
+            wire_protocol: ``openai_responses``, ``anthropic_messages``,
+                or ``ollama_chat``.
             credential_name: Named credential reference, never a secret.
             hard_input_bytes: Required maximum canonical request bytes.
             auth: ``none``, ``bearer``, or ``api_key``. Defaults from

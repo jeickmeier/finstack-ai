@@ -327,7 +327,7 @@ async fn summarize_requests_child_model_and_resume_does_not_recurse() {
             completion_id: Arc::from("summary-1"),
             continuation_state: None,
         },
-        resume_state: RawJson::parse(b"{\"depth\":1}").expect("resume"),
+        resume_state: RawJson::parse(b"{}").expect("resume"),
     };
     let second = invoke(&middleware, input, Some(resume))
         .await
@@ -396,4 +396,57 @@ fn incompatible_checkpoint_is_a_cache_miss() {
         )
         .expect("check")
     );
+}
+
+#[tokio::test]
+async fn sliding_window_terminates_on_five_thousand_entries() {
+    let count = 5_000_usize;
+    let entries: Arc<[CompactionSourceEntry]> = (0..count)
+        .map(|index| {
+            let ordinal = u64::try_from(index).expect("ordinal");
+            CompactionSourceEntry {
+                entry_id: id::<EntryTag>(100 + ordinal),
+                message: message(
+                    200 + ordinal,
+                    MessageRole::User,
+                    text(&"token-payload ".repeat(8)),
+                ),
+                sensitivity: Sensitivity::Internal,
+                provenance_digest: Digest::raw_json(b"bulk"),
+                protected: index + 1 == count,
+            }
+        })
+        .collect::<Vec<_>>()
+        .into();
+    let input = BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("preview-model").expect("model"),
+            messages: entries
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+                .into(),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 8_000_000,
+                max_input_tokens: 2_000_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: entries,
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 2_000_000,
+        checkpoint: None,
+    };
+    let middleware =
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(64, 0)).expect("middleware");
+    match invoke(&middleware, input, None).await {
+        Ok(StageOutcome::CompactContext(_) | StageOutcome::Continue) => {}
+        Err(error) if error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID => {}
+        other => panic!("sliding window did not terminate cleanly: {other:?}"),
+    }
 }
