@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use finstack_ai_kernel::{AllocatedIds, AppendBatchTag, KernelInput, RecordTag, TransitionEnv};
 use tokio::sync::mpsc;
 
+use crate::coordinator::ToolDispatchSeed;
 use crate::middleware_driver::StageDriver;
 use crate::model::Model;
 use crate::native::model::ModelDriverMessage;
@@ -11,9 +12,9 @@ use crate::native::timer::{TimerDriverMessage, TimerDriverResult};
 use crate::native::tool::ToolDriverMessage;
 use crate::run_types::RunHandleError;
 use crate::settlement::{
-    SettlementSources, drain_idle_cancellation, prepare_tool_batch_if_ready,
-    process_model_progress, process_model_result, process_tool_progress, process_tool_result,
-    reconcile_cancelled_effect,
+    SettlementSources, ToolResultDisposition, continue_after_interaction, drain_idle_cancellation,
+    parked_tool_continue, prepare_tool_batch_if_ready, process_model_progress,
+    process_model_result, process_tool_progress, process_tool_result, reconcile_cancelled_effect,
 };
 use crate::stage_settlement::submit_command;
 use crate::{
@@ -200,6 +201,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     let mut model_path_open = true;
     let mut tool_path_open = true;
     let mut timer_path_open = true;
+    let mut parked_tool: Option<ToolDispatchSeed> = None;
     loop {
         tokio::select! {
             biased;
@@ -262,9 +264,16 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                         if shared.shutting_down.load(Ordering::Acquire) {
                             continue;
                         }
-                        if let Err(error) = process_tool_result(&mut coordinator, *result, &sources).await {
-                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
-                            break;
+                        let seed = result.seed.clone();
+                        match process_tool_result(&mut coordinator, *result, &sources).await {
+                            Ok(ToolResultDisposition::ParkedForInteraction) => {
+                                parked_tool = Some(seed);
+                            }
+                            Ok(ToolResultDisposition::Settled) => {}
+                            Err(error) => {
+                                fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                                break;
+                            }
                         }
                     }
                     None => tool_path_open = false,
@@ -296,6 +305,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                     continue;
                 }
                 let RunCommand { env, input, reply } = command;
+                let parked_continue = parked_tool_continue(&input);
                 let mut result = submit_command(
                     &mut coordinator,
                     stage_driver.as_ref(),
@@ -305,6 +315,17 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                     input,
                     Some(model.as_ref()),
                 ).await;
+                if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
+                    && let Err(error) = continue_after_interaction(
+                        &mut coordinator,
+                        &sources,
+                        &catalog,
+                        &mut parked_tool,
+                        parked_continue,
+                    ).await
+                {
+                    result = Err(error);
+                }
                 if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
                     && let Err(error) = prepare_tool_batch_if_ready(
                         &mut coordinator,

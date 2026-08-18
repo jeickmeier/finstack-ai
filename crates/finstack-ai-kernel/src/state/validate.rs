@@ -557,6 +557,7 @@ impl KernelState {
             Some(
                 RunPhase::AwaitingTools
                     | RunPhase::AwaitingExternal
+                    | RunPhase::AwaitingInteraction
                     | RunPhase::Cancelling
                     | RunPhase::Suspended
             )

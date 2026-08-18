@@ -17,8 +17,9 @@ deny-by-default allowlist at construction.
 Implemented: `tools/list` and `prompts/list` at construction;
 `Toolset::call` for `tools/call`; `resources/list` and
 `resources/templates` at construction and a `ContextProvider` that
-`resources/read`s only the frozen names; `input_required` mapped onto
-existing `InteractionRequest` (`Form` or `FreeText`).
+`resources/read`s only the frozen names; `input_required` journals
+`InteractionRequested` and parks the committed tool on durable HITL
+(`Form` or `FreeText`) the same way native interactions do.
 
 Not implemented:
 

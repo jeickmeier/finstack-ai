@@ -107,7 +107,6 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
 ) -> Result<(), RunHandleError> {
-    let now = sources.now()?;
     let interaction_id = generate_tool_id::<InteractionTag, _, _>(sources)?;
     let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
     let expires_at = coordinator
@@ -153,6 +152,51 @@ pub(super) async fn request_approval_interaction<C: Clock, R: RandomSource>(
     .map_err(|_| RunHandleError::InteractionSettlement {
         code: "approval_request_invalid",
     })?;
+    submit_interaction_request(coordinator, sources, request).await
+}
+
+pub(crate) async fn request_tool_interaction<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    template: &InteractionRequest,
+) -> Result<(), RunHandleError> {
+    let interaction_id = generate_tool_id::<InteractionTag, _, _>(sources)?;
+    let effect_id = generate_tool_id::<EffectTag, _, _>(sources)?;
+    let expires_at = template.expires_at().or_else(|| {
+        coordinator
+            .state()
+            .accepted
+            .as_ref()
+            .and_then(finstack_ai_kernel::RunAccepted::effective_deadline)
+    });
+    let request = InteractionRequest::try_new(
+        template.request_version(),
+        interaction_id,
+        effect_id,
+        template.kind().clone(),
+        template.prompt().to_vec(),
+        template.response_schema().clone(),
+        template.policy_component().clone(),
+        template.policy_version(),
+        template.assignee_hint().cloned(),
+        expires_at,
+        template.delegatable(),
+        template.metadata().clone(),
+    )
+    .map_err(|_| RunHandleError::InteractionSettlement {
+        code: "tool_interaction_request_invalid",
+    })?;
+    submit_interaction_request(coordinator, sources, request).await
+}
+
+async fn submit_interaction_request<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    request: InteractionRequest,
+) -> Result<(), RunHandleError> {
+    let now = sources.now()?;
+    let interaction_id = request.interaction_id();
+    let effect_id = request.effect_id();
     let input = KernelInput::RequestInteraction(RequestInteraction { request });
     let ids = AllocatedIds::try_new(
         generate_tool_ids::<RecordTag, _, _>(2, sources)?,

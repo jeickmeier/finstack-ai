@@ -1,4 +1,4 @@
-use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor, Metadata};
+use finstack_ai_kernel::{ErrorCategory, ErrorDescriptor, InteractionRequest, Metadata};
 use thiserror::Error;
 
 use crate::error::{PortErrorData, PortErrorInvalid};
@@ -19,6 +19,8 @@ pub const TOOL_RESULT_LIMIT_EXCEEDED: &str = "tool_result_limit_exceeded";
 pub const TOOL_STREAM_LIMIT_EXCEEDED: &str = "tool_stream_limit_exceeded";
 /// Stable approval-required closure code.
 pub const TOOL_APPROVAL_REQUIRED: &str = "tool_approval_required";
+/// Stable mid-tool HITL park code. The tool effect stays committed.
+pub const TOOL_INTERACTION_REQUIRED: &str = "tool_interaction_required";
 /// Stable policy-denial closure code.
 pub const TOOL_POLICY_DENIED: &str = "tool_policy_denied";
 /// Stable cancellation adapter code.
@@ -125,6 +127,15 @@ impl ToolError {
         &self.data.metadata
     }
 
+    /// Recover a durable HITL request from [`TOOL_INTERACTION_REQUIRED`] metadata.
+    #[must_use]
+    pub fn interaction_request(&self) -> Option<InteractionRequest> {
+        if self.code() != TOOL_INTERACTION_REQUIRED {
+            return None;
+        }
+        serde_json::from_slice(self.metadata().as_bytes()).ok()
+    }
+
     /// Convert to a source-free durable kernel descriptor.
     ///
     /// # Errors
@@ -153,7 +164,9 @@ fn reserved_category(code: &str) -> Option<ErrorCategory> {
         TOOL_DEADLINE_EXCEEDED => Some(ErrorCategory::Deadline),
         TOOL_PANICKED => Some(ErrorCategory::Internal),
         TOOL_REGISTRATION_INVALID => Some(ErrorCategory::Registration),
-        UNKNOWN_TOOL | TOOL_APPROVAL_REQUIRED | TOOL_POLICY_DENIED => Some(ErrorCategory::Tool),
+        UNKNOWN_TOOL | TOOL_APPROVAL_REQUIRED | TOOL_INTERACTION_REQUIRED | TOOL_POLICY_DENIED => {
+            Some(ErrorCategory::Tool)
+        }
         _ => None,
     }
 }

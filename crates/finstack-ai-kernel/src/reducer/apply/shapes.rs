@@ -88,7 +88,9 @@ pub(super) fn validate_batch_shape(
                 || one_failed_stage(records, state.cycle, Stage::BeforeToolBatch)
                 || interaction_request_shape(records)
         }
-        Some(RunPhase::AwaitingTools) => tool_settlement_shape(state, records),
+        Some(RunPhase::AwaitingTools) => {
+            tool_settlement_shape(state, records) || interaction_request_shape(records)
+        }
         Some(RunPhase::AfterToolBatch) => {
             one_stage(records, state.cycle, Stage::AfterToolBatch, |disposition| {
                 matches!(
@@ -831,7 +833,7 @@ pub(super) fn stage_cursor_for_phase(state: &KernelState) -> Option<crate::Stage
         RunPhase::PreparingContext => Stage::PrepareContext,
         RunPhase::BeforeModel => Stage::BeforeModel,
         RunPhase::AfterModel => Stage::AfterModel,
-        RunPhase::BeforeToolBatch => Stage::BeforeToolBatch,
+        RunPhase::BeforeToolBatch | RunPhase::AwaitingTools => Stage::BeforeToolBatch,
         RunPhase::AfterToolBatch => Stage::AfterToolBatch,
         RunPhase::BeforeFinalize => Stage::BeforeFinalize,
         _ => return None,

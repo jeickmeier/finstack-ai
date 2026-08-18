@@ -10,7 +10,8 @@ use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed}
 use crate::middleware_driver::StageDriver;
 use crate::run_types::RunHandleError;
 use crate::settlement::{
-    ModelDriverResult, SettlementSources, ToolDriverResult, drain_idle_cancellation,
+    ModelDriverResult, SettlementSources, ToolDriverResult, ToolResultDisposition,
+    continue_after_interaction, drain_idle_cancellation, parked_tool_continue,
     prepare_tool_batch_if_ready, process_model_progress, process_model_result,
     process_tool_progress, process_tool_result,
 };
@@ -76,6 +77,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
     C: Clock + crate::PortObject,
     R: RandomSource + crate::PortObject,
 {
+    let mut parked_tool: Option<ToolDispatchSeed> = None;
     loop {
         if shared.shutting_down.load(Ordering::Acquire) {
             break;
@@ -87,6 +89,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
             command.reply.send(Err(RunHandleError::ShuttingDown));
             continue;
         }
+        let parked_continue = parked_tool_continue(&command.input);
         if submit_and_reply(
             &mut coordinator,
             &shared,
@@ -98,6 +101,27 @@ pub(super) async fn run_worker_with_effects<C, R>(
         )
         .await
         {
+            break;
+        }
+        if let Some(catalog) = catalog.as_deref()
+            && let Err(error) = continue_after_interaction(
+                &mut coordinator,
+                &sources,
+                catalog,
+                &mut parked_tool,
+                parked_continue,
+            )
+            .await
+        {
+            fault_shared(
+                &shared,
+                match error {
+                    RunHandleError::ToolSettlement { code }
+                    | RunHandleError::InteractionSettlement { code }
+                    | RunHandleError::Faulted { code } => code,
+                    _ => "host_tool_interaction_continue_failed",
+                },
+            );
             break;
         }
         if let Err(error) = drain_idle_cancellation(&mut coordinator, &sources, false).await {
@@ -124,6 +148,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
             &sources,
             stage_driver.as_ref(),
             &profile,
+            &mut parked_tool,
         ))
         .await
         {
@@ -199,6 +224,7 @@ async fn drain_effects_accepting_commands<C, R>(
     sources: &SettlementSources<C, R>,
     stage_driver: Option<&StageDriver>,
     profile: &LockedModelContextProfile,
+    parked_tool: &mut Option<ToolDispatchSeed>,
 ) -> Result<(), RunHandleError>
 where
     C: Clock + crate::PortObject,
@@ -246,7 +272,7 @@ where
                 context,
                 resolved,
             } => {
-                settle_driven_tool(
+                if let Some(parked) = settle_driven_tool(
                     coordinator,
                     intake,
                     shared,
@@ -260,7 +286,10 @@ where
                     context,
                     resolved,
                 )
-                .await?;
+                .await?
+                {
+                    *parked_tool = Some(parked);
+                }
             }
         }
     }
@@ -353,7 +382,7 @@ async fn settle_driven_tool<C, R>(
     seed: ToolDispatchSeed,
     context: ToolCallContext,
     resolved: Arc<ResolvedTool>,
-) -> Result<(), RunHandleError>
+) -> Result<Option<ToolDispatchSeed>, RunHandleError>
 where
     C: Clock + crate::PortObject,
     R: RandomSource + crate::PortObject,
@@ -391,8 +420,11 @@ where
     for item in progress {
         process_tool_progress(coordinator, effect_id, item, sources).await?;
     }
-    process_tool_result(coordinator, ToolDriverResult { seed, result }, sources).await?;
-    Ok(())
+    let parked = seed.clone();
+    match process_tool_result(coordinator, ToolDriverResult { seed, result }, sources).await? {
+        ToolResultDisposition::ParkedForInteraction => Ok(Some(parked)),
+        ToolResultDisposition::Settled => Ok(None),
+    }
 }
 
 async fn drive_accepting_commands<C, R, T>(

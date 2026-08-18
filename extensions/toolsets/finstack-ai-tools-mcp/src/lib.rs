@@ -3,8 +3,8 @@
 //!
 //! Protocol revision `2026-07-28`. There is no `initialize` handshake.
 //! Sampling is not implemented. Elicitation / `input_required` maps onto
-//! existing [`InteractionRequest`]. An MCP server is not an
-//! application-instruction authority.
+//! existing [`InteractionRequest`] and parks the committed tool on durable
+//! HITL. An MCP server is not an application-instruction authority.
 
 #![warn(missing_docs)]
 
@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     Digest, ErrorCategory, Metadata, PendingToolEffect, PortFuture, RawJson, ReconcileContext,
-    TOOL_OUTPUT_INVALID, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
-    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall,
+    TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, ToolCallContext, ToolError, ToolEventStream,
+    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ValidatedToolCall,
 };
 use futures_util::stream;
 use thiserror::Error;
@@ -53,7 +54,10 @@ pub const MCP_LIMIT_EXCEEDED: &str = "mcp_limit_exceeded";
 /// Stable required-artifact-service code.
 pub const MCP_ARTIFACT_REQUIRED: &str = "mcp_artifact_required";
 /// Stable code when a tool parks on MCP elicitation / `input_required`.
-pub const MCP_INPUT_REQUIRED: &str = "mcp_input_required";
+///
+/// Aliased to [`TOOL_INTERACTION_REQUIRED`] so the runtime journals
+/// `InteractionRequested` instead of failing the committed tool effect.
+pub const MCP_INPUT_REQUIRED: &str = TOOL_INTERACTION_REQUIRED;
 
 const DEFAULT_INLINE_RESULT_BYTES: u64 = 64 * 1024;
 const CONTEXT_PROVIDER_COMPONENT: &str = "finstack.context.mcp";

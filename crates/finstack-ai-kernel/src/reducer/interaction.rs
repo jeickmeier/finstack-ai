@@ -33,10 +33,14 @@ pub(super) fn decide_request(
     }
     // Request-interaction only requires a requestable stage. Cursor compare
     // is for inputs that carry a cursor (`StageCursorMismatch`).
-    expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
-        phase: state.phase,
-        input: "request_interaction",
-    })?;
+    // `AwaitingTools` is requestable so a committed tool can park on HITL;
+    // it is not a stage-settlement cursor (`expected_stage_cursor` stays None).
+    if expected_stage_cursor(state).is_none() && state.phase != Some(RunPhase::AwaitingTools) {
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "request_interaction",
+        });
+    }
     let request = &input.request;
     validate_allocated_ids(
         &env.ids,

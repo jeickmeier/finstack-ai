@@ -6,7 +6,8 @@ use finstack_ai_kernel::{
     ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
     ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag,
     KernelInput, MessageTag, Metadata, ProviderIds, RawJson, RecordExternalCommandRejected,
-    RecordTag, ToolBatchSettled, ToolCallPlan, ToolFailurePolicy, ToolSettlement, TransitionEnv,
+    RecordTag, ToolBatchSettled, ToolCallBlock, ToolCallPlan, ToolFailurePolicy, ToolSettlement,
+    TransitionEnv, ValidatedToolCall,
 };
 
 use crate::coordinator::{CommitCoordinator, CommitCoordinatorError, ToolDispatchSeed};
@@ -14,27 +15,37 @@ use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
     CancellationSignal, Clock, PendingToolEffect, RandomSource, ReconcileContext,
-    ResolvedToolCatalog, RunCallContext, ToolDeferral, ToolError, ToolProgress,
-    ToolReconcileResult, ToolResult, ToolResumeAction, map_tool_reconcile_result,
-    normalize_tool_result, tool_resume_action, tool_retry_allowed,
+    ResolvedToolCatalog, RunCallContext, ToolCallContext, ToolDeferral, ToolError, ToolProgress,
+    ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamLimits,
+    map_tool_reconcile_result, normalize_tool_result, tool_resume_action, tool_retry_allowed,
 };
 
 use super::cancel::reconcile_cancelled_effect;
 use super::ids::submit_resume_input;
+use super::interaction::request_tool_interaction;
 use super::{SettlementSources, ToolDriverResult, tool_handle_error};
+
+/// How [`process_tool_result`] finished without failing the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolResultDisposition {
+    /// The tool effect was settled.
+    Settled,
+    /// The committed tool effect is still open; the run parked on HITL.
+    ParkedForInteraction,
+}
 
 pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     mut driver_result: ToolDriverResult,
     sources: &SettlementSources<C, R>,
-) -> Result<(), RunHandleError> {
+) -> Result<ToolResultDisposition, RunHandleError> {
     let effect_id = driver_result.seed.requested.effect_id();
     let state = coordinator.state();
     let Some(batch) = state.active_tool_batch.as_ref() else {
-        return Ok(());
+        return Ok(ToolResultDisposition::Settled);
     };
     let Some(active) = batch.call(effect_id) else {
-        return Ok(());
+        return Ok(ToolResultDisposition::Settled);
     };
     if let Some(cancellation) = state.cancellation.as_ref()
         && cancellation.outstanding_effects.contains(&effect_id)
@@ -43,7 +54,8 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
             .result
             .as_ref()
             .is_err_and(|error| error.category() == ErrorCategory::Cancellation);
-        return reconcile_cancelled_effect(coordinator, effect_id, cancelled, sources).await;
+        reconcile_cancelled_effect(coordinator, effect_id, cancelled, sources).await?;
+        return Ok(ToolResultDisposition::Settled);
     }
     if batch.opened.tool_batch_id != driver_result.seed.tool_batch_id
         || !matches!(
@@ -52,7 +64,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         )
         || state.terminal.is_some()
     {
-        return Ok(());
+        return Ok(ToolResultDisposition::Settled);
     }
     let now = sources.now()?;
     if driver_result
@@ -69,6 +81,12 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
             Metadata::empty(),
         )
         .map_err(|error| tool_handle_error(&ToolError::from(error)))?);
+    }
+    if let Err(error) = &driver_result.result
+        && let Some(request) = error.interaction_request()
+    {
+        request_tool_interaction(coordinator, sources, &request).await?;
+        return Ok(ToolResultDisposition::ParkedForInteraction);
     }
     let settled = build_tool_settlement(driver_result)?;
     let input = KernelInput::ToolBatchSettled(settled.clone());
@@ -89,7 +107,159 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
     if let Some(fault) = outcome.fault {
         return Err(RunHandleError::Faulted { code: fault.code });
     }
+    Ok(ToolResultDisposition::Settled)
+}
+
+pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    catalog: &ResolvedToolCatalog,
+    seed: ToolDispatchSeed,
+    response: &RawJson,
+) -> Result<ToolResultDisposition, RunHandleError> {
+    let resolved =
+        catalog
+            .by_id(&seed.call.tool_id)
+            .cloned()
+            .ok_or(RunHandleError::ToolSettlement {
+                code: "tool_resolution_missing",
+            })?;
+    let call = merge_call_arguments(&seed.call, response)?;
+    let context = ToolCallContext {
+        run: RunCallContext {
+            locator: seed.locator.clone(),
+            authorization: seed.authorization.clone(),
+            effect_id: seed.requested.effect_id(),
+            attempt: seed.attempt,
+            deadline: seed.requested.deadline(),
+            budget_scope_id: seed.budget_scope_id,
+            cancellation: CancellationSignal::new(),
+        },
+        tool_batch_id: seed.tool_batch_id,
+        tool_call_id: seed.tool_call_id,
+    };
+    let result = match resolved.toolset.call(context, call).await {
+        Ok(stream) => ToolStreamAssembler::new(ToolStreamLimits::default())
+            .assemble(
+                stream,
+                resolved.output_validator.as_deref(),
+                resolved.spec.max_result_bytes,
+            )
+            .await
+            .map(|assembled| AssembledToolTerminal {
+                usage: assembled.usage,
+                result: assembled.result,
+            }),
+        Err(error) => Err(error),
+    };
+    process_tool_result(coordinator, ToolDriverResult { seed, result }, sources).await
+}
+
+pub(crate) async fn fail_parked_tool<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    seed: ToolDispatchSeed,
+) -> Result<ToolResultDisposition, RunHandleError> {
+    process_tool_result(
+        coordinator,
+        ToolDriverResult {
+            seed,
+            result: Err(ToolError::stable(
+                crate::TOOL_CANCELLED,
+                "parked tool interaction was not resolved",
+            )),
+        },
+        sources,
+    )
+    .await
+}
+
+pub(crate) enum ParkedToolContinue {
+    Resolved(RawJson),
+    Abandoned,
+}
+
+pub(crate) fn parked_tool_continue(input: &KernelInput) -> Option<ParkedToolContinue> {
+    match input {
+        KernelInput::InteractionSettled(finstack_ai_kernel::InteractionSettled::Resolved(
+            resolution,
+        )) => Some(ParkedToolContinue::Resolved(resolution.response().clone())),
+        KernelInput::InteractionSettled(_) => Some(ParkedToolContinue::Abandoned),
+        _ => None,
+    }
+}
+
+pub(crate) async fn continue_after_interaction<C, R>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    catalog: &ResolvedToolCatalog,
+    parked_tool: &mut Option<ToolDispatchSeed>,
+    action: Option<ParkedToolContinue>,
+) -> Result<(), RunHandleError>
+where
+    C: Clock,
+    R: RandomSource,
+{
+    let Some(action) = action else {
+        return Ok(());
+    };
+    let Some(seed) = parked_tool.take() else {
+        return Ok(());
+    };
+    let disposition = match action {
+        ParkedToolContinue::Resolved(response) => {
+            continue_parked_tool(coordinator, sources, catalog, seed.clone(), &response).await?
+        }
+        ParkedToolContinue::Abandoned => {
+            fail_parked_tool(coordinator, sources, seed.clone()).await?
+        }
+    };
+    if disposition == ToolResultDisposition::ParkedForInteraction {
+        *parked_tool = Some(seed);
+    }
     Ok(())
+}
+
+fn merge_call_arguments(
+    call: &ValidatedToolCall,
+    response: &RawJson,
+) -> Result<ValidatedToolCall, RunHandleError> {
+    let mut arguments: serde_json::Value =
+        serde_json::from_slice(call.call.arguments().as_bytes()).unwrap_or(serde_json::json!({}));
+    let extra: serde_json::Value = serde_json::from_slice(response.as_bytes()).map_err(|_| {
+        RunHandleError::ToolSettlement {
+            code: "tool_interaction_response_invalid",
+        }
+    })?;
+    match (&mut arguments, extra) {
+        (serde_json::Value::Object(base), serde_json::Value::Object(overlay)) => {
+            for (key, value) in overlay {
+                base.insert(key, value);
+            }
+        }
+        (base, extra) => *base = extra,
+    }
+    let encoded = serde_json_canonicalizer::to_vec(&arguments).map_err(|_| {
+        RunHandleError::ToolSettlement {
+            code: "tool_interaction_response_invalid",
+        }
+    })?;
+    let arguments = RawJson::parse(encoded).map_err(|_| RunHandleError::ToolSettlement {
+        code: "tool_interaction_response_invalid",
+    })?;
+    let block = ToolCallBlock::try_new_with_provider_call_id(
+        *call.call.tool_call_id(),
+        call.call.tool_name(),
+        arguments,
+        call.call.provider_call_id(),
+    )
+    .map_err(|_| RunHandleError::ToolSettlement {
+        code: "tool_interaction_response_invalid",
+    })?;
+    Ok(ValidatedToolCall {
+        call: block,
+        ..call.clone()
+    })
 }
 
 pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(

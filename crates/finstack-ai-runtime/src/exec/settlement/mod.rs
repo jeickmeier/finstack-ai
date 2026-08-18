@@ -39,7 +39,10 @@ pub(crate) use context::resume_pending_context_effects;
 pub(crate) use interaction::apply_interaction_resume;
 pub(crate) use model::{process_model_progress, process_model_result, resume_pending_model_effect};
 pub(crate) use stage::{prepare_tool_batch_if_ready, stage_allocation};
-pub(crate) use tool::{process_tool_progress, process_tool_result, resume_pending_tool_effects};
+pub(crate) use tool::{
+    ToolResultDisposition, continue_after_interaction, parked_tool_continue, process_tool_progress,
+    process_tool_result, resume_pending_tool_effects,
+};
 
 pub(crate) struct ModelDriverResult {
     pub(crate) seed: ModelDispatchSeed,

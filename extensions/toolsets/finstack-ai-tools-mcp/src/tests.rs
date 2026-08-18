@@ -823,3 +823,216 @@ async fn list_changed_is_observed_and_does_not_add_a_tool() {
         ["notifications/tools/list_changed"]
     );
 }
+
+fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
+    use finstack_ai::runtime::{
+        ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
+        TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    };
+    use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
+
+    let arguments = RawJson::parse(br#"{}"#).expect("arguments");
+    Arc::new(ScriptedModel::from_plans(
+        ModelContextProfile {
+            provider: Arc::from("scripted"),
+            model: ModelName::try_new("preview-1").expect("model"),
+            hard_input_bytes: 1_048_576,
+            context_window_tokens: 8_192,
+            max_output_tokens: 512,
+            reserved_output_tokens: 128,
+            provider_overhead_tokens: 32,
+            estimator: TokenEstimatorRef {
+                id: Arc::from("scripted.utf8"),
+                version: Arc::from("1"),
+                source: TokenEstimatorSource::ConservativeUpperBound,
+            },
+        },
+        vec![
+            ScriptedModelPlan {
+                actions: vec![
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                        index: 0,
+                        name: Some(Arc::from("ask")),
+                        arguments_delta: Arc::from(arguments.as_str()),
+                        provider_call_id: None,
+                    }))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([]),
+                        tool_calls: Arc::from([ModelToolCall {
+                            name: Arc::from("ask"),
+                            arguments,
+                            provider_call_id: None,
+                        }]),
+                        usage: finstack_ai::runtime::Usage::empty(),
+                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        completion_id: Arc::from("mcp-elicitation-1"),
+                        continuation_state: None,
+                    }))),
+                ],
+            },
+            ScriptedModelPlan {
+                actions: vec![
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                        finstack_ai::runtime::TextDelta {
+                            text: Arc::from("oslo is ready"),
+                        },
+                    ))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([ContentBlock::Text(
+                            TextBlock::try_new("oslo is ready").expect("text"),
+                        )]),
+                        tool_calls: Arc::from([]),
+                        usage: finstack_ai::runtime::Usage::empty(),
+                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        completion_id: Arc::from("mcp-elicitation-2"),
+                        continuation_state: None,
+                    }))),
+                ],
+            },
+        ],
+    ))
+}
+
+#[tokio::test]
+async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool() {
+    use std::time::Duration;
+
+    use finstack_ai::runtime::{
+        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, LoadRequest, Model, Version,
+    };
+    use finstack_ai::{
+        Agent, AgentRunRequest, InteractionResolution, PrincipalRef, RunSecurityContext,
+    };
+    use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind};
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"ask","description":"Ask","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({
+            "resultType":"input_required",
+            "content":[{"type":"text","text":"Need a city"}],
+            "inputRequests":{"type":"object","properties":{"city":{"type":"string"}}}
+        }),
+        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"resolved"}],"isError":false}),
+    ]);
+    let toolset = McpToolset::connect(
+        Arc::new(transport),
+        McpConfig::default().with_read_only_tools(["ask"]),
+        None,
+    )
+    .await
+    .expect("connects");
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 1_024,
+            snapshot_bytes: 16_384,
+        })
+        .expect("store"),
+    );
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let model = elicitation_model();
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.mcp-elicitation").expect("agent"),
+        BundleId::parse("test.bundle.mcp-elicitation").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mcp-elicitation").expect("model"),
+                Some(version),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mcp-elicitation").expect("store"),
+                Some(version),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("finstack.tools.mcp").expect("toolset"),
+            Some(version),
+        ),
+        Arc::new(toolset) as Arc<dyn Toolset>,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let security = RunSecurityContext::try_new(
+        "tenant-a",
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+        "local",
+        "test",
+        "mcp-elicitation-policy-v1",
+        "mcp-elicitation-decision-v1",
+        None,
+    )
+    .expect("security");
+    let run = agent
+        .start(
+            AgentRunRequest::try_new(
+                finstack_ai::runtime::ModelName::try_new("preview-1").expect("model name"),
+                "ask the tool",
+                security.clone(),
+            )
+            .expect("request"),
+        )
+        .expect("start");
+    let listed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let listed = run.list_interactions().await.expect("list");
+            if !listed.is_empty() {
+                return listed;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("elicitation timeout");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind(), &InteractionKind::Form);
+    let resolution = InteractionResolution::try_new(
+        listed[0].interaction_id(),
+        "mcp-elicitation-1",
+        security.principal().clone(),
+        AuthorizationEvidence::try_new(
+            security.authorization_policy_version(),
+            security.authorization_decision_id(),
+        )
+        .expect("auth"),
+        RawJson::parse(br#"{"city":"oslo"}"#).expect("city"),
+        None::<&str>,
+    )
+    .expect("resolution");
+    tokio::time::timeout(Duration::from_secs(3), run.resolve_interaction(resolution))
+        .await
+        .expect("resolve timeout")
+        .expect("resolve");
+    let output = tokio::time::timeout(Duration::from_secs(8), run.result())
+        .await
+        .expect("run timeout")
+        .expect("run result");
+    assert!(output.text().contains("oslo is ready"), "{}", output.text());
+    let kinds = store
+        .load(LoadRequest {
+            session_id: run.locator().session_id,
+        })
+        .await
+        .expect("load journal")
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .map(|record| record.body().kind_name().to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        kinds.iter().any(|kind| kind == "interaction_requested"),
+        "durable HITL must journal InteractionRequested, got {kinds:?}"
+    );
+}
