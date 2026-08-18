@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-17 (ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
+Index last reconciled: 2026-08-17 (ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -67,6 +67,7 @@ Index last reconciled: 2026-08-17 (ADR-042 accepted and implementation in progre
 | ADR-040 | `openai-responses-native-ollama` | Ecosystem lead | PR-068–PR-073 | Accepted | Standalone | In progress | Partial (decision accepted; mapped delivery in progress; publication excluded) |
 | ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | In progress | Missing |
 | ADR-042 | `model-assisted-compaction-runtime-phase` | Core/runtime lead | FR-02 Task 14 | Accepted | Standalone | In progress | Missing |
+| ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Missing |
 
 ## Security review seed
 
@@ -95,6 +96,7 @@ Index last reconciled: 2026-08-17 (ADR-042 accepted and implementation in progre
 | ADR-036 | TM-16, TM-20 |
 | ADR-037, ADR-042 | SEC-INV-013; TM-21 |
 | ADR-038 | SEC-INV-007, SEC-INV-010; TM-09, TM-12, TM-16 |
+| ADR-043 | SEC-INV-006, SEC-INV-012; TM-03, TM-06 |
 | ADR-039 | TM-02, TM-16 |
 
 ## Change control
@@ -421,6 +423,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-17 | ADR-042 | Decision | me@jeickmeier.com | — | Accepted | Runtime phase (option b); reject middleware-owned child and two-pass settlement | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-042 | Record | me@jeickmeier.com | — | Standalone | ADR-042-model-assisted-compaction-runtime-phase.md | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-042 | Implementation | me@jeickmeier.com | Not started | In progress | FR-02 Task 14 landed locally; no published evidence id | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-043 | Decision | me@jeickmeier.com | — | Accepted | Internal ProcessConfinement service; Landlock+no_new_privs, Seatbelt (deprecated), restricted token+Job Object; fail closed; T1 unchanged | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-043 | Record | me@jeickmeier.com | — | Standalone | ADR-043-process-confinement-backends.md | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-043 | Implementation | me@jeickmeier.com | Not started | In progress | FR-08 Task 16 landed locally; no published evidence id; no threat-model review id | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -468,6 +473,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-040 | [ADR-040-openai-responses-native-ollama.md](adrs/ADR-040-openai-responses-native-ollama.md) | me@jeickmeier.com | Partial: decision accepted; Responses and native Ollama delivery in progress; publication excluded | ADR-040 standalone record; PR-068–PR-073 | 2026-08-17 |
 | ADR-041 | [ADR-041-mid-run-capability-activation-and-variants.md](adrs/ADR-041-mid-run-capability-activation-and-variants.md) | me@jeickmeier.com | Missing: FR-06 Tasks 10d–10j landed locally; no evidence id | ADR-041 standalone record | 2026-08-17 |
 | ADR-042 | [ADR-042-model-assisted-compaction-runtime-phase.md](adrs/ADR-042-model-assisted-compaction-runtime-phase.md) | me@jeickmeier.com | Missing: FR-02 Task 14 landed locally; no evidence id | ADR-042 standalone record | 2026-08-17 |
+| ADR-043 | [ADR-043-process-confinement-backends.md](adrs/ADR-043-process-confinement-backends.md) | me@jeickmeier.com | Missing: FR-08 Task 16 landed locally; no evidence id; no threat-model review id | ADR-043 standalone record | 2026-08-17 |
 
 ## Supersession log
 

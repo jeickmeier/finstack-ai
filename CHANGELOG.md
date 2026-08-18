@@ -16,6 +16,10 @@ unpublished.
 
 ### Added
 
+- Internal `ProcessConfinement` service (not a port) for fail-closed
+  local process confinement. `finstack-ai-tools-shell` can consume it;
+  the labeled unconfined `std::process` runner stays reachable. The
+  shell crate remains T1. No E2B or remote sandbox.
 - Optional same-`effect_id` model-driver retry (`SameIdentityRetryPolicy` on
   `ModelTaskConfig`). Default is zero extra attempts. Retryable provider
   errors may be retried; validation and limit errors are never retried.

@@ -104,6 +104,10 @@ pub use services::composition::{
 pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
 };
+pub use services::process_confinement::{
+    CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinementBackend,
+    ConfinementError, ConfinementProfile, ProcessConfinement,
+};
 pub use session::{
     LaneAppendIds, LaneCreateIds, LaneInspect, LaneOwner, SessionCreateIds, SessionError,
     SessionRuntime,

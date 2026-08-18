@@ -19,9 +19,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use finstack_ai_runtime::ToolStreamItem;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    ErrorCategory, Metadata, PortFuture, RawJson, Sensitivity, SideEffectClass, Timestamp,
-    ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec,
-    Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    ConfinementError, ConfinementProfile, ErrorCategory, Metadata, PortFuture, ProcessConfinement,
+    RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext, ToolError, ToolEventStream,
+    ToolExecutionMode, ToolId, ToolResult, ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall,
+    stage_required_artifact,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -250,9 +251,62 @@ pub trait CommandSandbox: Send + Sync {
     ) -> PortFuture<Result<SandboxedOutput, ToolError>>;
 }
 
-/// Default in-process `std::process` sandbox.
-#[derive(Debug, Default)]
-pub struct ProcessCommandSandbox;
+/// How [`ProcessCommandSandbox`] starts a child.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessSandboxKind {
+    /// Labeled unconfined `std::process` runner. This is not a sandbox.
+    UnconfinedStdProcess,
+    /// Runtime [`ProcessConfinement`] backends (Landlock, Seatbelt, Job Object).
+    Confined,
+}
+
+/// Default in-process runner. Unconfined `std::process` stays reachable and labeled.
+#[derive(Debug, Clone)]
+pub struct ProcessCommandSandbox {
+    confinement: Option<(ProcessConfinement, ConfinementProfile)>,
+}
+
+impl Default for ProcessCommandSandbox {
+    fn default() -> Self {
+        Self::unconfined()
+    }
+}
+
+impl ProcessCommandSandbox {
+    /// Labeled unconfined `std::process` runner.
+    #[must_use]
+    pub fn unconfined() -> Self {
+        Self { confinement: None }
+    }
+
+    /// Confine children with the runtime service and `profile`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfinementError::unavailable`] when this target has no
+    /// confinement backend. The unconfined runner is not used as a fallback.
+    pub fn confined(profile: ConfinementProfile) -> Result<Self, ConfinementError> {
+        let confinement = ProcessConfinement::for_current_platform();
+        if confinement.is_unavailable() {
+            return Err(ConfinementError::unavailable(
+                "process confinement is unavailable on this target",
+            ));
+        }
+        Ok(Self {
+            confinement: Some((confinement, profile)),
+        })
+    }
+
+    /// Label for the selected runner.
+    #[must_use]
+    pub fn kind(&self) -> ProcessSandboxKind {
+        if self.confinement.is_some() {
+            ProcessSandboxKind::Confined
+        } else {
+            ProcessSandboxKind::UnconfinedStdProcess
+        }
+    }
+}
 
 impl CommandSandbox for ProcessCommandSandbox {
     fn run(
@@ -261,16 +315,19 @@ impl CommandSandbox for ProcessCommandSandbox {
         cancellation: finstack_ai_runtime::CancellationSignal,
         deadline: Option<Timestamp>,
     ) -> PortFuture<Result<SandboxedOutput, ToolError>> {
+        let confinement = self.confinement.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || run_process(&request, &cancellation, deadline))
-                .await
-                .map_err(|_| {
-                    tool_error(
-                        SHELL_IO_ERROR,
-                        ErrorCategory::Internal,
-                        "shell worker failed",
-                    )
-                })?
+            tokio::task::spawn_blocking(move || {
+                run_process(&request, &cancellation, deadline, confinement.as_ref())
+            })
+            .await
+            .map_err(|_| {
+                tool_error(
+                    SHELL_IO_ERROR,
+                    ErrorCategory::Internal,
+                    "shell worker failed",
+                )
+            })?
         })
     }
 }
@@ -337,7 +394,7 @@ impl ShellToolset {
             tool_id,
             policy,
             limits: ShellLimits::default(),
-            sandbox: Arc::new(ProcessCommandSandbox),
+            sandbox: Arc::new(ProcessCommandSandbox::unconfined()),
             artifact_store: None,
             sensitivity: Sensitivity::Internal,
             root: root.map(unix::Root::open).transpose()?,
@@ -379,6 +436,35 @@ impl ShellToolset {
     pub fn with_sandbox(mut self, sandbox: Arc<dyn CommandSandbox>) -> Self {
         self.sandbox = sandbox;
         self
+    }
+
+    /// Request runtime process confinement using the authorized cwd root.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when no authorized root was configured or the host
+    /// confinement backend is unavailable. Does not fall back to the labeled
+    /// unconfined runner.
+    pub fn try_with_confinement(mut self) -> Result<Self, ShellError> {
+        #[cfg(not(unix))]
+        {
+            return Err(ShellError::Unsupported);
+        }
+        #[cfg(unix)]
+        {
+            let root = self.root.as_ref().ok_or(ShellError::Configuration {
+                reason: "confinement_requires_authorized_root",
+            })?;
+            let profile = ConfinementProfile::try_new(root.path()).map_err(|_| {
+                ShellError::Configuration {
+                    reason: "invalid_confinement_root",
+                }
+            })?;
+            self.sandbox = Arc::new(
+                ProcessCommandSandbox::confined(profile).map_err(|_| ShellError::Unsupported)?,
+            );
+            Ok(self)
+        }
     }
 
     /// Attach the artifact store used for oversized output.
@@ -500,6 +586,7 @@ fn run_process(
     request: &SandboxedCommand,
     cancellation: &finstack_ai_runtime::CancellationSignal,
     deadline: Option<Timestamp>,
+    confinement: Option<&(ProcessConfinement, ConfinementProfile)>,
 ) -> Result<SandboxedOutput, ToolError> {
     if cancellation.is_cancelled() || deadline_elapsed(deadline) {
         return Err(timeout_error());
@@ -514,17 +601,25 @@ fn run_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    if let Some(cwd) = &request.cwd {
-        apply_authorized_cwd(&mut command, cwd)?;
-    }
-    let mut child = command.spawn().map_err(|_| {
-        tool_error(
-            SHELL_IO_ERROR,
-            ErrorCategory::Tool,
-            "shell process could not be started",
-        )
-    })?;
+    let mut child = if let Some((service, profile)) = confinement {
+        let mut profile = profile.clone();
+        if let Some(cwd) = &request.cwd {
+            profile = profile.with_authorized_cwd(cwd).map_err(map_confinement)?;
+        }
+        service.spawn(command, &profile).map_err(map_confinement)?
+    } else {
+        #[cfg(unix)]
+        if let Some(cwd) = &request.cwd {
+            apply_authorized_cwd(&mut command, cwd)?;
+        }
+        command.spawn().map_err(|_| {
+            tool_error(
+                SHELL_IO_ERROR,
+                ErrorCategory::Tool,
+                "shell process could not be started",
+            )
+        })?
+    };
     let started = Instant::now();
     loop {
         if cancellation.is_cancelled()
@@ -753,6 +848,17 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
+fn map_confinement(error: ConfinementError) -> ToolError {
+    let category = if error.code() == finstack_ai_runtime::CONFINEMENT_UNAVAILABLE {
+        ErrorCategory::Configuration
+    } else if error.code() == finstack_ai_runtime::CONFINEMENT_DENIED {
+        ErrorCategory::Tool
+    } else {
+        ErrorCategory::Tool
+    };
+    tool_error(error.code(), category, error.message())
+}
+
 #[cfg(unix)]
 mod unix {
     use std::path::{Path, PathBuf};
@@ -782,6 +888,10 @@ mod unix {
                 fd: Arc::new(fd),
                 path: path.to_path_buf(),
             })
+        }
+
+        pub(super) fn path(&self) -> &Path {
+            &self.path
         }
 
         pub(super) fn authorize_cwd(&self, relative: &str) -> Result<PathBuf, ToolError> {

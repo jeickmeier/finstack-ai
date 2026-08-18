@@ -1040,6 +1040,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "jsonschema",
+ "rustix",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",

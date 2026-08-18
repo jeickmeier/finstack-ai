@@ -188,6 +188,74 @@ async fn output_flood_fails_closed_or_stages_artifact() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn confined_shell_cannot_read_outside_declared_root() {
+    let root = TempDir::new().expect("root");
+    let root_path = root.path().canonicalize().expect("canonical root");
+    std::fs::write(root_path.join("inside.txt"), "inside-ok").expect("inside");
+    let outside = TempDir::new().expect("outside");
+    let secret_path = outside
+        .path()
+        .canonicalize()
+        .expect("canonical outside")
+        .join("secret.txt");
+    std::fs::write(&secret_path, "SECRET-OUTSIDE-ROOT").expect("secret");
+    let policy = ShellPolicy::try_new(["/bin/cat"]).expect("policy");
+    let toolset = ShellToolset::try_new(policy, Some(&root_path))
+        .expect("shell")
+        .try_with_confinement()
+        .expect("confinement");
+    assert_eq!(
+        ProcessCommandSandbox::confined(
+            finstack_ai_runtime::ConfinementProfile::try_new(&root_path).expect("profile")
+        )
+        .expect("sandbox")
+        .kind(),
+        ProcessSandboxKind::Confined
+    );
+
+    let inside_path = root_path.join("inside.txt");
+    let inside = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/cat", inside_path.to_string_lossy()]}),
+    )
+    .await
+    .expect("inside readable");
+    assert!(
+        inside.output.as_str().contains("inside-ok"),
+        "inside cat failed: {}",
+        inside.output.as_str()
+    );
+
+    let outside_result = invoke(
+        &toolset,
+        serde_json::json!({"argv":["/bin/cat", secret_path.to_string_lossy()]}),
+    )
+    .await;
+    match outside_result {
+        Ok(result) => {
+            assert!(
+                !result.output.as_str().contains("SECRET-OUTSIDE-ROOT"),
+                "confined cat must not return bytes from outside the root"
+            );
+            assert!(result.is_error);
+        }
+        Err(error) => {
+            assert_ne!(error.code(), SHELL_POLICY_DENIED);
+            assert!(!error.message().contains("SECRET-OUTSIDE-ROOT"));
+        }
+    }
+}
+
+#[test]
+fn unconfined_process_runner_is_labeled() {
+    assert_eq!(
+        ProcessCommandSandbox::unconfined().kind(),
+        ProcessSandboxKind::UnconfinedStdProcess
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn echo_under_policy_returns_stdout() {
     let toolset = ShellToolset::try_new(echo_policy(), None).expect("shell");
     let result = invoke(
