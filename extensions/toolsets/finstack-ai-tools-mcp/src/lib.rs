@@ -50,6 +50,8 @@ pub const MCP_TRANSPORT_ERROR: &str = "mcp_transport_error";
 pub const MCP_CATALOG_DRIFT: &str = "mcp_catalog_drift";
 /// Stable unsupported-result code.
 pub const MCP_RESULT_UNSUPPORTED: &str = "mcp_result_unsupported";
+/// Stable fail-closed code when `resources/subscribe` names a missing resource.
+pub const MCP_SUBSCRIBE_UNKNOWN: &str = "mcp_subscribe_unknown";
 /// Stable intercept when `tools/call` asks the host to run `sampling/createMessage`.
 pub use finstack_ai_runtime::MCP_SAMPLING_REQUIRED;
 /// Stable output-limit code.
@@ -394,6 +396,18 @@ impl McpToolsetFactory {
         McpToolset::connect(transport, self.config.clone(), self.list_changed.clone()).await
     }
 
+    /// Build a new frozen catalog from a fresh `tools/list`.
+    ///
+    /// In-flight agents keep the previous lock. The new toolset is a new
+    /// composition snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Fails when construction would fail.
+    pub async fn reconstruct(&self) -> Result<McpToolset, McpError> {
+        self.construct().await
+    }
+
     /// Enumerate `resources/list` once and freeze the context-provider snapshot.
     ///
     /// Mid-run list changes are ignored. The provider never sets
@@ -406,6 +420,15 @@ impl McpToolsetFactory {
     pub async fn construct_context_provider(&self) -> Result<McpContextProvider, McpError> {
         let transport = self.open_transport()?;
         McpContextProvider::connect(transport, &self.config, self.list_changed.clone()).await
+    }
+
+    /// Build a new frozen resource snapshot from a fresh `resources/list`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when construction would fail.
+    pub async fn reconstruct_context_provider(&self) -> Result<McpContextProvider, McpError> {
+        self.construct_context_provider().await
     }
 
     /// Enumerate tools and resources on one shared transport.
@@ -623,6 +646,18 @@ impl Toolset for McpToolset {
             } else {
                 Ok(ToolReconcileResult::NonRepeatable)
             }
+        })
+    }
+
+    fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn Toolset>>, ToolError>> {
+        let transport = Arc::clone(&self.transport);
+        let config = self.config.clone();
+        let list_changed = self.list_changed.clone();
+        Box::pin(async move {
+            let toolset = McpToolset::connect(transport, config, list_changed)
+                .await
+                .map_err(tool_error_from_mcp)?;
+            Ok(Some(Arc::new(toolset) as Arc<dyn Toolset>))
         })
     }
 

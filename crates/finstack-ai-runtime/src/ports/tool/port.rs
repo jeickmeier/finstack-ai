@@ -43,6 +43,17 @@ pub trait Toolset: PortObject {
         Box::pin(async { Ok(ToolReconcileResult::Unknown) })
     }
 
+    /// Rebuild this Toolset's catalog as a new object, or `None` to keep it.
+    ///
+    /// MCP re-runs `tools/list`. Default implementations keep the live catalog.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable tool error when reconstruction fails closed.
+    fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn Toolset>>, ToolError>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Resume a committed tool after the runtime fulfills nested sampling.
     ///
     /// Default implementations reject with [`super::error::MCP_SAMPLING_UNSUPPORTED`].

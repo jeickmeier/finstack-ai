@@ -263,6 +263,13 @@ export declare class Agent {
      */
     compactCapabilityCatalog(): string;
     /**
+     * Compose a new agent from reconstructed catalogs.
+     *
+     * In-flight runs keep the previous lock. wasm-host fail-closed is a Rust
+     * platform error, not a missing method.
+     */
+    reResolve(): Promise<Agent>;
+    /**
      * Replay one stored session into a provisional inspect snapshot.
      *
      * This does not continue an interrupted run or retry in-flight effects.

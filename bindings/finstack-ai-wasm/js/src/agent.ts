@@ -417,6 +417,22 @@ export class Agent {
   }
 
   /**
+   * Compose a new agent from reconstructed catalogs.
+   *
+   * In-flight runs keep the previous lock. wasm-host fail-closed is a Rust
+   * platform error, not a missing method.
+   */
+  async reResolve(): Promise<Agent> {
+    requireWasm();
+    try {
+      const handle = await this.#handle.reResolve();
+      return new Agent(handle as WasmAgent);
+    } catch (error) {
+      throw FinstackError.fromUnknown(error);
+    }
+  }
+
+  /**
    * Replay one stored session into a provisional inspect snapshot.
    *
    * This does not continue an interrupted run or retry in-flight effects.

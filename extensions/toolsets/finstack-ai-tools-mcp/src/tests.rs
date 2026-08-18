@@ -858,6 +858,152 @@ async fn list_changed_is_observed_and_does_not_add_a_tool() {
     );
 }
 
+#[tokio::test]
+async fn subscribe_rejects_names_absent_from_the_frozen_snapshot() {
+    let transport = ScriptedTransport::new(vec![listed_resource("notes", "mcp://fixture/notes")]);
+    let provider = McpContextProvider::connect(Arc::new(transport), &McpConfig::default(), None)
+        .await
+        .expect("connects");
+    let error = provider
+        .subscribe("missing")
+        .await
+        .expect_err("unknown name");
+    assert_eq!(error.code(), MCP_SUBSCRIBE_UNKNOWN);
+}
+
+#[tokio::test]
+async fn subscribe_then_collect_rereads_frozen_uri_bytes() {
+    let transport = ScriptedTransport::new(vec![
+        listed_resource("notes", "mcp://fixture/notes"),
+        serde_json::json!({"resultType":"complete"}),
+        read_resource("mcp://fixture/notes", "updated note"),
+    ]);
+    let provider = McpContextProvider::connect(Arc::new(transport), &McpConfig::default(), None)
+        .await
+        .expect("connects");
+    provider.subscribe("notes").await.expect("subscribe");
+    let contribution = provider
+        .collect(context_call(), context_request())
+        .await
+        .expect("collect");
+    let text = contribution.items[0].content.iter().find_map(|block| {
+        if let ContentBlock::Text(value) = block {
+            Some(value.text().to_owned())
+        } else {
+            None
+        }
+    });
+    assert_eq!(text.as_deref(), Some("updated note"));
+}
+
+#[tokio::test]
+async fn reconstruct_snapshot_includes_the_new_tool() {
+    let transport = Arc::new(ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}},{"name":"extra","inputSchema":{"type":"object"}}]}),
+    ]));
+    let live = McpToolset::connect(
+        Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
+        McpConfig::default(),
+        None,
+    )
+    .await
+    .expect("connects");
+    assert_eq!(live.tools().len(), 1);
+    let rebuilt = live
+        .reconstruct()
+        .await
+        .expect("reconstruct")
+        .expect("new toolset");
+    assert_eq!(live.tools().len(), 1, "live catalog stays frozen");
+    assert_eq!(rebuilt.tools().len(), 2);
+}
+
+#[tokio::test]
+async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
+    use finstack_ai::Agent;
+    use finstack_ai::runtime::{
+        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Version,
+    };
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let transport = Arc::new(ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}},{"name":"extra","inputSchema":{"type":"object"}}]}),
+    ]));
+    let toolset = McpToolset::connect(
+        Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
+        McpConfig::default(),
+        None,
+    )
+    .await
+    .expect("connects");
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 8_192,
+        })
+        .expect("store"),
+    );
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.mcp-reresolve").expect("agent"),
+        BundleId::parse("test.bundle.mcp-reresolve").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mcp-reresolve").expect("model"),
+                Some(version),
+            ),
+            preview_model() as Arc<dyn finstack_ai::runtime::Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mcp-reresolve").expect("store"),
+                Some(version),
+            ),
+            store,
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("test.tools.mcp-reresolve").expect("tools"),
+            Some(version),
+        ),
+        Arc::new(toolset),
+    )
+    .build()
+    .await
+    .expect("agent");
+    let live_tools = agent.resolved().run_plan().toolsets()[0]
+        .handle()
+        .tools()
+        .len();
+    assert_eq!(live_tools, 1);
+    let live_resolved = Arc::as_ptr(agent.resolved());
+    let rebuilt = agent.re_resolve().await.expect("re_resolve");
+    assert_eq!(
+        agent.resolved().run_plan().toolsets()[0]
+            .handle()
+            .tools()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rebuilt.resolved().run_plan().toolsets()[0]
+            .handle()
+            .tools()
+            .len(),
+        2
+    );
+    assert_ne!(Arc::as_ptr(rebuilt.resolved()), live_resolved);
+}
+
 fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
     use finstack_ai::runtime::{
         ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,

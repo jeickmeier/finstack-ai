@@ -91,6 +91,18 @@ def test_openai_api_key_constructs_without_a_request() -> None:
     asyncio.run(construct())
 
 
+def test_re_resolve_returns_a_new_agent() -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.openai(
+            "fixture-model",
+            api_key="sk-openai-secret-canary-056",
+        )
+        resolved = await agent.re_resolve()
+        assert resolved.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
 def test_openai_rejects_unknown_reasoning_effort() -> None:
     async def construct() -> None:
         with pytest.raises(finstack_ai.ConfigurationError, match="reasoning_effort"):

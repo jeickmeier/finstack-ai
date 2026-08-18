@@ -87,6 +87,13 @@ export class Agent {
      */
     static openai(model: string, api_key: string): Promise<any>;
     /**
+     * Compose a new agent from reconstructed catalogs.
+     *
+     * wasm-host maps the same Rust method. Missing reconstruct support fails
+     * closed from Rust.
+     */
+    reResolve(): Promise<any>;
+    /**
      * Execute one run and await its committed result.
      *
      * # Errors
@@ -717,6 +724,7 @@ export interface InitOutput {
     readonly agent_ollama: (a: number, b: number, c: number, d: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly agent_openai: (a: number, b: number, c: number, d: number) => number;
+    readonly agent_reResolve: (a: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly applyScriptedCoordinatorCommands: (a: number, b: number, c: number) => void;
@@ -787,9 +795,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1835: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1849: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_429: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1870: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1884: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_436: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

@@ -400,6 +400,37 @@ impl PyAgent {
         self.inner.compact_capability_catalog()
     }
 
+    /// Compose a new agent from reconstructed catalogs.
+    ///
+    /// In-flight runs keep the previous lock.
+    fn re_resolve<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let agent = Arc::clone(&self.inner);
+        let model = self.model.clone();
+        let settings = self.settings.clone();
+        let default_timeout_seconds = self.default_timeout_seconds;
+        let output_adapter = self
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            match agent.re_resolve().await {
+                Ok(inner) => Python::attach(|py| {
+                    Py::new(
+                        py,
+                        PyAgent {
+                            inner: Arc::new(inner),
+                            model,
+                            output_adapter,
+                            settings,
+                            default_timeout_seconds,
+                        },
+                    )
+                }),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, None))),
+            }
+        })
+    }
+
     /// Create a live session on this agent's journal store.
     #[pyo3(signature = (tenant_scope = "default"))]
     fn create_session<'py>(

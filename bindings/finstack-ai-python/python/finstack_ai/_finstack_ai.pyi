@@ -1026,6 +1026,19 @@ class Agent:
         Returns:
             ``id: description`` lines under the 8 KiB registration ceiling.
         """
+    async def re_resolve(self) -> Agent:
+        """Compose a new agent from reconstructed catalogs.
+
+        MCP ``list_changed`` does not mutate this lock. In-flight runs keep
+        the previous composition. The returned agent has a new lock.
+
+        Returns:
+            A new Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: Reconstruction failed or the agent was not
+                builder-composed.
+        """
     def create_session(self, tenant_scope: str = "default") -> Awaitable[Session]:
         """Create a live session on this agent's journal store.
 

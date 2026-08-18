@@ -273,6 +273,28 @@ impl Agent {
         self.inner.compact_capability_catalog()
     }
 
+    /// Compose a new agent from reconstructed catalogs.
+    ///
+    /// wasm-host maps the same Rust method. Missing reconstruct support fails
+    /// closed from Rust.
+    #[wasm_bindgen(js_name = reResolve)]
+    pub fn re_resolve(&self) -> js_sys::Promise {
+        let agent = Arc::clone(&self.inner);
+        let model = self.model.clone();
+        executor::drive(async move {
+            agent
+                .re_resolve()
+                .await
+                .map(|inner| {
+                    JsValue::from(Agent {
+                        inner: Arc::new(inner),
+                        model,
+                    })
+                })
+                .map_err(|error| agent_error(&error, None))
+        })
+    }
+
     /// Replay one stored session into a provisional inspect snapshot.
     ///
     /// This does not continue an interrupted run or retry in-flight effects.

@@ -20,6 +20,7 @@ use super::types::{
 ///
 /// It creates the same strict `AgentSpec`, bundle lock, and no-lookup run plan
 /// as the lower-level catalog/registry APIs. No credentials are serialized.
+#[derive(Clone)]
 pub struct NativeAgentBuilder {
     agent_id: AgentId,
     bundle_id: BundleId,
@@ -220,6 +221,7 @@ impl NativeAgentBuilder {
     /// Fails closed on non-exact or duplicate components and all ordinary
     /// registry, bundle, warmup, and tool-catalog failures.
     pub async fn build(self) -> Result<Agent, AgentRunError> {
+        let recompose = Arc::new(self.clone());
         validate_builder_components(&self)?;
         let mut registered_toolsets = self.toolsets.clone();
         registered_toolsets.extend(self.installed_toolsets.iter().cloned());
@@ -297,6 +299,7 @@ impl NativeAgentBuilder {
                 })?
         };
         let mut agent = Agent::try_from_resolved(Arc::new(composed_agent))?;
+        agent.recompose = Some(recompose);
         let contributions =
             super::mask::CapabilityContributionIndex::from_specs(&self.capabilities);
         agent.attach_capability_surface(
@@ -317,6 +320,41 @@ impl NativeAgentBuilder {
         }
         Ok(agent)
     }
+
+    pub(super) async fn rebuild_from_live_catalogs(mut self) -> Result<Agent, AgentRunError> {
+        self.toolsets = reconstruct_toolsets(self.toolsets).await?;
+        self.installed_toolsets = reconstruct_toolsets(self.installed_toolsets).await?;
+        self.context_providers = reconstruct_providers(self.context_providers).await?;
+        self.installed_context_providers =
+            reconstruct_providers(self.installed_context_providers).await?;
+        self.build().await
+    }
+}
+
+async fn reconstruct_toolsets(
+    entries: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+) -> Result<Vec<(ComponentRef, Arc<dyn Toolset>)>, AgentRunError> {
+    let mut rebuilt = Vec::with_capacity(entries.len());
+    for (component, toolset) in entries {
+        let next = toolset.reconstruct().await.map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        rebuilt.push((component, next.unwrap_or(toolset)));
+    }
+    Ok(rebuilt)
+}
+
+async fn reconstruct_providers(
+    entries: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
+) -> Result<Vec<(ComponentRef, Arc<dyn ContextProvider>)>, AgentRunError> {
+    let mut rebuilt = Vec::with_capacity(entries.len());
+    for (component, provider) in entries {
+        let next = provider.reconstruct().await.map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        rebuilt.push((component, next.unwrap_or(provider)));
+    }
+    Ok(rebuilt)
 }
 
 fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentRunError> {
