@@ -271,6 +271,26 @@ async fn factory_rejects_a_server_that_is_not_allowlisted() {
 }
 
 #[tokio::test]
+async fn confined_stdio_fails_closed_when_confinement_is_unavailable() {
+    let root = std::env::temp_dir();
+    let profile = finstack_ai_runtime::ConfinementProfile::try_new(&root).expect("root");
+    let config = McpConfig::default()
+        .allow_command("/bin/echo")
+        .stdio_confined(
+            StdioConfig::new("/bin/echo", Vec::<String>::new()),
+            finstack_ai_runtime::ProcessConfinement::unavailable(),
+            profile,
+        )
+        .expect("allowlisted");
+    let result = McpToolsetFactory::new(config).construct().await;
+    let error = match result {
+        Ok(_) => panic!("requested confinement is unavailable"),
+        Err(error) => error,
+    };
+    assert!(format!("{error}").contains(finstack_ai_runtime::CONFINEMENT_UNAVAILABLE));
+}
+
+#[tokio::test]
 async fn toolset_satisfies_the_published_port_conformance_suite() {
     let transport = ScriptedTransport::new(vec![
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),

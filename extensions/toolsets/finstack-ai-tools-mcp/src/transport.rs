@@ -129,6 +129,10 @@ pub struct StdioConfig {
     pub program: PathBuf,
     /// Additional argv after the program.
     pub args: Vec<String>,
+    confinement: Option<(
+        finstack_ai_runtime::ProcessConfinement,
+        finstack_ai_runtime::ConfinementProfile,
+    )>,
 }
 
 impl StdioConfig {
@@ -138,7 +142,22 @@ impl StdioConfig {
         Self {
             program: program.into(),
             args: args.into(),
+            confinement: None,
         }
+    }
+
+    /// Request the same runtime confinement service used by the shell crate.
+    ///
+    /// Unconfined stdio stays the default T1 path. Requested-and-unavailable
+    /// fails closed at spawn.
+    #[must_use]
+    pub fn with_confinement(
+        mut self,
+        confinement: finstack_ai_runtime::ProcessConfinement,
+        profile: finstack_ai_runtime::ConfinementProfile,
+    ) -> Self {
+        self.confinement = Some((confinement, profile));
+        self
     }
 
     pub(crate) fn identity(&self) -> String {
@@ -165,17 +184,44 @@ pub(crate) struct StdioTransport {
 
 impl StdioTransport {
     pub(crate) fn try_spawn(config: &StdioConfig) -> Result<Self, McpError> {
-        let mut command = Command::new(&config.program);
-        command
-            .args(&config.args)
-            .env_clear()
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = command.spawn().map_err(|error| {
-            McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
-        })?;
+        let mut child = match &config.confinement {
+            Some((confinement, profile)) => {
+                if confinement.is_unavailable() {
+                    return Err(McpError::stable(
+                        finstack_ai_runtime::CONFINEMENT_UNAVAILABLE,
+                        "MCP stdio confinement was requested and is unavailable",
+                    ));
+                }
+                let mut command = std::process::Command::new(&config.program);
+                command
+                    .args(&config.args)
+                    .env_clear()
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                confinement
+                    .configure(&mut command, profile)
+                    .map_err(|error| McpError::stable(error.code(), error.message().to_string()))?;
+                let mut command = Command::from(command);
+                command.kill_on_drop(true);
+                command.spawn().map_err(|error| {
+                    McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
+                })?
+            }
+            None => {
+                let mut command = Command::new(&config.program);
+                command
+                    .args(&config.args)
+                    .env_clear()
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true);
+                command.spawn().map_err(|error| {
+                    McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
+                })?
+            }
+        };
         let stdin = child.stdin.take().ok_or_else(|| {
             McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdin is unavailable")
         })?;

@@ -67,7 +67,7 @@ Index last reconciled: 2026-08-17 (ADR-043 accepted and implementation in progre
 | ADR-040 | `openai-responses-native-ollama` | Ecosystem lead | PR-068–PR-073 | Accepted | Standalone | In progress | Partial (decision accepted; mapped delivery in progress; publication excluded) |
 | ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | In progress | Missing |
 | ADR-042 | `model-assisted-compaction-runtime-phase` | Core/runtime lead | FR-02 Task 14 | Accepted | Standalone | In progress | Missing |
-| ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Missing |
+| ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Partial ([local G6 confinement review](artifacts/adr-043-confinement-review.md); Windows token-on-child and Seatbelt deprecation remain) |
 
 ## Security review seed
 
@@ -426,6 +426,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-17 | ADR-043 | Decision | me@jeickmeier.com | — | Accepted | Internal ProcessConfinement service; Landlock+no_new_privs, Seatbelt (deprecated), restricted token+Job Object; fail closed; T1 unchanged | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-043 | Record | me@jeickmeier.com | — | Standalone | ADR-043-process-confinement-backends.md | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-043 | Implementation | me@jeickmeier.com | Not started | In progress | FR-08 Task 16 landed locally; no published evidence id; no threat-model review id | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-043 | Evidence | me@jeickmeier.com | Missing | Partial | Local G6 confinement review; Windows token-on-child and Seatbelt deprecation remain; no invented review id | [adr-043-confinement-review.md](artifacts/adr-043-confinement-review.md) | — |
 
 ## Current record and evidence links
 
@@ -473,7 +474,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-040 | [ADR-040-openai-responses-native-ollama.md](adrs/ADR-040-openai-responses-native-ollama.md) | me@jeickmeier.com | Partial: decision accepted; Responses and native Ollama delivery in progress; publication excluded | ADR-040 standalone record; PR-068–PR-073 | 2026-08-17 |
 | ADR-041 | [ADR-041-mid-run-capability-activation-and-variants.md](adrs/ADR-041-mid-run-capability-activation-and-variants.md) | me@jeickmeier.com | Missing: FR-06 Tasks 10d–10j landed locally; no evidence id | ADR-041 standalone record | 2026-08-17 |
 | ADR-042 | [ADR-042-model-assisted-compaction-runtime-phase.md](adrs/ADR-042-model-assisted-compaction-runtime-phase.md) | me@jeickmeier.com | Missing: FR-02 Task 14 landed locally; no evidence id | ADR-042 standalone record | 2026-08-17 |
-| ADR-043 | [ADR-043-process-confinement-backends.md](adrs/ADR-043-process-confinement-backends.md) | me@jeickmeier.com | Missing: FR-08 Task 16 landed locally; no evidence id; no threat-model review id | ADR-043 standalone record | 2026-08-17 |
+| ADR-043 | [ADR-043-process-confinement-backends.md](adrs/ADR-043-process-confinement-backends.md) | me@jeickmeier.com | Partial: local G6 confinement review; Windows token-on-child and Seatbelt deprecation remain; no invented review or evidence id | ADR-043 standalone record; [adr-043-confinement-review.md](artifacts/adr-043-confinement-review.md) | 2026-08-17 |
 
 ## Supersession log
 

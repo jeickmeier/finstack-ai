@@ -118,6 +118,23 @@ impl McpConfig {
         Ok(self)
     }
 
+    /// Bind an allowlisted stdio server under [`finstack_ai_runtime::ProcessConfinement`].
+    ///
+    /// Requested-and-unavailable fails closed at construct. Unconfined
+    /// [`Self::stdio`] stays the T1 path.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a program that is not on the command allowlist.
+    pub fn stdio_confined(
+        self,
+        config: StdioConfig,
+        confinement: finstack_ai_runtime::ProcessConfinement,
+        profile: finstack_ai_runtime::ConfinementProfile,
+    ) -> Result<Self, McpError> {
+        self.stdio(config.with_confinement(confinement, profile))
+    }
+
     /// Bind an allowlisted streamable-HTTP server.
     ///
     /// # Errors

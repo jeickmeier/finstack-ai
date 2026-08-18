@@ -180,6 +180,33 @@ impl ProcessConfinement {
         matches!(self.backend, ConfinementBackend::Unavailable)
     }
 
+    /// Apply confinement hooks to `command` without spawning.
+    ///
+    /// Unix backends attach `pre_exec` so a later `tokio::process` spawn stays
+    /// confined. Windows cannot attach a restricted token to a later spawn, so
+    /// this returns [`CONFINEMENT_UNAVAILABLE`] there; use [`Self::spawn`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`ConfinementError`] and does not mutate `command` into
+    /// an unconfined-success path.
+    pub fn configure(
+        &self,
+        command: &mut Command,
+        profile: &ConfinementProfile,
+    ) -> Result<(), ConfinementError> {
+        match self.backend {
+            ConfinementBackend::Unavailable => Err(ConfinementError::unavailable(
+                "process confinement is unavailable on this target",
+            )),
+            ConfinementBackend::LinuxLandlock => linux::configure(command, profile),
+            ConfinementBackend::MacosSeatbelt => macos::configure(command, profile),
+            ConfinementBackend::WindowsRestrictedJob => Err(ConfinementError::unavailable(
+                "windows confined children must use ProcessConfinement::spawn",
+            )),
+        }
+    }
+
     /// Spawn `command` under `profile`. Refuses when the backend is missing.
     ///
     /// # Errors
@@ -270,10 +297,10 @@ mod linux {
         fn syscall(number: i64, ...) -> i64;
     }
 
-    pub(super) fn spawn(
-        mut command: Command,
+    pub(super) fn configure(
+        command: &mut Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<(), ConfinementError> {
         probe_landlock()?;
         let root = profile.root().to_path_buf();
         let program = command
@@ -295,6 +322,14 @@ mod linux {
                 apply_landlock(&root, Path::new(&program))
             });
         }
+        Ok(())
+    }
+
+    pub(super) fn spawn(
+        mut command: Command,
+        profile: &ConfinementProfile,
+    ) -> Result<Child, ConfinementError> {
+        configure(&mut command, profile)?;
         command
             .spawn()
             .map_err(|_| ConfinementError::io("confined linux process could not be started"))
@@ -399,6 +434,15 @@ mod linux {
 
     use super::{ConfinementError, ConfinementProfile};
 
+    pub(super) fn configure(
+        _command: &mut Command,
+        _profile: &ConfinementProfile,
+    ) -> Result<(), ConfinementError> {
+        Err(ConfinementError::unavailable(
+            "linux landlock is not compiled on this target",
+        ))
+    }
+
     pub(super) fn spawn(
         _command: Command,
         _profile: &ConfinementProfile,
@@ -427,11 +471,12 @@ mod macos {
         fn sandbox_free_error(errorbuf: *mut c_char);
     }
 
-    pub(super) fn spawn(
-        mut command: Command,
+    pub(super) fn configure(
+        command: &mut Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
-        let seatbelt = seatbelt_profile(profile.root())?;
+    ) -> Result<(), ConfinementError> {
+        let program = Path::new(command.get_program());
+        let seatbelt = seatbelt_profile(profile.root(), program)?;
         let cwd = profile.cwd().map(Path::to_path_buf);
         // SAFETY: `pre_exec` runs only in the forked child before `exec`.
         // `sandbox_init` confines that child; the parent stays unsandboxed.
@@ -445,16 +490,33 @@ mod macos {
                 apply_seatbelt(&seatbelt)
             });
         }
+        Ok(())
+    }
+
+    pub(super) fn spawn(
+        mut command: Command,
+        profile: &ConfinementProfile,
+    ) -> Result<Child, ConfinementError> {
+        configure(&mut command, profile)?;
         command
             .spawn()
             .map_err(|_| ConfinementError::io("confined macos process could not be started"))
     }
 
-    fn seatbelt_profile(root: &Path) -> Result<CString, ConfinementError> {
+    pub(super) fn seatbelt_profile(
+        root: &Path,
+        program: &Path,
+    ) -> Result<CString, ConfinementError> {
         let root = escape_literal(root)?;
+        let program = escape_literal(program)?;
         let source = format!(
             r#"(version 1)
 (allow default)
+(deny network*)
+(deny process-exec)
+(allow process-exec (literal "{program}"))
+(deny file-write*)
+(allow file-write* (subpath "{root}"))
 (deny file-read-data (regex "^/private/var/folders/.*"))
 (deny file-read-data (regex "^/var/folders/.*"))
 (deny file-read-data (regex "^/Users/.*"))
@@ -497,6 +559,15 @@ mod macos {
     use std::process::{Child, Command};
 
     use super::{ConfinementError, ConfinementProfile};
+
+    pub(super) fn configure(
+        _command: &mut Command,
+        _profile: &ConfinementProfile,
+    ) -> Result<(), ConfinementError> {
+        Err(ConfinementError::unavailable(
+            "macos seatbelt is not compiled on this target",
+        ))
+    }
 
     pub(super) fn spawn(
         _command: Command,
@@ -752,6 +823,7 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -792,5 +864,36 @@ mod tests {
     fn relative_root_is_denied() {
         let error = ConfinementProfile::try_new("relative-root").expect_err("relative");
         assert_eq!(error.code(), CONFINEMENT_DENIED);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_profile_keeps_allow_default_and_tightens_denies() {
+        let root = std::env::temp_dir();
+        let profile = macos::seatbelt_profile(&root, Path::new("/bin/echo")).expect("profile");
+        let source = profile.to_string_lossy();
+        assert!(source.contains("(allow default)"));
+        assert!(source.contains("(deny network*)"));
+        assert!(source.contains("(deny process-exec)"));
+        assert!(source.contains("(allow process-exec (literal \"/bin/echo\"))"));
+        assert!(source.contains("(deny file-write*)"));
+        assert!(source.contains(&format!(
+            "(allow file-write* (subpath \"{}\"))",
+            root.display()
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_confined_echo_starts() {
+        let root = std::env::temp_dir();
+        let profile = ConfinementProfile::try_new(&root).expect("temp root");
+        let mut command = Command::new("/bin/echo");
+        command.arg("confined");
+        let mut child = ProcessConfinement::for_current_platform()
+            .spawn(command, &profile)
+            .expect("confined echo");
+        let status = child.wait().expect("wait");
+        assert!(status.success(), "confined echo must exit 0: {status:?}");
     }
 }
