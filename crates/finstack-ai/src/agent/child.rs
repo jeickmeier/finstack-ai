@@ -14,9 +14,10 @@ use finstack_ai_runtime::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
     AuthorizationContext, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
     ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalClock,
-    ExternalEffectCompletionCommand, ExternalRouteOutcome, PortFuture, WorkflowSession,
-    child_relation_digest,
+    ExternalEffectCompletionCommand, PortFuture, child_relation_digest,
 };
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::{ExternalRouteOutcome, WorkflowSession};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;

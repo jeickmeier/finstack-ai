@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 import finstack_ai
 
 
@@ -28,7 +30,9 @@ def test_start_child_and_complete_external_route() -> None:
             provider="scripted",
             model="preview-1",
         )
-        agent = await finstack_ai.Agent.from_python(model)
+        agent = await finstack_ai.Agent.from_python(
+            model, child_runs=finstack_ai.ChildRunPolicy.allow(1)
+        )
         parent = agent.start("parent work")
         effect_id = await _wait_effect_id(parent)
         child = await parent.start_child(
@@ -71,6 +75,31 @@ def test_start_child_and_complete_external_route() -> None:
         )
         outcome = await parent.complete_external(command)
         assert outcome["status"] in {"committed", "idempotent", "rejected"}
+
+    asyncio.run(exercise())
+
+
+def test_start_child_fails_closed_when_policy_denies() -> None:
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, object]
+    ) -> dict[str, object]:
+        del context, request
+        return {"text": "parent done", "completion_id": "python-deny-1"}
+
+    async def exercise() -> None:
+        model = finstack_ai.PythonModel(
+            model_callback,
+            component="python.model.child-deny",
+            provider="scripted",
+            model="preview-1",
+        )
+        agent = await finstack_ai.Agent.from_python(model)
+        parent = agent.start("parent work")
+        with pytest.raises(finstack_ai.FinstackError) as caught:
+            await parent.start_child(
+                agent, "child work", placement="isolated_child_session"
+            )
+        assert caught.value.code == "agent_invoke_invalid_acceptance"
 
     asyncio.run(exercise())
 

@@ -469,6 +469,33 @@ class SqliteDurability:
     Durable: SqliteDurability
     Relaxed: SqliteDurability
 
+class ChildRunPolicy:
+    """Child-run admission policy frozen into agent composition.
+
+    The default for every factory is :meth:`deny`. Pass
+    :meth:`allow` to admit isolated or compatible children up to an
+    inclusive depth.
+    """
+
+    @staticmethod
+    def deny() -> ChildRunPolicy:
+        """Reject every child invocation.
+
+        Returns:
+            A deny policy. ``Run.start_child`` fails closed.
+        """
+
+    @staticmethod
+    def allow(max_depth: int) -> ChildRunPolicy:
+        """Allow children up to the inclusive ``max_depth``.
+
+        Args:
+            max_depth: Inclusive child depth accepted by this agent.
+
+        Returns:
+            An allow policy consumed by the agent factories.
+        """
+
 class MemoryExternalIdentityMap:
     """In-process external identity map."""
 
@@ -696,6 +723,7 @@ class Agent:
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -725,6 +753,8 @@ class Agent:
             observers: Optional trusted observer callbacks.
             output_type: Optional Pydantic output type. Lazily requires the
                 Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -747,6 +777,7 @@ class Agent:
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -773,6 +804,8 @@ class Agent:
             observers: Optional trusted observer callbacks.
             output_type: Optional Pydantic output type. Lazily requires the
                 Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -794,6 +827,7 @@ class Agent:
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -813,6 +847,8 @@ class Agent:
             observers: Optional trusted observer callbacks.
             output_type: Optional Pydantic output type. Lazily requires the
                 Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -833,6 +869,7 @@ class Agent:
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         *,
+        child_runs: ChildRunPolicy | None = None,
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
     ) -> Agent:
@@ -848,6 +885,8 @@ class Agent:
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
             sqlite_path: Optional SQLite file path. ``None`` keeps the
                 in-memory journal. ``:memory:`` requires
                 :attr:`SqliteDurability.Relaxed`.

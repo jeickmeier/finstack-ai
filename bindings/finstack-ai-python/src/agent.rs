@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
+use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
 use finstack_ai::runtime::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, Model, ModelName, ModelSettings,
     RawJson, Version,
 };
-use finstack_ai::{Agent, AgentRunError, CapabilitySpec, Session};
+use finstack_ai::{Agent, AgentRunError, CapabilitySpec, ChildRunPolicy, RunPolicy, Session};
 use finstack_ai_provider_anthropic::{
     AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
     Authentication as AnthropicAuthentication, SecretString as AnthropicSecret,
@@ -70,7 +71,7 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
         clippy::needless_pass_by_value,
@@ -90,6 +91,7 @@ impl PyAgent {
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let settings =
             reasoning_settings(reasoning_effort.as_deref(), reasoning_summary.as_deref())?;
@@ -103,6 +105,7 @@ impl PyAgent {
             observers,
             output_type,
         )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_openai_agent(
                 model,
@@ -112,6 +115,7 @@ impl PyAgent {
                 api_key,
                 settings,
                 ports,
+                child_runs,
             )
             .await;
             Python::attach(|py| match built {
@@ -127,7 +131,7 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth and primary port components distinctly"
@@ -145,6 +149,7 @@ impl PyAgent {
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -156,6 +161,7 @@ impl PyAgent {
             observers,
             output_type,
         )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_anthropic_agent(
                 base_url,
@@ -165,6 +171,7 @@ impl PyAgent {
                 capabilities,
                 active_capabilities,
                 ports,
+                child_runs,
             )
             .await;
             Python::attach(|py| match built {
@@ -179,7 +186,7 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards primary port components distinctly"
@@ -196,6 +203,7 @@ impl PyAgent {
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
         output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
@@ -207,6 +215,7 @@ impl PyAgent {
             observers,
             output_type,
         )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_ollama_agent(
                 base_url,
@@ -215,6 +224,7 @@ impl PyAgent {
                 capabilities,
                 active_capabilities,
                 ports,
+                child_runs,
             )
             .await;
             Python::attach(|py| match built {
@@ -226,7 +236,7 @@ impl PyAgent {
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, sqlite_path = None, sqlite_durability = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, sqlite_path = None, sqlite_durability = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -242,6 +252,7 @@ impl PyAgent {
         context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
         middleware: Option<Vec<Py<PyPythonMiddleware>>>,
         observers: Option<Vec<Py<PyPythonObserver>>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
         sqlite_path: Option<String>,
         sqlite_durability: Option<PySqliteDurability>,
     ) -> PyResult<Bound<'py, PyAny>> {
@@ -258,6 +269,7 @@ impl PyAgent {
         )?;
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
+        let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let built = build_python_agent(
                 model_name,
@@ -266,6 +278,7 @@ impl PyAgent {
                 ports,
                 capabilities,
                 active_capabilities,
+                child_runs,
                 (sqlite_path, sqlite_durability),
             )
             .await;
@@ -467,6 +480,10 @@ impl PyAgent {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "linked factory forwards provider auth, ports, and child-run policy distinctly"
+)]
 async fn build_openai_agent(
     model: String,
     instruction: Option<String>,
@@ -475,6 +492,7 @@ async fn build_openai_agent(
     api_key: String,
     settings: ModelSettings,
     ports: LinkedPorts,
+    child_runs: ChildRunPolicy,
 ) -> Result<PyAgent, AgentRunError> {
     let config = OpenAiConfig::try_new("https://api.openai.com")
         .map_err(model_configuration_error)?
@@ -495,6 +513,7 @@ async fn build_openai_agent(
         capabilities,
         active_capabilities,
         ports,
+        child_runs,
         settings,
         default_timeout_seconds: OPENAI_TIMEOUT_SECONDS,
         sqlite_path: None,
@@ -503,6 +522,10 @@ async fn build_openai_agent(
     .await
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "linked factory forwards provider auth, ports, and child-run policy distinctly"
+)]
 async fn build_anthropic_agent(
     base_url: String,
     model: String,
@@ -511,6 +534,7 @@ async fn build_anthropic_agent(
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
     ports: LinkedPorts,
+    child_runs: ChildRunPolicy,
 ) -> Result<PyAgent, AgentRunError> {
     let mut config = AnthropicConfig::try_new(base_url).map_err(model_configuration_error)?;
     if let Some(api_key) = api_key {
@@ -541,6 +565,7 @@ async fn build_anthropic_agent(
         capabilities,
         active_capabilities,
         ports,
+        child_runs,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
         sqlite_path: None,
@@ -556,6 +581,7 @@ async fn build_ollama_agent(
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
     ports: LinkedPorts,
+    child_runs: ChildRunPolicy,
 ) -> Result<PyAgent, AgentRunError> {
     let config = OllamaConfig::try_new(base_url).map_err(model_configuration_error)?;
     let model_config = OllamaModelConfig::try_new(
@@ -580,6 +606,7 @@ async fn build_ollama_agent(
         capabilities,
         active_capabilities,
         ports,
+        child_runs,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
         sqlite_path: None,
@@ -640,6 +667,7 @@ struct LinkedAgentSpec {
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
     ports: LinkedPorts,
+    child_runs: ChildRunPolicy,
     settings: ModelSettings,
     default_timeout_seconds: f64,
     sqlite_path: Option<String>,
@@ -680,6 +708,10 @@ async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunE
     for capability in spec.active_capabilities {
         builder = builder.activate_application(capability);
     }
+    builder = builder.policy(RunPolicy {
+        child_runs: spec.child_runs,
+        ..RunPolicy::default()
+    });
     let agent = builder.build().await?;
     let (agent, output_adapter) = if let Some(output) = spec.ports.output {
         (
@@ -698,6 +730,10 @@ async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunE
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "callback factory forwards ports, child-run policy, and sqlite store distinctly"
+)]
 async fn build_python_agent(
     model_name: ModelName,
     model: (ComponentRef, Arc<dyn Model>),
@@ -705,6 +741,7 @@ async fn build_python_agent(
     ports: LinkedPorts,
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
+    child_runs: ChildRunPolicy,
     sqlite: (Option<String>, Option<PySqliteDurability>),
 ) -> Result<PyAgent, AgentRunError> {
     finish_linked_agent(LinkedAgentSpec {
@@ -716,12 +753,19 @@ async fn build_python_agent(
         capabilities,
         active_capabilities,
         ports,
+        child_runs,
         settings: empty_model_settings()?,
         default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
         sqlite_path: sqlite.0,
         sqlite_durability: sqlite.1,
     })
     .await
+}
+
+fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) -> ChildRunPolicy {
+    child_runs.map_or(ChildRunPolicy::Deny, |policy| {
+        policy.bind(py).borrow().to_rust()
+    })
 }
 
 fn linked_openai_model_config(

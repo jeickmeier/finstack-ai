@@ -250,6 +250,7 @@ where
                     coordinator,
                     intake,
                     shared,
+                    model,
                     tool_assembler,
                     active,
                     sources,
@@ -298,6 +299,7 @@ where
         stage_driver,
         profile,
         sources,
+        model,
         drive_model(model, model_assembler, request),
     )
     .await
@@ -342,6 +344,7 @@ async fn settle_driven_tool<C, R>(
     coordinator: &mut CommitCoordinator,
     intake: &CommandIntake,
     shared: &Arc<Shared>,
+    model: &Arc<dyn Model>,
     tool_assembler: Option<ToolStreamAssembler>,
     active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
     sources: &SettlementSources<C, R>,
@@ -367,6 +370,7 @@ where
         stage_driver,
         profile,
         sources,
+        model,
         drive_tool(resolved, context, call, assembler),
     )
     .await
@@ -398,6 +402,7 @@ async fn drive_accepting_commands<C, R, T>(
     stage_driver: Option<&StageDriver>,
     profile: &LockedModelContextProfile,
     sources: &SettlementSources<C, R>,
+    model: &Arc<dyn Model>,
     drive: impl Future<Output = T>,
 ) -> Result<T, RunHandleError>
 where

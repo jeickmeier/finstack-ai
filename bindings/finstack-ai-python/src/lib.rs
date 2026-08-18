@@ -9,6 +9,7 @@ mod benchmark_fixture;
 mod callback_fixture;
 mod callbacks;
 mod capability;
+mod child_policy;
 mod errors;
 mod events;
 mod json_bridge;
@@ -28,6 +29,7 @@ use callbacks::{
     PyPythonObserver, PyPythonToolset,
 };
 use capability::PyCapability;
+use child_policy::PyChildRunPolicy;
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
 use protocol::{
@@ -85,6 +87,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("TimeoutError", module.py().get_type::<TimeoutError>())?;
     module.add_class::<PyAgent>()?;
     module.add_class::<PyCapability>()?;
+    module.add_class::<PyChildRunPolicy>()?;
     module.add_class::<PyRun>()?;
     module.add_class::<PyEventIterator>()?;
     module.add_class::<PyLocator>()?;
