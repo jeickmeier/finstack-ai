@@ -139,5 +139,9 @@ superseding ADR.
 
 - Approval: accepted by the decision owner to execute FR-08 Task 16
   locally only, without publication
-- Implementation evidence: Missing (Task 16 landed locally; no evidence
-  id; no threat-model review id)
+- Implementation evidence: Partial — local G6 `71607e5ae216d81e4136a139243771b100b2319b`
+  (`cargo test -p finstack-ai-runtime --locked --features native-tokio --lib services::process_confinement`;
+  `cargo test -p finstack-ai-tools-mcp --locked`). Review file
+  [`../artifacts/adr-043-confinement-review.md`](../artifacts/adr-043-confinement-review.md).
+  No published evidence id and no invented review id. Windows
+  `CreateProcessAsUser` and Seatbelt deny-default remain residuals.

@@ -19,7 +19,67 @@ Bearer auth and always targets official Responses. `ollama` stays keyless.
 The factories do not read environment variables. Opt-in
 `finstack-ai-provider-gateway` covers config-selected OpenAI-compatible,
 Anthropic Messages, and Ollama chat endpoints without adding a client to
-the default SDK graph.
+the default SDK graph. There is no `Agent.gateway()`. Construct the leaf
+and pass it as a model:
+
+```rust
+use finstack_ai_provider_gateway::{
+    Authentication, CredentialReference, CredentialStore, GatewayCapabilityFlags,
+    GatewayModelConfig, GatewayModelSpec, GatewayProvider, GatewayRouteConfig,
+    WireProtocol,
+};
+use finstack_ai_runtime::{
+    InputCapabilities, StructuredOutputCapability, TokenEstimatorRef,
+    TokenEstimatorSource,
+};
+use std::sync::Arc;
+
+let route = GatewayRouteConfig::try_new(
+    WireProtocol::OpenaiChat,
+    "http://127.0.0.1:9/v1/chat/completions",
+    CredentialReference::try_new("local").expect("reference"),
+)
+.expect("route");
+let spec = GatewayModelSpec::try_from_config(GatewayModelConfig {
+    name: Some("fixture-model".to_owned()),
+    hard_input_bytes: Some(1_000_000),
+    context_window_tokens: Some(8_192),
+    max_output_tokens: Some(1_024),
+    reserved_output_tokens: Some(1_024),
+    provider_overhead_tokens: Some(64),
+    estimator: Some(TokenEstimatorRef {
+        id: Arc::from("gateway.utf8-byte-upper-bound"),
+        version: Arc::from("1"),
+        source: TokenEstimatorSource::ConservativeUpperBound,
+    }),
+    capabilities: Some(GatewayCapabilityFlags {
+        input: InputCapabilities {
+            text: true,
+            json: true,
+            images: false,
+            audio: false,
+            files: false,
+        },
+        native_tool_calls: true,
+        parallel_tool_calls: false,
+        structured_output: StructuredOutputCapability::Unsupported,
+        reasoning: false,
+        prompt_cache: false,
+        resumable_stream: false,
+        idempotent_requests: false,
+    }),
+})
+.expect("spec");
+let mut store = CredentialStore::empty();
+store
+    .insert("local", Authentication::None)
+    .expect("store");
+let _provider = GatewayProvider::try_new(route, vec![spec], store).expect("provider");
+```
+
+Required construction fields include `hard_input_bytes` and
+`max_output_tokens`. The crate rustdoc on `GatewayProvider::try_new` is
+the same constructor.
 
 Never put secrets in `AgentSpec`, bundle defaults, resolution locks, logs,
 or source files. Pass credentials only through redacted `Authentication`

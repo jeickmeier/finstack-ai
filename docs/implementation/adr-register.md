@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
+Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044 evidence stays Missing. No invented evidence or review ids.
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -65,10 +65,10 @@ Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progre
 | ADR-038 | `ciborium-test-interop` | Durability/ecosystem lead | Protocol `to_ciborium` unexport; `ciborium` dev-dep | Accepted | Standalone | In progress | Missing |
 | ADR-039 | `jsonschema-crate-selection` | Ecosystem lead | C2 swap blocked until acceptance; recommended outcome is no swap | Proposed | Standalone | Not started | Partial ([C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md)) |
 | ADR-040 | `openai-responses-native-ollama` | Ecosystem lead | PR-068–PR-073 | Accepted | Standalone | In progress | Partial (decision accepted; mapped delivery in progress; publication excluded) |
-| ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | In progress | Missing |
-| ADR-042 | `model-assisted-compaction-runtime-phase` | Core/runtime lead | FR-02 Task 14 | Accepted | Standalone | In progress | Missing |
-| ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Partial ([local G6 confinement review](artifacts/adr-043-confinement-review.md); Windows token-on-child and Seatbelt deprecation remain) |
-| ADR-044 | `skills-first-load-time-import` | Ecosystem lead | FR-10 G8 | Accepted | Standalone | In progress | Missing |
+| ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | In progress | Partial (local activation + G9 bust `8fd9f9f2ecc256c40583e987209a1f444b1a7915`; prefix still invalid; no evidence id) |
+| ADR-042 | `model-assisted-compaction-runtime-phase` | Core/runtime lead | FR-02 Task 14 | Accepted | Standalone | In progress | Partial (local phase + G3 resume `033de86c634656cc69621d5d88589b63325a00ba`; fold residual remains; no evidence id) |
+| ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Partial ([local G6 confinement review](artifacts/adr-043-confinement-review.md) at `71607e5ae216d81e4136a139243771b100b2319b`; Windows `CreateProcessAsUser` and Seatbelt deny-default remain; no review id) |
+| ADR-044 | `skills-first-load-time-import` | Ecosystem lead | FR-10 G8 | Accepted | Standalone | In progress | Missing (local G8 `f370fb9b2ef7042de4c8171b3b71d24a9c7ffc86`; no published evidence id) |
 
 ## Security review seed
 

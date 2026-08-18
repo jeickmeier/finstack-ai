@@ -40,8 +40,11 @@ path to that flag.
 
 ## Prompt-cache invalidation
 
-Mid-run activation changes the tool list on the next model request and
-invalidates Anthropic/OpenAI prompt-cache prefixes. That cost is
-recorded, not solved here.
+Mid-run activation changes the tool list on the next model request.
+Anthropic and OpenAI/gateway adapters bust the stale prefix: the next
+request omits `cache_control` on the old system block and does not send
+a cache key that claims the previous tool list. The vendor prefix is
+still invalid; this is an honest bust, not cache preservation.
 
-Load-time `SKILL.md` / plugin import is FR-10 and is not implemented.
+Load-time `SKILL.md` import is composition-time and default-off
+(`finstack-ai-tools-skill-import`, ADR-044). It is not a per-run scan.

@@ -79,7 +79,7 @@ settlement that can carry them.
 | [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
 | [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
 
-### Why summarize compaction cannot complete
+### How summarize compaction completes
 
 **Deterministic strategies return `CompactContext`.** That outcome
 lands once the last source entry is a protected user. `protected` is

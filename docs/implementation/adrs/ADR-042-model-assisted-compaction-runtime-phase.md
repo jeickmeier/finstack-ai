@@ -148,4 +148,8 @@ requires that path.
 
 - Approval: accepted by the decision owner to execute FR-02 Task 14
   locally only, without publication
-- Implementation evidence: Missing (Task 14 landed locally; no evidence id)
+- Implementation evidence: Partial — local phase `c8992bc312bdc3954788c4411fb3203e91167c9b`
+  and host-task resume `033de86c634656cc69621d5d88589b63325a00ba`
+  (`cargo test -p finstack-ai-runtime --locked --lib exec::compaction_driver`).
+  No published evidence id. Fold residual if `RequestCompactionModel` reaches
+  `StageFold::accumulate` is unchanged.

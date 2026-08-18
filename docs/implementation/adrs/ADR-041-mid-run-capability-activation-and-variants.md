@@ -279,4 +279,9 @@ requires that path. A later FR-10 importer requires its own ADR.
 - Approval: accepted by the decision owner to execute FR-06 Tasks
   10d–10j against the decisions above, locally only, without
   publication
-- Implementation evidence: Missing (10d–10j landed locally; no evidence id)
+- Implementation evidence: Partial — local activation `bc0a12fc0b5e836f810c1d2bf1847f5c7b331c7a` and honest
+  prompt-cache bust `8fd9f9f2ecc256c40583e987209a1f444b1a7915`
+  (`cargo test -p finstack-ai-provider-gateway --locked`;
+  `cargo test -p finstack-ai-provider-anthropic --locked --lib request::`;
+  `cargo test -p finstack-ai-provider-openai --locked --lib request::`).
+  No published evidence id. Prefix reuse after activation remains invalid.

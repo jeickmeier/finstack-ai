@@ -7,7 +7,7 @@ and policy surface is intended to stay under 100 lines (NFR-DX-002).
 | --- | --- |
 | `finstack-ai-tools-calculator` | Bounded read-only arithmetic |
 | `finstack-ai-tools-filesystem` | Capability-scoped root; no symlink escape |
-| `finstack-ai-tools-mcp` | Allowlisted MCP servers; no catalogue |
+| `finstack-ai-tools-mcp` | Allowlisted MCP servers; tools and untrusted `ContextProvider`; `construct_with_context` is the one-connection constructor |
 | `finstack-ai-tools-shell` | Deny-by-default argv, empty env, timeout |
 | `finstack-ai-tools-skills` | `capability_list` / additions-only `capability_activate` |
 
@@ -15,8 +15,8 @@ The `coding` binary in [rust-minimal](../../examples/rust-minimal/README.md)
 composes those leaves with repository/memory context, sliding-window
 compaction, and a `before_finalize` verifier over a keyless loopback model.
 The toolset, context, and sliding-window compaction legs work. Summarize
-compaction stays unlandable — see
-[why summarize compaction cannot complete](middleware.md#why-summarize-compaction-cannot-complete).
+compaction completes via the runtime-owned phase — see
+[how summarize compaction completes](middleware.md#how-summarize-compaction-completes).
 
 Native toolsets are [T1](security-trust-levels.md). They inherit process
 authority. Do not call them a sandbox. Untrusted code belongs on the

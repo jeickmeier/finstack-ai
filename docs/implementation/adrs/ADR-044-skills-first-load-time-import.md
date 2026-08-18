@@ -117,4 +117,6 @@ trusted-application-instruction authority requires that path.
 
 - Approval: accepted by the decision owner to execute FR-10 first cut
   locally only, without publication
-- Implementation evidence: Missing (no published evidence id)
+- Implementation evidence: Missing (local G8 `f370fb9b2ef7042de4c8171b3b71d24a9c7ffc86`;
+  `cargo test -p finstack-ai-tools-skill-import --locked`;
+  `cargo test -p finstack-ai-tools-skills --locked`; no published evidence id)

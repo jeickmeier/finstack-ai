@@ -30,15 +30,17 @@ run. `AgentRun::start_child` prepares and accepts a child through
 `ChildRunPrepared` and `AgentInvoker`. Prefer isolated placement so the
 parent journal stays operable. `AgentRun::complete_external`
 routes through `WorkflowSession::complete_external`. Python exposes the
-same child-run and completion surfaces. WASM lane verbs remain a
-tracked deferral. `RemoteChildSession` dispatch stays excluded.
+same child-run and completion surfaces. WASM `Lane.run` is exposed;
+`suspend` / `resume` stay unsupported. Isolated WASM `start_child` remains
+a residual because wasm-host has no park/respawn path. `RemoteChildSession`
+dispatch stays excluded.
 
 ## Starters
 
 | Binary | Role |
 | --- | --- |
 | `minimal` | Model-only loopback run |
-| `coding` | Calculator, filesystem, shell, context, sliding-window compaction, verifier. Summarize compaction stays unlandable; see [why summarize compaction cannot complete](middleware.md#why-summarize-compaction-cannot-complete) |
+| `coding` | Calculator, filesystem, shell, context, sliding-window compaction, verifier. Summarize compaction completes via the runtime-owned phase; see [how summarize compaction completes](middleware.md#how-summarize-compaction-completes) |
 | `service` | Resolve once, health, one request |
 | `diagnostic` | Credential-free `AgentSpec` and lock fingerprints |
 
