@@ -147,6 +147,66 @@ async fn deferred_poll_rearms_live_wait_after_still_running() {
 }
 
 #[tokio::test]
+async fn deferred_polls_keep_later_live_waits_per_effect() {
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let first = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", 2_000, None),
+        )))],
+    };
+    let second = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![
+            ScriptedToolAction::Block(Arc::from("second-deferral")),
+            ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(polling_deferral(
+                "job-2", 2_000, None,
+            )))),
+        ],
+    };
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        2,
+        vec![first, second],
+        vec![
+            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_600, None)),
+            ToolReconcileResult::Completed(tool_result(2)),
+        ],
+        spec,
+    );
+    let control = toolset.control();
+    let mut owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        2_000,
+        817,
+    )
+    .await
+    .expect("owner");
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_gate(&control, "second-deferral").await;
+    let recovered = wait_state(&store, |_| toolset.reconcile_count() == 1).await;
+    let second_effect_id = recovered
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .and_then(|batch| batch.calls.get(1))
+        .expect("second deferred tool call")
+        .assigned
+        .effect_id;
+
+    control.release("second-deferral");
+    wait_state(&store, |state| {
+        state.tool_settlements.contains_key(&second_effect_id)
+    })
+    .await;
+    assert_eq!(toolset.reconcile_count(), 2);
+    owner.shutdown().await;
+}
+
+#[tokio::test]
 async fn deferred_poll_expiry_fails_without_reconciliation() {
     let mut spec = tool_spec("echo");
     spec.deferral = ToolDeferralSupport::Supported;

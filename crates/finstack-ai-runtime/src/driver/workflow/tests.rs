@@ -228,3 +228,15 @@ fn checkpoint_hint_never_overrides_journal() {
     assert_eq!(resolve_checkpoint_sequence(12, Some(99)), 12);
     assert_eq!(resolve_checkpoint_sequence(12, None), 12);
 }
+
+#[test]
+fn spawn_code_preserves_fault_code() {
+    let error = crate::RunHandleError::Faulted {
+        code: Arc::from("tool_reconciliation_unsupported"),
+    };
+
+    assert_eq!(
+        spawn_code(&error).as_ref(),
+        "tool_reconciliation_unsupported"
+    );
+}

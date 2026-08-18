@@ -118,7 +118,7 @@ pub enum WorkflowDriverError {
     #[error("workflow spawn failed: {code}")]
     Spawn {
         /// Stable fault code.
-        code: &'static str,
+        code: Arc<str>,
     },
     /// Model/tool ports are required to continue a non-waiting run.
     #[error("workflow ports required")]
@@ -137,10 +137,11 @@ pub enum WorkflowDriverError {
 impl WorkflowDriverError {
     /// Stable lowercase error code.
     #[must_use]
-    pub const fn code(&self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
             Self::UnknownLocator => "unknown_locator",
-            Self::Recover { code } | Self::Spawn { code } => code,
+            Self::Recover { code } => code,
+            Self::Spawn { code } => code,
             Self::PortsRequired => "ports_required",
             Self::AuditNotReady => "audit_not_ready",
             Self::DriveTimeout => "drive_timeout",
@@ -785,23 +786,25 @@ fn recover_error(error: &crate::CommitCoordinatorError) -> WorkflowDriverError {
     }
 }
 
-fn spawn_code(error: &crate::RunHandleError) -> &'static str {
+fn spawn_code(error: &crate::RunHandleError) -> Arc<str> {
     match error {
-        crate::RunHandleError::InvalidConfiguration => "invalid_configuration",
-        crate::RunHandleError::ShuttingDown => "shutting_down",
-        crate::RunHandleError::Stopped => "stopped",
-        crate::RunHandleError::Faulted { .. } => "faulted",
-        crate::RunHandleError::IntakeClosed => "intake_closed",
-        crate::RunHandleError::Coordinator(_) => "coordinator",
+        crate::RunHandleError::InvalidConfiguration => Arc::from("invalid_configuration"),
+        crate::RunHandleError::ShuttingDown => Arc::from("shutting_down"),
+        crate::RunHandleError::Stopped => Arc::from("stopped"),
+        crate::RunHandleError::Faulted { code } => Arc::clone(code),
+        crate::RunHandleError::IntakeClosed => Arc::from("intake_closed"),
+        crate::RunHandleError::Coordinator(_) => Arc::from("coordinator"),
         crate::RunHandleError::Model { .. } | crate::RunHandleError::ModelSettlement { .. } => {
-            "model"
+            Arc::from("model")
         }
-        crate::RunHandleError::Tool { .. } | crate::RunHandleError::ToolSettlement { .. } => "tool",
-        crate::RunHandleError::InteractionSettlement { .. } => "interaction",
-        crate::RunHandleError::Timer { .. } => "timer",
-        crate::RunHandleError::CancellationSettlement { .. } => "cancellation",
-        crate::RunHandleError::EventDelivery { .. } => "event_delivery",
-        crate::RunHandleError::Middleware { .. } => "middleware",
+        crate::RunHandleError::Tool { .. } | crate::RunHandleError::ToolSettlement { .. } => {
+            Arc::from("tool")
+        }
+        crate::RunHandleError::InteractionSettlement { .. } => Arc::from("interaction"),
+        crate::RunHandleError::Timer { .. } => Arc::from("timer"),
+        crate::RunHandleError::CancellationSettlement { .. } => Arc::from("cancellation"),
+        crate::RunHandleError::EventDelivery { .. } => Arc::from("event_delivery"),
+        crate::RunHandleError::Middleware { .. } => Arc::from("middleware"),
     }
 }
 

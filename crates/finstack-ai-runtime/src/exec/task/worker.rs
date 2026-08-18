@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use finstack_ai_kernel::{AllocatedIds, AppendBatchTag, KernelInput, RecordTag, TransitionEnv};
+use finstack_ai_kernel::{
+    AllocatedIds, AppendBatchTag, EffectId, KernelInput, RecordTag, Timestamp, TransitionEnv,
+};
 use tokio::sync::mpsc;
 
 use crate::coordinator::ToolDispatchSeed;
@@ -192,8 +195,9 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut tool_results: mpsc::Receiver<ToolDriverMessage>,
     mut timer_results: mpsc::Receiver<TimerDriverMessage>,
     mut due_poll_fired: mpsc::Receiver<DuePollWake>,
-    due_poll_schedules: mpsc::Sender<Option<finstack_ai_kernel::Timestamp>>,
+    due_poll_schedules: mpsc::Sender<Option<Timestamp>>,
     due_poll_cancellation: crate::CancellationSignal,
+    mut process_local_poll_deadlines: BTreeMap<EffectId, Timestamp>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
@@ -283,7 +287,12 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                             }
                         }
                         if let Err(error) =
-                            arm_due_poll_wait(&coordinator, &due_poll_schedules, None).await
+                            arm_due_poll_wait(
+                                &coordinator,
+                                &due_poll_schedules,
+                                &process_local_poll_deadlines,
+                            )
+                            .await
                         {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
@@ -318,17 +327,18 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                             continue;
                         }
                         let result = async {
-                            let process_local_deadline = drive_due_polls(
+                            drive_due_polls(
                                 &mut coordinator,
                                 catalog.as_ref(),
                                 &sources,
                                 &due_poll_cancellation,
+                                &mut process_local_poll_deadlines,
                             )
                             .await?;
                             arm_due_poll_wait(
                                 &coordinator,
                                 &due_poll_schedules,
-                                process_local_deadline,
+                                &process_local_poll_deadlines,
                             )
                             .await
                         }

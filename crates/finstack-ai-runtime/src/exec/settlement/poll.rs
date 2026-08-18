@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use finstack_ai_kernel::{
     ActiveToolCallStatus, EffectDeferred, EffectId, ExternalEffectCompletedInput,
     ExternalEffectCompletion, ExternalEffectOutcome, KernelInput, KernelState,
@@ -66,8 +68,8 @@ pub(crate) fn expired(deferred: &EffectDeferred, now: Timestamp) -> bool {
 
 /// Reconcile due deferrals after failing all committed expirations.
 ///
-/// Returns the earliest future process-local poll deadline received from a
-/// live reconciliation. The returned deadline is not committed.
+/// Re-arms each effect's future process-local deadline received from a live
+/// reconciliation. Those deadlines are not committed.
 ///
 /// # Errors
 ///
@@ -78,7 +80,8 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
     catalog: &ResolvedToolCatalog,
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
-) -> Result<Option<Timestamp>, RunHandleError> {
+    process_local_deadlines: &mut BTreeMap<EffectId, Timestamp>,
+) -> Result<(), RunHandleError> {
     let now = sources.now()?;
     let expired_effects = coordinator
         .state()
@@ -99,49 +102,65 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
         })
         .unwrap_or_default();
     for effect_id in expired_effects {
+        process_local_deadlines.remove(&effect_id);
         fail_expired_deferral(coordinator, effect_id, sources).await?;
     }
 
     let due_effects = due_polls(coordinator.state(), now)
         .into_iter()
-        .filter(|due| due.at <= now)
+        .filter(|due| {
+            due.at <= now
+                && process_local_deadlines
+                    .get(&due.effect_id)
+                    .is_none_or(|deadline| *deadline <= now)
+        })
         .map(|due| due.effect_id)
         .collect::<Vec<_>>();
-    let mut next_process_local_poll = None;
     for effect_id in due_effects {
         if let Some(next_poll_at) =
             reconcile_due_tool(coordinator, catalog, effect_id, now, sources, cancellation).await?
         {
-            next_process_local_poll = Some(
-                next_process_local_poll
-                    .map_or(next_poll_at, |current: Timestamp| current.min(next_poll_at)),
-            );
+            process_local_deadlines.insert(effect_id, next_poll_at);
+        } else {
+            process_local_deadlines.remove(&effect_id);
         }
     }
-    Ok(next_process_local_poll)
+    Ok(())
 }
 
-/// Return the earliest process-local wake-up needed by committed deferrals.
-pub(crate) fn next_due_poll_or_expiry(state: &KernelState) -> Option<Timestamp> {
+/// Return the earliest wake-up needed by committed and local deferral state.
+pub(crate) fn next_due_poll_or_expiry(
+    state: &KernelState,
+    process_local_deadlines: &BTreeMap<EffectId, Timestamp>,
+) -> Option<Timestamp> {
     state
         .active_tool_batch
         .iter()
         .flat_map(|batch| batch.calls.iter())
-        .filter_map(|call| match &call.status {
+        .flat_map(|call| match &call.status {
             ActiveToolCallStatus::Requested {
                 deferred: Some(deferred),
                 ..
-            } => Some(deferred),
-            _ => None,
-        })
-        .flat_map(|deferred| {
-            let poll = matches!(
-                deferred.reconciliation,
-                ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll
-            )
-            .then_some(deferred.next_poll_at)
-            .flatten();
-            [poll, deferred.expires_at]
+            } => {
+                let local = process_local_deadlines.get(&deferred.effect_id).copied();
+                let journal_deadline = |deadline: Option<Timestamp>| {
+                    deadline.filter(|deadline| {
+                        local.is_none_or(|local_deadline| local_deadline <= *deadline)
+                    })
+                };
+                let poll = matches!(
+                    deferred.reconciliation,
+                    ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll
+                )
+                .then_some(deferred.next_poll_at)
+                .flatten();
+                [
+                    journal_deadline(poll),
+                    journal_deadline(deferred.expires_at),
+                    local,
+                ]
+            }
+            _ => [None, None, None],
         })
         .flatten()
         .min()

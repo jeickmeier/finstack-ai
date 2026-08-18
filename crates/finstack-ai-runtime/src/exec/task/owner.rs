@@ -109,10 +109,7 @@ where
     }
 }
 
-/// Schedule the next sibling poll wait from committed or live-only state.
-///
-/// A live reconciliation deadline takes precedence because the journal retains
-/// the first deferred deadline by design.
+/// Schedule the next sibling poll wait from committed and live-only state.
 ///
 /// # Errors
 ///
@@ -120,9 +117,9 @@ where
 pub(super) async fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
     schedules: &mpsc::Sender<Option<Timestamp>>,
-    process_local_deadline: Option<Timestamp>,
+    process_local_deadlines: &BTreeMap<EffectId, Timestamp>,
 ) -> Result<(), RunHandleError> {
-    let deadline = process_local_deadline.or_else(|| next_due_poll_or_expiry(coordinator.state()));
+    let deadline = next_due_poll_or_expiry(coordinator.state(), process_local_deadlines);
     schedules
         .send(deadline)
         .await
@@ -371,7 +368,7 @@ impl RunTaskOwner {
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
         }
-        if !cancelling && next_due_poll_or_expiry(coordinator.state()).is_some() {
+        if !cancelling && next_due_poll_or_expiry(coordinator.state(), &BTreeMap::new()).is_some() {
             // This constructor has no tool catalog to reconcile committed deferred
             // effects. Refuse startup rather than silently discarding their deadline.
             return Err(RunHandleError::Tool {
@@ -557,6 +554,7 @@ impl RunTaskOwner {
             mpsc::channel(run_config.command_capacity);
         let (due_poll_fired_sender, due_poll_fired_receiver) =
             mpsc::channel(run_config.command_capacity);
+        let mut process_local_poll_deadlines = BTreeMap::new();
 
         // Cloned before the move: the worker needs the locked profile to
         // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
@@ -630,17 +628,18 @@ impl RunTaskOwner {
                 )
                 .await?;
             }
-            let process_local_deadline = drive_due_polls(
+            drive_due_polls(
                 &mut coordinator,
                 catalog.as_ref(),
                 &sources,
                 &tool_batch_cancellation,
+                &mut process_local_poll_deadlines,
             )
             .await?;
             arm_due_poll_wait(
                 &coordinator,
                 &due_poll_schedule_sender,
-                process_local_deadline,
+                &process_local_poll_deadlines,
             )
             .await?;
         }
@@ -669,6 +668,7 @@ impl RunTaskOwner {
             due_poll_fired_receiver,
             due_poll_schedule_sender,
             tool_batch_cancellation,
+            process_local_poll_deadlines,
             Arc::clone(&shared),
             sources,
             catalog,
