@@ -737,6 +737,9 @@ finstack-ai-runtime::TOOL_APPROVAL_REQUIRED
 finstack-ai-runtime::TOOL_ARGUMENTS_INVALID
 finstack-ai-runtime::TOOL_CANCELLED
 finstack-ai-runtime::TOOL_DEADLINE_EXCEEDED
+finstack-ai-runtime::TOOL_DEFERRAL_EXPIRED
+finstack-ai-runtime::TOOL_DEFERRAL_INVALID
+finstack-ai-runtime::TOOL_DEFERRAL_NOT_DECLARED
 finstack-ai-runtime::TOOL_INTERACTION_REQUIRED
 finstack-ai-runtime::TOOL_OUTPUT_INVALID
 finstack-ai-runtime::TOOL_PANICKED
@@ -760,6 +763,7 @@ finstack-ai-runtime::ToolCallId
 finstack-ai-runtime::ToolCallPlan
 finstack-ai-runtime::ToolCatalogPlan
 finstack-ai-runtime::ToolDeferral
+finstack-ai-runtime::ToolDeferralSupport
 finstack-ai-runtime::ToolError
 finstack-ai-runtime::ToolEventStream
 finstack-ai-runtime::ToolExecutionMode
@@ -777,6 +781,7 @@ finstack-ai-runtime::ToolStreamAssembler
 finstack-ai-runtime::ToolStreamItem
 finstack-ai-runtime::ToolStreamLimits
 finstack-ai-runtime::ToolTaskConfig
+finstack-ai-runtime::ToolTerminal
 finstack-ai-runtime::ToolValidator
 finstack-ai-runtime::ToolValidatorCompiler
 finstack-ai-runtime::Toolset
