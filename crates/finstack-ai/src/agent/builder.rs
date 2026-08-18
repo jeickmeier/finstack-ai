@@ -5,7 +5,7 @@ use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
     BundleResolver, BundleSpec, CapabilityActivation, CapabilityRef, CapabilitySpec,
     CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
-    Registrar, RegistrationError, RegistrationMetadata, Registry, RuntimeServices,
+    Registrar, RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
 };
 use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, MiddlewareRef, Version};
 use finstack_ai_runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
@@ -32,6 +32,7 @@ pub struct NativeAgentBuilder {
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
+    policy: RunPolicy,
 }
 
 impl NativeAgentBuilder {
@@ -53,6 +54,7 @@ impl NativeAgentBuilder {
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
+            policy: RunPolicy::default(),
         }
     }
 
@@ -145,6 +147,19 @@ impl NativeAgentBuilder {
     #[must_use]
     pub fn activate_application(mut self, capability: CapabilityId) -> Self {
         self.active_application.insert(capability);
+        self
+    }
+
+    /// Replace run and child-invocation policy.
+    ///
+    /// Child runs default to [`crate::ChildRunPolicy::Deny`].
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - Composition policy frozen into the agent specification.
+    #[must_use]
+    pub fn policy(mut self, policy: RunPolicy) -> Self {
+        self.policy = policy;
         self
     }
 
@@ -282,6 +297,7 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
             .collect::<Vec<_>>(),
     )
     .capabilities(capability_refs)
+    .policy(builder.policy.clone())
     .build()
     .map_err(|error| {
         AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())

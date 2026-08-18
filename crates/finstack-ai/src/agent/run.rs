@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use finstack_ai_kernel::{CancelRequested, CancellationInitiator, KernelInput, OperationLocator};
@@ -16,10 +17,13 @@ use finstack_ai_runtime::native_driver as driver;
 
 use super::prepare::{NativeIds, submit};
 use super::types::{AgentRunError, AgentRunOutput};
+use crate::ChildRunPolicy;
 
 pub(super) struct AgentRunInner {
     pub(super) locator: OperationLocator,
     pub(super) store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    pub(super) child_runs: ChildRunPolicy,
+    pub(super) child_invoker_starts: Arc<AtomicUsize>,
     pub(super) cancellation_initiator: CancellationInitiator,
     pub(super) handle: Mutex<Option<Result<RunHandle, AgentRunError>>>,
     pub(super) handle_ready: driver::Signal,
@@ -145,6 +149,13 @@ impl AgentRun {
     #[must_use]
     pub fn locator(&self) -> &OperationLocator {
         &self.inner.locator
+    }
+
+    /// Number of [`finstack_ai_runtime::AgentInvoker::start_or_attach`] calls
+    /// issued while preparing children on this run.
+    #[must_use]
+    pub fn child_invoker_starts(&self) -> usize {
+        self.inner.child_invoker_starts.load(Ordering::SeqCst)
     }
 
     /// Live session handle for this run. Does not respawn parked runs.

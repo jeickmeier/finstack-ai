@@ -392,6 +392,60 @@ async fn child_run_and_lane_stay_distinct_and_cancel_fans_out() {
     assert!(detach_again.state().cancellation.is_none());
 }
 
+#[tokio::test]
+async fn child_run_policy_deny_rejects_before_invoker_runs() {
+    let (agent, store, _model) = scripted_agent(ChildRunPolicy::Deny).await;
+    let parent = agent
+        .start(agent_request("parent work"))
+        .expect("parent start");
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            agent_request("child work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("start_child timeout")
+    .err()
+    .expect("deny must reject");
+    assert_eq!(error.code(), AGENT_INVOKE_INVALID_ACCEPTANCE);
+    assert_eq!(parent.child_invoker_starts(), 0);
+    let kinds = journal_kind_names(&store, parent.locator().session_id).await;
+    assert!(
+        !kinds.iter().any(|kind| kind == "child_run_prepared"),
+        "deny must not commit ChildRunPrepared: {kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn child_run_policy_allow_rejects_when_depth_exceeds_max() {
+    let (agent, store, _model) = scripted_agent(ChildRunPolicy::Allow { max_depth: 0 }).await;
+    let parent = agent
+        .start(agent_request("parent work"))
+        .expect("parent start");
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            agent_request("child work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("start_child timeout")
+    .err()
+    .expect("depth 1 must exceed max_depth 0");
+    assert_eq!(error.code(), AGENT_INVOKE_INVALID_ACCEPTANCE);
+    assert_eq!(parent.child_invoker_starts(), 0);
+    let kinds = journal_kind_names(&store, parent.locator().session_id).await;
+    assert!(
+        !kinds.iter().any(|kind| kind == "child_run_prepared"),
+        "over-depth allow must not commit ChildRunPrepared: {kinds:?}"
+    );
+}
+
 #[test]
 fn identity_map_equal_bind_is_idempotent() {
     let map = MemoryExternalIdentityMap::new();

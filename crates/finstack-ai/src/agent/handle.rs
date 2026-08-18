@@ -293,9 +293,16 @@ impl Agent {
         let locator = prepared.locator.clone();
         let store = Arc::clone(&prepared.store);
         let cancellation_initiator = prepared.cancellation_initiator()?;
+        let child_runs = agent
+            .resolved
+            .spec()
+            .map(|spec| spec.policy.child_runs)
+            .unwrap_or_default();
         let inner = Arc::new(AgentRunInner {
             locator,
             store,
+            child_runs,
+            child_invoker_starts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             cancellation_initiator,
             handle: Mutex::new(None),
             handle_ready: driver::Signal::new(),

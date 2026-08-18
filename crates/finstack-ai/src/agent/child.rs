@@ -1,7 +1,9 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
+use crate::ChildRunPolicy;
 use finstack_ai_kernel::{
     AppendBatchTag, BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement,
     ChildRunLocator, ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId,
@@ -9,10 +11,11 @@ use finstack_ai_kernel::{
     RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock,
 };
 use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, ChildCoordinationIds,
-    ChildRunContext, ChildRunCoordinator, ChildRunHandle, ChildRunRequest, CommitCoordinator,
-    ExternalClock, ExternalEffectCompletionCommand, ExternalRouteOutcome, PortFuture,
-    WorkflowSession, child_relation_digest,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
+    AuthorizationContext, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
+    ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalClock,
+    ExternalEffectCompletionCommand, ExternalRouteOutcome, PortFuture, WorkflowSession,
+    child_relation_digest,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -25,7 +28,9 @@ use super::prepare::NativeIds;
 use super::run::AgentRun;
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
-struct RecordingChildInvoker;
+struct RecordingChildInvoker {
+    starts: Arc<std::sync::atomic::AtomicUsize>,
+}
 
 impl AgentInvoker for RecordingChildInvoker {
     fn start_or_attach(
@@ -33,6 +38,7 @@ impl AgentInvoker for RecordingChildInvoker {
         context: ChildRunContext,
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
         let relation_digest = match child_relation_digest(&context, &request) {
             Ok(digest) => digest,
             Err(error) => {
@@ -56,10 +62,12 @@ impl AgentInvoker for RecordingChildInvoker {
 impl AgentRun {
     /// Commit one [`ChildRunPrepared`] mapping through [`ChildRunCoordinator`].
     ///
-    /// Allocates the child locator, creates the placement lane or isolated
-    /// session, then invokes [`AgentInvoker::start_or_attach`]. The invoker
-    /// used here only returns the acceptance handle; [`Self::accept_child`]
-    /// starts the child agent on the frozen locator.
+    /// Enforces the parent [`crate::ChildRunPolicy`] before allocating a
+    /// locator or invoking [`AgentInvoker::start_or_attach`]. Deny and
+    /// over-depth Allow reject with [`AGENT_INVOKE_INVALID_ACCEPTANCE`] and
+    /// write no child journal records. The invoker used here only returns the
+    /// acceptance handle; [`Self::accept_child`] starts the child agent on the
+    /// frozen locator.
     ///
     /// Remote placement is out of scope for this surface.
     ///
@@ -90,6 +98,10 @@ impl AgentRun {
         }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
+        enforce_child_run_policy(
+            self.inner.child_runs,
+            child_depth(parent_accepted.relation().depth())?,
+        )?;
         let parent = self.inner.locator.clone();
         let (locator, session) = self.allocate_child_locator(placement).await?;
         let parent_effect_id = NativeIds::generate::<EffectTag>()?;
@@ -105,7 +117,9 @@ impl AgentRun {
             CommitCoordinator::recover(Arc::clone(&self.inner.store), parent.session_id)
                 .await
                 .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        let coordinator = ChildRunCoordinator::new(Arc::new(RecordingChildInvoker));
+        let coordinator = ChildRunCoordinator::new(Arc::new(RecordingChildInvoker {
+            starts: Arc::clone(&self.inner.child_invoker_starts),
+        }));
         coordinator
             .start_or_attach(
                 &mut commit,
@@ -366,6 +380,28 @@ impl AgentRun {
     }
 }
 
+fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {
+    parent_depth
+        .checked_add(1)
+        .ok_or_else(|| AgentRunError::runtime_message("child relation depth overflow"))
+}
+
+fn enforce_child_run_policy(policy: ChildRunPolicy, child_depth: u16) -> Result<(), AgentRunError> {
+    match policy {
+        ChildRunPolicy::Deny => Err(AgentRunError::configuration(
+            AGENT_INVOKE_INVALID_ACCEPTANCE,
+            "child run policy denies child invocation",
+        )),
+        ChildRunPolicy::Allow { max_depth } if child_depth > max_depth => {
+            Err(AgentRunError::configuration(
+                AGENT_INVOKE_INVALID_ACCEPTANCE,
+                "child run depth exceeds policy max_depth",
+            ))
+        }
+        ChildRunPolicy::Allow { .. } => Ok(()),
+    }
+}
+
 fn child_run_request(
     child: &Agent,
     request: &AgentRunRequest,
@@ -481,11 +517,7 @@ fn child_acceptance(
             "child Agent requires a bundle-resolved lock",
         )
     })?;
-    let depth = parent
-        .relation()
-        .depth()
-        .checked_add(1)
-        .ok_or_else(|| AgentRunError::runtime_message("child relation depth overflow"))?;
+    let depth = child_depth(parent.relation().depth())?;
     let relation = RunRelation::try_new(
         parent.relation().root_run_id(),
         Some(parent.run_id()),

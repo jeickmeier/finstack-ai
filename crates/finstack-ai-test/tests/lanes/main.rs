@@ -3,13 +3,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use finstack_ai::ChildRunPolicy;
 use finstack_ai_kernel::{
     AcceptRun, CancellationInitiator, CancellationPropagation, ChildPlacement, KernelInput,
     LaneCreated, LaneMoved, LaneTag, RunPhase, SessionTag,
 };
 use finstack_ai_runtime::{
-    ChildCoordinationIds, ChildRunContext, ChildRunCoordinator, ExternalIdentityKey,
-    ExternalIdentityMap, JournalStore, MemoryExternalIdentityMap, SessionError, SessionRuntime,
+    AGENT_INVOKE_INVALID_ACCEPTANCE, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
+    ExternalIdentityKey, ExternalIdentityMap, JournalStore, MemoryExternalIdentityMap,
+    SessionError, SessionRuntime,
 };
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,

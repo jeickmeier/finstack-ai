@@ -271,6 +271,138 @@ pub(crate) fn child_request(
     }
 }
 
+pub(crate) fn scripted_profile() -> finstack_ai_runtime::ModelContextProfile {
+    use finstack_ai_runtime::{ModelName, TokenEstimatorRef, TokenEstimatorSource};
+    finstack_ai_runtime::ModelContextProfile {
+        provider: Arc::from("scripted"),
+        model: ModelName::try_new("lanes-1").expect("model name"),
+        hard_input_bytes: 1_048_576,
+        context_window_tokens: 1_048_576,
+        max_output_tokens: 256,
+        reserved_output_tokens: 256,
+        provider_overhead_tokens: 32,
+        estimator: TokenEstimatorRef {
+            id: Arc::from("bytes-upper-bound"),
+            version: Arc::from("1"),
+            source: TokenEstimatorSource::ConservativeUpperBound,
+        },
+    }
+}
+
+pub(crate) fn completed_plan(text: &str) -> finstack_ai_test::ScriptedModelPlan {
+    use finstack_ai_kernel::{ContentBlock, ProviderIds, TextBlock, Usage};
+    use finstack_ai_runtime::{ModelResponse, ModelStreamItem};
+    finstack_ai_test::ScriptedModelPlan {
+        actions: vec![
+            finstack_ai_test::ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                finstack_ai_runtime::TextDelta {
+                    text: Arc::from(text),
+                },
+            ))),
+            finstack_ai_test::ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
+                ModelResponse {
+                    assistant_content: Arc::from([ContentBlock::Text(
+                        TextBlock::try_new(text).expect("assistant text"),
+                    )]),
+                    tool_calls: Arc::from([]),
+                    usage: Usage::empty(),
+                    provider_ids: ProviderIds::empty(),
+                    completion_id: Arc::from("lanes-completion"),
+                    continuation_state: None,
+                },
+            ))),
+        ],
+    }
+}
+
+pub(crate) fn agent_request(input: &str) -> finstack_ai::AgentRunRequest {
+    use finstack_ai_runtime::ModelName;
+    finstack_ai::AgentRunRequest::try_new(
+        ModelName::try_new("lanes-1").expect("model name"),
+        input,
+        security("decision-v1"),
+    )
+    .expect("request")
+}
+
+pub(crate) async fn scripted_agent(
+    child_runs: finstack_ai::ChildRunPolicy,
+) -> (
+    finstack_ai::Agent,
+    Arc<dyn JournalStore>,
+    Arc<finstack_ai_test::ScriptedModel>,
+) {
+    use finstack_ai::{Agent, RunPolicy};
+    use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
+    use finstack_ai_runtime::Model;
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let version = Version {
+        major: 0,
+        minor: 0,
+        patch: 1,
+    };
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 8_192,
+        })
+        .expect("store"),
+    );
+    let model = Arc::new(finstack_ai_test::ScriptedModel::from_plans(
+        scripted_profile(),
+        vec![
+            completed_plan("parent unused"),
+            completed_plan("child unused"),
+        ],
+    ));
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.lanes").expect("agent"),
+        BundleId::parse("test.bundle.lanes").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.lanes").expect("model"),
+                Some(version),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.lanes").expect("store"),
+                Some(version),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .policy(RunPolicy {
+        child_runs,
+        ..RunPolicy::default()
+    })
+    .build()
+    .await
+    .expect("agent");
+    (agent, store, model)
+}
+
+pub(crate) async fn journal_kind_names(
+    store: &Arc<dyn JournalStore>,
+    session_id: finstack_ai_kernel::SessionId,
+) -> Vec<String> {
+    use finstack_ai_runtime::LoadRequest;
+    let loaded = store
+        .load(LoadRequest { session_id })
+        .await
+        .expect("load journal");
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .map(|record| record.body().kind_name().to_string())
+        .collect()
+}
+
 pub(crate) fn unique_sqlite_path() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "pr047-a04-{}-{}",

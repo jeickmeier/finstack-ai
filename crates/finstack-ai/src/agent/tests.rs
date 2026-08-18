@@ -26,9 +26,9 @@ use super::types::MAX_COMPACT_CATALOG_BYTES;
 use super::*;
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
-    BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, CompatibilityRequirements,
-    Extension, ExtensionDescriptor, ReadyComponent, Registrar, RegistrationError,
-    RegistrationMetadata, RuntimeServices, Session,
+    BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, ChildRunPolicy,
+    CompatibilityRequirements, Extension, ExtensionDescriptor, ReadyComponent, Registrar,
+    RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session,
 };
 
 const VERSION: Version = Version {
@@ -204,6 +204,17 @@ fn security() -> RunSecurityContext {
 }
 
 async fn model_only_agent(model: Arc<ScriptedModel>) -> (Agent, Arc<MemoryJournalStore>) {
+    model_only_agent_with_child_policy(model, ChildRunPolicy::Deny).await
+}
+
+async fn child_capable_agent(model: Arc<ScriptedModel>) -> (Agent, Arc<MemoryJournalStore>) {
+    model_only_agent_with_child_policy(model, ChildRunPolicy::Allow { max_depth: 1 }).await
+}
+
+async fn model_only_agent_with_child_policy(
+    model: Arc<ScriptedModel>,
+    child_runs: ChildRunPolicy,
+) -> (Agent, Arc<MemoryJournalStore>) {
     let model_id = ComponentId::parse("test.model.preview").expect("model id");
     let store_id = ComponentId::parse("test.store.preview").expect("store id");
     let store = Arc::new(
@@ -232,6 +243,10 @@ async fn model_only_agent(model: Arc<ScriptedModel>) -> (Agent, Arc<MemoryJourna
         ComponentRef::new(model_id, Some(VERSION)),
         ComponentRef::new(store_id, Some(VERSION)),
     )
+    .policy(RunPolicy {
+        child_runs,
+        ..RunPolicy::default()
+    })
     .build()
     .expect("spec");
     let bundle_id = BundleId::parse("test.bundle.preview").expect("bundle id");
@@ -900,7 +915,7 @@ async fn child_accept_and_cancel_fans_out_against_journal_fixture() {
         vec![parent_plan, child_plan],
     ));
     let control = model.control();
-    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let (agent, store) = child_capable_agent(Arc::clone(&model)).await;
     let parent = agent.start(request("parent work")).expect("parent start");
     tokio::time::timeout(Duration::from_secs(3), async {
         while control.entries(&parent_gate) == 0 {
@@ -980,7 +995,7 @@ async fn complete_external_routes_a_deferred_parent_effect() {
             completed("unused parent retry"),
         ],
     ));
-    let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+    let (agent, _store) = child_capable_agent(Arc::clone(&model)).await;
     let parent = agent.start(request("defer me")).expect("parent start");
     let effect_id = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
