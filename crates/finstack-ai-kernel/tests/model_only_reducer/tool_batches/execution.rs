@@ -318,3 +318,101 @@ fn fail_run_drains_parallel_group_and_closes_only_undispatched_calls() {
     assert!(value.value().as_str().contains("tool_batch_aborted"));
     assert_tool_golden("valid--pr010-fail-run.json", &harness);
 }
+
+#[test]
+fn nested_mcp_sampling_journals_a_child_model_under_the_open_tool() {
+    const NESTED_EFFECT: u64 = 510;
+    let calls = vec![call(CALL_A, "echo")];
+    let mut harness = model_with_calls(&calls);
+    settle_after_model_for_tools(&mut harness);
+    harness.apply_input(
+        tool_env(
+            1_600,
+            &[1_000, 1_001, 1_002],
+            &[1_000],
+            &[TOOL_EFFECT_A],
+            &[],
+            &[BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: vec![execute(
+                    &calls[0],
+                    ToolExecutionMode::Sequential,
+                    ToolFailurePolicy::ReturnToModel,
+                )]
+                .into(),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AwaitingTools));
+
+    let request = KernelInput::RequestCompactionModel(RequestCompactionModel {
+        request: RawJson::parse(br#"{"sampling":"createMessage"}"#).expect("request"),
+        component: None,
+        relation: EffectRelation {
+            parent_effect_id: id::<finstack_ai_kernel::EffectTag>(TOOL_EFFECT_A),
+            purpose: EffectPurpose::NestedModel {
+                kind: NestedModelKind::McpSampling,
+            },
+        },
+        output_contract: EffectOutputContract {
+            kind: EffectOutputKind::ModelResponse,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(br#"{"type":"model_response"}"#),
+        },
+        retry_safety: RetrySafety::SafeToRetry,
+        deadline: None,
+    });
+    harness.apply_input(
+        tool_env(1_700, &[1_100], &[1_100], &[NESTED_EFFECT], &[], &[], &[]),
+        request,
+    );
+    let requested = harness
+        .batches
+        .last()
+        .expect("nested request batch")
+        .records
+        .iter()
+        .find_map(|record| match record.body() {
+            RecordBody::EffectRequested(value) => Some(value.clone()),
+            _ => None,
+        })
+        .expect("nested EffectRequested");
+    assert!(requested.is_nested_model());
+    assert_eq!(
+        requested.relation().map(|relation| relation.parent_effect_id),
+        Some(id::<finstack_ai_kernel::EffectTag>(TOOL_EFFECT_A))
+    );
+    assert_eq!(
+        requested.relation().map(|relation| relation.purpose.clone()),
+        Some(EffectPurpose::NestedModel {
+            kind: NestedModelKind::McpSampling,
+        })
+    );
+    assert_eq!(
+        harness.kernel.state().phase,
+        Some(RunPhase::AwaitingModel)
+    );
+
+    harness.apply_input(
+        tool_env(1_800, &[1_200], &[1_200], &[], &[], &[], &[]),
+        KernelInput::ModelSettled(ModelSettled {
+            turn_id: id::<finstack_ai_kernel::TurnTag>(TURN_ONE),
+            model_request_id: id::<finstack_ai_kernel::ModelRequestTag>(MODEL_REQUEST_ONE),
+            outcome: ModelSettlement::Completed {
+                completion: completed_effect(NESTED_EFFECT, "nested-sample", "sampled"),
+                assistant_message: assistant_message(9_001, 1_800, "sampled"),
+            },
+        }),
+    );
+    assert_eq!(
+        harness.kernel.state().phase,
+        Some(RunPhase::AwaitingTools)
+    );
+    assert!(harness.kernel.state().pending_model_effect.is_none());
+}

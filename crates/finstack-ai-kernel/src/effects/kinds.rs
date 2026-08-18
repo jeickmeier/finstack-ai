@@ -162,6 +162,14 @@ pub struct EffectRelation {
     pub purpose: EffectPurpose,
 }
 
+/// Why a nested model effect exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NestedModelKind {
+    /// MCP `sampling/createMessage` owned by an open parent tool.
+    McpSampling,
+}
+
 /// Why a child effect exists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -170,6 +178,12 @@ pub enum EffectPurpose {
     CompactionSummary {
         /// Middleware component id.
         middleware_component_id: ComponentId,
+    },
+    /// Nested model owned by an open parent effect (ADR-046).
+    NestedModel {
+        /// Why the nested model exists. Wire name avoids the purpose tag.
+        #[serde(rename = "nested_kind")]
+        kind: NestedModelKind,
     },
 }
 

@@ -21,17 +21,17 @@ Implemented: `tools/list` and `prompts/list` at construction;
 `InteractionRequested` and parks the committed tool on durable HITL
 (`Form` or `FreeText`) the same way native interactions do.
 
-Not implemented:
+**Sampling.** `sampling/createMessage` commits a nested model child of
+the open tool (`EffectPurpose::NestedModel { kind: McpSampling }`). The
+runtime runs the parent model through `validate_model_request` and the
+locked profile. Missing lock or budget rejects sampling. Crash-resume
+uses the ordinary model reconcile path.
 
-- **Sampling.** MCP sampling inverts control and would create a model
-  request from inside a committed tool effect with no locked context
-  profile, no budget parent, and an effect graph the kernel cannot
-  linearize. Sampling is unsupported and will stay unsupported.
-- Mid-run catalog mutation. `notifications/tools/list_changed` and
-  `notifications/resources/list_changed` are observer-only; adopters who
-  need new tools or resources re-resolve the agent. The crate emits a
-  non-semantic `McpListChangedObserver` event and does not change the
-  lock.
+Mid-run catalog mutation. `notifications/tools/list_changed` and
+`notifications/resources/list_changed` are observer-only; adopters who
+need new tools or resources re-resolve the agent. The crate emits a
+non-semantic `McpListChangedObserver` event and does not change the
+lock.
 
 An MCP server is not an application-instruction authority. Every MCP
 resource provider sets `trusted_application_instructions` to `false`.

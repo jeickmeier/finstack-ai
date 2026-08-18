@@ -200,10 +200,11 @@ pub use observer::{
 };
 pub use ports::{PortFuture, PortObject, PortStream};
 pub use tool::{
-    AssembledToolStream, JsonSchemaToolValidatorCompiler, PendingToolEffect, ResolvedTool,
-    ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID, TOOL_CANCELLED,
-    TOOL_DEADLINE_EXCEEDED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, TOOL_PANICKED,
-    TOOL_POLICY_DENIED, TOOL_RECONCILIATION_UNSUPPORTED, TOOL_REGISTRATION_INVALID,
+    AssembledToolStream, JsonSchemaToolValidatorCompiler, MCP_SAMPLING_REQUIRED,
+    MCP_SAMPLING_UNAVAILABLE, MCP_SAMPLING_UNSUPPORTED, NestedSample, PendingToolEffect,
+    ResolvedTool, ResolvedToolCatalog, TOOL_APPROVAL_REQUIRED, TOOL_ARGUMENTS_INVALID,
+    TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
+    TOOL_PANICKED, TOOL_POLICY_DENIED, TOOL_RECONCILIATION_UNSUPPORTED, TOOL_REGISTRATION_INVALID,
     TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolCallContext,
     ToolCatalogPlan, ToolDeferral, ToolError, ToolEventStream, ToolExecutionPolicy,
     ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler,

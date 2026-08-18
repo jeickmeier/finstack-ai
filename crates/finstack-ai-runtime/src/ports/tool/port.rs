@@ -6,7 +6,8 @@ use crate::{PortFuture, PortObject, ToolSpec};
 
 use super::error::ToolError;
 use super::types::{
-    PendingToolEffect, ToolCallContext, ToolEventStream, ToolReconcileResult, ToolsetDescriptor,
+    NestedSample, PendingToolEffect, ToolCallContext, ToolEventStream, ToolReconcileResult,
+    ToolsetDescriptor,
 };
 
 /// Object-safe executable Toolset port.
@@ -40,5 +41,28 @@ pub trait Toolset: PortObject {
         _effect: PendingToolEffect,
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
         Box::pin(async { Ok(ToolReconcileResult::Unknown) })
+    }
+
+    /// Resume a committed tool after the runtime fulfills nested sampling.
+    ///
+    /// Default implementations reject with [`super::error::MCP_SAMPLING_UNSUPPORTED`].
+    /// MCP sends the sample back to the server and finishes `tools/call`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable tool error when the Toolset cannot complete the sample
+    /// or the follow-up `tools/call` result is invalid.
+    fn complete_nested_sample(
+        &self,
+        _ctx: ToolCallContext,
+        _call: ValidatedToolCall,
+        _sample: NestedSample,
+    ) -> PortFuture<Result<ToolEventStream, ToolError>> {
+        Box::pin(async {
+            Err(ToolError::stable(
+                super::error::MCP_SAMPLING_UNSUPPORTED,
+                "nested sampling is not supported",
+            ))
+        })
     }
 }

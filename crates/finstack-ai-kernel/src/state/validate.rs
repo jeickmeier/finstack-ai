@@ -552,7 +552,11 @@ impl KernelState {
         reason = "the active-batch state machine is validated as one source-ordered invariant"
     )]
     fn validate_active_tool_batch(&self, batch: &ActiveToolBatch) -> Result<(), ()> {
-        if !matches!(
+        let nested_model = self
+            .pending_model_effect
+            .as_ref()
+            .is_some_and(|pending| pending.requested.is_nested_model());
+        let allowed_phase = matches!(
             self.phase,
             Some(
                 RunPhase::AwaitingTools
@@ -561,7 +565,9 @@ impl KernelState {
                     | RunPhase::Cancelling
                     | RunPhase::Suspended
             )
-        ) || self.pending_model_effect.is_some()
+        ) || (nested_model && self.phase == Some(RunPhase::AwaitingModel));
+        if !allowed_phase
+            || (self.pending_model_effect.is_some() && !nested_model)
             || batch.opened.cycle != self.cycle
             || batch.calls.is_empty()
             || batch.calls.len() != batch.opened.calls.len()
