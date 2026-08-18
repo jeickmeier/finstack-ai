@@ -364,6 +364,10 @@ fn content_digest(text: &str, tool_calls: &[Value]) -> Result<String, ModelError
     Ok(raw.digest().to_hex())
 }
 
+#[allow(
+    dead_code,
+    reason = "request-side continuation helpers stay with the vendor crate"
+)]
 pub(crate) fn response_content_digest(
     text: &str,
     tool_calls: &[(String, String)],
@@ -375,6 +379,10 @@ pub(crate) fn response_content_digest(
     content_digest(text, &values)
 }
 
+#[allow(
+    dead_code,
+    reason = "request-side continuation helpers stay with the vendor crate"
+)]
 pub(crate) fn encode_continuation(
     entries: Vec<ReplayEntry>,
 ) -> Result<Option<RawJson>, ModelError> {

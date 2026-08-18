@@ -16,6 +16,11 @@ unpublished.
 
 ### Added
 
+- `finstack-ai-provider-gateway` is a config-driven `Model` adapter over
+  `openai_responses`, `openai_chat`, `anthropic_messages`, and
+  `ollama_chat`. Required profile fields fail at construction; credential
+  references resolve per request with no environment fallback. Official
+  vendor crates stay as reference implementations.
 - Native mid-run capability activation (`capability_list` /
   `capability_activate` in `finstack-ai-tools-skills`) unions onto the
   run-start variant without re-resolving the agent (ADR-041). Python

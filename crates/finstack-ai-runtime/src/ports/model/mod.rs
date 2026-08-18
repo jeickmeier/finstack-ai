@@ -60,7 +60,11 @@ pub use profile::{
     ModelContextProfileOverride, StructuredOutputCapability, TokenEstimatorRef,
     TokenEstimatorSource, resolve_model_context_profile,
 };
-pub use provider_util::{SECRET_MAX_BYTES, SseFrameError, SseFrameParser, secret_is_valid};
+pub use provider_util::{
+    AnthropicMessagesAssembly, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
+    OpenAiChatAssembly, OpenAiResponsesAssembly, SECRET_MAX_BYTES, SseEvent, SseEventParser,
+    SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind, secret_is_valid,
+};
 pub use request::{
     ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft, ModelRequestLimits,
     ModelRequestValidation, ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall,

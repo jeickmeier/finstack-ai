@@ -1,38 +1,36 @@
 //! Incremental, bounded official `OpenAI` Responses Server-Sent Events framing.
 
-use finstack_ai_runtime::{ModelError, SseFrameParser};
+use finstack_ai_runtime::{ModelError, SseEvent, SseEventParser, SseParseError};
 
 use crate::error::{stream_error, stream_limit_error};
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct SseEvent {
+pub(crate) struct SseEventData {
     pub(crate) data: String,
 }
 
 pub(crate) struct SseParser {
-    frames: SseFrameParser,
+    inner: SseEventParser,
 }
 
 impl SseParser {
     pub(crate) fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         Self {
-            frames: SseFrameParser::new(max_event_bytes, max_stream_bytes),
+            inner: SseEventParser::new(max_event_bytes, max_stream_bytes),
         }
     }
 
-    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEvent>, ModelError> {
-        let frames = self.frames.push(bytes).map_err(|_| stream_limit_error())?;
-        let mut events = Vec::new();
-        for frame in frames {
-            if let Some(event) = parse_frame(&frame)? {
-                events.push(event);
-            }
-        }
-        Ok(events)
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseEventData>, ModelError> {
+        let events = self.inner.push(bytes).map_err(map_parse)?;
+        Ok(events
+            .into_iter()
+            .filter(|event| !event.data.is_empty() && event.data != "[DONE]")
+            .map(|SseEvent { data, .. }| SseEventData { data })
+            .collect())
     }
 
     pub(crate) fn finish(self) -> Result<(), ModelError> {
-        if self.frames.finish_clean() {
+        if self.inner.finish_clean() {
             Ok(())
         } else {
             Err(stream_error("OpenAI SSE stream ended mid-event"))
@@ -40,26 +38,11 @@ impl SseParser {
     }
 }
 
-fn parse_frame(bytes: &[u8]) -> Result<Option<SseEvent>, ModelError> {
-    let frame =
-        core::str::from_utf8(bytes).map_err(|_| stream_error("OpenAI SSE event is not UTF-8"))?;
-    let mut data = String::new();
-    for line in frame.lines() {
-        if line.starts_with(':') || line.is_empty() {
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("data:") {
-            if !data.is_empty() {
-                data.push('\n');
-            }
-            data.push_str(value.strip_prefix(' ').unwrap_or(value));
-        }
-    }
-    if data.is_empty() || data == "[DONE]" {
-        // `[DONE]` is not a Responses success signal.
-        Ok(None)
-    } else {
-        Ok(Some(SseEvent { data }))
+fn map_parse(error: SseParseError) -> ModelError {
+    match error {
+        SseParseError::Limit => stream_limit_error(),
+        SseParseError::InvalidUtf8 => stream_error("OpenAI SSE event is not UTF-8"),
+        SseParseError::DuplicateName => stream_error("OpenAI SSE event declared multiple names"),
     }
 }
 
@@ -73,7 +56,7 @@ mod tests {
         assert!(parser.push(b"data: {\"id\":").unwrap().is_empty());
         assert_eq!(
             parser.push(b"\"one\"}\r\n\r\ndata: [DONE]\n\n").unwrap(),
-            vec![SseEvent {
+            vec![SseEventData {
                 data: "{\"id\":\"one\"}".to_owned(),
             }]
         );

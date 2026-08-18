@@ -8,6 +8,7 @@ a client on import.
 | `finstack-ai-provider-openai` | Official OpenAI Responses; HTTPS Bearer |
 | `finstack-ai-provider-ollama` | Native `/api/chat`; keyless loopback |
 | `finstack-ai-provider-anthropic` | Anthropic Messages leaf |
+| `finstack-ai-provider-gateway` | Config-selected wire protocol; explicit profiles |
 | `finstack-ai-test` (`ScriptedModel`) | Semantic scripted tests; no HTTP |
 
 Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
@@ -15,8 +16,10 @@ Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
 explicit T1 constructors. They accept the same keyword-only T2 Python ports
 as `Agent.from_python`. `openai` maps required keyword-only `api_key` to
 Bearer auth and always targets official Responses. `ollama` stays keyless.
-The factories do not read environment variables. Generic Chat Completions
-gateways are not a first-party provider.
+The factories do not read environment variables. Opt-in
+`finstack-ai-provider-gateway` covers config-selected OpenAI-compatible,
+Anthropic Messages, and Ollama chat endpoints without adding a client to
+the default SDK graph.
 
 Never put secrets in `AgentSpec`, bundle defaults, resolution locks, logs,
 or source files. Pass credentials only through redacted `Authentication`

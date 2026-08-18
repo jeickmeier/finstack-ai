@@ -1,76 +1,34 @@
 //! Incremental, bounded Ollama NDJSON line framing.
 
-use finstack_ai_runtime::ModelError;
+use finstack_ai_runtime::{ModelError, NdjsonError, NdjsonParser as SharedNdjsonParser};
 
 use crate::error::{stream_error, stream_limit_error};
 
-/// Incremental NDJSON splitter. Object interpretation stays in the provider.
 pub(crate) struct NdjsonParser {
-    buffer: Vec<u8>,
-    total_bytes: usize,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
+    inner: SharedNdjsonParser,
 }
 
 impl NdjsonParser {
     pub(crate) const fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         Self {
-            buffer: Vec::new(),
-            total_bytes: 0,
-            max_event_bytes,
-            max_stream_bytes,
+            inner: SharedNdjsonParser::new(max_event_bytes, max_stream_bytes),
         }
     }
 
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, ModelError> {
-        self.total_bytes = self
-            .total_bytes
-            .checked_add(bytes.len())
-            .ok_or_else(stream_limit_error)?;
-        if self.total_bytes > self.max_stream_bytes {
-            return Err(stream_limit_error());
-        }
-        self.buffer.extend_from_slice(bytes);
-        let mut lines = Vec::new();
-        let mut cursor = 0;
-        while let Some(relative) = self.buffer[cursor..].iter().position(|byte| *byte == b'\n') {
-            let end = cursor + relative;
-            if end - cursor > self.max_event_bytes {
-                return Err(stream_limit_error());
-            }
-            if let Some(line) = parse_line(&self.buffer[cursor..end])? {
-                lines.push(line);
-            }
-            cursor = end + 1;
-        }
-        if cursor > 0 {
-            self.buffer.drain(..cursor);
-        }
-        if self.buffer.len() > self.max_event_bytes {
-            return Err(stream_limit_error());
-        }
-        Ok(lines)
+        self.inner.push(bytes).map_err(map_error)
     }
 
     pub(crate) fn finish(self) -> Result<Vec<String>, ModelError> {
-        if self.buffer.len() > self.max_event_bytes {
-            return Err(stream_limit_error());
-        }
-        match parse_line(&self.buffer)? {
-            Some(line) => Ok(vec![line]),
-            None => Ok(Vec::new()),
-        }
+        self.inner.finish().map_err(map_error)
     }
 }
 
-fn parse_line(bytes: &[u8]) -> Result<Option<String>, ModelError> {
-    let line =
-        core::str::from_utf8(bytes).map_err(|_| stream_error("Ollama NDJSON line is not UTF-8"))?;
-    let line = line.strip_suffix('\r').unwrap_or(line);
-    if line.chars().all(char::is_whitespace) {
-        return Ok(None);
+fn map_error(error: NdjsonError) -> ModelError {
+    match error {
+        NdjsonError::Limit => stream_limit_error(),
+        NdjsonError::InvalidUtf8 => stream_error("Ollama NDJSON line is not UTF-8"),
     }
-    Ok(Some(line.to_owned()))
 }
 
 #[cfg(test)]

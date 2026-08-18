@@ -975,6 +975,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-provider-gateway"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
