@@ -3,8 +3,8 @@ use std::sync::Arc;
 use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::ModelName;
 use finstack_ai::{
-    AnthropicAgentSpec, ChildRunPolicy, GatewayAgentSpec, LinkedAgentPorts, OllamaAgentSpec,
-    OpenAiAgentSpec,
+    AnthropicAgentSpec, ChildRunPolicy, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgentPorts,
+    OllamaAgentSpec, OpenAiAgentSpec,
 };
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;
@@ -207,6 +207,39 @@ impl Agent {
                 hard_input_bytes,
                 auth_kind: auth,
                 api_key,
+                instruction: None,
+                capabilities: Vec::new(),
+                active_capabilities: Vec::new(),
+                ports: LinkedAgentPorts::default(),
+                child_runs: ChildRunPolicy::Deny,
+            })
+            .await
+            .map(|built| {
+                JsValue::from(Agent {
+                    inner: Arc::new(built.agent),
+                    model: built.model,
+                })
+            })
+            .map_err(|error| agent_error(&error, None))
+        })
+    }
+
+    /// Construct a T4 E2B sandbox agent.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen(js_name = e2bSandbox)]
+    pub fn e2b_sandbox(
+        model: String,
+        api_key: String,
+        endpoint: Option<String>,
+        template: Option<String>,
+    ) -> js_sys::Promise {
+        executor::drive(async move {
+            FacadeAgent::e2b_sandbox(E2bSandboxAgentSpec {
+                model,
+                api_key,
+                endpoint,
+                template,
                 instruction: None,
                 capabilities: Vec::new(),
                 active_capabilities: Vec::new(),

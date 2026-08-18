@@ -192,6 +192,40 @@ def test_gateway_http_credentials_do_not_leak_the_canary() -> None:
     asyncio.run(construct())
 
 
+def test_e2b_sandbox_constructs_without_a_request() -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.e2b_sandbox(
+            "fixture-model",
+            api_key="e2b-secret-canary-045",
+        )
+        assert agent.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_e2b_sandbox_rejects_a_missing_api_key() -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="API key"):
+            await finstack_ai.Agent.e2b_sandbox("fixture-model", api_key="")
+
+    asyncio.run(construct())
+
+
+def test_e2b_sandbox_rejects_plaintext_non_loopback() -> None:
+    canary = "e2b-secret-canary-045"
+
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="plaintext HTTP") as raised:
+            await finstack_ai.Agent.e2b_sandbox(
+                "fixture-model",
+                api_key=canary,
+                endpoint="http://8.8.8.8",
+            )
+        assert canary not in str(raised.value)
+
+    asyncio.run(construct())
+
+
 def test_openai_api_key_is_keyword_only() -> None:
     async def construct() -> None:
         with pytest.raises(TypeError):

@@ -139,6 +139,28 @@ export class Agent {
         return takeObject(ret);
     }
     /**
+     * Construct a T4 E2B sandbox agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * @param {string} model
+     * @param {string} api_key
+     * @param {string | null} [endpoint]
+     * @param {string | null} [template]
+     * @returns {Promise<any>}
+     */
+    static e2bSandbox(model, api_key, endpoint, template) {
+        const ptr0 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(endpoint) ? 0 : passStringToWasm0(endpoint, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len2 = WASM_VECTOR_LEN;
+        var ptr3 = isLikeNone(template) ? 0 : passStringToWasm0(template, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len3 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_e2bSandbox(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        return takeObject(ret);
+    }
+    /**
      * Construct a config-driven gateway agent.
      *
      * wasm-host fails closed with `agent_run_unsupported_plan`.
@@ -2090,7 +2112,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1840(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1849(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2172,13 +2194,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 580, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1826);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 585, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1835);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_425);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_429);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -2210,14 +2232,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_425(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_425(arg0, arg1);
+function __wasm_bindgen_func_elem_429(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_429(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1826(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1835(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1826(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1835(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2228,8 +2250,8 @@ function __wasm_bindgen_func_elem_1826(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1840(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1840(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1849(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1849(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

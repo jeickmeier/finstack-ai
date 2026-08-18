@@ -164,6 +164,28 @@ pub struct GatewayAgentSpec {
     pub child_runs: ChildRunPolicy,
 }
 
+/// Arguments for [`Agent::e2b_sandbox`].
+pub struct E2bSandboxAgentSpec {
+    /// Catalog model name reserved for the constructed agent.
+    pub model: String,
+    /// Explicit E2B API key. Never read from the environment.
+    pub api_key: String,
+    /// Optional HTTPS product endpoint, or loopback HTTP for fixtures.
+    pub endpoint: Option<String>,
+    /// Optional sandbox template. Defaults to `base`.
+    pub template: Option<String>,
+    /// Optional system instruction.
+    pub instruction: Option<String>,
+    /// Declarative catalog entries.
+    pub capabilities: Vec<CapabilitySpec>,
+    /// Application activations selected at construct time.
+    pub active_capabilities: Vec<CapabilityId>,
+    /// Binding-resolved ports.
+    pub ports: LinkedAgentPorts,
+    /// Child-run policy. Bindings default this to Deny.
+    pub child_runs: ChildRunPolicy,
+}
+
 impl Agent {
     /// Construct an official `OpenAI` Responses agent.
     ///
@@ -218,6 +240,21 @@ impl Agent {
     /// `hard_input_bytes`, or credential pairing is invalid.
     pub async fn gateway(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
         gateway_inner(spec).await
+    }
+
+    /// Construct an agent that registers the T4 E2B sandbox Toolset.
+    ///
+    /// Reuses `finstack-ai-sandbox-e2b` under `native-tokio` only. Does not
+    /// read environment variables. Construction fails without an explicit API
+    /// key. Non-loopback endpoints must be HTTPS.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
+    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the API key or endpoint
+    /// is invalid.
+    pub async fn e2b_sandbox(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+        e2b_sandbox_inner(spec).await
     }
 }
 
@@ -432,6 +469,60 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
     .await
 }
 
+#[cfg(feature = "native-tokio")]
+async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    use finstack_ai_sandbox_e2b::{E2bSandboxConfig, E2bSandboxError, E2bSandboxToolset};
+
+    if spec.api_key.is_empty() {
+        return Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "e2b sandbox construction requires an explicit API key",
+        ));
+    }
+    let model_name = ModelName::try_new(&spec.model).map_err(|error| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            format!("{}: {}", error.code(), error.message()),
+        )
+    })?;
+    let toolset = E2bSandboxToolset::try_new(E2bSandboxConfig {
+        api_key: spec.api_key,
+        endpoint: spec.endpoint.unwrap_or_default(),
+        template: spec.template,
+    })
+    .map_err(|error| match error {
+        E2bSandboxError::CredentialRequired => AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "e2b sandbox construction requires an explicit API key",
+        ),
+        E2bSandboxError::EndpointInvalid { reason } => {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, reason)
+        }
+    })?;
+    let mut ports = spec.ports;
+    ports
+        .toolsets
+        .push((component("python.toolset.e2b")?, Arc::new(toolset)));
+    let provider: Arc<dyn Model> = Arc::new(E2bCatalogModel {
+        name: model_name.clone(),
+    });
+    finish_linked_agent(
+        "python.agent.e2b",
+        "python.bundle.e2b",
+        "python.model.e2b",
+        provider,
+        model_name,
+        spec.instruction,
+        spec.capabilities,
+        spec.active_capabilities,
+        ports,
+        spec.child_runs,
+        empty_model_settings()?,
+        DEFAULT_TIMEOUT,
+    )
+    .await
+}
+
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 #[expect(
     clippy::unused_async,
@@ -466,6 +557,15 @@ async fn ollama_inner(_spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErr
 )]
 async fn gateway_inner(_spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported("gateway")
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+#[expect(
+    clippy::unused_async,
+    reason = "wasm-host keeps the same async signature as native-tokio"
+)]
+async fn e2b_sandbox_inner(_spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported("e2b_sandbox")
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -681,6 +781,101 @@ fn reasoning_settings(
         })
 }
 
+#[cfg(feature = "native-tokio")]
+struct E2bCatalogModel {
+    name: ModelName,
+}
+
+#[cfg(feature = "native-tokio")]
+impl Model for E2bCatalogModel {
+    fn descriptor(&self) -> finstack_ai_runtime::ModelDescriptor {
+        finstack_ai_runtime::ModelDescriptor {
+            provider: Arc::from("e2b"),
+            models: Arc::from([self.name.clone()]),
+            metadata: finstack_ai_runtime::Metadata::empty(),
+        }
+    }
+
+    fn capabilities(&self, model: &ModelName) -> finstack_ai_runtime::ModelCapabilities {
+        use std::collections::BTreeSet;
+
+        use finstack_ai_runtime::{
+            InputCapabilities, ModelCapabilities, ModelContextProfile, StructuredOutputCapability,
+            TokenEstimatorRef, TokenEstimatorSource,
+        };
+
+        ModelCapabilities {
+            input: InputCapabilities {
+                text: true,
+                json: true,
+                images: false,
+                audio: false,
+                files: false,
+            },
+            context_profile: ModelContextProfile {
+                provider: Arc::from("e2b"),
+                model: model.clone(),
+                hard_input_bytes: LINKED_CONTEXT_WINDOW_TOKENS,
+                context_window_tokens: LINKED_CONTEXT_WINDOW_TOKENS,
+                max_output_tokens: LINKED_RESERVED_OUTPUT_TOKENS,
+                reserved_output_tokens: LINKED_RESERVED_OUTPUT_TOKENS,
+                provider_overhead_tokens: LINKED_PROVIDER_OVERHEAD_TOKENS,
+                estimator: TokenEstimatorRef {
+                    id: Arc::from("e2b.utf8-byte-upper-bound"),
+                    version: Arc::from("1"),
+                    source: TokenEstimatorSource::ConservativeUpperBound,
+                },
+            },
+            native_tool_calls: true,
+            parallel_tool_calls: false,
+            structured_output: StructuredOutputCapability::Unsupported,
+            reasoning: false,
+            prompt_cache: false,
+            resumable_stream: false,
+            idempotent_requests: false,
+            native_capabilities: BTreeSet::new(),
+        }
+    }
+
+    fn estimate_input_tokens(
+        &self,
+        _model: &ModelName,
+        canonical_request: &[u8],
+    ) -> Result<finstack_ai_runtime::ModelTokenEstimate, finstack_ai_runtime::ModelError> {
+        use finstack_ai_runtime::{ModelTokenEstimate, TokenEstimatorRef, TokenEstimatorSource};
+
+        Ok(ModelTokenEstimate {
+            input_tokens: u64::try_from(canonical_request.len()).unwrap_or(u64::MAX),
+            estimator: TokenEstimatorRef {
+                id: Arc::from("e2b.utf8-byte-upper-bound"),
+                version: Arc::from("1"),
+                source: TokenEstimatorSource::ConservativeUpperBound,
+            },
+        })
+    }
+
+    fn request(
+        &self,
+        _request: finstack_ai_runtime::ModelRequest,
+    ) -> finstack_ai_runtime::PortFuture<
+        Result<finstack_ai_runtime::ModelEventStream, finstack_ai_runtime::ModelError>,
+    > {
+        use finstack_ai_kernel::ErrorCategory;
+        use finstack_ai_runtime::{MODEL_REQUEST_INVALID, ModelError};
+
+        Box::pin(async {
+            Err(ModelError::try_new(
+                MODEL_REQUEST_INVALID,
+                ErrorCategory::Validation,
+                false,
+                "e2b_sandbox registers the T4 toolset and does not invoke a model",
+                finstack_ai_runtime::Metadata::empty(),
+            )
+            .unwrap_or_else(Into::into))
+        })
+    }
+}
+
 #[cfg(all(test, feature = "native-tokio"))]
 mod tests {
     use super::*;
@@ -843,5 +1038,44 @@ mod tests {
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("HTTPS"));
         assert!(!error.to_string().contains(canary));
+    }
+
+    fn e2b_spec() -> E2bSandboxAgentSpec {
+        E2bSandboxAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "e2b-secret-canary-045".into(),
+            endpoint: Some("https://api.e2b.dev".into()),
+            template: None,
+            instruction: None,
+            capabilities: Vec::new(),
+            active_capabilities: Vec::new(),
+            ports: LinkedAgentPorts::default(),
+            child_runs: ChildRunPolicy::Deny,
+        }
+    }
+
+    #[tokio::test]
+    async fn e2b_sandbox_constructs_without_a_network_request() {
+        let built = Agent::e2b_sandbox(e2b_spec()).await.expect("e2b construct");
+        assert!(built.agent.capability_catalog().is_empty());
+    }
+
+    #[tokio::test]
+    async fn e2b_sandbox_rejects_a_missing_api_key() {
+        let mut spec = e2b_spec();
+        spec.api_key.clear();
+        let error = Agent::e2b_sandbox(spec).await.err().expect("missing key");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("API key"));
+    }
+
+    #[tokio::test]
+    async fn e2b_sandbox_rejects_plaintext_non_loopback() {
+        let mut spec = e2b_spec();
+        spec.endpoint = Some("http://8.8.8.8".into());
+        let error = Agent::e2b_sandbox(spec).await.err().expect("plaintext");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("plaintext HTTP"));
+        assert!(!error.to_string().contains("e2b-secret-canary-045"));
     }
 }

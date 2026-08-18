@@ -753,6 +753,7 @@ dependencies = [
  "finstack-ai-provider-openai",
  "finstack-ai-remote-child",
  "finstack-ai-runtime",
+ "finstack-ai-sandbox-e2b",
  "finstack-ai-store-memory",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
@@ -1064,6 +1065,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "finstack-ai-sandbox-e2b"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

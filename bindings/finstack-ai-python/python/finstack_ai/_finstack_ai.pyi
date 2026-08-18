@@ -923,6 +923,54 @@ class Agent:
                 invalid.
         """
     @staticmethod
+    async def e2b_sandbox(
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        api_key: str,
+        endpoint: str | None = None,
+        template: str | None = None,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+    ) -> Agent:
+        """Build a Rust-backed T4 E2B sandbox agent.
+
+        Registers the E2B Toolset. This factory does not read environment
+        variables. Construction fails without ``api_key``. Non-loopback
+        endpoints must be HTTPS. The leaf is not Landlock and is not isolated.
+
+        Args:
+            model: Catalog model name reserved for the constructed agent.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            api_key: Explicit E2B credential.
+            endpoint: Optional HTTPS product endpoint, or loopback HTTP for
+                fixtures. Defaults to ``https://api.e2b.dev``.
+            template: Optional sandbox template. Defaults to ``base``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The API key, endpoint, capability set, or port
+                registration is invalid.
+        """
+    @staticmethod
     async def from_python(
         model: PythonModel,
         toolsets: list[PythonToolset] | None = None,
