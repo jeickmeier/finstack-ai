@@ -74,7 +74,9 @@ use std::sync::Arc;
 use crate::middleware::MiddlewareError;
 use crate::run_types::RunHandleError;
 
-pub(crate) use driver::{settle_facade_stage_with_model, stage_driver, submit_command};
+#[cfg(test)]
+pub(crate) use driver::settle_facade_stage_with_model;
+pub(crate) use driver::{stage_driver, submit_command};
 pub(crate) use submit::submit_folded;
 pub(crate) use tool_batch::{ToolBatchPolicy, run_tool_batch_chain};
 

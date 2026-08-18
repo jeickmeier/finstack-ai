@@ -222,6 +222,10 @@ impl PostCommitDispatcher for ModelDispatcher {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the native job loop keeps model, queues, clock, and retry policy contiguous"
+)]
 pub(crate) async fn run_model_jobs<C>(
     model: Arc<dyn Model>,
     assembler: ModelStreamAssembler,
@@ -425,9 +429,24 @@ fn same_identity_retryable(error: &ModelError) -> bool {
 }
 
 fn retry_after_wait(error: &ModelError) -> Duration {
-    parse_retry_after_seconds(error.metadata())
-        .map(Duration::from_secs)
-        .unwrap_or(Duration::ZERO)
+    parse_retry_after_seconds(error.metadata()).map_or(Duration::ZERO, Duration::from_secs)
+}
+
+fn finite_seconds_to_u64(seconds: f64) -> Option<u64> {
+    if !seconds.is_finite() || seconds.is_sign_negative() {
+        return None;
+    }
+    let ceiled = seconds.ceil();
+    // 2^53 is the largest integer f64 can represent exactly.
+    if ceiled >= 9_007_199_254_740_992.0 {
+        return None;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "retry-after is clamped to a non-negative finite second count"
+    )]
+    Some(ceiled as u64)
 }
 
 fn parse_retry_after_seconds(metadata: &Metadata) -> Option<u64> {
@@ -439,7 +458,7 @@ fn parse_retry_after_seconds(metadata: &Metadata) -> Option<u64> {
     match raw {
         serde_json::Value::Number(number) => number
             .as_u64()
-            .or_else(|| number.as_f64().map(|seconds| seconds.ceil() as u64)),
+            .or_else(|| number.as_f64().and_then(finite_seconds_to_u64)),
         serde_json::Value::String(text) => text.parse().ok(),
         _ => None,
     }
@@ -503,6 +522,10 @@ async fn emit_attempt_heartbeat(
         .map_err(|_| progress_delivery_error())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "same-identity retry keeps the committed request, progress sink, and deadline together"
+)]
 async fn request_with_same_identity_retry<C>(
     model: Arc<dyn Model>,
     request: ModelRequest,

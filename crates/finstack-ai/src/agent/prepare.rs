@@ -188,6 +188,7 @@ impl Agent {
         Ok(prepared)
     }
 
+    #[cfg(feature = "native-tokio")]
     pub(super) fn prepare_accepted(
         &self,
         request: AgentRunRequest,

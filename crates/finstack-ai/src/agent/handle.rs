@@ -393,6 +393,7 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a configuration or runtime failure when the child cannot start.
+    #[cfg(feature = "native-tokio")]
     pub(super) fn start_prepared(
         &self,
         request: AgentRunRequest,

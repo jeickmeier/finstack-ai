@@ -427,6 +427,10 @@ where
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the wasm owner interleaves command intake with one in-flight model or tool drive"
+)]
 async fn drive_accepting_commands<C, R, T>(
     coordinator: &mut CommitCoordinator,
     intake: &CommandIntake,
