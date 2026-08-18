@@ -109,13 +109,11 @@ where
     }
 }
 
-pub(super) async fn arm_due_poll_wait<C: Clock, R: RandomSource>(
+pub(super) async fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
-    sources: &SettlementSources<C, R>,
     schedules: &mpsc::Sender<Option<Timestamp>>,
 ) -> Result<(), RunHandleError> {
-    let now = sources.now()?;
-    let deadline = next_due_poll_or_expiry(coordinator.state()).filter(|deadline| *deadline > now);
+    let deadline = next_due_poll_or_expiry(coordinator.state());
     schedules
         .send(deadline)
         .await
@@ -124,11 +122,21 @@ pub(super) async fn arm_due_poll_wait<C: Clock, R: RandomSource>(
         })
 }
 
+pub(super) enum DuePollWake {
+    Due,
+    ConstructionFailed,
+}
+
+enum DuePollWait {
+    Waiting(MonotonicDeadline),
+    Due,
+}
+
 async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
     clock: Arc<C>,
     cancellation: CancellationSignal,
     mut schedules: mpsc::Receiver<Option<Timestamp>>,
-    fired: mpsc::Sender<()>,
+    fired: mpsc::Sender<DuePollWake>,
 ) {
     let mut wait: Option<MonotonicDeadline> = None;
     loop {
@@ -137,10 +145,25 @@ async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
                 () = cancellation.cancelled() => break,
                 schedule = schedules.recv() => {
                     let Some(schedule) = schedule else { break; };
-                    wait = schedule.and_then(|deadline| due_poll_wait(clock.as_ref(), deadline));
+                    match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
+                        Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
+                        Some(Ok(DuePollWait::Due)) => {
+                            if fired.send(DuePollWake::Due).await.is_err() {
+                                break;
+                            }
+                            wait = None;
+                        }
+                        Some(Err(())) => {
+                            if fired.send(DuePollWake::ConstructionFailed).await.is_err() {
+                                break;
+                            }
+                            wait = None;
+                        }
+                        None => wait = None,
+                    }
                 }
                 () = active.wait() => {
-                    if fired.send(()).await.is_err() {
+                    if fired.send(DuePollWake::Due).await.is_err() {
                         break;
                     }
                     wait = None;
@@ -151,18 +174,34 @@ async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
                 () = cancellation.cancelled() => break,
                 schedule = schedules.recv() => {
                     let Some(schedule) = schedule else { break; };
-                    wait = schedule.and_then(|deadline| due_poll_wait(clock.as_ref(), deadline));
+                    match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
+                        Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
+                        Some(Ok(DuePollWait::Due)) => {
+                            if fired.send(DuePollWake::Due).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(Err(()))
+                            if fired.send(DuePollWake::ConstructionFailed).await.is_err() =>
+                        {
+                            break;
+                        }
+                        Some(Err(())) | None => {}
+                    }
                 }
             }
         }
     }
 }
 
-fn due_poll_wait(clock: &impl Clock, deadline: Timestamp) -> Option<MonotonicDeadline> {
-    let scheduled_at = clock.now().ok()?;
-    (deadline > scheduled_at)
-        .then(|| MonotonicDeadline::from_persisted(clock, scheduled_at, deadline).ok())
-        .flatten()
+fn due_poll_wait(clock: &impl Clock, deadline: Timestamp) -> Result<DuePollWait, ()> {
+    let scheduled_at = clock.now().map_err(|_| ())?;
+    if deadline <= scheduled_at {
+        return Ok(DuePollWait::Due);
+    }
+    MonotonicDeadline::from_persisted(clock, scheduled_at, deadline)
+        .map(DuePollWait::Waiting)
+        .map_err(|_| ())
 }
 
 /// Single owner of all tasks spawned for one run.
@@ -319,6 +358,13 @@ impl RunTaskOwner {
                 .resume(seed)
                 .await
                 .map_err(|error| RunHandleError::Timer { code: error.code })?;
+        }
+        if !cancelling && next_due_poll_or_expiry(coordinator.state()).is_some() {
+            // This constructor has no tool catalog to reconcile committed deferred
+            // effects. Refuse startup rather than silently discarding their deadline.
+            return Err(RunHandleError::Tool {
+                code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+            });
         }
         if cancelling {
             drain_idle_cancellation(&mut coordinator, &sources, true).await?;
@@ -579,7 +625,7 @@ impl RunTaskOwner {
                 &tool_batch_cancellation,
             )
             .await?;
-            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedule_sender).await?;
+            arm_due_poll_wait(&coordinator, &due_poll_schedule_sender).await?;
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);

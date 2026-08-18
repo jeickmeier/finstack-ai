@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::fault::{fault_worker, model_runtime_fault, result_fault_code, runtime_fault};
-use super::owner::arm_due_poll_wait;
+use super::owner::{DuePollWake, arm_due_poll_wait};
 use super::shared::{RunCommand, Shared};
 
 pub(super) async fn run_worker(
@@ -189,7 +189,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut model_results: mpsc::Receiver<ModelDriverMessage>,
     mut tool_results: mpsc::Receiver<ToolDriverMessage>,
     mut timer_results: mpsc::Receiver<TimerDriverMessage>,
-    mut due_poll_fired: mpsc::Receiver<()>,
+    mut due_poll_fired: mpsc::Receiver<DuePollWake>,
     due_poll_schedules: mpsc::Sender<Option<finstack_ai_kernel::Timestamp>>,
     due_poll_cancellation: crate::CancellationSignal,
     shared: Arc<Shared>,
@@ -281,7 +281,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                             }
                         }
                         if let Err(error) =
-                            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedules).await
+                            arm_due_poll_wait(&coordinator, &due_poll_schedules).await
                         {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
@@ -311,7 +311,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
             }
             fired = due_poll_fired.recv(), if due_poll_path_open => {
                 match fired {
-                    Some(()) => {
+                    Some(DuePollWake::Due) => {
                         if shared.shutting_down.load(Ordering::Acquire) {
                             continue;
                         }
@@ -323,13 +323,17 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                                 &due_poll_cancellation,
                             )
                             .await?;
-                            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedules).await
+                            arm_due_poll_wait(&coordinator, &due_poll_schedules).await
                         }
                         .await;
                         if let Err(error) = result {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
                         }
+                    }
+                    Some(DuePollWake::ConstructionFailed) => {
+                        fault_worker(&shared, &mut receiver, "poll_wait_construction_failed");
+                        break;
                     }
                     None => due_poll_path_open = false,
                 }

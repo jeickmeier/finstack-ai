@@ -94,6 +94,44 @@ async fn deferred_poll_reconciles_when_due_and_rearms_until_completion() {
 }
 
 #[tokio::test]
+async fn deferred_poll_immediately_due_after_first_pass_rearms_live_until_completion() {
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", 2_000, None),
+        )))],
+    };
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![plan],
+        vec![
+            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_000, None)),
+            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_000, None)),
+            ToolReconcileResult::Completed(tool_result(3)),
+        ],
+        spec,
+    );
+    let mut owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        2_000,
+        815,
+    )
+    .await
+    .expect("owner");
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
+    assert_eq!(toolset.reconcile_count(), 3);
+    assert_eq!(settled.state().tool_settlements.len(), 1);
+
+    owner.shutdown().await;
+}
+
+#[tokio::test]
 async fn deferred_poll_expiry_fails_without_reconciliation() {
     let mut spec = tool_spec("echo");
     spec.deferral = ToolDeferralSupport::Supported;
