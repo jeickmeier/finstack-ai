@@ -26,9 +26,11 @@ unpublished.
   run-start variant without re-resolving the agent (ADR-041). Python
   `Capability` stays instruction-only. Prompt-cache invalidation after
   activation is recorded, not solved.
-- `finstack-ai-tools-mcp` is an opt-in MCP client Toolset for protocol
-  revision `2026-07-28` (`tools/list` + `Toolset::call` only; sampling,
-  elicitation, and resources are not implemented).
+- `finstack-ai-tools-mcp` is an opt-in MCP client Toolset and
+  `ContextProvider` for protocol revision `2026-07-28` (`tools/list` +
+  `Toolset::call`; `resources/list` snapshot + untrusted collect).
+  Sampling and elicitation stay unimplemented. The default `finstack-ai`
+  crate does not depend on this leaf.
 - `Lane::run` / `suspend` / `resume` complete the PR-047 minimum verbs:
   idle `run` uses the existing `Agent::start_on_lane` / `AcceptRun` path,
   `suspend` parks the driver without dropping the journal, and `resume`

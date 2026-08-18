@@ -98,6 +98,64 @@ pub(crate) struct ToolAnnotations {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ListResourcesResult {
+    #[serde(default)]
+    pub(crate) result_type: ResultType,
+    #[serde(default)]
+    pub(crate) resources: Vec<Resource>,
+    /// Opaque. An EMPTY STRING is a valid cursor — terminate only on `None`.
+    #[serde(default)]
+    pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Resource {
+    pub(crate) uri: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "accepted from the wire snapshot; not mapped onto ContextItem authority"
+    )]
+    pub(crate) title: Option<String>,
+    #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "accepted from the wire snapshot; not mapped onto ContextItem authority"
+    )]
+    pub(crate) description: Option<String>,
+    #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "accepted from the wire snapshot; not mapped onto ContextItem authority"
+    )]
+    pub(crate) mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReadResourceResult {
+    #[serde(default)]
+    pub(crate) result_type: ResultType,
+    #[serde(default)]
+    pub(crate) contents: Vec<ResourceContents>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResourceContents {
+    pub(crate) uri: String,
+    #[serde(default)]
+    pub(crate) mime_type: Option<String>,
+    #[serde(default)]
+    pub(crate) text: Option<String>,
+    #[serde(default)]
+    pub(crate) blob: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CallToolResult {
     #[serde(default)]
     pub(crate) result_type: ResultType,
@@ -193,5 +251,12 @@ mod tests {
         let json = r#"{"tools":[]}"#;
         let result: ListToolsResult = serde_json::from_str(json).expect("parses");
         assert_eq!(result.result_type, ResultType::Complete);
+    }
+
+    #[test]
+    fn empty_string_resource_cursor_is_a_valid_cursor() {
+        let json = r#"{"resultType":"complete","resources":[],"nextCursor":""}"#;
+        let result: ListResourcesResult = serde_json::from_str(json).expect("parses");
+        assert_eq!(result.next_cursor.as_deref(), Some(""));
     }
 }

@@ -1,7 +1,9 @@
-//! Model Context Protocol client implementation of the public `Toolset` port.
+//! Model Context Protocol client implementation of the public `Toolset` and
+//! `ContextProvider` ports.
 //!
 //! Protocol revision `2026-07-28`. There is no `initialize` handshake.
-//! Sampling, elicitation, and `resources/*` are not implemented.
+//! Sampling and elicitation are not implemented. An MCP server is not an
+//! application-instruction authority.
 
 #![warn(missing_docs)]
 
@@ -18,11 +20,13 @@ use thiserror::Error;
 
 mod classify;
 mod protocol;
+mod resources;
 mod transport;
 
 #[cfg(test)]
 mod tests;
 
+pub use resources::McpContextProvider;
 pub use transport::{HttpConfig, StdioConfig};
 
 use classify::{catalog_digest, enumerate_catalog, invocation_digest, to_tool_spec};
@@ -45,6 +49,7 @@ pub const MCP_LIMIT_EXCEEDED: &str = "mcp_limit_exceeded";
 pub const MCP_ARTIFACT_REQUIRED: &str = "mcp_artifact_required";
 
 const DEFAULT_INLINE_RESULT_BYTES: u64 = 64 * 1024;
+const CONTEXT_PROVIDER_COMPONENT: &str = "finstack.context.mcp";
 
 /// Host-supplied MCP client configuration.
 ///
@@ -183,7 +188,7 @@ impl McpConfig {
         self.is_read_only(name) || self.is_idempotent(name)
     }
 
-    fn identity(&self) -> String {
+    pub(crate) fn identity(&self) -> String {
         match &self.server {
             Some(McpServerSpec::Stdio(config)) => format!("stdio:{}", config.identity()),
             Some(McpServerSpec::Http(config)) => format!("http:{}", config.url()),
@@ -221,17 +226,47 @@ impl McpToolsetFactory {
     /// Fails when the server is not allowlisted, transport setup fails, or
     /// `tools/list` violates protocol rules.
     pub async fn construct(&self) -> Result<McpToolset, McpError> {
-        let transport: Arc<dyn McpTransport> = match &self.config.server {
-            Some(McpServerSpec::Stdio(config)) => Arc::new(StdioTransport::try_spawn(config)?),
-            Some(McpServerSpec::Http(config)) => Arc::new(HttpTransport::try_new(config)?),
-            None => {
-                return Err(McpError::stable(
-                    MCP_SERVER_NOT_ALLOWLISTED,
-                    "MCP factory requires an allowlisted server",
-                ));
-            }
-        };
+        let transport = self.open_transport()?;
         McpToolset::connect(transport, self.config.clone()).await
+    }
+
+    /// Enumerate `resources/list` once and freeze the context-provider snapshot.
+    ///
+    /// Mid-run list changes are ignored. The provider never sets
+    /// `trusted_application_instructions`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the server is not allowlisted, transport setup fails, or
+    /// `resources/list` violates protocol rules.
+    pub async fn construct_context_provider(&self) -> Result<McpContextProvider, McpError> {
+        let transport = self.open_transport()?;
+        McpContextProvider::connect(transport, &self.config).await
+    }
+
+    /// Enumerate tools and resources on one shared transport.
+    ///
+    /// # Errors
+    ///
+    /// Fails when either catalog freeze fails.
+    pub async fn construct_with_context(
+        &self,
+    ) -> Result<(McpToolset, McpContextProvider), McpError> {
+        let transport = self.open_transport()?;
+        let toolset = McpToolset::connect(Arc::clone(&transport), self.config.clone()).await?;
+        let provider = McpContextProvider::connect(transport, &self.config).await?;
+        Ok((toolset, provider))
+    }
+
+    fn open_transport(&self) -> Result<Arc<dyn McpTransport>, McpError> {
+        match &self.config.server {
+            Some(McpServerSpec::Stdio(config)) => Ok(Arc::new(StdioTransport::try_spawn(config)?)),
+            Some(McpServerSpec::Http(config)) => Ok(Arc::new(HttpTransport::try_new(config)?)),
+            None => Err(McpError::stable(
+                MCP_SERVER_NOT_ALLOWLISTED,
+                "MCP factory requires an allowlisted server",
+            )),
+        }
     }
 }
 

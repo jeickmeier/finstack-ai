@@ -1,10 +1,10 @@
 # finstack-ai-tools-mcp
 
 Trusted native Model Context Protocol client behind the public `Toolset`
-port. The crate speaks protocol revision **`2026-07-28`**. There is **no
-`initialize` handshake** — `initialize` and `notifications/initialized`
-were removed by SEP-2575. Every request carries `params._meta` with
-`io.modelcontextprotocol/protocolVersion` and
+and `ContextProvider` ports. The crate speaks protocol revision
+**`2026-07-28`**. There is **no `initialize` handshake** — `initialize`
+and `notifications/initialized` were removed by SEP-2575. Every request
+carries `params._meta` with `io.modelcontextprotocol/protocolVersion` and
 `io.modelcontextprotocol/clientCapabilities`.
 
 This is a third-party protocol client, **not** the finstack process-plugin
@@ -15,7 +15,8 @@ deny-by-default allowlist at construction.
 ## Scope
 
 Implemented: `tools/list` at construction and `Toolset::call` for
-`tools/call`.
+`tools/call`; `resources/list` at construction and a `ContextProvider`
+that `resources/read`s only the frozen names.
 
 Not implemented:
 
@@ -24,15 +25,21 @@ Not implemented:
   profile, no budget parent, and an effect graph the kernel cannot
   linearize. Sampling is unsupported and will stay unsupported.
 - Elicitation / MRTR (`input_required`).
-- `resources/list` / `ContextProvider`.
-- Mid-run catalog mutation. `notifications/tools/list_changed` is
-  observer-only; adopters who need new tools re-resolve the agent.
+- Mid-run catalog mutation. `notifications/tools/list_changed` and
+  `notifications/resources/list_changed` are observer-only; adopters who
+  need new tools or resources re-resolve the agent.
+
+An MCP server is not an application-instruction authority. Every MCP
+resource provider sets `trusted_application_instructions` to `false`.
 
 ## Catalog freeze
 
 `tools/list` runs inside `McpToolsetFactory::construct` /
 `McpToolset::connect` exactly once. The resulting `Arc<[ToolSpec]>` is
-frozen. The run hot path does no network and no registry work.
+frozen. `resources/list` runs inside
+`McpToolsetFactory::construct_context_provider` /
+`McpContextProvider::connect` exactly once. `collect` fetches only those
+frozen names. The run hot path does no registry work.
 
 ## Classification
 

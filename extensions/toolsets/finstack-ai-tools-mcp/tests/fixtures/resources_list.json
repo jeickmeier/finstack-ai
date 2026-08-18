@@ -1,0 +1,11 @@
+{
+  "resultType": "complete",
+  "resources": [
+    {
+      "uri": "mcp://fixture/notes",
+      "name": "notes",
+      "title": "Notes",
+      "mimeType": "text/plain"
+    }
+  ]
+}

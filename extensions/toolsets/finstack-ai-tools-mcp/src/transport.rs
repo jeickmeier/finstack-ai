@@ -56,6 +56,7 @@ pub(crate) fn with_meta(mut params: serde_json::Value) -> serde_json::Value {
 #[cfg(test)]
 pub(crate) struct ScriptedTransport {
     responses: Mutex<VecDeque<Result<serde_json::Value, McpError>>>,
+    methods: Mutex<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -63,6 +64,7 @@ impl ScriptedTransport {
     pub(crate) fn new(responses: Vec<serde_json::Value>) -> Self {
         Self {
             responses: Mutex::new(responses.into_iter().map(Ok).collect()),
+            methods: Mutex::new(Vec::new()),
         }
     }
 
@@ -72,7 +74,15 @@ impl ScriptedTransport {
                 MCP_PROTOCOL_VIOLATION,
                 format!("jsonrpc {code} {message}"),
             ))])),
+            methods: Mutex::new(Vec::new()),
         }
+    }
+
+    pub(crate) fn called_methods(&self) -> Vec<String> {
+        self.methods
+            .lock()
+            .map(|methods| methods.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -80,10 +90,14 @@ impl ScriptedTransport {
 impl McpTransport for ScriptedTransport {
     fn request(
         &self,
-        _method: &str,
+        method: &str,
         params: serde_json::Value,
     ) -> BoxFuture<'_, Result<serde_json::Value, McpError>> {
+        let method = method.to_owned();
         Box::pin(async move {
+            if let Ok(mut methods) = self.methods.lock() {
+                methods.push(method);
+            }
             let params = with_meta(params);
             let version = params
                 .get("_meta")

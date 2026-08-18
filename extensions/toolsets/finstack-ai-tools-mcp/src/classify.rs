@@ -12,7 +12,7 @@ use crate::protocol::{ListToolsResult, ResultType, Tool};
 use crate::transport::McpTransport;
 use crate::{MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError};
 
-const MAX_LIST_PAGES: usize = 64;
+pub(crate) const MAX_LIST_PAGES: usize = 64;
 const TOOL_ID_PREFIX: &str = "mcp.";
 
 pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Vec<Tool>, McpError> {

@@ -1,13 +1,18 @@
 use std::sync::Arc;
 
 use finstack_ai_runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, Digest, EffectOutputContract,
-    EffectOutputKind, LaneId, Metadata, OperationLocator, PendingToolEffect, PrincipalRef,
-    ReconcileContext, RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass, ToolBatchId,
-    ToolCallBlock, ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult,
-    ToolStreamItem, ToolStreamLimits, Toolset, ValidatedToolCall,
+    AssembledToolStream, AuthorizationContext, CancellationSignal, ContentBlock, ContextAuthority,
+    ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider,
+    ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+    OperationLocator, PendingToolEffect, PrincipalRef, ReconcileContext, RetrySafety,
+    RunCallContext, RunId, SessionId, SideEffectClass, TextBlock, ToolBatchId, ToolCallBlock,
+    ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult, ToolStreamItem,
+    ToolStreamLimits, Toolset, ValidatedToolCall,
 };
-use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
+use finstack_ai_test::{
+    ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
+    check_toolset_conformance,
+};
 use futures_util::StreamExt;
 
 use super::*;
@@ -315,4 +320,366 @@ fn invocation_digest_covers_server_identity_and_tool_names() {
 
 fn invocation_digest_for(identity: &str, tools: &[Tool]) -> Digest {
     crate::classify::invocation_digest(identity, tools)
+}
+
+fn context_call() -> ContextCallContext {
+    ContextCallContext {
+        run: RunCallContext {
+            locator: OperationLocator::try_new(
+                "tenant-a",
+                SessionId::from_bytes([1; 16]),
+                LaneId::from_bytes([2; 16]),
+                RunId::from_bytes([3; 16]),
+            )
+            .expect("locator"),
+            authorization: AuthorizationContext {
+                principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                    .expect("principal"),
+                authentication_method: Arc::from("test"),
+                assurance_level: Arc::from("test"),
+                roles: Arc::from([]),
+                permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from("policy-v1"),
+                decision_id: Arc::from("decision-v1"),
+            },
+            effect_id: EffectId::from_bytes([4; 16]),
+            attempt: 1,
+            deadline: None,
+            budget_scope_id: None,
+            cancellation: CancellationSignal::new(),
+        },
+        provider_index: 0,
+        chain_digest: Digest::raw_json(b"mcp-context-chain"),
+    }
+}
+
+fn context_request() -> ContextRequest {
+    ContextRequest {
+        session_id: SessionId::from_bytes([1; 16]),
+        lane_id: LaneId::from_bytes([2; 16]),
+        run_id: RunId::from_bytes([3; 16]),
+        user_input: Arc::from([ContentBlock::Text(
+            TextBlock::try_new("hello").expect("text"),
+        )]),
+        recent_history: Arc::from([]),
+        budget: ContextBudget {
+            max_items: 8,
+            max_tokens: 1_000,
+            max_bytes: 64 * 1024,
+            overflow: ContextOverflowPolicy::Reject,
+        },
+        active_capabilities: Arc::from([]),
+    }
+}
+
+fn listed_resource(name: &str, uri: &str) -> serde_json::Value {
+    serde_json::json!({
+        "resultType": "complete",
+        "resources": [{
+            "uri": uri,
+            "name": name,
+            "title": name,
+            "mimeType": "text/plain"
+        }]
+    })
+}
+
+fn read_resource(uri: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "resultType": "complete",
+        "contents": [{
+            "uri": uri,
+            "mimeType": "text/plain",
+            "text": text
+        }]
+    })
+}
+
+#[test]
+fn mcp_resource_provider_is_never_trusted_application_instructions() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let provider = runtime.block_on(async {
+        let transport =
+            ScriptedTransport::new(vec![listed_resource("notes", "mcp://fixture/notes")]);
+        McpContextProvider::connect(Arc::new(transport), &McpConfig::default())
+            .await
+            .expect("connects")
+    });
+    assert!(!provider.descriptor().trusted_application_instructions);
+}
+
+#[tokio::test]
+async fn resource_pagination_follows_cursors_including_the_empty_string() {
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({
+            "resultType":"complete",
+            "resources":[{"uri":"mcp://a","name":"a"}],
+            "nextCursor":""
+        }),
+        serde_json::json!({
+            "resultType":"complete",
+            "resources":[{"uri":"mcp://b","name":"b"}]
+        }),
+    ]);
+    let listed = crate::resources::enumerate_resources(&transport)
+        .await
+        .expect("enumerates");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|resource| resource.name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+}
+
+#[tokio::test]
+async fn factory_context_provider_rejects_a_server_that_is_not_allowlisted() {
+    let result = McpToolsetFactory::new(McpConfig::default())
+        .construct_context_provider()
+        .await;
+    let Err(error) = result else {
+        panic!("deny by default");
+    };
+    assert!(format!("{error}").contains(MCP_SERVER_NOT_ALLOWLISTED));
+}
+
+#[tokio::test]
+async fn mid_run_resource_list_changes_are_ignored() {
+    let transport = Arc::new(ScriptedTransport::new(vec![
+        listed_resource("notes", "mcp://fixture/notes"),
+        read_resource("mcp://fixture/notes", "remember this note"),
+        listed_resource("later", "mcp://fixture/later"),
+    ]));
+    let provider = McpContextProvider::connect(
+        Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
+        &McpConfig::default(),
+    )
+    .await
+    .expect("connects");
+    assert_eq!(provider.frozen_names(), ["notes"]);
+    let contribution = provider
+        .collect(context_call(), context_request())
+        .await
+        .expect("collect");
+    assert_eq!(contribution.items.len(), 1);
+    assert_eq!(contribution.items[0].kind, ContextItemKind::QuotedSource);
+    assert_eq!(contribution.items[0].authority, ContextAuthority::Untrusted);
+    assert_eq!(
+        contribution.items[0].provenance.source_ref.as_deref(),
+        Some("mcp://fixture/notes")
+    );
+    assert_eq!(
+        transport.called_methods(),
+        ["resources/list", "resources/read"]
+    );
+}
+
+async fn notes_provider() -> McpContextProvider {
+    let transport = ScriptedTransport::new(vec![
+        listed_resource("notes", "mcp://fixture/notes"),
+        read_resource("mcp://fixture/notes", "remember this note"),
+    ]);
+    McpContextProvider::connect(Arc::new(transport), &McpConfig::default())
+        .await
+        .expect("connects")
+}
+
+#[tokio::test]
+async fn resource_provider_satisfies_context_conformance() {
+    let expected = notes_provider()
+        .await
+        .collect(context_call(), context_request())
+        .await
+        .expect("expected");
+    check_context_conformance(
+        &notes_provider().await,
+        ContextConformanceCase {
+            context: context_call(),
+            request: context_request(),
+            expected,
+        },
+    )
+    .await
+    .expect("published context conformance suite");
+}
+
+fn preview_model() -> Arc<finstack_ai_test::ScriptedModel> {
+    use finstack_ai::runtime::{
+        ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TokenEstimatorRef,
+        TokenEstimatorSource,
+    };
+    use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
+
+    Arc::new(ScriptedModel::from_plans(
+        ModelContextProfile {
+            provider: Arc::from("scripted"),
+            model: ModelName::try_new("preview-1").expect("model"),
+            hard_input_bytes: 1_048_576,
+            context_window_tokens: 8_192,
+            max_output_tokens: 512,
+            reserved_output_tokens: 128,
+            provider_overhead_tokens: 32,
+            estimator: TokenEstimatorRef {
+                id: Arc::from("scripted.utf8"),
+                version: Arc::from("1"),
+                source: TokenEstimatorSource::ConservativeUpperBound,
+            },
+        },
+        vec![ScriptedModelPlan {
+            actions: vec![
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                    finstack_ai::runtime::TextDelta {
+                        text: Arc::from("ok"),
+                    },
+                ))),
+                ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                    assistant_content: Arc::from([ContentBlock::Text(
+                        TextBlock::try_new("ok").expect("text"),
+                    )]),
+                    tool_calls: Arc::from([]),
+                    usage: finstack_ai::runtime::Usage::empty(),
+                    provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                    completion_id: Arc::from("mcp-resource-1"),
+                    continuation_state: None,
+                }))),
+            ],
+        }],
+    ))
+}
+
+async fn run_with_mcp_provider(
+    provider: McpContextProvider,
+    model: Arc<finstack_ai_test::ScriptedModel>,
+) {
+    use finstack_ai::runtime::{
+        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, Version,
+    };
+    use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 8_192,
+        })
+        .expect("store"),
+    );
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.mcp-resources").expect("agent"),
+        BundleId::parse("test.bundle.mcp-resources").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mcp-resources").expect("model"),
+                Some(version),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mcp-resources").expect("store"),
+                Some(version),
+            ),
+            store,
+        ),
+    )
+    .context_provider(
+        ComponentRef::new(
+            ComponentId::parse("finstack.context.mcp").expect("provider"),
+            Some(version),
+        ),
+        Arc::new(provider),
+    )
+    .build()
+    .await
+    .expect("agent");
+    let security = RunSecurityContext::try_new(
+        "tenant-a",
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+        "local",
+        "test",
+        "mcp-resource-policy-v1",
+        "mcp-resource-decision-v1",
+        None,
+    )
+    .expect("security");
+    agent
+        .run(
+            AgentRunRequest::try_new(
+                ModelName::try_new("preview-1").expect("model name"),
+                "hello",
+                security,
+            )
+            .expect("request"),
+        )
+        .await
+        .expect("production run");
+}
+
+fn message_texts(request: &finstack_ai::runtime::ModelRequest) -> Vec<String> {
+    request
+        .draft
+        .messages
+        .iter()
+        .flat_map(|message| message.content().iter())
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn production_driver_collects_frozen_mcp_resources() {
+    let expected = notes_provider()
+        .await
+        .collect(context_call(), context_request())
+        .await
+        .expect("expected collect");
+    check_context_conformance(
+        &notes_provider().await,
+        ContextConformanceCase {
+            context: context_call(),
+            request: context_request(),
+            expected: expected.clone(),
+        },
+    )
+    .await
+    .expect("conformance before driver");
+
+    let transport = Arc::new(ScriptedTransport::new(vec![
+        listed_resource("notes", "mcp://fixture/notes"),
+        read_resource("mcp://fixture/notes", "remember this note"),
+    ]));
+    let provider = McpContextProvider::connect(
+        Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
+        &McpConfig::default(),
+    )
+    .await
+    .expect("driver provider");
+    let model = preview_model();
+    run_with_mcp_provider(provider, Arc::clone(&model)).await;
+    let texts = message_texts(&model.last_request().expect("model request"));
+    assert!(
+        texts.iter().any(|text| text.contains("remember this note")),
+        "production install_context_providers / collect_context_stage must project the frozen resource, got {texts:?}"
+    );
+    assert_eq!(texts.last().map(String::as_str), Some("hello"));
+    assert_eq!(
+        transport.called_methods(),
+        ["resources/list", "resources/read"]
+    );
+    assert_eq!(expected.items[0].kind, ContextItemKind::QuotedSource);
+    assert_eq!(expected.items[0].authority, ContextAuthority::Untrusted);
 }
