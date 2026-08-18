@@ -4,15 +4,16 @@ use core::fmt;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError, RwLock};
 
 use finstack_ai_runtime::{
-    AnthropicMessagesAssembly, ContentBlock, ErrorCategory, MODEL_RESPONSE_MISMATCH,
-    MODEL_STREAM_LIMIT_EXCEEDED, Metadata, Model, ModelCapabilities, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft,
-    ModelStreamItem, ModelTokenEstimate, NdjsonParser, OllamaChatAssembly, OpenAiChatAssembly,
-    OpenAiResponsesAssembly, OutputSpec, PendingModelEffect, ReconcileContext,
+    AnthropicMessagesAssembly, ContentBlock, Digest, ErrorCategory, MODEL_RESPONSE_MISMATCH,
+    MODEL_STREAM_LIMIT_EXCEEDED, Message, MessageRole, Metadata, Model, ModelCapabilities,
+    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest,
+    ModelRequestDraft, ModelStreamItem, ModelTokenEstimate, NdjsonParser, OllamaChatAssembly,
+    OpenAiChatAssembly, OpenAiResponsesAssembly, OutputSpec, PendingModelEffect, ReconcileContext,
     SUBMIT_FINAL_OUTPUT_TOOL, SseEventParser, SseParseError, StreamNormError, StreamNormKind,
+    ToolCallId, ToolSpec,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -34,6 +35,7 @@ pub struct GatewayProvider {
     route: GatewayRouteConfig,
     credentials: CredentialStore,
     models: RwLock<BTreeMap<ModelName, GatewayModelSpec>>,
+    last_tool_catalog: Mutex<Option<Digest>>,
 }
 
 impl fmt::Debug for GatewayProvider {
@@ -138,6 +140,7 @@ impl GatewayProvider {
             route,
             credentials,
             models: RwLock::new(by_name),
+            last_tool_catalog: Mutex::new(None),
         })
     }
 
@@ -233,13 +236,25 @@ impl Model for GatewayProvider {
         let route = self.route.clone();
         let credentials = self.credentials.clone();
         let model = self.model_spec(&request.draft.model);
+        let digest = tool_catalog_digest(&request.draft.tools);
+        let catalog_changed = {
+            let mut last = self
+                .last_tool_catalog
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let changed = last.as_ref().is_some_and(|previous| previous != &digest);
+            *last = Some(digest);
+            changed
+        };
         Box::pin(async move {
             let model = model?;
             let authentication = credentials
                 .resolve(route.auth())
                 .ok_or_else(|| request_error("credential reference could not be resolved"))?;
             let headers = route.header_map(authentication)?;
-            let payload = serialize_wire_request(route.wire_protocol(), &request.draft, &model)?;
+            let cache_ok = model.capabilities().prompt_cache && !catalog_changed;
+            let payload =
+                serialize_wire_request(route.wire_protocol(), &request.draft, &model, cache_ok)?;
             let endpoint = route.endpoint()?;
             let request_id = request.call.request_id.to_string();
             let cancellation = request.call.run.cancellation;
@@ -625,6 +640,7 @@ fn serialize_wire_request(
     protocol: WireProtocol,
     draft: &ModelRequestDraft,
     model: &GatewayModelSpec,
+    cache_ok: bool,
 ) -> Result<Vec<u8>, ModelError> {
     draft.validate()?;
     if draft.model != *model.name() {
@@ -634,12 +650,24 @@ fn serialize_wire_request(
         .limits
         .max_output_tokens
         .min(model.max_output_tokens());
-    let body = match protocol {
+    let mut body = match protocol {
         WireProtocol::OpenaiResponses => openai_responses_body(draft, max_output)?,
         WireProtocol::OpenaiChat => openai_chat_body(draft, max_output)?,
-        WireProtocol::AnthropicMessages => anthropic_messages_body(draft, max_output)?,
+        WireProtocol::AnthropicMessages => anthropic_messages_body(draft, max_output, cache_ok)?,
         WireProtocol::OllamaChat => ollama_chat_body(draft, max_output)?,
     };
+    if cache_ok
+        && matches!(
+            protocol,
+            WireProtocol::OpenaiResponses | WireProtocol::OpenaiChat
+        )
+        && let Some(object) = body.as_object_mut()
+    {
+        object.insert(
+            "prompt_cache_key".to_owned(),
+            json!(tool_catalog_digest(&draft.tools).to_string()),
+        );
+    }
     serde_json::to_vec(&body).map_err(|_| request_error("provider request could not be encoded"))
 }
 
@@ -649,7 +677,7 @@ fn openai_responses_body(
 ) -> Result<Value, ModelError> {
     Ok(json!({
         "model": draft.model.as_str(),
-        "input": conversation_text(draft)?,
+        "input": openai_responses_input(draft)?,
         "stream": true,
         "store": false,
         "max_output_tokens": max_output_tokens,
@@ -663,7 +691,7 @@ fn openai_chat_body(
 ) -> Result<Value, ModelError> {
     Ok(json!({
         "model": draft.model.as_str(),
-        "messages": chat_messages(draft)?,
+        "messages": openai_chat_messages(draft)?,
         "stream": true,
         "max_tokens": max_output_tokens,
         "tools": function_tools(draft, "parameters")?,
@@ -673,14 +701,22 @@ fn openai_chat_body(
 fn anthropic_messages_body(
     draft: &ModelRequestDraft,
     max_output_tokens: u64,
+    cache_ok: bool,
 ) -> Result<Value, ModelError> {
-    Ok(json!({
+    let (system, messages) = anthropic_messages(draft, cache_ok)?;
+    let mut body = json!({
         "model": draft.model.as_str(),
         "max_tokens": max_output_tokens,
         "stream": true,
-        "messages": chat_messages(draft)?,
+        "messages": messages,
         "tools": anthropic_tools(draft)?,
-    }))
+    });
+    if !system.is_empty() {
+        body.as_object_mut()
+            .expect("object")
+            .insert("system".to_owned(), Value::Array(system));
+    }
+    Ok(body)
 }
 
 fn ollama_chat_body(
@@ -689,34 +725,11 @@ fn ollama_chat_body(
 ) -> Result<Value, ModelError> {
     Ok(json!({
         "model": draft.model.as_str(),
-        "messages": chat_messages(draft)?,
+        "messages": ollama_chat_messages(draft)?,
         "stream": true,
         "tools": function_tools(draft, "parameters")?,
         "options": { "num_predict": max_output_tokens },
     }))
-}
-
-fn conversation_text(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> {
-    let mut input = Vec::new();
-    for message in draft.messages.iter() {
-        input.push(json!({
-            "type": "message",
-            "role": role_name(message.role())?,
-            "content": [{ "type": "input_text", "text": render_text(message.content())? }],
-        }));
-    }
-    Ok(input)
-}
-
-fn chat_messages(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> {
-    let mut messages = Vec::new();
-    for message in draft.messages.iter() {
-        messages.push(json!({
-            "role": role_name(message.role())?,
-            "content": render_text(message.content())?,
-        }));
-    }
-    Ok(messages)
 }
 
 fn function_tools(draft: &ModelRequestDraft, schema_key: &str) -> Result<Vec<Value>, ModelError> {
@@ -750,16 +763,345 @@ fn anthropic_tools(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> 
     Ok(tools)
 }
 
-fn role_name(role: finstack_ai_runtime::MessageRole) -> Result<&'static str, ModelError> {
-    match role {
-        finstack_ai_runtime::MessageRole::System | finstack_ai_runtime::MessageRole::Developer => {
-            Ok("system")
+fn tool_catalog_digest(tools: &[ToolSpec]) -> Digest {
+    let mut bytes = Vec::new();
+    for tool in tools {
+        bytes.extend_from_slice(tool.model_name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(tool.input_schema.as_bytes());
+        bytes.push(0);
+    }
+    Digest::raw_json(&bytes)
+}
+
+fn openai_responses_input(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> {
+    let mut input = Vec::new();
+    for message in draft.messages.iter() {
+        match message.role() {
+            MessageRole::System | MessageRole::Developer | MessageRole::User => {
+                input.push(json!({
+                    "type": "message",
+                    "role": openai_role(message.role()),
+                    "content": [{ "type": "input_text", "text": render_text(message.content())? }],
+                }));
+            }
+            MessageRole::Assistant => {
+                input.extend(openai_responses_assistant(message.content())?);
+            }
+            MessageRole::Tool => {
+                input.extend(openai_responses_tool_results(message.content())?);
+            }
         }
-        finstack_ai_runtime::MessageRole::User => Ok("user"),
-        finstack_ai_runtime::MessageRole::Assistant => Ok("assistant"),
-        finstack_ai_runtime::MessageRole::Tool => Err(request_error(
-            "gateway request mapping does not accept tool-role messages",
+    }
+    Ok(input)
+}
+
+fn openai_responses_assistant(blocks: &[ContentBlock]) -> Result<Vec<Value>, ModelError> {
+    let mut items = Vec::new();
+    let mut text = String::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::ToolCall(call) => {
+                if !text.is_empty() {
+                    items.push(json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": text.as_str() }],
+                    }));
+                    text.clear();
+                }
+                items.push(json!({
+                    "type": "function_call",
+                    "call_id": call.tool_call_id().to_string(),
+                    "name": call.tool_name(),
+                    "arguments": call.arguments().as_str(),
+                }));
+            }
+            ContentBlock::Opaque(_) => {}
+            _ => {
+                return Err(request_error(
+                    "gateway request mapping does not accept this assistant content",
+                ));
+            }
+        }
+    }
+    if !text.is_empty() {
+        items.push(json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": text }],
+        }));
+    }
+    Ok(items)
+}
+
+fn openai_responses_tool_results(blocks: &[ContentBlock]) -> Result<Vec<Value>, ModelError> {
+    let mut items = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::ToolResult(result) => items.push(json!({
+                "type": "function_call_output",
+                "call_id": result.tool_call_id().to_string(),
+                "output": render_text(result.content())?,
+            })),
+            _ => {
+                return Err(request_error(
+                    "gateway tool messages contain unsupported content",
+                ));
+            }
+        }
+    }
+    Ok(items)
+}
+
+fn openai_chat_messages(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> {
+    let mut messages = Vec::new();
+    for message in draft.messages.iter() {
+        match message.role() {
+            MessageRole::Tool => {
+                for block in message.content() {
+                    let ContentBlock::ToolResult(result) = block else {
+                        return Err(request_error(
+                            "gateway tool messages contain unsupported content",
+                        ));
+                    };
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": result.tool_call_id().to_string(),
+                        "content": render_text(result.content())?,
+                    }));
+                }
+            }
+            MessageRole::Assistant => {
+                let (content, tool_calls) = openai_chat_assistant(message.content())?;
+                let mut item = json!({ "role": "assistant", "content": content });
+                if !tool_calls.is_empty() {
+                    item.as_object_mut()
+                        .expect("object")
+                        .insert("tool_calls".to_owned(), Value::Array(tool_calls));
+                }
+                messages.push(item);
+            }
+            role => messages.push(json!({
+                "role": openai_role(role),
+                "content": render_text(message.content())?,
+            })),
+        }
+    }
+    Ok(messages)
+}
+
+fn openai_chat_assistant(blocks: &[ContentBlock]) -> Result<(Value, Vec<Value>), ModelError> {
+    let mut text = String::new();
+    let mut tool_calls = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::ToolCall(call) => tool_calls.push(json!({
+                "id": call.tool_call_id().to_string(),
+                "type": "function",
+                "function": {
+                    "name": call.tool_name(),
+                    "arguments": call.arguments().as_str(),
+                },
+            })),
+            ContentBlock::Opaque(_) => {}
+            _ => {
+                return Err(request_error(
+                    "gateway request mapping does not accept this assistant content",
+                ));
+            }
+        }
+    }
+    let content = if text.is_empty() {
+        Value::Null
+    } else {
+        Value::String(text)
+    };
+    Ok((content, tool_calls))
+}
+
+fn anthropic_messages(
+    draft: &ModelRequestDraft,
+    cache_ok: bool,
+) -> Result<(Vec<Value>, Vec<Value>), ModelError> {
+    let prefix_len = draft
+        .messages
+        .iter()
+        .take_while(|message| {
+            matches!(message.role(), MessageRole::System | MessageRole::Developer)
+        })
+        .count();
+    let mut system = Vec::new();
+    for message in draft.messages.iter().take(prefix_len) {
+        system.push(json!({
+            "type": "text",
+            "text": render_text(message.content())?,
+        }));
+    }
+    if cache_ok && let Some(last) = system.last_mut() {
+        last.as_object_mut()
+            .expect("object")
+            .insert("cache_control".to_owned(), json!({ "type": "ephemeral" }));
+    }
+    let mut messages = Vec::new();
+    for message in draft.messages.iter().skip(prefix_len) {
+        messages.extend(anthropic_conversation_message(message)?);
+    }
+    Ok((system, messages))
+}
+
+fn anthropic_conversation_message(message: &Message) -> Result<Vec<Value>, ModelError> {
+    match message.role() {
+        MessageRole::User => Ok(vec![json!({
+            "role": "user",
+            "content": [{ "type": "text", "text": render_text(message.content())? }],
+        })]),
+        MessageRole::Assistant => Ok(vec![json!({
+            "role": "assistant",
+            "content": anthropic_assistant_content(message.content())?,
+        })]),
+        MessageRole::Tool => Ok(vec![json!({
+            "role": "user",
+            "content": anthropic_tool_results(message.content())?,
+        })]),
+        MessageRole::System | MessageRole::Developer => Err(request_error(
+            "system instructions must remain a stable leading prefix",
         )),
+    }
+}
+
+fn anthropic_assistant_content(blocks: &[ContentBlock]) -> Result<Vec<Value>, ModelError> {
+    let mut content = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text(value) => {
+                content.push(json!({ "type": "text", "text": value.text() }));
+            }
+            ContentBlock::Json(value) => {
+                content.push(json!({ "type": "text", "text": value.value().as_str() }));
+            }
+            ContentBlock::ToolCall(call) => content.push(json!({
+                "type": "tool_use",
+                "id": call.tool_call_id().to_string(),
+                "name": call.tool_name(),
+                "input": raw_json(call.arguments())?,
+            })),
+            ContentBlock::Opaque(_) => {}
+            _ => {
+                return Err(request_error(
+                    "gateway request mapping does not accept this assistant content",
+                ));
+            }
+        }
+    }
+    Ok(content)
+}
+
+fn anthropic_tool_results(blocks: &[ContentBlock]) -> Result<Vec<Value>, ModelError> {
+    let mut content = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::ToolResult(result) => content.push(json!({
+                "type": "tool_result",
+                "tool_use_id": result.tool_call_id().to_string(),
+                "content": render_text(result.content())?,
+            })),
+            _ => {
+                return Err(request_error(
+                    "gateway tool messages contain unsupported content",
+                ));
+            }
+        }
+    }
+    Ok(content)
+}
+
+fn ollama_chat_messages(draft: &ModelRequestDraft) -> Result<Vec<Value>, ModelError> {
+    let mut messages = Vec::new();
+    for message in draft.messages.iter() {
+        match message.role() {
+            MessageRole::Tool => {
+                for block in message.content() {
+                    let ContentBlock::ToolResult(result) = block else {
+                        return Err(request_error(
+                            "gateway tool messages contain unsupported content",
+                        ));
+                    };
+                    messages.push(json!({
+                        "role": "tool",
+                        "content": render_text(result.content())?,
+                        "tool_name": tool_name_for(draft.messages.as_ref(), result.tool_call_id())?,
+                    }));
+                }
+            }
+            MessageRole::Assistant => {
+                let (content, tool_calls) = ollama_assistant(message.content())?;
+                let mut item = json!({ "role": "assistant", "content": content });
+                if !tool_calls.is_empty() {
+                    item.as_object_mut()
+                        .expect("object")
+                        .insert("tool_calls".to_owned(), Value::Array(tool_calls));
+                }
+                messages.push(item);
+            }
+            role => messages.push(json!({
+                "role": openai_role(role),
+                "content": render_text(message.content())?,
+            })),
+        }
+    }
+    Ok(messages)
+}
+
+fn ollama_assistant(blocks: &[ContentBlock]) -> Result<(String, Vec<Value>), ModelError> {
+    let mut text = String::new();
+    let mut tool_calls = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::ToolCall(call) => tool_calls.push(json!({
+                "function": {
+                    "name": call.tool_name(),
+                    "arguments": raw_json(call.arguments())?,
+                },
+            })),
+            ContentBlock::Opaque(_) => {}
+            _ => {
+                return Err(request_error(
+                    "gateway request mapping does not accept this assistant content",
+                ));
+            }
+        }
+    }
+    Ok((text, tool_calls))
+}
+
+fn tool_name_for(messages: &[Message], tool_call_id: &ToolCallId) -> Result<String, ModelError> {
+    for message in messages {
+        for block in message.content() {
+            if let ContentBlock::ToolCall(call) = block
+                && call.tool_call_id() == tool_call_id
+            {
+                return Ok(call.tool_name().to_owned());
+            }
+        }
+    }
+    Err(request_error(
+        "tool result does not match a prior tool call",
+    ))
+}
+
+fn openai_role(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::System | MessageRole::Developer => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
     }
 }
 
@@ -768,9 +1110,10 @@ fn render_text(blocks: &[ContentBlock]) -> Result<String, ModelError> {
     for block in blocks {
         match block {
             ContentBlock::Text(text) => parts.push(text.text().to_owned()),
+            ContentBlock::Json(value) => parts.push(value.value().as_str().to_owned()),
             _ => {
                 return Err(request_error(
-                    "gateway request mapping accepts text content only",
+                    "gateway request mapping accepts text or json content only here",
                 ));
             }
         }
@@ -890,12 +1233,13 @@ mod tests {
     use std::sync::Arc;
 
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, EffectId, InputCapabilities, LaneId,
-        MODEL_REQUEST_INVALID, Message, MessageId, MessageRole, ModelCallContext, ModelName,
-        ModelRequestDraft, ModelRequestId, ModelRequestLimits, ModelSettings, ModelTerminal,
-        OpenAiChatAssembly, OperationLocator, PrincipalRef, ProviderIds, RawJson, RunCallContext,
-        RunId, SessionId, StructuredOutputCapability, TextBlock, Timestamp, TokenEstimatorRef,
-        TokenEstimatorSource, Usage,
+        ApprovalMetadata, ApprovalRequirement, AuthorizationContext, CancellationSignal, EffectId,
+        InputCapabilities, LaneId, MODEL_REQUEST_INVALID, Message, MessageId, MessageRole,
+        ModelCallContext, ModelName, ModelRequestDraft, ModelRequestId, ModelRequestLimits,
+        ModelSettings, ModelTerminal, OpenAiChatAssembly, OperationLocator, PrincipalRef,
+        ProviderIds, RawJson, RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass,
+        StructuredOutputCapability, TextBlock, Timestamp, TokenEstimatorRef, TokenEstimatorSource,
+        ToolCallBlock, ToolCallId, ToolExecutionMode, ToolId, ToolResultBlock, ToolSpec, Usage,
     };
     use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1307,5 +1651,193 @@ mod tests {
             BTreeMap::new(),
         )
         .expect("usage")
+    }
+
+    fn text_message(id: &str, role: MessageRole, text: &str) -> Message {
+        Message::try_new(
+            MessageId::parse(id).expect("message id"),
+            role,
+            vec![ContentBlock::Text(TextBlock::try_new(text).expect("text"))],
+            Timestamp::from_unix_ms(1).expect("ts"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message")
+    }
+
+    fn tool_spec(name: &str, schema: &[u8]) -> ToolSpec {
+        ToolSpec {
+            id: ToolId::parse("finstack.tools.fixture").expect("tool id"),
+            model_name: Arc::from(name),
+            title: Arc::from("Fixture tool"),
+            description: Arc::from("A deterministic fixture tool."),
+            input_schema: RawJson::parse(schema).expect("schema"),
+            output_schema: None,
+            execution: ToolExecutionMode::Sequential,
+            side_effect: SideEffectClass::ReadOnly,
+            retry_safety: RetrySafety::SafeToRetry,
+            approval: ApprovalMetadata {
+                requirement: ApprovalRequirement::NotRequired,
+                reason: None,
+                attributes: Metadata::empty(),
+            },
+            max_result_bytes: 1_024,
+            metadata: Metadata::empty(),
+        }
+    }
+
+    fn tool_turn_draft(tools: &[ToolSpec]) -> ModelRequestDraft {
+        let tool_call_id =
+            ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("tool call id");
+        let assistant = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("message id"),
+            MessageRole::Assistant,
+            vec![ContentBlock::ToolCall(
+                ToolCallBlock::try_new(
+                    tool_call_id,
+                    "lookup",
+                    RawJson::parse(br#"{"q":1}"#).expect("args"),
+                )
+                .expect("call"),
+            )],
+            Timestamp::from_unix_ms(1).expect("ts"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("assistant");
+        let tool = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ae").expect("message id"),
+            MessageRole::Tool,
+            vec![ContentBlock::ToolResult(
+                ToolResultBlock::try_new(
+                    tool_call_id,
+                    vec![ContentBlock::Text(TextBlock::try_new("ok").expect("text"))],
+                    false,
+                )
+                .expect("result"),
+            )],
+            Timestamp::from_unix_ms(1).expect("ts"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("tool");
+        ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("name"),
+            messages: Arc::from([
+                text_message(
+                    "01234567-89ab-7cde-89ab-0123456789a6",
+                    MessageRole::System,
+                    "Stable prefix.",
+                ),
+                text_message(
+                    "01234567-89ab-7cde-89ab-0123456789a7",
+                    MessageRole::User,
+                    "hello",
+                ),
+                assistant,
+                tool,
+            ]),
+            tools: Arc::from(tools.to_vec()),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_024,
+                max_input_tokens: 1_024,
+                max_output_tokens: 128,
+            },
+        }
+    }
+
+    fn decode(protocol: WireProtocol, draft: &ModelRequestDraft, cache_ok: bool) -> Value {
+        serde_json::from_slice(
+            &serialize_wire_request(protocol, draft, &model_spec(), cache_ok).expect("encode"),
+        )
+        .expect("json")
+    }
+
+    #[test]
+    fn openai_responses_replays_a_tool_role_turn() {
+        let draft = tool_turn_draft(&[tool_spec("lookup", br#"{"type":"object"}"#)]);
+        let value = decode(WireProtocol::OpenaiResponses, &draft, false);
+        let input = value["input"].as_array().expect("input");
+        assert_eq!(input[0]["role"], "system");
+        assert_eq!(input[1]["role"], "user");
+        assert_eq!(input[2]["type"], "function_call");
+        assert_eq!(input[2]["name"], "lookup");
+        assert_eq!(input[3]["type"], "function_call_output");
+        assert_eq!(input[3]["output"], "ok");
+        assert!(value.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn openai_chat_replays_a_tool_role_turn() {
+        let draft = tool_turn_draft(&[tool_spec("lookup", br#"{"type":"object"}"#)]);
+        let value = decode(WireProtocol::OpenaiChat, &draft, false);
+        let messages = value["messages"].as_array().expect("messages");
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[2]["tool_calls"][0]["function"]["name"], "lookup");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["content"], "ok");
+    }
+
+    #[test]
+    fn anthropic_messages_replays_a_tool_role_turn() {
+        let draft = tool_turn_draft(&[tool_spec("lookup", br#"{"type":"object"}"#)]);
+        let value = decode(WireProtocol::AnthropicMessages, &draft, true);
+        assert_eq!(value["system"][0]["text"], "Stable prefix.");
+        assert_eq!(value["system"][0]["cache_control"]["type"], "ephemeral");
+        let messages = value["messages"].as_array().expect("messages");
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[2]["content"][0]["content"], "ok");
+    }
+
+    #[test]
+    fn ollama_chat_replays_a_tool_role_turn() {
+        let draft = tool_turn_draft(&[tool_spec("lookup", br#"{"type":"object"}"#)]);
+        let value = decode(WireProtocol::OllamaChat, &draft, false);
+        let messages = value["messages"].as_array().expect("messages");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[2]["tool_calls"][0]["function"]["name"], "lookup");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["content"], "ok");
+        assert_eq!(messages[3]["tool_name"], "lookup");
+    }
+
+    #[test]
+    fn catalog_change_omits_stale_anthropic_cache_control_and_openai_cache_key() {
+        let first = tool_turn_draft(&[tool_spec("lookup", br#"{"type":"object"}"#)]);
+        let second = tool_turn_draft(&[tool_spec("search", br#"{"type":"object"}"#)]);
+        assert_ne!(
+            tool_catalog_digest(&first.tools),
+            tool_catalog_digest(&second.tools)
+        );
+        let cached = decode(WireProtocol::AnthropicMessages, &first, true);
+        let busted = decode(WireProtocol::AnthropicMessages, &second, false);
+        assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");
+        assert!(busted["system"][0].get("cache_control").is_none());
+
+        let keyed = decode(WireProtocol::OpenaiResponses, &first, true);
+        let rewritten = decode(WireProtocol::OpenaiResponses, &second, true);
+        let omitted = decode(WireProtocol::OpenaiResponses, &second, false);
+        assert_eq!(
+            keyed["prompt_cache_key"],
+            tool_catalog_digest(&first.tools).to_string()
+        );
+        assert_eq!(
+            rewritten["prompt_cache_key"],
+            tool_catalog_digest(&second.tools).to_string()
+        );
+        assert_ne!(keyed["prompt_cache_key"], rewritten["prompt_cache_key"]);
+        assert!(omitted.get("prompt_cache_key").is_none());
     }
 }

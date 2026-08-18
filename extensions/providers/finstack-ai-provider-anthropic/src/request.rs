@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use finstack_ai_runtime::{
-    ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec,
-    SUBMIT_FINAL_OUTPUT_TOOL,
+    ContentBlock, Digest, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec,
+    SUBMIT_FINAL_OUTPUT_TOOL, ToolSpec,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -91,11 +91,19 @@ impl MessagesRequest {
         draft: &ModelRequestDraft,
         model: &AnthropicModelConfig,
     ) -> Result<Self, ModelError> {
+        Self::try_from_draft_with_cache(draft, model, model.cache_breakpoints)
+    }
+
+    pub(crate) fn try_from_draft_with_cache(
+        draft: &ModelRequestDraft,
+        model: &AnthropicModelConfig,
+        cache_breakpoints: bool,
+    ) -> Result<Self, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (system, messages) = map_messages(&draft.messages, model.cache_breakpoints)?;
+        let (system, messages) = map_messages(&draft.messages, cache_breakpoints)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -196,6 +204,17 @@ fn parse_settings(
 fn raw_value(value: &finstack_ai_runtime::RawJson) -> Result<Value, ModelError> {
     serde_json::from_slice(value.as_bytes())
         .map_err(|_| request_error("canonical provider JSON could not be decoded"))
+}
+
+pub(crate) fn tool_catalog_digest(tools: &[ToolSpec]) -> Digest {
+    let mut bytes = Vec::new();
+    for tool in tools {
+        bytes.extend_from_slice(tool.model_name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(tool.input_schema.as_bytes());
+        bytes.push(0);
+    }
+    Digest::raw_json(&bytes)
 }
 
 fn map_messages(
@@ -373,6 +392,35 @@ mod tests {
         assert_eq!(value["system"][1]["text"], "Always instruction.");
         assert_eq!(value["system"][1]["cache_control"]["type"], "ephemeral");
         assert_eq!(value["messages"][0]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn cache_control_is_omitted_when_the_tool_catalog_changes() {
+        let system = text_message(MessageRole::System, "Stable prefix.");
+        let user = text_message(MessageRole::User, "hello");
+        let draft = ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("model"),
+            messages: Arc::from([system, user]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: finstack_ai_runtime::RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 100_000,
+                max_output_tokens: 1_024,
+            },
+        };
+        let model = model().with_cache_breakpoints(true);
+        let cached =
+            MessagesRequest::try_from_draft_with_cache(&draft, &model, true).expect("cached");
+        let busted =
+            MessagesRequest::try_from_draft_with_cache(&draft, &model, false).expect("busted");
+        let cached: Value = serde_json::from_slice(&serialize_request(&cached).unwrap()).unwrap();
+        let busted: Value = serde_json::from_slice(&serialize_request(&busted).unwrap()).unwrap();
+        assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");
+        assert!(busted["system"][0].get("cache_control").is_none());
     }
 
     fn model() -> AnthropicModelConfig {

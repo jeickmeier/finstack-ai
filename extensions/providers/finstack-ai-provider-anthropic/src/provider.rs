@@ -4,7 +4,7 @@ use core::fmt;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use finstack_ai_runtime::{
     AnthropicMessagesAssembly, ErrorCategory, Metadata, Model, ModelCapabilities, ModelDescriptor,
@@ -21,7 +21,7 @@ use crate::error::{
     CANCELLED, HTTP_ERROR, RESPONSE_INVALID, TIMEOUT, TRANSPORT_ERROR, error, response_error,
     stream_error,
 };
-use crate::request::{MessagesRequest, serialize_request};
+use crate::request::{MessagesRequest, serialize_request, tool_catalog_digest};
 use crate::sse::SseParser;
 use crate::{AnthropicConfig, AnthropicModelConfig};
 
@@ -33,6 +33,7 @@ pub struct AnthropicProvider {
     endpoint: reqwest::Url,
     config: AnthropicConfig,
     models: RwLock<BTreeMap<ModelName, AnthropicModelConfig>>,
+    last_tool_catalog: Mutex<Option<finstack_ai_runtime::Digest>>,
 }
 
 impl fmt::Debug for AnthropicProvider {
@@ -99,6 +100,7 @@ impl AnthropicProvider {
             endpoint,
             config,
             models: RwLock::new(by_name),
+            last_tool_catalog: Mutex::new(None),
         })
     }
 
@@ -242,9 +244,23 @@ impl Model for AnthropicProvider {
         let timeout = self.config.request_timeout();
         let max_event_bytes = self.config.max_event_bytes();
         let max_stream_bytes = self.config.max_stream_bytes();
+        let digest = tool_catalog_digest(&request.draft.tools);
+        let changed = {
+            let mut last = self
+                .last_tool_catalog
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let changed = last.as_ref().is_some_and(|previous| previous != &digest);
+            *last = Some(digest);
+            changed
+        };
         Box::pin(async move {
             let model = model?;
-            let wire = MessagesRequest::try_from_draft(&request.draft, &model)?;
+            let wire = if changed {
+                MessagesRequest::try_from_draft_with_cache(&request.draft, &model, false)?
+            } else {
+                MessagesRequest::try_from_draft(&request.draft, &model)?
+            };
             let payload = serialize_request(&wire)?;
             let request_id = request.call.request_id.to_string();
             let cancellation = request.call.run.cancellation;

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use finstack_ai_runtime::{
     ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec, RawJson,
-    SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
+    SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId, ToolSpec,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -84,6 +84,12 @@ impl ResponsesRequest {
             if settings.remove(*reserved).is_some() {
                 return Err(request_error("provider settings contain a reserved field"));
             }
+        }
+        if settings.contains_key("prompt_cache_key") {
+            settings.insert(
+                "prompt_cache_key".to_owned(),
+                json!(tool_catalog_key(&draft.tools)),
+            );
         }
         let reasoning_effort =
             take_string_setting(&mut settings, "reasoning_effort", REASONING_EFFORTS)?;
@@ -362,6 +368,17 @@ fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {
     Ok(rendered)
 }
 
+fn tool_catalog_key(tools: &[ToolSpec]) -> String {
+    let mut bytes = Vec::new();
+    for tool in tools {
+        bytes.extend_from_slice(tool.model_name.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(tool.input_schema.as_bytes());
+        bytes.push(0);
+    }
+    finstack_ai_runtime::Digest::raw_json(&bytes).to_string()
+}
+
 pub(crate) fn serialize_request(request: &ResponsesRequest) -> Result<Vec<u8>, ModelError> {
     serde_json::to_vec(request).map_err(|_| request_error("provider request could not be encoded"))
 }
@@ -400,6 +417,16 @@ mod tests {
         assert_eq!(value["temperature"], 0);
         assert!(value.get("reasoning_effort").is_none());
         assert!(value.get("reasoning_summary").is_none());
+    }
+
+    #[test]
+    fn prompt_cache_key_is_rewritten_to_the_current_tool_catalog() {
+        let mut draft = draft(br#"{"prompt_cache_key":"stale-previous-tools"}"#);
+        draft.tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None).expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_ne!(value["prompt_cache_key"], "stale-previous-tools");
+        assert_eq!(value["prompt_cache_key"], tool_catalog_key(&draft.tools));
     }
 
     #[test]
