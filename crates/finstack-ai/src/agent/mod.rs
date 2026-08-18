@@ -7,6 +7,8 @@ mod child;
 mod child_route;
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 mod child_wasm;
+#[cfg(feature = "native-tokio")]
+pub mod deferred;
 mod drive;
 mod handle;
 mod lane;
@@ -25,6 +27,13 @@ pub use activation::{
 };
 pub use builder::NativeAgentBuilder;
 pub use child_route::RemoteChildRouteSpec;
+#[cfg(feature = "native-tokio")]
+pub use deferred::{
+    CHILD_RUN_BRIDGE_FAILED, CHILD_RUN_BRIDGE_PLANNER_REJECTED,
+    CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE, ChildEventContext, ChildEventSink, ChildPlanContext,
+    ChildRunBridge, ChildRunBridgeError, ChildRunResolver, DeferredChildPlanner, DeferredPlanError,
+    OutstandingDeferral,
+};
 pub use handle::Agent;
 pub use linked::{
     AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,

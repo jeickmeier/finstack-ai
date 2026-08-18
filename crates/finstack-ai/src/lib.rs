@@ -38,6 +38,13 @@ pub use agent::{
     MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
     OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
 };
+#[cfg(feature = "native-tokio")]
+pub use agent::{
+    CHILD_RUN_BRIDGE_FAILED, CHILD_RUN_BRIDGE_PLANNER_REJECTED,
+    CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE, ChildEventContext, ChildEventSink, ChildPlanContext,
+    ChildRunBridge, ChildRunBridgeError, ChildRunResolver, DeferredChildPlanner, DeferredPlanError,
+    OutstandingDeferral,
+};
 pub use bundle::{
     BUNDLE_RESOLUTION_CONFLICT, BUNDLE_RESOLUTION_INVALID, BUNDLE_RESOLUTION_LOCK_MISMATCH,
     BUNDLE_RESOLUTION_MISSING, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleConflict,
