@@ -24,8 +24,12 @@ run. `Lane::run` starts a new root on an idle lane through
 `Agent::start_on_lane`. `Lane::suspend` parks the in-process driver without
 dropping the journal; `Lane::resume` respawns `RunTaskOwner` through
 `WorkflowSession::with_ports`. `Lane::append_text` still does not start a
-run. Python exposes the same lane verbs plus `SqliteDurability`. WASM
-lane verbs remain a tracked deferral (PR-078 exclusion).
+run. `AgentRun::start_child` prepares and accepts a child through
+`ChildRunPrepared` and `AgentInvoker`. Prefer isolated placement so the
+parent journal stays operable. `AgentRun::complete_external`
+routes through `WorkflowSession::complete_external`. Python exposes the
+same child-run and completion surfaces. WASM lane verbs remain a
+tracked deferral. `RemoteChildSession` dispatch stays excluded.
 
 ## Starters
 

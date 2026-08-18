@@ -1,0 +1,13 @@
+{
+  "case": "agent-run-child-accept-cancel-fanout",
+  "placement": "isolated_child_session",
+  "required_kinds": [
+    "child_run_prepared",
+    "run_accepted",
+    "cancellation_requested"
+  ],
+  "expect": {
+    "parent_and_child_accepted": true,
+    "cancel_fans_out": true
+  }
+}

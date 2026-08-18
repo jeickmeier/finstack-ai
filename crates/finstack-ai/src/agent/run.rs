@@ -29,6 +29,7 @@ pub(super) struct AgentRunInner {
     pub(super) events_fault: OnceLock<AgentRunError>,
     pub(super) cancellation: Mutex<CancellationState>,
     pub(super) cancellation_ready: driver::Signal,
+    pub(super) children: Mutex<Vec<AgentRun>>,
 }
 
 const EVENT_LOCK_POISONED: &str = "run event lock is poisoned";
@@ -126,8 +127,8 @@ impl Drop for EventConsumerGuard {
 
 #[derive(Default)]
 pub(super) struct CancellationState {
-    started: bool,
-    result: Option<Result<(), AgentRunError>>,
+    pub(super) started: bool,
+    pub(super) result: Option<Result<(), AgentRunError>>,
 }
 
 /// Cloneable control and observation handle for one Rust-owned native run.
@@ -399,7 +400,7 @@ impl AgentRun {
         }
     }
 
-    async fn submit_cancellation(&self) -> Result<(), AgentRunError> {
+    pub(super) async fn submit_cancellation(&self) -> Result<(), AgentRunError> {
         if self
             .inner
             .result
@@ -418,7 +419,10 @@ impl AgentRun {
                 reason: Some(Arc::from("frontend cancellation")),
             }),
         )
-        .await
+        .await?;
+        #[cfg(feature = "native-tokio")]
+        Box::pin(self.fan_out_cancellation()).await?;
+        Ok(())
     }
 
     #[cfg(test)]

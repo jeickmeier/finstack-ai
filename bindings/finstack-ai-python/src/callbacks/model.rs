@@ -2,11 +2,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, ErrorCategory, InputCapabilities, Metadata, Model, ModelCapabilities,
-    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
-    ModelResponse, ModelStreamItem, ModelTokenEstimate, ModelToolCall, PortFuture, ProviderIds,
-    RawJson, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallDelta, Usage,
+    ComponentRef, ErrorCategory, ExternalHandleRef, InputCapabilities, Metadata, Model,
+    ModelCapabilities, ModelContextProfile, ModelDeferral, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate,
+    ModelToolCall, PortFuture, ProviderIds, RawJson, ReconciliationPolicy,
+    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    Usage,
 };
 use futures_util::stream;
 use pyo3::prelude::*;
@@ -28,6 +29,8 @@ struct PythonModelOutput {
     completion_id: String,
     #[serde(default)]
     tool_calls: Vec<PythonModelToolCall>,
+    #[serde(default)]
+    deferred: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,12 +75,29 @@ impl Model for PythonModelAdapter {
 
     fn request(&self, request: ModelRequest) -> PortFuture<Result<ModelEventStream, ModelError>> {
         let callback = Arc::clone(&self.callback);
+        let component = self.component.clone();
         Box::pin(async move {
             let context = PyCallbackContext::new("model", &request.call.run);
             let output: PythonModelOutput = callback
                 .invoke(context, &request.draft)
                 .await
                 .map_err(model_failure)?;
+            if let Some(job) = output.deferred.as_deref() {
+                let handle = ExternalHandleRef::try_new(
+                    component.id().clone(),
+                    job,
+                    RawJson::parse(b"{}")
+                        .map_err(|_| model_failure(CallbackFailure::InvalidResult))?,
+                )
+                .map_err(|_| model_failure(CallbackFailure::InvalidResult))?;
+                let items = vec![ModelStreamItem::Deferred(ModelDeferral {
+                    handle,
+                    reconciliation: ReconciliationPolicy::CallbackOnly,
+                    next_poll_at: None,
+                    expires_at: None,
+                })];
+                return Ok(Box::pin(stream::iter(items.into_iter().map(Ok))) as ModelEventStream);
+            }
             let response = model_response(output)
                 .map_err(|()| model_failure(CallbackFailure::InvalidResult))?;
             let mut items = Vec::with_capacity(2);

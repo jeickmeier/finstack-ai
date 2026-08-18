@@ -3,7 +3,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{CapabilityId, ModelName, ModelSettings, OperationLocator, RawJson};
+use finstack_ai::runtime::{
+    CapabilityId, ChildPlacement, ExternalRouteOutcome, ModelName, ModelSettings, OperationLocator,
+    RawJson,
+};
 use finstack_ai::{
     AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RunSecurityContext,
 };
@@ -11,6 +14,7 @@ use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
+use crate::agent::PyAgent;
 use crate::callbacks::normalize_pydantic_schema;
 use crate::errors::{agent_error, configuration_error};
 use crate::events::PyEventIterator;
@@ -94,6 +98,95 @@ impl PyRun {
             let locator = run.locator().clone();
             match run.resolve_interaction(resolution).await {
                 Ok(()) => Ok(()),
+                Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
+            }
+        })
+    }
+
+    /// Prepare and accept one child run through the Rust child-run router.
+    #[pyo3(signature = (agent, input, *, placement = "isolated_child_session", timeout_seconds = None, max_cycles = crate::agent::DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
+    #[pyo3(
+        text_signature = "($self, agent, input, *, placement='isolated_child_session', timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None)"
+    )]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "child start forwards the same bounded run request fields as Agent.start"
+    )]
+    fn start_child<'py>(
+        &self,
+        py: Python<'py>,
+        agent: &Bound<'py, PyAgent>,
+        input: String,
+        placement: &str,
+        timeout_seconds: Option<f64>,
+        max_cycles: u64,
+        max_output_retries: u32,
+        capability: Option<String>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let placement = parse_child_placement(placement)?;
+        let borrowed = agent.borrow();
+        let child = Arc::clone(&borrowed.inner);
+        let model = borrowed.model.clone();
+        let settings = borrowed.settings.clone();
+        let timeout_seconds = timeout_seconds.unwrap_or(borrowed.default_timeout_seconds);
+        let output_adapter = borrowed
+            .output_adapter
+            .as_ref()
+            .map(|adapter| adapter.clone_ref(py));
+        drop(borrowed);
+        let parent = self.inner.clone();
+        let tenant_scope = parent.locator().tenant_scope.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let request = run_request(
+                &model,
+                input,
+                timeout_seconds,
+                max_cycles,
+                max_output_retries,
+                capability,
+                settings,
+                &tenant_scope,
+            )
+            .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
+            match Box::pin(parent.start_child(&child, request, placement)).await {
+                Ok(inner) => Python::attach(|py| {
+                    Py::new(
+                        py,
+                        PyRun {
+                            inner,
+                            output_adapter,
+                        },
+                    )
+                }),
+                Err(error) => {
+                    Python::attach(|py| Err(agent_error(py, &error, Some(parent.locator()))))
+                }
+            }
+        })
+    }
+
+    /// Route one authenticated external completion through the Rust ingress.
+    #[pyo3(text_signature = "($self, command)")]
+    fn complete_external<'py>(
+        &self,
+        py: Python<'py>,
+        command: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let encoded = serde_json::to_string(&py_to_json(command)?)
+            .map_err(|_| PyTypeError::new_err("command is not JSON serializable"))?;
+        let normalized = crate::protocol::normalize_encoded_shape::<
+            finstack_ai::runtime::ExternalEffectCompletionCommand,
+        >(&encoded)?;
+        let command =
+            serde_json::from_str::<finstack_ai::runtime::ExternalEffectCompletionCommand>(
+                &normalized,
+            )
+            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let run = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let locator = run.locator().clone();
+            match Box::pin(run.complete_external(command)).await {
+                Ok(outcome) => Python::attach(|py| route_outcome_to_python(py, &outcome)),
                 Err(error) => Python::attach(|py| Err(agent_error(py, &error, Some(&locator)))),
             }
         })
@@ -293,6 +386,27 @@ pub(crate) fn run_request(
         );
     }
     Ok(request)
+}
+
+fn parse_child_placement(value: &str) -> PyResult<ChildPlacement> {
+    match value {
+        "compatible_lane_in_parent_session" => Ok(ChildPlacement::CompatibleLaneInParentSession),
+        "isolated_child_session" => Ok(ChildPlacement::IsolatedChildSession),
+        "remote_child_session" => Ok(ChildPlacement::RemoteChildSession),
+        _ => Err(PyTypeError::new_err(format!(
+            "unsupported child placement: {value}"
+        ))),
+    }
+}
+
+fn route_outcome_to_python(py: Python<'_>, outcome: &ExternalRouteOutcome) -> PyResult<Py<PyAny>> {
+    let status = match outcome {
+        ExternalRouteOutcome::Committed(_) => "committed",
+        ExternalRouteOutcome::Idempotent { .. } => "idempotent",
+        ExternalRouteOutcome::Rejected { .. } => "rejected",
+    };
+    let value = serde_json::json!({ "status": status });
+    json_to_py(py, &value)
 }
 
 pub(crate) fn result_to_python_with_locator(

@@ -187,6 +187,24 @@ impl Agent {
         Ok(prepared)
     }
 
+    pub(super) fn prepare_accepted(
+        &self,
+        request: AgentRunRequest,
+        locator: OperationLocator,
+        accepted: RunAccepted,
+        session: crate::Session,
+    ) -> Result<PreparedAgentRun, AgentRunError> {
+        let mut prepared = self.prepare(request)?;
+        prepared.store = session.journal_store();
+        prepared.session_id = locator.session_id;
+        prepared.lane_id = locator.lane_id;
+        prepared.accepted = accepted;
+        prepared.locator = locator;
+        prepared.bootstrap = false;
+        prepared.session = Some(session);
+        Ok(prepared)
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "bootstrap and sibling-lane start share one acquire/release path"

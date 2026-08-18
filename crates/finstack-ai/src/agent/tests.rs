@@ -3,14 +3,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, ContentBlock, ProviderIds, RawJson,
-    RunEventClass, RunSecurityContext, TerminalState, TextBlock, Usage, Version,
+    AgentId, AuthorizationEvidence, BundleId, CapabilityId, ChildPlacement, ComponentId,
+    ComponentRef, ContentBlock, ExternalEffectCompletion, ExternalEffectCompletionCommand,
+    ExternalEffectOutcome, ProviderIds, RawJson, RunEventClass, RunSecurityContext, TerminalState,
+    TextBlock, Usage, Version,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, JournalStore, Metadata, Model, ModelContextProfile, ModelName,
-    ModelResponse, ModelStreamItem, ModelToolCall, NoopObserver, Observer, ObserverDescriptor,
-    ObserverError, ObserverPayloadMode, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    Toolset,
+    CommitCoordinator, ExternalHandleRef, ExternalRouteOutcome, JournalStore, LoadRequest,
+    Metadata, Model, ModelContextProfile, ModelDeferral, ModelName, ModelResponse, ModelStreamItem,
+    ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
+    ReconciliationPolicy, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Toolset,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -89,6 +91,24 @@ fn profile() -> finstack_ai_runtime::ModelContextProfile {
             version: Arc::from("1"),
             source: TokenEstimatorSource::ConservativeUpperBound,
         },
+    }
+}
+
+fn deferred(job: &str) -> ScriptedModelPlan {
+    ScriptedModelPlan {
+        actions: vec![ScriptedModelAction::Emit(Ok(ModelStreamItem::Deferred(
+            ModelDeferral {
+                handle: ExternalHandleRef::try_new(
+                    ComponentId::parse("test.model.preview").expect("component"),
+                    job,
+                    RawJson::parse(b"{}").expect("metadata"),
+                )
+                .expect("handle"),
+                reconciliation: ReconciliationPolicy::CallbackOnly,
+                next_poll_at: None,
+                expires_at: None,
+            },
+        )))],
     }
 }
 
@@ -845,4 +865,185 @@ async fn append_text_does_not_start_a_run() {
     assert!(inspect.active_run_id.is_none());
     assert_eq!(inspect.leaf_id, Some(entry));
     assert_eq!(inspect.history.len(), 1);
+}
+
+async fn journal_kinds(
+    store: &Arc<MemoryJournalStore>,
+    session_id: finstack_ai_kernel::SessionId,
+) -> Vec<String> {
+    let loaded = store
+        .load(LoadRequest { session_id })
+        .await
+        .expect("load journal");
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .map(|record| record.body().kind_name().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn child_accept_and_cancel_fans_out_against_journal_fixture() {
+    let parent_gate = Arc::<str>::from("parent-child-fanout");
+    let child_gate = Arc::<str>::from("child-child-fanout");
+    let mut parent_plan = completed("parent unused");
+    parent_plan
+        .actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&parent_gate)));
+    let mut child_plan = completed("child unused");
+    child_plan
+        .actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&child_gate)));
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![parent_plan, child_plan],
+    ));
+    let control = model.control();
+    let (agent, store) = model_only_agent(Arc::clone(&model)).await;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&parent_gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent reached gate");
+    let child = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            request("child work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("start_child timeout")
+    .expect("start_child");
+    assert_ne!(child.locator().run_id, parent.locator().run_id);
+    assert_ne!(child.locator().session_id, parent.locator().session_id);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&child_gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("child reached gate");
+    tokio::time::timeout(Duration::from_secs(3), parent.cancel())
+        .await
+        .expect("parent cancel timeout")
+        .expect("parent cancel");
+    let child_error = tokio::time::timeout(Duration::from_secs(3), child.result())
+        .await
+        .expect("child result timeout")
+        .expect_err("child must cancel when the parent fans out");
+    assert_eq!(child_error.code(), AGENT_RUN_CANCELLED);
+
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/compatibility/child-run/v1/valid--accept-cancel-fanout.json"
+    ))
+    .expect("fixture");
+    let mut kinds = journal_kinds(&store, parent.locator().session_id).await;
+    kinds.extend(journal_kinds(&store, child.locator().session_id).await);
+    for required in fixture["required_kinds"]
+        .as_array()
+        .expect("required_kinds")
+    {
+        let kind = required.as_str().expect("kind");
+        assert!(
+            kinds.iter().any(|actual| actual == kind),
+            "journal missing {kind}: {kinds:?}"
+        );
+    }
+    let accepted = kinds.iter().filter(|kind| *kind == "run_accepted").count();
+    let cancelled = kinds
+        .iter()
+        .filter(|kind| *kind == "cancellation_requested")
+        .count();
+    assert!(
+        accepted >= 2,
+        "parent and child must both accept: {kinds:?}"
+    );
+    assert!(
+        cancelled >= 2,
+        "parent cancel must fan out to the child: {kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn complete_external_routes_a_deferred_parent_effect() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![
+            deferred("job-1"),
+            completed("child done"),
+            completed("unused parent retry"),
+        ],
+    ));
+    let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+    let parent = agent.start(request("defer me")).expect("parent start");
+    let effect_id = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(commit) =
+                CommitCoordinator::recover(agent.journal_store(), parent.locator().session_id).await
+                && let Some(pending) = commit.state().pending_model_effect.as_ref()
+                && let Some(deferred) = pending.deferred.as_ref()
+            {
+                return deferred.effect_id;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("deferred effect");
+    let child = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            request("child work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("start_child timeout")
+    .expect("start_child");
+    let child_out = tokio::time::timeout(Duration::from_secs(8), child.result())
+        .await
+        .expect("child timeout")
+        .expect("child result");
+    assert_eq!(child_out.text(), "child done");
+    let command = ExternalEffectCompletionCommand::try_new(
+        parent.locator().clone(),
+        security().principal().clone(),
+        AuthorizationEvidence::try_new(
+            security().authorization_policy_version(),
+            security().authorization_decision_id(),
+        )
+        .expect("auth"),
+        ExternalEffectCompletion::try_new(
+            effect_id,
+            "ext-1",
+            ExternalEffectOutcome::Failed {
+                error: finstack_ai_kernel::ErrorDescriptor::new(
+                    "provider_failed",
+                    "provider failed",
+                    finstack_ai_kernel::ErrorCategory::Model,
+                    true,
+                )
+                .expect("error"),
+            },
+        )
+        .expect("completion"),
+    )
+    .expect("command");
+    let outcome = Box::pin(parent.complete_external(command))
+        .await
+        .expect("complete_external");
+    assert!(
+        matches!(
+            outcome,
+            ExternalRouteOutcome::Committed(_) | ExternalRouteOutcome::Rejected { .. }
+        ),
+        "external completion must route, not stay data-only"
+    );
 }

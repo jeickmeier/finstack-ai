@@ -55,11 +55,11 @@ const PREVIEW_VERSION: Version = Version {
 /// Rust-owned resolved agent handle.
 #[pyclass(module = "finstack_ai._finstack_ai", name = "Agent", frozen)]
 pub(crate) struct PyAgent {
-    inner: Arc<Agent>,
-    model: ModelName,
-    output_adapter: Option<Py<PyAny>>,
-    settings: ModelSettings,
-    default_timeout_seconds: f64,
+    pub(crate) inner: Arc<Agent>,
+    pub(crate) model: ModelName,
+    pub(crate) output_adapter: Option<Py<PyAny>>,
+    pub(crate) settings: ModelSettings,
+    pub(crate) default_timeout_seconds: f64,
 }
 
 #[pymethods]

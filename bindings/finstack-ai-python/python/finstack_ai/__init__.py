@@ -100,8 +100,9 @@ def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, ob
     """Validate a pre-beta Rust-owned lineage or external-command shape.
 
     Supported kinds are ``child_run_prepared``, ``interaction_resolution``,
-    and ``external_effect_completion``. This data-only API does not route a
-    command or claim durable restart support; PR-048 owns that beta gate.
+    and ``external_effect_completion``. This helper only validates the
+    shape. ``Run.start_child`` and ``Run.complete_external`` route those
+    two kinds through the Rust engine.
 
     Args:
         kind: Stable shape family.

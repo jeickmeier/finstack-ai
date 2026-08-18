@@ -2,7 +2,7 @@
 
 ``Agent.open_session`` still inspects only. ``Lane.resume`` respawns the
 parked owner after E3/E4a. Child-run and ``complete_external`` routing
-stay PR-079.
+live on ``Run`` (PR-079).
 """
 
 from __future__ import annotations

@@ -50,7 +50,11 @@ Never put secrets in `AgentSpec`. See [provider security](provider-security.md).
 variant. `None` runs this agent. See [FAQ](faq.md).
 `Agent.from_python` accepts keyword-only `sqlite_path` and
 `sqlite_durability`. `Lane.resume` continues a parked run after
-`open_session`.
+`open_session`. `Run.start_child` prepares and accepts a child through
+the Rust `ChildRunPrepared` / `AgentInvoker` handshake.
+`Run.complete_external` routes an authenticated completion through the
+same ingress as `WorkflowSession::complete_external`.
+`normalize_prebeta_shape` remains a validator in front of that router.
 
 ## Learning notebooks
 

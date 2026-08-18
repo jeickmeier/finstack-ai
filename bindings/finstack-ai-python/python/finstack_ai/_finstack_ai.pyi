@@ -604,6 +604,62 @@ class Run:
                 is rejected as conflicting, expired, or unauthorized.
             TypeError: ``resolution`` is not a valid resolution shape.
         """
+    async def start_child(
+        self,
+        agent: Agent,
+        input: str,
+        *,
+        placement: str = "isolated_child_session",
+        timeout_seconds: float | None = None,
+        max_cycles: int = 16,
+        max_output_retries: int = 1,
+        capability: str | None = None,
+    ) -> Run:
+        """Prepare and accept one child run through the Rust router.
+
+        Rust commits ``ChildRunPrepared`` then starts the child on the
+        frozen locator. This is not a JSON round-trip.
+
+        Args:
+            agent: Child agent composition. The parent journal store is
+                authoritative; the child's store is not used.
+            input: Child user text.
+            placement: ``isolated_child_session`` (default) or
+                ``compatible_lane_in_parent_session``. Remote placement is
+                rejected. Isolated keeps the parent journal operable after
+                accept.
+            timeout_seconds: Child operational deadline. ``None`` uses the
+                child agent's default.
+            max_cycles: Maximum child model cycles.
+            max_output_retries: Maximum structured-output retries.
+            capability: Optional model-activated child variant.
+
+        Returns:
+            The live child :class:`Run`.
+
+        Raises:
+            FinstackError: Prepare or accept failed.
+            TypeError: ``placement`` is not a supported value.
+        """
+    async def complete_external(self, command: dict[str, object]) -> dict[str, str]:
+        """Route one authenticated external completion through Rust.
+
+        ``normalize_prebeta_shape("external_effect_completion", command)``
+        remains a validator in front of this router.
+
+        Args:
+            command: Normalized completion dictionary with ``locator``,
+                ``principal``, ``authorization``, and ``completion``.
+
+        Returns:
+            A mapping with ``status`` of ``committed``, ``idempotent``,
+            or ``rejected``.
+
+        Raises:
+            FinstackError: Ingress rejected the command or the locator
+                does not match this run.
+            TypeError: ``command`` is not a valid completion shape.
+        """
     async def cancel(self) -> None:
         """Submit idempotent durable cancellation.
 

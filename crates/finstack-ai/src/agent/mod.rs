@@ -1,6 +1,7 @@
 //! Public native execution facade.
 
 mod builder;
+mod child;
 mod drive;
 mod handle;
 mod lane;

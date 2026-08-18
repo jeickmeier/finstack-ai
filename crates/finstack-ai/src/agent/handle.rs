@@ -244,30 +244,7 @@ impl Agent {
     pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
         let selected = self.select_for_request(&request)?.clone();
         let prepared = selected.prepare(request)?;
-        let locator = prepared.locator.clone();
-        let store = Arc::clone(&prepared.store);
-        let cancellation_initiator = prepared.cancellation_initiator()?;
-        let inner = Arc::new(AgentRunInner {
-            locator,
-            store,
-            cancellation_initiator,
-            handle: Mutex::new(None),
-            handle_ready: driver::Signal::new(),
-            result: Mutex::new(None),
-            result_ready: driver::Signal::new(),
-            events: Mutex::new(EventStreamState::Waiting),
-            events_fault: OnceLock::new(),
-            cancellation: Mutex::new(CancellationState::default()),
-            cancellation_ready: driver::Signal::new(),
-        });
-        let execution = Arc::downgrade(&inner);
-        let agent = selected;
-        driver::spawn(Box::pin(async move {
-            let result = Box::pin(agent.execute_started(prepared, &execution)).await;
-            publish_result(&execution, result);
-        }))
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        Ok(AgentRun { inner })
+        Self::spawn_prepared(selected.clone(), prepared)
     }
 
     /// Start a new root run on an existing idle lane.
@@ -287,6 +264,32 @@ impl Agent {
     ) -> Result<AgentRun, AgentRunError> {
         let selected = self.select_for_request(&request)?.clone();
         let prepared = selected.prepare_on(request, lane)?;
+        Self::spawn_prepared(selected.clone(), prepared)
+    }
+
+    /// Start one run on a frozen locator and already-validated acceptance.
+    ///
+    /// Used by child accept after a durable `ChildRunPrepared` mapping exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration or runtime failure when the child cannot start.
+    pub(super) fn start_prepared(
+        &self,
+        request: AgentRunRequest,
+        locator: finstack_ai_kernel::OperationLocator,
+        accepted: finstack_ai_kernel::RunAccepted,
+        session: crate::Session,
+    ) -> Result<AgentRun, AgentRunError> {
+        let selected = self.select_for_request(&request)?.clone();
+        let prepared = selected.prepare_accepted(request, locator, accepted, session)?;
+        Self::spawn_prepared(selected.clone(), prepared)
+    }
+
+    fn spawn_prepared(
+        agent: Self,
+        prepared: super::prepare::PreparedAgentRun,
+    ) -> Result<AgentRun, AgentRunError> {
         let locator = prepared.locator.clone();
         let store = Arc::clone(&prepared.store);
         let cancellation_initiator = prepared.cancellation_initiator()?;
@@ -302,9 +305,9 @@ impl Agent {
             events_fault: OnceLock::new(),
             cancellation: Mutex::new(CancellationState::default()),
             cancellation_ready: driver::Signal::new(),
+            children: Mutex::new(Vec::new()),
         });
         let execution = Arc::downgrade(&inner);
-        let agent = selected;
         driver::spawn(Box::pin(async move {
             let result = Box::pin(agent.execute_started(prepared, &execution)).await;
             publish_result(&execution, result);

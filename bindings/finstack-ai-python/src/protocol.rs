@@ -82,6 +82,13 @@ pub(crate) fn _normalize_pydantic_schema(
     json_to_py(py, &normalized)
 }
 
+pub(crate) fn normalize_encoded_shape<T>(encoded: &str) -> PyResult<String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    normalize_shape::<T>(encoded)
+}
+
 fn normalize_shape<T>(encoded: &str) -> PyResult<String>
 where
     T: serde::de::DeserializeOwned + serde::Serialize,
