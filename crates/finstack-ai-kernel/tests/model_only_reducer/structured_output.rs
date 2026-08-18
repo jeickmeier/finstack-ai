@@ -576,3 +576,107 @@ fn capability_activation_is_sorted_replay_complete_and_supports_all_sources() {
         "invalid_input_payload",
     );
 }
+
+#[test]
+fn capabilities_activated_is_accepted_at_the_named_mid_run_phase() {
+    let calls = vec![super::tool_batches::call(
+        super::tool_batches::CALL_A,
+        "alpha",
+    )];
+    let mut harness = super::tool_batches::model_with_calls(&calls);
+    super::tool_batches::settle_after_model_for_tools(&mut harness);
+    let unknown = finstack_ai_kernel::ErrorDescriptor::new(
+        "unknown_tool",
+        "unknown tool: alpha",
+        finstack_ai_kernel::ErrorCategory::Tool,
+        false,
+    )
+    .expect("tool error");
+    harness.apply_input(
+        super::tool_batches::tool_env(
+            1_600,
+            &[2_000, 2_001, 2_002, 2_003],
+            &[2_000, 2_001],
+            &[super::tool_batches::TOOL_EFFECT_A],
+            &[2_100],
+            &[super::tool_batches::BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([finstack_ai_kernel::ToolCallPlan::SyntheticClosure(
+                    finstack_ai_kernel::SyntheticToolClosure {
+                        call: calls[0].clone(),
+                        execution: finstack_ai_kernel::ToolExecutionMode::Sequential,
+                        failure_policy: finstack_ai_kernel::ToolFailurePolicy::ReturnToModel,
+                        error: unknown,
+                    },
+                )]),
+                continuation: finstack_ai_kernel::ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+
+    let first = CapabilitiesActivated {
+        prior_plan_digest: None,
+        resolved_plan_digest: Digest::raw_json(br#"{"plan":1}"#),
+        active: Arc::from([ActiveCapability {
+            capability_id: finstack_ai_kernel::CapabilityId::parse("finstack.capability.alpha")
+                .expect("capability id"),
+            source: CapabilityActivationSource::Always,
+        }]),
+    };
+    harness.apply_input(
+        transition_env(1_800, &[2_000], &[], &[], &[], &[], &[]),
+        KernelInput::CapabilitiesActivated(first.clone()),
+    );
+    assert_eq!(harness.kernel.state().active_capabilities, first.active);
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+
+    let second = CapabilitiesActivated {
+        prior_plan_digest: harness.kernel.state().resolved_plan_digest,
+        resolved_plan_digest: Digest::raw_json(br#"{"plan":2}"#),
+        active: Arc::from([
+            ActiveCapability {
+                capability_id: finstack_ai_kernel::CapabilityId::parse("finstack.capability.alpha")
+                    .expect("capability id"),
+                source: CapabilityActivationSource::Always,
+            },
+            ActiveCapability {
+                capability_id: finstack_ai_kernel::CapabilityId::parse("finstack.capability.beta")
+                    .expect("capability id"),
+                source: CapabilityActivationSource::Model,
+            },
+        ]),
+    };
+    harness.apply_input(
+        transition_env(1_810, &[2_001], &[], &[], &[], &[], &[]),
+        KernelInput::CapabilitiesActivated(second.clone()),
+    );
+    assert_eq!(harness.kernel.state().active_capabilities, second.active);
+
+    let noop = harness
+        .kernel
+        .decide(
+            &empty_env(1_820),
+            KernelInput::CapabilitiesActivated(second.clone()),
+        )
+        .expect("identical mid-run activation is a no-op");
+    assert!(noop.records.is_empty());
+
+    let stale = CapabilitiesActivated {
+        prior_plan_digest: Some(Digest::raw_json(br#"{"plan":1}"#)),
+        resolved_plan_digest: Digest::raw_json(br#"{"plan":3}"#),
+        active: second.active.clone(),
+    };
+    assert_error_code(
+        harness.kernel.decide(
+            &transition_env(1_830, &[2_002], &[], &[], &[], &[], &[]),
+            KernelInput::CapabilitiesActivated(stale),
+        ),
+        "conflicting_settlement",
+    );
+}

@@ -7,3 +7,4 @@
 | `finstack-ai-tools-mcp` | Allowlisted MCP servers; no catalogue |
 | `finstack-ai-tools-shell` | Deny-by-default argv, empty env, timeout |
 | `finstack-ai-tools-subagent` | Allow-listed child start over `AgentInvoker` |
+| `finstack-ai-tools-skills` | `capability_list` / additions-only `capability_activate` |

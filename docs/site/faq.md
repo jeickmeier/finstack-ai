@@ -27,7 +27,9 @@ second constructor path. Start at [docs/site/rust.md](rust.md).
 Explicitly. Pass `AgentRunRequest.capability` (Rust) or `capability=` on
 `Agent.start` / `Agent.run` (Python). `None` runs the agent that was
 called. An unknown catalog id fails closed. Word overlap in user input
-does not select a capability.
+does not select a capability. Native mid-run `capability_activate` is
+additions-only over the already-chosen variant. Python and WASM
+`Capability` stay instruction-only. See [capabilities](capabilities.md).
 
 ## Does `open_session` continue a parked run?
 

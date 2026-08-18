@@ -304,7 +304,9 @@ pub(crate) async fn run_stage_chain(
     };
     let ctx = MiddlewareStageContext::new(run, driver.chain().digest(), cursor);
     let outcomes = driver
-        .run_stage(&ctx, input)
+        .run_stage_masked(&ctx, input, |component| {
+            coordinator.component_is_active(component)
+        })
         .await
         .map_err(|error| middleware_error(&error))?;
     StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))

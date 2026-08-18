@@ -10,6 +10,8 @@ use wasm_bindgen::prelude::*;
 
 use super::errors::{agent_error, configuration_error};
 
+/// WASM Capability stays instruction-only (id, description, instructions,
+/// activation). Native Rust may attach executable refs; this wire cannot.
 #[derive(Debug, Deserialize)]
 struct JsCapabilityWire {
     id: String,

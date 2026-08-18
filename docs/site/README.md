@@ -16,6 +16,7 @@ the public index and does not replace either layer.
 | --- | --- |
 | [Concept](concept.md) | Kernel, runtime, SDK, leaves, six ports, commit-before-effect |
 | [FAQ](faq.md) | Install, capabilities, sessions, secrets, support |
+| [Capabilities](capabilities.md) | Run-start variants, mid-run activate, instruction-only bindings |
 | [Troubleshooting](troubleshooting.md) | Stable error codes and common failures |
 | [Rust](rust.md) | Native SDK quick start |
 | [Python](python.md) | Staged wheel, rust-backed vs callback |

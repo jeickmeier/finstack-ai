@@ -279,6 +279,7 @@ impl Agent {
         }
         coordinator
             .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
+        coordinator.install_capability_owners(self.capability_index().as_arc_owners());
         let providers: Arc<[Arc<dyn ContextProvider>]> = self
             .resolved
             .run_plan()
@@ -369,6 +370,7 @@ impl Agent {
         &self,
         input: &str,
         committed: &[Message],
+        extra_capability_instructions: &[crate::InstructionSpec],
     ) -> Result<Arc<[Message]>, AgentRunError> {
         let now = NativeIds::now()?;
         let spec = self.resolved.spec().ok_or_else(|| {
@@ -379,6 +381,14 @@ impl Agent {
         })?;
         let mut messages = Vec::with_capacity(spec.instructions.len() + committed.len() + 1);
         for instruction in spec.instructions.iter() {
+            messages.push(text_message(
+                NativeIds::generate::<MessageTag>()?,
+                MessageRole::System,
+                instruction.text(),
+                now,
+            )?);
+        }
+        for instruction in extra_capability_instructions {
             messages.push(text_message(
                 NativeIds::generate::<MessageTag>()?,
                 MessageRole::System,

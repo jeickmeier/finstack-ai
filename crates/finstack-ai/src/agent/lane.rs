@@ -114,7 +114,12 @@ mod native {
         )
         .await
         .map_err(|error| workflow_error(&error))
-        .map(|session| session.with_ports(model, profile, catalog))
+        .and_then(|session| {
+            agent.validate_restored_mask(&session.last_state().active_capabilities)?;
+            Ok(session
+                .with_ports(model, profile, catalog)
+                .with_capability_owners(agent.capability_index().as_arc_owners()))
+        })
     }
 
     #[cfg(test)]

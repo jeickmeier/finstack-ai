@@ -29,10 +29,14 @@ pub struct NativeAgentBuilder {
     context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
     middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
+    installed_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
+    installed_context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
+    installed_middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
     policy: RunPolicy,
+    activation_host: Option<Arc<super::activation::NativeCapabilityHost>>,
 }
 
 impl NativeAgentBuilder {
@@ -51,10 +55,14 @@ impl NativeAgentBuilder {
             context_providers: Vec::new(),
             middleware: Vec::new(),
             observers: Vec::new(),
+            installed_toolsets: Vec::new(),
+            installed_context_providers: Vec::new(),
+            installed_middleware: Vec::new(),
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
             policy: RunPolicy::default(),
+            activation_host: None,
         }
     }
 
@@ -100,6 +108,48 @@ impl NativeAgentBuilder {
         provider: Arc<dyn ContextProvider>,
     ) -> Self {
         self.context_providers.push((component, provider));
+        self
+    }
+
+    /// Register a Toolset handle without adding it to the base spec.
+    ///
+    /// Use this for capability-contributed toolsets so they join the lock-time
+    /// union without becoming base-agent members.
+    #[must_use]
+    pub fn install_toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
+        self.installed_toolsets.push((component, toolset));
+        self
+    }
+
+    /// Register a context provider handle without adding it to the base spec.
+    #[must_use]
+    pub fn install_context_provider(
+        mut self,
+        component: ComponentRef,
+        provider: Arc<dyn ContextProvider>,
+    ) -> Self {
+        self.installed_context_providers.push((component, provider));
+        self
+    }
+
+    /// Register a Middleware handle without adding it to the base spec.
+    #[must_use]
+    pub fn install_middleware(
+        mut self,
+        component: ComponentRef,
+        middleware: Arc<dyn Middleware>,
+    ) -> Self {
+        self.installed_middleware.push((component, middleware));
+        self
+    }
+
+    /// Attach the host used by `capability_activate` to submit complete sets.
+    #[must_use]
+    pub fn capability_activation_host(
+        mut self,
+        host: Arc<super::activation::NativeCapabilityHost>,
+    ) -> Self {
+        self.activation_host = Some(host);
         self
     }
 
@@ -171,6 +221,12 @@ impl NativeAgentBuilder {
     /// registry, bundle, warmup, and tool-catalog failures.
     pub async fn build(self) -> Result<Agent, AgentRunError> {
         validate_builder_components(&self)?;
+        let mut registered_toolsets = self.toolsets.clone();
+        registered_toolsets.extend(self.installed_toolsets.iter().cloned());
+        let mut registered_providers = self.context_providers.clone();
+        registered_providers.extend(self.installed_context_providers.iter().cloned());
+        let mut registered_middleware = self.middleware.clone();
+        registered_middleware.extend(self.installed_middleware.iter().cloned());
         let extension = NativeBuilderExtension {
             source: finstack_ai_kernel::ComponentId::parse("finstack.sdk.native-builder").map_err(
                 |error| {
@@ -179,9 +235,9 @@ impl NativeAgentBuilder {
             )?,
             model: self.model.clone(),
             store: self.store.clone(),
-            toolsets: self.toolsets.clone(),
-            context_providers: self.context_providers.clone(),
-            middleware: self.middleware.clone(),
+            toolsets: registered_toolsets,
+            context_providers: registered_providers,
+            middleware: registered_middleware,
             observers: self.observers.clone(),
         };
         let mut registrar = Registrar::new();
@@ -241,10 +297,24 @@ impl NativeAgentBuilder {
                 })?
         };
         let mut agent = Agent::try_from_resolved(Arc::new(composed_agent))?;
+        let contributions =
+            super::mask::CapabilityContributionIndex::from_specs(&self.capabilities);
+        agent.attach_capability_surface(
+            Arc::from(self.capabilities.clone()),
+            contributions.clone(),
+            self.activation_host.clone(),
+        )?;
         let variants =
             resolve_model_variants(&self.capabilities, &bundle_resolver, &mut registry, &agent)
                 .await?;
         agent.model_capabilities = variants.into();
+        for variant in Arc::make_mut(&mut agent.model_capabilities) {
+            variant.agent.attach_capability_surface(
+                Arc::from(self.capabilities.clone()),
+                contributions.clone(),
+                self.activation_host.clone(),
+            )?;
+        }
         Ok(agent)
     }
 }
@@ -317,6 +387,15 @@ fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), Agent
         validate_exact_component(component)?;
     }
     for (component, _) in &builder.observers {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.installed_toolsets {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.installed_context_providers {
+        validate_exact_component(component)?;
+    }
+    for (component, _) in &builder.installed_middleware {
         validate_exact_component(component)?;
     }
     Ok(())

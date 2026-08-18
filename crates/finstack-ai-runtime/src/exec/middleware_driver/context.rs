@@ -142,6 +142,7 @@ pub async fn invoke_middleware_stage(
     chain: &ResolvedMiddlewareChain,
     ctx: &MiddlewareStageContext,
     input: StageInput,
+    live: impl Fn(&finstack_ai_kernel::ComponentId) -> bool,
 ) -> Result<Vec<StageOutcome>, MiddlewareError> {
     debug_assert_eq!(
         ctx.stage(),
@@ -152,6 +153,9 @@ pub async fn invoke_middleware_stage(
     let components: &[ResolvedMiddleware] = chain.stage(stage);
     let mut outcomes = Vec::with_capacity(components.len());
     for (index, resolved) in components.iter().enumerate() {
+        if !live(&resolved.descriptor.invocation.component) {
+            continue;
+        }
         let mw_ctx = ctx.middleware_context(index)?;
         let outcome = resolved.middleware.invoke(mw_ctx, input.clone()).await?;
         validate_stage_outcome(&resolved.descriptor, &input, &outcome)?;

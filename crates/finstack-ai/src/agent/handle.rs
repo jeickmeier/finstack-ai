@@ -3,20 +3,24 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ResolvedAgent;
 use finstack_ai_kernel::{
-    AgentId, BundleId, ComponentRef, Digest, JsonSchemaDraft, RawJson, SchemaRef,
+    AgentId, BundleId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery,
+    JsonSchemaDraft, RawJson, SchemaRef, Version,
 };
 use finstack_ai_runtime::{
-    JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog, SideEffectClass,
-    ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision, ToolValidator,
-    ToolValidatorCompiler, ToolsetRegistration,
+    JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolValidator, ToolValidatorCompiler,
+    ToolsetRegistration,
 };
 
+use super::activation::NativeCapabilityHost;
 use super::builder::NativeAgentBuilder;
+use super::mask::CapabilityContributionIndex;
 use super::run::{AgentRun, AgentRunInner, CancellationState, EventStreamState, publish_result};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
     CapabilityCatalogEntry,
 };
+use crate::{CapabilityActivation, CapabilitySpec};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
@@ -40,6 +44,9 @@ pub struct Agent {
     pub(super) tools: Arc<ResolvedToolCatalog>,
     pub(super) structured_output: Option<StructuredOutputConfig>,
     pub(super) model_capabilities: Arc<[ModelCapabilityVariant]>,
+    pub(super) capability_specs: Arc<[CapabilitySpec]>,
+    pub(super) capability_index: CapabilityContributionIndex,
+    pub(super) activation_host: Option<Arc<NativeCapabilityHost>>,
 }
 
 #[derive(Clone)]
@@ -103,39 +110,59 @@ impl Agent {
             ));
         }
         let plan = resolved.run_plan();
-        let registrations = plan
-            .toolsets()
-            .iter()
-            .map(|component| {
-                let toolset = Arc::clone(component.handle());
-                let policies = toolset
-                    .tools()
-                    .iter()
-                    .map(|tool| {
-                        let approval = match tool.side_effect {
-                            SideEffectClass::ReadOnly => ToolPolicyDecision::Allow,
-                            SideEffectClass::IdempotentWrite
-                            | SideEffectClass::NonIdempotentWrite => {
-                                ToolPolicyDecision::RequireApproval
-                            }
+        let registrations =
+            plan.toolsets()
+                .iter()
+                .map(|component| {
+                    let toolset = Arc::clone(component.handle());
+                    let invocation =
+                        ComponentInvocation {
+                            component: component.descriptor().component.id().clone(),
+                            version: component.descriptor().component.version().unwrap_or(
+                                Version {
+                                    major: 0,
+                                    minor: 0,
+                                    patch: 1,
+                                },
+                            ),
+                            configuration_digest: Digest::raw_json(b"{}"),
+                            recovery: InvocationRecovery::RecomputeSafe,
                         };
-                        (
-                            tool.id.clone(),
-                            ToolExecutionPolicy {
-                                failure_policy: ToolFailurePolicy::ReturnToModel,
-                                approval,
-                                max_concurrency: 4,
-                            },
-                        )
-                    })
-                    .collect();
-                ToolsetRegistration {
-                    toolset,
-                    policies,
-                    components: BTreeMap::new(),
-                }
-            })
-            .collect::<Vec<_>>();
+                    let policies = toolset
+                        .tools()
+                        .iter()
+                        .map(|tool| {
+                            let approval = match tool.approval.requirement {
+                                finstack_ai_runtime::ApprovalRequirement::NotRequired => {
+                                    ToolPolicyDecision::Allow
+                                }
+                                finstack_ai_runtime::ApprovalRequirement::Required
+                                | finstack_ai_runtime::ApprovalRequirement::Policy => {
+                                    ToolPolicyDecision::RequireApproval
+                                }
+                            };
+                            (
+                                tool.id.clone(),
+                                ToolExecutionPolicy {
+                                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                                    approval,
+                                    max_concurrency: 4,
+                                },
+                            )
+                        })
+                        .collect();
+                    let components = toolset
+                        .tools()
+                        .iter()
+                        .map(|tool| (tool.id.clone(), invocation.clone()))
+                        .collect();
+                    ToolsetRegistration {
+                        toolset,
+                        policies,
+                        components,
+                    }
+                })
+                .collect::<Vec<_>>();
         let tools = ResolvedToolCatalog::try_new(
             registrations,
             &BTreeMap::new(),
@@ -149,7 +176,99 @@ impl Agent {
             tools: Arc::new(tools),
             structured_output: None,
             model_capabilities: Arc::from([]),
+            capability_specs: Arc::from([]),
+            capability_index: CapabilityContributionIndex::default(),
+            activation_host: None,
         })
+    }
+
+    pub(super) fn attach_capability_surface(
+        &mut self,
+        specs: Arc<[CapabilitySpec]>,
+        index: CapabilityContributionIndex,
+        host: Option<Arc<NativeCapabilityHost>>,
+    ) -> Result<(), AgentRunError> {
+        for provider in self.resolved.run_plan().context_providers() {
+            let component_id = provider.descriptor().component.id();
+            let Some(owner) = index.owners().get(component_id) else {
+                continue;
+            };
+            let untrusted = specs
+                .iter()
+                .any(|spec| spec.id == *owner && spec.activation == CapabilityActivation::Model);
+            if untrusted
+                && provider
+                    .handle()
+                    .descriptor()
+                    .trusted_application_instructions
+            {
+                return Err(AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "untrusted capability cannot set trusted_application_instructions",
+                ));
+            }
+        }
+        self.capability_specs = specs;
+        self.capability_index = index;
+        self.activation_host = host;
+        Ok(())
+    }
+
+    pub(super) fn capability_index(&self) -> &CapabilityContributionIndex {
+        &self.capability_index
+    }
+
+    pub(super) fn capability_specs(&self) -> &[CapabilitySpec] {
+        &self.capability_specs
+    }
+
+    pub(super) fn activation_host(&self) -> Option<&Arc<NativeCapabilityHost>> {
+        self.activation_host.as_ref()
+    }
+
+    pub(super) fn validate_restored_mask(
+        &self,
+        active: &[finstack_ai_kernel::ActiveCapability],
+    ) -> Result<(), AgentRunError> {
+        let Some(lock) = self.resolved.lock() else {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "native Agent requires an exact resolved lock",
+            ));
+        };
+        for item in active {
+            if !lock
+                .capabilities
+                .iter()
+                .any(|capability| capability.id == item.capability_id)
+            {
+                return Err(AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "capability_mask_not_in_lock",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn live_tool_specs(
+        &self,
+        active: &[finstack_ai_kernel::ActiveCapability],
+    ) -> Vec<finstack_ai_runtime::ToolSpec> {
+        self.tools
+            .tools()
+            .filter(|tool| {
+                match tool
+                    .component
+                    .as_ref()
+                    .map(|invocation| &invocation.component)
+                {
+                    Some(component) => self.capability_index.allows(component, active),
+                    None => true,
+                }
+            })
+            .map(|tool| tool.spec.clone())
+            .collect()
     }
 
     /// Return an agent configured for one compile-once Draft 2020-12 output schema.

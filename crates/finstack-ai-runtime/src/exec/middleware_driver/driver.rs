@@ -73,6 +73,24 @@ impl StageDriver {
         if self.cancellation.is_cancelled() {
             return Ok(Vec::new());
         }
-        invoke_middleware_stage(&self.chain, ctx, input).await
+        invoke_middleware_stage(&self.chain, ctx, input, |_| true).await
+    }
+
+    /// Invoke `stage` while skipping components the capability mask hides.
+    ///
+    /// # Errors
+    ///
+    /// Returns the component's own `MiddlewareError`, or a stable
+    /// `middleware_outcome_not_allowed` when an outcome fails the stage matrix.
+    pub async fn run_stage_masked(
+        &self,
+        ctx: &MiddlewareStageContext,
+        input: StageInput,
+        live: impl Fn(&finstack_ai_kernel::ComponentId) -> bool,
+    ) -> Result<Vec<StageOutcome>, MiddlewareError> {
+        if self.cancellation.is_cancelled() {
+            return Ok(Vec::new());
+        }
+        invoke_middleware_stage(&self.chain, ctx, input, live).await
     }
 }

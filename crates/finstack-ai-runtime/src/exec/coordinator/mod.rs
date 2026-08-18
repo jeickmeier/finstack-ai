@@ -8,12 +8,13 @@ mod submit;
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    CommittedBatch, Diagnostic, Digest, EffectId, EventId, Kernel, KernelState, ModelTextDelta,
-    ProviderHeartbeat, ReasoningDelta, RunEvent, RunEventBody, RunId, Sensitivity,
-    SessionProjection, Timestamp, ToolProgress,
+    CapabilityId, CommittedBatch, ComponentId, Diagnostic, Digest, EffectId, EventId, Kernel,
+    KernelState, ModelTextDelta, ProviderHeartbeat, ReasoningDelta, RunEvent, RunEventBody, RunId,
+    Sensitivity, SessionProjection, Timestamp, ToolProgress,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 use finstack_ai_kernel::{Decision, KernelError, KernelInput, TransitionEnv};
@@ -133,6 +134,7 @@ pub struct CommitCoordinator {
     event_publisher: Option<Arc<dyn crate::event_hub::RuntimeEventPublisher>>,
     replay_scope: ReplayScope,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     context_projection: Option<
@@ -166,6 +168,7 @@ impl CommitCoordinator {
             event_publisher: None,
             replay_scope: ReplayScope::Primary,
             middleware_chain: None,
+            capability_owners: None,
             context_providers: None,
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             context_projection: None,
@@ -286,6 +289,26 @@ impl CommitCoordinator {
     #[must_use]
     pub fn middleware_chain(&self) -> Option<&Arc<ResolvedMiddlewareChain>> {
         self.middleware_chain.as_ref()
+    }
+
+    /// Install the lock-time capability-to-component ownership map.
+    pub fn install_capability_owners(&mut self, owners: Arc<BTreeMap<ComponentId, CapabilityId>>) {
+        self.capability_owners = Some(owners);
+    }
+
+    /// Whether a lock-time component is live under the current kernel mask.
+    #[must_use]
+    pub fn component_is_active(&self, component: &ComponentId) -> bool {
+        let Some(owners) = self.capability_owners.as_ref() else {
+            return true;
+        };
+        let Some(owner) = owners.get(component) else {
+            return true;
+        };
+        self.state()
+            .active_capabilities
+            .iter()
+            .any(|item| &item.capability_id == owner)
     }
 
     /// Install the resolved `ContextProvider` list the runtime drives at

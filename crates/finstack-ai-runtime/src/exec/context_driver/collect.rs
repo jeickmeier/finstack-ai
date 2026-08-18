@@ -57,6 +57,9 @@ pub(crate) async fn collect_context_stage<C: Clock, R: RandomSource>(
     let digest = chain_digest(driver.providers());
     let mut recorded = Vec::with_capacity(driver.providers().len());
     for (index, provider) in driver.providers().iter().enumerate() {
+        if !coordinator.component_is_active(&provider.descriptor().invocation.component) {
+            continue;
+        }
         let provider_index = u32::try_from(index).map_err(|_| RunHandleError::Middleware {
             code: Arc::from(crate::CONTEXT_CONFIGURATION_INVALID),
         })?;

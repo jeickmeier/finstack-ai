@@ -95,6 +95,10 @@ pub(super) fn validate_batch_shape(
                     StageDisposition::Continued | StageDisposition::Failed { .. }
                 )
             }) || interaction_request_shape(records)
+                || matches!(
+                    records,
+                    [record] if matches!(record.body(), RecordBody::CapabilitiesActivated(_))
+                )
         }
         Some(RunPhase::BeforeFinalize) => {
             finalize_shape(state, records)

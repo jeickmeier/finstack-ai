@@ -30,6 +30,9 @@ continue-the-run.
 Host callbacks are [T2](security-trust-levels.md). They inherit page
 authority and are not isolated.
 
+`Capability` stays instruction-only (`id`, `description`, `instructions`,
+`activation`), matching Python. See [capabilities](capabilities.md).
+
 ## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).

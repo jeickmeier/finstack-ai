@@ -7,7 +7,7 @@ use finstack_ai::{CapabilityActivation, CapabilitySpec, InstructionSpec};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
-/// Data-only declarative capability accepted by both Python agent factories.
+/// Instruction-only declarative capability accepted by both Python agent factories.
 #[pyclass(
     module = "finstack_ai._finstack_ai",
     name = "Capability",

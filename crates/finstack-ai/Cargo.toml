@@ -34,6 +34,7 @@ thiserror = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
 finstack-ai-tools-calculator = { workspace = true }
+finstack-ai-tools-skills = { workspace = true }
 tokio = { workspace = true }
 
 [lints]

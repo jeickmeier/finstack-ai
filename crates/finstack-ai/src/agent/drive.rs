@@ -1,11 +1,12 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::CapabilityActivation;
+use crate::{CapabilityActivation, InstructionSpec};
 use finstack_ai_kernel::{
     AcceptRun, ActiveCapability, CapabilitiesActivated, CapabilityActivationSource, KernelInput,
     LaneId, OperationLocator, OutputConfiguration, OutputEndStrategy, OutputSpec, OutputValidated,
     RawJson, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
-    RunPhase, SessionId, Stage, TerminalState,
+    RunId, RunPhase, SessionId, Stage, TerminalState,
 };
 use finstack_ai_runtime::{LoadRequest, LockedModelContextProfile, RunHandle};
 
@@ -67,18 +68,20 @@ impl Agent {
                 },
             })
             .collect::<Vec<_>>();
+        let lock_digest = lock.fingerprint().map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        if let Some(host) = self.activation_host() {
+            host.set_lock_digest(lock_digest);
+            host.seed_active(locator.run_id, active.clone().into());
+        }
         if !active.is_empty() {
             submit(
                 handle,
                 NativeIds::environment(1, 0, 0, 0, 0, 0)?,
                 KernelInput::CapabilitiesActivated(CapabilitiesActivated {
                     prior_plan_digest: None,
-                    resolved_plan_digest: lock.fingerprint().map_err(|error| {
-                        AgentRunError::configuration(
-                            AGENT_RUN_INVALID_CONFIGURATION,
-                            error.to_string(),
-                        )
-                    })?,
+                    resolved_plan_digest: lock_digest,
                     active: active.into(),
                 }),
             )
@@ -108,13 +111,18 @@ impl Agent {
 
         loop {
             let state = recover_state(Arc::clone(&store), session_id).await?;
+            self.validate_restored_mask(&state.active_capabilities)?;
+            if let Some(host) = self.activation_host() {
+                host.seed_active(locator.run_id, Arc::clone(&state.active_capabilities));
+            }
             if state.cycle >= request.max_cycles {
                 return Err(AgentRunError::configuration(
                     AGENT_RUN_INVALID_CONFIGURATION,
                     "run exceeded max_cycles before producing a final response",
                 ));
             }
-            let messages = self.context_messages(&request.input, &state.messages)?;
+            let extra = self.extra_capability_instructions(&state.active_capabilities);
+            let messages = self.context_messages(&request.input, &state.messages, &extra)?;
             submit_stage(
                 handle,
                 state.cycle,
@@ -131,7 +139,7 @@ impl Agent {
                     .as_ref()
                     .map(|turn| Arc::clone(&turn.context.messages))
                     .ok_or_else(|| AgentRunError::runtime_message("prepared context is missing"))?,
-                self.tools.tools().map(|tool| tool.spec.clone()).collect(),
+                self.live_tool_specs(&state.active_capabilities),
                 self.structured_output
                     .as_ref()
                     .map_or(OutputSpec::PlainText, |output| OutputSpec::JsonSchema {
@@ -173,6 +181,8 @@ impl Agent {
             .await?;
             ensure_nonterminal_failure(&after_model)?;
             if after_model.phase == Some(RunPhase::AfterToolBatch) {
+                self.submit_pending_activation(handle, &store, session_id, locator.run_id)
+                    .await?;
                 submit_stage(
                     handle,
                     after_model.cycle,
@@ -232,6 +242,8 @@ impl Agent {
             };
             ensure_nonterminal_failure(&next)?;
             if next.phase == Some(RunPhase::AfterToolBatch) {
+                self.submit_pending_activation(handle, &store, session_id, locator.run_id)
+                    .await?;
                 submit_stage(
                     handle,
                     next.cycle,
@@ -320,5 +332,60 @@ impl Agent {
                 record_kinds: record_kinds.into(),
             });
         }
+    }
+
+    fn extra_capability_instructions(&self, active: &[ActiveCapability]) -> Vec<InstructionSpec> {
+        let Some(lock) = self.resolved.lock() else {
+            return Vec::new();
+        };
+        let initially_active = lock
+            .capabilities
+            .iter()
+            .filter(|capability| capability.active)
+            .map(|capability| capability.id.clone())
+            .collect::<BTreeSet<_>>();
+        self.capability_specs()
+            .iter()
+            .filter(|spec| {
+                active.iter().any(|item| item.capability_id == spec.id)
+                    && !initially_active.contains(&spec.id)
+            })
+            .flat_map(|spec| spec.instructions.iter().cloned())
+            .collect()
+    }
+
+    async fn submit_pending_activation(
+        &self,
+        handle: &RunHandle,
+        store: &Arc<dyn finstack_ai_runtime::JournalStore>,
+        session_id: SessionId,
+        run_id: RunId,
+    ) -> Result<(), AgentRunError> {
+        let Some(host) = self.activation_host() else {
+            return Ok(());
+        };
+        let Some(complete) = host.take_pending(run_id) else {
+            return Ok(());
+        };
+        self.validate_restored_mask(&complete)?;
+        let state = recover_state(Arc::clone(store), session_id).await?;
+        let Some(digest) = host.lock_digest() else {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "capability activation is missing the resolved-plan digest",
+            ));
+        };
+        submit(
+            handle,
+            NativeIds::environment(1, 0, 0, 0, 0, 0)?,
+            KernelInput::CapabilitiesActivated(CapabilitiesActivated {
+                prior_plan_digest: state.resolved_plan_digest,
+                resolved_plan_digest: digest,
+                active: complete.clone().into(),
+            }),
+        )
+        .await?;
+        host.seed_active(run_id, complete.into());
+        Ok(())
     }
 }

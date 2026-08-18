@@ -64,6 +64,7 @@ impl CommitCoordinator {
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             context_projection: None,
             last_model_continuation,
+            capability_owners: None,
         })
     }
 
@@ -130,6 +131,7 @@ impl CommitCoordinator {
             #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
             context_projection: None,
             last_model_continuation,
+            capability_owners: None,
         })
     }
 

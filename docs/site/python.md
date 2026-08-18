@@ -47,7 +47,10 @@ Lazy `finstack_ai.providers.*` stay unloaded until attribute access.
 Never put secrets in `AgentSpec`. See [provider security](provider-security.md).
 
 `Agent.start` / `run` take optional `capability=` to select a model-activated
-variant. `None` runs this agent. See [FAQ](faq.md).
+variant. `None` runs this agent. **Python `Capability` stays
+instruction-only** (`id`, `description`, `instructions`, `activation`).
+It does not accept toolset, context-provider, or middleware references.
+See [capabilities](capabilities.md) and [FAQ](faq.md).
 `Agent.from_python` accepts keyword-only `sqlite_path` and
 `sqlite_durability`. `Lane.resume` continues a parked run after
 `open_session`. `Run.start_child` prepares and accepts a child through

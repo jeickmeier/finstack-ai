@@ -16,6 +16,11 @@ unpublished.
 
 ### Added
 
+- Native mid-run capability activation (`capability_list` /
+  `capability_activate` in `finstack-ai-tools-skills`) unions onto the
+  run-start variant without re-resolving the agent (ADR-041). Python
+  `Capability` stays instruction-only. Prompt-cache invalidation after
+  activation is recorded, not solved.
 - `finstack-ai-tools-mcp` is an opt-in MCP client Toolset for protocol
   revision `2026-07-28` (`tools/list` + `Toolset::call` only; sampling,
   elicitation, and resources are not implemented).

@@ -1,10 +1,12 @@
 //! Public native execution facade.
 
+mod activation;
 mod builder;
 mod child;
 mod drive;
 mod handle;
 mod lane;
+mod mask;
 mod prepare;
 mod run;
 mod types;
@@ -12,6 +14,10 @@ mod types;
 #[cfg(all(test, feature = "native-tokio"))]
 mod tests;
 
+pub use activation::{
+    ActivationHostError, CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED,
+    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeCapabilityHost,
+};
 pub use builder::NativeAgentBuilder;
 pub use handle::Agent;
 pub use run::AgentRun;

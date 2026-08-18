@@ -66,7 +66,7 @@ pub(super) fn decide_capabilities_activated(
     {
         return duplicate_decision(state);
     }
-    if state.phase != Some(RunPhase::BeforeRun) {
+    if !capabilities_activated_phase_allowed(state.phase) {
         return Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
             input: "capabilities_activated",
@@ -86,6 +86,10 @@ pub(super) fn decide_capabilities_activated(
         actions: Vec::new(),
         diagnostics: Vec::new(),
     })
+}
+
+fn capabilities_activated_phase_allowed(phase: Option<RunPhase>) -> bool {
+    matches!(phase, Some(RunPhase::BeforeRun | RunPhase::AfterToolBatch))
 }
 
 pub(super) fn decide_output_validated(

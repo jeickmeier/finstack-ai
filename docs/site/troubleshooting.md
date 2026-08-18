@@ -30,6 +30,8 @@ and read it after the callback returns. Copy needed fields with
 `Agent.start` / `run` with `capability="…"` requires that id in the
 model-activation catalog. `None` keeps the agent that was called. List
 ids with `capability_catalog()` / `Agent::capability_catalog`.
+Mid-run activation uses `capability_activate` and does not shrink the
+committed set. See [capabilities](capabilities.md).
 
 ## Journal cannot be opened / `sqlite_schema_unsupported`
 

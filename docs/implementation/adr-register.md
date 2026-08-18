@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-17 (ADR-041 accepted for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
+Index last reconciled: 2026-08-17 (ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial).
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -65,7 +65,7 @@ Index last reconciled: 2026-08-17 (ADR-041 accepted for mid-run capability activ
 | ADR-038 | `ciborium-test-interop` | Durability/ecosystem lead | Protocol `to_ciborium` unexport; `ciborium` dev-dep | Accepted | Standalone | In progress | Missing |
 | ADR-039 | `jsonschema-crate-selection` | Ecosystem lead | C2 swap blocked until acceptance; recommended outcome is no swap | Proposed | Standalone | Not started | Partial ([C1 spike](artifacts/dep-graph/c1-jsonschema-spike.md)) |
 | ADR-040 | `openai-responses-native-ollama` | Ecosystem lead | PR-068–PR-073 | Accepted | Standalone | In progress | Partial (decision accepted; mapped delivery in progress; publication excluded) |
-| ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | Not started | Missing |
+| ADR-041 | `mid-run-capability-activation-and-variants` | Ecosystem lead | FR-06 Tasks 10d–10j | Accepted | Standalone | In progress | Missing |
 
 ## Security review seed
 
@@ -416,6 +416,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-17 | ADR-023 | Decision | me@jeickmeier.com | Accepted | Superseded | Replaced by ADR-040 | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-041 | Decision | me@jeickmeier.com | — | Accepted | Variants coexist with mid-run mask union; lock-time chain (option b); AfterToolBatch phase window | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-041 | Record | me@jeickmeier.com | — | Standalone | ADR-041-mid-run-capability-activation-and-variants.md | — | me@jeickmeier.com |
+| 2026-08-17 | ADR-041 | Implementation | me@jeickmeier.com | Not started | In progress | FR-06 Tasks 10d–10j landed locally; no published evidence id | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -461,7 +462,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-038 | [ADR-038-ciborium-test-interop.md](adrs/ADR-038-ciborium-test-interop.md) | me@jeickmeier.com | Missing: change-control record accepted; protocol unexport and dev-dep move are in progress and uncommitted | ADR-038 standalone record | 2026-08-17 |
 | ADR-039 | [ADR-039-jsonschema-crate-selection.md](adrs/ADR-039-jsonschema-crate-selection.md) | me@jeickmeier.com | Partial: C1 unique-tree, license, and capability spike; production validator unchanged | ADR-039 standalone Proposed record | 2026-08-17 |
 | ADR-040 | [ADR-040-openai-responses-native-ollama.md](adrs/ADR-040-openai-responses-native-ollama.md) | me@jeickmeier.com | Partial: decision accepted; Responses and native Ollama delivery in progress; publication excluded | ADR-040 standalone record; PR-068–PR-073 | 2026-08-17 |
-| ADR-041 | [ADR-041-mid-run-capability-activation-and-variants.md](adrs/ADR-041-mid-run-capability-activation-and-variants.md) | me@jeickmeier.com | Missing: decision accepted; FR-06 activation implementation not started | ADR-041 standalone record | 2026-08-17 |
+| ADR-041 | [ADR-041-mid-run-capability-activation-and-variants.md](adrs/ADR-041-mid-run-capability-activation-and-variants.md) | me@jeickmeier.com | Missing: FR-06 Tasks 10d–10j landed locally; no evidence id | ADR-041 standalone record | 2026-08-17 |
 
 ## Supersession log
 

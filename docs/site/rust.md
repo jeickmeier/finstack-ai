@@ -19,6 +19,8 @@ provider, calls `run`, and prints the completion. No credential is required.
 `Agent::builder` registers the model and journal store, then `build().await`
 resolves once. `Agent::run` / `start` execute one run. `request.capability`
 selects a model-activated variant; `None` runs the `Agent` that was called.
+Mid-run `capability_activate` unions onto that chosen variant and does
+not re-resolve the agent. See [capabilities](capabilities.md).
 `Session::open` inspects an existing journal and does not continue a parked
 run. `Lane::run` starts a new root on an idle lane through
 `Agent::start_on_lane`. `Lane::suspend` parks the in-process driver without

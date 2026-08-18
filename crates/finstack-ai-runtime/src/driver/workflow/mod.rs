@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveToolCallStatus, EffectId, EffectKind, EffectRequested, ExternalEffectCompletionCommand,
-    ExternalHandleRef, InteractionId, InteractionRequest, InteractionResolutionCommand,
-    KernelState, LaneId, OperationLocator, RunId, RunPhase, SessionId, Timestamp,
+    ActiveToolCallStatus, CapabilityId, ComponentId, EffectId, EffectKind, EffectRequested,
+    ExternalEffectCompletionCommand, ExternalHandleRef, InteractionId, InteractionRequest,
+    InteractionResolutionCommand, KernelState, LaneId, OperationLocator, RunId, RunPhase,
+    SessionId, Timestamp,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -371,6 +372,7 @@ pub struct WorkflowSession {
     audit: Arc<SecurityAuditGate>,
     model: Option<Arc<dyn Model>>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
     profile: Option<LockedModelContextProfile>,
     owner: Option<RunTaskOwner>,
     last_state: KernelState,
@@ -417,6 +419,7 @@ impl WorkflowSession {
             audit,
             model: None,
             catalog: None,
+            capability_owners: None,
             profile: None,
             owner: None,
             last_state: coordinator.state().clone(),
@@ -452,6 +455,16 @@ impl WorkflowSession {
         self.model = Some(model);
         self.profile = Some(profile);
         self.catalog = catalog;
+        self
+    }
+
+    /// Bind the lock-time capability ownership map used as a dispatch mask.
+    #[must_use]
+    pub fn with_capability_owners(
+        mut self,
+        owners: Arc<BTreeMap<ComponentId, CapabilityId>>,
+    ) -> Self {
+        self.capability_owners = Some(owners);
         self
     }
 
@@ -686,7 +699,7 @@ impl WorkflowSession {
             .profile
             .clone()
             .ok_or(WorkflowDriverError::PortsRequired)?;
-        let coordinator =
+        let mut coordinator =
             CommitCoordinator::recover(Arc::clone(&self.store), self.locator.session_id)
                 .await
                 .map_err(|error| recover_error(&error))?;
@@ -697,6 +710,9 @@ impl WorkflowSession {
             .is_none_or(|accepted| accepted.run_id() != self.locator.run_id)
         {
             return Err(WorkflowDriverError::UnknownLocator);
+        }
+        if let Some(owners) = self.capability_owners.clone() {
+            coordinator.install_capability_owners(owners);
         }
         let run_config = RunTaskConfig {
             command_capacity: 8,

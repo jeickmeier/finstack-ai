@@ -751,6 +751,7 @@ dependencies = [
  "finstack-ai-store-memory",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
+ "finstack-ai-tools-skills",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -1152,6 +1153,19 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-tools-skills"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

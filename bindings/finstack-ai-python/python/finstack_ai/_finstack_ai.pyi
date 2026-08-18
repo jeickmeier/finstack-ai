@@ -108,9 +108,10 @@ class ActiveCapability(TypedDict):
     source: Literal["always", "application", "model"]
 
 class Capability:
-    """Bounded declarative capability composed by the Rust SDK.
+    """Instruction-only declarative capability composed by the Rust SDK.
 
-    Python capabilities contribute instructions. Native bundle specifications
+    Python stays instruction-only: ``id``, ``description``,
+    ``instructions``, and ``activation``. Native bundle specifications
     may additionally contribute registered Toolset, ContextProvider, and
     Middleware references.
     """

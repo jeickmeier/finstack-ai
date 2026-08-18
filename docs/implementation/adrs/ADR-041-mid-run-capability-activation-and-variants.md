@@ -279,4 +279,4 @@ requires that path. A later FR-10 importer requires its own ADR.
 - Approval: accepted by the decision owner to execute FR-06 Tasks
   10d–10j against the decisions above, locally only, without
   publication
-- Implementation evidence: Missing until 10d–10j land
+- Implementation evidence: Missing (10d–10j landed locally; no evidence id)

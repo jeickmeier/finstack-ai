@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AgentId, AuthorizationEvidence, BundleId, CapabilityId, ChildPlacement, ComponentId,
-    ComponentRef, ContentBlock, ExternalEffectCompletion, ExternalEffectCompletionCommand,
-    ExternalEffectOutcome, ProviderIds, RawJson, RunEventClass, RunSecurityContext, TerminalState,
-    TextBlock, Usage, Version,
+    ActiveCapability, AgentId, AuthorizationEvidence, BundleId, CapabilityActivationSource,
+    CapabilityId, ChildPlacement, ComponentId, ComponentRef, ContentBlock,
+    ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome, ProviderIds,
+    RawJson, RunEventClass, RunSecurityContext, TerminalState, TextBlock, Usage, Version,
 };
 use finstack_ai_runtime::{
     CommitCoordinator, ExternalHandleRef, ExternalRouteOutcome, JournalStore, LoadRequest,
@@ -27,8 +27,8 @@ use super::*;
 use crate::{
     AgentBuilder, AgentConstructionContext, BUNDLE_SCHEMA_VERSION, BundleCatalog, BundleDefaults,
     BundleResolver, BundleSpec, CapabilityActivation, CapabilitySpec, ChildRunPolicy,
-    CompatibilityRequirements, Extension, ExtensionDescriptor, ReadyComponent, Registrar,
-    RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session,
+    CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
+    Registrar, RegistrationError, RegistrationMetadata, RunPolicy, RuntimeServices, Session,
 };
 
 const VERSION: Version = Version {
@@ -1061,4 +1061,103 @@ async fn complete_external_routes_a_deferred_parent_effect() {
         ),
         "external completion must route, not stay data-only"
     );
+}
+
+fn research_capability(toolset: ComponentRef) -> CapabilitySpec {
+    CapabilitySpec {
+        id: CapabilityId::parse("test.capability.research").expect("capability id"),
+        description: Arc::from("Research notes"),
+        instructions: Arc::from([InstructionSpec::try_new("Research instruction.").expect("text")]),
+        toolsets: Arc::from([toolset]),
+        context_providers: Arc::from([]),
+        middleware: Arc::from([]),
+        activation: CapabilityActivation::Model,
+    }
+}
+
+#[tokio::test]
+async fn restore_after_mid_run_activation_reconstructs_the_same_mask_or_fails_closed() {
+    let model: Arc<dyn Model> =
+        Arc::new(ScriptedModel::from_plans(profile(), vec![completed("ok")]));
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store"),
+    );
+    let calculator: Arc<dyn Toolset> = Arc::new(CalculatorToolset::try_new().expect("calculator"));
+    let toolset = ComponentRef::new(
+        ComponentId::parse("test.tools.calculator").expect("toolset"),
+        Some(VERSION),
+    );
+    let with_research = Agent::builder(
+        AgentId::parse("test.agent.mask-restore").expect("agent"),
+        BundleId::parse("test.bundle.mask-restore").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mask-restore").expect("model"),
+                Some(VERSION),
+            ),
+            Arc::clone(&model),
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mask-restore").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .install_toolset(toolset.clone(), calculator)
+    .capability(research_capability(toolset))
+    .build()
+    .await
+    .expect("agent with research");
+    let activated = [ActiveCapability {
+        capability_id: CapabilityId::parse("test.capability.research").expect("id"),
+        source: CapabilityActivationSource::Model,
+    }];
+    with_research
+        .validate_restored_mask(&activated)
+        .expect("journaled id in lock");
+    let live = with_research.live_tool_specs(&activated);
+    assert!(
+        live.iter()
+            .any(|tool| tool.model_name.as_ref() == "calculator")
+    );
+    let hidden = with_research.live_tool_specs(&[]);
+    assert!(
+        hidden
+            .iter()
+            .all(|tool| tool.model_name.as_ref() != "calculator")
+    );
+
+    let missing = Agent::builder(
+        AgentId::parse("test.agent.mask-missing").expect("agent"),
+        BundleId::parse("test.bundle.mask-missing").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mask-missing").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mask-missing").expect("store"),
+                Some(VERSION),
+            ),
+            store,
+        ),
+    )
+    .build()
+    .await
+    .expect("agent without research");
+    let error = missing
+        .validate_restored_mask(&activated)
+        .expect_err("missing lock member fails closed");
+    assert!(error.to_string().contains("capability_mask_not_in_lock"));
 }

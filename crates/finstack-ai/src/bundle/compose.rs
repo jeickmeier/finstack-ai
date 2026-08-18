@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{ComponentId, Digest, RawJson, Version};
+use finstack_ai_runtime::{ComponentId, ComponentRef, Digest, RawJson, Version};
 
 use crate::{
     AgentComponentSelection, AgentSpec, CapabilityActivation, ComponentSelector, ResolvedAgent,
@@ -23,39 +23,34 @@ pub(super) fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, Bundl
     let mut context = spec.context_providers.to_vec();
     let mut middleware = spec.middleware.to_vec();
     for (id, (_, capability)) in &recipe.capabilities {
-        let active = capability.activation != CapabilityActivation::Model
-            && (capability.activation == CapabilityActivation::Always
-                || recipe.active_application.contains(id));
-        if active {
-            instructions.extend(capability.instructions.iter().cloned());
-            toolsets.extend(capability.toolsets.iter().cloned());
-            context.extend(capability.context_providers.iter().cloned());
-            for component in capability.middleware.iter().cloned() {
-                middleware.push(
-                    finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
-                        |error| BundleResolutionError::Invalid {
-                            message: Arc::from(error.to_string()),
-                        },
-                    )?,
-                );
-            }
+        if capability.activation == CapabilityActivation::Disabled {
+            continue;
         }
-    }
-    for (id, (_, capability)) in &recipe.capabilities {
-        if capability.activation == CapabilityActivation::Model && recipe.active_model.contains(id)
-        {
-            instructions.extend(capability.instructions.iter().cloned());
-            toolsets.extend(capability.toolsets.iter().cloned());
-            context.extend(capability.context_providers.iter().cloned());
-            for component in capability.middleware.iter().cloned() {
-                middleware.push(
-                    finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
-                        |error| BundleResolutionError::Invalid {
-                            message: Arc::from(error.to_string()),
-                        },
-                    )?,
-                );
+        extend_unique_components(&mut toolsets, capability.toolsets.iter().cloned());
+        extend_unique_components(&mut context, capability.context_providers.iter().cloned());
+        for component in capability.middleware.iter().cloned() {
+            if middleware
+                .iter()
+                .any(|existing| existing.component().id() == component.id())
+            {
+                continue;
             }
+            middleware.push(
+                finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
+                    |error| BundleResolutionError::Invalid {
+                        message: Arc::from(error.to_string()),
+                    },
+                )?,
+            );
+        }
+        let instructions_active = match capability.activation {
+            CapabilityActivation::Always => true,
+            CapabilityActivation::Application => recipe.active_application.contains(id),
+            CapabilityActivation::Model => recipe.active_model.contains(id),
+            CapabilityActivation::Disabled => false,
+        };
+        if instructions_active {
+            instructions.extend(capability.instructions.iter().cloned());
         }
     }
     spec.instructions = instructions.into();
@@ -258,4 +253,19 @@ pub(super) fn required_services(bundle: &BundleSpec) -> RequiredServices {
         }
     }
     required
+}
+
+fn extend_unique_components(
+    target: &mut Vec<ComponentRef>,
+    extra: impl IntoIterator<Item = ComponentRef>,
+) {
+    for component in extra {
+        if target
+            .iter()
+            .any(|existing| existing.id() == component.id())
+        {
+            continue;
+        }
+        target.push(component);
+    }
 }
