@@ -23,7 +23,7 @@ use finstack_ai_runtime::{
     ToolsetRegistration, UsageDelta, tool_resume_action,
 };
 use finstack_ai_test::{
-    FixedClock, ScriptedModel, ScriptedToolAction, ScriptedToolPlan, ScriptedToolset,
+    FixedClock, ManualClock, ScriptedModel, ScriptedToolAction, ScriptedToolPlan, ScriptedToolset,
 };
 
 mod helpers;

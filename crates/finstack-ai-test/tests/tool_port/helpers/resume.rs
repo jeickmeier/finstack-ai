@@ -10,7 +10,7 @@ use finstack_ai_kernel::{
     ToolCallPlan, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, ManualDriveAction, Model,
+    Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, ManualDriveAction, Model,
     ModelStreamLimits, ModelTaskConfig, ResolvedToolCatalog, RunHandleError, RunTaskConfig,
     RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolDeferral, ToolReconcileResult,
     ToolResult, ToolStreamLimits, ToolTaskConfig,
@@ -128,6 +128,26 @@ pub(crate) async fn spawn_tool_owner(
     clock_ms: i64,
     random: u64,
 ) -> Result<RunTaskOwner, RunHandleError> {
+    spawn_tool_owner_with_clock(
+        coordinator,
+        model,
+        catalog,
+        FixedClock::new(timestamp(clock_ms)),
+        random,
+    )
+    .await
+}
+
+pub(crate) async fn spawn_tool_owner_with_clock<C>(
+    coordinator: CommitCoordinator,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    clock: C,
+    random: u64,
+) -> Result<RunTaskOwner, RunHandleError>
+where
+    C: Clock + Send + Sync + 'static,
+{
     Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
         owner_run_config(),
@@ -136,7 +156,7 @@ pub(crate) async fn spawn_tool_owner(
         model,
         locked_profile(),
         catalog,
-        FixedClock::new(timestamp(clock_ms)),
+        clock,
         CounterRandom(AtomicU64::new(random)),
     ))
     .await

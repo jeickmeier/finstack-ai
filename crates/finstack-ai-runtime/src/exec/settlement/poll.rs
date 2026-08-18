@@ -143,22 +143,14 @@ pub(crate) fn next_due_poll_or_expiry(
                 ..
             } => {
                 let local = process_local_deadlines.get(&deferred.effect_id).copied();
-                let journal_deadline = |deadline: Option<Timestamp>| {
-                    deadline.filter(|deadline| {
-                        local.is_none_or(|local_deadline| local_deadline <= *deadline)
-                    })
-                };
                 let poll = matches!(
                     deferred.reconciliation,
                     ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll
                 )
                 .then_some(deferred.next_poll_at)
-                .flatten();
-                [
-                    journal_deadline(poll),
-                    journal_deadline(deferred.expires_at),
-                    local,
-                ]
+                .flatten()
+                .filter(|deadline| local.is_none_or(|local_deadline| local_deadline <= *deadline));
+                [poll, deferred.expires_at, local]
             }
             _ => [None, None, None],
         })

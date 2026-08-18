@@ -146,6 +146,67 @@ async fn deferred_poll_rearms_live_wait_after_still_running() {
     owner.shutdown().await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn deferred_poll_expiry_wakes_before_later_live_wait() {
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", 2_000, Some(2_500)),
+        )))],
+    };
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![plan],
+        vec![ToolReconcileResult::StillRunning(polling_deferral(
+            "job-1", 2_600, None,
+        ))],
+        spec,
+    );
+    let clock = ManualClock::new(timestamp(2_000));
+    let mut owner = spawn_tool_owner_with_clock(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        clock.clone(),
+        817,
+    )
+    .await
+    .expect("owner");
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_state(&store, |_| toolset.reconcile_count() == 1).await;
+    clock.set(timestamp(2_500)).expect("advance clock");
+    tokio::time::advance(StdDuration::from_millis(500)).await;
+
+    let mut error_code = None;
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+        let loaded = store
+            .load(LoadRequest {
+                session_id: id::<SessionTag>(1),
+            })
+            .await
+            .expect("load");
+        error_code = loaded
+            .committed_batches
+            .iter()
+            .flat_map(|batch| batch.records.iter())
+            .find_map(|record| match record.body() {
+                RecordBody::EffectFailed(failure) => Some(failure.error().code.as_str().to_owned()),
+                _ => None,
+            });
+        if error_code.is_some() {
+            break;
+        }
+    }
+
+    assert_eq!(toolset.reconcile_count(), 1);
+    assert_eq!(error_code.as_deref(), Some(TOOL_DEFERRAL_EXPIRED));
+    owner.shutdown().await;
+}
+
 #[tokio::test]
 async fn deferred_polls_keep_later_live_waits_per_effect() {
     let mut spec = tool_spec("echo");
