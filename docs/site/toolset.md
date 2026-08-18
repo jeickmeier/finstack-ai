@@ -37,7 +37,7 @@ authority. Do not call them a sandbox. Untrusted code belongs on the
 A tool that may suspend its first pass declares
 `ToolSpec.deferral = Supported`. On the first pass the stream must emit
 `ToolStreamItem::Deferred` as its **sole** terminal item — not alongside
-`Complete`, `Error`, or further progress. The runtime commits the
+`Completed`, stream errors, or further progress. The runtime commits the
 deferral under the original effect id and the run enters
 `AwaitingExternal`.
 
@@ -46,8 +46,8 @@ submit through `complete_external` (for example via a workflow driver
 session). For poll-backed deferrals the runtime derives the next wake
 from the committed `next_poll_at` and calls `Toolset::reconcile` when
 due (`due_polls` / `drive_due_polls`). A reconcile that returns
-`StillRunning` updates the committed deferral; `Complete` or `Error`
-settles the effect.
+`StillRunning` keeps its replacement `next_poll_at` process-local;
+`Completed` or a stream error settles the effect.
 
 ### Stable codes
 

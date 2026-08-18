@@ -109,28 +109,21 @@ where
     }
 }
 
-/// Schedule the next sibling poll wait from committed and live-only state.
-///
-/// # Errors
-///
-/// Returns [`RunHandleError::Timer`] with `timer_job_queue_closed` when the
-/// bounded sibling-wait queue is closed.
-pub(super) async fn arm_due_poll_wait(
+/// Replace the sibling poll wait with the latest committed or live-only deadline.
+pub(super) fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
-    schedules: &mpsc::Sender<Option<Timestamp>>,
+    schedules: &watch::Sender<Option<Timestamp>>,
     process_local_deadlines: &BTreeMap<EffectId, Option<Timestamp>>,
-) -> Result<(), RunHandleError> {
+) {
     let deadline = next_due_poll_or_expiry(coordinator.state(), process_local_deadlines);
-    schedules
-        .send(deadline)
-        .await
-        .map_err(|_| RunHandleError::Timer {
-            code: "timer_job_queue_closed",
-        })
+    schedules.send_replace(deadline);
 }
 
 /// Wake-up outcome emitted by the process-local deferred-poll waiter.
+#[derive(Clone, Copy)]
 pub(super) enum DuePollWake {
+    /// No poll deadline has elapsed.
+    Idle,
     /// The current sibling poll deadline has elapsed.
     Due,
     /// The sibling deadline could not be converted into a monotonic wait.
@@ -145,58 +138,54 @@ enum DuePollWait {
 async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
     clock: Arc<C>,
     cancellation: CancellationSignal,
-    mut schedules: mpsc::Receiver<Option<Timestamp>>,
-    fired: mpsc::Sender<DuePollWake>,
+    mut schedules: watch::Receiver<Option<Timestamp>>,
+    fired: watch::Sender<DuePollWake>,
 ) {
     let mut wait: Option<MonotonicDeadline> = None;
     loop {
         if let Some(active) = wait.as_ref() {
             tokio::select! {
                 () = cancellation.cancelled() => break,
-                schedule = schedules.recv() => {
-                    let Some(schedule) = schedule else { break; };
+                schedule = schedules.changed() => {
+                    if schedule.is_err() {
+                        break;
+                    }
+                    let schedule = *schedules.borrow_and_update();
                     match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
                         Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
                         Some(Ok(DuePollWait::Due)) => {
-                            if fired.send(DuePollWake::Due).await.is_err() {
-                                break;
-                            }
+                            fired.send_replace(DuePollWake::Due);
                             wait = None;
                         }
                         Some(Err(())) => {
-                            if fired.send(DuePollWake::ConstructionFailed).await.is_err() {
-                                break;
-                            }
+                            fired.send_replace(DuePollWake::ConstructionFailed);
                             wait = None;
                         }
                         None => wait = None,
                     }
                 }
                 () = active.wait() => {
-                    if fired.send(DuePollWake::Due).await.is_err() {
-                        break;
-                    }
+                    fired.send_replace(DuePollWake::Due);
                     wait = None;
                 }
             }
         } else {
             tokio::select! {
                 () = cancellation.cancelled() => break,
-                schedule = schedules.recv() => {
-                    let Some(schedule) = schedule else { break; };
+                schedule = schedules.changed() => {
+                    if schedule.is_err() {
+                        break;
+                    }
+                    let schedule = *schedules.borrow_and_update();
                     match schedule.map(|deadline| due_poll_wait(clock.as_ref(), deadline)) {
                         Some(Ok(DuePollWait::Waiting(next))) => wait = Some(next),
                         Some(Ok(DuePollWait::Due)) => {
-                            if fired.send(DuePollWake::Due).await.is_err() {
-                                break;
-                            }
+                            fired.send_replace(DuePollWake::Due);
                         }
-                        Some(Err(()))
-                            if fired.send(DuePollWake::ConstructionFailed).await.is_err() =>
-                        {
-                            break;
+                        Some(Err(())) => {
+                            fired.send_replace(DuePollWake::ConstructionFailed);
                         }
-                        Some(Err(())) | None => {}
+                        None => {}
                     }
                 }
             }
@@ -551,10 +540,8 @@ impl RunTaskOwner {
         let (timer_job_sender, timer_job_receiver) = mpsc::channel(run_config.command_capacity);
         let (timer_result_sender, timer_result_receiver) =
             mpsc::channel(run_config.command_capacity);
-        let (due_poll_schedule_sender, due_poll_schedule_receiver) =
-            mpsc::channel(run_config.command_capacity);
-        let (due_poll_fired_sender, due_poll_fired_receiver) =
-            mpsc::channel(run_config.command_capacity);
+        let (due_poll_schedule_sender, due_poll_schedule_receiver) = watch::channel(None);
+        let (due_poll_fired_sender, due_poll_fired_receiver) = watch::channel(DuePollWake::Idle);
         let mut process_local_poll_deadlines = BTreeMap::new();
 
         // Cloned before the move: the worker needs the locked profile to
@@ -641,8 +628,7 @@ impl RunTaskOwner {
                 &coordinator,
                 &due_poll_schedule_sender,
                 &process_local_poll_deadlines,
-            )
-            .await?;
+            );
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
@@ -796,5 +782,77 @@ impl Drop for RunTaskOwner {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use finstack_ai_kernel::Timestamp;
+    use tokio::sync::watch;
+
+    use super::{CancellationSignal, Clock, DuePollWake, run_due_poll_waits};
+
+    #[derive(Clone, Copy)]
+    struct TestClock(Timestamp);
+
+    impl Clock for TestClock {
+        fn now(&self) -> Result<Timestamp, crate::IdGenerationError> {
+            Ok(self.0)
+        }
+    }
+
+    #[tokio::test]
+    async fn due_poll_waiter_consumes_latest_schedule_with_pending_wake() {
+        let cancellation = CancellationSignal::new();
+        let (schedule_sender, schedule_receiver) = watch::channel(None);
+        let (fired_sender, mut fired_receiver) = watch::channel(DuePollWake::Idle);
+        let task = tokio::spawn(run_due_poll_waits(
+            Arc::new(TestClock(
+                Timestamp::from_unix_ms(2_000).expect("timestamp"),
+            )),
+            cancellation.child(),
+            schedule_receiver,
+            fired_sender,
+        ));
+        let due = Some(Timestamp::from_unix_ms(2_000).expect("timestamp"));
+
+        schedule_sender.send_replace(due);
+        tokio::time::timeout(Duration::from_secs(1), fired_receiver.changed())
+            .await
+            .expect("first wake")
+            .expect("first wake sender");
+        assert!(matches!(
+            *fired_receiver.borrow_and_update(),
+            DuePollWake::Due
+        ));
+        schedule_sender.send_replace(due);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !fired_receiver.has_changed().expect("wake sender") {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("second wake");
+        fired_receiver.changed().await.expect("second wake sender");
+        assert!(matches!(
+            *fired_receiver.borrow_and_update(),
+            DuePollWake::Due
+        ));
+        schedule_sender.send_replace(None);
+        schedule_sender.send_replace(due);
+        tokio::time::timeout(Duration::from_secs(1), fired_receiver.changed())
+            .await
+            .expect("latest schedule wake")
+            .expect("latest wake sender");
+        assert!(matches!(
+            *fired_receiver.borrow_and_update(),
+            DuePollWake::Due
+        ));
+
+        cancellation.cancel();
+        task.await.expect("wait task");
     }
 }

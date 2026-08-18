@@ -154,9 +154,37 @@ pub(crate) async fn spawn_tool_owner_with_clock<C>(
 where
     C: Clock + Send + Sync + 'static,
 {
+    spawn_tool_owner_with_run_config(
+        coordinator,
+        model,
+        catalog,
+        clock,
+        random,
+        owner_run_config(),
+    )
+    .await
+}
+
+/// Spawn a native model-and-tool owner using an explicit run configuration.
+///
+/// # Errors
+///
+/// Returns [`RunHandleError`] when the runtime configuration, port bindings, or
+/// startup reconciliation cannot initialize the owner.
+pub(crate) async fn spawn_tool_owner_with_run_config<C>(
+    coordinator: CommitCoordinator,
+    model: Arc<dyn Model>,
+    catalog: Arc<ResolvedToolCatalog>,
+    clock: C,
+    random: u64,
+    run_config: RunTaskConfig,
+) -> Result<RunTaskOwner, RunHandleError>
+where
+    C: Clock + Send + Sync + 'static,
+{
     Box::pin(RunTaskOwner::spawn_with_model_and_tools(
         coordinator,
-        owner_run_config(),
+        run_config,
         owner_model_config(),
         owner_tool_config(),
         model,

@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, EffectId, KernelInput, RecordTag, Timestamp, TransitionEnv,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::coordinator::ToolDispatchSeed;
 use crate::middleware_driver::StageDriver;
@@ -192,8 +192,8 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut model_results: mpsc::Receiver<ModelDriverMessage>,
     mut tool_results: mpsc::Receiver<ToolDriverMessage>,
     mut timer_results: mpsc::Receiver<TimerDriverMessage>,
-    mut due_poll_fired: mpsc::Receiver<DuePollWake>,
-    due_poll_schedules: mpsc::Sender<Option<Timestamp>>,
+    mut due_poll_fired: watch::Receiver<DuePollWake>,
+    due_poll_schedules: watch::Sender<Option<Timestamp>>,
     due_poll_cancellation: crate::CancellationSignal,
     mut process_local_poll_deadlines: BTreeMap<EffectId, Option<Timestamp>>,
     shared: Arc<Shared>,
@@ -284,17 +284,11 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                                 break;
                             }
                         }
-                        if let Err(error) =
-                            arm_due_poll_wait(
-                                &coordinator,
-                                &due_poll_schedules,
-                                &process_local_poll_deadlines,
-                            )
-                            .await
-                        {
-                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
-                            break;
-                        }
+                        arm_due_poll_wait(
+                            &coordinator,
+                            &due_poll_schedules,
+                            &process_local_poll_deadlines,
+                        );
                     }
                     None => tool_path_open = false,
                 }
@@ -318,39 +312,41 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                     None => timer_path_open = false,
                 }
             }
-            fired = due_poll_fired.recv(), if due_poll_path_open => {
+            fired = due_poll_fired.changed(), if due_poll_path_open => {
                 match fired {
-                    Some(DuePollWake::Due) => {
-                        if shared.shutting_down.load(Ordering::Acquire) {
-                            continue;
-                        }
-                        let result = async {
-                            drive_due_polls(
+                    Ok(()) => {
+                        let fired = *due_poll_fired.borrow_and_update();
+                        match fired {
+                        DuePollWake::Idle => {}
+                        DuePollWake::Due => {
+                            if shared.shutting_down.load(Ordering::Acquire) {
+                                continue;
+                            }
+                            let result = drive_due_polls(
                                 &mut coordinator,
                                 catalog.as_ref(),
                                 &sources,
                                 &due_poll_cancellation,
                                 &mut process_local_poll_deadlines,
                             )
-                            .await?;
+                            .await;
+                            if let Err(error) = result {
+                                fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                                break;
+                            }
                             arm_due_poll_wait(
                                 &coordinator,
                                 &due_poll_schedules,
                                 &process_local_poll_deadlines,
-                            )
-                            .await
+                            );
                         }
-                        .await;
-                        if let Err(error) = result {
-                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                        DuePollWake::ConstructionFailed => {
+                            fault_worker(&shared, &mut receiver, "timer_deadline_invalid");
                             break;
                         }
+                        }
                     }
-                    Some(DuePollWake::ConstructionFailed) => {
-                        fault_worker(&shared, &mut receiver, "timer_deadline_invalid");
-                        break;
-                    }
-                    None => due_poll_path_open = false,
+                    Err(_) => due_poll_path_open = false,
                 }
             }
             command = receiver.recv() => {
