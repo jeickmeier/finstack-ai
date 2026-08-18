@@ -5230,20 +5230,11 @@ impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::Version
 pub fn finstack_ai_kernel::Version::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub const finstack_ai_kernel::AGENT_SPEC_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::APPEND_BATCH_MAX_RECORDS: usize
-pub const finstack_ai_kernel::BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::CONTENT_MAX_ITEMS: usize
 pub const finstack_ai_kernel::DOMAIN_AGENT_SPEC: &str
-pub const finstack_ai_kernel::DOMAIN_BLOB_CONTENT: &str
-pub const finstack_ai_kernel::DOMAIN_EFFECT_INPUT: &str
-pub const finstack_ai_kernel::DOMAIN_EFFECT_OUTPUT: &str
-pub const finstack_ai_kernel::DOMAIN_MIDDLEWARE_CHAIN: &str
-pub const finstack_ai_kernel::DOMAIN_RAW_JSON: &str
 pub const finstack_ai_kernel::DOMAIN_RECORD_ENVELOPE: &str
 pub const finstack_ai_kernel::DOMAIN_RECORD_PAYLOAD: &str
-pub const finstack_ai_kernel::DOMAIN_SNAPSHOT_STATE: &str
 pub const finstack_ai_kernel::DURATION_JS_SAFE_MAX_MS: u64
-pub const finstack_ai_kernel::EFFECT_INPUT_DIGEST_SCHEMA_VERSION: u32
-pub const finstack_ai_kernel::EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::INTERNAL_TOOL_NAMESPACE: &str
 pub const finstack_ai_kernel::KEY_MAX_BYTES: usize
 pub const finstack_ai_kernel::LABEL_MAX_BYTES: usize
@@ -5253,9 +5244,7 @@ pub const finstack_ai_kernel::METADATA_MAX_BYTES: usize
 pub const finstack_ai_kernel::METADATA_MAX_DEPTH: usize
 pub const finstack_ai_kernel::METADATA_MAX_KEY_BYTES: usize
 pub const finstack_ai_kernel::METADATA_MAX_MEMBERS: usize
-pub const finstack_ai_kernel::MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::MODEL_CONTEXT_LENGTH_MAX: u64
-pub const finstack_ai_kernel::RAW_JSON_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::RAW_JSON_MAX_BYTES: usize
 pub const finstack_ai_kernel::RAW_JSON_MAX_DEPTH: usize
 pub const finstack_ai_kernel::RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION: u32
@@ -5266,7 +5255,6 @@ pub const finstack_ai_kernel::RUN_EVENT_KIND_VERSION: u16
 pub const finstack_ai_kernel::RUN_EVENT_SCHEMA_VERSION: u16
 pub const finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS: usize
 pub const finstack_ai_kernel::SEMANTIC_MAP_MAX_ENTRIES: usize
-pub const finstack_ai_kernel::SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION: u32
 pub const finstack_ai_kernel::SUBMIT_FINAL_OUTPUT_TOOL: &str
 pub const finstack_ai_kernel::TEXT_MAX_BYTES: usize
 pub const finstack_ai_kernel::TIMESTAMP_MAX_MS: i64
@@ -5333,7 +5321,6 @@ pub const finstack_ai_kernel::LimitTag::REQUIRES_NAMESPACE: bool
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::ToolTag
 pub const finstack_ai_kernel::ToolTag::NAME: &'static str
 pub const finstack_ai_kernel::ToolTag::REQUIRES_NAMESPACE: bool
-pub fn finstack_ai_kernel::derived_event_kind(&finstack_ai_kernel::RecordBody, u16, usize) -> core::result::Result<finstack_ai_kernel::RunEventKind, finstack_ai_kernel::EventError>
 pub const fn finstack_ai_kernel::hex_nibble(u8) -> core::option::Option<u8>
 pub fn finstack_ai_kernel::is_internal_tool_name(&str) -> bool
 pub fn finstack_ai_kernel::label_is_valid(&str) -> bool

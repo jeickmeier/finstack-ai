@@ -12,10 +12,11 @@ use crate::records::RecordEnvelope;
 
 use super::body::RunEventBody;
 use super::derive::{
-    derived_event_kind, derived_event_sensitivity, effect_id_for_body, is_model_effect_record,
-    is_tool_effect_record, record_correlations, run_event_body_from_record,
-    validate_event_correlations, validate_event_policy, validate_event_versions,
+    derived_event_sensitivity, effect_id_for_body, is_model_effect_record, is_tool_effect_record,
+    record_correlations, run_event_body_from_record, validate_event_correlations,
+    validate_event_policy, validate_event_versions,
 };
+use super::derived_event_kind;
 use super::{EventError, RUN_EVENT_SCHEMA_VERSION, RunEventClass, RunEventKind};
 
 /// Public runtime event envelope.

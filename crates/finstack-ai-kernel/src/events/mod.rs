@@ -121,7 +121,7 @@ mod transient;
 mod tests;
 
 pub use body::RunEventBody;
-pub use derive::derived_event_kind;
+pub(crate) use derive::derived_event_kind;
 pub(crate) use envelope::EventCorrelations;
 pub use envelope::RunEvent;
 pub use error::EventError;

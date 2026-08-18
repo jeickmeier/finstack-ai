@@ -24,11 +24,11 @@ pub(crate) fn decide_tool_settled(
     state: &KernelState,
     env: &TransitionEnv,
     input: &ToolBatchSettled,
+    digest: crate::Digest,
 ) -> Result<Decision, KernelError> {
     if let ToolSettlement::Failed(failure) = &input.outcome {
         validate_error_descriptor(failure.error())?;
     }
-    let digest = direct_tool_digest(input.tool_batch_id, &input.outcome)?;
     settle_normalized_tool(
         state,
         env,
@@ -54,6 +54,7 @@ pub(crate) fn decide_external_tool(
     state: &KernelState,
     env: &TransitionEnv,
     input: ExternalEffectCompletedInput,
+    settlement_digest: Option<crate::Digest>,
 ) -> Result<Decision, KernelError> {
     let indexed_completion = state
         .completion_identities
@@ -79,7 +80,10 @@ pub(crate) fn decide_external_tool(
         .ok_or(KernelError::EffectNotPending {
             effect_id: input.completion.effect_id,
         })?;
-    let digest = external_tool_digest(tool_batch_id, &input)?;
+    let digest = match settlement_digest {
+        Some(digest) => digest,
+        None => external_tool_digest(tool_batch_id, &input)?,
+    };
     if let Some(existing) = indexed_completion {
         return if existing.effect_id == input.completion.effect_id
             && existing.settlement_digest == digest

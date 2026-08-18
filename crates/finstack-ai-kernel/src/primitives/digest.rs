@@ -7,13 +7,13 @@ use sha2::{Digest as Sha2Digest, Sha256};
 use thiserror::Error;
 
 /// Fixed domain name for `RawJson` / `Metadata` digests (TDD §6.4).
-pub const DOMAIN_RAW_JSON: &str = "raw-json";
+pub(crate) const DOMAIN_RAW_JSON: &str = "raw-json";
 /// Schema version embedded in the current `RawJson` digest domain.
-pub const RAW_JSON_DIGEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const RAW_JSON_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for blob-content digests (TDD §6.4 / §7.2).
-pub const DOMAIN_BLOB_CONTENT: &str = "blob-content";
+pub(crate) const DOMAIN_BLOB_CONTENT: &str = "blob-content";
 /// Schema version embedded in the current blob-content digest domain.
-pub const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const BLOB_CONTENT_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for record-payload digests (TDD §6.4).
 pub const DOMAIN_RECORD_PAYLOAD: &str = "record-payload";
 /// Schema version for the `record-payload` digest domain.
@@ -23,21 +23,23 @@ pub const DOMAIN_RECORD_ENVELOPE: &str = "record-envelope";
 /// Schema version for the `record-envelope` digest domain.
 pub const RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for effect-input digests (TDD §6.4 / §12.3).
-pub const DOMAIN_EFFECT_INPUT: &str = "effect-input";
+pub(crate) const DOMAIN_EFFECT_INPUT: &str = "effect-input";
 /// Schema version for the `effect-input` digest domain.
-pub const EFFECT_INPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EFFECT_INPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for effect-output digests (TDD §6.4 / §12.3).
-pub const DOMAIN_EFFECT_OUTPUT: &str = "effect-output";
+pub(crate) const DOMAIN_EFFECT_OUTPUT: &str = "effect-output";
 /// Schema version for the `effect-output` digest domain.
-pub const EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for snapshot-state digests (TDD §6.4).
-pub const DOMAIN_SNAPSHOT_STATE: &str = "snapshot-state";
+pub(crate) const DOMAIN_SNAPSHOT_STATE: &str = "snapshot-state";
 /// Schema version for the `snapshot-state` digest domain.
-pub const SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION: u32 = 1;
+pub(crate) const SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for middleware-chain digests (TDD §6.4).
-pub const DOMAIN_MIDDLEWARE_CHAIN: &str = "middleware-chain";
+#[allow(dead_code)] // registry only; runtime hashes this domain via `Digest::domain_separated`
+pub(crate) const DOMAIN_MIDDLEWARE_CHAIN: &str = "middleware-chain";
 /// Schema version for the `middleware-chain` digest domain.
-pub const MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION: u32 = 1;
+#[allow(dead_code)]
+pub(crate) const MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for agent-spec digests (TDD §6.4).
 pub const DOMAIN_AGENT_SPEC: &str = "agent-spec";
 /// Schema version for the `agent-spec` digest domain.
@@ -142,7 +144,7 @@ impl Digest {
     ///
     /// # Panics
     ///
-    /// Panics only if the fixed [`DOMAIN_RAW_JSON`] registry entry were invalid.
+    /// Panics only if the fixed `raw-json` registry entry were invalid.
     #[must_use]
     pub fn raw_json(canonical_bytes: &[u8]) -> Self {
         Self::domain_separated(
@@ -157,7 +159,7 @@ impl Digest {
     ///
     /// # Panics
     ///
-    /// Panics only if the fixed [`DOMAIN_BLOB_CONTENT`] registry entry were invalid.
+    /// Panics only if the fixed `blob-content` registry entry were invalid.
     #[must_use]
     pub fn blob_content(raw_bytes: &[u8]) -> Self {
         Self::domain_separated(
@@ -172,7 +174,7 @@ impl Digest {
     ///
     /// # Panics
     ///
-    /// Panics only if the fixed [`DOMAIN_EFFECT_INPUT`] registry entry were invalid.
+    /// Panics only if the fixed `effect-input` registry entry were invalid.
     #[must_use]
     pub fn effect_input(canonical_bytes: &[u8]) -> Self {
         Self::domain_separated(
@@ -187,7 +189,7 @@ impl Digest {
     ///
     /// # Panics
     ///
-    /// Panics only if the fixed [`DOMAIN_EFFECT_OUTPUT`] registry entry were invalid.
+    /// Panics only if the fixed `effect-output` registry entry were invalid.
     #[must_use]
     pub fn effect_output(canonical_bytes: &[u8]) -> Self {
         Self::domain_separated(
@@ -202,7 +204,7 @@ impl Digest {
     ///
     /// # Panics
     ///
-    /// Panics only if the fixed [`DOMAIN_SNAPSHOT_STATE`] registry entry were invalid.
+    /// Panics only if the fixed `snapshot-state` registry entry were invalid.
     #[must_use]
     pub fn snapshot_state(canonical_bytes: &[u8]) -> Self {
         Self::domain_separated(

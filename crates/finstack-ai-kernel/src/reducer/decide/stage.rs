@@ -10,7 +10,6 @@ use crate::{OutputConfiguration, OutputSpec, RetrySafety};
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::capacity::{self, StateGrowth};
 use super::super::decision::{Decision, KernelError, PostCommitAction};
-use super::super::fingerprint::stage_digest;
 use super::super::input::{AcceptRun, ReducerStageOutcome, StageSettled};
 use super::super::validation::validate_error_descriptor;
 use super::bodies::{
@@ -69,9 +68,9 @@ pub(super) fn decide_stage(
     env: &TransitionEnv,
     input: &StageSettled,
     context_canonical: Option<(Digest, usize)>,
+    settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     validate_stage_input(input)?;
-    let settlement_digest = stage_digest(input)?;
     if let Some(existing) = state.stage_settlements.get(&input.cursor) {
         return if *existing == settlement_digest {
             duplicate_decision(state)

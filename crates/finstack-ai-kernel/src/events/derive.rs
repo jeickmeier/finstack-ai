@@ -403,7 +403,7 @@ pub(super) fn is_model_effect_record(body: &RecordBody) -> bool {
 /// # Errors
 ///
 /// Returns [`EventError::UnsupportedOrdinal`] when the ordinal is out of range.
-pub fn derived_event_kind(
+pub(crate) fn derived_event_kind(
     body: &RecordBody,
     kind_version: u16,
     ordinal: usize,

@@ -91,9 +91,10 @@ pub(super) fn decide_settled(
     state: &KernelState,
     env: &TransitionEnv,
     input: &InteractionSettled,
+    settlement_digest: Option<Digest>,
 ) -> Result<Decision, KernelError> {
     if let InteractionSettled::Resolved(resolution) = input {
-        let digest = resolution_digest(resolution)?;
+        let digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
         if let Some(existing) = state.resolution_identities.get(resolution.resolution_id()) {
             return if existing.settlement_digest == digest {
                 duplicate_decision(state)

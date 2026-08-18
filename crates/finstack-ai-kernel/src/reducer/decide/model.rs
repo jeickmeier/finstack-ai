@@ -12,7 +12,7 @@ use crate::state::{KernelState, RunPhase, TransitionEnv};
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::capacity::{self, StateGrowth};
 use super::super::decision::{Decision, KernelError};
-use super::super::fingerprint::{direct_digest, external_digest};
+use super::super::fingerprint::direct_digest;
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ModelSettled, ModelSettlement,
     RequestCompactionModel,
@@ -117,11 +117,11 @@ pub(super) fn decide_model(
     state: &KernelState,
     env: &TransitionEnv,
     input: &ModelSettled,
+    settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     if let ModelSettlement::Failed(failed) = &input.outcome {
         validate_error_descriptor(failed.error())?;
     }
-    let settlement_digest = direct_digest(input)?;
     decide_normalized_model(state, env, input, "model_settled", settlement_digest)
 }
 
@@ -157,12 +157,13 @@ pub(super) fn decide_external(
     state: &KernelState,
     env: &TransitionEnv,
     input: ExternalEffectCompletedInput,
+    settlement_digest: Option<Digest>,
 ) -> Result<Decision, KernelError> {
     validate_external_completion_input(&input)?;
     if super::super::tool::is_known_tool_effect(state, input.completion.effect_id) {
-        return super::super::tool::decide_external_tool(state, env, input);
+        return super::super::tool::decide_external_tool(state, env, input, settlement_digest);
     }
-    let settlement_digest = external_digest(&input)?;
+    let settlement_digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
     if let Some(decision) = classify_model_duplicate(
         state,
         Some(input.completion.completion_id.as_ref()),
