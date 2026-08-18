@@ -14,18 +14,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    AcceptRun, AllocatedIds, BudgetChargeReceipt, BudgetChargeRequest, BudgetPropagation,
-    BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest, BudgetReservationReceipt,
-    BudgetReserveRequest, CancellationPropagation, ChildPlacement, ChildRunLocator, ComponentId,
-    ComponentInvocation, ComponentRef, ContentBlock, DeadlinePropagation, Digest, EffectCompleted,
-    EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectRequested, Id, IdTag,
-    InteractionKind, InteractionRequest, InteractionTag, InvocationRecovery, KernelInput, LaneTag,
-    Message, MessageRole, Metadata, ModelSettled, ModelSettlement, OperationLocator,
-    PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
-    RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
-    RunRelationKind, RunSecurityContext, SessionTag, Stage, StageCursor, TextBlock, Timestamp,
-    ToolBatchContinuation, ToolCallBlock, ToolCallPlan, ToolExecutionMode, ToolFailurePolicy,
-    ToolId, TransitionEnv, Usage, ValidatedToolCall, Version,
+    AcceptRun, AllocatedIds, BoundedMap, BudgetChargeReceipt, BudgetChargeRequest,
+    BudgetPropagation, BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest,
+    BudgetReservationReceipt, BudgetReserveRequest, CancellationPropagation, ChildPlacement,
+    ChildRunLocator, ComponentId, ComponentInvocation, ComponentRef, ContentBlock,
+    DeadlinePropagation, Digest, EffectCompleted, EffectInput, EffectKind, EffectOutputContract,
+    EffectOutputKind, EffectRequested, Id, IdTag, InteractionKind, InteractionRequest,
+    InteractionTag, InvocationRecovery, KernelInput, LaneTag, Message, MessageRole, Metadata,
+    ModelSettled, ModelSettlement, OperationLocator, PrincipalPropagation, PrincipalRef,
+    ProviderIds, RawJson, RecordTag, ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits,
+    RunPhase, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext, SessionTag,
+    Stage, StageCursor, TextBlock, Timestamp, ToolBatchContinuation, ToolCallBlock, ToolCallPlan,
+    ToolExecutionMode, ToolFailurePolicy, ToolId, TransitionEnv, Usage, ValidatedToolCall, Version,
 };
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, BudgetError, BudgetLedger,
@@ -880,7 +880,7 @@ pub(crate) fn reserve_request() -> BudgetReserveRequest {
         input_tokens: Some(1_000),
         output_tokens: Some(250),
         cost: None,
-        extension_counters: Default::default(),
+        extension_counters: BoundedMap::default(),
     };
     let request_digest =
         BudgetReserveRequest::compute_digest(id(342), id(343), id(51), &amount).expect("digest");

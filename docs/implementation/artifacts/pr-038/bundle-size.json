@@ -13,10 +13,10 @@
       "sha256": "4f412d47b6787e04e3338724bea9080c8663cce4a36e1d2a12bbdb681ed0b2ae"
     },
     {
-      "bytes": 9451572,
-      "gzip_bytes": 2791572,
+      "bytes": 9473049,
+      "gzip_bytes": 2795198,
       "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
-      "sha256": "87265137f7fbb43c73ab01fea2a0a730083a978ef9a6ebe51681c887c4c7a9e2"
+      "sha256": "b2c6807f35bee09f84ce3dfeaccb292892d23188e6c200d4320a78dfcdea7c55"
     },
     {
       "bytes": 8349,

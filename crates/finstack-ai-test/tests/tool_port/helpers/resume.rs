@@ -1,5 +1,6 @@
 //! PR-016 Toolset port, validation, scheduler, ordering, and panic proofs.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration as StdDuration;
@@ -121,21 +122,20 @@ pub(crate) fn resume_ports(
     (memory_store(), toolset, model, catalog, tools)
 }
 
-pub(crate) async fn spawn_tool_owner(
+pub(crate) fn spawn_tool_owner(
     coordinator: CommitCoordinator,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
     clock_ms: i64,
     random: u64,
-) -> Result<RunTaskOwner, RunHandleError> {
-    spawn_tool_owner_with_clock(
+) -> impl Future<Output = Result<RunTaskOwner, RunHandleError>> {
+    Box::pin(spawn_tool_owner_with_clock(
         coordinator,
         model,
         catalog,
         FixedClock::new(timestamp(clock_ms)),
         random,
-    )
-    .await
+    ))
 }
 
 /// Spawn a native model-and-tool owner using the supplied semantic clock.
@@ -144,25 +144,24 @@ pub(crate) async fn spawn_tool_owner(
 ///
 /// Returns [`RunHandleError`] when the runtime configuration, port bindings, or
 /// startup reconciliation cannot initialize the owner.
-pub(crate) async fn spawn_tool_owner_with_clock<C>(
+pub(crate) fn spawn_tool_owner_with_clock<C>(
     coordinator: CommitCoordinator,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
     clock: C,
     random: u64,
-) -> Result<RunTaskOwner, RunHandleError>
+) -> impl Future<Output = Result<RunTaskOwner, RunHandleError>>
 where
     C: Clock + Send + Sync + 'static,
 {
-    spawn_tool_owner_with_run_config(
+    Box::pin(spawn_tool_owner_with_run_config(
         coordinator,
         model,
         catalog,
         clock,
         random,
         owner_run_config(),
-    )
-    .await
+    ))
 }
 
 /// Spawn a native model-and-tool owner using an explicit run configuration.
@@ -171,14 +170,14 @@ where
 ///
 /// Returns [`RunHandleError`] when the runtime configuration, port bindings, or
 /// startup reconciliation cannot initialize the owner.
-pub(crate) async fn spawn_tool_owner_with_run_config<C>(
+pub(crate) fn spawn_tool_owner_with_run_config<C>(
     coordinator: CommitCoordinator,
     model: Arc<dyn Model>,
     catalog: Arc<ResolvedToolCatalog>,
     clock: C,
     random: u64,
     run_config: RunTaskConfig,
-) -> Result<RunTaskOwner, RunHandleError>
+) -> impl Future<Output = Result<RunTaskOwner, RunHandleError>>
 where
     C: Clock + Send + Sync + 'static,
 {
@@ -193,7 +192,6 @@ where
         clock,
         CounterRandom(AtomicU64::new(random)),
     ))
-    .await
 }
 
 pub(crate) async fn recover_session(store: &Arc<MemoryJournalStore>) -> CommitCoordinator {
