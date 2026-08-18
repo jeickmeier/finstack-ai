@@ -644,10 +644,72 @@ pub fn compile_native_host_adapters() {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    use finstack_ai::{
+        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, ChildRunPolicy, LinkedAgentPorts,
+        OllamaAgentSpec, OpenAiAgentSpec,
+    };
+
     use super::health;
+
+    fn ready<T>(future: impl Future<Output = T>) -> T {
+        let mut future = std::pin::pin!(future);
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            Poll::Ready(value) => value,
+            Poll::Pending => panic!("expected a ready wasm-host constructor error"),
+        }
+    }
 
     #[test]
     fn wasm_bindgen_health_matches_rust_token() {
         assert_eq!(health(), "ok");
+    }
+
+    #[test]
+    fn linked_constructors_are_fail_closed_on_wasm_host() {
+        let openai = ready(Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-unused".into(),
+            instruction: None,
+            capabilities: Vec::new(),
+            active_capabilities: Vec::new(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            ports: LinkedAgentPorts::default(),
+            child_runs: ChildRunPolicy::Deny,
+        }))
+        .err()
+        .expect("openai");
+        let anthropic = ready(Agent::anthropic(AnthropicAgentSpec {
+            base_url: "https://api.anthropic.com".into(),
+            model: "fixture-model".into(),
+            api_key: None,
+            instruction: None,
+            capabilities: Vec::new(),
+            active_capabilities: Vec::new(),
+            ports: LinkedAgentPorts::default(),
+            child_runs: ChildRunPolicy::Deny,
+        }))
+        .err()
+        .expect("anthropic");
+        let ollama = ready(Agent::ollama(OllamaAgentSpec {
+            base_url: "http://127.0.0.1:11434".into(),
+            model: "fixture-model".into(),
+            instruction: None,
+            capabilities: Vec::new(),
+            active_capabilities: Vec::new(),
+            ports: LinkedAgentPorts::default(),
+            child_runs: ChildRunPolicy::Deny,
+        }))
+        .err()
+        .expect("ollama");
+        assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
     }
 }

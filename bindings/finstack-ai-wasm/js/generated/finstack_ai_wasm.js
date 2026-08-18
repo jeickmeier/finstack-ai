@@ -21,6 +21,25 @@ export class Agent {
         wasm.__wbg_agent_free(ptr, 0);
     }
     /**
+     * Construct an Anthropic Messages agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * @param {string} base_url
+     * @param {string} model
+     * @param {string | null} [api_key]
+     * @returns {Promise<any>}
+     */
+    static anthropic(base_url, model, api_key) {
+        const ptr0 = passStringToWasm0(base_url, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(api_key) ? 0 : passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_anthropic(ptr0, len0, ptr1, len1, ptr2, len2);
+        return takeObject(ret);
+    }
+    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * # Errors
@@ -140,6 +159,22 @@ export class Agent {
         return takeObject(ret);
     }
     /**
+     * Construct a keyless Ollama agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * @param {string} base_url
+     * @param {string} model
+     * @returns {Promise<any>}
+     */
+    static ollama(base_url, model) {
+        const ptr0 = passStringToWasm0(base_url, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_ollama(ptr0, len0, ptr1, len1);
+        return takeObject(ret);
+    }
+    /**
      * Open an existing session without respawning parked runs.
      *
      * # Errors
@@ -156,6 +191,22 @@ export class Agent {
         var ptr1 = isLikeNone(tenant_scope) ? 0 : passStringToWasm0(tenant_scope, wasm.__wbindgen_export, wasm.__wbindgen_export2);
         var len1 = WASM_VECTOR_LEN;
         const ret = wasm.agent_openSession(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        return takeObject(ret);
+    }
+    /**
+     * Construct an official OpenAI Responses agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     * @param {string} model
+     * @param {string} api_key
+     * @returns {Promise<any>}
+     */
+    static openai(model, api_key) {
+        const ptr0 = passStringToWasm0(model, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(api_key, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_openai(ptr0, len0, ptr1, len1);
         return takeObject(ret);
     }
     /**
@@ -1980,7 +2031,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_1795(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_1822(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -2062,13 +2113,13 @@ function __wbg_get_imports() {
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 555, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1781);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 570, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_1808);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 5, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_406);
+            const ret = makeMutClosure(arg0, arg1, __wasm_bindgen_func_elem_417);
             return addHeapObject(ret);
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -2100,14 +2151,14 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_406(arg0, arg1) {
-    wasm.__wasm_bindgen_func_elem_406(arg0, arg1);
+function __wasm_bindgen_func_elem_417(arg0, arg1) {
+    wasm.__wasm_bindgen_func_elem_417(arg0, arg1);
 }
 
-function __wasm_bindgen_func_elem_1781(arg0, arg1, arg2) {
+function __wasm_bindgen_func_elem_1808(arg0, arg1, arg2) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.__wasm_bindgen_func_elem_1781(retptr, arg0, arg1, addHeapObject(arg2));
+        wasm.__wasm_bindgen_func_elem_1808(retptr, arg0, arg1, addHeapObject(arg2));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         if (r1) {
@@ -2118,8 +2169,8 @@ function __wasm_bindgen_func_elem_1781(arg0, arg1, arg2) {
     }
 }
 
-function __wasm_bindgen_func_elem_1795(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1795(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1822(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1822(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const AgentFinalization = (typeof FinalizationRegistry === 'undefined')

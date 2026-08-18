@@ -8,15 +8,9 @@ use finstack_ai::runtime::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, Model, ModelName, ModelSettings,
     RawJson, Version,
 };
-use finstack_ai::{Agent, AgentRunError, CapabilitySpec, ChildRunPolicy, RunPolicy, Session};
-use finstack_ai_provider_anthropic::{
-    AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
-    Authentication as AnthropicAuthentication, SecretString as AnthropicSecret,
-};
-use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
-use finstack_ai_provider_openai::{
-    Authentication as OpenAiAuthentication, OpenAiConfig, OpenAiModelConfig, OpenAiProvider,
-    SecretString as OpenAiSecret,
+use finstack_ai::{
+    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, LinkedAgent,
+    LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy, Session,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -27,9 +21,7 @@ use crate::callbacks::{
     PyPythonContextProvider, PyPythonMiddleware, PyPythonModel, PyPythonObserver, PyPythonToolset,
 };
 use crate::capability::PyCapability;
-use crate::errors::{
-    agent_error, configuration_error, model_configuration_error, session_py_error,
-};
+use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::run::{
     PreparedPydanticOutput, PyRun, prepare_pydantic_output, result_to_python_with_locator,
     run_request,
@@ -37,16 +29,7 @@ use crate::run::{
 use crate::session::PySession;
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 30.0;
-const OPENAI_TIMEOUT_SECONDS: f64 = 120.0;
 pub(crate) const DEFAULT_MAX_CYCLES: u64 = 16;
-const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
-const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
-/// Anthropic rejects `max_tokens` above the selected model's own ceiling, and
-/// the current Claude generation tops out at 64,000 output tokens.
-const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
-const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
-const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
 const PREVIEW_VERSION: Version = Version {
     major: 0,
     minor: 0,
@@ -74,7 +57,6 @@ impl PyAgent {
     #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
     #[expect(
         clippy::too_many_arguments,
-        clippy::needless_pass_by_value,
         reason = "linked factory forwards provider auth, reasoning, and primary port components distinctly"
     )]
     fn openai(
@@ -93,8 +75,6 @@ impl PyAgent {
         output_type: Option<Py<PyAny>>,
         child_runs: Option<Py<PyChildRunPolicy>>,
     ) -> PyResult<Bound<'_, PyAny>> {
-        let settings =
-            reasoning_settings(reasoning_effort.as_deref(), reasoning_summary.as_deref())?;
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
         let ports = linked_ports(
@@ -107,21 +87,20 @@ impl PyAgent {
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_openai_agent(
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::openai(OpenAiAgentSpec {
                 model,
+                api_key,
                 instruction,
                 capabilities,
                 active_capabilities,
-                api_key,
-                settings,
+                reasoning_effort,
+                reasoning_summary,
                 ports,
                 child_runs,
-            )
-            .await;
-            Python::attach(|py| match built {
-                Ok(value) => Py::new(py, value),
-                Err(error) => Err(agent_error(py, &error, None)),
             })
+            .await;
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
         })
     }
 
@@ -163,7 +142,8 @@ impl PyAgent {
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_anthropic_agent(
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::anthropic(AnthropicAgentSpec {
                 base_url,
                 model,
                 api_key,
@@ -172,12 +152,9 @@ impl PyAgent {
                 active_capabilities,
                 ports,
                 child_runs,
-            )
-            .await;
-            Python::attach(|py| match built {
-                Ok(value) => Py::new(py, value),
-                Err(error) => Err(agent_error(py, &error, None)),
             })
+            .await;
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
         })
     }
 
@@ -217,7 +194,8 @@ impl PyAgent {
         )?;
         let child_runs = child_runs_or_deny(py, child_runs);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let built = build_ollama_agent(
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
                 instruction,
@@ -225,12 +203,9 @@ impl PyAgent {
                 active_capabilities,
                 ports,
                 child_runs,
-            )
-            .await;
-            Python::attach(|py| match built {
-                Ok(value) => Py::new(py, value),
-                Err(error) => Err(agent_error(py, &error, None)),
             })
+            .await;
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
         })
     }
 
@@ -480,139 +455,37 @@ impl PyAgent {
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "linked factory forwards provider auth, ports, and child-run policy distinctly"
-)]
-async fn build_openai_agent(
-    model: String,
-    instruction: Option<String>,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    api_key: String,
-    settings: ModelSettings,
-    ports: LinkedPorts,
-    child_runs: ChildRunPolicy,
-) -> Result<PyAgent, AgentRunError> {
-    let config = OpenAiConfig::try_new("https://api.openai.com")
-        .map_err(model_configuration_error)?
-        .with_authentication(OpenAiAuthentication::Bearer(
-            OpenAiSecret::try_new(api_key).map_err(model_configuration_error)?,
-        ));
-    let model_config = linked_openai_model_config(&model, true)?;
-    let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        OpenAiProvider::try_new(config, vec![model_config]).map_err(model_configuration_error)?,
-    );
-    finish_linked_agent(LinkedAgentSpec {
-        agent_id: "python.agent.openai",
-        bundle_id: "python.bundle.openai",
-        model: (component("python.model.openai")?, provider),
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-        settings,
-        default_timeout_seconds: OPENAI_TIMEOUT_SECONDS,
-        sqlite_path: None,
-        sqlite_durability: None,
-    })
-    .await
+fn split_linked_ports(ports: LinkedPorts) -> (LinkedAgentPorts, Option<Py<PyAny>>) {
+    (
+        LinkedAgentPorts {
+            toolsets: ports.toolsets,
+            context_providers: ports.context_providers,
+            middleware: ports.middleware,
+            observers: ports.observers,
+            output_schema: ports.output.as_ref().map(|output| output.schema.clone()),
+        },
+        ports.output.map(|output| output.adapter),
+    )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "linked factory forwards provider auth, ports, and child-run policy distinctly"
-)]
-async fn build_anthropic_agent(
-    base_url: String,
-    model: String,
-    api_key: Option<String>,
-    instruction: Option<String>,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    ports: LinkedPorts,
-    child_runs: ChildRunPolicy,
-) -> Result<PyAgent, AgentRunError> {
-    let mut config = AnthropicConfig::try_new(base_url).map_err(model_configuration_error)?;
-    if let Some(api_key) = api_key {
-        config = config.with_authentication(AnthropicAuthentication::ApiKey(
-            AnthropicSecret::try_new(api_key).map_err(model_configuration_error)?,
-        ));
+fn wrap_linked_agent(
+    py: Python<'_>,
+    built: Result<LinkedAgent, AgentRunError>,
+    output_adapter: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAgent>> {
+    match built {
+        Ok(value) => Py::new(
+            py,
+            PyAgent {
+                inner: Arc::new(value.agent),
+                model: value.model,
+                output_adapter,
+                settings: value.settings,
+                default_timeout_seconds: value.default_timeout.as_secs_f64(),
+            },
+        ),
+        Err(error) => Err(agent_error(py, &error, None)),
     }
-    let model_config = AnthropicModelConfig::try_new(
-        &model,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_ANTHROPIC_OUTPUT_TOKENS,
-        LINKED_ANTHROPIC_OUTPUT_TOKENS,
-        LINKED_PROVIDER_OVERHEAD_TOKENS,
-    )
-    .map_err(model_configuration_error)?;
-    let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        AnthropicProvider::try_new(config, vec![model_config])
-            .map_err(model_configuration_error)?,
-    );
-    finish_linked_agent(LinkedAgentSpec {
-        agent_id: "python.agent.anthropic",
-        bundle_id: "python.bundle.anthropic",
-        model: (component("python.model.anthropic")?, provider),
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-        settings: empty_model_settings()?,
-        default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
-        sqlite_path: None,
-        sqlite_durability: None,
-    })
-    .await
-}
-
-async fn build_ollama_agent(
-    base_url: String,
-    model: String,
-    instruction: Option<String>,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    ports: LinkedPorts,
-    child_runs: ChildRunPolicy,
-) -> Result<PyAgent, AgentRunError> {
-    let config = OllamaConfig::try_new(base_url).map_err(model_configuration_error)?;
-    let model_config = OllamaModelConfig::try_new(
-        &model,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_RESERVED_OUTPUT_TOKENS,
-        LINKED_RESERVED_OUTPUT_TOKENS,
-        LINKED_PROVIDER_OVERHEAD_TOKENS,
-    )
-    .map_err(model_configuration_error)?;
-    let model_name = model_config.name.clone();
-    let provider: Arc<dyn Model> = Arc::new(
-        OllamaProvider::try_new(config, vec![model_config]).map_err(model_configuration_error)?,
-    );
-    finish_linked_agent(LinkedAgentSpec {
-        agent_id: "python.agent.ollama",
-        bundle_id: "python.bundle.ollama",
-        model: (component("python.model.ollama")?, provider),
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-        settings: empty_model_settings()?,
-        default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
-        sqlite_path: None,
-        sqlite_durability: None,
-    })
-    .await
 }
 
 struct LinkedPorts {
@@ -768,57 +641,10 @@ fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) 
     })
 }
 
-fn linked_openai_model_config(
-    model: &str,
-    reasoning: bool,
-) -> Result<OpenAiModelConfig, AgentRunError> {
-    let mut config = OpenAiModelConfig::try_new(
-        model,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_CONTEXT_WINDOW_TOKENS,
-        LINKED_RESERVED_OUTPUT_TOKENS,
-        LINKED_RESERVED_OUTPUT_TOKENS,
-        LINKED_PROVIDER_OVERHEAD_TOKENS,
-    )
-    .map_err(model_configuration_error)?;
-    if reasoning {
-        config = config.with_reasoning(true);
-    }
-    Ok(config)
-}
-
 pub(crate) fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
     Ok(ModelSettings {
         values: RawJson::parse(b"{}").map_err(|error| configuration_error(error.to_string()))?,
     })
-}
-
-fn reasoning_settings(effort: Option<&str>, summary: Option<&str>) -> PyResult<ModelSettings> {
-    let mut fields = Vec::new();
-    if let Some(value) = effort {
-        if !REASONING_EFFORTS.contains(&value) {
-            return Err(ConfigurationError::new_err(
-                "reasoning_effort must be one of none, minimal, low, medium, high, xhigh, max",
-            ));
-        }
-        fields.push(format!(r#""reasoning_effort":"{value}""#));
-    }
-    if let Some(value) = summary {
-        if !REASONING_SUMMARIES.contains(&value) {
-            return Err(ConfigurationError::new_err(
-                "reasoning_summary must be one of auto, concise, detailed",
-            ));
-        }
-        fields.push(format!(r#""reasoning_summary":"{value}""#));
-    }
-    if fields.is_empty() {
-        return empty_model_settings()
-            .map_err(|error| ConfigurationError::new_err(error.to_string()));
-    }
-    let payload = format!("{{{}}}", fields.join(","));
-    RawJson::parse(payload.as_bytes())
-        .map(|values| ModelSettings { values })
-        .map_err(|error| ConfigurationError::new_err(error.to_string()))
 }
 
 fn capability_configuration(

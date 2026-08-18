@@ -7,6 +7,7 @@ mod child;
 mod drive;
 mod handle;
 mod lane;
+mod linked;
 mod mask;
 mod prepare;
 mod run;
@@ -21,6 +22,9 @@ pub use activation::{
 };
 pub use builder::NativeAgentBuilder;
 pub use handle::Agent;
+pub use linked::{
+    AnthropicAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
+};
 pub use run::AgentRun;
 pub use types::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
