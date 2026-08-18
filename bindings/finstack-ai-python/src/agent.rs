@@ -9,8 +9,9 @@ use finstack_ai::runtime::{
     RawJson, Version,
 };
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, GatewayAgentSpec,
-    LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy, Session,
+    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
+    GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy,
+    Session,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -259,6 +260,61 @@ impl PyAgent {
                 hard_input_bytes,
                 auth_kind: auth,
                 api_key,
+                instruction,
+                capabilities,
+                active_capabilities,
+                ports,
+                child_runs,
+            })
+            .await;
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+        })
+    }
+
+    /// Construct a Rust-backed T4 E2B sandbox agent.
+    ///
+    /// `api_key` is required and keyword-only. The binding does not read
+    /// environment variables.
+    #[staticmethod]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, endpoint = None, template = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "linked factory forwards e2b route and primary port components distinctly"
+    )]
+    fn e2b_sandbox(
+        py: Python<'_>,
+        model: String,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+        api_key: String,
+        endpoint: Option<String>,
+        template: Option<String>,
+        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
+        output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        let ports = linked_ports(
+            py,
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_type,
+        )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::e2b_sandbox(E2bSandboxAgentSpec {
+                model,
+                api_key,
+                endpoint,
+                template,
                 instruction,
                 capabilities,
                 active_capabilities,

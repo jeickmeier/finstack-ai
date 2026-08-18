@@ -221,6 +221,28 @@ export declare class Agent {
         apiKey?: string;
     }): Promise<Agent>;
     /**
+     * Construct a T4 E2B sandbox agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Catalog model name and explicit API key. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the toolset.
+     * @example
+     * ```ts
+     * await Agent.e2bSandbox({
+     *   model: "fixture-model",
+     *   apiKey: "e2b-...",
+     * });
+     * ```
+     */
+    static e2bSandbox(options: {
+        model: string;
+        apiKey: string;
+        endpoint?: string;
+        template?: string;
+    }): Promise<Agent>;
+    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * @returns Compact catalog entries visible to model selection.

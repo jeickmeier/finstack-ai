@@ -47,6 +47,7 @@ FORBIDDEN_WASM = frozenset(
         "opentelemetry-http",
         "prometheus",
         "finstack-ai-remote-child",
+        "finstack-ai-sandbox-e2b",
         "finstack-ai-server",
         "finstack-ai-workflow-local",
         "finstack-ai-workflow-temporal",

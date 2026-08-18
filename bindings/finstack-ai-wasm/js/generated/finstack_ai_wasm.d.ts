@@ -43,6 +43,12 @@ export class Agent {
      */
     createSession(tenant_scope?: string | null): Promise<any>;
     /**
+     * Construct a T4 E2B sandbox agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     */
+    static e2bSandbox(model: string, api_key: string, endpoint?: string | null, template?: string | null): Promise<any>;
+    /**
      * Construct a config-driven gateway agent.
      *
      * wasm-host fails closed with `agent_run_unsupported_plan`.
@@ -705,6 +711,7 @@ export interface InitOutput {
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
     readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
     readonly agent_createSession: (a: number, b: number, c: number) => number;
+    readonly agent_e2bSandbox: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly agent_gateway: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: bigint, k: number, l: number, m: number, n: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
     readonly agent_ollama: (a: number, b: number, c: number, d: number) => number;
@@ -780,9 +787,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1826: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1840: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_425: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1835: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1849: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_429: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

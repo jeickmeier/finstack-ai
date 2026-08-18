@@ -165,6 +165,32 @@ export class Agent {
         }
     }
     /**
+     * Construct a T4 E2B sandbox agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Catalog model name and explicit API key. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the toolset.
+     * @example
+     * ```ts
+     * await Agent.e2bSandbox({
+     *   model: "fixture-model",
+     *   apiKey: "e2b-...",
+     * });
+     * ```
+     */
+    static async e2bSandbox(options) {
+        requireWasm();
+        try {
+            const handle = await WasmAgent.e2bSandbox(options.model, options.apiKey, options.endpoint, options.template);
+            return new Agent(handle);
+        }
+        catch (error) {
+            throw FinstackError.fromUnknown(error);
+        }
+    }
+    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * @returns Compact catalog entries visible to model selection.

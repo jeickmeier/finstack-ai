@@ -27,8 +27,8 @@ pub use builder::NativeAgentBuilder;
 pub use child_route::RemoteChildRouteSpec;
 pub use handle::Agent;
 pub use linked::{
-    AnthropicAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec,
-    OpenAiAgentSpec,
+    AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
+    OllamaAgentSpec, OpenAiAgentSpec,
 };
 pub use run::AgentRun;
 pub use types::{
