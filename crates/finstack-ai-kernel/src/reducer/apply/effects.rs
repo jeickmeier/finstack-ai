@@ -101,7 +101,7 @@ pub(super) fn apply_effect_requested(
         .ok_or(KernelError::InvariantViolation)?;
     let model_request_id = if let Some(model_request_id) = turn.model_request_id {
         model_request_id
-    } else if requested.is_compaction_summary() {
+    } else if requested.is_runtime_owned_child_model() {
         let model_request_id = ModelRequestId::from_bytes(*requested.effect_id().as_bytes());
         turn.model_request_id = Some(model_request_id);
         turn.effect_id = Some(requested.effect_id());
@@ -286,7 +286,7 @@ pub(super) fn apply_effect_completed(
     if state
         .pending_model_effect
         .as_ref()
-        .is_some_and(|pending| pending.requested.is_compaction_summary())
+        .is_some_and(|pending| pending.requested.is_runtime_owned_child_model())
     {
         return apply_compaction_completed(state, completed);
     }
@@ -411,7 +411,11 @@ fn apply_compaction_completed(
         turn.model_request_id = None;
         turn.effect_id = None;
     }
-    state.phase = Some(RunPhase::BeforeModel);
+    state.phase = if pending.requested.is_nested_model() {
+        Some(RunPhase::AwaitingTools)
+    } else {
+        Some(RunPhase::BeforeModel)
+    };
     Ok(())
 }
 

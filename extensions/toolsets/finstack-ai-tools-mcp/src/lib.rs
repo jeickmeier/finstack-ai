@@ -2,7 +2,8 @@
 //! `ContextProvider` ports.
 //!
 //! Protocol revision `2026-07-28`. There is no `initialize` handshake.
-//! Sampling is not implemented. Elicitation / `input_required` maps onto
+//! Sampling is a nested committed model child of the open tool (ADR-046).
+//! Elicitation / `input_required` maps onto
 //! existing [`InteractionRequest`] and parks the committed tool on durable
 //! HITL. An MCP server is not an application-instruction authority.
 
@@ -12,10 +13,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai_runtime::{
-    Digest, ErrorCategory, Metadata, PendingToolEffect, PortFuture, RawJson, ReconcileContext,
-    TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, ToolCallContext, ToolError, ToolEventStream,
-    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    ValidatedToolCall,
+    Digest, ErrorCategory, Metadata, NestedSample, PendingToolEffect, PortFuture, RawJson,
+    ReconcileContext, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, ToolCallContext, ToolError,
+    ToolEventStream, ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor, ValidatedToolCall,
 };
 use futures_util::stream;
 use thiserror::Error;
@@ -49,6 +50,8 @@ pub const MCP_TRANSPORT_ERROR: &str = "mcp_transport_error";
 pub const MCP_CATALOG_DRIFT: &str = "mcp_catalog_drift";
 /// Stable unsupported-result code.
 pub const MCP_RESULT_UNSUPPORTED: &str = "mcp_result_unsupported";
+/// Stable intercept when `tools/call` asks the host to run `sampling/createMessage`.
+pub use finstack_ai_runtime::MCP_SAMPLING_REQUIRED;
 /// Stable output-limit code.
 pub const MCP_LIMIT_EXCEEDED: &str = "mcp_limit_exceeded";
 /// Stable required-artifact-service code.
@@ -574,11 +577,7 @@ impl Toolset for McpToolset {
             if value.get("method").and_then(serde_json::Value::as_str)
                 == Some("sampling/createMessage")
             {
-                return Err(tool_error(
-                    MCP_RESULT_UNSUPPORTED,
-                    ErrorCategory::Validation,
-                    "MCP sampling is not supported",
-                ));
+                return Err(sampling_required_error(value.get("params")));
             }
             let result: CallToolResult = serde_json::from_value(value).map_err(|_| {
                 tool_error(
@@ -624,6 +623,53 @@ impl Toolset for McpToolset {
             } else {
                 Ok(ToolReconcileResult::NonRepeatable)
             }
+        })
+    }
+
+    fn complete_nested_sample(
+        &self,
+        ctx: ToolCallContext,
+        _call: ValidatedToolCall,
+        sample: NestedSample,
+    ) -> PortFuture<Result<ToolEventStream, ToolError>> {
+        let transport = Arc::clone(&self.transport);
+        let max_bytes = self.config.inline_result_bytes();
+        let list_changed = self.list_changed.clone();
+        Box::pin(async move {
+            let params = serde_json::from_slice(sample.output.as_bytes())
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let value = transport
+                .request_identified(
+                    serde_json::json!(ctx.run.effect_id.to_string()),
+                    "sampling/createMessage",
+                    params,
+                )
+                .await
+                .map_err(tool_error_from_mcp)?;
+            emit_list_changed(transport.as_ref(), list_changed.as_deref());
+            let result: CallToolResult = serde_json::from_value(value).map_err(|_| {
+                tool_error(
+                    MCP_PROTOCOL_VIOLATION,
+                    ErrorCategory::Validation,
+                    "sampling completion result is invalid",
+                )
+            })?;
+            if result.result_type != ResultType::Complete {
+                return Err(tool_error(
+                    MCP_RESULT_UNSUPPORTED,
+                    ErrorCategory::Validation,
+                    "MCP resultType is not complete",
+                ));
+            }
+            if result.is_error {
+                return Err(tool_error(
+                    TOOL_OUTPUT_INVALID,
+                    ErrorCategory::Validation,
+                    "MCP tool reported isError",
+                ));
+            }
+            let output = normalize_call_result(&result, max_bytes)?;
+            Ok(completed(output, false))
         })
     }
 }
@@ -689,6 +735,21 @@ pub fn interaction_request_from_tool_error(error: &ToolError) -> Option<Interact
         return None;
     }
     serde_json::from_slice(error.metadata().as_bytes()).ok()
+}
+
+fn sampling_required_error(params: Option<&serde_json::Value>) -> ToolError {
+    let bytes = params
+        .and_then(|value| serde_json::to_vec(value).ok())
+        .unwrap_or_else(|| Vec::from(b"{}"));
+    let metadata = Metadata::parse(bytes).unwrap_or_else(|_| Metadata::empty());
+    ToolError::try_new(
+        MCP_SAMPLING_REQUIRED,
+        ErrorCategory::Tool,
+        false,
+        "MCP tool requested sampling",
+        metadata,
+    )
+    .unwrap_or_else(Into::into)
 }
 
 fn interaction_required_error(request: &InteractionRequest) -> ToolError {

@@ -89,7 +89,9 @@ pub(super) fn validate_batch_shape(
                 || interaction_request_shape(records)
         }
         Some(RunPhase::AwaitingTools) => {
-            tool_settlement_shape(state, records) || interaction_request_shape(records)
+            tool_settlement_shape(state, records)
+                || interaction_request_shape(records)
+                || compaction_model_request_shape(records)
         }
         Some(RunPhase::AfterToolBatch) => {
             one_stage(records, state.cycle, Stage::AfterToolBatch, |disposition| {
@@ -619,7 +621,7 @@ fn compaction_model_request_shape(records: &[RecordEnvelope]) -> bool {
     };
     matches!(
         record.body(),
-        RecordBody::EffectRequested(requested) if requested.is_compaction_summary()
+        RecordBody::EffectRequested(requested) if requested.is_runtime_owned_child_model()
     )
 }
 
@@ -643,7 +645,7 @@ pub(super) fn model_settlement_shape(
                 terminal_settlement_ok && failed.validate_against(&pending.requested).is_ok()
             }
             RecordBody::EffectCompleted(completed) => {
-                pending.requested.is_compaction_summary()
+                pending.requested.is_runtime_owned_child_model()
                     && terminal_settlement_ok
                     && completed.validate_against(&pending.requested).is_ok()
             }

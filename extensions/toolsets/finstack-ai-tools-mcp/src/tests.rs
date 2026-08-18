@@ -4,10 +4,10 @@ use finstack_ai_runtime::{
     AssembledToolStream, AuthorizationContext, CancellationSignal, ContentBlock, ContextAuthority,
     ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider,
     ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-    OperationLocator, PendingToolEffect, PrincipalRef, ReconcileContext, RetrySafety,
-    RunCallContext, RunId, SessionId, SideEffectClass, TextBlock, ToolBatchId, ToolCallBlock,
-    ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult, ToolStreamItem,
-    ToolStreamLimits, Toolset, ValidatedToolCall,
+    NestedSample, OperationLocator, PendingToolEffect, PrincipalRef, RawJson, ReconcileContext,
+    RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass, TextBlock, ToolBatchId,
+    ToolCallBlock, ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult,
+    ToolStreamItem, ToolStreamLimits, Toolset, ValidatedToolCall,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -736,7 +736,7 @@ async fn production_driver_collects_frozen_mcp_resources() {
 }
 
 #[tokio::test]
-async fn sampling_create_message_is_rejected() {
+async fn sampling_create_message_signals_required() {
     let transport = ScriptedTransport::new(vec![
         serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
         serde_json::json!({"method":"sampling/createMessage","params":{}}),
@@ -746,9 +746,43 @@ async fn sampling_create_message_is_rejected() {
         .expect("connects");
     let error = call(&toolset, "echo", serde_json::json!({}))
         .await
-        .expect_err("sampling stays rejected");
-    assert!(format!("{error}").contains(MCP_RESULT_UNSUPPORTED));
+        .expect_err("sampling intercepts as required");
+    assert_eq!(error.code(), MCP_SAMPLING_REQUIRED);
     assert!(format!("{error}").contains("sampling"));
+}
+
+#[tokio::test]
+async fn complete_nested_sample_finishes_tools_call() {
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({"method":"sampling/createMessage","params":{"prompt":"hi"}}),
+        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"sampled-tool"}],"isError":false}),
+    ]);
+    let toolset = McpToolset::connect(Arc::new(transport), McpConfig::default(), None)
+        .await
+        .expect("connects");
+    let error = call(&toolset, "echo", serde_json::json!({}))
+        .await
+        .expect_err("sampling required");
+    assert_eq!(error.code(), MCP_SAMPLING_REQUIRED);
+    let mut stream = toolset
+        .complete_nested_sample(
+            context(),
+            validated(&toolset, "echo", &serde_json::json!({})),
+            NestedSample {
+                output: RawJson::parse(br#"{"role":"assistant","content":"sampled"}"#)
+                    .expect("sample"),
+            },
+        )
+        .await
+        .expect("completes");
+    let item = stream.next().await.expect("item").expect("ok");
+    match item {
+        ToolStreamItem::Completed(result) => {
+            assert!(result.output.as_str().contains("sampled-tool"));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -1034,5 +1068,229 @@ async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool
     assert!(
         kinds.iter().any(|kind| kind == "interaction_requested"),
         "durable HITL must journal InteractionRequested, got {kinds:?}"
+    );
+}
+
+fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
+    use finstack_ai::runtime::{
+        ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
+        TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    };
+    use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
+
+    let arguments = RawJson::parse(br#"{}"#).expect("arguments");
+    Arc::new(ScriptedModel::from_plans(
+        ModelContextProfile {
+            provider: Arc::from("scripted"),
+            model: ModelName::try_new("preview-1").expect("model"),
+            hard_input_bytes: 1_048_576,
+            context_window_tokens: 8_192,
+            max_output_tokens: 512,
+            reserved_output_tokens: 128,
+            provider_overhead_tokens: 32,
+            estimator: TokenEstimatorRef {
+                id: Arc::from("scripted.utf8"),
+                version: Arc::from("1"),
+                source: TokenEstimatorSource::ConservativeUpperBound,
+            },
+        },
+        vec![
+            ScriptedModelPlan {
+                actions: vec![
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                        index: 0,
+                        name: Some(Arc::from("echo")),
+                        arguments_delta: Arc::from(arguments.as_str()),
+                        provider_call_id: None,
+                    }))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([]),
+                        tool_calls: Arc::from([ModelToolCall {
+                            name: Arc::from("echo"),
+                            arguments,
+                            provider_call_id: None,
+                        }]),
+                        usage: finstack_ai::runtime::Usage::empty(),
+                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        completion_id: Arc::from("mcp-sampling-1"),
+                        continuation_state: None,
+                    }))),
+                ],
+            },
+            ScriptedModelPlan {
+                actions: vec![
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                        finstack_ai::runtime::TextDelta {
+                            text: Arc::from("sampled"),
+                        },
+                    ))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([ContentBlock::Text(
+                            TextBlock::try_new("sampled").expect("text"),
+                        )]),
+                        tool_calls: Arc::from([]),
+                        usage: finstack_ai::runtime::Usage::empty(),
+                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        completion_id: Arc::from("mcp-sampling-2"),
+                        continuation_state: None,
+                    }))),
+                ],
+            },
+            ScriptedModelPlan {
+                actions: vec![
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                        finstack_ai::runtime::TextDelta {
+                            text: Arc::from("done"),
+                        },
+                    ))),
+                    ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                        assistant_content: Arc::from([ContentBlock::Text(
+                            TextBlock::try_new("done").expect("text"),
+                        )]),
+                        tool_calls: Arc::from([]),
+                        usage: finstack_ai::runtime::Usage::empty(),
+                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        completion_id: Arc::from("mcp-sampling-3"),
+                        continuation_state: None,
+                    }))),
+                ],
+            },
+        ],
+    ))
+}
+
+#[tokio::test]
+async fn sampling_journals_a_nested_model_under_the_parent_tool() {
+    use std::time::Duration;
+
+    use finstack_ai::runtime::{
+        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, LoadRequest, Model, Version,
+    };
+    use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+    use finstack_ai_kernel::{EffectPurpose, NestedModelKind, RecordBody};
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let transport = ScriptedTransport::new(vec![
+        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),
+        serde_json::json!({"method":"sampling/createMessage","params":{"prompt":"sample"}}),
+        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"tool-done"}],"isError":false}),
+    ]);
+    let toolset = McpToolset::connect(
+        Arc::new(transport),
+        McpConfig::default().with_read_only_tools(["echo"]),
+        None,
+    )
+    .await
+    .expect("connects");
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 1_024,
+            snapshot_bytes: 16_384,
+        })
+        .expect("store"),
+    );
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let model = sampling_model();
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.mcp-sampling").expect("agent"),
+        BundleId::parse("test.bundle.mcp-sampling").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.mcp-sampling").expect("model"),
+                Some(version),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.mcp-sampling").expect("store"),
+                Some(version),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("finstack.tools.mcp").expect("toolset"),
+            Some(version),
+        ),
+        Arc::new(toolset) as Arc<dyn Toolset>,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let security = RunSecurityContext::try_new(
+        "tenant-a",
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+        "local",
+        "test",
+        "mcp-sampling-policy-v1",
+        "mcp-sampling-decision-v1",
+        None,
+    )
+    .expect("security");
+    let output = tokio::time::timeout(
+        Duration::from_secs(8),
+        agent.run(
+            AgentRunRequest::try_new(
+                finstack_ai::runtime::ModelName::try_new("preview-1").expect("model name"),
+                "call echo",
+                security,
+            )
+            .expect("request"),
+        ),
+    )
+    .await
+    .expect("run timeout")
+    .expect("run");
+    assert!(output.text().contains("done"), "{}", output.text());
+    let records = store
+        .load(LoadRequest {
+            session_id: output.locator.session_id,
+        })
+        .await
+        .expect("load journal")
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let nested = records
+        .iter()
+        .filter_map(|record| match record.body() {
+            RecordBody::EffectRequested(requested) if requested.is_nested_model() => {
+                Some(requested.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(nested.len(), 1, "parent budget charged once for sampling");
+    assert!(matches!(
+        nested[0]
+            .relation()
+            .map(|relation| relation.purpose.clone()),
+        Some(EffectPurpose::NestedModel {
+            kind: NestedModelKind::McpSampling,
+        })
+    ));
+    assert!(
+        nested[0]
+            .relation()
+            .is_some_and(|relation| records.iter().any(|record| match record.body() {
+                RecordBody::EffectRequested(requested)
+                    if requested.kind() == finstack_ai_kernel::EffectKind::Tool
+                        && requested.effect_id() == relation.parent_effect_id =>
+                {
+                    true
+                }
+                _ => false,
+            })),
+        "nested model must be a child of the open tool"
     );
 }

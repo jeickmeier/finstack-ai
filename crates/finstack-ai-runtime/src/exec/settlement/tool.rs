@@ -88,6 +88,16 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         request_tool_interaction(coordinator, sources, &request).await?;
         return Ok(ToolResultDisposition::ParkedForInteraction);
     }
+    if let Err(error) = &driver_result.result
+        && error.code() == crate::MCP_SAMPLING_REQUIRED
+    {
+        return Box::pin(super::nested_sample::fulfill_nested_sample(
+            coordinator,
+            driver_result,
+            sources,
+        ))
+        .await;
+    }
     let settled = build_tool_settlement(driver_result)?;
     let input = KernelInput::ToolBatchSettled(settled.clone());
     let allocation = allocate_tool_settlement(coordinator.state(), &settled, sources)?;

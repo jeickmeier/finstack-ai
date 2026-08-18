@@ -10,9 +10,9 @@ use crate::run_types::{
     ToolTaskConfig,
 };
 use crate::settlement::{
-    SettlementSources, apply_interaction_resume, drain_idle_cancellation, model_handle_error,
-    prepare_tool_batch_if_ready, resume_pending_context_effects, resume_pending_model_effect,
-    resume_pending_tool_effects, validate_model_binding,
+    NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
+    model_handle_error, prepare_tool_batch_if_ready, resume_pending_context_effects,
+    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
 use crate::{
     CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, Clock, InvocationResumeAction,
@@ -181,9 +181,17 @@ impl RunTaskOwner {
             })
             .transpose()?;
         validate_model_binding(model.as_ref(), &profile)?;
-        let sources = SettlementSources::try_new(clock, random)?;
+        let mut sources = SettlementSources::try_new(clock, random)?;
         let run_cancellation = CancellationSignal::new();
         let parent = run_cancellation.child();
+        if let Some(catalog) = catalog.clone() {
+            sources.attach_nested_sampling(NestedSamplingPorts {
+                model: Arc::clone(&model),
+                profile: profile.clone(),
+                catalog,
+                cancellation: parent.child(),
+            });
+        }
         model
             .warmup(ModelWarmupContext {
                 cancellation: parent.child(),

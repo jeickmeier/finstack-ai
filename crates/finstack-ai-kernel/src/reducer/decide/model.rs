@@ -2,7 +2,7 @@ use crate::content::LABEL_MAX_BYTES;
 use crate::conversation::Message;
 use crate::effects::{
     EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
-    EffectPurpose, EffectRequested,
+    EffectPurpose, EffectRequested, NestedModelKind,
 };
 use crate::primitives::Digest;
 use crate::records::RecordBody;
@@ -36,24 +36,48 @@ pub(super) fn decide_request_compaction_model(
     input: &RequestCompactionModel,
 ) -> Result<Decision, KernelError> {
     reject_terminal(state)?;
-    if state.phase != Some(RunPhase::BeforeModel) || state.pending_model_effect.is_some() {
-        return Err(KernelError::InvalidPhaseInput {
-            phase: state.phase,
-            input: "request_compaction_model",
-        });
+    match &input.relation.purpose {
+        EffectPurpose::CompactionSummary { .. } => {
+            if state.phase != Some(RunPhase::BeforeModel) || state.pending_model_effect.is_some() {
+                return Err(KernelError::InvalidPhaseInput {
+                    phase: state.phase,
+                    input: "request_compaction_model",
+                });
+            }
+            expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
+                phase: state.phase,
+                input: "request_compaction_model",
+            })?;
+        }
+        EffectPurpose::NestedModel {
+            kind: NestedModelKind::McpSampling,
+        } => {
+            if state.phase != Some(RunPhase::AwaitingTools) || state.pending_model_effect.is_some()
+            {
+                return Err(KernelError::InvalidPhaseInput {
+                    phase: state.phase,
+                    input: "request_nested_model",
+                });
+            }
+            let parent = input.relation.parent_effect_id;
+            let parent_open = state.active_tool_batch.as_ref().is_some_and(|batch| {
+                batch.calls.iter().any(|call| {
+                    matches!(
+                        &call.status,
+                        crate::ActiveToolCallStatus::Requested { requested, .. }
+                            if requested.effect_id() == parent
+                    )
+                })
+            });
+            if !parent_open {
+                return Err(KernelError::ModelRequestContractMismatch);
+            }
+        }
     }
-    expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
-        phase: state.phase,
-        input: "request_compaction_model",
-    })?;
     if state.current_turn.is_none() {
         return Err(KernelError::InvariantViolation);
     }
-    if !matches!(
-        input.relation.purpose,
-        EffectPurpose::CompactionSummary { .. }
-    ) || input.output_contract.kind != EffectOutputKind::ModelResponse
-    {
+    if input.output_contract.kind != EffectOutputKind::ModelResponse {
         return Err(KernelError::ModelRequestContractMismatch);
     }
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 1, 1, 0, 0, 0))?;
@@ -364,7 +388,7 @@ fn completed_settlement_bodies(
     if completion.output_contract().kind != EffectOutputKind::ModelResponse {
         return Err(KernelError::ModelSettlementMismatch);
     }
-    if pending.requested.is_compaction_summary() {
+    if pending.requested.is_runtime_owned_child_model() {
         return compaction_summary_completion_bodies(
             state,
             completion,
@@ -465,7 +489,7 @@ fn deferred_settlement_bodies(
     pending: &crate::PendingModelEffect,
     deferred: &EffectDeferred,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
-    if pending.requested.is_compaction_summary() {
+    if pending.requested.is_runtime_owned_child_model() {
         return Err(KernelError::ModelSettlementMismatch);
     }
     deferred

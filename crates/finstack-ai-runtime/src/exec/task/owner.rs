@@ -18,9 +18,9 @@ use crate::run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
 };
 use crate::settlement::{
-    SettlementSources, apply_interaction_resume, drain_idle_cancellation, model_handle_error,
-    prepare_tool_batch_if_ready, resume_pending_model_effect, resume_pending_tool_effects,
-    validate_model_binding,
+    NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
+    model_handle_error, prepare_tool_batch_if_ready, resume_pending_model_effect,
+    resume_pending_tool_effects, validate_model_binding,
 };
 use crate::{
     CancellationSignal, Clock, CommitCoordinator, LockedModelContextProfile,
@@ -408,12 +408,18 @@ impl RunTaskOwner {
             .validate()
             .map_err(|_| RunHandleError::InvalidConfiguration)?;
         validate_model_binding(model.as_ref(), &profile)?;
-        let sources = SettlementSources::try_new(clock, random)?;
+        let mut sources = SettlementSources::try_new(clock, random)?;
         let runtime_clock = sources.clock();
         let run_cancellation = CancellationSignal::new();
         let model_cancellation = run_cancellation.child();
         let tool_batch_cancellation = run_cancellation.child();
         let timer_cancellation = run_cancellation.child();
+        sources.attach_nested_sampling(NestedSamplingPorts {
+            model: Arc::clone(&model),
+            profile: profile.clone(),
+            catalog: Arc::clone(&catalog),
+            cancellation: run_cancellation.child(),
+        });
         model
             .warmup(ModelWarmupContext {
                 cancellation: model_cancellation.child(),

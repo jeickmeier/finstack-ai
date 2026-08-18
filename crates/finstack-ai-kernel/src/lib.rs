@@ -133,8 +133,8 @@ pub use effects::{
     ComponentInvocation, EffectCancelled, EffectCompleted, EffectDeferred, EffectError,
     EffectFailed, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind, EffectPurpose,
     EffectRelation, EffectRequested, InteractionCancelled, InteractionExpired, InteractionKind,
-    InteractionRequest, InteractionResolution, InvocationRecovery, PipelinePosition,
-    ReconciliationPolicy, RetrySafety,
+    InteractionRequest, InteractionResolution, InvocationRecovery, NestedModelKind,
+    PipelinePosition, ReconciliationPolicy, RetrySafety,
 };
 pub use events::{
     EventError, ModelTextDelta, ProviderHeartbeat, QueueDepthWarning, RUN_EVENT_KIND_VERSION,

@@ -15,7 +15,8 @@ pub use interaction::{
 };
 pub use kinds::{
     ComponentInvocation, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
-    EffectPurpose, EffectRelation, InvocationRecovery, PipelinePosition, RetrySafety,
+    EffectPurpose, EffectRelation, InvocationRecovery, NestedModelKind, PipelinePosition,
+    RetrySafety,
 };
 pub use lifecycle::{
     EffectCancelled, EffectCompleted, EffectDeferred, EffectFailed, EffectRequested,

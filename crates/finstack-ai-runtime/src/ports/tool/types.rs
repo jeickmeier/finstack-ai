@@ -36,6 +36,13 @@ pub struct ToolCallContext {
     pub tool_call_id: ToolCallId,
 }
 
+/// Parent-model sample returned to the Toolset that requested nested sampling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NestedSample {
+    /// Canonical model-response JSON committed under the parent tool.
+    pub output: RawJson,
+}
+
 /// Provider-neutral tool result before framework envelope injection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

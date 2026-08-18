@@ -21,6 +21,12 @@ pub const TOOL_STREAM_LIMIT_EXCEEDED: &str = "tool_stream_limit_exceeded";
 pub const TOOL_APPROVAL_REQUIRED: &str = "tool_approval_required";
 /// Stable mid-tool HITL park code. The tool effect stays committed.
 pub const TOOL_INTERACTION_REQUIRED: &str = "tool_interaction_required";
+/// Stable intercept: a committed tool asked the host to run a nested model.
+pub const MCP_SAMPLING_REQUIRED: &str = "mcp_sampling_required";
+/// Stable reject when nested sampling has no locked model or parent budget.
+pub const MCP_SAMPLING_UNAVAILABLE: &str = "mcp_sampling_unavailable";
+/// Stable reject when a Toolset does not implement nested sampling completion.
+pub const MCP_SAMPLING_UNSUPPORTED: &str = "mcp_sampling_unsupported";
 /// Stable policy-denial closure code.
 pub const TOOL_POLICY_DENIED: &str = "tool_policy_denied";
 /// Stable cancellation adapter code.
@@ -136,6 +142,15 @@ impl ToolError {
         serde_json::from_slice(self.metadata().as_bytes()).ok()
     }
 
+    /// Recover sampling params from [`MCP_SAMPLING_REQUIRED`] metadata.
+    #[must_use]
+    pub fn sampling_params(&self) -> Option<finstack_ai_kernel::RawJson> {
+        if self.code() != MCP_SAMPLING_REQUIRED {
+            return None;
+        }
+        finstack_ai_kernel::RawJson::parse(self.metadata().as_bytes()).ok()
+    }
+
     /// Convert to a source-free durable kernel descriptor.
     ///
     /// # Errors
@@ -164,9 +179,13 @@ fn reserved_category(code: &str) -> Option<ErrorCategory> {
         TOOL_DEADLINE_EXCEEDED => Some(ErrorCategory::Deadline),
         TOOL_PANICKED => Some(ErrorCategory::Internal),
         TOOL_REGISTRATION_INVALID => Some(ErrorCategory::Registration),
-        UNKNOWN_TOOL | TOOL_APPROVAL_REQUIRED | TOOL_INTERACTION_REQUIRED | TOOL_POLICY_DENIED => {
-            Some(ErrorCategory::Tool)
-        }
+        UNKNOWN_TOOL
+        | TOOL_APPROVAL_REQUIRED
+        | TOOL_INTERACTION_REQUIRED
+        | TOOL_POLICY_DENIED
+        | MCP_SAMPLING_REQUIRED
+        | MCP_SAMPLING_UNAVAILABLE
+        | MCP_SAMPLING_UNSUPPORTED => Some(ErrorCategory::Tool),
         _ => None,
     }
 }

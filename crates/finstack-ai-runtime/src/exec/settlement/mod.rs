@@ -5,6 +5,7 @@ mod context;
 mod ids;
 mod interaction;
 mod model;
+mod nested_sample;
 mod stage;
 mod tool;
 
@@ -20,9 +21,9 @@ use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
-    Clock, IdGenerationError, LockedModelContextProfile, Model, ModelContextProfileOverride,
-    ModelError, ModelRequestDraft, ModelTerminal, RandomSource, ToolError, UuidV7Generator,
-    resolve_model_context_profile,
+    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile, Model,
+    ModelContextProfileOverride, ModelError, ModelRequestDraft, ModelTerminal, RandomSource,
+    ResolvedToolCatalog, ToolError, UuidV7Generator, resolve_model_context_profile,
 };
 
 pub(crate) use cancel::drain_idle_cancellation;
@@ -57,10 +58,18 @@ pub(crate) struct ToolDriverResult {
 }
 
 // --- extracted from task.rs 787-862 ---
+pub(crate) struct NestedSamplingPorts {
+    pub(crate) model: Arc<dyn Model>,
+    pub(crate) profile: LockedModelContextProfile,
+    pub(crate) catalog: Arc<ResolvedToolCatalog>,
+    pub(crate) cancellation: CancellationSignal,
+}
+
 pub(crate) struct SettlementSources<C, R> {
     clock: Arc<C>,
     random: R,
     progress_random: ProgressRandom,
+    nested_sampling: Option<NestedSamplingPorts>,
 }
 
 impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
@@ -70,7 +79,16 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             clock: Arc::new(clock),
             random,
             progress_random,
+            nested_sampling: None,
         })
+    }
+
+    pub(crate) fn attach_nested_sampling(&mut self, ports: NestedSamplingPorts) {
+        self.nested_sampling = Some(ports);
+    }
+
+    pub(crate) fn nested_sampling(&self) -> Option<&NestedSamplingPorts> {
+        self.nested_sampling.as_ref()
     }
 
     pub(crate) fn now(&self) -> Result<finstack_ai_kernel::Timestamp, RunHandleError> {

@@ -151,6 +151,24 @@ impl EffectRequested {
             })
     }
 
+    /// Whether this request is a nested model child of an open parent effect.
+    #[must_use]
+    pub fn is_nested_model(&self) -> bool {
+        self.kind == EffectKind::Model
+            && self.relation.as_ref().is_some_and(|relation| {
+                matches!(
+                    relation.purpose,
+                    super::kinds::EffectPurpose::NestedModel { .. }
+                )
+            })
+    }
+
+    /// Compaction or nested model: no assistant turn entry.
+    #[must_use]
+    pub fn is_runtime_owned_child_model(&self) -> bool {
+        self.is_compaction_summary() || self.is_nested_model()
+    }
+
     /// Resolved component invocation metadata.
     #[must_use]
     pub fn component(&self) -> Option<&ComponentInvocation> {
