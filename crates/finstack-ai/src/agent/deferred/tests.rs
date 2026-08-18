@@ -1,12 +1,26 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ComponentId, Digest, EffectDeferred, EffectId, EffectOutputContract, EffectOutputKind,
-    ExternalHandleRef, OperationLocator, RawJson, ReconciliationPolicy,
+    AgentId, BundleId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock,
+    Digest, EffectDeferred, EffectId, EffectOutputContract, EffectOutputKind, ExternalHandleRef,
+    OperationLocator, RawJson, ReconciliationPolicy, RunSecurityContext, TextBlock, Version,
 };
-use finstack_ai_runtime::{ChildRunRequest, PortFuture};
+use finstack_ai_runtime::{
+    AgentInvokeError, AgentInvoker, AgentRef, BudgetRequest, ChildRunContext, ChildRunHandle,
+    ChildRunRequest, CommitCoordinator, JournalStore, Metadata, ModelContextProfile, ModelName,
+    ModelResponse, ModelStreamItem, PortFuture, TokenEstimatorRef, TokenEstimatorSource,
+    child_relation_digest,
+};
+use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 
-use super::{ChildPlanContext, DeferredChildPlanner, DeferredPlanError};
+use super::{
+    ChildPlanContext, ChildRunBridge, ChildRunBridgeError, ChildRunResolver, ChildSettleOutcome,
+    DeferredChildPlanner, DeferredPlanError,
+};
+use crate::{Agent, AgentRun, AgentRunRequest};
 
 struct UnownedPlanner;
 
@@ -70,4 +84,280 @@ async fn planner_may_return_none_for_an_unowned_handle() {
         .expect("unowned planner stays available");
     assert_eq!(claim, None);
     let _resolver: Option<Arc<dyn super::ChildRunResolver>> = None;
+}
+
+const VERSION: Version = Version {
+    major: 0,
+    minor: 0,
+    patch: 1,
+};
+
+struct CountingPlanner {
+    hits: AtomicUsize,
+    claim: Option<ChildRunRequest>,
+}
+
+impl DeferredChildPlanner for CountingPlanner {
+    fn plan(
+        &self,
+        _context: &ChildPlanContext,
+    ) -> PortFuture<Result<Option<ChildRunRequest>, DeferredPlanError>> {
+        self.hits.fetch_add(1, Ordering::SeqCst);
+        let claim = self.claim.clone();
+        Box::pin(async move { Ok(claim) })
+    }
+}
+
+struct RecordingInvoker;
+
+impl AgentInvoker for RecordingInvoker {
+    fn start_or_attach(
+        &self,
+        context: ChildRunContext,
+        request: ChildRunRequest,
+    ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
+        let relation_digest = match child_relation_digest(&context, &request) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return Box::pin(async move {
+                    Err(AgentInvokeError::InvalidRequest {
+                        message: Arc::from(error.to_string()),
+                    })
+                });
+            }
+        };
+        let locator = request.locator;
+        Box::pin(async move {
+            Ok(ChildRunHandle {
+                locator,
+                relation_digest,
+            })
+        })
+    }
+}
+
+struct FailingResolver;
+
+impl ChildRunResolver for FailingResolver {
+    fn resolve(
+        &self,
+        _child: &ChildRunLocator,
+    ) -> PortFuture<Result<AgentRun, ChildRunBridgeError>> {
+        Box::pin(async {
+            Err(ChildRunBridgeError::Failed {
+                message: "resolver unused in unclaimed path".to_owned(),
+            })
+        })
+    }
+}
+
+fn profile() -> ModelContextProfile {
+    ModelContextProfile {
+        provider: Arc::from("scripted"),
+        model: ModelName::try_new("preview-1").expect("model name"),
+        hard_input_bytes: 1_048_576,
+        context_window_tokens: 1_048_576,
+        max_output_tokens: 256,
+        reserved_output_tokens: 256,
+        provider_overhead_tokens: 32,
+        estimator: TokenEstimatorRef {
+            id: Arc::from("bytes-upper-bound"),
+            version: Arc::from("1"),
+            source: TokenEstimatorSource::ConservativeUpperBound,
+        },
+    }
+}
+
+fn completed(text: &str) -> ScriptedModelPlan {
+    ScriptedModelPlan {
+        actions: vec![
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
+                finstack_ai_runtime::TextDelta {
+                    text: Arc::from(text),
+                },
+            ))),
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                assistant_content: Arc::from([ContentBlock::Text(
+                    TextBlock::try_new(text).expect("assistant text"),
+                )]),
+                tool_calls: Arc::from([]),
+                usage: finstack_ai_kernel::Usage::empty(),
+                provider_ids: finstack_ai_kernel::ProviderIds::empty(),
+                completion_id: Arc::from("preview-completion"),
+                continuation_state: None,
+            }))),
+        ],
+    }
+}
+
+fn security() -> RunSecurityContext {
+    RunSecurityContext::try_new(
+        "tenant-preview",
+        finstack_ai_kernel::PrincipalRef::try_new(
+            "preview-tests",
+            "developer",
+            Some("tenant-preview"),
+        )
+        .expect("principal"),
+        "local",
+        "test",
+        "preview-policy-v1",
+        "preview-decision-v1",
+        None,
+    )
+    .expect("security")
+}
+
+fn request(input: &str) -> AgentRunRequest {
+    AgentRunRequest::try_new(
+        ModelName::try_new("preview-1").expect("model name"),
+        input,
+        security(),
+    )
+    .expect("request")
+}
+
+async fn preview_parent() -> (AgentRun, Arc<dyn JournalStore>) {
+    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("parent")],
+    ));
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store"),
+    );
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.deferred").expect("agent"),
+        BundleId::parse("test.bundle.deferred").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.deferred").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.deferred").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .build()
+    .await
+    .expect("agent");
+    let parent = agent.start(request("parent work")).expect("parent start");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(commit) =
+                CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id).await
+                && commit
+                    .state()
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.run_id() == parent.locator().run_id)
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent accepted");
+    (parent, store)
+}
+
+async fn isolated_child_request(
+    store: Arc<dyn JournalStore>,
+    parent: &AgentRun,
+) -> ChildRunRequest {
+    let session = crate::Session::create(store, Arc::clone(&parent.locator().tenant_scope))
+        .await
+        .expect("child session");
+    let lane = session.lane("main").await.expect("child lane");
+    let run_id = super::super::prepare::NativeIds::generate::<finstack_ai_kernel::RunTag>()
+        .expect("child run");
+    let locator = ChildRunLocator {
+        operation: OperationLocator::try_new(
+            parent.locator().tenant_scope.as_ref(),
+            session.session_id(),
+            lane.lane_id(),
+            run_id,
+        )
+        .expect("child locator"),
+        remote: None,
+    };
+    ChildRunRequest {
+        agent: AgentRef {
+            id: AgentId::parse("finstack.agent.child").expect("agent"),
+            bundle: None,
+            spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
+        },
+        input: Arc::from([ContentBlock::Text(
+            TextBlock::try_new("work").expect("text"),
+        )]),
+        placement: ChildPlacement::IsolatedChildSession,
+        locator,
+        requested_deadline: None,
+        requested_budget: BudgetRequest::default(),
+        delegation_id: None,
+        metadata: Metadata::empty(),
+        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
+    }
+}
+
+#[tokio::test]
+async fn settle_returns_unclaimed_when_no_planner_owns_the_handle() {
+    let (parent, _store) = preview_parent().await;
+    let bridge = ChildRunBridge::new(
+        vec![Arc::new(UnownedPlanner)],
+        Arc::new(RecordingInvoker),
+        Arc::new(FailingResolver),
+    );
+    let outcome = bridge
+        .settle(&parent, &plan_context().deferred)
+        .await
+        .expect("unclaimed is not an error");
+    assert_eq!(outcome, ChildSettleOutcome::Unclaimed);
+}
+
+#[tokio::test]
+async fn settle_uses_the_first_claiming_planner() {
+    let (parent, store) = preview_parent().await;
+    let request = isolated_child_request(store, &parent).await;
+    let skipped = Arc::new(CountingPlanner {
+        hits: AtomicUsize::new(0),
+        claim: None,
+    });
+    let claimed = Arc::new(CountingPlanner {
+        hits: AtomicUsize::new(0),
+        claim: Some(request),
+    });
+    let later = Arc::new(CountingPlanner {
+        hits: AtomicUsize::new(0),
+        claim: Some(isolated_child_request(Arc::clone(parent.journal_store()), &parent).await),
+    });
+    let bridge = ChildRunBridge::new(
+        vec![
+            Arc::clone(&skipped) as Arc<dyn DeferredChildPlanner>,
+            Arc::clone(&claimed) as Arc<dyn DeferredChildPlanner>,
+            Arc::clone(&later) as Arc<dyn DeferredChildPlanner>,
+        ],
+        Arc::new(RecordingInvoker),
+        Arc::new(FailingResolver),
+    );
+    let error = bridge
+        .settle(&parent, &plan_context().deferred)
+        .await
+        .expect_err("resolver fails after the first claim");
+    assert_eq!(error.code(), super::CHILD_RUN_BRIDGE_FAILED);
+    assert_eq!(skipped.hits.load(Ordering::SeqCst), 1);
+    assert_eq!(claimed.hits.load(Ordering::SeqCst), 1);
+    assert_eq!(later.hits.load(Ordering::SeqCst), 0);
 }

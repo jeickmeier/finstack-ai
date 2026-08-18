@@ -31,8 +31,8 @@ pub use child_route::RemoteChildRouteSpec;
 pub use deferred::{
     CHILD_RUN_BRIDGE_FAILED, CHILD_RUN_BRIDGE_PLANNER_REJECTED,
     CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE, ChildEventContext, ChildEventSink, ChildPlanContext,
-    ChildRunBridge, ChildRunBridgeError, ChildRunResolver, DeferredChildPlanner, DeferredPlanError,
-    OutstandingDeferral,
+    ChildRunBridge, ChildRunBridgeError, ChildRunResolver, ChildSettleOutcome,
+    DeferredChildPlanner, DeferredPlanError, OutstandingDeferral,
 };
 pub use handle::Agent;
 pub use linked::{
