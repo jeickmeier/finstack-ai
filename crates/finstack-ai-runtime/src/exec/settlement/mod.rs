@@ -1,6 +1,7 @@
 //! Shared commit-settlement helpers for native and host-driven run owners.
 
 mod cancel;
+mod context;
 mod ids;
 mod interaction;
 mod model;
@@ -27,6 +28,14 @@ use crate::{
 pub(crate) use cancel::drain_idle_cancellation;
 #[cfg(feature = "native-tokio")]
 pub(crate) use cancel::reconcile_cancelled_effect;
+#[cfg_attr(
+    feature = "native-tokio",
+    allow(
+        unused_imports,
+        reason = "host-task recover consumes this under wasm-host"
+    )
+)]
+pub(crate) use context::resume_pending_context_effects;
 pub(crate) use interaction::apply_interaction_resume;
 pub(crate) use model::{process_model_progress, process_model_result, resume_pending_model_effect};
 pub(crate) use stage::{prepare_tool_batch_if_ready, stage_allocation};

@@ -122,7 +122,7 @@ pub use context::{
     ContextProvider, ContextProviderDescriptor, ContextReconcileResult, ContextRequest,
     ContextTruncationDiagnostic, InvocationResumeAction, PendingContextEffect,
     RecordedContextContribution, assemble_context, assemble_context_projection,
-    context_resume_action,
+    context_resume_action, map_context_reconcile_result,
 };
 
 pub use error::{FrameworkError, PortErrorInvalid};

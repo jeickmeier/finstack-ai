@@ -11,13 +11,14 @@ use crate::run_types::{
 };
 use crate::settlement::{
     SettlementSources, apply_interaction_resume, drain_idle_cancellation, model_handle_error,
-    prepare_tool_batch_if_ready, resume_pending_model_effect, resume_pending_tool_effects,
-    validate_model_binding,
+    prepare_tool_batch_if_ready, resume_pending_context_effects, resume_pending_model_effect,
+    resume_pending_tool_effects, validate_model_binding,
 };
 use crate::{
-    CancellationSignal, Clock, LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model,
-    ModelResumeAction, ModelWarmupContext, RandomSource, ResolvedToolCatalog,
-    TOOL_RECONCILIATION_UNSUPPORTED, ToolResumeAction, ToolStreamAssembler,
+    CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, Clock, InvocationResumeAction,
+    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction,
+    ModelWarmupContext, RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
+    ToolResumeAction, ToolStreamAssembler,
 };
 
 use super::dispatcher::HostDispatcher;
@@ -235,6 +236,25 @@ impl RunTaskOwner {
                 | ModelResumeAction::UseRecorded
                 | ModelResumeAction::Reconcile
                 | ModelResumeAction::WaitExternal => {}
+            }
+            if let Some(providers) = coordinator.context_providers().cloned() {
+                match resume_pending_context_effects(
+                    &coordinator,
+                    providers.as_ref(),
+                    &sources,
+                    &parent,
+                )
+                .await?
+                {
+                    InvocationResumeAction::SuspendUncertain => {
+                        return Err(RunHandleError::Middleware {
+                            code: Arc::from(CONTEXT_RECOVERY_UNCERTAIN),
+                        });
+                    }
+                    InvocationResumeAction::UseRecorded
+                    | InvocationResumeAction::Recompute
+                    | InvocationResumeAction::Reconcile => {}
+                }
             }
         }
         coordinator.install_dispatcher(Arc::clone(&dispatcher) as Arc<dyn PostCommitDispatcher>);

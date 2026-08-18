@@ -2,20 +2,22 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentInvocation, ContentBlock, Digest, EffectId, Id, IdTag,
+    ComponentId, ComponentInvocation, ContentBlock, Digest, EffectId, EffectInput, EffectKind,
+    EffectOutputContract, EffectOutputKind, EffectRequested, EventTag, Id, IdTag,
     InvocationRecovery, Message, MessageRole, MessageTag, Metadata, PipelinePosition, ProviderIds,
+    RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordEnvelope, RecordTag, RetrySafety,
     Sensitivity, TextBlock, Timestamp, Version,
 };
 
 use crate::context::{
-    ContextAuthority, ContextBudget, ContextCallContext, ContextContribution, ContextError,
-    ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
-    ContextProviderDescriptor, ContextReconcileResult, ContextRequest, InvocationResumeAction,
-    PendingContextEffect,
+    CommittedContextCall, ContextAuthority, ContextBudget, ContextCallContext, ContextContribution,
+    ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
+    ContextProvider, ContextProviderDescriptor, ContextReconcileResult, ContextRequest,
+    InvocationResumeAction, map_context_reconcile_result,
 };
 use crate::{
-    AuthorizationContext, CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, PortFuture,
-    ReconcileContext, RunCallContext,
+    AuthorizationContext, CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, PendingContextEffect,
+    PortFuture, ReconcileContext, RunCallContext,
 };
 
 use super::commit::{chain_digest, derived_context_effect_id};
@@ -66,23 +68,6 @@ fn derived_context_effect_id_is_stable_for_the_same_cursor() {
     assert_eq!(first, second);
     assert_ne!(first, other);
     assert_ne!(first, EffectId::from_bytes([0; 16]));
-}
-
-/// Map one provider reconcile result onto the existing context resume taxonomy.
-///
-/// Mirrors `map_model_reconcile_result`: `Completed` reuses the contribution,
-/// `NotStarted` / `RetrySafe` retry the same effect identity, and `Unknown` /
-/// `NonRepeatable` fail closed.
-fn map_context_reconcile_result(result: &ContextReconcileResult) -> InvocationResumeAction {
-    match result {
-        ContextReconcileResult::Completed(_) => InvocationResumeAction::UseRecorded,
-        ContextReconcileResult::NotStarted | ContextReconcileResult::RetrySafe => {
-            InvocationResumeAction::Recompute
-        }
-        ContextReconcileResult::Unknown | ContextReconcileResult::NonRepeatable => {
-            InvocationResumeAction::SuspendUncertain
-        }
-    }
 }
 
 #[test]
@@ -178,22 +163,6 @@ fn reconcile_fixture(
     (fixture, collect_calls, last_effect_id)
 }
 
-fn pending_effect(
-    request: ContextRequest,
-    descriptor: &ContextProviderDescriptor,
-) -> PendingContextEffect {
-    PendingContextEffect {
-        request,
-        invocation: descriptor.invocation.clone(),
-        pipeline: PipelinePosition::try_new(
-            Digest::raw_json(b"context-chain"),
-            "prepare_context",
-            0,
-        )
-        .expect("pipeline"),
-    }
-}
-
 fn context_request() -> ContextRequest {
     ContextRequest {
         session_id: id(1),
@@ -258,36 +227,61 @@ fn resume_after_crash(
     effect_id: EffectId,
 ) -> Result<ContextContribution, ContextError> {
     let request = context_request();
-    let pending = pending_effect(request.clone(), &provider.descriptor());
-    let reconcile_ctx = ReconcileContext {
-        run: call_context(effect_id).run,
-        original_input_digest: Digest::raw_json(b"context-request"),
-    };
-    let result = block_on(provider.reconcile(reconcile_ctx, pending))?;
-    match map_context_reconcile_result(&result) {
-        InvocationResumeAction::UseRecorded => match result {
-            ContextReconcileResult::Completed(contribution) => Ok(contribution),
-            _ => Err(ContextError::try_new(
-                CONTEXT_RECOVERY_UNCERTAIN,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                "completed resume missing contribution",
-                Metadata::empty(),
-            )
-            .expect("error")),
+    let context = call_context(effect_id);
+    let envelope = request_envelope(effect_id, &provider.descriptor(), &request);
+    let call = CommittedContextCall::try_new(&envelope, context, request, &provider.descriptor())?;
+    block_on(call.resume(provider))
+}
+
+fn request_envelope(
+    effect_id: EffectId,
+    descriptor: &ContextProviderDescriptor,
+    request: &ContextRequest,
+) -> RecordEnvelope {
+    let requested = EffectRequested::try_new(
+        effect_id,
+        EffectKind::Context,
+        None,
+        Some(descriptor.invocation.clone()),
+        Some(
+            PipelinePosition::try_new(Digest::raw_json(b"context-chain"), "prepare_context", 0)
+                .expect("pipeline"),
+        ),
+        EffectOutputContract {
+            kind: EffectOutputKind::ContextContribution,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(b"context-contribution-v1"),
         },
-        InvocationResumeAction::Recompute => {
-            block_on(provider.collect(call_context(effect_id), request))
-        }
-        InvocationResumeAction::Reconcile | InvocationResumeAction::SuspendUncertain => {
-            Err(ContextError::try_new(
-                CONTEXT_RECOVERY_UNCERTAIN,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                "context resume is non-repeatable or unknown",
-                Metadata::empty(),
-            )
-            .expect("error"))
-        }
-    }
+        EffectInput::Context {
+            request: request.to_raw_json().expect("request"),
+        },
+        RetrySafety::SafeToRetry,
+        None,
+    )
+    .expect("effect");
+    let body = RecordBody::EffectRequested(requested);
+    let events = (0..body
+        .derived_event_count(RECORD_KIND_VERSION)
+        .expect("events"))
+        .map(|offset| id::<EventTag>(100 + u64::try_from(offset).expect("offset")))
+        .collect();
+    RecordEnvelope::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        id::<RecordTag>(10),
+        id(1),
+        id(2),
+        Some(id(3)),
+        1,
+        Timestamp::from_unix_ms(1_000).expect("timestamp"),
+        None,
+        Digest::raw_json(b"context-request"),
+        None,
+        Digest::raw_json(b"context-request"),
+        events,
+        body,
+    )
+    .expect("envelope")
 }
 
 #[test]
@@ -366,4 +360,45 @@ fn context_reconcile_non_repeatable_does_not_retry() {
         map_context_reconcile_result(&ContextReconcileResult::NonRepeatable),
         InvocationResumeAction::SuspendUncertain
     );
+}
+
+#[test]
+fn crash_after_context_request_recovers_contribution_once() {
+    let contribution = contribution("already-done");
+    let (provider, calls, last_id) =
+        reconcile_fixture(ContextReconcileResult::Completed(contribution.clone()));
+    let locator = finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
+        .expect("locator");
+    let effect_id = derived_context_effect_id(&locator, 0, 0);
+    let request = context_request();
+    let _requested = request_envelope(effect_id, &provider.descriptor(), &request);
+    let resumed = resume_after_crash(&provider, effect_id).expect("recover");
+    assert_eq!(resumed, contribution);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(last_id.lock().expect("id").is_none());
+    let collected = local_context_conformance(&provider).expect("conformance");
+    assert_eq!(collected, provider.contribution);
+}
+
+fn local_context_conformance(
+    provider: &ReconcileFixture,
+) -> Result<ContextContribution, ContextError> {
+    let descriptor = provider.descriptor();
+    let effect_id = derived_context_effect_id(
+        &finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
+            .expect("locator"),
+        0,
+        0,
+    );
+    let collected = block_on(provider.collect(call_context(effect_id), context_request()))?;
+    if provider.descriptor() != descriptor {
+        return Err(ContextError::try_new(
+            CONTEXT_RECOVERY_UNCERTAIN,
+            finstack_ai_kernel::ErrorCategory::Validation,
+            "descriptor mutated after collection",
+            Metadata::empty(),
+        )
+        .expect("error"));
+    }
+    Ok(collected)
 }

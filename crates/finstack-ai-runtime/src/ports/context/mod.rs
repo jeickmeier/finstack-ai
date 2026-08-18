@@ -13,7 +13,7 @@ mod tests;
 pub use assembly::{AssembledContext, ContextTruncationDiagnostic, assemble_context};
 pub use committed::{
     CommittedContextCall, InvocationResumeAction, RecordedContextContribution,
-    context_resume_action,
+    context_resume_action, map_context_reconcile_result,
 };
 pub use error::{
     CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID,

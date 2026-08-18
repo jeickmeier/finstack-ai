@@ -3,8 +3,15 @@ use finstack_ai_kernel::{
     InvocationRecovery, RecordBody, RecordEnvelope, RetrySafety,
 };
 
-use super::error::{CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID, ContextError};
-use super::port::{CONTEXT_STAGE, ContextCallContext, ContextProvider, ContextProviderDescriptor};
+use crate::ReconcileContext;
+
+use super::error::{
+    CONTEXT_BUDGET_EXCEEDED, CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,
+};
+use super::port::{
+    CONTEXT_STAGE, ContextCallContext, ContextProvider, ContextProviderDescriptor,
+    ContextReconcileResult, PendingContextEffect,
+};
 use super::types::{
     ContextAuthority, ContextBudget, ContextContribution, ContextItemKind, ContextOverflowPolicy,
     ContextRequest,
@@ -80,7 +87,77 @@ impl CommittedContextCall {
         if self.requested.component() != Some(&descriptor.invocation) {
             return Err(ContextError::commit_required());
         }
-        let mut contribution = provider.collect(self.context, self.request.clone()).await?;
+        let contribution = provider
+            .collect(self.context.clone(), self.request.clone())
+            .await?;
+        self.accept_contribution(&descriptor, contribution)
+    }
+
+    /// Reconcile after a committed request and before a first collect.
+    ///
+    /// `Completed` reuses the contribution. `NotStarted` / `RetrySafe` collect
+    /// with the same effect identity. `Unknown` / `NonRepeatable` fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CONTEXT_RECOVERY_UNCERTAIN`] when the provider cannot classify
+    /// the outstanding invocation, or a collect/validation failure.
+    pub async fn resume(
+        self,
+        provider: &dyn ContextProvider,
+    ) -> Result<ContextContribution, ContextError> {
+        let descriptor = provider.descriptor();
+        if self.requested.component() != Some(&descriptor.invocation) {
+            return Err(ContextError::commit_required());
+        }
+        let pipeline = self
+            .requested
+            .pipeline()
+            .cloned()
+            .ok_or_else(ContextError::commit_required)?;
+        let result = provider
+            .reconcile(
+                ReconcileContext {
+                    run: self.context.run.clone(),
+                    original_input_digest: self.requested.input_digest(),
+                },
+                PendingContextEffect {
+                    request: self.request.clone(),
+                    invocation: descriptor.invocation.clone(),
+                    pipeline,
+                },
+            )
+            .await?;
+        match map_context_reconcile_result(&result) {
+            InvocationResumeAction::UseRecorded => match result {
+                ContextReconcileResult::Completed(contribution) => {
+                    self.accept_contribution(&descriptor, contribution)
+                }
+                _ => Err(ContextError::stable(
+                    CONTEXT_RECOVERY_UNCERTAIN,
+                    "completed resume missing contribution",
+                )),
+            },
+            InvocationResumeAction::Recompute => {
+                let contribution = provider
+                    .collect(self.context.clone(), self.request.clone())
+                    .await?;
+                self.accept_contribution(&descriptor, contribution)
+            }
+            InvocationResumeAction::Reconcile | InvocationResumeAction::SuspendUncertain => {
+                Err(ContextError::stable(
+                    CONTEXT_RECOVERY_UNCERTAIN,
+                    "context resume is non-repeatable or unknown",
+                ))
+            }
+        }
+    }
+
+    fn accept_contribution(
+        &self,
+        descriptor: &ContextProviderDescriptor,
+        mut contribution: ContextContribution,
+    ) -> Result<ContextContribution, ContextError> {
         contribution.validate()?;
         normalize_instruction_authority(
             &mut contribution,
@@ -199,6 +276,24 @@ pub fn context_resume_action(
         Some(InvocationRecovery::RecomputeSafe) => InvocationResumeAction::Recompute,
         Some(InvocationRecovery::Reconcile) => InvocationResumeAction::Reconcile,
         Some(InvocationRecovery::NonRepeatable) | None => InvocationResumeAction::SuspendUncertain,
+    }
+}
+
+/// Map one provider reconcile result onto the existing context resume taxonomy.
+///
+/// Mirrors [`crate::map_model_reconcile_result`]: `Completed` reuses the
+/// contribution, `NotStarted` / `RetrySafe` retry the same effect identity,
+/// and `Unknown` / `NonRepeatable` fail closed.
+#[must_use]
+pub fn map_context_reconcile_result(result: &ContextReconcileResult) -> InvocationResumeAction {
+    match result {
+        ContextReconcileResult::Completed(_) => InvocationResumeAction::UseRecorded,
+        ContextReconcileResult::NotStarted | ContextReconcileResult::RetrySafe => {
+            InvocationResumeAction::Recompute
+        }
+        ContextReconcileResult::Unknown | ContextReconcileResult::NonRepeatable => {
+            InvocationResumeAction::SuspendUncertain
+        }
     }
 }
 
