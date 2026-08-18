@@ -122,5 +122,5 @@ requires that path.
 
 - Approval: accepted by the decision owner to execute D5–D6 locally
   only, without publication
-- Implementation evidence: Missing (decision accepted; D5–D6 not
-  started; no invented evidence or review id)
+- Implementation evidence: Partial (local D5 `eafd8ea` / `bcc35b0`,
+  D6 `b25fd95` / `66d108b`; no invented evidence or review id)

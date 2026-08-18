@@ -142,5 +142,7 @@ requires that path.
 
 - Approval: accepted by the decision owner to execute D1–D4 locally
   only, without publication
-- Implementation evidence: Missing (decision accepted; constructor
-  waves not started; no invented evidence or review id)
+- Implementation evidence: Partial (local D1 `e8caa09` / `df03258`,
+  D2 `445c409` / `d4e7e0e`, D3 `295919b` / `bc2469f`, D4 `e246384` /
+  `5448e37`; wasm-host fail-closed from Rust; no invented evidence or
+  review id)

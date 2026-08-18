@@ -12,15 +12,19 @@ a client on import.
 | `finstack-ai-test` (`ScriptedModel`) | Semantic scripted tests; no HTTP |
 
 Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
-`Agent.openai()`, `Agent.anthropic()`, and `Agent.ollama()` are
-explicit T1 constructors. They accept the same keyword-only T2 Python ports
-as `Agent.from_python`. `openai` maps required keyword-only `api_key` to
-Bearer auth and always targets official Responses. `ollama` stays keyless.
-The factories do not read environment variables. Opt-in
-`finstack-ai-provider-gateway` covers config-selected OpenAI-compatible,
+`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`, and
+`Agent.gateway()` are the same Rust-owned constructors on Python and
+WASM. wasm-host methods exist; fail-closed is a Rust platform error
+(`agent_run_unsupported_plan`), not a missing method. They accept the
+same keyword-only T2 Python ports as `Agent.from_python`. `openai` maps
+required keyword-only `api_key` to Bearer auth and always targets
+official Responses. `ollama` stays keyless. The factories do not read
+environment variables. `Agent.gateway()` reuses the opt-in
+`finstack-ai-provider-gateway` leaf for config-selected OpenAI-compatible,
 Anthropic Messages, and Ollama chat endpoints without adding a client to
-the default SDK graph. There is no `Agent.gateway()`. Construct the leaf
-and pass it as a model:
+the default SDK graph. The leaf can still be constructed directly.
+`Agent.e2b_sandbox()` is the T4 sandbox constructor on both bindings;
+see [toolsets](toolset.md).
 
 ```rust
 use finstack_ai_provider_gateway::{

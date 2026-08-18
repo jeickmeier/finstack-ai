@@ -30,6 +30,14 @@ continue-the-run.
 Host callbacks are [T2](security-trust-levels.md). They inherit page
 authority and are not isolated.
 
+`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`,
+`Agent.gateway()`, and `Agent.e2bSandbox()` are the same Rust-owned
+constructors as Python. wasm-host methods exist; fail-closed is a Rust
+platform error (`agent_run_unsupported_plan`), not a missing method.
+Do not read environment variables. `Agent.reResolve()` returns a new
+lock from reconstructed catalogs; in-flight runs keep the previous
+composition.
+
 `Capability` stays instruction-only (`id`, `description`, `instructions`,
 `activation`), matching Python. See [capabilities](capabilities.md).
 
