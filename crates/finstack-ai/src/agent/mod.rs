@@ -32,7 +32,7 @@ pub use deferred::{
     CHILD_RUN_BRIDGE_FAILED, CHILD_RUN_BRIDGE_PLANNER_REJECTED,
     CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE, ChildEventContext, ChildEventSink, ChildPlanContext,
     ChildRunBridge, ChildRunBridgeError, ChildRunResolver, ChildSettleOutcome,
-    DeferredChildPlanner, DeferredPlanError, OutstandingDeferral,
+    DeferredChildPlanner, DeferredPlanError, OutstandingDeferral, outstanding_deferrals,
 };
 pub use handle::Agent;
 pub use linked::{

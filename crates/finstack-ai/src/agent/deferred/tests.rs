@@ -5,20 +5,25 @@ use std::time::Duration;
 use finstack_ai_kernel::{
     AgentId, BundleId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock,
     Digest, EffectDeferred, EffectId, EffectOutputContract, EffectOutputKind, ExternalHandleRef,
-    OperationLocator, RawJson, ReconciliationPolicy, RunSecurityContext, TextBlock, Version,
+    OperationLocator, RawJson, ReconciliationPolicy, RunPhase, RunSecurityContext, TextBlock,
+    ToolExecutionMode, ToolId, Version,
 };
 use finstack_ai_runtime::{
-    AgentInvokeError, AgentInvoker, AgentRef, BudgetRequest, ChildRunContext, ChildRunHandle,
-    ChildRunRequest, CommitCoordinator, JournalStore, Metadata, ModelContextProfile, ModelName,
-    ModelResponse, ModelStreamItem, PortFuture, TokenEstimatorRef, TokenEstimatorSource,
-    child_relation_digest,
+    AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement, BudgetRequest,
+    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, JournalStore, Metadata,
+    ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture,
+    RetrySafety, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset, child_relation_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
+use finstack_ai_test::{
+    ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
+    ScriptedToolset,
+};
 
 use super::{
     ChildPlanContext, ChildRunBridge, ChildRunBridgeError, ChildRunResolver, ChildSettleOutcome,
-    DeferredChildPlanner, DeferredPlanError,
+    DeferredChildPlanner, DeferredPlanError, outstanding_deferrals,
 };
 use crate::{Agent, AgentRun, AgentRunRequest};
 
@@ -360,4 +365,228 @@ async fn settle_uses_the_first_claiming_planner() {
     assert_eq!(skipped.hits.load(Ordering::SeqCst), 1);
     assert_eq!(claimed.hits.load(Ordering::SeqCst), 1);
     assert_eq!(later.hits.load(Ordering::SeqCst), 0);
+}
+
+struct FixedResolver {
+    child: AgentRun,
+}
+
+impl ChildRunResolver for FixedResolver {
+    fn resolve(
+        &self,
+        _child: &ChildRunLocator,
+    ) -> PortFuture<Result<AgentRun, ChildRunBridgeError>> {
+        let child = self.child.clone();
+        Box::pin(async move { Ok(child) })
+    }
+}
+
+fn echo_tool_spec() -> ToolSpec {
+    ToolSpec {
+        id: ToolId::parse("finstack.tools.echo").expect("tool id"),
+        model_name: Arc::from("echo"),
+        title: Arc::from("echo"),
+        description: Arc::from("scripted deterministic tool"),
+        input_schema: RawJson::parse(
+            br#"{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}"#,
+        )
+        .expect("input schema"),
+        output_schema: Some(
+            RawJson::parse(
+                br#"{"additionalProperties":false,"properties":{"ok":{"type":"boolean"},"value":{"type":"integer"}},"required":["ok","value"],"type":"object"}"#,
+            )
+            .expect("output schema"),
+        ),
+        execution: ToolExecutionMode::Parallel,
+        side_effect: SideEffectClass::ReadOnly,
+        retry_safety: RetrySafety::SafeToRetry,
+        approval: ApprovalMetadata {
+            requirement: ApprovalRequirement::NotRequired,
+            reason: None,
+            attributes: Metadata::empty(),
+        },
+        max_result_bytes: 4_096,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Supported,
+    }
+}
+
+fn echo_tool_call() -> ScriptedModelPlan {
+    let arguments = RawJson::parse(br#"{"value":1}"#).expect("arguments");
+    ScriptedModelPlan {
+        actions: vec![
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                index: 0,
+                name: Some(Arc::from("echo")),
+                arguments_delta: Arc::from(arguments.as_str()),
+                provider_call_id: Some(Arc::from("call-echo")),
+            }))),
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                assistant_content: Arc::from([]),
+                tool_calls: Arc::from([ModelToolCall {
+                    name: Arc::from("echo"),
+                    arguments,
+                    provider_call_id: Some(Arc::from("call-echo")),
+                }]),
+                usage: finstack_ai_kernel::Usage::empty(),
+                provider_ids: finstack_ai_kernel::ProviderIds::empty(),
+                completion_id: Arc::from("echo-tool-completion"),
+                continuation_state: None,
+            }))),
+        ],
+    }
+}
+
+async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
+    let toolset: Arc<dyn Toolset> = Arc::new(ScriptedToolset::new(
+        Arc::from([echo_tool_spec()]),
+        vec![ScriptedToolPlan {
+            panic_on_call: None,
+            actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+                ToolDeferral {
+                    handle: ExternalHandleRef::try_new(
+                        ComponentId::parse("finstack.tool.scripted").expect("component"),
+                        "job-1",
+                        RawJson::parse(b"{}").expect("metadata"),
+                    )
+                    .expect("handle"),
+                    reconciliation: ReconciliationPolicy::CallbackOrPoll,
+                    next_poll_at: None,
+                    expires_at: None,
+                },
+            )))],
+        }],
+    ));
+    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![echo_tool_call(), completed("unused parent retry")],
+    ));
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store"),
+    );
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.deferred-tool").expect("agent"),
+        BundleId::parse("test.bundle.deferred-tool").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.deferred-tool").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.deferred-tool").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("test.tools.echo").expect("toolset"),
+            Some(VERSION),
+        ),
+        toolset,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let parent = agent
+        .start(request("defer the tool"))
+        .expect("parent start");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(commit) =
+                CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id).await
+                && commit.state().phase == Some(RunPhase::AwaitingExternal)
+                && !outstanding_deferrals(commit.state()).is_empty()
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("deferred tool");
+    (parent, store)
+}
+
+async fn completing_child(store: Arc<dyn JournalStore>) -> AgentRun {
+    let model: Arc<dyn finstack_ai_runtime::Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("child done")],
+    ));
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.deferred-child").expect("agent"),
+        BundleId::parse("test.bundle.deferred-child").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.deferred-child").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.deferred-child").expect("store"),
+                Some(VERSION),
+            ),
+            store,
+        ),
+    )
+    .build()
+    .await
+    .expect("child agent");
+    agent.start(request("child work")).expect("child start")
+}
+
+#[tokio::test]
+async fn recover_is_empty_when_no_tool_is_deferred() {
+    let (parent, _store) = preview_parent().await;
+    let bridge = ChildRunBridge::new(
+        vec![Arc::new(UnownedPlanner)],
+        Arc::new(RecordingInvoker),
+        Arc::new(FailingResolver),
+    );
+    let outcomes = bridge.recover(&parent).await.expect("recover");
+    assert!(outcomes.is_empty());
+}
+
+#[tokio::test]
+async fn recover_settles_outstanding_deferrals_and_is_idempotent() {
+    let (parent, store) = deferred_tool_parent().await;
+    let commit = CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id)
+        .await
+        .expect("recover state");
+    let pending = outstanding_deferrals(commit.state());
+    assert_eq!(pending.len(), 1);
+    let child = completing_child(Arc::clone(&store)).await;
+    tokio::time::timeout(Duration::from_secs(3), child.cancel())
+        .await
+        .expect("child cancel timeout")
+        .ok();
+    let child_request = isolated_child_request(Arc::clone(&store), &parent).await;
+    let bridge = ChildRunBridge::new(
+        vec![Arc::new(CountingPlanner {
+            hits: AtomicUsize::new(0),
+            claim: Some(child_request),
+        })],
+        Arc::new(RecordingInvoker),
+        Arc::new(FixedResolver { child }),
+    );
+    let first = bridge.recover(&parent).await.expect("first recover");
+    assert_eq!(first, vec![ChildSettleOutcome::Failed]);
+    let after = CommitCoordinator::recover(Arc::clone(&store), parent.locator().session_id)
+        .await
+        .expect("recover after settle");
+    assert!(outstanding_deferrals(after.state()).is_empty());
+    let second = bridge.recover(&parent).await.expect("second recover");
+    assert!(second.is_empty());
 }

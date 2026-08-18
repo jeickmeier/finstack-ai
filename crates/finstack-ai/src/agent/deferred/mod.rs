@@ -13,5 +13,5 @@ pub use bridge::{
     CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE, ChildRunBridge, ChildRunBridgeError, ChildSettleOutcome,
 };
 pub use planner::{ChildPlanContext, ChildRunResolver, DeferredChildPlanner, DeferredPlanError};
-pub use scan::OutstandingDeferral;
+pub use scan::{OutstandingDeferral, outstanding_deferrals};
 pub use sink::{ChildEventContext, ChildEventSink};

@@ -202,6 +202,38 @@ impl ChildRunBridge {
         }
     }
 
+    /// Recover and settle every outstanding deferred tool call on `parent`.
+    ///
+    /// Re-entry attaches through [`AgentRun::start_or_attach_child`]. A second
+    /// recover after successful completion sees no outstanding deferrals.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recover, planner, child-start, resolve, or completion failure.
+    pub async fn recover(
+        &self,
+        parent: &AgentRun,
+    ) -> Result<Vec<ChildSettleOutcome>, ChildRunBridgeError> {
+        Box::pin(self.recover_inner(parent)).await
+    }
+
+    async fn recover_inner(
+        &self,
+        parent: &AgentRun,
+    ) -> Result<Vec<ChildSettleOutcome>, ChildRunBridgeError> {
+        let commit = CommitCoordinator::recover(
+            Arc::clone(parent.journal_store()),
+            parent.locator().session_id,
+        )
+        .await
+        .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+        let mut outcomes = Vec::new();
+        for pending in super::scan::outstanding_deferrals(commit.state()) {
+            outcomes.push(self.settle(parent, &pending.deferred).await?);
+        }
+        Ok(outcomes)
+    }
+
     async fn pump_child(&self, child: &AgentRun, context: &ChildEventContext) {
         loop {
             match child.next_event_batch().await {
@@ -244,7 +276,7 @@ async fn completion_command(
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let completion = ExternalEffectCompletion::try_new(
         deferred.effect_id,
-        format!("child-settle-{}", deferred.effect_id),
+        format!("{}", deferred.effect_id),
         outcome,
     )
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
