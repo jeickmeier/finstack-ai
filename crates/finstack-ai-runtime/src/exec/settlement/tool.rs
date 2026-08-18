@@ -306,6 +306,16 @@ pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(
         .map_err(RunHandleError::Coordinator)
 }
 
+/// Build a [`ToolBatchSettled`] from one driver result without committing it.
+///
+/// Normalizes completed tool output, maps terminal deferrals through
+/// [`tool_effect_deferred`], and constructs failure descriptors when the driver
+/// returned an error.
+///
+/// # Errors
+///
+/// Returns a stable tool settlement error when result normalization,
+/// serialization, or effect completion or failure construction fails.
 pub(crate) fn build_tool_settlement(
     result: ToolDriverResult,
 ) -> Result<ToolBatchSettled, RunHandleError> {
@@ -375,6 +385,11 @@ pub(crate) fn build_tool_settlement(
     })
 }
 
+/// Shared [`EffectDeferred`] constructor for first-pass and reconcile deferrals.
+///
+/// Used when a tool stream terminates with [`ToolTerminal::Deferred`] and when
+/// reconciliation in `ensure_or_wait_tool_deferred` records an outstanding
+/// external handle, so both paths settle byte-identical deferred outcomes.
 pub(crate) fn tool_effect_deferred(
     effect_id: EffectId,
     output_contract: &EffectOutputContract,
