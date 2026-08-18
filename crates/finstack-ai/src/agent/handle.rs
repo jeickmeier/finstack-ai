@@ -47,6 +47,7 @@ pub struct Agent {
     pub(super) capability_specs: Arc<[CapabilitySpec]>,
     pub(super) capability_index: CapabilityContributionIndex,
     pub(super) activation_host: Option<Arc<NativeCapabilityHost>>,
+    pub(super) recompose: Option<Arc<NativeAgentBuilder>>,
 }
 
 #[derive(Clone)]
@@ -179,7 +180,33 @@ impl Agent {
             capability_specs: Arc::from([]),
             capability_index: CapabilityContributionIndex::default(),
             activation_host: None,
+            recompose: None,
         })
+    }
+
+    /// Compose a new agent from reconstructed catalogs.
+    ///
+    /// MCP `list_changed` never mutates this lock. The returned agent has a
+    /// new lock. In-flight runs keep the previous composition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AGENT_RUN_INVALID_CONFIGURATION`] when the agent was not
+    /// composed through [`NativeAgentBuilder`], or when a catalog
+    /// reconstruction fails.
+    pub async fn re_resolve(&self) -> Result<Self, AgentRunError> {
+        let builder = self
+            .recompose
+            .as_ref()
+            .ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "re_resolve requires a builder-composed agent",
+                )
+            })?
+            .as_ref()
+            .clone();
+        builder.rebuild_from_live_catalogs().await
     }
 
     pub(super) fn attach_capability_surface(

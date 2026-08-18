@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use finstack_ai_kernel::{ComponentInvocation, Digest, Metadata, PipelinePosition};
 use serde::{Deserialize, Serialize};
 
@@ -85,5 +87,16 @@ pub trait ContextProvider: PortObject {
         _effect: PendingContextEffect,
     ) -> PortFuture<Result<ContextReconcileResult, ContextError>> {
         Box::pin(async { Ok(ContextReconcileResult::Unknown) })
+    }
+
+    /// Rebuild this provider's frozen snapshot, or `None` to keep it.
+    ///
+    /// MCP re-runs `resources/list`. Default implementations keep the live snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable context error when reconstruction fails closed.
+    fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn ContextProvider>>, ContextError>> {
+        Box::pin(async { Ok(None) })
     }
 }

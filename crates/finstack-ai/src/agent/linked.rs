@@ -897,6 +897,8 @@ mod tests {
         .expect("openai construct");
         assert!(built.agent.capability_catalog().is_empty());
         assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
+        let resolved = built.agent.re_resolve().await.expect("re_resolve");
+        assert!(resolved.capability_catalog().is_empty());
     }
 
     #[tokio::test]

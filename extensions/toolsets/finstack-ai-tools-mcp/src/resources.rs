@@ -1,7 +1,7 @@
 //! Frozen `resources/list` snapshot and the MCP `ContextProvider`.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_runtime::{
     ComponentId, ComponentInvocation, ContentBlock, ContextAuthority, ContextCallContext,
@@ -18,7 +18,8 @@ use crate::protocol::{
 };
 use crate::transport::McpTransport;
 use crate::{
-    CONTEXT_PROVIDER_COMPONENT, MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED, McpConfig, McpError,
+    CONTEXT_PROVIDER_COMPONENT, MCP_PROTOCOL_VIOLATION, MCP_RESULT_UNSUPPORTED,
+    MCP_SUBSCRIBE_UNKNOWN, McpConfig, McpError,
 };
 
 const RESOURCE_SOURCE_ID: &str = "finstack.context.mcp";
@@ -51,6 +52,9 @@ pub struct McpContextProvider {
     snapshot: Arc<[FrozenResource]>,
     transport: Arc<dyn McpTransport>,
     inline_result_bytes: u64,
+    config: McpConfig,
+    list_changed: Option<Arc<dyn crate::McpListChangedObserver>>,
+    subscribed: Mutex<BTreeSet<Arc<str>>>,
 }
 
 impl McpContextProvider {
@@ -130,7 +134,48 @@ impl McpContextProvider {
             snapshot,
             transport,
             inline_result_bytes: config.inline_result_bytes(),
+            config: config.clone(),
+            list_changed,
+            subscribed: Mutex::new(BTreeSet::new()),
         })
+    }
+
+    /// Subscribe to one frozen resource name.
+    ///
+    /// Unknown names fail closed. Later [`ContextProvider::collect`] re-reads
+    /// subscribed URIs. Names absent from the frozen snapshot are rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MCP_SUBSCRIBE_UNKNOWN`] when the name is not frozen, or a
+    /// transport/protocol error when `resources/subscribe` fails.
+    pub async fn subscribe(&self, name: &str) -> Result<(), McpError> {
+        let resource = self
+            .snapshot
+            .iter()
+            .find(|resource| resource.name() == name)
+            .ok_or_else(|| {
+                McpError::stable(
+                    MCP_SUBSCRIBE_UNKNOWN,
+                    "resources/subscribe name is not in the frozen snapshot",
+                )
+            })?;
+        self.transport
+            .request(
+                "resources/subscribe",
+                serde_json::json!({
+                    "uri": resource.uri(),
+                    "name": resource.name(),
+                }),
+            )
+            .await?;
+        self.subscribed
+            .lock()
+            .map_err(|_| {
+                McpError::stable(crate::MCP_TRANSPORT_ERROR, "subscribe lock is poisoned")
+            })?
+            .insert(Arc::from(name));
+        Ok(())
     }
 
     /// Frozen `resources/templates` names in list order.
@@ -165,8 +210,27 @@ impl ContextProvider for McpContextProvider {
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
         let transport = Arc::clone(&self.transport);
         let snapshot = Arc::clone(&self.snapshot);
+        let subscribed = self
+            .subscribed
+            .lock()
+            .map(|names| names.clone())
+            .unwrap_or_default();
         let max_bytes = self.inline_result_bytes;
-        Box::pin(async move { collect_frozen(&transport, &snapshot, &request, max_bytes).await })
+        Box::pin(async move {
+            collect_frozen(&transport, &snapshot, &subscribed, &request, max_bytes).await
+        })
+    }
+
+    fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn ContextProvider>>, ContextError>> {
+        let transport = Arc::clone(&self.transport);
+        let config = self.config.clone();
+        let list_changed = self.list_changed.clone();
+        Box::pin(async move {
+            let provider = McpContextProvider::connect(transport, &config, list_changed)
+                .await
+                .map_err(|error| context_error_from_mcp(&error))?;
+            Ok(Some(Arc::new(provider) as Arc<dyn ContextProvider>))
+        })
     }
 
     fn reconcile(
@@ -326,11 +390,20 @@ pub(crate) fn resource_snapshot_digest(
 async fn collect_frozen(
     transport: &Arc<dyn McpTransport>,
     snapshot: &[FrozenResource],
+    subscribed: &BTreeSet<Arc<str>>,
     request: &ContextRequest,
     max_bytes: u64,
 ) -> Result<ContextContribution, ContextError> {
-    let mut items = Vec::with_capacity(snapshot.len());
-    for resource in snapshot {
+    let selected: Vec<&FrozenResource> = if subscribed.is_empty() {
+        snapshot.iter().collect()
+    } else {
+        snapshot
+            .iter()
+            .filter(|resource| subscribed.contains(resource.name()))
+            .collect()
+    };
+    let mut items = Vec::with_capacity(selected.len());
+    for resource in selected {
         let value = transport
             .request(
                 "resources/read",
