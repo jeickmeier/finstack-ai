@@ -172,9 +172,7 @@ def main() -> int:
             failed = True
         extra = added(current, baseline)
         if extra:
-            print(
-                f"{family}: added public items: {', '.join(extra)}", file=sys.stderr
-            )
+            print(f"{family}: added public items: {', '.join(extra)}", file=sys.stderr)
             failed = True
         mutation = read_list(mutation_path)
         if not compare(current, mutation):

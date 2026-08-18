@@ -604,9 +604,15 @@ fn run_process(
     let mut child = if let Some((service, profile)) = confinement {
         let mut profile = profile.clone();
         if let Some(cwd) = &request.cwd {
-            profile = profile.with_authorized_cwd(cwd).map_err(map_confinement)?;
+            profile = profile
+                .with_authorized_cwd(cwd)
+                .map_err(|error| map_confinement(&error))?;
         }
-        RunningChild::Confined(service.spawn(command, &profile).map_err(map_confinement)?)
+        RunningChild::Confined(
+            service
+                .spawn(command, &profile)
+                .map_err(|error| map_confinement(&error))?,
+        )
     } else {
         #[cfg(unix)]
         if let Some(cwd) = &request.cwd {
@@ -890,11 +896,9 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
-fn map_confinement(error: ConfinementError) -> ToolError {
+fn map_confinement(error: &ConfinementError) -> ToolError {
     let category = if error.code() == finstack_ai_runtime::CONFINEMENT_UNAVAILABLE {
         ErrorCategory::Configuration
-    } else if error.code() == finstack_ai_runtime::CONFINEMENT_DENIED {
-        ErrorCategory::Tool
     } else {
         ErrorCategory::Tool
     };

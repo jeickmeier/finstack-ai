@@ -312,9 +312,8 @@ async fn confined_stdio_fails_closed_when_confinement_is_unavailable() {
         )
         .expect("allowlisted");
     let result = McpToolsetFactory::new(config).construct().await;
-    let error = match result {
-        Ok(_) => panic!("requested confinement is unavailable"),
-        Err(error) => error,
+    let Err(error) = result else {
+        panic!("requested confinement is unavailable")
     };
     assert!(format!("{error}").contains(finstack_ai_runtime::CONFINEMENT_UNAVAILABLE));
 }
@@ -1004,6 +1003,85 @@ async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
     assert_ne!(Arc::as_ptr(rebuilt.resolved()), live_resolved);
 }
 
+fn memory_journal_store() -> Arc<dyn finstack_ai::runtime::JournalStore> {
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 8,
+            batches_per_session: 64,
+            records_per_session: 1_024,
+            snapshot_bytes: 16_384,
+        })
+        .expect("store"),
+    )
+}
+
+fn run_security(policy: &str, decision: &str) -> finstack_ai::RunSecurityContext {
+    finstack_ai::RunSecurityContext::try_new(
+        "tenant-a",
+        finstack_ai::PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+            .expect("principal"),
+        "local",
+        "test",
+        policy,
+        decision,
+        None,
+    )
+    .expect("security")
+}
+
+async fn connect_read_only_mcp_agent(
+    slug: &str,
+    tool_name: &str,
+    frames: Vec<serde_json::Value>,
+    model: Arc<finstack_ai_test::ScriptedModel>,
+    store: Arc<dyn finstack_ai::runtime::JournalStore>,
+) -> finstack_ai::Agent {
+    use finstack_ai::runtime::{AgentId, BundleId, ComponentId, ComponentRef, Model, Version};
+
+    let toolset = McpToolset::connect(
+        Arc::new(ScriptedTransport::new(frames)),
+        McpConfig::default().with_read_only_tools([tool_name]),
+        None,
+    )
+    .await
+    .expect("connects");
+    let version = Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    finstack_ai::Agent::builder(
+        AgentId::parse(format!("test.agent.{slug}")).expect("agent"),
+        BundleId::parse(format!("test.bundle.{slug}")).expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse(format!("test.model.{slug}")).expect("model"),
+                Some(version),
+            ),
+            Arc::clone(&model) as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse(format!("test.store.{slug}")).expect("store"),
+                Some(version),
+            ),
+            store,
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("finstack.tools.mcp").expect("toolset"),
+            Some(version),
+        ),
+        Arc::new(toolset) as Arc<dyn Toolset>,
+    )
+    .build()
+    .await
+    .expect("agent")
+}
+
 fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
     use finstack_ai::runtime::{
         ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, ModelToolCall,
@@ -1011,7 +1089,7 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
     };
     use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 
-    let arguments = RawJson::parse(br#"{}"#).expect("arguments");
+    let arguments = RawJson::parse(br"{}").expect("arguments");
     Arc::new(ScriptedModel::from_plans(
         ModelContextProfile {
             provider: Arc::from("scripted"),
@@ -1077,84 +1155,28 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
 async fn elicitation_journals_interaction_and_host_resolution_completes_the_tool() {
     use std::time::Duration;
 
-    use finstack_ai::runtime::{
-        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, LoadRequest, Model, Version,
-    };
-    use finstack_ai::{
-        Agent, AgentRunRequest, InteractionResolution, PrincipalRef, RunSecurityContext,
-    };
+    use finstack_ai::runtime::LoadRequest;
+    use finstack_ai::{AgentRunRequest, InteractionResolution};
     use finstack_ai_kernel::{AuthorizationEvidence, InteractionKind};
-    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
-    let transport = ScriptedTransport::new(vec![
-        serde_json::json!({"resultType":"complete","tools":[{"name":"ask","description":"Ask","inputSchema":{"type":"object"}}]}),
-        serde_json::json!({
-            "resultType":"input_required",
-            "content":[{"type":"text","text":"Need a city"}],
-            "inputRequests":{"type":"object","properties":{"city":{"type":"string"}}}
-        }),
-        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"resolved"}],"isError":false}),
-    ]);
-    let toolset = McpToolset::connect(
-        Arc::new(transport),
-        McpConfig::default().with_read_only_tools(["ask"]),
-        None,
+    let store = memory_journal_store();
+    let agent = connect_read_only_mcp_agent(
+        "mcp-elicitation",
+        "ask",
+        vec![
+            serde_json::json!({"resultType":"complete","tools":[{"name":"ask","description":"Ask","inputSchema":{"type":"object"}}]}),
+            serde_json::json!({
+                "resultType":"input_required",
+                "content":[{"type":"text","text":"Need a city"}],
+                "inputRequests":{"type":"object","properties":{"city":{"type":"string"}}}
+            }),
+            serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"resolved"}],"isError":false}),
+        ],
+        elicitation_model(),
+        Arc::clone(&store),
     )
-    .await
-    .expect("connects");
-    let store: Arc<dyn JournalStore> = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 8,
-            batches_per_session: 64,
-            records_per_session: 1_024,
-            snapshot_bytes: 16_384,
-        })
-        .expect("store"),
-    );
-    let version = Version {
-        major: 1,
-        minor: 0,
-        patch: 0,
-    };
-    let model = elicitation_model();
-    let agent = Agent::builder(
-        AgentId::parse("test.agent.mcp-elicitation").expect("agent"),
-        BundleId::parse("test.bundle.mcp-elicitation").expect("bundle"),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.model.mcp-elicitation").expect("model"),
-                Some(version),
-            ),
-            Arc::clone(&model) as Arc<dyn Model>,
-        ),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.store.mcp-elicitation").expect("store"),
-                Some(version),
-            ),
-            Arc::clone(&store),
-        ),
-    )
-    .toolset(
-        ComponentRef::new(
-            ComponentId::parse("finstack.tools.mcp").expect("toolset"),
-            Some(version),
-        ),
-        Arc::new(toolset) as Arc<dyn Toolset>,
-    )
-    .build()
-    .await
-    .expect("agent");
-    let security = RunSecurityContext::try_new(
-        "tenant-a",
-        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
-        "local",
-        "test",
-        "mcp-elicitation-policy-v1",
-        "mcp-elicitation-decision-v1",
-        None,
-    )
-    .expect("security");
+    .await;
+    let security = run_security("mcp-elicitation-policy-v1", "mcp-elicitation-decision-v1");
     let run = agent
         .start(
             AgentRunRequest::try_new(
@@ -1224,7 +1246,7 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
     };
     use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 
-    let arguments = RawJson::parse(br#"{}"#).expect("arguments");
+    let arguments = RawJson::parse(br"{}").expect("arguments");
     Arc::new(ScriptedModel::from_plans(
         ModelContextProfile {
             provider: Arc::from("scripted"),
@@ -1309,78 +1331,24 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
 async fn sampling_journals_a_nested_model_under_the_parent_tool() {
     use std::time::Duration;
 
-    use finstack_ai::runtime::{
-        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, LoadRequest, Model, Version,
-    };
-    use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+    use finstack_ai::AgentRunRequest;
+    use finstack_ai::runtime::LoadRequest;
     use finstack_ai_kernel::{EffectPurpose, NestedModelKind, RecordBody};
-    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
-    let transport = ScriptedTransport::new(vec![
-        serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),
-        serde_json::json!({"method":"sampling/createMessage","params":{"prompt":"sample"}}),
-        serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"tool-done"}],"isError":false}),
-    ]);
-    let toolset = McpToolset::connect(
-        Arc::new(transport),
-        McpConfig::default().with_read_only_tools(["echo"]),
-        None,
+    let store = memory_journal_store();
+    let agent = connect_read_only_mcp_agent(
+        "mcp-sampling",
+        "echo",
+        vec![
+            serde_json::json!({"resultType":"complete","tools":[{"name":"echo","description":"Echo","inputSchema":{"type":"object"}}]}),
+            serde_json::json!({"method":"sampling/createMessage","params":{"prompt":"sample"}}),
+            serde_json::json!({"resultType":"complete","content":[{"type":"text","text":"tool-done"}],"isError":false}),
+        ],
+        sampling_model(),
+        Arc::clone(&store),
     )
-    .await
-    .expect("connects");
-    let store: Arc<dyn JournalStore> = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 8,
-            batches_per_session: 64,
-            records_per_session: 1_024,
-            snapshot_bytes: 16_384,
-        })
-        .expect("store"),
-    );
-    let version = Version {
-        major: 1,
-        minor: 0,
-        patch: 0,
-    };
-    let model = sampling_model();
-    let agent = Agent::builder(
-        AgentId::parse("test.agent.mcp-sampling").expect("agent"),
-        BundleId::parse("test.bundle.mcp-sampling").expect("bundle"),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.model.mcp-sampling").expect("model"),
-                Some(version),
-            ),
-            Arc::clone(&model) as Arc<dyn Model>,
-        ),
-        (
-            ComponentRef::new(
-                ComponentId::parse("test.store.mcp-sampling").expect("store"),
-                Some(version),
-            ),
-            Arc::clone(&store),
-        ),
-    )
-    .toolset(
-        ComponentRef::new(
-            ComponentId::parse("finstack.tools.mcp").expect("toolset"),
-            Some(version),
-        ),
-        Arc::new(toolset) as Arc<dyn Toolset>,
-    )
-    .build()
-    .await
-    .expect("agent");
-    let security = RunSecurityContext::try_new(
-        "tenant-a",
-        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
-        "local",
-        "test",
-        "mcp-sampling-policy-v1",
-        "mcp-sampling-decision-v1",
-        None,
-    )
-    .expect("security");
+    .await;
+    let security = run_security("mcp-sampling-policy-v1", "mcp-sampling-decision-v1");
     let output = tokio::time::timeout(
         Duration::from_secs(8),
         agent.run(
@@ -1426,17 +1394,16 @@ async fn sampling_journals_a_nested_model_under_the_parent_tool() {
         })
     ));
     assert!(
-        nested[0]
-            .relation()
-            .is_some_and(|relation| records.iter().any(|record| match record.body() {
-                RecordBody::EffectRequested(requested)
-                    if requested.kind() == finstack_ai_kernel::EffectKind::Tool
-                        && requested.effect_id() == relation.parent_effect_id =>
-                {
-                    true
-                }
-                _ => false,
-            })),
+        nested[0].relation().is_some_and(|relation| {
+            records.iter().any(|record| {
+                matches!(
+                    record.body(),
+                    RecordBody::EffectRequested(requested)
+                        if requested.kind() == finstack_ai_kernel::EffectKind::Tool
+                            && requested.effect_id() == relation.parent_effect_id
+                )
+            })
+        }),
         "nested model must be a child of the open tool"
     );
 }

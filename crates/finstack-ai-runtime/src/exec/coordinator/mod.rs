@@ -196,6 +196,7 @@ impl CommitCoordinator {
     }
 
     /// Journal store used to commit and recover this coordinator.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
     #[must_use]
     pub(crate) fn journal_store(&self) -> &Arc<dyn JournalStore> {
         &self.store

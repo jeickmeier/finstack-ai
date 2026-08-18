@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn catalog_is_default_off() {
         let source = SkillMarkdown::from_text(REVIEW);
-        let disabled = SkillCatalog::try_import(false, &[source.clone()]).expect("off");
+        let disabled = SkillCatalog::try_import(false, std::slice::from_ref(&source)).expect("off");
         assert!(disabled.specs().is_empty());
         let imported = SkillCatalog::try_import(true, &[source]).expect("on");
         assert_eq!(imported.specs().len(), 1);

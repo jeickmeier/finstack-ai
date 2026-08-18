@@ -104,6 +104,7 @@ pub use services::composition::{
 pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{
     CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend,
     ConfinementError, ConfinementProfile, ProcessConfinement,

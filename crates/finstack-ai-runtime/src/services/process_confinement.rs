@@ -1228,7 +1228,7 @@ mod tests {
 
     impl SpawnProbe {
         fn command(&self) -> Command {
-            let _ = self.spawned.store(true, Ordering::Release);
+            self.spawned.store(true, Ordering::Release);
             // The probe records that the test asked for a command. The
             // unavailable backend must return before Command::spawn.
             Command::new("finstack-confinement-must-not-spawn")

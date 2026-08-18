@@ -2,9 +2,9 @@
   "format_version": 1,
   "results": [
     {
-      "bytes": 9206,
+      "bytes": 9305,
       "detail": "within ratified budget or unratified optional",
-      "gzip_bytes": 8652,
+      "gzip_bytes": 8747,
       "id": "python-wheel",
       "path": "target/wheels/finstack_ai-1.0.0-cp314-cp314-macosx_11_0_arm64.whl",
       "present": true,
@@ -12,9 +12,9 @@
       "within_budget": true
     },
     {
-      "bytes": 8465252,
+      "bytes": 9449844,
       "detail": "within ratified budget or unratified optional",
-      "gzip_bytes": 2541067,
+      "gzip_bytes": 2790984,
       "id": "wasm-bg",
       "path": "bindings/finstack-ai-wasm/js/generated/finstack_ai_wasm_bg.wasm",
       "present": true,

@@ -398,8 +398,7 @@ mod tests {
             endpoint: "https://api.e2b.dev".into(),
             template: None,
         })
-        .err()
-        .expect("missing key");
+        .expect_err("missing key");
         assert_eq!(error, E2bSandboxError::CredentialRequired);
         assert!(error.to_string().contains(E2B_CREDENTIAL_REQUIRED));
     }
@@ -411,8 +410,7 @@ mod tests {
             endpoint: "http://8.8.8.8".into(),
             template: None,
         })
-        .err()
-        .expect("plaintext");
+        .expect_err("plaintext");
         assert!(error.to_string().contains("plaintext HTTP"));
         assert!(!error.to_string().contains(CANARY));
     }

@@ -552,6 +552,20 @@ impl AgentInvoker for ApprovalLoopInvoker {
     }
 }
 
+async fn wait_for_listed_interactions(run: &AgentRun) -> Vec<finstack_ai::InteractionRequest> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let listed = run.list_interactions().await.expect("list");
+            if !listed.is_empty() {
+                return listed;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("approval timeout")
+}
+
 #[tokio::test]
 async fn subagent_start_approval_loop_resolves_durable_interaction() {
     let store = memory_journal();
@@ -607,17 +621,7 @@ async fn subagent_start_approval_loop_resolves_durable_interaction() {
         .start(agent_request("delegate"))
         .expect("parent start");
     assert_eq!(invoker.starts.load(Ordering::SeqCst), 0);
-    let listed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let listed = parent.list_interactions().await.expect("list");
-            if !listed.is_empty() {
-                return listed;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("approval timeout");
+    let listed = wait_for_listed_interactions(&parent).await;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].kind(), &InteractionKind::Approval);
     let security = security("decision-v1");

@@ -227,7 +227,9 @@ def test_e2b_sandbox_rejects_plaintext_non_loopback() -> None:
     canary = "e2b-secret-canary-045"
 
     async def construct() -> None:
-        with pytest.raises(finstack_ai.ConfigurationError, match="plaintext HTTP") as raised:
+        with pytest.raises(
+            finstack_ai.ConfigurationError, match="plaintext HTTP"
+        ) as raised:
             await finstack_ai.Agent.e2b_sandbox(
                 "fixture-model",
                 api_key=canary,

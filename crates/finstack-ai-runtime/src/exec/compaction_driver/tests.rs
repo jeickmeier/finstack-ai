@@ -800,17 +800,20 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
         "replay must not call the model"
     );
     assert_eq!(compaction_requests(&replayed).len(), 1);
+    recover_summarize_after_crash(&driver, &draft);
+}
 
+fn recover_summarize_after_crash(driver: &StageDriver, draft: &ModelRequestDraft) {
     let crash_store = Arc::new(MemoryStore::new());
     let mut crashing = accepted_on(Arc::clone(&crash_store) as Arc<MemoryStore>);
     let crashing_model = ScriptedModel::new(true);
     let crash_error = block_on(settle_facade_stage_with_model(
         &mut crashing,
-        Some(&driver),
+        Some(driver),
         &test_sources(),
         &test_profile(),
         before_model_env(),
-        model_request_settled(&draft),
+        model_request_settled(draft),
         Some(&crashing_model),
     ))
     .expect_err("first attempt crashes after the request commits");
@@ -835,11 +838,11 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
     let recovered_model = ScriptedModel::new(false);
     block_on(settle_facade_stage_with_model(
         &mut recovered,
-        Some(&driver),
+        Some(driver),
         &test_sources_from(10_000),
         &test_profile(),
         env(1_400, &[15, 16], &[12], &[113], &[], &[112], &[], 114),
-        model_request_settled(&draft),
+        model_request_settled(draft),
         Some(&recovered_model),
     ))
     .expect("recover at-least-once");
