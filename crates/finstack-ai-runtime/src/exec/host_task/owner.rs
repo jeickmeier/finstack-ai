@@ -237,6 +237,14 @@ impl RunTaskOwner {
                 | ModelResumeAction::Reconcile
                 | ModelResumeAction::WaitExternal => {}
             }
+            crate::compaction_driver::resume_pending_compaction_model(
+                &mut coordinator,
+                &sources,
+                &stage_profile,
+                model.as_ref(),
+                &parent,
+            )
+            .await?;
             if let Some(providers) = coordinator.context_providers().cloned() {
                 match resume_pending_context_effects(
                     &coordinator,

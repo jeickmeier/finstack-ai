@@ -107,6 +107,69 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
     execute_and_settle(coordinator, sources, profile, model, request, cancellation).await
 }
 
+/// Resume a committed compaction-summary model effect without a new user turn.
+///
+/// # Errors
+///
+/// Returns a stable middleware or model-settlement error when the pending
+/// compaction effect cannot be reconstructed or settled.
+pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
+    model: &dyn Model,
+    cancellation: &CancellationSignal,
+) -> Result<bool, RunHandleError> {
+    let Some(pending) = coordinator.state().pending_model_effect.clone() else {
+        return Ok(false);
+    };
+    if !pending.requested.is_compaction_summary() {
+        return Ok(false);
+    }
+    let finstack_ai_kernel::EffectInput::Model { request: raw } = pending.requested.input() else {
+        return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
+    };
+    let draft: crate::ModelRequestDraft = serde_json::from_slice(raw.as_bytes())
+        .map_err(|_| stage_error(crate::MODEL_REQUEST_INVALID))?;
+    let model_ref = match pending.requested.component() {
+        Some(invocation) => finstack_ai_kernel::ComponentRef::new(
+            invocation.component.clone(),
+            Some(invocation.version),
+        ),
+        None => finstack_ai_kernel::ComponentRef::new(
+            finstack_ai_kernel::ComponentId::parse("finstack.model.compaction")
+                .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
+            None,
+        ),
+    };
+    let budget_scope_id = coordinator
+        .stage_dispatch_seed()
+        .and_then(|seed| seed.budget_scope_id)
+        .unwrap_or_else(|| {
+            finstack_ai_kernel::BudgetScopeId::from_bytes(*pending.requested.effect_id().as_bytes())
+        });
+    let request = CompactionModelRequest {
+        model: model_ref,
+        request: draft,
+        budget_scope_id,
+        source_sensitivity: finstack_ai_kernel::Sensitivity::Internal,
+        residency_policy_digest: finstack_ai_kernel::Digest::raw_json(b"compaction-resume"),
+        resume_state: finstack_ai_kernel::RawJson::parse(b"{}")
+            .map_err(|_| stage_error(COMPACTION_PHASE_UNAVAILABLE))?,
+    };
+    fulfill_compaction_model(
+        coordinator,
+        sources,
+        profile,
+        model,
+        &request,
+        pending.cycle,
+        cancellation,
+    )
+    .await?;
+    Ok(true)
+}
+
 async fn execute_and_settle<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,

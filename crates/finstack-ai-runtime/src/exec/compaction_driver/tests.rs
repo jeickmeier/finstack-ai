@@ -14,7 +14,7 @@ use finstack_ai_kernel::{
 };
 use futures_core::Stream;
 
-use crate::compaction_driver::compaction_parent_effect_id;
+use crate::compaction_driver::{compaction_parent_effect_id, resume_pending_compaction_model};
 use crate::context::{ContextAuthority, ContextItem, ContextItemKind, ContextProvenance};
 use crate::middleware::{
     BeforeModelInput, CompactionEvidence, CompactionResult, MiddlewareDescriptor, MiddlewareOrder,
@@ -846,4 +846,47 @@ fn summarize_completes_against_a_scripted_model_without_duplicating_on_retry() {
     assert_eq!(recovered_model.requests.load(Ordering::SeqCst), 1);
     assert_eq!(compaction_requests(&recovered).len(), 1);
     assert_eq!(summary_occurrences(&committed_draft(&recovered)), 1);
+}
+
+#[test]
+fn host_task_resume_settles_pending_compaction_without_a_new_user_turn() {
+    let store = Arc::new(MemoryStore::new());
+    let mut crashing = accepted_on(Arc::clone(&store) as Arc<MemoryStore>);
+    let crashing_model = ScriptedModel::new(true);
+    let draft = request_draft(vec![user_message(4, "hi")]);
+    block_on(settle_facade_stage_with_model(
+        &mut crashing,
+        Some(&summarize_driver()),
+        &test_sources(),
+        &test_profile(),
+        before_model_env(),
+        model_request_settled(&draft),
+        Some(&crashing_model),
+    ))
+    .expect_err("crash after compaction request");
+    let session_id = crashing.state().session_id.expect("session");
+    let mut recovered = block_on(CommitCoordinator::recover(
+        Arc::clone(&store) as Arc<dyn JournalStore>,
+        session_id,
+    ))
+    .expect("recover");
+    let recovered_model = ScriptedModel::new(false);
+    let resumed = block_on(resume_pending_compaction_model(
+        &mut recovered,
+        &test_sources_from(10_000),
+        &test_profile(),
+        &recovered_model,
+        &CancellationSignal::new(),
+    ))
+    .expect("resume");
+    assert!(resumed, "pending compaction summary must resume");
+    assert_eq!(recovered_model.requests.load(Ordering::SeqCst), 1);
+    assert_eq!(compaction_requests(&recovered).len(), 1);
+    assert!(
+        recovered
+            .state()
+            .model_settlements
+            .contains_key(&compaction_requests(&recovered)[0].effect_id()),
+        "summary settles once without a new user turn"
+    );
 }
