@@ -1175,6 +1175,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-tools-skill-import"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai",
+ "finstack-ai-runtime",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-tools-skills"
 version = "1.0.0"
 dependencies = [

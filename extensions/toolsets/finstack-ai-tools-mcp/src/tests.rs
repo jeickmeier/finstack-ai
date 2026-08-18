@@ -273,6 +273,24 @@ async fn reconcile_is_non_repeatable_unless_host_declared_retry_safe() {
     assert_eq!(result, ToolReconcileResult::NonRepeatable);
 }
 
+#[test]
+fn mcp_json_snapshot_allowlists_and_binds_one_server() {
+    let config = McpConfig::try_from_mcp_json(
+        r#"{"mcpServers":{"echo":{"command":"/bin/echo","args":[]}}}"#,
+    )
+    .expect("snapshot");
+    assert!(config.identity().contains("/bin/echo"));
+}
+
+#[test]
+fn mcp_json_rejects_runtime_scan_keys() {
+    let error = McpConfig::try_from_mcp_json(
+        r#"{"mcpServers":{"echo":{"command":"/bin/echo","cwd":"."}}}"#,
+    )
+    .expect_err("cwd is a scan");
+    assert!(format!("{error}").contains(MCP_PROTOCOL_VIOLATION));
+}
+
 #[tokio::test]
 async fn factory_rejects_a_server_that_is_not_allowlisted() {
     let error = McpConfig::default()

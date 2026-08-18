@@ -241,6 +241,19 @@ impl McpConfig {
         self.is_read_only(name) || self.is_idempotent(name)
     }
 
+    /// Snapshot one `mcp.json` document at construction. Not a run-time scan.
+    ///
+    /// Allowlists every listed command or URL. When the document names exactly
+    /// one server, that server is bound.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid JSON, empty server entries, and unsupported keys that
+    /// would require a run-time scan.
+    pub fn try_from_mcp_json(document: &str) -> Result<Self, McpError> {
+        snapshot_mcp_json(document)
+    }
+
     pub(crate) fn identity(&self) -> String {
         match &self.server {
             Some(McpServerSpec::Stdio(config)) => format!("stdio:{}", config.identity()),
@@ -254,6 +267,75 @@ impl McpConfig {
 enum McpServerSpec {
     Stdio(StdioConfig),
     Http(HttpConfig),
+}
+
+fn snapshot_mcp_json(document: &str) -> Result<McpConfig, McpError> {
+    let value: serde_json::Value = serde_json::from_str(document)
+        .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "mcp.json is not json"))?;
+    let servers = value
+        .get("mcpServers")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            McpError::stable(MCP_PROTOCOL_VIOLATION, "mcp.json is missing mcpServers")
+        })?;
+    let mut config = McpConfig::default();
+    let mut bound: Option<McpServerSpec> = None;
+    for (name, server) in servers {
+        let _ = name;
+        if server.get("cwd").is_some() || server.get("envFile").is_some() {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "mcp.json run-time scan keys are rejected",
+            ));
+        }
+        if let Some(command) = server.get("command").and_then(serde_json::Value::as_str) {
+            if command.is_empty() {
+                return Err(McpError::stable(
+                    MCP_PROTOCOL_VIOLATION,
+                    "mcp.json command is empty",
+                ));
+            }
+            let args = server
+                .get("args")
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            config = config.allow_command(command);
+            let spec = McpServerSpec::Stdio(StdioConfig::new(command, args));
+            bound = match bound {
+                Some(_) => None,
+                None => Some(spec),
+            };
+            continue;
+        }
+        if let Some(url) = server
+            .get("url")
+            .or_else(|| server.get("serverUrl"))
+            .and_then(serde_json::Value::as_str)
+        {
+            config = config.allow_url(url)?;
+            let spec = McpServerSpec::Http(HttpConfig::try_new(url)?);
+            bound = match bound {
+                Some(_) => None,
+                None => Some(spec),
+            };
+            continue;
+        }
+        return Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "mcp.json server needs command or url",
+        ));
+    }
+    if servers.len() == 1 {
+        config.server = bound;
+    }
+    Ok(config)
 }
 
 /// Construction-time factory. Enumerates and freezes the catalog once.
