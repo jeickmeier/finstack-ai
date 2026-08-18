@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{
     ActiveCapability, AgentId, AuthorizationEvidence, BundleId, CapabilityActivationSource,
-    CapabilityId, ChildPlacement, ComponentId, ComponentRef, ContentBlock,
+    CapabilityId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock,
     ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome, ProviderIds,
     RawJson, RunEventClass, RunSecurityContext, TerminalState, TextBlock, Usage, Version,
 };
@@ -982,6 +982,131 @@ async fn child_accept_and_cancel_fans_out_against_journal_fixture() {
     assert!(
         cancelled >= 2,
         "parent cancel must fan out to the child: {kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn compatible_start_while_parent_mid_turn_fails_closed() {
+    let parent_gate = Arc::<str>::from("parent-compatible-mid-turn");
+    let child_gate = Arc::<str>::from("child-isolated-mid-turn");
+    let mut parent_plan = completed("parent unused");
+    parent_plan
+        .actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&parent_gate)));
+    let mut child_plan = completed("child unused");
+    child_plan
+        .actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&child_gate)));
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![parent_plan, child_plan],
+    ));
+    let control = model.control();
+    let (agent, store) = child_capable_agent(Arc::clone(&model)).await;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&parent_gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent reached gate");
+    let isolated = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            request("isolated work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("isolated timeout")
+    .expect("isolated");
+    assert_ne!(isolated.locator().session_id, parent.locator().session_id);
+    let error = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            request("compatible work"),
+            ChildPlacement::CompatibleLaneInParentSession,
+        )),
+    )
+    .await
+    .expect("compatible timeout")
+    .err()
+    .expect("compatible mid-turn must fail closed");
+    assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+    let kinds = journal_kinds(&store, parent.locator().session_id).await;
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|kind| *kind == "child_run_prepared")
+            .count(),
+        1,
+        "compatible mid-turn must write no mapping: {kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn cancel_child_locator_and_journal_recover_do_not_require_live_handles() {
+    let parent_gate = Arc::<str>::from("parent-journal-fanout");
+    let mut parent_plan = completed("parent unused");
+    parent_plan
+        .actions
+        .insert(0, ScriptedModelAction::Block(Arc::clone(&parent_gate)));
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![parent_plan, completed("child done")],
+    ));
+    let control = model.control();
+    let (agent, store) = child_capable_agent(Arc::clone(&model)).await;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while control.entries(&parent_gate) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent reached gate");
+    let child = tokio::time::timeout(
+        Duration::from_secs(3),
+        Box::pin(parent.start_child(
+            &agent,
+            request("child work"),
+            ChildPlacement::IsolatedChildSession,
+        )),
+    )
+    .await
+    .expect("start_child timeout")
+    .expect("start_child");
+    tokio::time::timeout(Duration::from_secs(8), child.result())
+        .await
+        .expect("child timeout")
+        .expect("child result");
+    parent
+        .cancel_child_locator(&ChildRunLocator {
+            operation: child.locator().clone(),
+            remote: None,
+        })
+        .await
+        .expect("locator cancel after child completed");
+    parent
+        .recover_children()
+        .await
+        .expect("recover isolated session");
+    parent.clear_child_handles();
+    parent
+        .recover_children()
+        .await
+        .expect("recover after dropping live handles");
+    tokio::time::timeout(Duration::from_secs(3), parent.cancel())
+        .await
+        .expect("parent cancel timeout")
+        .expect("parent cancel");
+    let kinds = journal_kinds(&store, child.locator().session_id).await;
+    assert!(
+        kinds.iter().any(|kind| kind == "run_accepted"),
+        "isolated child mapping remains durable after recover: {kinds:?}"
     );
 }
 

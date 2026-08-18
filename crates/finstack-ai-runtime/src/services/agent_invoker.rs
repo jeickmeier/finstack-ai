@@ -112,6 +112,22 @@ pub trait AgentInvoker: PortObject {
         ctx: ChildRunContext,
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>>;
+
+    /// Submit one durable cancel for a previously accepted child.
+    ///
+    /// Isolated and compatible placements must submit
+    /// `CancellationRequested` for `locator.operation.run_id`. Remote
+    /// stays fail-closed at the toolset. The default implementation
+    /// returns [`AgentInvokeError::Unavailable`] so a host that does not
+    /// implement cancel cannot claim success.
+    fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
+        let _ = locator;
+        Box::pin(async {
+            Err(AgentInvokeError::Unavailable {
+                message: Arc::from("child cancel is not implemented"),
+            })
+        })
+    }
 }
 
 /// Child-agent service failure.

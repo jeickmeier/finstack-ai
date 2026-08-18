@@ -437,6 +437,13 @@ impl AgentRun {
     }
 
     #[cfg(test)]
+    pub(crate) fn clear_child_handles(&self) {
+        if let Ok(mut children) = self.inner.children.lock() {
+            children.clear();
+        }
+    }
+
+    #[cfg(test)]
     pub(super) fn poison_events_lock(&self) {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = self.inner.events.lock().expect("event lock");

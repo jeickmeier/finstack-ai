@@ -169,7 +169,7 @@ impl Toolset for SubagentToolset {
             let result = match name {
                 START_NAME => start_child(&invoker, &allow_list, &ctx, &call).await,
                 AWAIT_NAME => await_child(&snapshot, last.as_ref(), &call),
-                CANCEL_NAME => cancel_child(&snapshot, &call),
+                CANCEL_NAME => cancel_child(&invoker, &snapshot, &call).await,
                 _ => unreachable!("name checked above"),
             }?;
             if let Some(started) = result.started {
@@ -313,7 +313,8 @@ fn await_child(
     })
 }
 
-fn cancel_child(
+async fn cancel_child(
+    invoker: &Arc<dyn AgentInvoker>,
     children: &BTreeMap<Arc<str>, StartedChild>,
     call: &ValidatedToolCall,
 ) -> Result<CallOutcome, ToolError> {
@@ -335,6 +336,9 @@ fn cancel_child(
             SUBAGENT_REMOTE_CANCEL_UNSUPPORTED,
             "remote child cancel is not asserted",
         ));
+    }
+    if let Err(error) = invoker.cancel(&child.handle.locator).await {
+        return Ok(invoke_error_result(&error));
     }
     let output = result_json(&serde_json::json!({
         "run_id": run_id.as_ref(),

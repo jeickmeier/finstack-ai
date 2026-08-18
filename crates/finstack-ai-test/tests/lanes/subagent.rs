@@ -1,14 +1,19 @@
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use finstack_ai::{AGENT_RUN_CANCELLED, Agent, AgentRun, RunPolicy};
+use finstack_ai::{
+    AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, Agent, AgentRun, InteractionResolution,
+    RunPolicy,
+};
 use finstack_ai_kernel::{
-    AgentId, BundleId, ComponentId, ComponentRef, ContentBlock, EffectOutputContract,
-    EffectOutputKind, Version,
+    AgentId, AuthorizationEvidence, BundleId, ComponentId, ComponentRef, ContentBlock,
+    EffectOutputContract, EffectOutputKind, InteractionKind, ProviderIds, Usage, Version,
 };
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, AgentRef, ChildRunHandle, ChildRunLocator, ChildRunRequest,
-    Digest, Model, PortFuture, RawJson, ToolCallBlock, ToolFailurePolicy, ToolStreamItem,
-    ValidatedToolCall, child_relation_digest,
+    Digest, Model, ModelResponse, ModelStreamItem, ModelToolCall, PortFuture, RawJson,
+    ToolCallBlock, ToolCallDelta, ToolFailurePolicy, ToolStreamItem, ValidatedToolCall,
+    child_relation_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction};
@@ -25,6 +30,7 @@ struct ParentStartInvoker {
     parent: Mutex<Option<AgentRun>>,
     child: Agent,
     wait_for_result: bool,
+    started: Arc<Mutex<Vec<AgentRun>>>,
 }
 
 impl AgentInvoker for ParentStartInvoker {
@@ -36,6 +42,7 @@ impl AgentInvoker for ParentStartInvoker {
         let parent = self.parent.lock().expect("parent slot").clone();
         let child = self.child.clone();
         let wait_for_result = self.wait_for_result;
+        let started = Arc::clone(&self.started);
         Box::pin(async move {
             let parent = parent.ok_or_else(|| AgentInvokeError::Unavailable {
                 message: Arc::from("parent run is not attached"),
@@ -54,6 +61,7 @@ impl AgentInvoker for ParentStartInvoker {
                 .map_err(|error| AgentInvokeError::InvalidRequest {
                     message: Arc::from(error.to_string()),
                 })?;
+            started.lock().expect("started").push(run.clone());
             if wait_for_result {
                 let _ = Box::pin(run.result()).await;
             }
@@ -69,6 +77,27 @@ impl AgentInvoker for ParentStartInvoker {
                 },
                 relation_digest,
             })
+        })
+    }
+
+    fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
+        let started = Arc::clone(&self.started);
+        let locator = locator.clone();
+        Box::pin(async move {
+            let run = started
+                .lock()
+                .expect("started")
+                .iter()
+                .find(|run| run.locator().run_id == locator.operation.run_id)
+                .cloned()
+                .ok_or_else(|| AgentInvokeError::Unavailable {
+                    message: Arc::from("started child is not attached"),
+                })?;
+            run.cancel()
+                .await
+                .map_err(|error| AgentInvokeError::InvalidRequest {
+                    message: Arc::from(error.to_string()),
+                })
         })
     }
 }
@@ -216,6 +245,7 @@ async fn subagent_start_await_incorporates_child_text() {
         parent: Mutex::new(None),
         child,
         wait_for_result: true,
+        started: Arc::new(Mutex::new(Vec::new())),
     });
     let toolset = SubagentToolset::try_new(
         Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
@@ -313,6 +343,7 @@ async fn subagent_deny_leaves_no_child_records() {
         parent: Mutex::new(None),
         child,
         wait_for_result: false,
+        started: Arc::new(Mutex::new(Vec::new())),
     });
     let toolset = SubagentToolset::try_new(
         Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
@@ -367,7 +398,7 @@ async fn subagent_deny_leaves_no_child_records() {
 }
 
 #[tokio::test]
-async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
+async fn subagent_cancel_fans_out_to_isolated() {
     let store = memory_journal();
     let store_port: Arc<dyn JournalStore> = store.clone();
     let child_gate = Arc::<str>::from("subagent-child-gate");
@@ -375,13 +406,9 @@ async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
     isolated_plan
         .actions
         .insert(0, ScriptedModelAction::Block(Arc::clone(&child_gate)));
-    let mut compatible_plan = completed_plan("compatible");
-    compatible_plan
-        .actions
-        .insert(0, ScriptedModelAction::Block(Arc::clone(&child_gate)));
     let child_model = Arc::new(ScriptedModel::from_plans(
         scripted_profile(),
-        vec![isolated_plan, compatible_plan],
+        vec![isolated_plan],
     ));
     let child_control = child_model.control();
     let child = build_agent(
@@ -400,7 +427,7 @@ async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
     let parent_agent = build_agent(
         "test.agent.subagent-parent",
         parent_model,
-        store_port,
+        Arc::clone(&store_port),
         ChildRunPolicy::Allow { max_depth: 1 },
     )
     .await;
@@ -432,7 +459,7 @@ async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
     })
     .await
     .expect("isolated child reached gate");
-    let compatible = tokio::time::timeout(
+    let compatible_error = tokio::time::timeout(
         Duration::from_secs(3),
         Box::pin(parent.start_child(
             &child,
@@ -442,7 +469,18 @@ async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
     )
     .await
     .expect("compatible timeout")
-    .expect("compatible");
+    .err()
+    .expect("compatible mid-turn must fail closed");
+    assert_eq!(compatible_error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+    let parent_kinds = journal_kind_names(&store_port, parent.locator().session_id).await;
+    let compatible_prepared = parent_kinds
+        .iter()
+        .filter(|kind| *kind == "child_run_prepared")
+        .count();
+    assert_eq!(
+        compatible_prepared, 1,
+        "only the isolated mapping is journaled mid-turn: {parent_kinds:?}"
+    );
     tokio::time::timeout(Duration::from_secs(3), parent.cancel())
         .await
         .expect("cancel timeout")
@@ -451,16 +489,175 @@ async fn subagent_cancel_fans_out_to_compatible_and_isolated() {
         .await
         .expect("isolated result")
         .expect_err("isolated must cancel");
-    let compatible_error = tokio::time::timeout(Duration::from_secs(3), compatible.result())
-        .await
-        .expect("compatible result")
-        .expect_err("compatible must cancel");
     assert_eq!(isolated_error.code(), AGENT_RUN_CANCELLED);
+}
+
+fn subagent_start_plan() -> finstack_ai_test::ScriptedModelPlan {
+    let arguments = RawJson::parse(
+        br#"{"agent_id":"test.agent.subagent-child","input":"child work","placement":"isolated_child_session"}"#,
+    )
+    .expect("arguments");
+    finstack_ai_test::ScriptedModelPlan {
+        actions: vec![
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                index: 0,
+                name: Some(Arc::from("subagent_start")),
+                arguments_delta: Arc::from(arguments.as_str()),
+                provider_call_id: None,
+            }))),
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                assistant_content: Arc::from([]),
+                tool_calls: Arc::from([ModelToolCall {
+                    name: Arc::from("subagent_start"),
+                    arguments,
+                    provider_call_id: None,
+                }]),
+                usage: Usage::empty(),
+                provider_ids: ProviderIds::empty(),
+                completion_id: Arc::from("subagent-approval"),
+                continuation_state: None,
+            }))),
+        ],
+    }
+}
+
+struct ApprovalLoopInvoker {
+    starts: AtomicUsize,
+}
+
+impl AgentInvoker for ApprovalLoopInvoker {
+    fn start_or_attach(
+        &self,
+        context: ChildRunContext,
+        request: ChildRunRequest,
+    ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let relation_digest = match child_relation_digest(&context, &request) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return Box::pin(async move {
+                    Err(AgentInvokeError::InvalidRequest {
+                        message: Arc::from(error.to_string()),
+                    })
+                });
+            }
+        };
+        let locator = request.locator;
+        Box::pin(async move {
+            Ok(ChildRunHandle {
+                locator,
+                relation_digest,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn subagent_start_approval_loop_resolves_durable_interaction() {
+    let store = memory_journal();
+    let store_port: Arc<dyn JournalStore> = store.clone();
+    let invoker = Arc::new(ApprovalLoopInvoker {
+        starts: AtomicUsize::new(0),
+    });
+    let toolset = SubagentToolset::try_new(
+        Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+        Arc::from([child_ref()]),
+    )
+    .expect("toolset");
+    let parent_model = Arc::new(ScriptedModel::from_plans(
+        scripted_profile(),
+        vec![
+            subagent_start_plan(),
+            completed_plan("incorporated after approval"),
+        ],
+    ));
+    let parent_agent = Agent::builder(
+        AgentId::parse("test.agent.subagent-parent").expect("agent"),
+        BundleId::parse("test.bundle.subagent").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.subagent-parent").expect("model"),
+                Some(VERSION),
+            ),
+            parent_model as Arc<dyn Model>,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.subagent").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store_port),
+        ),
+    )
+    .policy(RunPolicy {
+        child_runs: ChildRunPolicy::Allow { max_depth: 1 },
+        ..RunPolicy::default()
+    })
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("test.toolset.subagent").expect("toolset"),
+            Some(VERSION),
+        ),
+        Arc::new(toolset) as Arc<dyn Toolset>,
+    )
+    .build()
+    .await
+    .expect("parent");
+    let parent = parent_agent
+        .start(agent_request("delegate"))
+        .expect("parent start");
+    assert_eq!(invoker.starts.load(Ordering::SeqCst), 0);
+    let listed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let listed = parent.list_interactions().await.expect("list");
+            if !listed.is_empty() {
+                return listed;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("approval timeout");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind(), &InteractionKind::Approval);
+    let security = security("decision-v1");
+    let resolution = InteractionResolution::try_new(
+        listed[0].interaction_id(),
+        "subagent-approval-1",
+        security.principal().clone(),
+        AuthorizationEvidence::try_new(
+            security.authorization_policy_version(),
+            security.authorization_decision_id(),
+        )
+        .expect("auth"),
+        RawJson::parse(br#"{"approved":true}"#).expect("approved"),
+        None::<&str>,
+    )
+    .expect("resolution");
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        parent.resolve_interaction(resolution),
+    )
+    .await
+    .expect("resolve timeout")
+    .expect("resolve");
+    let output = tokio::time::timeout(Duration::from_secs(8), parent.result())
+        .await
+        .expect("parent timeout")
+        .expect("parent result");
     assert!(
-        compatible_error.code() == AGENT_RUN_CANCELLED
-            || compatible_error.code() == "agent_run_runtime_failure",
-        "compatible-lane cancel fans out or hits the shared-session caveat; remote is not asserted: {} {}",
-        compatible_error.code(),
-        compatible_error
+        output.text().contains("incorporated after approval"),
+        "{}",
+        output.text()
+    );
+    assert_eq!(
+        invoker.starts.load(Ordering::SeqCst),
+        1,
+        "granted approval must dispatch subagent_start"
+    );
+    let kinds = journal_kind_names(&store_port, parent.locator().session_id).await;
+    assert!(
+        kinds.iter().any(|kind| kind == "interaction_requested"),
+        "approval loop must journal the durable interaction: {kinds:?}"
     );
 }

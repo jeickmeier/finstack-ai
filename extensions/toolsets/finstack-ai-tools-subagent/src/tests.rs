@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use finstack_ai_runtime::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentId, AgentInvokeError, AgentInvoker, AgentRef,
     AuthorizationContext, CancellationSignal, ChildPlacement, ChildRunContext, ChildRunHandle,
-    ChildRunRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-    OperationLocator, PortFuture, PrincipalRef, RawJson, RunCallContext, RunId, SessionId,
-    SideEffectClass, ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, ToolStreamItem,
-    Toolset, ValidatedToolCall, child_relation_digest,
+    ChildRunLocator, ChildRunRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind,
+    LaneId, Metadata, OperationLocator, PortFuture, PrincipalRef, RawJson, RunCallContext, RunId,
+    SessionId, SideEffectClass, ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy,
+    ToolStreamItem, Toolset, ValidatedToolCall, child_relation_digest,
 };
 use futures_util::StreamExt;
 
@@ -15,6 +15,7 @@ use super::*;
 
 struct RecordingInvoker {
     starts: AtomicUsize,
+    cancels: AtomicUsize,
     error: Option<AgentInvokeError>,
 }
 
@@ -45,6 +46,12 @@ impl AgentInvoker for RecordingInvoker {
                 relation_digest,
             })
         })
+    }
+
+    fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
+        let _ = locator;
+        self.cancels.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -141,6 +148,7 @@ fn start_args(agent_id: &str) -> serde_json::Value {
 fn subagent_toolset_exposes_exactly_three_tools() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
         error: None,
     });
     let toolset = SubagentToolset::try_new(invoker, allow_list()).expect("toolset");
@@ -161,6 +169,7 @@ fn subagent_toolset_exposes_exactly_three_tools() {
 fn try_new_rejects_empty_allow_list() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
         error: None,
     });
     let error = SubagentToolset::try_new(invoker, Arc::from([]))
@@ -178,6 +187,7 @@ fn try_new_rejects_empty_allow_list() {
 async fn unknown_agent_id_is_a_tool_result_not_a_run_abort() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
         error: None,
     });
     let toolset =
@@ -197,6 +207,7 @@ async fn unknown_agent_id_is_a_tool_result_not_a_run_abort() {
 async fn policy_and_budget_failures_surface_as_tool_results() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
         error: Some(AgentInvokeError::InvalidRequest {
             message: Arc::from("child run policy denies child invocation"),
         }),
@@ -218,9 +229,12 @@ async fn policy_and_budget_failures_surface_as_tool_results() {
 async fn start_await_and_cancel_track_compatible_and_isolated_only() {
     let invoker = Arc::new(RecordingInvoker {
         starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
         error: None,
     });
-    let toolset = SubagentToolset::try_new(invoker, allow_list()).expect("toolset");
+    let toolset =
+        SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
+            .expect("toolset");
     let started = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
         .await
         .expect("start");
@@ -241,6 +255,7 @@ async fn start_await_and_cancel_track_compatible_and_isolated_only() {
     .await
     .expect("cancel");
     assert!(!cancelled.is_error);
+    assert_eq!(invoker.cancels.load(Ordering::SeqCst), 1);
     let missing = invoke(
         &toolset,
         CANCEL_NAME,
@@ -251,8 +266,8 @@ async fn start_await_and_cancel_track_compatible_and_isolated_only() {
     assert!(missing.is_error);
 }
 
-#[test]
-fn remote_cancel_is_not_claimed() {
+#[tokio::test]
+async fn remote_cancel_is_not_claimed() {
     let child = StartedChild {
         handle: ChildRunHandle {
             locator: ChildRunLocator {
@@ -271,21 +286,31 @@ fn remote_cancel_is_not_claimed() {
     };
     let mut children = BTreeMap::new();
     children.insert(Arc::from("remote-1"), child);
+    let invoker = Arc::new(RecordingInvoker {
+        starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
+        error: None,
+    });
     let call = {
-        let invoker = Arc::new(RecordingInvoker {
-            starts: AtomicUsize::new(0),
-            error: None,
-        });
-        let toolset = SubagentToolset::try_new(invoker, allow_list()).expect("toolset");
+        let toolset =
+            SubagentToolset::try_new(Arc::clone(&invoker) as Arc<dyn AgentInvoker>, allow_list())
+                .expect("toolset");
         call(
             &toolset,
             CANCEL_NAME,
             &serde_json::json!({ "run_id": "remote-1" }),
         )
     };
-    let outcome = cancel_child(&children, &call).expect("cancel");
+    let outcome = cancel_child(
+        &(Arc::clone(&invoker) as Arc<dyn AgentInvoker>),
+        &children,
+        &call,
+    )
+    .await
+    .expect("cancel");
     assert!(outcome.is_error);
     let payload: serde_json::Value =
         serde_json::from_slice(outcome.output.as_bytes()).expect("json");
     assert_eq!(payload["code"], SUBAGENT_REMOTE_CANCEL_UNSUPPORTED);
+    assert_eq!(invoker.cancels.load(Ordering::SeqCst), 0);
 }

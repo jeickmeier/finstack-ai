@@ -230,6 +230,9 @@ impl crate::Lane {
                 workflow: None,
             });
         live.workflow = Some(workflow);
+        if let Some(run) = live.run.as_ref() {
+            run.recover_children().await?;
+        }
         native::put_live(self, live)
     }
 }

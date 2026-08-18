@@ -1,5 +1,6 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -83,7 +84,8 @@ impl AgentRun {
     /// # Errors
     ///
     /// Returns a configuration or runtime failure when the parent is not yet
-    /// accepted, placement is remote, or the durable mapping conflicts.
+    /// accepted, placement is remote, the parent turn is still open for
+    /// compatible-lane placement, or the durable mapping conflicts.
     #[cfg(feature = "native-tokio")]
     pub async fn prepare_child(
         &self,
@@ -99,6 +101,14 @@ impl AgentRun {
         }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
+        if matches!(placement, ChildPlacement::CompatibleLaneInParentSession)
+            && self.parent_turn_is_open()?
+        {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "compatible child placement is not allowed while the parent turn is open",
+            ));
+        }
         enforce_child_run_policy(
             self.inner.child_runs,
             child_depth(parent_accepted.relation().depth())?,
@@ -201,8 +211,9 @@ impl AgentRun {
     /// Prepare then accept one child on the selected placement.
     ///
     /// Prefer isolated placement: the child journal is a new session on the
-    /// parent store. Compatible-lane placement shares the parent session and
-    /// can block later parent commits.
+    /// parent store. Compatible-lane placement is rejected while the parent
+    /// turn is open so this path never opens a second coordinator on the
+    /// parent session.
     ///
     /// # Arguments
     ///
@@ -274,7 +285,9 @@ impl AgentRun {
             .lock()
             .map_err(|_| AgentRunError::runtime_message("run child lock is poisoned"))?
             .clone();
+        let mut live = BTreeSet::new();
         for child in children {
+            live.insert(child.inner.locator.run_id);
             let should_start = {
                 let mut cancellation = child.inner.cancellation.lock().map_err(|_| {
                     AgentRunError::runtime_message("run cancellation lock is poisoned")
@@ -296,7 +309,175 @@ impl AgentRun {
             child.inner.cancellation_ready.notify_waiters();
             result?;
         }
+        self.fan_out_journaled_children(&live).await
+    }
+
+    /// Rebuild isolated children from journaled mappings when live handles
+    /// are gone. Compatible mappings stay on the recovered parent journal
+    /// and are not accepted again. Remote stays a no-op.
+    #[cfg(feature = "native-tokio")]
+    pub(crate) async fn recover_children(&self) -> Result<(), AgentRunError> {
+        let live = self.live_child_run_ids()?;
+        for prepared in self.journaled_child_mappings().await? {
+            if live.contains(&prepared.child.operation.run_id) {
+                continue;
+            }
+            match prepared.placement {
+                ChildPlacement::IsolatedChildSession => {
+                    let _ = finstack_ai_runtime::SessionRuntime::open(
+                        Arc::clone(&self.inner.store),
+                        prepared.child.operation.session_id,
+                        Arc::clone(&prepared.child.operation.tenant_scope),
+                    )
+                    .await
+                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+                }
+                ChildPlacement::CompatibleLaneInParentSession
+                | ChildPlacement::RemoteChildSession => {}
+            }
+        }
         Ok(())
+    }
+
+    fn parent_turn_is_open(&self) -> Result<bool, AgentRunError> {
+        let result = self
+            .inner
+            .result
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run result lock is poisoned"))?;
+        Ok(result.is_none())
+    }
+
+    fn live_child_run_ids(&self) -> Result<BTreeSet<finstack_ai_kernel::RunId>, AgentRunError> {
+        let children = self
+            .inner
+            .children
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run child lock is poisoned"))?;
+        Ok(children
+            .iter()
+            .map(|child| child.inner.locator.run_id)
+            .collect())
+    }
+
+    #[cfg(feature = "native-tokio")]
+    async fn journaled_child_mappings(&self) -> Result<Vec<ChildRunPrepared>, AgentRunError> {
+        let parent_run = self.inner.locator.run_id;
+        let Ok(commit) = CommitCoordinator::recover(
+            Arc::clone(&self.inner.store),
+            self.inner.locator.session_id,
+        )
+        .await
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(commit
+            .session()
+            .child_mappings()
+            .iter()
+            .filter(|((run_id, _), _)| *run_id == parent_run)
+            .map(|(_, prepared)| prepared.clone())
+            .collect())
+    }
+
+    #[cfg(feature = "native-tokio")]
+    async fn fan_out_journaled_children(
+        &self,
+        live: &BTreeSet<finstack_ai_kernel::RunId>,
+    ) -> Result<(), AgentRunError> {
+        for prepared in self.journaled_child_mappings().await? {
+            if live.contains(&prepared.child.operation.run_id) {
+                continue;
+            }
+            match prepared.placement {
+                ChildPlacement::RemoteChildSession => {}
+                ChildPlacement::CompatibleLaneInParentSession => {
+                    if self.parent_turn_is_open()? {
+                        continue;
+                    }
+                    self.cancel_journaled_run(
+                        prepared.child.operation.session_id,
+                        prepared.child.operation.run_id,
+                    )
+                    .await?;
+                }
+                ChildPlacement::IsolatedChildSession => {
+                    self.cancel_journaled_run(
+                        prepared.child.operation.session_id,
+                        prepared.child.operation.run_id,
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Cancel one previously prepared child by its frozen locator.
+    ///
+    /// Live child handles are the fast path. Isolated children without a
+    /// live handle are cancelled through the child session journal.
+    /// Compatible children are not cancelled through a second parent
+    /// coordinator while the parent turn is open.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration or runtime failure when cancellation cannot
+    /// be submitted safely.
+    #[cfg(feature = "native-tokio")]
+    pub async fn cancel_child_locator(
+        &self,
+        locator: &ChildRunLocator,
+    ) -> Result<(), AgentRunError> {
+        let children = self
+            .inner
+            .children
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run child lock is poisoned"))?
+            .clone();
+        if let Some(child) = children
+            .into_iter()
+            .find(|child| child.inner.locator.run_id == locator.operation.run_id)
+        {
+            return child.cancel().await;
+        }
+        if locator.operation.session_id == self.inner.locator.session_id
+            && self.parent_turn_is_open()?
+        {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "compatible child cancel cannot open a second parent coordinator",
+            ));
+        }
+        self.cancel_journaled_run(locator.operation.session_id, locator.operation.run_id)
+            .await
+    }
+
+    #[cfg(feature = "native-tokio")]
+    async fn cancel_journaled_run(
+        &self,
+        session_id: finstack_ai_kernel::SessionId,
+        run_id: finstack_ai_kernel::RunId,
+    ) -> Result<(), AgentRunError> {
+        let session = finstack_ai_runtime::SessionRuntime::open(
+            Arc::clone(&self.inner.store),
+            session_id,
+            Arc::clone(&self.inner.locator.tenant_scope),
+        )
+        .await
+        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        session
+            .cancel_run(
+                run_id,
+                self.inner.cancellation_initiator.clone(),
+                &mut || {
+                    NativeIds::cancellation_environment().map_err(|error| {
+                        finstack_ai_runtime::SessionError::Commit { code: error.code() }
+                    })
+                },
+            )
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
     }
 
     async fn wait_accepted(&self) -> Result<RunAccepted, AgentRunError> {
