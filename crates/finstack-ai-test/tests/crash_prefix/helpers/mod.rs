@@ -40,9 +40,9 @@ use finstack_ai_store_sqlite::{
 use finstack_ai_test::{LegalRestore, classify_phase};
 
 pub(crate) const PREFIX_IDS: &[&str] = &[
-    "W1", "W2", "W3", "W4", "W5", "W6", "D1", "D2", "D3", "D4", "D5", "D6", "I1", "I2", "I3", "I4",
-    "C1", "C2", "C3", "C4", "C5", "F1", "F2", "F3", "L1", "L2", "L3", "B1", "B2", "B3", "B4", "N1",
-    "N2", "N3", "N4", "A1", "A2", "T1", "R1", "X1", "M1", "K1", "P1", "P2", "P3", "P4",
+    "W1", "W2", "W3", "W4", "W5", "W6", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "I1", "I2",
+    "I3", "I4", "C1", "C2", "C3", "C4", "C5", "F1", "F2", "F3", "L1", "L2", "L3", "B1", "B2", "B3",
+    "B4", "N1", "N2", "N3", "N4", "A1", "A2", "T1", "R1", "X1", "M1", "K1", "P1", "P2", "P3", "P4",
 ];
 
 pub(crate) fn id<T: IdTag>(ordinal: u64) -> Id<T> {

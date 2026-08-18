@@ -172,3 +172,201 @@ async fn prefix_d1_through_d6_and_post_horizon() {
         "post-horizon is expired_locator"
     );
 }
+
+#[tokio::test]
+async fn prefix_d7_and_d8_tool_deferral() {
+    let store = memory_store();
+    let coordinator =
+        drive_to_pending_tool(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    drop(coordinator);
+
+    let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingTools));
+    let batch = recovered
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .expect("active tool batch");
+    let call = batch.calls.first().expect("requested tool call");
+    let tool_batch_id = batch.opened.tool_batch_id;
+    let effect_id = call.assigned.effect_id;
+    assert!(matches!(
+        call.status,
+        ActiveToolCallStatus::Requested { deferred: None, .. }
+    ));
+    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
+    assert_legal("D7", recovered.state().phase, LegalRestore::Retryable);
+
+    let deferred_input = KernelInput::ToolBatchSettled(ToolBatchSettled {
+        tool_batch_id,
+        outcome: ToolSettlement::Deferred(EffectDeferred {
+            effect_id,
+            handle: ExternalHandleRef::try_new(
+                ComponentId::parse("finstack.tool.fixture").expect("component"),
+                "job-1",
+                RawJson::parse("{}").expect("metadata"),
+            )
+            .expect("handle"),
+            reconciliation: ReconciliationPolicy::CallbackOrPoll,
+            next_poll_at: None,
+            expires_at: None,
+            output_contract: tool_output_contract(),
+        }),
+    });
+    let mut recovered = recovered;
+    recovered
+        .submit(
+            env_tools(1_700, &[1_010], &[1_010], &[], &[], &[], &[], 710),
+            deferred_input.clone(),
+        )
+        .await
+        .expect("defer tool");
+    drop(recovered);
+
+    let mut recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(deferred_call_count(recovered.state()), 1);
+    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
+    assert_legal("D8", recovered.state().phase, LegalRestore::Suspended);
+
+    let duplicate = recovered
+        .submit(
+            env_tools(1_701, &[], &[], &[], &[], &[], &[], 711),
+            deferred_input,
+        )
+        .await
+        .expect("equal deferred duplicate");
+    assert!(duplicate.committed.is_none());
+    drop(recovered);
+
+    let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    assert_eq!(recovered.state().phase, Some(RunPhase::AwaitingExternal));
+    assert_eq!(deferred_call_count(recovered.state()), 1);
+    assert!(!recovered.state().tool_settlements.contains_key(&effect_id));
+    assert_legal("D8", recovered.state().phase, LegalRestore::Suspended);
+}
+
+async fn drive_to_pending_tool(store: Arc<dyn JournalStore>) -> CommitCoordinator {
+    let mut coordinator = drive_to_pending_model(store).await;
+    let pending = coordinator
+        .state()
+        .pending_model_effect
+        .as_ref()
+        .expect("pending model effect")
+        .clone();
+    let tool_call = ToolCallBlock::try_new(id(301), "alpha", RawJson::parse("{}").expect("args"))
+        .expect("tool call");
+    let assistant = Message::try_new(
+        id(617),
+        MessageRole::Assistant,
+        vec![
+            ContentBlock::Text(TextBlock::try_new("calling").expect("text")),
+            ContentBlock::ToolCall(tool_call.clone()),
+        ],
+        timestamp(1_400),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("assistant");
+    let completion = EffectCompleted::try_new(
+        pending.requested.effect_id(),
+        output_contract(),
+        RawJson::parse(r#"{"text":"calling"}"#).expect("output"),
+        None,
+        vec![],
+        ProviderIds::empty(),
+        Some("cmpl-tool"),
+        None,
+    )
+    .expect("completed");
+    coordinator
+        .submit(
+            env_tools(
+                1_400,
+                &[607, 608],
+                &[603, 604],
+                &[],
+                &[617],
+                &[],
+                &[301],
+                605,
+            ),
+            KernelInput::ModelSettled(ModelSettled {
+                turn_id: pending.turn_id,
+                model_request_id: pending.model_request_id,
+                outcome: ModelSettlement::Completed {
+                    completion,
+                    assistant_message: assistant,
+                },
+            }),
+        )
+        .await
+        .expect("settle tools");
+    coordinator
+        .submit(
+            env(1_500, &[609], &[], &[], &[], &[], &[], 606),
+            stage(Stage::AfterModel, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("after model tools");
+    coordinator
+        .submit(
+            env_tools(
+                1_600,
+                &[1_000, 1_001, 1_002],
+                &[1_000],
+                &[401],
+                &[],
+                &[400],
+                &[],
+                700,
+            ),
+            stage(
+                Stage::BeforeToolBatch,
+                ReducerStageOutcome::ToolBatchPrepared {
+                    calls: Arc::from([ToolCallPlan::Execute(ValidatedToolCall {
+                        call: tool_call,
+                        tool_id: ToolId::parse("finstack.tools.fixture").expect("tool"),
+                        component: None,
+                        output_contract: tool_output_contract(),
+                        retry_safety: RetrySafety::IdempotentWithKey,
+                        deadline: None,
+                        execution: ToolExecutionMode::Sequential,
+                        failure_policy: ToolFailurePolicy::ReturnToModel,
+                    })]),
+                    continuation: ToolBatchContinuation::Finalize,
+                },
+            ),
+        )
+        .await
+        .expect("tool batch");
+    coordinator
+}
+
+fn tool_output_contract() -> EffectOutputContract {
+    EffectOutputContract {
+        kind: EffectOutputKind::ToolResult,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(br#"{"type":"tool_result"}"#),
+    }
+}
+
+fn deferred_call_count(state: &finstack_ai_kernel::KernelState) -> usize {
+    state
+        .active_tool_batch
+        .as_ref()
+        .expect("active tool batch")
+        .calls
+        .iter()
+        .filter(|call| {
+            matches!(
+                call.status,
+                ActiveToolCallStatus::Requested {
+                    deferred: Some(_),
+                    ..
+                }
+            )
+        })
+        .count()
+}

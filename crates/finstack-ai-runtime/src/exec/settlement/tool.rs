@@ -430,9 +430,16 @@ fn allocate_tool_settlement<C: Clock, R: RandomSource>(
     let fatal = batch.fatal_error.is_some()
         || (matches!(settled.outcome, ToolSettlement::Failed(_))
             && target_plan.failure_policy() == ToolFailurePolicy::FailRun);
-    let (messages, requests, close) = batch.predicted_settlement_counts(target, fatal);
-    let records = 1 + messages + requests + close;
-    let events = 1 + 2 * messages + requests;
+    let (records, events, messages) = if matches!(settled.outcome, ToolSettlement::Deferred(_)) {
+        (1, 1, 0)
+    } else {
+        let (messages, requests, close) = batch.predicted_settlement_counts(target, fatal);
+        (
+            1 + messages + requests + close,
+            1 + 2 * messages + requests,
+            messages,
+        )
+    };
     AllocatedIds::try_new(
         generate_tool_ids::<RecordTag, _, _>(records, sources)?,
         generate_tool_ids::<EventTag, _, _>(events, sources)?,

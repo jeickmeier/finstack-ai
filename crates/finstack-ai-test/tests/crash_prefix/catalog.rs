@@ -1,6 +1,6 @@
 #[test]
 fn enumerated_prefix_matrix_lists_every_id() {
-    assert_eq!(PREFIX_IDS.len(), 46);
+    assert_eq!(PREFIX_IDS.len(), 48);
     let mut unique = PREFIX_IDS.to_vec();
     unique.sort_unstable();
     unique.dedup();

@@ -33,3 +33,4 @@ include!("catalog.rs");
 include!("stream.rs");
 include!("runtime.rs");
 include!("resume.rs");
+include!("deferral_first_pass.rs");

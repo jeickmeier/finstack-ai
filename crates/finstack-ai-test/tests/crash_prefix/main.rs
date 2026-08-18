@@ -13,28 +13,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, AppendRequest, AuthorizationEvidence, CancelRequested, CancellationInitiator,
-    CapabilitiesActivated, CapabilityActivationSource, ChildPlacement, ComponentId, ContentBlock,
-    Digest, Duration as KernelDuration, EffectCompleted, EffectDeferred, EffectFailed, EffectKind,
-    EffectOutputContract, EffectOutputKind, ErrorCategory, ErrorDescriptor,
-    ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
+    ActiveCapability, ActiveToolCallStatus, AppendRequest, AuthorizationEvidence, CancelRequested,
+    CancellationInitiator, CapabilitiesActivated, CapabilityActivationSource, ChildPlacement,
+    ComponentId, ContentBlock, Digest, Duration as KernelDuration, EffectCompleted, EffectDeferred,
+    EffectFailed, EffectKind, EffectOutputContract, EffectOutputKind, ErrorCategory,
+    ErrorDescriptor, ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
     ExternalHandleRef, InteractionExpired, InteractionKind, InteractionResolution,
     InteractionSettled, InteractionTag, InvocationRecovery, KernelInput, LaneCreated, LaneTag,
     Message, MessageRole, Metadata, ModelSettled, ModelSettlement, OperationLocator, PrincipalRef,
     ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, ReconciliationPolicy,
     RecordBody, RecordDraft, RecordTag, ReducerStageOutcome, RequestInteraction,
     RetryClassification, RetryDirective, RetrySafety, RunPhase, RunTag, SessionTag, Stage,
-    TextBlock, ToolBatchContinuation, ToolCallBlock, ToolCallPlan, ToolExecutionMode,
-    ToolFailurePolicy, ToolId, ValidatedToolCall,
+    TextBlock, ToolBatchContinuation, ToolBatchSettled, ToolCallBlock, ToolCallPlan,
+    ToolExecutionMode, ToolFailurePolicy, ToolId, ToolSettlement, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactMetadata, ArtifactRef, ArtifactScope, BlobRef,
-    BudgetCoordinator, BudgetOperationIds, ChildRunCoordinator, CompositionError,
-    ExternalCompletionRouter, ExternalEffectCompletionCommand, ExternalRouteError,
-    IdempotencyHorizon, InvocationResumeAction, JournalStore, LaneAppendIds, LaneCreateIds,
-    LoadRequest, OpaqueSnapshot, PruneRequest, SecurityAuditCategory, SecurityAuditGate,
-    Sensitivity, SessionCreateIds, SessionError, SessionRuntime, SnapshotRequest,
-    WriteMetadataRequest, middleware_resume_action, validate_staged_artifact,
+    BudgetCoordinator, BudgetOperationIds, ChildRunCoordinator, CommitCoordinator,
+    CompositionError, ExternalCompletionRouter, ExternalEffectCompletionCommand,
+    ExternalRouteError, IdempotencyHorizon, InvocationResumeAction, JournalStore, LaneAppendIds,
+    LaneCreateIds, LoadRequest, OpaqueSnapshot, PruneRequest, SecurityAuditCategory,
+    SecurityAuditGate, Sensitivity, SessionCreateIds, SessionError, SessionRuntime,
+    SnapshotRequest, WriteMetadataRequest, middleware_resume_action, validate_staged_artifact,
 };
 use finstack_ai_test::{LegalRestore, all_activated_record_bodies, classify_phase};
 
