@@ -190,6 +190,37 @@ export declare class Agent {
         model: string;
     }): Promise<Agent>;
     /**
+     * Construct a config-driven gateway agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Route, protocol, credential reference, and required
+     * `hardInputBytes`. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the provider.
+     * @example
+     * ```ts
+     * await Agent.gateway({
+     *   endpoint: "https://api.example.test/v1/responses",
+     *   model: "fixture-model",
+     *   wireProtocol: "openai_responses",
+     *   credentialName: "prod",
+     *   hardInputBytes: 1_000_000,
+     *   auth: "bearer",
+     *   apiKey: "sk-...",
+     * });
+     * ```
+     */
+    static gateway(options: {
+        endpoint: string;
+        model: string;
+        wireProtocol: string;
+        credentialName: string;
+        hardInputBytes?: number;
+        auth?: string;
+        apiKey?: string;
+    }): Promise<Agent>;
+    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * @returns Compact catalog entries visible to model selection.

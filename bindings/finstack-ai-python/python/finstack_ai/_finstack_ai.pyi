@@ -858,6 +858,62 @@ class Agent:
                 registration is invalid.
         """
     @staticmethod
+    async def gateway(
+        endpoint: str,
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        wire_protocol: str,
+        credential_name: str,
+        hard_input_bytes: int | None = None,
+        auth: str | None = None,
+        api_key: str | None = None,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+    ) -> Agent:
+        """Build a Rust-backed config-driven gateway agent.
+
+        Reuses the native gateway leaf. This factory does not read
+        environment variables. HTTPS is required off loopback and whenever
+        ``api_key`` is set. Construction fails without ``hard_input_bytes``.
+
+        Args:
+            endpoint: Provider endpoint URL.
+            model: Provider model name.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            wire_protocol: ``openai_responses``, ``openai_chat``,
+                ``anthropic_messages``, or ``ollama_chat``.
+            credential_name: Named credential reference, never a secret.
+            hard_input_bytes: Required maximum canonical request bytes.
+            auth: ``none``, ``bearer``, or ``api_key``. Defaults from
+                ``api_key``.
+            api_key: Explicit credential. HTTPS is required when set.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The route, protocol, ``hard_input_bytes``,
+                credential pairing, capability set, or port registration is
+                invalid.
+        """
+    @staticmethod
     async def from_python(
         model: PythonModel,
         toolsets: list[PythonToolset] | None = None,

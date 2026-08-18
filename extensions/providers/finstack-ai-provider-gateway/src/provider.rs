@@ -1581,9 +1581,17 @@ mod tests {
     }
 
     #[test]
-    fn gateway_is_not_a_default_sdk_dependency() {
+    fn gateway_is_not_a_wasm_host_sdk_dependency() {
         let manifest = include_str!("../../../../crates/finstack-ai/Cargo.toml");
-        assert!(!manifest.contains("finstack-ai-provider-gateway"));
+        let wasm_host = manifest
+            .lines()
+            .find(|line| line.contains("wasm-host ="))
+            .expect("wasm-host feature");
+        assert!(
+            !wasm_host.contains("finstack-ai-provider-gateway"),
+            "gateway must stay off the wasm-host feature graph"
+        );
+        assert!(manifest.contains("dep:finstack-ai-provider-gateway"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

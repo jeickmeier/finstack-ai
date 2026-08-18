@@ -9,8 +9,8 @@ use finstack_ai::runtime::{
     RawJson, Version,
 };
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, LinkedAgent,
-    LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy, Session,
+    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, GatewayAgentSpec,
+    LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy, Session,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -198,6 +198,67 @@ impl PyAgent {
             let built = Agent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
+                instruction,
+                capabilities,
+                active_capabilities,
+                ports,
+                child_runs,
+            })
+            .await;
+            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+        })
+    }
+
+    /// Construct a Rust-backed config-driven gateway agent.
+    ///
+    /// `hard_input_bytes`, `wire_protocol`, and `credential_name` are
+    /// required. The binding does not read environment variables.
+    #[staticmethod]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "linked factory forwards gateway route, auth, and primary port components distinctly"
+    )]
+    fn gateway(
+        py: Python<'_>,
+        endpoint: String,
+        model: String,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+        wire_protocol: String,
+        credential_name: String,
+        hard_input_bytes: Option<u64>,
+        auth: Option<String>,
+        api_key: Option<String>,
+        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
+        output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        let ports = linked_ports(
+            py,
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_type,
+        )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::gateway(GatewayAgentSpec {
+                endpoint,
+                model,
+                wire_protocol,
+                credential_name,
+                hard_input_bytes,
+                auth_kind: auth,
+                api_key,
                 instruction,
                 capabilities,
                 active_capabilities,

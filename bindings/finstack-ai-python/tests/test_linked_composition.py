@@ -129,6 +129,69 @@ def test_openai_accepts_reasoning_settings() -> None:
     asyncio.run(construct())
 
 
+def test_gateway_constructs_without_a_request() -> None:
+    async def construct() -> None:
+        agent = await finstack_ai.Agent.gateway(
+            "https://api.example.test/v1/responses",
+            "fixture-model",
+            wire_protocol="openai_responses",
+            credential_name="prod",
+            hard_input_bytes=1_000_000,
+            auth="bearer",
+            api_key="sk-gateway-secret-canary-045",
+        )
+        assert agent.capability_catalog() == []
+
+    asyncio.run(construct())
+
+
+def test_gateway_rejects_missing_hard_input_bytes() -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="hard_input_bytes"):
+            await finstack_ai.Agent.gateway(
+                "https://api.example.test/v1/responses",
+                "fixture-model",
+                wire_protocol="openai_responses",
+                credential_name="prod",
+            )
+
+    asyncio.run(construct())
+
+
+def test_gateway_rejects_plaintext_non_loopback() -> None:
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="plaintext HTTP"):
+            await finstack_ai.Agent.gateway(
+                "http://api.example.test/v1/responses",
+                "fixture-model",
+                wire_protocol="openai_responses",
+                credential_name="prod",
+                hard_input_bytes=1_000_000,
+                auth="none",
+            )
+
+    asyncio.run(construct())
+
+
+def test_gateway_http_credentials_do_not_leak_the_canary() -> None:
+    canary = "sk-gateway-secret-canary-045"
+
+    async def construct() -> None:
+        with pytest.raises(finstack_ai.ConfigurationError, match="HTTPS") as raised:
+            await finstack_ai.Agent.gateway(
+                "http://127.0.0.1:9/v1/responses",
+                "fixture-model",
+                wire_protocol="openai_responses",
+                credential_name="prod",
+                hard_input_bytes=1_000_000,
+                auth="bearer",
+                api_key=canary,
+            )
+        assert canary not in str(raised.value)
+
+    asyncio.run(construct())
+
+
 def test_openai_api_key_is_keyword_only() -> None:
     async def construct() -> None:
         with pytest.raises(TypeError):

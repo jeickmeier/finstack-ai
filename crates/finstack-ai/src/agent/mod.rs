@@ -23,7 +23,8 @@ pub use activation::{
 pub use builder::NativeAgentBuilder;
 pub use handle::Agent;
 pub use linked::{
-    AnthropicAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
+    AnthropicAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec,
+    OpenAiAgentSpec,
 };
 pub use run::AgentRun;
 pub use types::{

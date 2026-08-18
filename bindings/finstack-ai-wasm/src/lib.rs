@@ -648,8 +648,8 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use finstack_ai::{
-        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, ChildRunPolicy, LinkedAgentPorts,
-        OllamaAgentSpec, OpenAiAgentSpec,
+        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, ChildRunPolicy, GatewayAgentSpec,
+        LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
     };
 
     use super::health;
@@ -708,8 +708,25 @@ mod tests {
         }))
         .err()
         .expect("ollama");
+        let gateway = ready(Agent::gateway(GatewayAgentSpec {
+            endpoint: "https://api.example.test/v1/responses".into(),
+            model: "fixture-model".into(),
+            wire_protocol: "openai_responses".into(),
+            credential_name: "prod".into(),
+            hard_input_bytes: Some(1_000_000),
+            auth_kind: Some("bearer".into()),
+            api_key: Some("sk-unused".into()),
+            instruction: None,
+            capabilities: Vec::new(),
+            active_capabilities: Vec::new(),
+            ports: LinkedAgentPorts::default(),
+            child_runs: ChildRunPolicy::Deny,
+        }))
+        .err()
+        .expect("gateway");
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
     }
 }

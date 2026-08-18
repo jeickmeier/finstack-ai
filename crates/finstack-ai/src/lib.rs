@@ -33,9 +33,9 @@ pub use agent::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActivationHostError, Agent, AgentRun,
     AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec,
-    CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry, LinkedAgent,
-    LinkedAgentPorts, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder,
-    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec,
+    CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
+    GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS,
+    NativeAgentBuilder, NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec,
 };
 pub use bundle::{
     BUNDLE_RESOLUTION_CONFLICT, BUNDLE_RESOLUTION_INVALID, BUNDLE_RESOLUTION_LOCK_MISMATCH,
