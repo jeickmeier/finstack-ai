@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044 evidence stays Missing. No invented evidence or review ids.
+Index last reconciled: 2026-08-18 (ADR-045 accepted for first-class SDK constructors; ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044–ADR-045 evidence stays Missing. No invented evidence or review ids.
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -69,6 +69,7 @@ Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progre
 | ADR-042 | `model-assisted-compaction-runtime-phase` | Core/runtime lead | FR-02 Task 14 | Accepted | Standalone | In progress | Partial (local phase + G3 resume `033de86c634656cc69621d5d88589b63325a00ba`; fold residual remains; no evidence id) |
 | ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Partial ([local G6 confinement review](artifacts/adr-043-confinement-review.md) at `71607e5ae216d81e4136a139243771b100b2319b`; Windows token-on-child at `1bbdcfaea96ac724a2d1edd5f9a4e96f1f3f2420`; Seatbelt deny-default remains; no review id) |
 | ADR-044 | `skills-first-load-time-import` | Ecosystem lead | FR-10 G8 | Accepted | Standalone | In progress | Missing (local G8 `f370fb9b2ef7042de4c8171b3b71d24a9c7ffc86`; no published evidence id) |
+| ADR-045 | `first-class-sdk-constructors` | Bindings lead | D1–D4 constructor waves | Accepted | Standalone | Not started | Missing (decision accepted; no invented evidence or review id) |
 
 ## Security review seed
 
@@ -99,6 +100,7 @@ Index last reconciled: 2026-08-17 (ADR-044 accepted and implementation in progre
 | ADR-038 | SEC-INV-007, SEC-INV-010; TM-09, TM-12, TM-16 |
 | ADR-043 | SEC-INV-006, SEC-INV-012; TM-03, TM-06 |
 | ADR-039 | TM-02, TM-16 |
+| ADR-045 | SEC-INV-005; TM-04, TM-06, TM-09 |
 
 ## Change control
 
@@ -431,6 +433,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-17 | ADR-044 | Decision | me@jeickmeier.com | — | Accepted | Skills-only composition-time import; catalog default-off; digest covers content not path | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-044 | Record | me@jeickmeier.com | — | Standalone | ADR-044-skills-first-load-time-import.md | — | me@jeickmeier.com |
 | 2026-08-17 | ADR-044 | Implementation | me@jeickmeier.com | Not started | In progress | FR-10 G8 first cut; no published evidence id | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-045 | Decision | me@jeickmeier.com | — | Accepted | Rust-owned constructors; identical Python/WASM bindings; G-01 zero-config preserved; wasm-host fail-closed | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-045 | Record | me@jeickmeier.com | — | Standalone | ADR-045-first-class-sdk-constructors.md | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-045 | Implementation | me@jeickmeier.com | — | Not started | D1–D4 constructor waves not started | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -480,6 +485,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-042 | [ADR-042-model-assisted-compaction-runtime-phase.md](adrs/ADR-042-model-assisted-compaction-runtime-phase.md) | me@jeickmeier.com | Missing: FR-02 Task 14 landed locally; no evidence id | ADR-042 standalone record | 2026-08-17 |
 | ADR-043 | [ADR-043-process-confinement-backends.md](adrs/ADR-043-process-confinement-backends.md) | me@jeickmeier.com | Partial: local G6 confinement review; Windows token-on-child and Seatbelt deprecation remain; no invented review or evidence id | ADR-043 standalone record; [adr-043-confinement-review.md](artifacts/adr-043-confinement-review.md) | 2026-08-17 |
 | ADR-044 | [ADR-044-skills-first-load-time-import.md](adrs/ADR-044-skills-first-load-time-import.md) | me@jeickmeier.com | Missing: FR-10 first cut landed locally; no evidence id | ADR-044 standalone record | 2026-08-17 |
+| ADR-045 | [ADR-045-first-class-sdk-constructors.md](adrs/ADR-045-first-class-sdk-constructors.md) | me@jeickmeier.com | Missing: decision accepted; D1–D4 not started; no evidence id | ADR-045 standalone record | 2026-08-18 |
 
 ## Supersession log
 

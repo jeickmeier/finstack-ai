@@ -1,10 +1,10 @@
 # ADR record directory
 
 This is the canonical location for standalone ADR records. Accepted ADR-001
-through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-044
+through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-045
 are indexed in the [ADR database](../adr-register.md). ADR-001 through
 ADR-037 were materialized here as versioned standalone records under
-logical PR-004; ADR-038 through ADR-044 are later implementation records.
+logical PR-004; ADR-038 through ADR-045 are later implementation records.
 ADR-040 supersedes ADR-023.
 
 Files use `ADR-NNN-short-topic.md`. The ADR database must link each file before
@@ -63,3 +63,4 @@ chain and receive the next approved ADR number.
 | ADR-042 | [ADR-042-model-assisted-compaction-runtime-phase.md](ADR-042-model-assisted-compaction-runtime-phase.md) |
 | ADR-043 | [ADR-043-process-confinement-backends.md](ADR-043-process-confinement-backends.md) |
 | ADR-044 | [ADR-044-skills-first-load-time-import.md](ADR-044-skills-first-load-time-import.md) |
+| ADR-045 | [ADR-045-first-class-sdk-constructors.md](ADR-045-first-class-sdk-constructors.md) |
