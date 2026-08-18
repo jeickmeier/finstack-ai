@@ -2,10 +2,10 @@
   "bomFormat": "CycloneDX",
   "components": [
     {
-      "bom-ref": "pkg:npm/@finstack/ai@0.0.2",
+      "bom-ref": "pkg:npm/@finstack/ai@1.0.0",
       "name": "@finstack/ai",
       "type": "library",
-      "version": "0.0.2"
+      "version": "1.0.0"
     },
     {
       "bom-ref": "pkg:npm/@playwright/test@1.55.1",
@@ -42,7 +42,7 @@
     "component": {
       "name": "@finstack/ai",
       "type": "library",
-      "version": "0.0.2"
+      "version": "1.0.0"
     }
   },
   "specVersion": "1.6",

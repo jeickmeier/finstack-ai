@@ -3,6 +3,7 @@ BuildMetadata
 CallbackContext
 CancelledError
 Capability
+ChildRunPolicy
 ConfigurationError
 Event
 EventBatch

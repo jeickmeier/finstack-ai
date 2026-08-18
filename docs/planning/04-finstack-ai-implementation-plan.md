@@ -13,9 +13,9 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.22 |
+| Version | 0.23 |
 | Status | Implementation baseline |
-| Date | 2026-08-17 |
+| Date | 2026-08-18 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
 | Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Technical Design v0.19; Security and Threat Model v0.6 |
 
@@ -2994,7 +2994,7 @@ A separate ADR is required before merging a change that:
 ## Entrance criteria
 
 - Documentation pack v0.24 / Implementation Plan 0.22 authorizes this section. Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-073 envelopes.
-- The public-item freeze gate fails on added names and Rust signature drift, so new E-group surface is visible. Phase 11 / PR-068–PR-073 may proceed in parallel; this phase does not implement the provider break.
+- The public-item freeze gate fails on removed **and added** public names, so new E-group surface that introduces a public name is visible. The gate does not extract signatures: additive struct fields, changed field types, and inherent methods on existing types (PR-077 `Lane` verbs, PR-079 `AgentRun` child-run) are covered by named review, not by the gate. Phase 11 / PR-068–PR-073 may proceed in parallel; this phase does not implement the provider break.
 
 ## Exit criteria
 

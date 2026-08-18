@@ -137,7 +137,7 @@ uv run --no-project python tools/migrate/migrate.py "$@"
 """
 
 [tasks.check-public-items]
-description = "Fail when frozen public Rust/Python/JS items are removed"
+description = "Fail when frozen public Rust/Python/JS items are removed or added"
 run = """
 set -euo pipefail
 uv run --no-project python tools/compat/public_items.py --check

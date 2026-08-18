@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Extract and compare frozen public-item lists for PR-062-A01."""
+"""Extract and compare frozen public-item lists for PR-062-A01.
+
+Reports both removed and added public names (B1). Signatures are not
+extracted; signature, field, and inherent-method changes are covered by
+named review, not by this gate.
+"""
 
 from __future__ import annotations
 
@@ -129,6 +134,11 @@ def compare(current: list[str], baseline: list[str]) -> list[str]:
     return missing
 
 
+def added(current: list[str], baseline: list[str]) -> list[str]:
+    known = set(baseline)
+    return [item for item in current if item not in known]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true")
@@ -158,6 +168,12 @@ def main() -> int:
         if missing:
             print(
                 f"{family}: removed public items: {', '.join(missing)}", file=sys.stderr
+            )
+            failed = True
+        extra = added(current, baseline)
+        if extra:
+            print(
+                f"{family}: added public items: {', '.join(extra)}", file=sys.stderr
             )
             failed = True
         mutation = read_list(mutation_path)
