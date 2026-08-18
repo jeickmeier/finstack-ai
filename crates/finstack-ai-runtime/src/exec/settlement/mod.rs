@@ -6,6 +6,7 @@ mod ids;
 mod interaction;
 mod model;
 mod nested_sample;
+#[cfg(any(feature = "native-tokio", test))]
 mod poll;
 mod stage;
 mod tool;
@@ -42,6 +43,7 @@ pub(crate) use interaction::apply_interaction_resume;
 pub(crate) use model::{process_model_progress, process_model_result, resume_pending_model_effect};
 #[cfg(test)]
 pub(crate) use poll::{DuePoll, due_polls, expired};
+#[cfg(feature = "native-tokio")]
 pub(crate) use poll::{drive_due_polls, next_due_poll_or_expiry};
 pub(crate) use stage::{prepare_tool_batch_if_ready, stage_allocation};
 pub(crate) use tool::{

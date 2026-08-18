@@ -9,7 +9,8 @@ use crate::run_types::RunHandleError;
 use crate::{
     CancellationSignal, Clock, PendingToolEffect, RandomSource, ReconcileContext,
     ResolvedToolCatalog, RunCallContext, TOOL_DEFERRAL_EXPIRED, TOOL_RECONCILIATION_UNSUPPORTED,
-    ToolError, ToolResumeAction,
+    ToolError, ToolReconcileResult, ToolResumeAction, map_tool_reconcile_result,
+    tool_retry_allowed,
 };
 
 use super::ids::submit_resume_input;
@@ -64,12 +65,20 @@ pub(crate) fn expired(deferred: &EffectDeferred, now: Timestamp) -> bool {
 }
 
 /// Reconcile due deferrals after failing all committed expirations.
+///
+/// Returns the earliest future process-local poll deadline received from a
+/// live reconciliation. The returned deadline is not committed.
+///
+/// # Errors
+///
+/// Returns a stable tool error when expiry settlement, reconciliation, or
+/// uncertainty handling fails.
 pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
-) -> Result<(), RunHandleError> {
+) -> Result<Option<Timestamp>, RunHandleError> {
     let now = sources.now()?;
     let expired_effects = coordinator
         .state()
@@ -98,10 +107,18 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
         .filter(|due| due.at <= now)
         .map(|due| due.effect_id)
         .collect::<Vec<_>>();
+    let mut next_process_local_poll = None;
     for effect_id in due_effects {
-        reconcile_due_tool(coordinator, catalog, effect_id, sources, cancellation).await?;
+        if let Some(next_poll_at) =
+            reconcile_due_tool(coordinator, catalog, effect_id, now, sources, cancellation).await?
+        {
+            next_process_local_poll = Some(
+                next_process_local_poll
+                    .map_or(next_poll_at, |current: Timestamp| current.min(next_poll_at)),
+            );
+        }
     }
-    Ok(())
+    Ok(next_process_local_poll)
 }
 
 /// Return the earliest process-local wake-up needed by committed deferrals.
@@ -165,9 +182,10 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     catalog: &ResolvedToolCatalog,
     effect_id: EffectId,
+    now: Timestamp,
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
-) -> Result<(), RunHandleError> {
+) -> Result<Option<Timestamp>, RunHandleError> {
     let seed =
         deferred_tool_seed(coordinator, effect_id).ok_or(RunHandleError::ToolSettlement {
             code: "tool_resume_seed_missing",
@@ -197,9 +215,18 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
             },
         )
         .await
-        .map_err(|_| RunHandleError::Tool {
+        .map_err(|error| tool_handle_error(&error))?;
+    let action = map_tool_reconcile_result(
+        coordinator.state(),
+        effect_id,
+        &result,
+        tool_retry_allowed(&seed.requested, &resolved.spec),
+    );
+    if action == ToolResumeAction::SuspendUncertain {
+        return Err(RunHandleError::Tool {
             code: TOOL_RECONCILIATION_UNSUPPORTED.into(),
-        })?;
+        });
+    }
     if apply_tool_reconcile_result(coordinator, &seed, &result, sources).await?
         == ToolResumeAction::SuspendUncertain
     {
@@ -207,5 +234,16 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
             code: TOOL_RECONCILIATION_UNSUPPORTED.into(),
         });
     }
-    Ok(())
+    Ok(match result {
+        ToolReconcileResult::Deferred(deferral) | ToolReconcileResult::StillRunning(deferral) => {
+            deferral
+                .next_poll_at
+                .filter(|next_poll_at| *next_poll_at > now)
+        }
+        ToolReconcileResult::Completed(_)
+        | ToolReconcileResult::NotStarted
+        | ToolReconcileResult::RetrySafe
+        | ToolReconcileResult::Unknown
+        | ToolReconcileResult::NonRepeatable => None,
+    })
 }

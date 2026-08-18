@@ -117,9 +117,9 @@ pub(super) async fn run_worker_with_effects<C, R>(
                 &shared,
                 match error {
                     RunHandleError::ToolSettlement { code }
-                    | RunHandleError::InteractionSettlement { code }
-                    | RunHandleError::Faulted { code } => code,
-                    _ => "host_tool_interaction_continue_failed",
+                    | RunHandleError::InteractionSettlement { code } => Arc::from(code),
+                    RunHandleError::Faulted { code } | RunHandleError::Tool { code } => code,
+                    _ => Arc::from("host_tool_interaction_continue_failed"),
                 },
             );
             break;
@@ -128,9 +128,9 @@ pub(super) async fn run_worker_with_effects<C, R>(
             fault_shared(
                 &shared,
                 match error {
-                    RunHandleError::CancellationSettlement { code }
-                    | RunHandleError::Faulted { code } => code,
-                    _ => "host_idle_cancellation_failed",
+                    RunHandleError::CancellationSettlement { code } => Arc::from(code),
+                    RunHandleError::Faulted { code } => code,
+                    _ => Arc::from("host_idle_cancellation_failed"),
                 },
             );
             break;
@@ -158,9 +158,9 @@ pub(super) async fn run_worker_with_effects<C, R>(
                     RunHandleError::ModelSettlement { code }
                     | RunHandleError::ToolSettlement { code }
                     | RunHandleError::InteractionSettlement { code }
-                    | RunHandleError::Faulted { code }
-                    | RunHandleError::EventDelivery { code } => code,
-                    _ => "host_effect_drain_failed",
+                    | RunHandleError::EventDelivery { code } => Arc::from(code),
+                    RunHandleError::Faulted { code } | RunHandleError::Tool { code } => code,
+                    _ => Arc::from("host_effect_drain_failed"),
                 },
             );
             break;
@@ -473,7 +473,7 @@ where
                 .await
                 {
                     return Err(RunHandleError::Faulted {
-                        code: "host_run_faulted_during_effect",
+                        code: Arc::from("host_run_faulted_during_effect"),
                     });
                 }
                 if coordinator.state().phase == Some(RunPhase::Cancelling)

@@ -225,7 +225,9 @@ async fn submit_interaction_request<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
+        return Err(RunHandleError::Faulted {
+            code: fault.code.into(),
+        });
     }
     Ok(())
 }
@@ -278,7 +280,9 @@ pub(crate) async fn apply_interaction_resume<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
+        return Err(RunHandleError::Faulted {
+            code: fault.code.into(),
+        });
     }
     Ok(action)
 }

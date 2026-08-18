@@ -9,7 +9,7 @@ use crate::coordinator::CommitCoordinatorError;
 use crate::{EventHubConfig, Metadata, ModelStreamAssembler, ModelStreamLimits, ToolStreamLimits};
 
 /// Observable lifecycle of one owned runtime task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunStatus {
     /// Intake and commit processing are active.
     Running,
@@ -20,7 +20,7 @@ pub enum RunStatus {
     /// Runtime uncertainty faulted this run only.
     Faulted {
         /// Stable fault code.
-        code: &'static str,
+        code: Arc<str>,
     },
 }
 
@@ -189,7 +189,7 @@ pub enum RunHandleError {
     #[error("run faulted: {code}")]
     Faulted {
         /// Stable fault code.
-        code: &'static str,
+        code: Arc<str>,
     },
     /// Worker intake or reply path closed unexpectedly.
     #[error("run intake closed")]

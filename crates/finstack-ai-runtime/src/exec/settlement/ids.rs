@@ -114,7 +114,9 @@ pub(super) async fn submit_resume_input<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
+        return Err(RunHandleError::Faulted {
+            code: fault.code.into(),
+        });
     }
     Ok(())
 }

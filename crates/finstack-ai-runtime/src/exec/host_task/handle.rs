@@ -102,9 +102,9 @@ impl RunHandle {
     pub fn status(&self) -> RunStatus {
         self.shared.status.lock().map_or(
             RunStatus::Faulted {
-                code: "run_status_lock_poisoned",
+                code: Arc::from("run_status_lock_poisoned"),
             },
-            |status| *status,
+            |status| status.clone(),
         )
     }
 

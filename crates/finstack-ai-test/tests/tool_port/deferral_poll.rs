@@ -94,7 +94,7 @@ async fn deferred_poll_reconciles_when_due_and_rearms_until_completion() {
 }
 
 #[tokio::test]
-async fn deferred_poll_immediately_due_after_first_pass_rearms_live_until_completion() {
+async fn deferred_poll_rearms_live_wait_after_still_running() {
     let mut spec = tool_spec("echo");
     spec.deferral = ToolDeferralSupport::Supported;
     let plan = ScriptedToolPlan {
@@ -107,16 +107,15 @@ async fn deferred_poll_immediately_due_after_first_pass_rearms_live_until_comple
         1,
         vec![plan],
         vec![
-            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_000, None)),
-            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_000, None)),
-            ToolReconcileResult::Completed(tool_result(3)),
+            ToolReconcileResult::StillRunning(polling_deferral("job-1", 2_600, None)),
+            ToolReconcileResult::Completed(tool_result(2)),
         ],
         spec,
     );
-    let mut owner = spawn_tool_owner(
+    let owner = spawn_tool_owner(
         CommitCoordinator::new(store.clone()),
-        model,
-        catalog,
+        model.clone(),
+        catalog.clone(),
         2_000,
         815,
     )
@@ -124,10 +123,26 @@ async fn deferred_poll_immediately_due_after_first_pass_rearms_live_until_comple
     .expect("owner");
 
     drive_to_tools(&owner.handle(), &store, tools).await;
-    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
-    assert_eq!(toolset.reconcile_count(), 3);
-    assert_eq!(settled.state().tool_settlements.len(), 1);
+    wait_state(&store, |_| toolset.reconcile_count() == 1).await;
+    assert!(
+        tokio::time::timeout(StdDuration::from_millis(100), async {
+            while toolset.reconcile_count() == 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_err(),
+        "the process-local wait must defer the second reconciliation"
+    );
+    drop(owner);
 
+    let recovered = recover_session(&store).await;
+    let mut owner = spawn_tool_owner(recovered, model, catalog, 2_600, 816)
+        .await
+        .expect("later poll");
+    let settled = wait_state(&store, |state| !state.tool_settlements.is_empty()).await;
+    assert_eq!(toolset.reconcile_count(), 2);
+    assert_eq!(settled.state().tool_settlements.len(), 1);
     owner.shutdown().await;
 }
 

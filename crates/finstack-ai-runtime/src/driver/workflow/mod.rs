@@ -790,7 +790,7 @@ fn spawn_code(error: &crate::RunHandleError) -> &'static str {
         crate::RunHandleError::InvalidConfiguration => "invalid_configuration",
         crate::RunHandleError::ShuttingDown => "shutting_down",
         crate::RunHandleError::Stopped => "stopped",
-        crate::RunHandleError::Faulted { code } => code,
+        crate::RunHandleError::Faulted { .. } => "faulted",
         crate::RunHandleError::IntakeClosed => "intake_closed",
         crate::RunHandleError::Coordinator(_) => "coordinator",
         crate::RunHandleError::Model { .. } | crate::RunHandleError::ModelSettlement { .. } => {

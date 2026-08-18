@@ -56,7 +56,9 @@ pub(super) async fn run_worker(
                 sender.take();
             }
             receiver.close();
-            shared.status.send_replace(RunStatus::Faulted { code });
+            shared
+                .status
+                .send_replace(RunStatus::Faulted { code: code.into() });
         }
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
@@ -281,7 +283,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                             }
                         }
                         if let Err(error) =
-                            arm_due_poll_wait(&coordinator, &due_poll_schedules).await
+                            arm_due_poll_wait(&coordinator, &due_poll_schedules, None).await
                         {
                             fault_worker(&shared, &mut receiver, runtime_fault(&error));
                             break;
@@ -316,14 +318,19 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                             continue;
                         }
                         let result = async {
-                            drive_due_polls(
+                            let process_local_deadline = drive_due_polls(
                                 &mut coordinator,
                                 catalog.as_ref(),
                                 &sources,
                                 &due_poll_cancellation,
                             )
                             .await?;
-                            arm_due_poll_wait(&coordinator, &due_poll_schedules).await
+                            arm_due_poll_wait(
+                                &coordinator,
+                                &due_poll_schedules,
+                                process_local_deadline,
+                            )
+                            .await
                         }
                         .await;
                         if let Err(error) = result {
@@ -455,7 +462,9 @@ async fn process_timer_result<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted { code: fault.code });
+        return Err(RunHandleError::Faulted {
+            code: fault.code.into(),
+        });
     }
     Ok(())
 }

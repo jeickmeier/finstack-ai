@@ -109,11 +109,20 @@ where
     }
 }
 
+/// Schedule the next sibling poll wait from committed or live-only state.
+///
+/// A live reconciliation deadline takes precedence because the journal retains
+/// the first deferred deadline by design.
+///
+/// # Errors
+///
+/// Returns a timer error when the bounded sibling-wait queue is closed.
 pub(super) async fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
     schedules: &mpsc::Sender<Option<Timestamp>>,
+    process_local_deadline: Option<Timestamp>,
 ) -> Result<(), RunHandleError> {
-    let deadline = next_due_poll_or_expiry(coordinator.state());
+    let deadline = process_local_deadline.or_else(|| next_due_poll_or_expiry(coordinator.state()));
     schedules
         .send(deadline)
         .await
@@ -122,8 +131,11 @@ pub(super) async fn arm_due_poll_wait(
         })
 }
 
+/// Wake-up outcome emitted by the process-local deferred-poll waiter.
 pub(super) enum DuePollWake {
+    /// The current sibling poll deadline has elapsed.
     Due,
+    /// The sibling deadline could not be converted into a monotonic wait.
     ConstructionFailed,
 }
 
@@ -618,14 +630,19 @@ impl RunTaskOwner {
                 )
                 .await?;
             }
-            drive_due_polls(
+            let process_local_deadline = drive_due_polls(
                 &mut coordinator,
                 catalog.as_ref(),
                 &sources,
                 &tool_batch_cancellation,
             )
             .await?;
-            arm_due_poll_wait(&coordinator, &due_poll_schedule_sender).await?;
+            arm_due_poll_wait(
+                &coordinator,
+                &due_poll_schedule_sender,
+                process_local_deadline,
+            )
+            .await?;
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
