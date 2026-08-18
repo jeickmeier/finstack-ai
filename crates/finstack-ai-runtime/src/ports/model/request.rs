@@ -69,6 +69,17 @@ pub enum SideEffectClass {
     NonIdempotentWrite,
 }
 
+/// Declares whether a tool may return a deferred outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDeferralSupport {
+    /// The tool must complete within the active call.
+    #[default]
+    Never,
+    /// The tool may defer completion for later reconciliation.
+    Supported,
+}
+
 /// Complete data-only tool description sent to a model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -98,6 +109,9 @@ pub struct ToolSpec {
     /// Bounded namespaced metadata.
     #[serde(default)]
     pub metadata: Metadata,
+    /// Whether the tool may return a deferred outcome.
+    #[serde(default)]
+    pub deferral: ToolDeferralSupport,
 }
 
 impl ToolSpec {

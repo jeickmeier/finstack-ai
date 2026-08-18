@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ErrorCategory, Metadata, PortFuture, RawJson,
-    RetrySafety, SideEffectClass, ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode,
-    ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall,
+    RetrySafety, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ValidatedToolCall,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -143,6 +144,7 @@ impl E2bSandboxToolset {
             },
             max_result_bytes: 64 * 1_024,
             metadata: Metadata::empty(),
+            deferral: ToolDeferralSupport::Never,
         };
         spec.validate()
             .map_err(|_| E2bSandboxError::EndpointInvalid {

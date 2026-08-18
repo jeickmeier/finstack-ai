@@ -365,6 +365,7 @@ fn tool(name: &str, input_schema: RawJson) -> ToolSpec {
         },
         max_result_bytes: 1_024,
         metadata: Metadata::empty(),
+        deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
     }
 }
 

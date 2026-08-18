@@ -14,9 +14,9 @@ use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, BudgetRequest, ChildPlacement, ChildRunContext,
     ChildRunHandle, ChildRunLocator, ChildRunRequest, ContentBlock, Digest, ErrorCategory,
     IdGenerationError, Metadata, OperationLocator, OsRandomSource, PortFuture, RawJson,
-    RetrySafety, SideEffectClass, SystemClock, TextBlock, ToolCallContext, ToolError,
-    ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, UuidV7Generator, ValidatedToolCall,
+    RetrySafety, SideEffectClass, SystemClock, TextBlock, ToolCallContext, ToolDeferralSupport,
+    ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem,
+    Toolset, ToolsetDescriptor, UuidV7Generator, ValidatedToolCall,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -497,6 +497,7 @@ fn tool_spec(
         },
         max_result_bytes: 8_192,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     };
     spec.validate().map_err(|_| SubagentError::Configuration {
         reason: "invalid_tool_spec",

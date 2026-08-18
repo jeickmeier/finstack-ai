@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Digest, Metadata, RawJson, RetrySafety, SideEffectClass,
-    ToolExecutionMode, ToolId, ToolSpec,
+    ToolDeferralSupport, ToolExecutionMode, ToolId, ToolSpec,
 };
 
 use crate::protocol::{ListPromptsResult, ListToolsResult, Prompt, ResultType, Tool};
@@ -234,6 +234,7 @@ pub(crate) fn to_tool_spec(tool: &Tool, config: &McpConfig) -> Result<ToolSpec, 
         approval,
         max_result_bytes: config.inline_result_bytes(),
         metadata,
+        deferral: ToolDeferralSupport::Never,
     };
     spec.validate().map_err(|error| {
         McpError::stable(

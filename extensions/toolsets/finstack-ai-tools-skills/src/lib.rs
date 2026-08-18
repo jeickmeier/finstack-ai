@@ -11,8 +11,9 @@ use std::sync::Arc;
 use finstack_ai_kernel::{ActiveCapability, CapabilityActivationSource, CapabilityId, RunId};
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ErrorCategory, Metadata, PortFuture, RawJson,
-    RetrySafety, SideEffectClass, ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode,
-    ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall,
+    RetrySafety, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ValidatedToolCall,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -300,6 +301,7 @@ fn tool_spec(
         },
         max_result_bytes: 8_192,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     };
     spec.validate().map_err(|_| SkillsError::Configuration {
         reason: "invalid_tool_spec",

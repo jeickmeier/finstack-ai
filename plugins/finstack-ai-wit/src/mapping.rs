@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     ApprovalMetadata, Digest, Metadata, RawJson, RetrySafety, RunCallContext, SideEffectClass,
-    ToolExecutionMode, ToolId, ToolSpec as NativeToolSpec,
+    ToolDeferralSupport, ToolExecutionMode, ToolId, ToolSpec as NativeToolSpec,
 };
 use serde_json::Value;
 
@@ -124,6 +124,7 @@ pub fn map_tool_spec(spec: &ToolSpec) -> Result<NativeToolSpec, WitMapError> {
         approval: parse_approval(&spec.approval_policy_json)?,
         max_result_bytes: spec.max_result_bytes,
         metadata: parse_metadata(&spec.metadata_json)?,
+        deferral: ToolDeferralSupport::Never,
     };
     native
         .validate()

@@ -24,10 +24,10 @@ use finstack_ai_runtime::{
     ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
     ModelToolCall, PortFuture, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
     RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolError,
-    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem,
-    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
-    ToolsetRegistration, resolve_model_context_profile,
+    StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision,
+    ToolResult, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator,
+    ToolValidatorCompiler, Toolset, ToolsetRegistration, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -98,6 +98,7 @@ pub(crate) fn tool_spec(per_name: &str) -> finstack_ai_runtime::ToolSpec {
         },
         max_result_bytes: 4_096,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     }
 }
 

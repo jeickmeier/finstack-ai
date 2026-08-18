@@ -9,7 +9,9 @@ use finstack_ai_kernel::{
     ToolFailurePolicy, ToolId, ToolSettlementFingerprint, ToolSettlementKind, ValidatedToolCall,
 };
 
-use crate::{ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolSpec};
+use crate::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
 
 use super::*;
 
@@ -152,7 +154,24 @@ fn spec(side_effect: SideEffectClass, retry_safety: RetrySafety) -> ToolSpec {
         },
         max_result_bytes: 1_024,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     }
+}
+
+#[test]
+fn tool_spec_defaults_to_never_deferred_and_validates() {
+    assert_eq!(ToolDeferralSupport::default(), ToolDeferralSupport::Never);
+    let spec = spec(SideEffectClass::ReadOnly, RetrySafety::SafeToRetry);
+    let mut serialized = serde_json::to_value(spec).expect("serialize tool spec");
+    serialized
+        .as_object_mut()
+        .expect("tool spec object")
+        .remove("deferral");
+    let deserialized: ToolSpec =
+        serde_json::from_value(serialized).expect("deserialize legacy tool spec");
+
+    assert_eq!(deserialized.deferral, ToolDeferralSupport::Never);
+    assert!(deserialized.validate().is_ok());
 }
 
 #[test]

@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Metadata, PortFuture, RawJson, RetrySafety,
-    SideEffectClass, ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode, ToolId,
-    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall,
+    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ValidatedToolCall,
 };
 use futures_core::Stream;
 
@@ -42,6 +43,7 @@ impl LeafToolset {
             },
             max_result_bytes: 1_024,
             metadata: Metadata::empty(),
+            deferral: ToolDeferralSupport::Never,
         }
     }
 

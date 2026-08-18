@@ -21,9 +21,10 @@ use finstack_ai_runtime::{
     ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
     ModelTaskConfig, ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
     RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef,
-    TokenEstimatorSource, ToolCallDelta, ToolExecutionPolicy, ToolFailurePolicy,
-    ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig,
-    Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait, resolve_model_context_profile,
+    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits,
+    ToolTaskConfig, Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait,
+    resolve_model_context_profile,
 };
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
@@ -204,6 +205,7 @@ fn tools() -> Arc<[ToolSpec]> {
         },
         max_result_bytes: 4_096,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     }])
 }
 

@@ -68,7 +68,7 @@ pub use provider_util::{
 pub use request::{
     ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft, ModelRequestLimits,
     ModelRequestValidation, ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall,
-    SideEffectClass, ToolSpec,
+    SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 pub use stream::{
     AssembledModelStream, ModelEventStream, ModelProgress, ModelStreamAssembler, ModelStreamItem,

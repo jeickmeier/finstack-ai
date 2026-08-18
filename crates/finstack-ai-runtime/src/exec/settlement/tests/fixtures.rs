@@ -253,6 +253,7 @@ fn tool_spec(name: &str) -> ToolSpec {
         },
         max_result_bytes: 4_096,
         metadata: Metadata::empty(),
+        deferral: crate::model::ToolDeferralSupport::Never,
     }
 }
 

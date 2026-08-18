@@ -550,6 +550,7 @@ mod tests {
             },
             max_result_bytes: 1_024,
             metadata: Metadata::empty(),
+            deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
         }
     }
 

@@ -161,6 +161,7 @@ async fn interaction_survives_worker_restart() {
         },
         max_result_bytes: 4_096,
         metadata: Metadata::empty(),
+        deferral: finstack_ai_runtime::ToolDeferralSupport::Never,
     }]);
     let toolset = Arc::new(ScriptedToolset::new(
         Arc::clone(&tools),

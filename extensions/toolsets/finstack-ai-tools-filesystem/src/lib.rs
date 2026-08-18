@@ -22,8 +22,8 @@ use finstack_ai_runtime::ToolStreamItem;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     ErrorCategory, Metadata, PortFuture, RawJson, RetrySafety, Sensitivity, SideEffectClass,
-    ToolCallContext, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec,
-    Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionMode, ToolId,
+    ToolResult, ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -640,6 +640,7 @@ fn build_tools() -> Result<BuiltTools, FileSystemError> {
             },
             max_result_bytes: u64::try_from(MAX_INLINE_RESULT_BYTES).unwrap_or(65_536),
             metadata: Metadata::empty(),
+            deferral: ToolDeferralSupport::Never,
         };
         spec.validate()
             .map_err(|_| FileSystemError::Configuration {

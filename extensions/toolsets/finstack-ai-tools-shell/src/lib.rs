@@ -21,8 +21,8 @@ use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     ConfinedChild, ConfinementError, ConfinementProfile, ErrorCategory, Metadata, PortFuture,
     ProcessConfinement, RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext,
-    ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, Toolset,
-    ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult,
+    ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -869,6 +869,7 @@ fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {
         },
         max_result_bytes: 65_536,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     };
     spec.validate().map_err(|_| ShellError::Configuration {
         reason: "invalid_tool_spec",

@@ -184,8 +184,8 @@ pub use model::{
     ReasoningDelta, ReconcileContext, RunCallContext, SECRET_MAX_BYTES, SideEffectClass, SseEvent,
     SseEventParser, SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind,
     StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    ToolSpec, UsageDelta, map_model_reconcile_result, model_resume_action, model_retry_allowed,
-    resolve_model_context_profile, secret_is_valid, validate_model_request,
+    ToolDeferralSupport, ToolSpec, UsageDelta, map_model_reconcile_result, model_resume_action,
+    model_retry_allowed, resolve_model_context_profile, secret_is_valid, validate_model_request,
 };
 pub use observer::export::{
     diagnostic_contains, journal_export_jsonl, observer_events_jsonl, support_bundle_versions,

@@ -16,9 +16,9 @@ use finstack_ai::runtime::{
     ObserverDescriptor, ObserverError, ObserverPayloadMode, OrderTier, PortFuture, ProviderIds,
     RawJson, RetrySafety, RunEvent, SideEffectClass, SnapshotReceipt, SnapshotRequest, Stage,
     StageInput, StageMask, StageOutcome, StoreError, StoreHealth, StructuredOutputCapability,
-    TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolError, ToolEventStream,
-    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    Usage, ValidatedToolCall, Version,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolDeferralSupport, ToolError,
+    ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor, Usage, ValidatedToolCall, Version,
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
 
@@ -83,6 +83,7 @@ fn tool_spec() -> ToolSpec {
         },
         max_result_bytes: 1_024,
         metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Never,
     }
 }
 
