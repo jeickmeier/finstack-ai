@@ -21,7 +21,7 @@ PR-004 promotes ADR-001 through ADR-037 record state to `Standalone`. Implementa
 
 Every row's standalone-record work is owned by [PR-004](delivery-ledger.md#phase-0). The `Planned delivery` column maps implementation or enforcement work; inferred mappings are execution pointers, not new architecture decisions.
 
-Index last reconciled: 2026-08-18 (ADR-045 accepted for first-class SDK constructors; ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044–ADR-045 evidence stays Missing. No invented evidence or review ids.
+Index last reconciled: 2026-08-18 (ADR-046 accepted for MCP nested sampling and catalog re-resolve; ADR-045 accepted for first-class SDK constructors; ADR-044 accepted and implementation in progress for skills-first load-time import; ADR-043 accepted and implementation in progress for process confinement backends; ADR-042 accepted and implementation in progress for model-assisted compaction; ADR-041 accepted and implementation in progress for mid-run capability activation; ADR-040 accepted and supersedes ADR-023; ADR-038 recorded as Accepted / Standalone / In progress / Missing; ADR-039 recorded as Proposed / Standalone / Not started / Partial). ADR-041–ADR-043 evidence is Partial with local SHAs and the commands actually run; ADR-044–ADR-046 evidence stays Missing. No invented evidence or review ids.
 
 | ADR | Topic key | Accountable role | Planned delivery | Decision | Record | Implementation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -70,6 +70,7 @@ Index last reconciled: 2026-08-18 (ADR-045 accepted for first-class SDK construc
 | ADR-043 | `process-confinement-backends` | Runtime/security owner | FR-08 Task 16 | Accepted | Standalone | In progress | Partial ([local G6 confinement review](artifacts/adr-043-confinement-review.md) at `71607e5ae216d81e4136a139243771b100b2319b`; Windows token-on-child at `1bbdcfaea96ac724a2d1edd5f9a4e96f1f3f2420`; Seatbelt deny-default remains; no review id) |
 | ADR-044 | `skills-first-load-time-import` | Ecosystem lead | FR-10 G8 | Accepted | Standalone | In progress | Missing (local G8 `f370fb9b2ef7042de4c8171b3b71d24a9c7ffc86`; no published evidence id) |
 | ADR-045 | `first-class-sdk-constructors` | Bindings lead | D1–D4 constructor waves | Accepted | Standalone | Not started | Missing (decision accepted; no invented evidence or review id) |
+| ADR-046 | `mcp-nested-sampling-and-catalog` | Core/runtime lead | D5–D6 MCP sampling and re-resolve | Accepted | Standalone | Not started | Missing (decision accepted; no invented evidence or review id) |
 
 ## Security review seed
 
@@ -101,6 +102,7 @@ Index last reconciled: 2026-08-18 (ADR-045 accepted for first-class SDK construc
 | ADR-043 | SEC-INV-006, SEC-INV-012; TM-03, TM-06 |
 | ADR-039 | TM-02, TM-16 |
 | ADR-045 | SEC-INV-005; TM-04, TM-06, TM-09 |
+| ADR-046 | SEC-INV-003, SEC-INV-004; TM-01, TM-10 |
 
 ## Change control
 
@@ -436,6 +438,9 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | 2026-08-18 | ADR-045 | Decision | me@jeickmeier.com | — | Accepted | Rust-owned constructors; identical Python/WASM bindings; G-01 zero-config preserved; wasm-host fail-closed | — | me@jeickmeier.com |
 | 2026-08-18 | ADR-045 | Record | me@jeickmeier.com | — | Standalone | ADR-045-first-class-sdk-constructors.md | — | me@jeickmeier.com |
 | 2026-08-18 | ADR-045 | Implementation | me@jeickmeier.com | — | Not started | D1–D4 constructor waves not started | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-046 | Decision | me@jeickmeier.com | — | Accepted | NestedModel McpSampling child of parent tool; additive 1.1 purpose; re_resolve new lock; frozen-name subscribe | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-046 | Record | me@jeickmeier.com | — | Standalone | ADR-046-mcp-nested-sampling-and-catalog.md | — | me@jeickmeier.com |
+| 2026-08-18 | ADR-046 | Implementation | me@jeickmeier.com | — | Not started | D5–D6 MCP sampling and re-resolve not started | — | me@jeickmeier.com |
 
 ## Current record and evidence links
 
@@ -486,6 +491,7 @@ Add a row whenever an ADR is assigned or any state axis changes. This is append-
 | ADR-043 | [ADR-043-process-confinement-backends.md](adrs/ADR-043-process-confinement-backends.md) | me@jeickmeier.com | Partial: local G6 confinement review; Windows token-on-child and Seatbelt deprecation remain; no invented review or evidence id | ADR-043 standalone record; [adr-043-confinement-review.md](artifacts/adr-043-confinement-review.md) | 2026-08-17 |
 | ADR-044 | [ADR-044-skills-first-load-time-import.md](adrs/ADR-044-skills-first-load-time-import.md) | me@jeickmeier.com | Missing: FR-10 first cut landed locally; no evidence id | ADR-044 standalone record | 2026-08-17 |
 | ADR-045 | [ADR-045-first-class-sdk-constructors.md](adrs/ADR-045-first-class-sdk-constructors.md) | me@jeickmeier.com | Missing: decision accepted; D1–D4 not started; no evidence id | ADR-045 standalone record | 2026-08-18 |
+| ADR-046 | [ADR-046-mcp-nested-sampling-and-catalog.md](adrs/ADR-046-mcp-nested-sampling-and-catalog.md) | me@jeickmeier.com | Missing: decision accepted; D5–D6 not started; no evidence id | ADR-046 standalone record | 2026-08-18 |
 
 ## Supersession log
 
