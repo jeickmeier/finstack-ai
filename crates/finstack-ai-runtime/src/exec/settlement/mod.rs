@@ -41,8 +41,10 @@ pub(crate) use cancel::reconcile_cancelled_effect;
 pub(crate) use context::resume_pending_context_effects;
 pub(crate) use interaction::apply_interaction_resume;
 pub(crate) use model::{process_model_progress, process_model_result, resume_pending_model_effect};
+#[cfg(any(feature = "native-tokio", test))]
+pub(crate) use poll::due_polls;
 #[cfg(test)]
-pub(crate) use poll::{DuePoll, due_polls, expired};
+pub(crate) use poll::{DuePoll, expired};
 #[cfg(feature = "native-tokio")]
 pub(crate) use poll::{drive_due_polls, next_due_poll_or_expiry};
 pub(crate) use stage::{prepare_tool_batch_if_ready, stage_allocation};

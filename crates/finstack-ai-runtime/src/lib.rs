@@ -221,6 +221,17 @@ pub use run_types::{
     ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
 };
 
+/// Expose committed poll derivation to cross-crate restore tests.
+#[cfg(feature = "native-tokio")]
+#[doc(hidden)]
+#[must_use]
+pub fn __test_due_polls(state: &KernelState, now: Timestamp) -> Vec<(EffectId, Timestamp)> {
+    settlement::due_polls(state, now)
+        .into_iter()
+        .map(|poll| (poll.effect_id, poll.at))
+        .collect()
+}
+
 #[cfg(feature = "native-tokio")]
 pub use task::{RunHandle, RunTaskOwner};
 

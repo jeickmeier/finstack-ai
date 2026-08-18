@@ -1,6 +1,13 @@
 use finstack_ai_kernel::{ComponentId, ExternalHandleRef, ReconciliationPolicy};
 use finstack_ai_runtime::{ToolDeferral, TOOL_DEFERRAL_EXPIRED};
 
+fn due_polls(
+    state: &finstack_ai_kernel::KernelState,
+    now: finstack_ai_kernel::Timestamp,
+) -> Vec<(finstack_ai_kernel::EffectId, finstack_ai_kernel::Timestamp)> {
+    finstack_ai_runtime::__test_due_polls(state, now)
+}
+
 fn polling_deferral(
     handle: &str,
     next_poll_at: i64,
@@ -23,6 +30,54 @@ fn externally_waiting_deferral(handle: &str) -> ToolDeferral {
     let mut deferral = polling_deferral(handle, 2_000, None);
     deferral.next_poll_at = None;
     deferral
+}
+
+#[tokio::test]
+async fn restore_rebuilds_poll_deadline_from_committed_deferral() {
+    let next_poll_at = timestamp(2_500);
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", next_poll_at.as_unix_ms(), None),
+        )))],
+    };
+    let (store, _, model, catalog, tools) =
+        resume_ports(1, vec![plan], Vec::new(), spec);
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        2_000,
+        810,
+    )
+    .await
+    .expect("owner");
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    let committed = wait_state(&store, |state| {
+        state.phase == Some(RunPhase::AwaitingExternal)
+    })
+    .await;
+    let effect_id = committed
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .and_then(|batch| batch.calls.first())
+        .expect("deferred tool call")
+        .assigned
+        .effect_id;
+    drop(owner);
+
+    let recovered = CommitCoordinator::recover(store, id::<SessionTag>(1))
+        .await
+        .expect("recover committed deferral");
+
+    assert_eq!(
+        due_polls(recovered.state(), timestamp(2_000)),
+        vec![(effect_id, next_poll_at)]
+    );
 }
 
 #[tokio::test]
