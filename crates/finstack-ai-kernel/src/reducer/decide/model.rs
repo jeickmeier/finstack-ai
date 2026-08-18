@@ -1,5 +1,8 @@
 use crate::content::LABEL_MAX_BYTES;
-use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
+use crate::effects::{
+    EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind, EffectPurpose,
+    EffectRequested,
+};
 use crate::primitives::Digest;
 use crate::records::RecordBody;
 use crate::records::lifecycle::EntryAppended;
@@ -11,12 +14,71 @@ use super::super::decision::{Decision, KernelError};
 use super::super::fingerprint::{direct_digest, external_digest};
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ModelSettled, ModelSettlement,
+    RequestCompactionModel,
 };
 use super::super::validation::{
     assistant_tool_calls, validate_assistant_message_id, validate_assistant_semantics,
     validate_assistant_tool_call_ids, validate_completion_identity, validate_error_descriptor,
 };
-use super::{draft_for_state, duplicate_decision, next_sequence, reject_terminal, required};
+use super::{
+    draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence, reject_terminal,
+    required,
+};
+
+/// Commit one runtime-owned compaction-summary model effect (ADR-042).
+///
+/// Does not consume the BeforeModel cursor. Emits no post-commit action; the
+/// runtime phase executes the model after the request is journaled.
+pub(super) fn decide_request_compaction_model(
+    state: &KernelState,
+    env: &TransitionEnv,
+    input: &RequestCompactionModel,
+) -> Result<Decision, KernelError> {
+    reject_terminal(state)?;
+    if state.phase != Some(RunPhase::BeforeModel) || state.pending_model_effect.is_some() {
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "request_compaction_model",
+        });
+    }
+    expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
+        phase: state.phase,
+        input: "request_compaction_model",
+    })?;
+    if state.current_turn.is_none() {
+        return Err(KernelError::InvariantViolation);
+    }
+    if !matches!(
+        input.relation.purpose,
+        EffectPurpose::CompactionSummary { .. }
+    ) || input.output_contract.kind != EffectOutputKind::ModelResponse
+    {
+        return Err(KernelError::ModelRequestContractMismatch);
+    }
+    validate_allocated_ids(&env.ids, IdRequirements::new(1, 1, 1, 0, 0, 0))?;
+    let effect_id = required(env.ids.effect_ids(), 0, "effect_ids")?;
+    let requested = EffectRequested::try_new(
+        effect_id,
+        EffectKind::Model,
+        Some(input.relation.clone()),
+        input.component.clone(),
+        None,
+        input.output_contract.clone(),
+        EffectInput::Model {
+            request: input.request.clone(),
+        },
+        input.retry_safety,
+        input.deadline,
+    )
+    .map_err(|_| KernelError::ModelRequestContractMismatch)?;
+    Ok(Decision {
+        expected_sequence: next_sequence(state)?,
+        records: draft_for_state(state, env, vec![RecordBody::EffectRequested(requested)])?,
+        actions: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+}
+
 use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
 pub(super) fn decide_model(
@@ -277,6 +339,26 @@ fn model_settlement_bodies(
             if completion.output_contract().kind != EffectOutputKind::ModelResponse {
                 return Err(KernelError::ModelSettlementMismatch);
             }
+            if pending.requested.is_compaction_summary() {
+                validate_completion_identity(
+                    state,
+                    completion.completion_id(),
+                    effect_id,
+                    settlement_digest,
+                )?;
+                capacity::preflight_decision(
+                    state,
+                    StateGrowth {
+                        model: Some(effect_id),
+                        completion: completion.completion_id(),
+                        ..StateGrowth::default()
+                    },
+                )?;
+                return Ok((
+                    IdRequirements::new(1, 1, 0, 0, 0, 0),
+                    vec![RecordBody::EffectCompleted(completion.clone())],
+                ));
+            }
             validate_completion_identity(
                 state,
                 completion.completion_id(),
@@ -321,6 +403,9 @@ fn model_settlement_bodies(
             ))
         }
         ModelSettlement::Deferred(deferred) => {
+            if pending.requested.is_compaction_summary() {
+                return Err(KernelError::ModelSettlementMismatch);
+            }
             deferred
                 .validate_against(&pending.requested)
                 .map_err(|_| KernelError::ModelSettlementMismatch)?;

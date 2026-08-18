@@ -12,8 +12,8 @@ use crate::content::{BoundedString, LABEL_MAX_BYTES, TEXT_MAX_BYTES};
 use crate::conversation::Message;
 use crate::effects::{
     ComponentInvocation, EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract,
-    InteractionCancelled, InteractionExpired, InteractionRequest, InteractionResolution,
-    RetrySafety,
+    EffectRelation, InteractionCancelled, InteractionExpired, InteractionRequest,
+    InteractionResolution, RetrySafety,
 };
 use crate::primitives::ErrorDescriptor;
 use crate::primitives::RawJson;
@@ -59,6 +59,28 @@ pub enum KernelInput {
     RequestInteraction(RequestInteraction),
     /// Settle the outstanding interaction by resolution, expiry, or cancellation.
     InteractionSettled(InteractionSettled),
+    /// Request one runtime-owned compaction-summary model effect without consuming BeforeModel.
+    RequestCompactionModel(RequestCompactionModel),
+}
+
+/// Runtime-owned compaction-summary model request (ADR-042).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestCompactionModel {
+    /// Canonical model-request draft.
+    pub request: RawJson,
+    /// Optional resolved component invocation for the child model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<ComponentInvocation>,
+    /// Parent linkage; purpose must be `CompactionSummary`.
+    pub relation: EffectRelation,
+    /// Non-optional output contract.
+    pub output_contract: EffectOutputContract,
+    /// Whether the host may retry the effect.
+    pub retry_safety: RetrySafety,
+    /// Optional semantic deadline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadline: Option<Timestamp>,
 }
 
 /// Normalized interaction request submitted at a live middleware stage.

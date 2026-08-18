@@ -138,7 +138,8 @@ pub(super) fn decide_limit(
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ModelRequestPrepared { .. },
             ..
-        }) => {
+        })
+        | KernelInput::RequestCompactionModel(_) => {
             let Some(model_requests) = usage.model_requests.checked_add(1) else {
                 return Ok(Some(control_failure_decision(
                     state,

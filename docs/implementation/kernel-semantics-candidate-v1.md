@@ -36,7 +36,7 @@ The complete `KernelInput` vocabulary is `AcceptRun`, `StageSettled`,
 `ModelSettled`, `ExternalEffectCompleted`, `ToolBatchSettled`, `CancelRequested`,
 `CancellationReconciled`, `TimerFired`, `ConfigureOutput`,
 `CapabilitiesActivated`, `OutputValidated`, `RecordExternalCommandRejected`,
-`RequestInteraction`, and `InteractionSettled`.
+`RequestInteraction`, `InteractionSettled`, and `RequestCompactionModel`.
 
 | Input | Permitted state | Result class |
 | --- | --- | --- |
@@ -51,6 +51,7 @@ The complete `KernelInput` vocabulary is `AcceptRun`, `StageSettled`,
 | `CancellationReconciled` | `Cancelling` | cumulative reconciliation or terminal cancellation |
 | `TimerFired` | exact pending timer in `Sleeping` | timer firing and retry continuation |
 | `OutputValidated` | structured output awaiting validation | valid final result or retry feedback |
+| `RequestCompactionModel` | `BeforeModel` with no pending model (1.2-oriented; RFC-0001) | compaction-summary `EffectRequested` without consuming the cursor |
 
 All other phase/input pairs fail with `invalid_phase_input`. Reserved phases do
 not fabricate transitions. Equal duplicate completion identities are no-ops;

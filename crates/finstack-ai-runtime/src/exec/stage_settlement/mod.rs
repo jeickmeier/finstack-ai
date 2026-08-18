@@ -34,12 +34,11 @@
 //! Two of the seven [`crate::middleware::StageOutcome`] variants a `BeforeModel`
 //! component may legally return are compaction outcomes, and they diverge:
 //!
-//! - `RequestCompactionModel` needs a **committed child model effect** under a
-//!   committed `EffectKind::Middleware` parent, plus a chain re-entry carrying
-//!   `compaction_resume`. The aggregate-fold design has no place for either: a
-//!   stage settles exactly once, as one `ReducerStageOutcome`, and no
-//!   `KernelInput` commits a middleware parent effect at all. It is refused with
-//!   [`MIDDLEWARE_STAGE_UNLANDABLE`] by [`StageFold::accumulate`].
+//! - `RequestCompactionModel` is fulfilled by the runtime-owned compaction
+//!   phase (ADR-042) before the fold: a child `EffectRequested(Model)` under
+//!   `EffectPurpose::CompactionSummary`, then chain re-entry with
+//!   `compaction_resume`. [`StageFold::accumulate`] still refuses it if that
+//!   intercept does not run.
 //! - `CompactContext` is landable once the last [`CompactionSourceEntry`] is a
 //!   protected user. `protected` stays authoritative-from-the-context-port
 //!   ([`crate::ContextItem::protected`]) plus the structural rule (system /
@@ -75,7 +74,7 @@ use std::sync::Arc;
 use crate::middleware::MiddlewareError;
 use crate::run_types::RunHandleError;
 
-pub(crate) use driver::{stage_driver, submit_command};
+pub(crate) use driver::{settle_facade_stage_with_model, stage_driver, submit_command};
 pub(crate) use submit::submit_folded;
 pub(crate) use tool_batch::{ToolBatchPolicy, run_tool_batch_chain};
 

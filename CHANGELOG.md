@@ -16,6 +16,11 @@ unpublished.
 
 ### Added
 
+- Model-assisted compaction is a runtime-owned phase between
+  `PrepareContext` and `BeforeModel` (ADR-042, RFC-0001). `summarize`
+  commits a child model effect under `EffectPurpose::CompactionSummary`,
+  charges the same run budget, and re-enters the chain with the summary.
+  Middleware stays non-effect-bearing.
 - `finstack-ai-provider-gateway` is a config-driven `Model` adapter over
   `openai_responses`, `openai_chat`, `anthropic_messages`, and
   `ollama_chat`. Required profile fields fail at construction; credential

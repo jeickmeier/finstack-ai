@@ -92,13 +92,10 @@ pub(super) fn apply_fold<C: Clock, R: RandomSource>(
 ///    survived, and nothing else. At most one component can produce one (the
 ///    single-compactor rule, `middleware.rs:650-655`).
 ///
-///    Two residual gaps live in this step. Sliding-window `CompactContext`
-///    does not use them; compaction-summarize stays unlandable at the fold:
-///
-///    - Its `derived_summaries` and `checkpoint` have no landing in a
-///      `ModelRequestPrepared` and are **dropped**. That is a real gap, not a
-///      design choice: a working summarize-compactor needs its summary in the
-///      projection.
+///    `derived_summaries` append as user messages after the replacement
+///    projection so a landed summarize result can carry the summary.
+///    `checkpoint` still has no landing and is dropped. Sliding-window
+///    `CompactContext` does not use those fields.
 ///    - A fold carrying **both** a `Replace` and a `CompactContext` applies a
 ///      projection that was validated against the *base* draft's
 ///      `source_entries` — assembled by [`before_model_input`], checked at
@@ -135,7 +132,11 @@ pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
         None => base,
     };
     if let Some(compaction) = fold.compaction.as_ref() {
-        draft.messages = compaction.replacement_messages.clone();
+        let mut messages = compaction.replacement_messages.to_vec();
+        for item in compaction.derived_summaries.iter() {
+            messages.push(message_from_item(item, MessageRole::User, sources)?);
+        }
+        draft.messages = messages.into();
     }
     if !fold.instructions.is_empty() || !fold.context.is_empty() {
         let mut messages = draft.messages.to_vec();

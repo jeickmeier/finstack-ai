@@ -5,6 +5,7 @@ use finstack_ai_kernel::{AllocatedIds, AppendBatchTag, KernelInput, RecordTag, T
 use tokio::sync::mpsc;
 
 use crate::middleware_driver::StageDriver;
+use crate::model::Model;
 use crate::native::model::ModelDriverMessage;
 use crate::native::timer::{TimerDriverMessage, TimerDriverResult};
 use crate::native::tool::ToolDriverMessage;
@@ -75,6 +76,7 @@ pub(super) async fn run_worker_with_model<C, R>(
     sources: SettlementSources<C, R>,
     stage_driver: Option<StageDriver>,
     profile: LockedModelContextProfile,
+    model: Arc<dyn Model>,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -146,6 +148,7 @@ pub(super) async fn run_worker_with_model<C, R>(
                     &profile,
                     env,
                     input,
+                    Some(model.as_ref()),
                 ).await;
                 let fault_code = result_fault_code(&result);
                 let drain = if result.is_ok() {
@@ -189,6 +192,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     catalog: Arc<ResolvedToolCatalog>,
     stage_driver: Option<StageDriver>,
     profile: LockedModelContextProfile,
+    model: Arc<dyn Model>,
 ) where
     C: Clock + Send + Sync + 'static,
     R: RandomSource + Send + Sync + 'static,
@@ -299,6 +303,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                     &profile,
                     env,
                     input,
+                    Some(model.as_ref()),
                 ).await;
                 if result.as_ref().is_ok_and(|outcome| outcome.fault.is_none())
                     && let Err(error) = prepare_tool_batch_if_ready(

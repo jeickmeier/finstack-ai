@@ -4,13 +4,16 @@ use finstack_ai_kernel::{
     KernelInput, ReducerStageOutcome, Stage, StageCursor, StageSettled, TransitionEnv,
 };
 
+use crate::compaction_driver::{
+    first_compaction_request, fulfill_compaction_model, load_completed_compaction_resume,
+};
 use crate::context_driver::{ContextDriver, collect_context_stage};
 use crate::coordinator::CommitCoordinator;
-use crate::middleware::StageInput;
+use crate::middleware::{CompactionModelResume, StageInput};
 use crate::middleware_driver::{
     MiddlewareStageContext, StageDriver, StageFold, derived_stage_effect_id,
 };
-use crate::model::LockedModelContextProfile;
+use crate::model::{LockedModelContextProfile, Model};
 use crate::run_types::RunHandleError;
 use crate::settlement::SettlementSources;
 use crate::{Clock, CommitOutcome, RandomSource, RunCallContext};
@@ -87,10 +90,20 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
     profile: &LockedModelContextProfile,
     env: TransitionEnv,
     input: KernelInput,
+    model: Option<&dyn Model>,
 ) -> Result<CommitOutcome, RunHandleError> {
     match input {
         KernelInput::StageSettled(settled) => {
-            settle_facade_stage(coordinator, driver, sources, profile, env, settled).await
+            settle_facade_stage_with_model(
+                coordinator,
+                driver,
+                sources,
+                profile,
+                env,
+                settled,
+                model,
+            )
+            .await
         }
         other => coordinator
             .submit(env, other)
@@ -135,7 +148,23 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     profile: &LockedModelContextProfile,
     env: TransitionEnv,
+    settled: StageSettled,
+) -> Result<CommitOutcome, RunHandleError> {
+    settle_facade_stage_with_model(coordinator, driver, sources, profile, env, settled, None).await
+}
+
+/// Fold a facade stage, optionally fulfilling a runtime-owned compaction model.
+///
+/// When `model` is `None`, `RequestCompactionModel` still reaches
+/// [`StageFold::accumulate`] and stays `middleware_stage_unlandable`.
+pub(crate) async fn settle_facade_stage_with_model<C: Clock, R: RandomSource>(
+    coordinator: &mut CommitCoordinator,
+    driver: Option<&StageDriver>,
+    sources: &SettlementSources<C, R>,
+    profile: &LockedModelContextProfile,
+    env: TransitionEnv,
     mut settled: StageSettled,
+    model: Option<&dyn Model>,
 ) -> Result<CommitOutcome, RunHandleError> {
     let cursor = settled.cursor;
     if matches!(cursor.stage, Stage::PrepareContext | Stage::BeforeModel) {
@@ -155,7 +184,33 @@ pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
         profile,
         coordinator.context_projection(),
     )?;
-    let fold = run_stage_chain(coordinator, Some(driver), cursor, input).await?;
+    let mut resume = if cursor.stage == Stage::BeforeModel {
+        load_completed_compaction_resume(coordinator, cursor.cycle).await?
+    } else {
+        None
+    };
+    let mut outcomes =
+        invoke_stage_chain(coordinator, driver, cursor, input.clone(), resume.clone()).await?;
+    if cursor.stage == Stage::BeforeModel
+        && let Some(request) = first_compaction_request(&outcomes)
+        && let Some(model) = model
+    {
+        resume = Some(
+            fulfill_compaction_model(
+                coordinator,
+                sources,
+                profile,
+                model,
+                request,
+                cursor.cycle,
+                driver.cancellation(),
+            )
+            .await?,
+        );
+        outcomes = invoke_stage_chain(coordinator, driver, cursor, input, resume).await?;
+    }
+    let fold =
+        StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))?;
     if fold.is_identity() {
         return submit_settled(coordinator, env, settled).await;
     }
@@ -285,6 +340,17 @@ pub(crate) async fn run_stage_chain(
     let Some(driver) = driver.filter(|driver| driver.is_active(cursor.stage)) else {
         return Ok(StageFold::default());
     };
+    let outcomes = invoke_stage_chain(coordinator, driver, cursor, input, None).await?;
+    StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))
+}
+
+async fn invoke_stage_chain(
+    coordinator: &CommitCoordinator,
+    driver: &StageDriver,
+    cursor: StageCursor,
+    input: StageInput,
+    resume: Option<CompactionModelResume>,
+) -> Result<Vec<crate::middleware::StageOutcome>, RunHandleError> {
     debug_assert_eq!(
         cursor.stage,
         input.stage(),
@@ -302,12 +368,14 @@ pub(crate) async fn run_stage_chain(
         budget_scope_id: seed.budget_scope_id,
         cancellation: driver.cancellation().child(),
     };
-    let ctx = MiddlewareStageContext::new(run, driver.chain().digest(), cursor);
-    let outcomes = driver
+    let mut ctx = MiddlewareStageContext::new(run, driver.chain().digest(), cursor);
+    if let Some(resume) = resume {
+        ctx = ctx.with_compaction_resume(resume);
+    }
+    driver
         .run_stage_masked(&ctx, input, |component| {
             coordinator.component_is_active(component)
         })
         .await
-        .map_err(|error| middleware_error(&error))?;
-    StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))
+        .map_err(|error| middleware_error(&error))
 }

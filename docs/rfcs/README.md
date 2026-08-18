@@ -19,7 +19,9 @@ an ADR.
 
 ## Status
 
-No numbered RFC is open. Workspace version is **1.0.0** (local tag
+RFC-0001 records the 1.2-oriented compaction-summary event-order
+change (existing `EffectRequested` / `EffectCompleted` kinds only).
+Workspace version is **1.0.0** (local tag
 `v1.0.0`). The last pushed GitHub tag is `v0.1.0`. The adopter-facing 1.0
 SemVer promise is
 [1.0-compatibility-policy.md](../implementation/1.0-compatibility-policy.md).

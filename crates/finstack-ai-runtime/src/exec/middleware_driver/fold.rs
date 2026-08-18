@@ -206,10 +206,9 @@ impl StageFold {
                 ))
             }
             Stage::BeforeModel => {
-                let compacted = self
-                    .compaction
-                    .as_ref()
-                    .map_or(0, |result| result.replacement_messages.len());
+                let compacted = self.compaction.as_ref().map_or(0, |result| {
+                    result.replacement_messages.len() + result.derived_summaries.len()
+                });
                 if added + compacted > ModelRequestDraft::MAX_MESSAGES {
                     Err(bounds_exceeded(
                         "aggregate BeforeModel additions exceed the model request message bound",

@@ -93,6 +93,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
             stage_driver.as_ref(),
             &sources,
             &profile,
+            &model,
             command,
         )
         .await
@@ -149,6 +150,7 @@ async fn submit_and_reply<C, R>(
     stage_driver: Option<&StageDriver>,
     sources: &SettlementSources<C, R>,
     profile: &LockedModelContextProfile,
+    model: &Arc<dyn crate::Model>,
     command: RunCommand,
 ) -> bool
 where
@@ -156,7 +158,16 @@ where
     R: RandomSource + crate::PortObject,
 {
     let RunCommand { env, input, reply } = command;
-    let result = submit_command(coordinator, stage_driver, sources, profile, env, input).await;
+    let result = submit_command(
+        coordinator,
+        stage_driver,
+        sources,
+        profile,
+        env,
+        input,
+        Some(model.as_ref()),
+    )
+    .await;
     let fault_code = result_fault_code(&result);
     reply.send(result);
     if let Some(code) = fault_code {
@@ -415,6 +426,7 @@ where
                     stage_driver,
                     sources,
                     profile,
+                    model,
                     *command,
                 )
                 .await

@@ -306,6 +306,7 @@ impl RunTaskOwner {
             sources,
             stage_driver,
             stage_profile,
+            Arc::clone(&model),
         ));
         tasks.spawn(run_model_jobs(
             model,
@@ -528,6 +529,7 @@ impl RunTaskOwner {
             catalog,
             stage_driver,
             stage_profile,
+            Arc::clone(&model),
         ));
         tasks.spawn(run_model_jobs(
             model,

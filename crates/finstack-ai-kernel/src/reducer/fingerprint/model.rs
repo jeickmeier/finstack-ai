@@ -82,6 +82,20 @@ pub fn external_digest(input: &ExternalEffectCompletedInput) -> Result<Digest, K
     digest(&fingerprint)
 }
 
+pub fn completed_compaction_digest(
+    pending: &PendingModelEffect,
+    completed: &EffectCompleted,
+) -> Result<Digest, KernelError> {
+    super::super::canonical_digest(
+        "compaction-model-settlement",
+        &(
+            pending.turn_id,
+            pending.model_request_id,
+            EffectCompletedProjection::from(completed),
+        ),
+    )
+}
+
 pub fn completed_record_digest(
     pending: &PendingModelEffect,
     completed: &EffectCompleted,

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::content::ContentBlock;
 use crate::effects::{EffectKind, EffectOutputKind};
-use crate::primitives::Digest;
+use crate::primitives::{Digest, ModelRequestId};
 use crate::records::RecordBody;
 use crate::records::lifecycle::EntryAppended;
 use crate::records::tools::{ActiveToolCallStatus, ToolCallIdentity};
@@ -12,7 +12,9 @@ use crate::state::{
 };
 
 use super::super::decision::KernelError;
-use super::super::fingerprint::{completed_record_digest, failed_record_digest};
+use super::super::fingerprint::{
+    completed_compaction_digest, completed_record_digest, failed_record_digest,
+};
 use super::interactions::{apply_interaction_effect_requested, apply_interaction_effect_terminal};
 use super::tools::{apply_tool_effect_completed, apply_tool_effect_failed};
 
@@ -95,14 +97,22 @@ pub(super) fn apply_effect_requested(
     }
     let turn = state
         .current_turn
-        .as_ref()
+        .as_mut()
         .ok_or(KernelError::InvariantViolation)?;
-    let model_request_id = turn
-        .model_request_id
-        .ok_or(KernelError::InvariantViolation)?;
+    let model_request_id = if let Some(model_request_id) = turn.model_request_id {
+        model_request_id
+    } else if requested.is_compaction_summary() {
+        let model_request_id = ModelRequestId::from_bytes(*requested.effect_id().as_bytes());
+        turn.model_request_id = Some(model_request_id);
+        turn.effect_id = Some(requested.effect_id());
+        model_request_id
+    } else {
+        return Err(KernelError::InvariantViolation);
+    };
+    let turn_id = turn.turn_id;
     state.pending_model_effect = Some(PendingModelEffect {
         cycle: state.cycle,
-        turn_id: turn.turn_id,
+        turn_id,
         model_request_id,
         requested: requested.clone(),
         deferred: None,
@@ -273,6 +283,13 @@ pub(super) fn apply_effect_completed(
     if completed.output_contract().kind == EffectOutputKind::ToolResult {
         return apply_tool_effect_completed(state, completed);
     }
+    if state
+        .pending_model_effect
+        .as_ref()
+        .is_some_and(|pending| pending.requested.is_compaction_summary())
+    {
+        return apply_compaction_completed(state, completed);
+    }
     let RecordBody::EntryAppended(entry) = next.ok_or(KernelError::InvalidRecordOrder)? else {
         return Err(KernelError::InvalidRecordOrder);
     };
@@ -365,6 +382,36 @@ pub(super) fn apply_effect_failed(
         error: failed.error().clone(),
     });
     state.phase = Some(RunPhase::BeforeFinalize);
+    Ok(())
+}
+
+fn apply_compaction_completed(
+    state: &mut KernelState,
+    completed: &crate::EffectCompleted,
+) -> Result<(), KernelError> {
+    let pending = state
+        .pending_model_effect
+        .as_ref()
+        .ok_or(KernelError::InvariantViolation)?;
+    let digest = completed_compaction_digest(pending, completed)?;
+    insert_model_identity(
+        state,
+        completed.effect_id(),
+        ModelSettlementKind::Completed,
+        digest,
+        completed.completion_id(),
+    )?;
+    let pending = state
+        .pending_model_effect
+        .take()
+        .ok_or(KernelError::InvariantViolation)?;
+    if let Some(turn) = state.current_turn.as_mut()
+        && turn.effect_id == Some(pending.requested.effect_id())
+    {
+        turn.model_request_id = None;
+        turn.effect_id = None;
+    }
+    state.phase = Some(RunPhase::BeforeModel);
     Ok(())
 }
 

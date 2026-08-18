@@ -1,10 +1,10 @@
 # ADR record directory
 
 This is the canonical location for standalone ADR records. Accepted ADR-001
-through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-041
+through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-042
 are indexed in the [ADR database](../adr-register.md). ADR-001 through
 ADR-037 were materialized here as versioned standalone records under
-logical PR-004; ADR-038 through ADR-041 are later implementation records.
+logical PR-004; ADR-038 through ADR-042 are later implementation records.
 ADR-040 supersedes ADR-023.
 
 Files use `ADR-NNN-short-topic.md`. The ADR database must link each file before
@@ -60,3 +60,4 @@ chain and receive the next approved ADR number.
 | ADR-039 | [ADR-039-jsonschema-crate-selection.md](ADR-039-jsonschema-crate-selection.md) |
 | ADR-040 | [ADR-040-openai-responses-native-ollama.md](ADR-040-openai-responses-native-ollama.md) |
 | ADR-041 | [ADR-041-mid-run-capability-activation-and-variants.md](ADR-041-mid-run-capability-activation-and-variants.md) |
+| ADR-042 | [ADR-042-model-assisted-compaction-runtime-phase.md](ADR-042-model-assisted-compaction-runtime-phase.md) |

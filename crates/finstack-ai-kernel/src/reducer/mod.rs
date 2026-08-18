@@ -19,8 +19,8 @@ pub use decision::{CommittedBatch, Decision, KernelError, PostCommitAction};
 pub use input::{
     AcceptRun, CancelRequested, CancellationReconciledInput, ExternalEffectCompletedInput,
     ExternalEffectCompletion, ExternalEffectOutcome, InteractionSettled, KernelInput, ModelSettled,
-    ModelSettlement, ReducerStageOutcome, RequestInteraction, StageSettled, TimerFiredInput,
-    ToolBatchSettled, ToolSettlement,
+    ModelSettlement, ReducerStageOutcome, RequestCompactionModel, RequestInteraction, StageSettled,
+    TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 
 use crate::events::RunEvent;

@@ -60,6 +60,7 @@ pub(super) fn validate_batch_shape(
         }
         Some(RunPhase::BeforeModel) => {
             request_model_shape(state, records)
+                || compaction_model_request_shape(records)
                 || one_failed_stage(records, state.cycle, Stage::BeforeModel)
                 || interaction_request_shape(records)
         }
@@ -610,6 +611,16 @@ pub(super) fn request_model_shape(kernel_state: &KernelState, records: &[RecordE
         && matches!(requested.input(), crate::EffectInput::Model { .. })
 }
 
+fn compaction_model_request_shape(records: &[RecordEnvelope]) -> bool {
+    let [record] = records else {
+        return false;
+    };
+    matches!(
+        record.body(),
+        RecordBody::EffectRequested(requested) if requested.is_compaction_summary()
+    )
+}
+
 pub(super) fn model_settlement_shape(
     state: &KernelState,
     records: &[RecordEnvelope],
@@ -628,6 +639,11 @@ pub(super) fn model_settlement_shape(
             }
             RecordBody::EffectFailed(failed) => {
                 terminal_settlement_ok && failed.validate_against(&pending.requested).is_ok()
+            }
+            RecordBody::EffectCompleted(completed) => {
+                pending.requested.is_compaction_summary()
+                    && terminal_settlement_ok
+                    && completed.validate_against(&pending.requested).is_ok()
             }
             _ => false,
         },

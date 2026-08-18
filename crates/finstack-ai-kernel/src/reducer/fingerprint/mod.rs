@@ -9,7 +9,8 @@ mod types;
 mod tests;
 
 pub(super) use model::{
-    completed_record_digest, direct_digest, external_digest, failed_record_digest,
+    completed_compaction_digest, completed_record_digest, direct_digest, external_digest,
+    failed_record_digest,
 };
 pub(super) use stage::{stage_digest, stage_record_digest};
 pub(super) use tool::{

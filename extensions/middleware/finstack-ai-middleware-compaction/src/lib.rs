@@ -34,7 +34,7 @@ pub enum CompactionStrategy {
     SlidingWindow,
     /// Truncate large tool-result bodies while keeping pairs.
     LargeToolOutput,
-    /// Request one authorized child model, then resume.
+    /// Request one runtime-owned compaction-summary model, then resume.
     Summarize,
 }
 

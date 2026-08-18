@@ -2,8 +2,8 @@ use finstack_ai_kernel::{Digest, EffectId, OperationLocator, Stage, StageCursor}
 
 use crate::RunCallContext;
 use crate::middleware::{
-    MiddlewareError, ResolvedMiddleware, ResolvedMiddlewareChain, StageInput, StageOutcome,
-    stage_name, validate_stage_outcome,
+    CompactionModelResume, MiddlewareError, ResolvedMiddleware, ResolvedMiddlewareChain,
+    StageInput, StageOutcome, stage_name, validate_stage_outcome,
 };
 
 /// Shared identity for one stage's chain invocation.
@@ -27,6 +27,8 @@ pub struct MiddlewareStageContext {
     /// stage boundary, and it is also the input [`derived_stage_effect_id`]
     /// needs to fabricate `run.effect_id`.
     pub cursor: StageCursor,
+    /// Optional child-model result for the same BeforeModel chain re-entry.
+    pub compaction_resume: Option<CompactionModelResume>,
 }
 
 impl MiddlewareStageContext {
@@ -38,7 +40,15 @@ impl MiddlewareStageContext {
             run,
             chain_digest,
             cursor,
+            compaction_resume: None,
         }
+    }
+
+    /// Attach a compaction-summary resume for chain re-entry.
+    #[must_use]
+    pub fn with_compaction_resume(mut self, resume: CompactionModelResume) -> Self {
+        self.compaction_resume = Some(resume);
+        self
     }
 
     /// The stage this invocation settles.
@@ -66,7 +76,7 @@ impl MiddlewareStageContext {
                     "middleware chain index exceeds u32",
                 )
             })?,
-            compaction_resume: None,
+            compaction_resume: self.compaction_resume.clone(),
         })
     }
 }

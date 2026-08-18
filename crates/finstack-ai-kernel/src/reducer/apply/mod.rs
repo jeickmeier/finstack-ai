@@ -142,6 +142,12 @@ fn event_correlations_for(state: &KernelState, body: &RecordBody) -> EventCorrel
                 .current_turn
                 .as_ref()
                 .and_then(|turn| turn.model_request_id)
+        })
+        .or_else(|| match body {
+            RecordBody::EffectRequested(requested) if requested.is_compaction_summary() => Some(
+                crate::ModelRequestId::from_bytes(*requested.effect_id().as_bytes()),
+            ),
+            _ => None,
         });
     let effect_id = match body {
         RecordBody::EffectRequested(value) => Some(value.effect_id()),

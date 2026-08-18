@@ -115,6 +115,7 @@ named_variants! {
     KernelInput::RecordExternalCommandRejected(_) => "RecordExternalCommandRejected",
     KernelInput::RequestInteraction(_) => "RequestInteraction",
     KernelInput::InteractionSettled(_) => "InteractionSettled",
+    KernelInput::RequestCompactionModel(_) => "RequestCompactionModel",
 }
 
 named_variants! {

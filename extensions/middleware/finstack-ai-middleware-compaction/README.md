@@ -1,9 +1,9 @@
 # finstack-ai-middleware-compaction
 
-> **Status: sliding-window and large-tool-output land.** Summarize
-> (`RequestCompactionModel`) stays unlandable. That remaining gap is a
-> framework limitation, not a bug in the strategies. Read
-> [Why summarize compaction cannot complete](../../../docs/site/middleware.md#why-summarize-compaction-cannot-complete)
+> **Status: sliding-window, large-tool-output, and summarize land.**
+> Summarize still never holds a `Model` handle; the runtime-owned
+> phase (ADR-042) fulfills `RequestCompactionModel`. Read
+> [Middleware](../../../docs/site/middleware.md)
 > before working on it.
 
 One `MiddlewareRole::ContextCompactor` leaf. Strategies are selected by
@@ -14,8 +14,8 @@ configuration, not by registering a second compactor:
 - `finstack.compaction.summarize`
 
 Deterministic strategies complete as `CompactContext`. Summarize returns
-`RequestCompactionModel` and never depends on a `Model` handle. Canonical
-history is not mutated.
+`RequestCompactionModel` and never depends on a `Model` handle or a
+middleware-owned child effect. Canonical history is not mutated.
 
 ## Landing
 
@@ -23,11 +23,10 @@ history is not mutated.
   user. That bit is authoritative-from-the-context-port plus the
   structural rule (system/developer and the trailing current user). A
   compactor still cannot set it.
-- **`RequestCompactionModel` has no landing path** in the aggregate-fold
-  design at all: it needs a committed child model effect under a
-  committed middleware parent, and no middleware invocation is ever a
-  committed effect. It fails with `middleware_stage_unlandable`. This
-  one needs a design change, not port wiring.
+- **`RequestCompactionModel` is fulfilled by the runtime phase**
+  (ADR-042), not by `fold.rs`. Middleware stays non-effect-bearing. If
+  the outcome reaches `StageFold::accumulate`, it is still
+  `middleware_stage_unlandable`.
 
 This crate is a T1 native adapter. It is not isolated.
 

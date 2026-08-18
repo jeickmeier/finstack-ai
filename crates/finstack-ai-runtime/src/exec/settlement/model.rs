@@ -29,6 +29,14 @@ pub(crate) async fn resume_pending_model_effect<C: Clock, R: RandomSource>(
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
 ) -> Result<ModelResumeAction, RunHandleError> {
+    if coordinator
+        .state()
+        .pending_model_effect
+        .as_ref()
+        .is_some_and(|pending| pending.requested.is_compaction_summary())
+    {
+        return Ok(ModelResumeAction::NoOutstanding);
+    }
     let first_pass = model_resume_action(coordinator.state());
     match first_pass {
         ModelResumeAction::NoOutstanding

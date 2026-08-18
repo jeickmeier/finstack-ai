@@ -109,12 +109,11 @@
 //!   structural rule (system/developer and the current user). The production
 //!   `ContextProvider` driver is the caller of `CommittedContextCall::try_new`
 //!   and `assemble_context`.
-//! - Its `summarize` strategy returns `RequestCompactionModel`, which needs a
-//!   committed child model effect under `EffectPurpose::CompactionSummary` and a
-//!   re-entry carrying `compaction_resume`. A stage settles exactly once, as one
-//!   `ReducerStageOutcome`, and there is no committed middleware parent to relate
-//!   a child effect to (section 1), so the aggregate design has no place for
-//!   either half. It stays [`MIDDLEWARE_STAGE_UNLANDABLE`].
+//! - Its `summarize` strategy returns `RequestCompactionModel`. The
+//!   runtime-owned compaction phase (ADR-042) intercepts that outcome
+//!   before [`StageFold::accumulate`], commits a child model effect, and
+//!   re-enters with `compaction_resume`. If the outcome still reaches
+//!   this fold, it stays [`MIDDLEWARE_STAGE_UNLANDABLE`].
 //!
 //! Two residual gaps sit behind a landed `CompactContext` and are documented at
 //! `stage_settlement::apply_model_draft`: a landed `CompactionResult` drops its

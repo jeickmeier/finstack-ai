@@ -208,8 +208,8 @@ pub use reducer::{
     AcceptRun, CancelRequested, CancellationReconciledInput, CommittedBatch, Decision,
     ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome,
     InteractionSettled, Kernel, KernelError, KernelInput, ModelSettled, ModelSettlement,
-    PostCommitAction, ReducerStageOutcome, RequestInteraction, StageSettled, TimerFiredInput,
-    ToolBatchSettled, ToolSettlement,
+    PostCommitAction, ReducerStageOutcome, RequestCompactionModel, RequestInteraction,
+    StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 pub use state::{
     BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,

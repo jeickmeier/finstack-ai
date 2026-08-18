@@ -14,8 +14,9 @@ page follows from it.
 
 **Sliding-window and large-tool-output `CompactContext` land** once the
 trailing current user is structurally protected. The `summarize`
-strategy still cannot complete: it returns `RequestCompactionModel`,
-which has no settlement slot. See [Shipping leaves](#shipping-leaves).
+strategy completes through a runtime-owned compaction phase (ADR-042):
+middleware still returns `RequestCompactionModel` and never calls a
+model. See [Shipping leaves](#shipping-leaves).
 
 ## What an author must know
 
@@ -58,7 +59,7 @@ land. Both checks can reject; neither ever coerces.
 | `Replace` | `prepare_context`, `before_model` only |
 | `Retry` | `before_finalize` only |
 | `CompactContext` | `before_model` when the last source entry is a protected user |
-| `RequestCompactionModel` | never |
+| `RequestCompactionModel` | runtime phase at `before_model` (ADR-042); unlandable if it reaches the fold |
 | `RequestInteraction` | never |
 | `Suspend` | never |
 | `Complete` | never |
@@ -76,7 +77,7 @@ settlement that can carry them.
 | Leaf | Status |
 | --- | --- |
 | [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
-| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize (`RequestCompactionModel`) stays unlandable. |
+| [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
 
 ### Why summarize compaction cannot complete
 
@@ -86,13 +87,13 @@ authoritative-from-the-context-port plus the structural rule (system /
 developer messages and the trailing current user). A compactor still
 cannot set the bit.
 
-**The `summarize` strategy returns `RequestCompactionModel`, which has
-no design slot at all.** It needs a committed child model effect
-attached to a committed middleware parent, plus a re-entry into the
-chain carrying the model's answer. A stage settles exactly once and
-there is no committed middleware parent to attach a child to, so the
-aggregate design has nowhere to put either half. This one is not
-unblocked by the context port; it needs a design change.
+**The `summarize` strategy returns `RequestCompactionModel`.** The
+runtime-owned phase (ADR-042) commits a child model effect under
+`EffectPurpose::CompactionSummary`, charges the same run budget, and
+re-enters the chain with `compaction_resume`. Middleware stays
+non-effect-bearing. If `RequestCompactionModel` reaches
+`StageFold::accumulate` (no model on the settlement path), it is still
+`middleware_stage_unlandable`.
 
 Two residual gaps sit behind a landed `CompactContext`. Both are
 documented at `apply_model_draft` in

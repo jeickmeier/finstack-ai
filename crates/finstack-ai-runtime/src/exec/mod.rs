@@ -1,6 +1,8 @@
 //! Commit-before-effect execution and run ownership.
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) mod compaction_driver;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) mod context_driver;
 pub(crate) mod coordinator;
 pub(crate) mod event_hub;

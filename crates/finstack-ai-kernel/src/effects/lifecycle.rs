@@ -139,6 +139,18 @@ impl EffectRequested {
         self.relation.as_ref()
     }
 
+    /// Whether this request is a runtime-owned compaction-summary child.
+    #[must_use]
+    pub fn is_compaction_summary(&self) -> bool {
+        self.kind == EffectKind::Model
+            && self.relation.as_ref().is_some_and(|relation| {
+                matches!(
+                    relation.purpose,
+                    super::kinds::EffectPurpose::CompactionSummary { .. }
+                )
+            })
+    }
+
     /// Resolved component invocation metadata.
     #[must_use]
     pub fn component(&self) -> Option<&ComponentInvocation> {

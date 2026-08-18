@@ -26,7 +26,7 @@ use cancel::{
 };
 use external::decide_external_command_rejected;
 use limit::decide_limit;
-use model::{decide_external, decide_model};
+use model::{decide_external, decide_model, decide_request_compaction_model};
 use output::{decide_capabilities_activated, decide_configure_output, decide_output_validated};
 use stage::{decide_accept, decide_stage};
 
@@ -93,6 +93,9 @@ pub(super) fn decide(
         }
         KernelInput::InteractionSettled(input) => {
             super::interaction::decide_settled(state, env, &input)
+        }
+        KernelInput::RequestCompactionModel(input) => {
+            decide_request_compaction_model(state, env, &input)
         }
     }
 }

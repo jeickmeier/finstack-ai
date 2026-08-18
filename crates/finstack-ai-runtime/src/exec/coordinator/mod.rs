@@ -195,6 +195,12 @@ impl CommitCoordinator {
         self.kernel.state()
     }
 
+    /// Journal store used to commit and recover this coordinator.
+    #[must_use]
+    pub(crate) fn journal_store(&self) -> &Arc<dyn JournalStore> {
+        &self.store
+    }
+
     /// Borrow the rebuilt session projection. Not part of `kernel-state`.
     #[must_use]
     pub const fn session(&self) -> &SessionProjection {
