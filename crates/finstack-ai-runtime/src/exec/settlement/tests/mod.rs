@@ -1,14 +1,16 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use finstack_ai_kernel::{
-    AllocatedIds, BudgetPropagation, CancellationPropagation, ComponentId, ContentBlock,
-    DeadlinePropagation, Digest, EffectCompleted, EffectOutputKind, ErrorCategory, ErrorDescriptor,
-    Id, IdTag, Kernel, KernelInput, KernelState, LaneTag, Message, MessageRole, Metadata,
-    ModelSettled, ModelSettlement, OutputConfiguration, OutputSpec, PrincipalPropagation,
-    PrincipalRef, ProviderIds, RawJson, ReducerStageOutcome, RetrySafety, RunAccepted, RunPhase,
-    RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag, SessionTag, Stage, StageCursor,
-    StageSettled, TerminalCandidate, TextBlock, Timestamp, ToolBatchContinuation, ToolCallBlock,
-    ToolCallId, ToolCallPlan, ToolFailurePolicy, TransitionEnv, Version,
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AllocatedIds, BudgetPropagation,
+    CancellationPropagation, ComponentId, ContentBlock, DeadlinePropagation, Digest,
+    EffectCompleted, EffectDeferred, EffectOutputKind, ErrorCategory, ErrorDescriptor,
+    ExternalHandleRef, Id, IdTag, Kernel, KernelInput, KernelState, LaneTag, Message, MessageRole,
+    Metadata, ModelSettled, ModelSettlement, OutputConfiguration, OutputSpec, PrincipalPropagation,
+    PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy, ReducerStageOutcome, RetrySafety,
+    RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
+    SessionTag, Stage, StageCursor, StageSettled, TerminalCandidate, TextBlock, Timestamp,
+    ToolBatchContinuation, ToolCallBlock, ToolCallId, ToolCallPlan, ToolFailurePolicy,
+    TransitionEnv, ValidatedToolCall, Version,
 };
 
 use super::stage::{
@@ -23,3 +25,4 @@ include!("allocation_table.rs");
 include!("fixtures.rs");
 include!("tool_batch.rs");
 include!("deferral.rs");
+include!("poll.rs");

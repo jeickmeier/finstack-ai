@@ -6,6 +6,11 @@ mod ids;
 mod interaction;
 mod model;
 mod nested_sample;
+#[allow(
+    dead_code,
+    reason = "consumed by the due-poll driver wired in the next task"
+)]
+mod poll;
 mod stage;
 mod tool;
 
@@ -39,6 +44,11 @@ pub(crate) use cancel::reconcile_cancelled_effect;
 pub(crate) use context::resume_pending_context_effects;
 pub(crate) use interaction::apply_interaction_resume;
 pub(crate) use model::{process_model_progress, process_model_result, resume_pending_model_effect};
+#[allow(
+    unused_imports,
+    reason = "consumed by the due-poll driver wired in the next task"
+)]
+pub(crate) use poll::{DuePoll, due_polls, expired};
 pub(crate) use stage::{prepare_tool_batch_if_ready, stage_allocation};
 pub(crate) use tool::{
     ToolResultDisposition, continue_after_interaction, parked_tool_continue, process_tool_progress,
