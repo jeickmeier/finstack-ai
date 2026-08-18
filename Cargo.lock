@@ -748,6 +748,7 @@ version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-provider-anthropic",
+ "finstack-ai-provider-gateway",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-runtime",

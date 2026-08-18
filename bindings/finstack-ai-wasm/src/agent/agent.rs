@@ -3,7 +3,8 @@ use std::sync::Arc;
 use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::ModelName;
 use finstack_ai::{
-    AnthropicAgentSpec, ChildRunPolicy, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
+    AnthropicAgentSpec, ChildRunPolicy, GatewayAgentSpec, LinkedAgentPorts, OllamaAgentSpec,
+    OpenAiAgentSpec,
 };
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;
@@ -167,6 +168,45 @@ impl Agent {
             FacadeAgent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
+                instruction: None,
+                capabilities: Vec::new(),
+                active_capabilities: Vec::new(),
+                ports: LinkedAgentPorts::default(),
+                child_runs: ChildRunPolicy::Deny,
+            })
+            .await
+            .map(|built| {
+                JsValue::from(Agent {
+                    inner: Arc::new(built.agent),
+                    model: built.model,
+                })
+            })
+            .map_err(|error| agent_error(&error, None))
+        })
+    }
+
+    /// Construct a config-driven gateway agent.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen]
+    pub fn gateway(
+        endpoint: String,
+        model: String,
+        wire_protocol: String,
+        credential_name: String,
+        hard_input_bytes: Option<u64>,
+        auth: Option<String>,
+        api_key: Option<String>,
+    ) -> js_sys::Promise {
+        executor::drive(async move {
+            FacadeAgent::gateway(GatewayAgentSpec {
+                endpoint,
+                model,
+                wire_protocol,
+                credential_name,
+                hard_input_bytes,
+                auth_kind: auth,
+                api_key,
                 instruction: None,
                 capabilities: Vec::new(),
                 active_capabilities: Vec::new(),
