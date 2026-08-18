@@ -24,8 +24,9 @@ use finstack_ai_runtime::{
     ModelDeferral, ModelError, ModelProgress, ModelReconcileResult, ModelResponse,
     ModelResumeAction, ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
     ModelTerminal, ModelToolCall, ModelWarmupContext, OpaqueProviderEvent, ProgressCoalescing,
-    ReasoningDelta, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner, ShutdownOutcome,
-    StoreError, TextDelta, ToolCallDelta, UsageDelta, model_resume_action,
+    ReasoningDelta, RunHandleError, RunStatus, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, ShutdownOutcome, StoreError, TextDelta, ToolCallDelta, UsageDelta,
+    model_resume_action,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModel, ScriptedModelAction, ScriptedModelPlan};

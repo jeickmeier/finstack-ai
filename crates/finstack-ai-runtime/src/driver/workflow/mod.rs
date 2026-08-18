@@ -22,8 +22,8 @@ use crate::{
     CommitCoordinator, EventHubConfig, ExternalClock, ExternalCompletionRouter, ExternalRouteError,
     ExternalRouteOutcome, IdGenerationError, InteractionRouter, JournalStore,
     LockedModelContextProfile, Model, ModelCapabilities, ModelTaskConfig, RandomSource,
-    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SecurityAuditGate, ToolSpec,
-    ToolStreamLimits, ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
+    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate,
+    ToolSpec, ToolStreamLimits, ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -728,6 +728,7 @@ impl WorkflowSession {
             stream_limits: crate::ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: crate::Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         };
         let owner = if let Some(catalog) = self.catalog.clone() {
             RunTaskOwner::spawn_with_model_and_tools(

@@ -19,8 +19,9 @@ use finstack_ai_runtime::{
     ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits,
     ModelSettings, ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, Observer,
     PendingModelEffect, PortFuture, ProgressCoalescing, ReconcileContext, RunEvent, RunHandle,
-    RunTaskConfig, RunTaskOwner, SessionError, SessionRuntime, StructuredOutputCapability,
-    ToolStreamLimits, ToolTaskConfig, UuidV7Generator, resolve_model_context_profile,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SessionError, SessionRuntime,
+    StructuredOutputCapability, ToolStreamLimits, ToolTaskConfig, UuidV7Generator,
+    resolve_model_context_profile,
 };
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -928,6 +929,7 @@ fn model_task_config() -> ModelTaskConfig {
         stream_limits: finstack_ai_runtime::ModelStreamLimits::default(),
         warmup_deadline: None,
         warmup_metadata: Metadata::empty(),
+        same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
 

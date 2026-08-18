@@ -23,11 +23,11 @@ use finstack_ai_runtime::{
     LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
     ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
     ModelToolCall, PortFuture, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
-    RunTaskOwner, SideEffectClass, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
-    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolError, ToolEventStream,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem, ToolStreamLimits,
-    ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset, ToolsetRegistration,
-    resolve_model_context_profile,
+    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, SnapshotReceipt, SnapshotRequest,
+    StoreError, StoreHealth, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolError,
+    ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolStreamItem,
+    ToolStreamLimits, ToolTaskConfig, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetRegistration, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -564,6 +564,7 @@ pub(crate) async fn setup_with_failure_policy(
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
             job_capacity: 8,

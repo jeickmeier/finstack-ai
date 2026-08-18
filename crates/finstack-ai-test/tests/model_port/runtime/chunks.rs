@@ -43,6 +43,7 @@ async fn run_runtime_chunks(count: usize, response_text: &str) -> RuntimeProject
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model_port,
         locked_profile(),

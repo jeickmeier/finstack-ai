@@ -17,9 +17,9 @@ use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator, EventHubConfig, ExternalClock,
     JournalStore, JsonSchemaToolValidatorCompiler, ManualDriveAction, Model, ModelDeferral,
     ModelResponse, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
-    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SideEffectClass, ToolCallDelta,
-    ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision, ToolResult, ToolSpec,
-    ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
+    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass,
+    ToolCallDelta, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision, ToolResult,
+    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
     WorkflowSession, WorkflowWait,
 };
 use finstack_ai_store_sqlite::{

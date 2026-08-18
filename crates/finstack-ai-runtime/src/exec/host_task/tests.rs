@@ -27,9 +27,9 @@ use crate::{
     ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress,
     ModelRequest, ModelRequestDraft, ModelResponse, ModelSettings, ModelStreamItem,
     ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PortFuture, RandomSource,
-    RunHandleError, RunTaskConfig, SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
-    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, Usage,
-    resolve_model_context_profile,
+    RunHandleError, RunTaskConfig, SameIdentityRetryPolicy, SnapshotReceipt, SnapshotRequest,
+    StoreError, StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
+    TokenEstimatorSource, Usage, resolve_model_context_profile,
 };
 
 /// The other half of the folded-allocation fix (`stage_settlement.rs`'s
@@ -411,6 +411,7 @@ fn model_config() -> ModelTaskConfig {
         stream_limits: crate::ModelStreamLimits::default(),
         warmup_deadline: None,
         warmup_metadata: Metadata::empty(),
+        same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
 

@@ -31,6 +31,7 @@ async fn repeated_model_runs_settle_and_shutdown_without_stream_or_task_leaks() 
                 stream_limits: ModelStreamLimits::default(),
                 warmup_deadline: None,
                 warmup_metadata: Metadata::empty(),
+                same_identity_retry: SameIdentityRetryPolicy::default(),
             },
             model_port,
             locked_profile(),

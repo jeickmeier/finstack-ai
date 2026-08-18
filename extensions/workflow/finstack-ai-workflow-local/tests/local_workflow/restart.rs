@@ -244,6 +244,7 @@ async fn interaction_survives_worker_restart() {
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
             job_capacity: 8,

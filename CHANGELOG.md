@@ -16,6 +16,12 @@ unpublished.
 
 ### Added
 
+- Optional same-`effect_id` model-driver retry (`SameIdentityRetryPolicy` on
+  `ModelTaskConfig`). Default is zero extra attempts. Retryable provider
+  errors may be retried; validation and limit errors are never retried.
+  Journals of first-attempt success and success after retries stay
+  identical. This is driver behavior; `check_model_conformance` is
+  unchanged.
 - Model-assisted compaction is a runtime-owned phase between
   `PrepareContext` and `BeforeModel` (ADR-042, RFC-0001). `summarize`
   commits a child model effect under `EffectPurpose::CompactionSummary`,

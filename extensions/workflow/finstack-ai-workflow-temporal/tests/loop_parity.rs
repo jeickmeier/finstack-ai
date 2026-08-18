@@ -17,8 +17,8 @@ use finstack_ai_runtime::{
     LoadRequest, LockedModelContextProfile, ManualDriveAction, Model, ModelContextProfile,
     ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
     ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RandomSource, RunHandle, RunTaskConfig,
-    RunTaskOwner, TextDelta, TokenEstimatorRef, TokenEstimatorSource, WorkflowSession,
-    resolve_model_context_profile,
+    RunTaskOwner, SameIdentityRetryPolicy, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    WorkflowSession, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
@@ -220,6 +220,7 @@ async fn spawn_model_owner(
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model,
         locked_profile(),

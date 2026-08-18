@@ -182,6 +182,7 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
             job_capacity: 2,

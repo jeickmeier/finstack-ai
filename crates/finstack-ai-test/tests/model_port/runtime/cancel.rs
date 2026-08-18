@@ -37,6 +37,7 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model_port,
         locked_profile(),

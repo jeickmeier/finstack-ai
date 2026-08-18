@@ -13,7 +13,7 @@ use finstack_ai_kernel::{KernelState, RecordBody};
 use finstack_ai_runtime::{
     Clock, CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, ManualDriveAction, Model,
     ModelDeferral, ModelError, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, RunHandleError,
-    RunTaskConfig, RunTaskOwner, TextDelta,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, TextDelta,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{FixedClock, ScriptedModelAction, ScriptedModelPlan};
@@ -50,6 +50,7 @@ pub(crate) fn owner_model_config() -> ModelTaskConfig {
         stream_limits: ModelStreamLimits::default(),
         warmup_deadline: None,
         warmup_metadata: Metadata::empty(),
+        same_identity_retry: SameIdentityRetryPolicy::default(),
     }
 }
 

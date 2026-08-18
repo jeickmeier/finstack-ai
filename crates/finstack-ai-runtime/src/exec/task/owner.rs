@@ -215,6 +215,7 @@ impl RunTaskOwner {
         let (event_handle, event_task) =
             event_hub(run_config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
+        let retry_policy = model_config.same_identity_retry;
         let assembler = model_config.validate()?;
         validate_model_binding(model.as_ref(), &profile)?;
         let sources = SettlementSources::try_new(clock, random)?;
@@ -316,6 +317,7 @@ impl RunTaskOwner {
             result_sender,
             Arc::clone(&runtime_clock),
             run_config.shutdown_deadline,
+            retry_policy,
         ));
         tasks.spawn(run_timer_jobs(
             runtime_clock,
@@ -400,6 +402,7 @@ impl RunTaskOwner {
         let (event_handle, event_task) =
             event_hub(run_config.event_hub).map_err(|_| RunHandleError::InvalidConfiguration)?;
         coordinator.install_event_publisher(Arc::new(event_handle.clone()));
+        let retry_policy = model_config.same_identity_retry;
         let model_assembler = model_config.validate()?;
         let tool_config = tool_config
             .validate()
@@ -539,6 +542,7 @@ impl RunTaskOwner {
             model_result_sender,
             Arc::clone(&runtime_clock),
             run_config.shutdown_deadline,
+            retry_policy,
         ));
         tasks.spawn(run_tool_jobs(
             tool_config,

@@ -21,11 +21,11 @@ use finstack_ai_runtime::{
     LoadRequest, LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft,
     ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
     ModelTaskConfig, ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunHandleError,
-    RunTaskConfig, RunTaskOwner, SecurityAuditError, SecurityAuditEvent, SecurityAuditGate,
-    SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink, SideEffectClass,
-    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolExecutionPolicy, ToolFailurePolicy,
-    ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig,
-    Toolset, ToolsetRegistration, resolve_model_context_profile,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditError, SecurityAuditEvent,
+    SecurityAuditGate, SecurityAuditHealth, SecurityAuditReceipt, SecurityAuditSink,
+    SideEffectClass, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, ToolExecutionPolicy,
+    ToolFailurePolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits,
+    ToolTaskConfig, Toolset, ToolsetRegistration, resolve_model_context_profile,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
@@ -411,6 +411,7 @@ pub(crate) async fn spawn_owner(
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         ToolTaskConfig {
             job_capacity: 8,

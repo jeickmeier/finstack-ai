@@ -210,8 +210,8 @@ pub use tool::{
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use run_types::{
-    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, ShutdownReport,
-    TimerDiagnostics, ToolTaskConfig,
+    ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, SameIdentityRetryPolicy,
+    ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
 };
 
 #[cfg(feature = "native-tokio")]

@@ -83,6 +83,24 @@ impl RunTaskConfig {
     }
 }
 
+/// Same-`effect_id` HTTP/provider retry for one committed model effect.
+///
+/// This is not whole-run `BeforeFinalize` semantic retry
+/// (`RecordBody::RetryScheduled` / `TimerFired`). Default is zero extra
+/// attempts. Journals of first-attempt success and success after N retries
+/// stay identical; observer events may differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SameIdentityRetryPolicy {
+    /// Extra attempts after the first. Zero disables retry.
+    pub max_retries: u32,
+}
+
+impl Default for SameIdentityRetryPolicy {
+    fn default() -> Self {
+        Self { max_retries: 0 }
+    }
+}
+
 /// Configuration for the private bounded model job/result path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelTaskConfig {
@@ -96,6 +114,8 @@ pub struct ModelTaskConfig {
     pub warmup_deadline: Option<finstack_ai_kernel::Timestamp>,
     /// Bounded non-secret warmup metadata.
     pub warmup_metadata: Metadata,
+    /// Same-identity provider retry. Default is no retry.
+    pub same_identity_retry: SameIdentityRetryPolicy,
 }
 
 impl ModelTaskConfig {

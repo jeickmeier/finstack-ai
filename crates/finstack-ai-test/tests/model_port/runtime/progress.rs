@@ -45,6 +45,7 @@ async fn runtime_publishes_validated_progress_before_terminal_settlement() {
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model_port,
         locked_profile(),

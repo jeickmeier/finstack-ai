@@ -35,6 +35,7 @@ async fn shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline() 
             stream_limits: ModelStreamLimits::default(),
             warmup_deadline: None,
             warmup_metadata: Metadata::empty(),
+            same_identity_retry: SameIdentityRetryPolicy::default(),
         },
         model_port,
         locked_profile(),
