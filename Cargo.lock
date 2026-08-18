@@ -751,6 +751,7 @@ dependencies = [
  "finstack-ai-provider-gateway",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-remote-child",
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-test",
@@ -1033,6 +1034,18 @@ dependencies = [
  "pyo3-build-config",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "finstack-ai-remote-child"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-protocol",
+ "finstack-ai-runtime",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

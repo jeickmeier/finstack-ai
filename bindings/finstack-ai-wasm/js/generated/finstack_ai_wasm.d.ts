@@ -475,6 +475,12 @@ export class Run {
      */
     result(): Promise<any>;
     /**
+     * Prepare and accept one child through the Rust router.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan`.
+     */
+    startChild(child: Agent, input: string, placement: string, route_endpoint?: string | null, route_service?: string | null, route_id?: string | null, route_token?: string | null): Promise<any>;
+    /**
      * Immutable operation locator snapshot.
      */
     readonly locator: Locator;
@@ -755,6 +761,7 @@ export interface InitOutput {
     readonly run_nextEventBatch: (a: number) => number;
     readonly run_result: (a: number) => number;
     readonly run_session: (a: number) => number;
+    readonly run_startChild: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
     readonly runresult_activeCapabilities: (a: number, b: number) => void;
     readonly runresult_locator: (a: number) => number;
     readonly runresult_retryAttempts: (a: number) => number;
@@ -773,9 +780,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1817: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1831: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_421: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1826: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1840: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_425: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

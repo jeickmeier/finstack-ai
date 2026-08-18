@@ -642,6 +642,10 @@ class Run:
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
+        route_endpoint: str | None = None,
+        route_service: str | None = None,
+        route_id: str | None = None,
+        route_token: str | None = None,
     ) -> Run:
         """Prepare and accept one child run through the Rust router.
 
@@ -652,15 +656,20 @@ class Run:
             agent: Child agent composition. The parent journal store is
                 authoritative; the child's store is not used.
             input: Child user text.
-            placement: ``isolated_child_session`` (default) or
-                ``compatible_lane_in_parent_session``. Remote placement is
-                rejected. Isolated keeps the parent journal operable after
-                accept.
+            placement: ``isolated_child_session`` (default),
+                ``compatible_lane_in_parent_session``, or
+                ``remote_child_session``. Remote placement requires
+                ``route_endpoint``, ``route_service``, and ``route_id``.
+                Isolated keeps the parent journal operable after accept.
             timeout_seconds: Child operational deadline. ``None`` uses the
                 child agent's default.
             max_cycles: Maximum child model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated child variant.
+            route_endpoint: Loopback ``host:port`` or ``unix:/path``.
+            route_service: Remote service component id.
+            route_id: Opaque non-secret route handle.
+            route_token: Optional Bearer token. Never read from env.
 
         Returns:
             The live child :class:`Run`.

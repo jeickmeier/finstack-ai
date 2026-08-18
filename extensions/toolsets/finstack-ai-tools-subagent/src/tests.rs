@@ -267,7 +267,7 @@ async fn start_await_and_cancel_track_compatible_and_isolated_only() {
 }
 
 #[tokio::test]
-async fn remote_cancel_is_not_claimed() {
+async fn remote_cancel_is_forwarded_to_the_invoker() {
     let child = StartedChild {
         handle: ChildRunHandle {
             locator: ChildRunLocator {
@@ -308,9 +308,6 @@ async fn remote_cancel_is_not_claimed() {
     )
     .await
     .expect("cancel");
-    assert!(outcome.is_error);
-    let payload: serde_json::Value =
-        serde_json::from_slice(outcome.output.as_bytes()).expect("json");
-    assert_eq!(payload["code"], SUBAGENT_REMOTE_CANCEL_UNSUPPORTED);
-    assert_eq!(invoker.cancels.load(Ordering::SeqCst), 0);
+    assert!(!outcome.is_error);
+    assert_eq!(invoker.cancels.load(Ordering::SeqCst), 1);
 }

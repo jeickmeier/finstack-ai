@@ -1286,3 +1286,20 @@ async fn restore_after_mid_run_activation_reconstructs_the_same_mask_or_fails_cl
         .expect_err("missing lock member fails closed");
     assert!(error.to_string().contains("capability_mask_not_in_lock"));
 }
+
+#[tokio::test]
+async fn remote_start_child_without_a_route_fails_closed() {
+    let model = Arc::new(ScriptedModel::from_plans(profile(), vec![completed("p")]));
+    let (agent, _store) = child_capable_agent(model).await;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    let error = Box::pin(parent.start_child(
+        &agent,
+        request("child work"),
+        ChildPlacement::RemoteChildSession,
+    ))
+    .await
+    .err()
+    .expect("missing route");
+    assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+    assert!(error.to_string().contains("explicit route"));
+}

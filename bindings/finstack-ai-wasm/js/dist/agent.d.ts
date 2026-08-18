@@ -369,6 +369,34 @@ export declare class Run {
      */
     cancel(reason?: string): Promise<void>;
     /**
+     * Prepare and accept one child through the Rust router.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param agent - Child agent composition.
+     * @param input - Child user text.
+     * @param options - Placement and optional remote route. Remote placement
+     * requires `routeEndpoint`, `routeService`, and `routeId`.
+     * @returns The live child run handle on native hosts.
+     * @throws {FinstackError} When prepare or accept fails.
+     * @example
+     * ```ts
+     * const child = await parent.startChild(childAgent, "hello", {
+     *   placement: "remote_child_session",
+     *   routeEndpoint: "127.0.0.1:9",
+     *   routeService: "finstack.remote.worker",
+     *   routeId: "route-1",
+     * });
+     * ```
+     */
+    startChild(agent: Agent, input: string, options?: {
+        placement?: string;
+        routeEndpoint?: string;
+        routeService?: string;
+        routeId?: string;
+        routeToken?: string;
+    }): Promise<Run>;
+    /**
      * Close event delivery without cancelling the run.
      *
      * @returns A promise that settles after delivery is closed.

@@ -4,6 +4,9 @@ mod activation;
 mod builder;
 #[cfg(feature = "native-tokio")]
 mod child;
+mod child_route;
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+mod child_wasm;
 mod drive;
 mod handle;
 mod lane;
@@ -21,6 +24,7 @@ pub use activation::{
     MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeCapabilityHost,
 };
 pub use builder::NativeAgentBuilder;
+pub use child_route::RemoteChildRouteSpec;
 pub use handle::Agent;
 pub use linked::{
     AnthropicAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec,

@@ -104,6 +104,32 @@ def test_start_child_fails_closed_when_policy_denies() -> None:
     asyncio.run(exercise())
 
 
+def test_remote_start_child_without_a_route_fails_closed() -> None:
+    async def model_callback(
+        context: finstack_ai.CallbackContext, request: dict[str, object]
+    ) -> dict[str, object]:
+        del context, request
+        return {"text": "parent done", "completion_id": "python-remote-1"}
+
+    async def exercise() -> None:
+        model = finstack_ai.PythonModel(
+            model_callback,
+            component="python.model.child-remote",
+            provider="scripted",
+            model="preview-1",
+        )
+        agent = await finstack_ai.Agent.from_python(
+            model, child_runs=finstack_ai.ChildRunPolicy.allow(1)
+        )
+        parent = agent.start("parent work")
+        with pytest.raises(finstack_ai.ConfigurationError, match="explicit route"):
+            await parent.start_child(
+                agent, "child work", placement="remote_child_session"
+            )
+
+    asyncio.run(exercise())
+
+
 async def _wait_effect_id(run: finstack_ai.Run) -> str:
     async for batch in run.events():
         for event in batch.events():
