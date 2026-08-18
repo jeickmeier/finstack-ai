@@ -39,6 +39,12 @@ pub const TOOL_PANICKED: &str = "tool_panicked";
 pub const TOOL_REGISTRATION_INVALID: &str = "tool_registration_invalid";
 /// Stable uncertainty code when a tool effect cannot be retried or classified.
 pub const TOOL_RECONCILIATION_UNSUPPORTED: &str = "tool_reconciliation_unsupported";
+/// Stable deferral-not-declared adapter code.
+pub const TOOL_DEFERRAL_NOT_DECLARED: &str = "tool_deferral_not_declared";
+/// Stable invalid-deferral adapter code.
+pub const TOOL_DEFERRAL_INVALID: &str = "tool_deferral_invalid";
+/// Stable deferral-expired adapter code.
+pub const TOOL_DEFERRAL_EXPIRED: &str = "tool_deferral_expired";
 
 /// Stable Toolset adapter error.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -171,12 +177,14 @@ impl ToolError {
 
 fn reserved_category(code: &str) -> Option<ErrorCategory> {
     match code {
-        TOOL_ARGUMENTS_INVALID | TOOL_OUTPUT_INVALID | TOOL_STREAM_INVALID => {
-            Some(ErrorCategory::Validation)
-        }
+        TOOL_ARGUMENTS_INVALID
+        | TOOL_OUTPUT_INVALID
+        | TOOL_STREAM_INVALID
+        | TOOL_DEFERRAL_NOT_DECLARED
+        | TOOL_DEFERRAL_INVALID => Some(ErrorCategory::Validation),
         TOOL_RESULT_LIMIT_EXCEEDED | TOOL_STREAM_LIMIT_EXCEEDED => Some(ErrorCategory::Limit),
         TOOL_CANCELLED => Some(ErrorCategory::Cancellation),
-        TOOL_DEADLINE_EXCEEDED => Some(ErrorCategory::Deadline),
+        TOOL_DEADLINE_EXCEEDED | TOOL_DEFERRAL_EXPIRED => Some(ErrorCategory::Deadline),
         TOOL_PANICKED => Some(ErrorCategory::Internal),
         TOOL_REGISTRATION_INVALID => Some(ErrorCategory::Registration),
         UNKNOWN_TOOL

@@ -159,6 +159,62 @@ fn spec(side_effect: SideEffectClass, retry_safety: RetrySafety) -> ToolSpec {
 }
 
 #[test]
+fn reserved_tool_deferral_codes_enforce_category_and_retryability() {
+    let error = ToolError::try_new(
+        TOOL_DEFERRAL_NOT_DECLARED,
+        ErrorCategory::Deadline,
+        false,
+        "wrong category",
+        Metadata::empty(),
+    )
+    .expect_err("reserved category");
+    assert_eq!(ToolError::from(error).code(), TOOL_REGISTRATION_INVALID);
+
+    let error = ToolError::try_new(
+        TOOL_DEFERRAL_INVALID,
+        ErrorCategory::Validation,
+        true,
+        "wrong retryability",
+        Metadata::empty(),
+    )
+    .expect_err("reserved retryability");
+    assert_eq!(ToolError::from(error).code(), TOOL_REGISTRATION_INVALID);
+
+    let not_declared = ToolError::try_new(
+        TOOL_DEFERRAL_NOT_DECLARED,
+        ErrorCategory::Validation,
+        false,
+        "bounded",
+        Metadata::empty(),
+    )
+    .expect("reserved classification");
+    assert_eq!(not_declared.category(), ErrorCategory::Validation);
+    assert!(!not_declared.retryable());
+
+    let invalid = ToolError::try_new(
+        TOOL_DEFERRAL_INVALID,
+        ErrorCategory::Validation,
+        false,
+        "bounded",
+        Metadata::empty(),
+    )
+    .expect("reserved classification");
+    assert_eq!(invalid.category(), ErrorCategory::Validation);
+    assert!(!invalid.retryable());
+
+    let expired = ToolError::try_new(
+        TOOL_DEFERRAL_EXPIRED,
+        ErrorCategory::Deadline,
+        false,
+        "bounded",
+        Metadata::empty(),
+    )
+    .expect("reserved classification");
+    assert_eq!(expired.category(), ErrorCategory::Deadline);
+    assert!(!expired.retryable());
+}
+
+#[test]
 fn tool_spec_defaults_to_never_deferred_and_validates() {
     assert_eq!(ToolDeferralSupport::default(), ToolDeferralSupport::Never);
     let spec = spec(SideEffectClass::ReadOnly, RetrySafety::SafeToRetry);
