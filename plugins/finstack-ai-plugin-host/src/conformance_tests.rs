@@ -91,7 +91,9 @@ fn reference_lock() -> PathBuf {
 fn default_host() -> Arc<PluginHost> {
     Arc::new(
         PluginHost::try_new(
-            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2).expect("cfg"),
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
+                .expect("cfg")
+                .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
     )

@@ -20,7 +20,7 @@ Source: Architecture Specification §27.
 
 ## Mechanical gates for this repository
 
-- [ ] `mise run ci-all` passes locally and in hosted CI (`.github/workflows/ci.yml`)
+- [ ] `mise run ci-all` passes locally; hosted CI runs `ci-rust`, `ci-python`, and `ci-wasm` (`.github/workflows/ci.yml`)
 - [ ] Dependency direction preserved: `kernel <- runtime <- SDK/bindings`; protocol stays outward
 - [ ] No forbidden kernel dependency (direct or transitive)
 - [ ] Runtime defaults remain empty; facade `native-tokio` / `wasm-host` pass-through only

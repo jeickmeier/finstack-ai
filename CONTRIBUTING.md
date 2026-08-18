@@ -21,16 +21,19 @@ Before opening a pull request, run at least:
 mise run ci-all
 ```
 
-The hosted `ci.yml` workflow invokes `mise run ci-all`. Do not reimplement
-checks in workflow YAML.
+The hosted `ci.yml` workflow runs `mise run ci-rust`, `ci-python`, and
+`ci-wasm` in parallel. `mise run ci-all` is the sequential local equivalent.
+Do not reimplement those task bodies in workflow YAML.
 
 Tasks:
 
 - `mise run install-all` — pinned tools plus Rust, Python, and WASM environments
-- `mise run ci-all` — same required checks as `.github/workflows/ci.yml`
+- `mise run ci-all` — sequential local equivalent of hosted CI
+- `mise run ci-rust` / `ci-python` / `ci-wasm` — per-language required checks
 - `mise run build-all` / `build-rust` / `build-python` / `build-wasm` — optional profile after `--` (default `dev`)
 - `mise run check-all` / `check-rust` / `check-python` / `check-wasm` — formatting, lint, and typecheck
 - `mise run test-all` / `test-rust` / `test-python` / `test-wasm` — language test suites
+- `mise run test-fast` — workspace nextest (not plugin-host), venv pytest, Chromium-only WASM
 - `mise run coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports
 - `mise run bench-all` / `bench-rust` / `bench-python` / `bench-wasm` — language benchmarks
 

@@ -4,6 +4,7 @@ python = "3.14"
 uv = "0.10.11"
 node = "22.18.0"
 "cargo:wasm-bindgen-cli" = "0.2.127"
+"cargo:cargo-nextest" = "0.9.143"
 "cargo:cargo-fuzz" = "0.13.2"
 "github:EmbarkStudios/cargo-deny" = "0.20.2"
 "github:taiki-e/cargo-llvm-cov" = { version = "0.8.7", version_prefix = "v" }
@@ -26,107 +27,150 @@ npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromiu
 """
 
 [tasks.ci-all]
-description = "Run the same required checks as .github/workflows/ci.yml"
+description = "Sequential local equivalent of the hosted ci-rust, ci-python, and ci-wasm jobs"
+run = """
+set -euo pipefail
+mise run ci-rust
+mise run ci-python
+mise run ci-wasm
+"""
+
+[tasks.ci-rust]
+description = "Format, lint, test, and deny the Rust workspace"
 run = """
 set -euo pipefail
 mise run check-rust
-mise run check-python
-uv run --no-project python tools/perf/check_size_budgets.py
 mise run test-rust
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
+"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --manifest-path fuzz/Cargo.toml check
+"""
+
+[tasks.ci-python]
+description = "Format, lint, typecheck, and test Python bindings"
+run = """
+set -euo pipefail
+mise run check-python
 mise run test-python
+"""
+
+[tasks.ci-wasm]
+description = "WASM target checks, package gates, and the three-browser harness"
+run = """
+set -euo pipefail
+. ./tools/ci/lib.sh
+uv run --no-project python tools/perf/check_size_budgets.py
 cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --features wasm-host
 cargo check -p finstack-ai --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
-cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked
-cargo check -p finstack-ai-wasm --target wasm32-unknown-unknown --locked --features scripted-trace
 cargo check -p finstack-ai-model-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-toolset-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --locked
 uv run --no-project python tools/wasm_package/check.py graph
 uv run --no-project python tools/wasm_package/check.py secrets
 echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13"
-"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
-"$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --manifest-path fuzz/Cargo.toml check
-FINSTACK_WASM_REPRO="${FINSTACK_WASM_REPRO:-1}" mise run build-wasm -- release
-mise run test-wasm
+mise run check-wasm
+if wasm_repro_needed; then
+  export FINSTACK_WASM_REPRO=1
+else
+  export FINSTACK_WASM_REPRO=0
+fi
+mise run build-wasm -- release
+FINSTACK_WASM_SKIP_BUILD=1 FINSTACK_WASM_SKIP_TYPECHECK=1 mise run test-wasm
 """
 
 [tasks.build-all]
 description = "Build Rust, Python, and WASM bindings"
 run = """
 set -euo pipefail
-mise run build-rust -- "$@"
-mise run build-python -- "$@"
-mise run build-wasm -- "$@"
+# mise appends `mise run ... -- <args>` to this script text, not $1.
+build_all() {
+  mise run build-rust -- "${1:-dev}"
+  mise run build-python -- "${1:-dev}"
+  mise run build-wasm -- "${1:-dev}"
+}
+build_all
 """
 
 [tasks.build-rust]
 description = "Build the Rust workspace. Optional profile after -- (default: dev)"
 run = """
 set -euo pipefail
-export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
-case "${1:-dev}" in
-  release|--release) profile=release ;;
-  dev|--dev) profile=dev ;;
-  test|--test) profile=test ;;
-  *) profile="${1#--}" ;;
-esac
-cargo build --workspace --locked --profile "${profile}"
+# mise appends `mise run ... -- <args>` to this script text, not $1.
+build_rust() {
+  export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+  case "${1:-dev}" in
+    release|--release) profile=release ;;
+    dev|--dev) profile=dev ;;
+    test|--test) profile=test ;;
+    *) profile="${1#--}" ;;
+  esac
+  cargo build --workspace --locked --profile "${profile}"
+}
+build_rust
 """
 
 [tasks.build-python]
 description = "Build the Python bindings. Optional profile after -- (default: dev)"
 run = """
 set -euo pipefail
-export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
-case "${1:-dev}" in
-  release|--release)
-    uv run --no-project --with maturin==1.14.1 \
-      maturin build --locked --release --manifest-path bindings/finstack-ai-python/Cargo.toml
-    ;;
-  dev|--dev)
-    uv run --no-project --with maturin==1.14.1 \
-      maturin build --locked --manifest-path bindings/finstack-ai-python/Cargo.toml
-    ;;
-  *)
-    uv run --no-project --with maturin==1.14.1 \
-      maturin build --locked --profile "${1#--}" --manifest-path bindings/finstack-ai-python/Cargo.toml
-    ;;
-esac
+# mise appends `mise run ... -- <args>` to this script text, not $1.
+build_python() {
+  export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+  case "${1:-dev}" in
+    release|--release)
+      uv run --no-project --with maturin==1.14.1 \
+        maturin build --locked --release --manifest-path bindings/finstack-ai-python/Cargo.toml
+      ;;
+    dev|--dev)
+      uv run --no-project --with maturin==1.14.1 \
+        maturin build --locked --manifest-path bindings/finstack-ai-python/Cargo.toml
+      ;;
+    *)
+      uv run --no-project --with maturin==1.14.1 \
+        maturin build --locked --profile "${1#--}" --manifest-path bindings/finstack-ai-python/Cargo.toml
+      ;;
+  esac
+}
+build_python
 """
 
 [tasks.build-wasm]
 description = "Build WASM bindings and the JS package. Optional profile after -- (default: dev)"
 run = """
 set -euo pipefail
-export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
-case "${1:-dev}" in
-  release|--release) profile=release; out_dir=release ;;
-  dev|--dev) profile=dev; out_dir=debug ;;
-  test|--test) profile=test; out_dir=debug ;;
-  *) profile="${1#--}"; out_dir="${profile}" ;;
-esac
-build_glue() {
-  cargo build -p finstack-ai-wasm --target wasm32-unknown-unknown --locked --profile "${profile}" --features scripted-trace
-  mkdir -p bindings/finstack-ai-wasm/js/generated
-  wasm-bindgen \\
-    --target web \\
-    --out-dir bindings/finstack-ai-wasm/js/generated \\
-    --out-name finstack_ai_wasm \\
-    "target/wasm32-unknown-unknown/${out_dir}/finstack_ai_wasm.wasm"
-}
-build_glue
-if [ "${FINSTACK_WASM_REPRO:-0}" = "1" ]; then
-  snapshot="$(mktemp)"
-  uv run --no-project python tools/wasm_package/check.py snapshot "${snapshot}"
+# mise appends `mise run ... -- <args>` to this script text, not $1.
+build_wasm() {
+  export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
+  case "${1:-dev}" in
+    release|--release) profile=release; out_dir=release ;;
+    release-fast|--release-fast) profile=release-fast; out_dir=release-fast ;;
+    dev|--dev) profile=dev; out_dir=debug ;;
+    test|--test) profile=test; out_dir=debug ;;
+    *) profile="${1#--}"; out_dir="${profile}" ;;
+  esac
+  build_glue() {
+    cargo build -p finstack-ai-wasm --target wasm32-unknown-unknown --locked --profile "${profile}" --features scripted-trace
+    mkdir -p bindings/finstack-ai-wasm/js/generated
+    wasm-bindgen \\
+      --target web \\
+      --out-dir bindings/finstack-ai-wasm/js/generated \\
+      --out-name finstack_ai_wasm \\
+      "target/wasm32-unknown-unknown/${out_dir}/finstack_ai_wasm.wasm"
+  }
   build_glue
-  uv run --no-project python tools/wasm_package/check.py compare "${snapshot}"
-  rm -f "${snapshot}"
-fi
-if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
-  npm --prefix bindings/finstack-ai-wasm/js ci
-fi
-npm --prefix bindings/finstack-ai-wasm/js run build
+  if [ "${FINSTACK_WASM_REPRO:-0}" = "1" ]; then
+    snapshot="$(mktemp)"
+    uv run --no-project python tools/wasm_package/check.py snapshot "${snapshot}"
+    build_glue
+    uv run --no-project python tools/wasm_package/check.py compare "${snapshot}"
+    rm -f "${snapshot}"
+  fi
+  if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
+    npm --prefix bindings/finstack-ai-wasm/js ci
+  fi
+  npm --prefix bindings/finstack-ai-wasm/js run build
+}
+build_wasm
 """
 
 [tasks.check-all]
@@ -153,8 +197,8 @@ run = """
 set -euo pipefail
 uv run --no-project --with ruff==0.12.11 ruff format --check .
 uv run --no-project --with ruff==0.12.11 ruff check .
-uv run --isolated --no-project --with mypy==2.3.0 \
-  mypy --strict bindings/finstack-ai-python/python
+uv run --no-project --with ty==0.0.72 \
+  ty check bindings/finstack-ai-python/python
 """
 
 [tasks.check-wasm]
@@ -181,11 +225,45 @@ mise run test-python
 mise run test-wasm
 """
 
+[tasks.test-fast]
+description = "Workspace nextest (not plugin-host), venv pytest, and Chromium-only WASM"
+run = """
+set -euo pipefail
+. ./tools/ci/lib.sh
+export PATH="$(mise where cargo:cargo-nextest)/bin:${PATH}"
+test_fast() {
+  cargo nextest run --workspace --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
+  cargo test --workspace --doc --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
+  cargo nextest run -p finstack-ai-wasm --locked
+  cargo test -p finstack-ai-wasm --doc --locked
+  export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+  uv run pytest -q
+  if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
+    FINSTACK_WASM_REPRO=0 mise run build-wasm -- release-fast
+  fi
+  uv run --no-project python tools/wasm_package/check.py generated
+  if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
+    npm --prefix bindings/finstack-ai-wasm/js ci
+  fi
+  ensure_playwright_browsers chromium
+  npm --prefix bindings/finstack-ai-wasm/js test -- --project=chromium
+}
+test_fast
+"""
+
 [tasks.test-rust]
 description = "Run Rust workspace tests"
 run = """
 set -euo pipefail
-cargo test --workspace --locked
+export PATH="$(mise where cargo:cargo-nextest)/bin:${PATH}"
+test_rust() {
+  cargo nextest run --workspace --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
+  cargo test --workspace --doc --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
+  cargo test -p finstack-ai-plugin-host --locked -- --test-threads=1
+  cargo nextest run -p finstack-ai-wasm --locked
+  cargo test -p finstack-ai-wasm --doc --locked
+}
+test_rust
 """
 
 [tasks.test-python]
@@ -193,26 +271,30 @@ description = "Run Python binding tests"
 run = """
 set -euo pipefail
 export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
-uv run --no-cache --isolated --no-project \
-  --with-editable bindings/finstack-ai-python \
-  --with pytest==9.1.1 \
-  --with pydantic==2.12.5 \
-  pytest -q
+uv run pytest -q
 """
 
 [tasks.test-wasm]
 description = "Type-check and run the headless Chromium, Firefox, and WebKit WASM harness"
 run = """
 set -euo pipefail
-mise run build-wasm -- release
-uv run --no-project python tools/wasm_package/check.py generated
-if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
-  npm --prefix bindings/finstack-ai-wasm/js ci
-fi
-npm --prefix bindings/finstack-ai-wasm/js run typecheck
-npx --prefix bindings/finstack-ai-wasm/js playwright install --with-deps chromium firefox webkit
-npm --prefix bindings/finstack-ai-wasm/js test
-uv run --no-project python tools/wasm_package/check.py size
+. ./tools/ci/lib.sh
+test_wasm() {
+  if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
+    mise run build-wasm -- release
+  fi
+  uv run --no-project python tools/wasm_package/check.py generated
+  if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
+    npm --prefix bindings/finstack-ai-wasm/js ci
+  fi
+  if [ "${FINSTACK_WASM_SKIP_TYPECHECK:-0}" != "1" ]; then
+    npm --prefix bindings/finstack-ai-wasm/js run typecheck
+  fi
+  ensure_playwright_browsers chromium firefox webkit
+  npm --prefix bindings/finstack-ai-wasm/js test
+  uv run --no-project python tools/wasm_package/check.py size
+}
+test_wasm
 """
 
 [tasks.coverage-all]
@@ -242,11 +324,7 @@ run = """
 set -euo pipefail
 export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
 mkdir -p target/coverage/python
-uv run --no-cache --isolated --no-project \
-  --with-editable bindings/finstack-ai-python \
-  --with pytest==9.1.1 \
-  --with pytest-cov==7.1.0 \
-  --with pydantic==2.12.5 \
+uv run --with pytest-cov==7.1.0 \
   pytest -q \
     --cov \
     --cov-report=term \

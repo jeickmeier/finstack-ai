@@ -33,8 +33,8 @@ test("journal known-answers match the Rust corpus through the wasm engine", asyn
 
   const payloads = loadValid("record-payload");
   const envelopes = loadValid("envelope");
-  expect(payloads).toHaveLength(39);
-  expect(envelopes).toHaveLength(39);
+  expect(payloads).toHaveLength(40);
+  expect(envelopes).toHaveLength(40);
 
   const observed = await page.evaluate(
     async ({ payloadFixtures, envelopeFixtures }) => {

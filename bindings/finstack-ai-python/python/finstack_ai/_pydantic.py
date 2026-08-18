@@ -62,7 +62,7 @@ class PydanticTool:
         if not callable(function):
             raise TypeError("@tool target must be callable")
         self._function = function
-        self.name = name or function.__name__
+        self.name = name or getattr(function, "__name__")
         self.title = title or self.name.replace("_", " ").title()
         self.description = (
             description or inspect.getdoc(function) or f"Python tool {self.name}."
@@ -131,7 +131,7 @@ class PydanticTool:
             fields[parameter.name] = hints.get(parameter.name, parameter.annotation)
 
         extensions = importlib.import_module("typing_extensions")
-        input_type = extensions.TypedDict(f"{self.name.title()}Arguments", fields)
+        input_type = extensions.TypedDict(f"{self.name.title()}Arguments", fields)  # ty: ignore[invalid-argument-type, mismatched-type-name]
         self._input_adapter = _type_adapter(input_type)
         self._input_schema = _normalized_schema(
             self._input_adapter,

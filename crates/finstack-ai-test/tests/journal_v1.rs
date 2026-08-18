@@ -40,24 +40,41 @@ fn journal_v1_corpus_is_byte_identical_and_covers_every_family() {
     assert_eq!(unique, kinds, "known-answers must be unique by kind_name");
 }
 
+fn cargo_tree(package: &str, extra: &[&str]) -> String {
+    let output = std::process::Command::new("cargo")
+        .args([
+            "tree", "-p", package, "--prefix", "none", "-e", "normal", "--locked",
+        ])
+        .args(extra)
+        .output()
+        .expect("cargo tree");
+    assert!(
+        output.status.success(),
+        "cargo tree {package} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf8")
+}
+
+fn assert_no_protocol(label: &str, tree: &str) {
+    assert!(
+        !tree
+            .lines()
+            .any(|line| line.starts_with("finstack-ai-protocol ")),
+        "{label} must stay protocol-free:\n{tree}"
+    );
+}
+
 #[test]
 fn runtime_and_sdk_stay_protocol_free() {
-    for package in ["finstack-ai-runtime", "finstack-ai"] {
-        let output = std::process::Command::new("cargo")
-            .args([
-                "tree", "-p", package, "--prefix", "none", "-e", "normal", "--locked",
-            ])
-            .output()
-            .expect("cargo tree");
-        assert!(output.status.success(), "cargo tree {package} failed");
-        let tree = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            !tree
-                .lines()
-                .any(|line| line.starts_with("finstack-ai-protocol ")),
-            "{package} must stay protocol-free:\n{tree}"
-        );
-    }
+    assert_no_protocol(
+        "finstack-ai-runtime",
+        &cargo_tree("finstack-ai-runtime", &[]),
+    );
+    assert_no_protocol(
+        "finstack-ai --no-default-features",
+        &cargo_tree("finstack-ai", &["--no-default-features"]),
+    );
 }
 
 #[test]

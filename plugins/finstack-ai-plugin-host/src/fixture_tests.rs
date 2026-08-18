@@ -22,6 +22,7 @@ use futures_util::StreamExt;
 
 use crate::adapters::{WasmPluginExtension, WasmToolsetAdapter};
 use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
+use crate::limits::EffectiveLimits;
 
 const MODEL_VERSION: Version = Version {
     major: 1,
@@ -74,8 +75,12 @@ fn component(value: &str) -> ComponentId {
 
 fn host(policy: InstancePolicy, max: u32) -> Arc<PluginHost> {
     Arc::new(
-        PluginHost::try_new(PluginHostConfig::try_new(None, policy, max).expect("cfg"))
-            .expect("host"),
+        PluginHost::try_new(
+            PluginHostConfig::try_new(None, policy, max)
+                .expect("cfg")
+                .with_default_limits(EffectiveLimits::for_tests()),
+        )
+        .expect("host"),
     )
 }
 

@@ -28,6 +28,7 @@ use crate::adapters::{WasmContextAdapter, WasmToolsetAdapter};
 use crate::cache::component_digest;
 use crate::grants::FilesystemPreopen;
 use crate::host::{InstancePolicy, PluginHost, PluginHostConfig, PluginWorld};
+use crate::limits::EffectiveLimits;
 use crate::lockfile::LockedPlugin;
 
 const EXPERIMENTAL: Version = Version {
@@ -69,7 +70,9 @@ fn component(value: &str) -> ComponentId {
 fn default_host() -> Arc<PluginHost> {
     Arc::new(
         PluginHost::try_new(
-            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2).expect("cfg"),
+            PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
+                .expect("cfg")
+                .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
     )
@@ -89,7 +92,7 @@ fn sandbox_manifest_bytes() -> Vec<u8> {
         "digest": digest,
         "resource_limits": {
             "max_output_bytes": 65_536,
-            "call_timeout_ms": 5_000,
+            "call_timeout_ms": 60_000,
             "max_tables": 16,
             "max_instances": 16
         }
@@ -108,7 +111,8 @@ fn sandbox_host(preopens: Vec<FilesystemPreopen>) -> Arc<PluginHost> {
                 .expect("cfg")
                 .with_application_grants(grants)
                 .expect("grants")
-                .with_filesystem_preopens(preopens),
+                .with_filesystem_preopens(preopens)
+                .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
     )
@@ -124,7 +128,8 @@ fn filesystem_offered_host() -> Arc<PluginHost> {
             PluginHostConfig::try_new(None, InstancePolicy::Exclusive, 2)
                 .expect("cfg")
                 .with_application_grants(grants)
-                .expect("grants"),
+                .expect("grants")
+                .with_default_limits(EffectiveLimits::for_tests()),
         )
         .expect("host"),
     )
@@ -675,7 +680,7 @@ async fn template_project_builds_and_runs() {
             "digest": digest,
             "resource_limits": {
                 "max_output_bytes": 65_536,
-                "call_timeout_ms": 5_000,
+                "call_timeout_ms": 60_000,
                 "max_tables": 8,
                 "max_instances": 8
             }

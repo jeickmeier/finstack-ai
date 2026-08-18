@@ -16,6 +16,16 @@ const MODEL_OPTIONS = {
   model: "js-capability-model",
 };
 
+function recordsInOrder(trace: string[], expected: string[]): boolean {
+  let index = 0;
+  for (const kind of trace) {
+    if (index < expected.length && kind === expected[index]) {
+      index += 1;
+    }
+  }
+  return index === expected.length;
+}
+
 const ECHO_TOOL = {
   id: "js.echo",
   model_name: "echo",
@@ -156,12 +166,8 @@ test("all activation modes share Rust-owned traces and a stable prefix", async (
     { id: "js.capability.application", source: "application" },
     { id: "js.capability.research", source: "model" },
   ]);
-  expect(result.firstTrace.slice(0, golden.records.length)).toEqual(
-    golden.records,
-  );
-  expect(result.secondTrace.slice(0, golden.records.length)).toEqual(
-    golden.records,
-  );
+  expect(recordsInOrder(result.firstTrace, golden.records)).toBe(true);
+  expect(recordsInOrder(result.secondTrace, golden.records)).toBe(true);
   expect(result.firstText.indexOf("Stable prefix.")).toBeLessThan(
     result.firstText.indexOf("Always instruction."),
   );

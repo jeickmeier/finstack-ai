@@ -43,6 +43,12 @@ members = [
     "plugins/finstack-ai-guest-sdk",
 ]
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -51,6 +57,14 @@ panic = "unwind"
 opt-level = 3
 debug = false
 incremental = false
+
+# Local WASM/test builds: optimized without release LTO.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
 
 [workspace.package]
 version = "1.0.0"

@@ -29,8 +29,8 @@ defaults:
     shell: bash
 
 jobs:
-  ci:
-    name: ci
+  ci-rust:
+    name: ci-rust
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -51,10 +51,87 @@ jobs:
       - name: Export Python interpreter for PyO3
         run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
 
-      - name: CI
+      - name: Rust CI
+        run: mise run ci-rust
+
+  ci-python:
+    name: ci-python
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Export Python interpreter for PyO3
+        run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
+
+      - name: Python CI
+        run: mise run ci-python
+
+  ci-wasm:
+    name: ci-wasm
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fetch pull-request base
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+
+      - name: Install mise tools
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          version: 2026.8.3
+          install: true
+          cache: true
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.55.1-${{ runner.os }}
+
+      - name: WASM CI
         env:
-          FINSTACK_WASM_REPRO: "1"
-        run: mise run ci-all
-        # Consecutive Linux rebuilds must be byte-identical. Dirty-tree vs the
-        # committed Darwin glue is a same-host `check.py dirty` obligation;
-        # rustc/wasm-bindgen output is not cross-OS identical.
+          FINSTACK_PLAYWRIGHT_WITH_DEPS: ${{ steps.playwright-cache.outputs.cache-hit != 'true' && '1' || '0' }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: mise run ci-wasm
+        # Consecutive Linux rebuilds must be byte-identical when glue paths
+        # change (`tools/ci/lib.sh`). Dirty-tree vs the committed Darwin glue
+        # is a same-host `check.py dirty` obligation; rustc/wasm-bindgen
+        # output is not cross-OS identical.
+
+  ci:
+    name: ci
+    if: always()
+    needs: [ci-rust, ci-python, ci-wasm]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require language jobs
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.ci-rust.result }}" != "success" ] \
+            || [ "${{ needs.ci-python.result }}" != "success" ] \
+            || [ "${{ needs.ci-wasm.result }}" != "success" ]; then
+            echo "ci-rust=${{ needs.ci-rust.result }} ci-python=${{ needs.ci-python.result }} ci-wasm=${{ needs.ci-wasm.result }}"
+            exit 1
+          fi

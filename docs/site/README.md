@@ -55,6 +55,7 @@ the public index and does not replace either layer.
 
 ```text
 mise run check-all
+mise run test-fast
 mise run test-all
 uv run --no-project python tools/docs/links.py
 uv run --no-project python tools/docs/quickstarts.py

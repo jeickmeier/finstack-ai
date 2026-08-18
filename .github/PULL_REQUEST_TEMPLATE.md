@@ -49,7 +49,7 @@
 ## Verification
 
 ```text
-# Prefer: mise run ci-all
+# Prefer: mise run test-fast while iterating; mise run ci-all before handoff
 # Commands run and results
 ```
 

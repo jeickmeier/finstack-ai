@@ -1,0 +1,5 @@
+# Workspace and finstack-ai-wasm suites. Plugin-host stays on
+# `cargo test -- --test-threads=1` (Wasmtime compile times out under load).
+
+[profile.default]
+retries = 0

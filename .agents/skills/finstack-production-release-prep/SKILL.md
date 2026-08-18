@@ -138,8 +138,8 @@ Quick automated check:
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps 2>&1 | head -50
 
 # Python — type-check bindings
-uv run --isolated --no-project --with mypy==2.3.0 \
-  mypy --strict bindings/finstack-ai-python/python
+uv run --no-project --with ty==0.0.72 \
+  ty check bindings/finstack-ai-python/python
 ```
 
 ### 3b. README and high-level docs

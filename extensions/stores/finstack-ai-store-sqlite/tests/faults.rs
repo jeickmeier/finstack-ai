@@ -337,32 +337,54 @@ fn ambiguous_ack_wrapper_retries_the_original_sqlite_receipt() {
     assert_eq!(original.first_sequence, 1);
 }
 
+fn cargo_tree(package: &str, extra: &[&str]) -> String {
+    let output = Command::new("cargo")
+        .args([
+            "tree", "-p", package, "--prefix", "none", "-e", "normal", "--locked",
+        ])
+        .args(extra)
+        .output()
+        .expect("cargo tree");
+    assert!(
+        output.status.success(),
+        "cargo tree {package} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("utf8")
+}
+
+fn assert_no_protocol(label: &str, tree: &str) {
+    assert!(
+        !tree
+            .lines()
+            .any(|line| line.starts_with("finstack-ai-protocol ")),
+        "{label} must stay protocol-free:\n{tree}"
+    );
+}
+
+fn assert_no_sqlite(label: &str, tree: &str) {
+    assert!(
+        !tree
+            .lines()
+            .any(|line| line.starts_with("finstack-ai-store-sqlite ")),
+        "{label} must not depend on the sqlite leaf:\n{tree}"
+    );
+    assert!(
+        !tree.lines().any(|line| line.starts_with("rusqlite ")),
+        "{label} must not depend on rusqlite:\n{tree}"
+    );
+}
+
 #[test]
 fn runtime_and_sdk_stay_free_of_sqlite_and_protocol() {
-    for package in ["finstack-ai-runtime", "finstack-ai"] {
-        let output = Command::new("cargo")
-            .args([
-                "tree", "-p", package, "--prefix", "none", "-e", "normal", "--locked",
-            ])
-            .output()
-            .expect("cargo tree");
-        assert!(output.status.success(), "cargo tree {package} failed");
-        let tree = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            !tree
-                .lines()
-                .any(|line| line.starts_with("finstack-ai-protocol ")),
-            "{package} must stay protocol-free:\n{tree}"
-        );
-        assert!(
-            !tree
-                .lines()
-                .any(|line| line.starts_with("finstack-ai-store-sqlite ")),
-            "{package} must not depend on the sqlite leaf:\n{tree}"
-        );
-        assert!(
-            !tree.lines().any(|line| line.starts_with("rusqlite ")),
-            "{package} must not depend on rusqlite:\n{tree}"
-        );
-    }
+    let runtime = cargo_tree("finstack-ai-runtime", &[]);
+    assert_no_protocol("finstack-ai-runtime", &runtime);
+    assert_no_sqlite("finstack-ai-runtime", &runtime);
+
+    let sdk_core = cargo_tree("finstack-ai", &["--no-default-features"]);
+    assert_no_protocol("finstack-ai --no-default-features", &sdk_core);
+    assert_no_sqlite("finstack-ai --no-default-features", &sdk_core);
+
+    // Default batteries may pull protocol through remote-child and store-memory.
+    assert_no_sqlite("finstack-ai", &cargo_tree("finstack-ai", &[]));
 }

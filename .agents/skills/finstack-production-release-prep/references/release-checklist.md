@@ -5,8 +5,8 @@ Use this as the repo-specific release checklist.
 ## Core Gates
 
 - Format and lint: `mise run check-all`
-- Tests: `mise run test-all`
-- CI-equivalent: `mise run ci-all`
+- Tests: `mise run test-all` (or `mise run test-fast` while iterating)
+- CI-equivalent: `mise run ci-all` (hosted CI runs `ci-rust` / `ci-python` / `ci-wasm` in parallel)
 - Security/audit: `cargo-deny check`
 
 ## Bindings

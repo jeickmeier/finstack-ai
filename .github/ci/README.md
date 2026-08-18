@@ -2,9 +2,11 @@
 
 Owner: `me@jeickmeier.com`
 
-Hosted CI calls `mise run ci-all`. Do not reimplement that policy in YAML.
-Workflows that are not the required CI gate may invoke a remaining language
-task or a documented Python tool when no mise task exists.
+Hosted CI runs `mise run ci-rust`, `ci-python`, and `ci-wasm` in parallel.
+`mise run ci-all` is the sequential local equivalent. Do not reimplement
+those task bodies in YAML. Workflows that are not the required CI gate may
+invoke a remaining language task or a documented Python tool when no mise
+task exists.
 
 ## Tasks
 
@@ -13,10 +15,12 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | Task | Purpose |
 | --- | --- |
 | `install-all` | Pinned tools plus Rust, Python, and WASM environments |
-| `ci-all` | Same required checks as [`.github/workflows/ci.yml`](../workflows/ci.yml) |
-| `build-all` / `build-rust` / `build-python` / `build-wasm` | Build each language. Optional profile after `--` (default `dev`) |
+| `ci-all` | Sequential local equivalent of the hosted `ci-rust` / `ci-python` / `ci-wasm` jobs |
+| `ci-rust` / `ci-python` / `ci-wasm` | Per-language required checks; hosted CI runs these in parallel |
+| `build-all` / `build-rust` / `build-python` / `build-wasm` | Build each language. Optional profile after `--` (default `dev`; WASM also accepts `release-fast`) |
 | `check-all` / `check-rust` / `check-python` / `check-wasm` | Formatting, lint, and typecheck |
 | `test-all` / `test-rust` / `test-python` / `test-wasm` | Language test suites |
+| `test-fast` | Workspace nextest (not plugin-host), venv pytest, and Chromium-only WASM |
 | `coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` | Diagnostic coverage reports under `target/coverage/` (not in `ci-all`) |
 | `bench-all` / `bench-rust` / `bench-python` / `bench-wasm` | Language benchmarks |
 
@@ -24,7 +28,7 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `ci-all`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Parallel Ubuntu jobs for `ci-rust`, `ci-python`, and `ci-wasm`, plus a `ci` aggregator. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
 | [`nightly.yml`](../workflows/nightly.yml) | daily, manual | In-tree starter RC against staged artifacts. Does not publish. |
 | [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` artifacts. Does not publish. |
 
@@ -43,10 +47,12 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 - GitHub Actions are pinned by full commit SHA with a version comment.
 - Contributor/CI tools are pinned in root [`mise.toml`](../../mise.toml).
 - Update pins by changing `mise.toml` and the workflow SHA comments together.
-- The `ci` job uses the pinned `Swatinem/rust-cache` action to reuse dependency
-  build artifacts across runs, and sets `CARGO_INCREMENTAL=0` and
-  `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut link time. It exports
-  `PYO3_PYTHON` so the PyO3 crate builds against the pinned interpreter.
+- Language jobs use the pinned `Swatinem/rust-cache` action to reuse dependency
+  build artifacts across runs, and set `CARGO_INCREMENTAL=0` and
+  `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut link time. Rust and Python
+  jobs export `PYO3_PYTHON` so the PyO3 crate builds against the pinned
+  interpreter. The WASM job caches Playwright browsers and runs the glue
+  recreate compare only when glue-related paths change.
 
 ## Retired automation
 

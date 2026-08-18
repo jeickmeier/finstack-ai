@@ -41,6 +41,24 @@ impl Default for EffectiveLimits {
     }
 }
 
+#[cfg(test)]
+impl EffectiveLimits {
+    /// Compile-tolerant host default for crate tests.
+    ///
+    /// First instantiate under parallel `cargo test --workspace` load can
+    /// exceed [`DEFAULT_CALL_TIMEOUT_MS`] and get reported as timeout.
+    #[must_use]
+    pub const fn for_tests() -> Self {
+        Self {
+            fuel: DEFAULT_FUEL,
+            max_memory_bytes: DEFAULT_MEMORY_BYTES,
+            max_tables: DEFAULT_TABLES,
+            max_instances: DEFAULT_INSTANCES,
+            call_timeout_ms: 60_000,
+        }
+    }
+}
+
 /// Merge manifest optional fields onto host defaults.
 #[must_use]
 pub fn effective_limits(manifest: &PluginManifest, defaults: EffectiveLimits) -> EffectiveLimits {

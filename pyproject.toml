@@ -19,7 +19,7 @@ dev = [
     "ipykernel",
     "jupyter",
     "nbclient",
-    "pytest",
+    "pytest==9.1.1",
     "ruff",
     "ty"
 ]

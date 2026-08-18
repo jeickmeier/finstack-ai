@@ -529,7 +529,7 @@ dev = [
     { name = "ipykernel" },
     { name = "jupyter" },
     { name = "nbclient" },
-    { name = "pytest" },
+    { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff" },
     { name = "ty" },
 ]
