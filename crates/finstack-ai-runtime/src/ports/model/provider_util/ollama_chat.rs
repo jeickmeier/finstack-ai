@@ -319,9 +319,7 @@ fn response_content_digest(
     Ok(raw.digest().to_hex())
 }
 
-fn encode_continuation(
-    entries: &[OllamaReplayEntry],
-) -> Result<Option<RawJson>, StreamNormError> {
+fn encode_continuation(entries: &[OllamaReplayEntry]) -> Result<Option<RawJson>, StreamNormError> {
     if entries.iter().all(|entry| entry.thinking.is_empty()) {
         return Ok(None);
     }

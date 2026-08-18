@@ -423,7 +423,10 @@ mod tests {
     use finstack_ai_runtime::{ContentBlock, LimitKey};
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "covers the recorded Anthropic event sequence")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "covers the recorded Anthropic event sequence"
+    )]
     fn assembles_text_tools_usage_and_thinking() {
         let mut assembly = AnthropicMessagesAssembly::new("request-1".to_owned(), false);
         assembly
