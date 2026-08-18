@@ -40,9 +40,6 @@ pub const SUBAGENT_AGENT_NOT_ALLOWED: &str = "subagent_agent_not_allowed";
 pub const SUBAGENT_INVALID_ARGUMENTS: &str = "subagent_invalid_arguments";
 /// Named child is not in the in-process start table.
 pub const SUBAGENT_CHILD_NOT_FOUND: &str = "subagent_child_not_found";
-/// Remote child cancel is not asserted by this toolset.
-pub const SUBAGENT_REMOTE_CANCEL_UNSUPPORTED: &str = "subagent_remote_cancel_unsupported";
-
 /// Construction failure for [`SubagentToolset`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SubagentError {
@@ -331,12 +328,6 @@ async fn cancel_child(
             "no started child matches run_id",
         ));
     };
-    if matches!(child.placement, ChildPlacement::RemoteChildSession) {
-        return Ok(error_result(
-            SUBAGENT_REMOTE_CANCEL_UNSUPPORTED,
-            "remote child cancel is not asserted",
-        ));
-    }
     if let Err(error) = invoker.cancel(&child.handle.locator).await {
         return Ok(invoke_error_result(&error));
     }

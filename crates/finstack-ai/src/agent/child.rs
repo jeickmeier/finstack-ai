@@ -1,8 +1,8 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ChildRunPolicy;
 use finstack_ai_kernel::{
@@ -25,9 +25,10 @@ use finstack_ai_runtime::host_driver as driver;
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::native_driver as driver;
 
+use super::child_route::RemoteChildRouteSpec;
 use super::handle::Agent;
 use super::prepare::NativeIds;
-use super::run::AgentRun;
+use super::run::{AgentRun, AgentRunInner, CancellationState, EventStreamState};
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
 struct RecordingChildInvoker {
@@ -71,7 +72,8 @@ impl AgentRun {
     /// acceptance handle; [`Self::accept_child`] starts the child agent on the
     /// frozen locator.
     ///
-    /// Remote placement is out of scope for this surface.
+    /// Remote placement requires [`Self::prepare_child_routed`] with an
+    /// explicit route. Missing routes stay fail-closed.
     ///
     /// # Arguments
     ///
@@ -93,10 +95,27 @@ impl AgentRun {
         request: AgentRunRequest,
         placement: ChildPlacement,
     ) -> Result<ChildRunPrepared, AgentRunError> {
-        if matches!(placement, ChildPlacement::RemoteChildSession) {
+        Box::pin(self.prepare_child_routed(child, request, placement, None)).await
+    }
+
+    /// Commit one child mapping, optionally routing a remote child.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration or runtime failure when the parent is not yet
+    /// accepted, remote placement has no route, or the durable mapping
+    /// conflicts.
+    pub async fn prepare_child_routed(
+        &self,
+        child: &Agent,
+        request: AgentRunRequest,
+        placement: ChildPlacement,
+        remote: Option<RemoteChildRouteSpec>,
+    ) -> Result<ChildRunPrepared, AgentRunError> {
+        if matches!(placement, ChildPlacement::RemoteChildSession) && remote.is_none() {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
-                "remote child placement is not routed by AgentRun",
+                "remote child placement requires an explicit route",
             ));
         }
         request.validate()?;
@@ -114,7 +133,10 @@ impl AgentRun {
             child_depth(parent_accepted.relation().depth())?,
         )?;
         let parent = self.inner.locator.clone();
-        let (locator, session) = self.allocate_child_locator(placement).await?;
+        let remote_invoker = remote.map(build_remote_invoker).transpose()?;
+        let (locator, session) = self
+            .allocate_child_locator(placement, remote_invoker.as_ref())
+            .await?;
         let parent_effect_id = NativeIds::generate::<EffectTag>()?;
         let child_request = child_run_request(child, &request, placement, locator.clone())?;
         let context = child_run_context(&parent, parent_effect_id, &request);
@@ -128,9 +150,20 @@ impl AgentRun {
             CommitCoordinator::recover(Arc::clone(&self.inner.store), parent.session_id)
                 .await
                 .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        let coordinator = ChildRunCoordinator::new(Arc::new(RecordingChildInvoker {
-            starts: Arc::clone(&self.inner.child_invoker_starts),
-        }));
+        let invoker: Arc<dyn AgentInvoker> = match remote_invoker {
+            Some(invoker) => {
+                let invoker = Arc::new(invoker);
+                let mut slot = self.inner.remote_invoker.lock().map_err(|_| {
+                    AgentRunError::runtime_message("run remote invoker lock is poisoned")
+                })?;
+                *slot = Some(Arc::clone(&invoker) as Arc<dyn AgentInvoker>);
+                invoker
+            }
+            None => Arc::new(RecordingChildInvoker {
+                starts: Arc::clone(&self.inner.child_invoker_starts),
+            }),
+        };
+        let coordinator = ChildRunCoordinator::new(invoker);
         coordinator
             .start_or_attach(
                 &mut commit,
@@ -175,10 +208,7 @@ impl AgentRun {
         request: AgentRunRequest,
     ) -> Result<Self, AgentRunError> {
         if matches!(prepared.placement, ChildPlacement::RemoteChildSession) {
-            return Err(AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "remote child placement is not routed by AgentRun",
-            ));
+            return accept_remote_child(self, prepared);
         }
         request.validate()?;
         let parent_accepted = self.wait_accepted().await?;
@@ -231,7 +261,23 @@ impl AgentRun {
         request: AgentRunRequest,
         placement: ChildPlacement,
     ) -> Result<Self, AgentRunError> {
-        let prepared = Box::pin(self.prepare_child(child, request.clone(), placement)).await?;
+        Box::pin(self.start_child_routed(child, request, placement, None)).await
+    }
+
+    /// Prepare then accept one child, optionally routing a remote child.
+    ///
+    /// # Errors
+    ///
+    /// Returns the prepare or accept failure.
+    pub async fn start_child_routed(
+        &self,
+        child: &Agent,
+        request: AgentRunRequest,
+        placement: ChildPlacement,
+        remote: Option<RemoteChildRouteSpec>,
+    ) -> Result<Self, AgentRunError> {
+        let prepared =
+            Box::pin(self.prepare_child_routed(child, request.clone(), placement, remote)).await?;
         let accepted = self.accept_child(&prepared, child, request).await?;
         if let Ok(mut children) = self.inner.children.lock() {
             children.push(accepted.clone());
@@ -390,7 +436,9 @@ impl AgentRun {
                 continue;
             }
             match prepared.placement {
-                ChildPlacement::RemoteChildSession => {}
+                ChildPlacement::RemoteChildSession => {
+                    self.cancel_remote_child(&prepared.child).await?;
+                }
                 ChildPlacement::CompatibleLaneInParentSession => {
                     if self.parent_turn_is_open()? {
                         continue;
@@ -441,6 +489,9 @@ impl AgentRun {
         {
             return child.cancel().await;
         }
+        if locator.remote.is_some() {
+            return self.cancel_remote_child(locator).await;
+        }
         if locator.operation.session_id == self.inner.locator.session_id
             && self.parent_turn_is_open()?
         {
@@ -451,6 +502,25 @@ impl AgentRun {
         }
         self.cancel_journaled_run(locator.operation.session_id, locator.operation.run_id)
             .await
+    }
+
+    async fn cancel_remote_child(&self, locator: &ChildRunLocator) -> Result<(), AgentRunError> {
+        let invoker = self
+            .inner
+            .remote_invoker
+            .lock()
+            .map_err(|_| AgentRunError::runtime_message("run remote invoker lock is poisoned"))?
+            .clone();
+        let Some(invoker) = invoker else {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "remote child cancel has no installed invoker",
+            ));
+        };
+        invoker
+            .cancel(locator)
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
     }
 
     #[cfg(feature = "native-tokio")]
@@ -500,6 +570,7 @@ impl AgentRun {
     async fn allocate_child_locator(
         &self,
         placement: ChildPlacement,
+        remote: Option<&finstack_ai_remote_child::RemoteChildInvoker>,
     ) -> Result<(ChildRunLocator, crate::Session), AgentRunError> {
         let run_id = NativeIds::generate::<RunTag>()?;
         match placement {
@@ -554,12 +625,101 @@ impl AgentRun {
                 };
                 Ok((locator, session))
             }
-            ChildPlacement::RemoteChildSession => Err(AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "remote child placement is not routed by AgentRun",
-            )),
+            ChildPlacement::RemoteChildSession => {
+                let invoker = remote.ok_or_else(|| {
+                    AgentRunError::configuration(
+                        AGENT_RUN_INVALID_CONFIGURATION,
+                        "remote child placement requires an explicit route",
+                    )
+                })?;
+                let session = crate::Session::create(
+                    Arc::clone(&self.inner.store),
+                    Arc::clone(&self.inner.locator.tenant_scope),
+                )
+                .await
+                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+                let lane = session
+                    .lane("main")
+                    .await
+                    .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+                let locator = ChildRunLocator {
+                    operation: OperationLocator::try_new(
+                        self.inner.locator.tenant_scope.as_ref(),
+                        session.session_id(),
+                        lane.lane_id(),
+                        run_id,
+                    )
+                    .map_err(|error| {
+                        AgentRunError::configuration(
+                            AGENT_RUN_INVALID_CONFIGURATION,
+                            error.to_string(),
+                        )
+                    })?,
+                    remote: Some(invoker.route_ref().map_err(|error| {
+                        AgentRunError::configuration(
+                            AGENT_RUN_INVALID_CONFIGURATION,
+                            error.to_string(),
+                        )
+                    })?),
+                };
+                Ok((locator, session))
+            }
         }
     }
+}
+
+fn build_remote_invoker(
+    spec: RemoteChildRouteSpec,
+) -> Result<finstack_ai_remote_child::RemoteChildInvoker, AgentRunError> {
+    finstack_ai_remote_child::RemoteChildInvoker::try_new(
+        finstack_ai_remote_child::RemoteChildRoute {
+            endpoint: spec.endpoint,
+            service: spec.service,
+            route: spec.route,
+            token: spec.token,
+        },
+    )
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })
+}
+
+fn accept_remote_child(
+    parent: &AgentRun,
+    prepared: &ChildRunPrepared,
+) -> Result<AgentRun, AgentRunError> {
+    let invoker = parent
+        .inner
+        .remote_invoker
+        .lock()
+        .map_err(|_| AgentRunError::runtime_message("run remote invoker lock is poisoned"))?
+        .clone()
+        .ok_or_else(|| {
+            AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "remote child accept has no installed invoker",
+            )
+        })?;
+    Ok(AgentRun {
+        inner: Arc::new(AgentRunInner {
+            locator: prepared.child.operation.clone(),
+            store: Arc::clone(&parent.inner.store),
+            child_runs: parent.inner.child_runs,
+            child_invoker_starts: Arc::clone(&parent.inner.child_invoker_starts),
+            cancellation_initiator: parent.inner.cancellation_initiator.clone(),
+            handle: Mutex::new(None),
+            handle_ready: driver::Signal::new(),
+            result: Mutex::new(None),
+            result_ready: driver::Signal::new(),
+            events: Mutex::new(EventStreamState::Waiting),
+            events_fault: OnceLock::new(),
+            cancellation: Mutex::new(CancellationState::default()),
+            cancellation_ready: driver::Signal::new(),
+            children: Mutex::new(Vec::new()),
+            remote_invoker: Mutex::new(Some(invoker)),
+            remote_child: Some(prepared.child.clone()),
+        }),
+    })
 }
 
 fn child_depth(parent_depth: u16) -> Result<u16, AgentRunError> {

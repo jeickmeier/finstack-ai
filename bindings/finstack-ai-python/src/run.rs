@@ -8,7 +8,8 @@ use finstack_ai::runtime::{
     RawJson,
 };
 use finstack_ai::{
-    AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RunSecurityContext,
+    AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RemoteChildRouteSpec,
+    RunSecurityContext,
 };
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
@@ -104,9 +105,9 @@ impl PyRun {
     }
 
     /// Prepare and accept one child run through the Rust child-run router.
-    #[pyo3(signature = (agent, input, *, placement = "isolated_child_session", timeout_seconds = None, max_cycles = crate::agent::DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
+    #[pyo3(signature = (agent, input, *, placement = "isolated_child_session", timeout_seconds = None, max_cycles = crate::agent::DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, route_endpoint = None, route_service = None, route_id = None, route_token = None))]
     #[pyo3(
-        text_signature = "($self, agent, input, *, placement='isolated_child_session', timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None)"
+        text_signature = "($self, agent, input, *, placement='isolated_child_session', timeout_seconds=None, max_cycles=16, max_output_retries=1, capability=None, route_endpoint=None, route_service=None, route_id=None, route_token=None)"
     )]
     #[expect(
         clippy::too_many_arguments,
@@ -122,8 +123,13 @@ impl PyRun {
         max_cycles: u64,
         max_output_retries: u32,
         capability: Option<String>,
+        route_endpoint: Option<String>,
+        route_service: Option<String>,
+        route_id: Option<String>,
+        route_token: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let placement = parse_child_placement(placement)?;
+        let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
         let borrowed = agent.borrow();
         let child = Arc::clone(&borrowed.inner);
         let model = borrowed.model.clone();
@@ -148,7 +154,7 @@ impl PyRun {
                 &tenant_scope,
             )
             .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
-            match Box::pin(parent.start_child(&child, request, placement)).await {
+            match Box::pin(parent.start_child_routed(&child, request, placement, remote)).await {
                 Ok(inner) => Python::attach(|py| {
                     Py::new(
                         py,
@@ -386,6 +392,26 @@ pub(crate) fn run_request(
         );
     }
     Ok(request)
+}
+
+fn remote_route(
+    endpoint: Option<String>,
+    service: Option<String>,
+    route: Option<String>,
+    token: Option<String>,
+) -> PyResult<Option<RemoteChildRouteSpec>> {
+    match (endpoint, service, route) {
+        (None, None, None) => Ok(None),
+        (Some(endpoint), Some(service), Some(route)) => Ok(Some(RemoteChildRouteSpec {
+            endpoint,
+            service,
+            route,
+            token,
+        })),
+        _ => Err(PyTypeError::new_err(
+            "remote child route requires route_endpoint, route_service, and route_id",
+        )),
+    }
 }
 
 fn parse_child_placement(value: &str) -> PyResult<ChildPlacement> {

@@ -22,6 +22,7 @@ native-tokio = [
     "dep:finstack-ai-provider-anthropic",
     "dep:finstack-ai-provider-ollama",
     "dep:finstack-ai-provider-gateway",
+    "dep:finstack-ai-remote-child",
     "dep:finstack-ai-store-memory",
 ]
 wasm-host = ["finstack-ai-runtime/wasm-host"]
@@ -33,6 +34,7 @@ finstack-ai-provider-openai = { workspace = true, optional = true, features = ["
 finstack-ai-provider-anthropic = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-ollama = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-gateway = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-remote-child = { workspace = true, optional = true }
 finstack-ai-store-memory = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

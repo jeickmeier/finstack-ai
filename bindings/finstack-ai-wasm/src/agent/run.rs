@@ -1,12 +1,15 @@
 use std::sync::OnceLock;
 
-use finstack_ai::AgentRun;
+use finstack_ai::runtime::ChildPlacement;
+use finstack_ai::{AgentRun, RemoteChildRouteSpec};
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
 
-use super::errors::agent_error;
+use super::agent::Agent;
+use super::errors::{agent_error, configuration_error};
 use super::events::EventBatch;
+use super::request::run_request;
 use super::results::RunResult;
 use super::session::{Locator, Session};
 
@@ -89,10 +92,76 @@ impl Run {
         })
     }
 
+    /// Prepare and accept one child through the Rust router.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen(js_name = startChild)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wasm-bindgen start_child forwards placement and optional remote route args"
+    )]
+    pub fn start_child(
+        &self,
+        child: &Agent,
+        input: String,
+        placement: String,
+        route_endpoint: Option<String>,
+        route_service: Option<String>,
+        route_id: Option<String>,
+        route_token: Option<String>,
+    ) -> js_sys::Promise {
+        let parent = self.inner.clone();
+        let child_agent = std::sync::Arc::clone(&child.inner);
+        let model = child.model.clone();
+        executor::drive(async move {
+            let placement = parse_child_placement(&placement)?;
+            let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
+            let request = run_request(&model, input, None, None, None, None)?;
+            parent
+                .start_child_routed(child_agent.as_ref(), request, placement, remote)
+                .await
+                .map(|inner| JsValue::from(Run { inner }))
+                .map_err(|error| agent_error(&error, Some(parent.locator())))
+        })
+    }
+
     /// Close event delivery without cancelling the run.
     #[wasm_bindgen(js_name = closeEvents)]
     pub fn close_events(&self) -> js_sys::Promise {
         self.inner.close_events();
         js_sys::Promise::resolve(&JsValue::UNDEFINED)
+    }
+}
+
+fn parse_child_placement(value: &str) -> Result<ChildPlacement, JsValue> {
+    match value {
+        "compatible_lane_in_parent_session" => Ok(ChildPlacement::CompatibleLaneInParentSession),
+        "isolated_child_session" => Ok(ChildPlacement::IsolatedChildSession),
+        "remote_child_session" => Ok(ChildPlacement::RemoteChildSession),
+        _ => Err(agent_error(
+            &configuration_error(format!("unsupported child placement: {value}")),
+            None,
+        )),
+    }
+}
+
+fn remote_route(
+    endpoint: Option<String>,
+    service: Option<String>,
+    route: Option<String>,
+    token: Option<String>,
+) -> Result<Option<RemoteChildRouteSpec>, JsValue> {
+    match (endpoint, service, route) {
+        (None, None, None) => Ok(None),
+        (Some(endpoint), Some(service), Some(route)) => Ok(Some(RemoteChildRouteSpec {
+            endpoint,
+            service,
+            route,
+            token,
+        })),
+        _ => Err(agent_error(
+            &configuration_error("remote child route requires endpoint, service, and route id"),
+            None,
+        )),
     }
 }

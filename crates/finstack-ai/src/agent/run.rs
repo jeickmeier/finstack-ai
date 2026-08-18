@@ -42,6 +42,16 @@ pub(super) struct AgentRunInner {
         allow(dead_code)
     )]
     pub(super) children: Mutex<Vec<AgentRun>>,
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        allow(dead_code)
+    )]
+    pub(super) remote_invoker: Mutex<Option<Arc<dyn finstack_ai_runtime::AgentInvoker>>>,
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        allow(dead_code)
+    )]
+    pub(super) remote_child: Option<finstack_ai_kernel::ChildRunLocator>,
 }
 
 const EVENT_LOCK_POISONED: &str = "run event lock is poisoned";
@@ -428,6 +438,24 @@ impl AgentRun {
             .is_some()
         {
             return Ok(());
+        }
+        if let Some(locator) = self.inner.remote_child.as_ref() {
+            let invoker = self
+                .inner
+                .remote_invoker
+                .lock()
+                .map_err(|_| AgentRunError::runtime_message("run remote invoker lock is poisoned"))?
+                .clone();
+            if let Some(invoker) = invoker {
+                return invoker
+                    .cancel(locator)
+                    .await
+                    .map_err(|error| AgentRunError::runtime_message(error.to_string()));
+            }
+            return Err(AgentRunError::configuration(
+                crate::AGENT_RUN_INVALID_CONFIGURATION,
+                "remote child cancel has no installed invoker",
+            ));
         }
         let handle = self.runtime_handle().await?;
         submit(

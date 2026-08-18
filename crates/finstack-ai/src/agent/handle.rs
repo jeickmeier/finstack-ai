@@ -433,6 +433,8 @@ impl Agent {
             cancellation: Mutex::new(CancellationState::default()),
             cancellation_ready: driver::Signal::new(),
             children: Mutex::new(Vec::new()),
+            remote_invoker: Mutex::new(None),
+            remote_child: None,
         });
         let execution = Arc::downgrade(&inner);
         driver::spawn(Box::pin(async move {
