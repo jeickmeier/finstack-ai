@@ -33,18 +33,13 @@ pub(super) fn apply_record(
     record: &RecordEnvelope,
     next: Option<&RecordBody>,
 ) -> Result<(), KernelError> {
+    if record.body().is_structural() {
+        return Ok(());
+    }
     if is_foreign_run(state, record) {
         return Ok(());
     }
-    if !matches!(
-        record.body(),
-        RecordBody::ExternalCommandRejected(_)
-            | RecordBody::SessionCreated(_)
-            | RecordBody::LaneCreated(_)
-            | RecordBody::LaneMoved(_)
-            | RecordBody::SnapshotWritten(_)
-            | RecordBody::ConversationEntry(_)
-    ) {
+    if !matches!(record.body(), RecordBody::ExternalCommandRejected(_)) {
         update_wall_usage(state, record.timestamp())?;
     }
     match record.body() {

@@ -163,7 +163,7 @@ pub struct ToolBatchOpened {
     pub calls: Arc<[AssignedToolCall]>,
     /// Frozen continuation after closure.
     pub continuation: ToolBatchContinuation,
-    /// `tool-batch-plan` schema-1 digest.
+    /// Domain-separated `tool-batch-plan` digest.
     pub plan_digest: Digest,
 }
 
@@ -212,7 +212,7 @@ pub struct ToolCallSettled {
     pub effect_id: EffectId,
     /// Canonical tool-role result message.
     pub message: Message,
-    /// `tool-settlement` schema-1 digest.
+    /// Domain-separated `tool-settlement` digest.
     pub settlement_digest: Digest,
     /// Whether the framework authored the result.
     pub synthetic: bool,
@@ -256,7 +256,7 @@ pub struct ToolBatchClosed {
     pub result_message_ids: Arc<[MessageId]>,
     /// Semantic post-batch outcome.
     pub outcome: ToolBatchOutcome,
-    /// `tool-batch-close` schema-1 digest.
+    /// Domain-separated `tool-batch-close` digest.
     pub close_digest: Digest,
 }
 
@@ -328,9 +328,6 @@ pub struct ActiveToolBatch {
     /// Open (Requested or Undispatched) calls in [`Self::current_group`].
     #[serde(skip)]
     current_group_open: u32,
-    /// Contiguous Buffered run starting at [`Self::next_source_index`].
-    #[serde(skip)]
-    buffered_prefix: u32,
     /// Calls that are not yet Settled.
     #[serde(skip)]
     unsettled_count: u32,
@@ -372,7 +369,6 @@ impl ActiveToolBatch {
             fatal_error,
             effect_index: BTreeMap::new(),
             current_group_open: 0,
-            buffered_prefix: 0,
             unsettled_count: 0,
             undispatched_count: 0,
         };
@@ -483,7 +479,6 @@ impl ActiveToolBatch {
                 ActiveToolCallStatus::Settled { .. } => {}
             }
         }
-        self.recompute_buffered_prefix();
     }
 
     pub(crate) fn set_call_status(&mut self, index: usize, status: ActiveToolCallStatus) {
@@ -498,11 +493,6 @@ impl ActiveToolBatch {
             (group, previous)
         };
         self.adjust_counters(group, previous, next);
-        self.recompute_buffered_prefix();
-    }
-
-    pub(crate) fn note_source_advanced(&mut self) {
-        self.recompute_buffered_prefix();
     }
 
     pub(crate) fn set_current_group(&mut self, group: u32) {
@@ -536,19 +526,6 @@ impl ActiveToolBatch {
         } else {
             self.current_group_open == 0
         }
-    }
-
-    fn recompute_buffered_prefix(&mut self) {
-        let start = usize::try_from(self.next_source_index).unwrap_or(self.calls.len());
-        let mut prefix = 0_u32;
-        for call in self.calls.iter().skip(start) {
-            if matches!(call.status, ActiveToolCallStatus::Buffered { .. }) {
-                prefix = prefix.saturating_add(1);
-            } else {
-                break;
-            }
-        }
-        self.buffered_prefix = prefix;
     }
 
     fn adjust_counters(&mut self, group: u32, previous: StatusKind, next: StatusKind) {
@@ -694,7 +671,7 @@ pub enum ToolSettlementKind {
 pub struct ToolSettlementFingerprint {
     /// Terminal settlement kind.
     pub kind: ToolSettlementKind,
-    /// `tool-settlement` schema-1 digest.
+    /// Domain-separated `tool-settlement` digest.
     pub digest: Digest,
 }
 
@@ -799,5 +776,43 @@ mod tests {
         assert!(!batch.group_is_terminal(0));
         let (messages, requests, close) = batch.predicted_settlement_counts(0, false);
         assert_eq!((messages, requests, close), (1, 0, 0));
+    }
+
+    #[test]
+    fn predicted_settlement_counts_are_the_tool_settlement_shape_owner() {
+        // `apply/shapes.rs::tool_settlement_shape` consumes these counts for
+        // expected settlement, request, and close cardinality. Keep the two
+        // paths on one owner; do not reintroduce a parallel closer.
+        let opened = ToolBatchOpened {
+            cycle: 0,
+            turn_id: id(4),
+            tool_batch_id: id(5),
+            source_message_id: id(6),
+            calls: Arc::from([]),
+            continuation: ToolBatchContinuation::Finalize,
+            plan_digest: crate::Digest::raw_json(b"plan"),
+        };
+        let buffered = synthetic_call(
+            id(1),
+            ActiveToolCallStatus::Buffered {
+                result: crate::ToolResultBlock::try_new(
+                    id(3),
+                    vec![crate::ContentBlock::Json(crate::JsonBlock::new(
+                        crate::RawJson::parse("{}").expect("json"),
+                    ))],
+                    true,
+                )
+                .expect("result"),
+                settlement_digest: crate::Digest::raw_json(b"s"),
+                synthetic: true,
+                error: None,
+            },
+        );
+        let requested = synthetic_call(id(2), ActiveToolCallStatus::Undispatched);
+        let batch =
+            ActiveToolBatch::new(opened, vec![buffered, requested], 0, 0, Arc::from([]), None);
+        assert_eq!(batch.predicted_settlement_counts(0, false), (1, 0, 0));
+        assert_eq!(batch.predicted_settlement_counts(1, true), (2, 0, 1));
+        assert_eq!(batch.predicted_settlement_counts(1, false), (2, 0, 1));
     }
 }

@@ -13,15 +13,18 @@ use crate::primitives::ComponentId;
 use crate::primitives::Digest;
 use crate::primitives::ExternalHandleRef;
 use crate::primitives::Timestamp;
-use crate::primitives::{ComponentRef, Metadata, RawJson, Version};
-use crate::records::lifecycle::EntryAppended;
+use crate::primitives::{BoundedMap, ComponentRef, Metadata, RawJson, Version};
+use crate::records::lifecycle::{
+    EntryAppended, RunCancelled, RunCompleted, RunFailed, RunSuspended,
+};
+use crate::records::run::{CancellationInitiator, CancellationRequest, CancellationRequested};
 use crate::records::{
     APPEND_BATCH_MAX_RECORDS, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
     RecordEnvelope,
 };
 use crate::state::{
     KernelState, ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
-    TerminalCandidate,
+    TerminalCandidate, TerminalState,
 };
 use crate::{
     CommittedBatch, FinalResultRecorded, JsonSchemaDraft, KernelError, OutputConfiguration,
@@ -79,7 +82,7 @@ fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
         input_tokens: Some(100),
         output_tokens: Some(20),
         cost: None,
-        extension_counters: BTreeMap::new(),
+        extension_counters: BoundedMap::default(),
     };
     let request_digest = crate::BudgetReserveRequest::compute_digest(
         scope_id,
@@ -219,6 +222,178 @@ fn child_preparation_and_budget_replay_are_idempotent_and_conflict_closed() {
         apply(&settled, &conflict_batch, 0),
         Err(KernelError::InvalidRecordOrder)
     );
+}
+
+fn accepted_before_finalize() -> (KernelState, Timestamp) {
+    let timestamp = Timestamp::from_unix_ms(1_000).expect("timestamp");
+    let run_id = fixed_id::<crate::RunTag>(12);
+    let accepted = crate::RunAccepted::try_new(
+        run_id,
+        crate::RunRelation::root(run_id).expect("root relation"),
+        crate::RunSecurityContext::try_new(
+            "tenant-a",
+            crate::PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        crate::RunLimits::empty(),
+        crate::RunPropagationPolicy {
+            cancellation: crate::CancellationPropagation::Cascade,
+            deadline: crate::DeadlinePropagation::MinimumOfParentAndChild,
+            budget: crate::BudgetPropagation::ReservedChildAllocation,
+            principal: crate::PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(b"agent-lock"),
+        None,
+    )
+    .expect("accepted");
+    (
+        KernelState {
+            state_version: 3,
+            session_id: Some(fixed_id::<crate::SessionTag>(10)),
+            lane_id: Some(fixed_id::<crate::LaneTag>(11)),
+            accepted: Some(accepted),
+            accepted_at: Some(timestamp),
+            phase: Some(RunPhase::BeforeFinalize),
+            ..KernelState::default()
+        },
+        timestamp,
+    )
+}
+
+#[test]
+fn apply_record_pairs_completed_phase_and_payload() {
+    let (mut state, timestamp) = accepted_before_finalize();
+    apply_record(
+        &mut state,
+        &envelope(
+            1,
+            1,
+            timestamp,
+            RecordBody::RunCompleted(RunCompleted {
+                cycle: 0,
+                turn_id: fixed_id::<crate::TurnTag>(1),
+                model_request_id: fixed_id::<crate::ModelRequestTag>(2),
+                effect_id: fixed_id::<crate::EffectTag>(3),
+                result_message_id: fixed_id::<crate::MessageTag>(4),
+                result_digest: Digest::raw_json(b"result"),
+            }),
+        ),
+        None,
+    )
+    .expect("apply completed");
+    assert!(matches!(
+        (&state.terminal, state.phase),
+        (Some(TerminalState::Completed(_)), Some(RunPhase::Completed))
+    ));
+    assert_eq!(state.validate(), Ok(()));
+}
+
+#[test]
+fn apply_record_pairs_failed_phase_and_payload() {
+    let (mut state, timestamp) = accepted_before_finalize();
+    apply_record(
+        &mut state,
+        &envelope(
+            1,
+            1,
+            timestamp,
+            RecordBody::RunFailed(RunFailed {
+                cycle: 0,
+                turn_id: None,
+                model_request_id: None,
+                effect_id: None,
+                error: crate::ErrorDescriptor::new(
+                    "limit_reached",
+                    "configured run limit reached",
+                    crate::ErrorCategory::Limit,
+                    false,
+                )
+                .expect("error"),
+            }),
+        ),
+        None,
+    )
+    .expect("apply failed");
+    assert!(matches!(
+        (&state.terminal, state.phase),
+        (Some(TerminalState::Failed(_)), Some(RunPhase::Failed))
+    ));
+    assert_eq!(state.validate(), Ok(()));
+}
+
+#[test]
+fn apply_record_pairs_cancelled_phase_with_cancellation() {
+    let (mut state, timestamp) = accepted_before_finalize();
+    apply_record(
+        &mut state,
+        &composition_envelope(
+            1,
+            timestamp,
+            fixed_id::<crate::SessionTag>(10),
+            fixed_id::<crate::LaneTag>(11),
+            fixed_id::<crate::RunTag>(12),
+            RecordBody::CancellationRequested(CancellationRequested {
+                request: CancellationRequest::try_new(
+                    fixed_id::<crate::CancellationRequestTag>(20),
+                    CancellationInitiator::Deadline,
+                    None::<&str>,
+                )
+                .expect("request"),
+            }),
+        ),
+        None,
+    )
+    .expect("apply cancellation");
+    assert_eq!(state.phase, Some(RunPhase::Cancelling));
+    assert!(state.cancellation.is_some());
+    apply_record(
+        &mut state,
+        &envelope(
+            2,
+            2,
+            timestamp,
+            RecordBody::RunCancelled(RunCancelled {
+                request_id: fixed_id::<crate::CancellationRequestTag>(20),
+                reason_code: crate::ErrorCode::new("cancelled").expect("reason"),
+            }),
+        ),
+        None,
+    )
+    .expect("apply cancelled");
+    assert!(matches!(
+        (&state.terminal, state.phase),
+        (Some(TerminalState::Cancelled(_)), Some(RunPhase::Cancelled))
+    ));
+    assert!(state.cancellation.is_some());
+    assert_eq!(state.validate(), Ok(()));
+}
+
+#[test]
+fn apply_record_pairs_suspended_phase_and_payload() {
+    let (mut state, timestamp) = accepted_before_finalize();
+    apply_record(
+        &mut state,
+        &envelope(
+            1,
+            1,
+            timestamp,
+            RecordBody::RunSuspended(RunSuspended {
+                reason_code: crate::ErrorCode::new("unknown_cost_usage").expect("reason"),
+                cancellation_request_id: None,
+            }),
+        ),
+        None,
+    )
+    .expect("apply suspended");
+    assert_eq!(state.phase, Some(RunPhase::Suspended));
+    assert!(state.suspension.is_some());
+    assert_eq!(state.validate(), Ok(()));
 }
 
 #[test]
@@ -370,6 +545,212 @@ fn event_sequence_overflow_keeps_reason_code() {
             field: "first_transient_sequence",
             reason_code: "overflow",
         })
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one fixture enumerates every structural body and the foreign completion bypass"
+)]
+fn structural_and_foreign_apply_do_not_charge_completed_usage() {
+    let timestamp = Timestamp::from_unix_ms(1_000).expect("timestamp");
+    let usage = crate::LimitUsage {
+        cost: Some(crate::CostAmount::try_new("USD", 5, "prices-v1").expect("cost")),
+        ..crate::LimitUsage::default()
+    };
+    let accepted = crate::RunAccepted::try_new(
+        fixed_id::<crate::RunTag>(12),
+        crate::RunRelation::root(fixed_id::<crate::RunTag>(12)).expect("root relation"),
+        crate::RunSecurityContext::try_new(
+            "tenant-a",
+            crate::PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            "oidc",
+            "high",
+            "policy-v1",
+            "decision-v1",
+            None,
+        )
+        .expect("security"),
+        None,
+        crate::RunLimits::empty(),
+        crate::RunPropagationPolicy {
+            cancellation: crate::CancellationPropagation::Cascade,
+            deadline: crate::DeadlinePropagation::MinimumOfParentAndChild,
+            budget: crate::BudgetPropagation::ReservedChildAllocation,
+            principal: crate::PrincipalPropagation::Inherit,
+        },
+        Digest::raw_json(b"agent-lock"),
+        None,
+    )
+    .expect("accepted");
+    let state = KernelState {
+        session_id: Some(fixed_id::<crate::SessionTag>(10)),
+        lane_id: Some(fixed_id::<crate::LaneTag>(11)),
+        accepted: Some(accepted),
+        accepted_at: Some(timestamp),
+        phase: Some(RunPhase::BeforeRun),
+        limit_usage: usage.clone(),
+        last_applied_sequence: 0,
+        ..KernelState::default()
+    };
+    let structural = [
+        RecordBody::SessionCreated(crate::SessionCreated::new(Metadata::empty())),
+        RecordBody::LaneCreated(crate::LaneCreated::try_new("research").expect("lane")),
+        RecordBody::LaneMoved(crate::LaneMoved::new(fixed_id::<crate::EntryTag>(30))),
+        RecordBody::SnapshotWritten(crate::SnapshotWritten::new(1, Digest::raw_json(b"snap"))),
+        RecordBody::ConversationEntry(
+            crate::ConversationEntry::try_new(
+                fixed_id::<crate::EntryTag>(31),
+                None,
+                fixed_id::<crate::LaneTag>(11),
+                1,
+                crate::EntryBody::Message(
+                    Message::try_new(
+                        fixed_id::<crate::MessageTag>(32),
+                        MessageRole::User,
+                        vec![ContentBlock::Text(
+                            TextBlock::try_new("hello").expect("text"),
+                        )],
+                        timestamp,
+                        None,
+                        ProviderIds::empty(),
+                        Metadata::empty(),
+                    )
+                    .expect("message"),
+                ),
+            )
+            .expect("conversation entry"),
+        ),
+    ];
+    assert_eq!(structural.len(), 5);
+    assert!(structural.iter().all(RecordBody::is_structural));
+    let completed = crate::EffectCompleted::try_new(
+        fixed_id::<crate::EffectTag>(40),
+        EffectOutputContract {
+            kind: EffectOutputKind::ModelResponse,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(b"schema"),
+        },
+        RawJson::parse(r#"{"text":"charge"}"#).expect("output"),
+        Some(
+            crate::Usage::try_new(
+                None,
+                None,
+                None,
+                Some(crate::CostAmount::try_new("USD", 99, "prices-v1").expect("cost")),
+                BTreeMap::new(),
+            )
+            .expect("usage"),
+        ),
+        vec![],
+        ProviderIds::empty(),
+        Some("foreign-charge"),
+        None,
+    )
+    .expect("completion");
+    assert!(!RecordBody::EffectCompleted(completed.clone()).is_structural());
+    for (index, body) in structural.into_iter().enumerate() {
+        let ordinal = u64::try_from(index + 1).expect("ordinal");
+        let record = RecordEnvelope::try_new(
+            RECORD_FORMAT_VERSION,
+            RECORD_KIND_VERSION,
+            fixed_id::<crate::RecordTag>(ordinal),
+            fixed_id::<crate::SessionTag>(10),
+            fixed_id::<crate::LaneTag>(11),
+            None,
+            1,
+            timestamp,
+            None,
+            Digest::raw_json(b"payload"),
+            None,
+            Digest::raw_json(b"checksum"),
+            vec![],
+            body,
+        )
+        .expect("structural envelope");
+        let batch = CommittedBatch::try_new(
+            fixed_id::<crate::AppendBatchTag>(ordinal + 50),
+            1,
+            1,
+            vec![record],
+        )
+        .expect("structural batch");
+        let applied = apply(&state, &batch, 0).expect("structural apply").0;
+        assert_eq!(applied.limit_usage.cost, usage.cost);
+        assert_eq!(applied.limit_usage.output_bytes, 0);
+    }
+
+    let child_run = fixed_id::<crate::RunTag>(14);
+    let prepared = crate::ChildRunPrepared {
+        parent_run_id: fixed_id::<crate::RunTag>(12),
+        parent_effect_id: fixed_id::<crate::EffectTag>(13),
+        child: crate::ChildRunLocator {
+            operation: crate::OperationLocator::try_new(
+                "tenant-a",
+                fixed_id::<crate::SessionTag>(10),
+                fixed_id::<crate::LaneTag>(17),
+                child_run,
+            )
+            .expect("child locator"),
+            remote: None,
+        },
+        request_digest: Digest::raw_json(b"child-request"),
+        placement: crate::ChildPlacement::CompatibleLaneInParentSession,
+        budget_reservation_id: None,
+    };
+    let mut with_child = state;
+    with_child
+        .child_preparations
+        .insert(prepared.parent_effect_id, prepared);
+    let foreign = RecordEnvelope::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        fixed_id::<crate::RecordTag>(2),
+        fixed_id::<crate::SessionTag>(10),
+        fixed_id::<crate::LaneTag>(17),
+        Some(child_run),
+        2,
+        timestamp,
+        None,
+        Digest::raw_json(b"payload"),
+        None,
+        Digest::raw_json(b"checksum"),
+        vec![fixed_id::<crate::EventTag>(2)],
+        RecordBody::EffectCompleted(completed),
+    )
+    .expect("foreign completion");
+    apply_record(&mut with_child, &foreign, None).expect("foreign apply");
+    assert_eq!(with_child.limit_usage.cost, usage.cost);
+    assert_eq!(with_child.limit_usage.output_bytes, 0);
+}
+
+#[test]
+fn missing_tool_call_lookup_returns_existing_invalid_record_order() {
+    let timestamp = Timestamp::from_unix_ms(1_000).expect("timestamp");
+    let completed = crate::EffectCompleted::try_new(
+        fixed_id::<crate::EffectTag>(99),
+        EffectOutputContract {
+            kind: EffectOutputKind::ToolResult,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(b"schema"),
+        },
+        RawJson::parse("{}").expect("output"),
+        None,
+        vec![],
+        ProviderIds::empty(),
+        Some("missing-call"),
+        None,
+    )
+    .expect("completion");
+    let record = envelope(1, 1, timestamp, RecordBody::EffectCompleted(completed));
+    let mut state = KernelState {
+        phase: Some(RunPhase::AwaitingTools),
+        ..KernelState::default()
+    };
+    assert_eq!(
+        apply_record(&mut state, &record, None),
+        Err(KernelError::InvalidRecordOrder)
     );
 }
 

@@ -1,12 +1,11 @@
 //! Durable shared-budget request, receipt, and journal value types.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize, de};
 use thiserror::Error;
 
 use crate::{
-    BudgetReservationId, BudgetScopeId, CostLimit, Digest, EffectId, LimitKey, RunId, Usage,
+    BoundedMap, BudgetReservationId, BudgetScopeId, CostLimit, Digest, EffectId, LimitKey, RunId,
+    Usage,
 };
 
 const MAX_EXTENSION_COUNTERS: usize = 32;
@@ -25,8 +24,8 @@ pub struct BudgetRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<CostLimit>,
     /// Registered extension-counter allowances.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub extension_counters: BTreeMap<LimitKey, u64>,
+    #[serde(default, skip_serializing_if = "BoundedMap::is_empty")]
+    pub extension_counters: BoundedMap<LimitKey, u64, MAX_EXTENSION_COUNTERS>,
 }
 
 impl BudgetRequest {
@@ -61,7 +60,7 @@ impl<'de> Deserialize<'de> for BudgetRequest {
             #[serde(default)]
             cost: Option<CostLimit>,
             #[serde(default)]
-            extension_counters: BTreeMap<LimitKey, u64>,
+            extension_counters: BoundedMap<LimitKey, u64, MAX_EXTENSION_COUNTERS>,
         }
         let wire = Wire::deserialize(deserializer)?;
         let value = Self {

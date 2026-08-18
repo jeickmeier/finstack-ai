@@ -1,11 +1,13 @@
-//! Internal bounded collection deserializers for semantic DTOs.
+//! Bounded collection deserializers for semantic DTOs.
 
 use core::fmt;
 use core::marker::PhantomData;
 use std::collections::BTreeMap;
 
+use std::ops::{Deref, DerefMut};
+
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// V1 maximum items in a semantic array (TDD §6.5).
 pub const SEMANTIC_ARRAY_MAX_ITEMS: usize = 4_096;
@@ -140,12 +142,45 @@ where
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct BoundedMap<K, V, const MAX: usize>(BTreeMap<K, V>);
+/// Map that rejects more than `MAX` entries during deserialize.
+///
+/// Serde fails closed before the map is fully materialized. In-memory
+/// mutation through [`DerefMut`] is not re-checked; owning types still
+/// call their validators before commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoundedMap<K, V, const MAX: usize>(BTreeMap<K, V>);
 
 impl<K, V, const MAX: usize> BoundedMap<K, V, MAX> {
-    pub(crate) fn into_inner(self) -> BTreeMap<K, V> {
+    /// Consume the wrapper and return the inner map.
+    #[must_use]
+    pub fn into_inner(self) -> BTreeMap<K, V> {
         self.0
+    }
+
+    /// Borrow the inner map.
+    #[must_use]
+    pub fn as_inner(&self) -> &BTreeMap<K, V> {
+        &self.0
+    }
+
+    /// Return whether the map has no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<K, V, const MAX: usize> Deref for BoundedMap<K, V, MAX> {
+    type Target = BTreeMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K, V, const MAX: usize> DerefMut for BoundedMap<K, V, MAX> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

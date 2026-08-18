@@ -33,7 +33,7 @@ fn child_retry_reconciles_ambiguous_reservation_before_invoke() {
         input_tokens: Some(1_000),
         output_tokens: Some(250),
         cost: None,
-        extension_counters: BTreeMap::new(),
+        extension_counters: Default::default(),
     };
     let scope_id = id(42);
     let reservation_id = id(43);

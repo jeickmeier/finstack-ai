@@ -111,9 +111,9 @@ pub(super) fn validate_batch_shape(
                 || interaction_request_shape(records)
         }
         Some(RunPhase::Sleeping) => timer_fired_shape(state, records),
-        Some(RunPhase::Cancelling) => reconciliation_shape(state, records),
+        Some(RunPhase::Cancelling | RunPhase::Suspended) => reconciliation_shape(state, records),
         Some(RunPhase::AwaitingInteraction) => interaction_terminal_shape(records),
-        Some(RunPhase::Accepted | RunPhase::Suspended) => false,
+        Some(RunPhase::Accepted) => false,
         Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled) => {
             return Err(KernelError::TerminalStateImmutable);
         }
@@ -432,6 +432,8 @@ pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelo
     }
 
     let fatal = batch.fatal_error.is_some() || fail_run;
+    let (expected_settlements, expected_requests, expected_close) =
+        batch.predicted_settlement_counts(target_index, fatal);
     let current_group_complete = batch.calls.iter().enumerate().all(|(index, call)| {
         call.assigned.group_index != batch.current_group
             || index == target_index
@@ -510,19 +512,17 @@ pub(super) fn tool_settlement_shape(state: &KernelState, records: &[RecordEnvelo
         return false;
     }
 
-    let all_settled = batch.calls.iter().enumerate().all(|(index, call)| {
-        matches!(call.status, ActiveToolCallStatus::Settled { .. })
-            || (index >= start && index < settled_end && is_virtual_buffered(index, call))
-    });
-    let expected_close = usize::from(all_settled);
-    let expected_len = settlement_effects.len() + requested.len() + expected_close;
+    let expected_len = expected_settlements + expected_requests + expected_close;
     let close_matches = expected_close == 0
         || matches!(
             rest.last().map(RecordEnvelope::body),
             Some(RecordBody::ToolBatchClosed(value))
                 if value.tool_batch_id == batch.opened.tool_batch_id
         );
-    rest.len() == expected_len && close_matches
+    rest.len() == expected_len
+        && settlement_effects.len() == expected_settlements
+        && requested.len() == expected_requests
+        && close_matches
 }
 
 pub(super) fn one_stage(

@@ -13,7 +13,7 @@ date: "2026-08-10"
 | --- | --- |
 | Product | finstack-ai |
 | Document | Implementation Plan |
-| Version | 0.23 |
+| Version | 0.24 |
 | Status | Implementation baseline |
 | Date | 2026-08-18 |
 | Primary audience | Maintainers, implementation team, reviewers, release managers, and AI coding agents |
@@ -48,7 +48,7 @@ Python bindings       Browser WASM       Durability/recovery
             1.0.x reliability / 1.0 production drivers
 ```
 
-The plan contains **79 logical pull requests** across twelve phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
+The plan contains **84 logical pull requests** across thirteen phases. A logical PR may be split when reviewability requires it, but unrelated logical PRs must not be combined merely to reduce the count. The plan favors a continuously usable main branch, cross-language golden traces, and merge gates over a large feature branch or big-bang rewrite.
 
 # 1. Purpose and use of this plan
 
@@ -91,6 +91,7 @@ A PR should not be combined with the next logical PR when the combination would 
 | 1.0.x maintenance | Phase 10 | Post-GA fail-closed hardening; no journal/WIT/protocol meaning change | SemVer patch; public removals remain major |
 | 2.0 provider migration | Phase 11 | Responses + native Ollama; Chat Completions removed | Major public break; publication is a later named action |
 | 1.0 production drivers | Phase 12 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | SemVer additive or new-package; freeze gate must see additions |
+| 1.0.x kernel remediation | Phase 13 | Decide/apply/cost/validator/wire fixes from the checked-in kernel reviews | 1.0.0 pre-publication source-breaking or patch; freeze gate sees added and removed names only; signatures stay named review |
 
 ## 2.1 MVP and preview boundary
 
@@ -132,6 +133,7 @@ The following ranges are elapsed workstream estimates, not engineer-weeks or del
 | 10. 1.0.x reliability | 1-2 weeks | Sequential slices after G8; one logical PR |
 | 11. 2.0 provider migration | 2-4 weeks | Sequential after ADR-040; publication excluded |
 | 12. 1.0 production drivers | 2-4 weeks | E1 parallel with E3 after authorization; E4 sequential on E3 |
+| 13. Kernel remediation | 2-3 weeks | Authorization first; PR-081 may start beside PR-082; PR-083 after PR-082; PR-084 last |
 
 ## 3.1 Staffing scenarios
 
@@ -206,8 +208,8 @@ Phase 4: Python     Phase 5: WASM      Phase 6: durability
                                         Phase 10: 1.0.x
                                                |
                           ---------------------|---------------------
-                          v                                         v
-                   Phase 11: 2.0 providers              Phase 12: 1.0 drivers
+                          v                    v                    v
+                   Phase 11: 2.0 providers   Phase 12: 1.0 drivers   Phase 13: kernel remediation
 ```
 
 Durability store work may begin after Phase 2. WIT design may begin after the six port traits are candidate-stable, and Phase 7 implementation may overlap the tail of Phase 6 once PR-039 provides the required record/effect context. Phase 8 still waits for the Phase 4-7 gates. Neither workstream should force changes into the Phase 1 kernel without an ADR.
@@ -3173,6 +3175,189 @@ A separate ADR is required before merging a change that:
 
 **Explicitly excluded.** `RemoteChildSession` dispatch; marketplace; Phase 11; `RequestCompactionModel`; Temporal engine; NFR-PORT-* / D1–D18; registry publication.
 
+# 17D. Phase 13: 1.0.x kernel remediation
+
+**Outcome.** Close the remaining `finstack-ai-kernel` conformance defects that sit outside every open envelope. PR-080 authorizes the phase, checks in the 23-finding review, dispositions work already fixed at HEAD, and repairs the evidence-register chain. PR-081 is inert cleanup. PR-082 is decide/apply ordering, capacity preflight, and cost accounting. PR-083 is fail-closed validator tightening. PR-084 is wire-visible and public-type change. Phase 10 remains fail-closed hardening with no `KernelError` variant-shape change. Phase 11 remains the ADR-040 provider migration. Phase 12 remains 1.0 production drivers. The public-item freeze gate already fails on removed and added names (pack v0.25); this phase does not land that gate again.
+
+**Planning range.** 2-3 weeks
+
+**Traceability.** FR-KRN; NFR-COMP; NFR-REL; TDD sections 6.5, 11.3, 20.2, 22.1, and 22.6.2; Threat Model TM-04, TM-12, TM-13, TM-14, TM-16, TM-17; 1.0 compatibility policy.
+
+## Entrance criteria
+
+- Documentation pack v0.26 / Implementation Plan 0.24 authorizes this section. Phase 10 / PR-067 may remain in progress; this phase does not reuse PR-001–PR-079 envelopes.
+- The public-item freeze gate already fails on removed and added public names (pack v0.25). The gate does not extract signatures. Phase 11 / PR-068–PR-073 and Phase 12 / PR-074–PR-079 may proceed in parallel; this phase does not implement the provider break or production drivers.
+- `docs/implementation/kernel-remediation-review.md` and `docs/implementation/kernel-conformance-review.md` are listed under Registers. The companion artifact URL is not an authority.
+
+## Exit criteria
+
+- Open findings from the checked-in 23-finding review and the F-series dispositions are closed, deferred with a backlog row, or recorded as maintainer-blocked.
+- Findings #1 and #2 land together: decide-limit projection no longer terminally fails a healthy run on a rejectable payload; `TimerFired` after `RunSuspended` is rejected; replay and `state_hash` match for those scenarios.
+- Capacity preflight covers `timer_firings`, `child_preparations`, `budget_reservations`, and `budget_charges`.
+- `AllowWithinReservedMaximum` matches the maintainer-decided TDD 0.20 contract, or finding #5 remains explicitly blocked.
+- Every PR-083 rejection is proven unproducible by a committed reducer path, or the item is deferred.
+- Authorized wire-visible and public-type changes are classified on the compatibility matrix; finding #21 is a backlog deferral; finding #13b is not landed.
+- No journal `RecordBody` variant, WIT world, remote-protocol meaning, `KernelError` variant-shape change, or NFR-PORT-* amendment.
+
+## Pull request sequence
+
+### PR-080 - Authorize Phase 13 and record the reviews
+
+**Purpose.** Authorize 1.0.x kernel remediation as Phase 13, check in the 23-finding review, disposition HEAD-already-fixed items, and repair the evidence-register chain. This slice is authorization and registers, not kernel behavior.
+
+**Principal changes.**
+
+- Add §17D with PR-080–PR-084; update the exec line, §2, §3, §5.1, and §22; bump Plan 0.23→0.24 and pack v0.25→v0.26.
+- Keep PLAN-0.23 intact; acknowledge or recover PLAN-0.20–0.22; append PLAN-0.24 as Current.
+- Write envelope stubs at `docs/implementation/artifacts/pr-080` through `pr-084`.
+- Check in `kernel-remediation-review.md`; link it and `kernel-conformance-review.md` from Registers; record HEAD dispositions on both reviews.
+- Add the `#21` defer row and a Phase 13 planned-surface section that does not pre-decide #5 or #17.
+- Do not re-land B1. Do not amend NFR-PORT-*. Do not manufacture a gate-decision ID.
+
+**Acceptance evidence.**
+
+- Implementation Plan 0.24 contains §17D with PR-080–PR-084, each with Purpose, Principal changes, Acceptance evidence, Dependencies, Explicitly excluded, and Traceability.
+
+- Pack README is v0.26 and lists Implementation Plan 0.24. Technical Design remains 0.19.
+
+- Evidence register keeps the PLAN-0.23 row and digest, inserts recovered PLAN-0.20–0.22 rows, appends PLAN-0.24 as Current, and updates the line-21 inventory prose.
+
+- Envelope stubs exist for PR-080–PR-084. `artifacts/pr-080/plan.md` records the three open maintainer questions and residual risks.
+
+- The 23-finding review is checked in. Registers lists that file and `kernel-conformance-review.md`. HEAD dispositions are recorded on both reviews.
+
+- `#21` has a defer row on `public-api-change-backlog.md`. The compatibility matrix has a Phase 13 planned-surface section that does not pre-decide #5 or #17. NFR-PORT-* is unchanged. B1 is not re-landed. No gate decision ID is manufactured.
+
+**Dependencies.** Phase 9 / G8. Phase 10 / PR-067 may remain in progress. Pack v0.25 B1 freeze gate is already landed.
+
+**Traceability.** FR-KRN; NFR-COMP; TDD sections 6.5, 11.3, 22.6.2; TM-04/12/14/16; 1.0 compatibility policy.
+
+**Explicitly excluded.** Kernel behavior changes (PR-081–PR-084). TDD §22.6.2 Option A wording (#5). `BudgetRequest` → `BoundedMap` (#17). `request_version` removal (#21). `InvariantViolation` reshape (#13b). B1 re-implementation. Phase 11 provider code. Phase 12 production-driver code. NFR-PORT-* amendment.
+
+### PR-081 - Inert kernel cleanup
+
+**Purpose.** Remove proven-dead private bookkeeping, fix remaining rustdoc drift, collapse fingerprint/projection twins, and add `RunEventKind::kind_name()` so later slices start from a clean crate.
+
+**Principal changes.**
+
+- Remove `buffered_prefix`, `recompute_buffered_prefix`, and `note_source_advanced` (`records/tools.rs`); they stay outside serde, `PartialEq`, and `state_hash`.
+- Fix remaining #18 and #23 rustdoc (not F23). Do not revert the live `state_hash` versions-1–6 rustdoc.
+- Collapse the three fingerprint/projection twins, including `content/tool.rs`.
+- Add `RunEventKind::kind_name()` as an additive inherent method.
+- Leave `raw_json.rs` lines 128–145 in place (live `Metadata` member-limit path). Do not unify the two batch-resolution implementations. Do not remove `RecordDraft::validate_run_lineage` or `OperationSummary::invocation_effect_id`.
+
+**Acceptance evidence.**
+
+- `buffered_prefix`, `recompute_buffered_prefix`, and `note_source_advanced` are gone; the field remains out of serde, `PartialEq`, and `state_hash`.
+
+- Remaining #18 and #23 rustdoc sites no longer claim schema-1-only behavior.
+
+- Fingerprint/projection twin duplication at the three named sites is collapsed to one owner.
+
+- `RunEventKind::kind_name()` returns the section 20.2.1 kind string and is pinned by a unit test.
+
+- The `raw_json.rs` member-limit path at lines 128–145 is unchanged. Finding #10 is not unified in this PR.
+
+**Dependencies.** PR-080. May proceed in parallel with the start of PR-082.
+
+**Traceability.** FR-KRN; TDD section 20.2; NFR-DX.
+
+**Explicitly excluded.** Decide/apply/cost behavior (PR-082). Validator tightening (PR-083). Wire-visible type changes and `pub fn` removals (PR-084). Finding #10 unification. `raw_json.rs` 128–145 deletion.
+
+### PR-082 - Decide/apply ordering and cost accounting
+
+**Purpose.** Stop decide-limit from terminally failing a healthy run on a rejectable payload, make `TimerFired` / reconciliation apply-safe, preflight the four maps `validate()` already caps, and land cost-accounting plus apply-lookup and batch-resolution ownership.
+
+**Principal changes.**
+
+- Land #1 and #2 together: projection guards and a narrow hoist after `equal_committed_redelivery` (`KernelInput` has **15** variants; **5** are already in `equal_committed_redelivery`); replace digest-swallowing `Ok(None)` with `?`; widen `Accepted`/`Suspended` apply shapes and guard `decide_timer_fired`.
+- Land #3 in one commit: `preflight_batch` + `preflight_decision` + `decide_timer_fired`, including a `timer_firing` growth field.
+- Land #4 before #5. #5 implements the maintainer-decided TDD 0.20 contract or stays blocked. Do not treat assign-max `reserve_remaining_cost` as Option A.
+- Land #15 apply-path lookup outcomes and #10 (the two batch-resolution implementations are not identical).
+
+**Acceptance evidence.**
+
+- Projection guards plus the narrow hoist reject a previously terminal-on-bad-projection payload without mutation; equal-committed redelivery is not re-counted; `ConflictingCompletionId` still precedes `assistant_message` presence.
+
+- `TimerFired` after `RunSuspended` is rejected; `reconciliation_shape` accepts the documented tail including a three-call interleaving.
+
+- `preflight_decision` and `preflight_batch` bound `timer_firings`, `child_preparations`, `budget_reservations`, and `budget_charges`; `decide_timer_fired` cannot emit an unhashable state.
+
+- The #4 regression pins that `apply_completed_usage` does not charge through structural/foreign bypass. #5 matches the maintainer-decided contract or this bullet stays blocked.
+
+- Apply-path missing-call lookup (#15) returns an existing `KernelError` without a new variant.
+
+- The two batch-resolution implementations (#10) share one owner or a documented agreement test.
+
+- For #1, #2, and #3, `replay(&batches)` equals live state and `state_hash()` matches.
+
+**Dependencies.** PR-080. #5 is blocked until the maintainer answers the TDD Option A question. Independent of PR-081 except merge conflicts.
+
+**Traceability.** FR-KRN; TDD sections 22.1 and 22.6.2; TM-12, TM-14.
+
+**Explicitly excluded.** Validator tightening (PR-083). Hash-projection/`provider_call_id` fixture (PR-084). `InvariantViolation` reshape. New `KernelError` variants. TDD Option A text written before the maintainer decision.
+
+### PR-083 - Fail-closed validator tightening
+
+**Purpose.** Reject previously accepted unreachable shapes after PR-082 reordering, without tightening any shape a committed reducer path can still produce.
+
+**Principal changes.**
+
+- Land #6 after #1 so terminal-state assertions see the reordered decide path.
+- Close remaining #7 `KernelState::validate` gaps, or prove they are already enforced.
+- Disposition residual #8/#19 that is not the already-landed `AssigneeHint` Role/Queue checks.
+- Every new rejection carries an unproducible-by-reducer fixture; failures defer rather than ship on a hand-wave.
+
+**Acceptance evidence.**
+
+- #6 terminal/validate tightening lands after #1; existing precedence tests still pass.
+
+- Remaining #7 `KernelState::validate` gaps are closed or proven already enforced.
+
+- Residual #8/#19 work that is not the already-landed `AssigneeHint` Role/Queue checks is closed or dispositioned as already landed.
+
+- Every new rejection has a fixture that the rejected shape was unproducible by any committed reducer path; failures defer.
+
+- `state_hash_oracles` minimal v2–v6, `successful.rs` v1 orphan `ToolResult`, and `accepted_v1_after_prepare` still pass.
+
+**Dependencies.** PR-082.
+
+**Traceability.** FR-KRN; TDD section 6.5; TM-16.
+
+**Explicitly excluded.** Findings #14, #16, #20, and #22 (HEAD). Most of #8/#19 `AssigneeHint` (HEAD). Wire-visible type changes (PR-084). Any item that fails its unreachability proof.
+
+### PR-084 - Wire-visible and public type changes
+
+**Purpose.** Land the remaining hash, decoder, telemetry, and classified public-type changes after decide/apply semantics are stable, so new pinned digests are computed against the final contract.
+
+**Principal changes.**
+
+- Add `provider_call_id` to `ContentProjection::ToolCall` (#9) and a new tool-call hash fixture. Existing seven pinned digests must stay unchanged.
+- Apply `RawJson` human-path byte/item/depth limits before full materialization (#11).
+- Record a TM-04-style kernel telemetry/secret-needle memo (#12).
+- Fold #13a call-site re-pointing into still-open PR-067 if that envelope can absorb it without a `(revised)` acceptance ID; otherwise land #13a here. Do not reshape `InvariantViolation` (#13b).
+- Land #17 only after the maintainer ADR decision. Remove or hide `RecordDraft::validate_run_lineage` and `OperationSummary::invocation_effect_id` with matrix/backlog rows. Do not drop `request_version` (#21).
+
+**Acceptance evidence.**
+
+- `ContentProjection::ToolCall` includes `provider_call_id`; a new tool-call hash fixture is added; the existing seven pinned digests are unchanged.
+
+- Human-path `RawJson` decode applies byte, item, and depth limits before full materialization.
+
+- A TM-04-style memo records the kernel telemetry/secret-needle review.
+
+- #13a is folded into PR-067 or landed here; #13b is not landed.
+
+- #17 lands only after the maintainer ADR decision; a matrix row is recorded; freeze baselines are `--write` updated only if a public name is added or removed.
+
+- `RecordDraft::validate_run_lineage` and `OperationSummary::invocation_effect_id` are removed or hidden with matrix/backlog rows. `#21` is not landed. The public-rust-api corpus count is updated if fixtures are added.
+
+**Dependencies.** PR-082. #9's pinned digest must be computed after #1/#4/#5. #17 blocked on the maintainer ADR question.
+
+**Traceability.** FR-KRN; TDD sections 6.5, 11.3.6; TM-04, TM-12, TM-13, TM-16, TM-17; 1.0 compatibility policy.
+
+**Explicitly excluded.** `#13b` `InvariantViolation` reshape. `#21` `request_version` removal. New `KernelError` variants. Journal `RecordBody`, WIT, or remote-protocol meaning change. Inventing a major version bump.
+
 # 18. Cross-phase quality plan
 
 ## 18.1 Test layers by phase
@@ -3300,6 +3485,7 @@ PRD lettered phases are capability groupings; the numbered phases and logical PR
 | 1.0.x reliability hardening | Phase 10, PR-067 | Post-GA fail-closed maintenance | — |
 | 2.0 provider migration | Phase 11, PR-068–PR-073 | Responses + native Ollama; Chat Completions removed | — |
 | 1.0 production drivers | Phase 12, PR-074–PR-079 | ContextProvider driver, local workflow+cron, Lane verbs, Python lanes/SQLite, child-runs | — |
+| 1.0.x kernel remediation | Phase 13, PR-080–PR-084 | Decide/apply/cost/validator/wire review closeout | — |
 
 A family traceability reference such as `NFR-PERF` expands to every numbered requirement in that family unless the entry names a narrower range. This convention avoids duplicating requirement prose while preserving ownership.
 
@@ -3318,6 +3504,7 @@ A family traceability reference such as `NFR-PERF` expands to every numbered req
 | 1.0.x reliability | PR-067 | NFR-SEC, NFR-REL, NFR-COMP | Fail-closed poison/ack, SDK honesty, event-hub parity |
 | 2.0 provider migration | PR-068 to PR-073 | FR-MDL; ADR-040; NFR-COMP | Responses, native Ollama, Chat Completions removed |
 | 1.0 production drivers | PR-074 to PR-079 | FR-CTX, FR-DUR, FR-PY; UC-05/08/09 | Context driver, workflow-local cron, Lane verbs, Python SQLite, child-runs |
+| Kernel remediation | PR-080 to PR-084 | FR-KRN; NFR-COMP; NFR-REL | Limit/redelivery, capacity preflight, validators, hash/wire surfaces |
 
 # 23. First 30 days
 

@@ -19,6 +19,7 @@ finstack-ai-kernel::AssigneeHint
 finstack-ai-kernel::AuthorizationEvidence
 finstack-ai-kernel::BLOB_CONTENT_DIGEST_SCHEMA_VERSION
 finstack-ai-kernel::BlobRef
+finstack-ai-kernel::BoundedMap
 finstack-ai-kernel::BudgetChargeReceipt
 finstack-ai-kernel::BudgetChargeRecorded
 finstack-ai-kernel::BudgetChargeRequest

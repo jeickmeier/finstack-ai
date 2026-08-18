@@ -1,8 +1,10 @@
+use crate::effects::{EffectPurpose, NestedModelKind};
 use crate::primitives::Digest;
 use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor};
 use crate::records::RecordBody;
-use crate::records::lifecycle::RunSuspended;
+use crate::records::lifecycle::{RunSuspended, StageCursor};
 use crate::records::policy::{LimitDimension, LimitReached, LimitUsage, LimitValue};
+use crate::records::tools::ActiveToolCallStatus;
 use crate::state::{KernelState, RunPhase, TransitionEnv};
 
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
@@ -10,9 +12,11 @@ use super::super::decision::{Decision, KernelError};
 use super::super::failure_from_state;
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, KernelInput, ModelSettled,
-    ModelSettlement, ReducerStageOutcome, StageSettled,
+    ModelSettlement, ReducerStageOutcome, RequestCompactionModel, StageSettled, ToolBatchSettled,
+    ToolSettlement,
 };
-use super::{draft_for_state, next_sequence};
+use super::super::tool::is_known_tool_effect;
+use super::{draft_for_state, expected_stage_cursor, next_sequence};
 
 #[expect(
     clippy::too_many_lines,
@@ -51,8 +55,9 @@ pub(super) fn decide_limit(
         .accepted
         .as_ref()
         .ok_or(KernelError::InvariantViolation)?;
-    let mut reserve_unknown_cost = false;
-    if let Some(policy) = unknown_cost_policy(accepted, input) {
+    if settlement_admissible_for_cost(state, input)
+        && let Some(policy) = unknown_cost_policy(accepted, input)
+    {
         match policy {
             crate::UnknownUsagePolicy::FailClosed => {
                 return Ok(Some(control_failure_decision(
@@ -82,14 +87,29 @@ pub(super) fn decide_limit(
                 }));
             }
             crate::UnknownUsagePolicy::AllowWithinReservedMaximum => {
-                reserve_unknown_cost = true;
+                let maximum = accepted
+                    .limits()
+                    .max_cost
+                    .as_ref()
+                    .ok_or(KernelError::InvariantViolation)?;
+                let accrued = state
+                    .limit_usage
+                    .cost
+                    .as_ref()
+                    .map_or(0, crate::CostAmount::micros);
+                if accrued >= maximum.micros() {
+                    return Ok(Some(control_failure_decision(
+                        state,
+                        env,
+                        "unknown_cost_usage",
+                        "completion omitted required cost usage",
+                        ErrorCategory::Limit,
+                    )?));
+                }
             }
         }
     }
     let mut usage = state.limit_usage.clone();
-    if reserve_unknown_cost {
-        reserve_remaining_cost(&mut usage, accepted.limits())?;
-    }
     if let Some(accepted_at) = state.accepted_at {
         let Some(elapsed) = env
             .now
@@ -110,8 +130,9 @@ pub(super) fn decide_limit(
     match input {
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ContextPrepared { .. },
+            cursor,
             ..
-        }) => {
+        }) if stage_boundary(state, cursor) => {
             let Some(turns) = usage.turns.checked_add(1) else {
                 return Ok(Some(control_failure_decision(
                     state,
@@ -137,24 +158,25 @@ pub(super) fn decide_limit(
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ModelRequestPrepared { .. },
+            cursor,
             ..
-        })
-        | KernelInput::RequestCompactionModel(_) => {
-            let Some(model_requests) = usage.model_requests.checked_add(1) else {
-                return Ok(Some(control_failure_decision(
-                    state,
-                    env,
-                    "model_requests_overflow",
-                    "model-request accounting overflowed",
-                    ErrorCategory::Limit,
-                )?));
-            };
-            usage.model_requests = model_requests;
+        }) if stage_boundary(state, cursor) => {
+            if let Some(decision) = bump_model_requests(state, env, &mut usage)? {
+                return Ok(Some(decision));
+            }
+        }
+        KernelInput::RequestCompactionModel(compaction)
+            if compaction_boundary(state, compaction) =>
+        {
+            if let Some(decision) = bump_model_requests(state, env, &mut usage)? {
+                return Ok(Some(decision));
+            }
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::ToolBatchPrepared { calls, .. },
+            cursor,
             ..
-        }) => {
+        }) if stage_boundary(state, cursor) => {
             let added = u64::try_from(calls.len()).map_err(|_| KernelError::InvariantViolation)?;
             let Some(tool_calls) = usage.tool_calls.checked_add(added) else {
                 return Ok(Some(control_failure_decision(
@@ -179,8 +201,9 @@ pub(super) fn decide_limit(
         }
         KernelInput::StageSettled(StageSettled {
             outcome: ReducerStageOutcome::Retry(_),
+            cursor,
             ..
-        }) => {
+        }) if stage_boundary(state, cursor) => {
             let Some(retries) = usage.retries.checked_add(1) else {
                 return Ok(Some(control_failure_decision(
                     state,
@@ -192,32 +215,38 @@ pub(super) fn decide_limit(
             };
             usage.retries = retries;
         }
-        KernelInput::ModelSettled(ModelSettled {
-            outcome: ModelSettlement::Completed { completion, .. },
-            ..
-        })
-        | KernelInput::ToolBatchSettled(super::super::input::ToolBatchSettled {
-            outcome: super::super::input::ToolSettlement::Completed(completion),
-            ..
-        }) => {
-            if let Err(failure) = project_completed_usage(
-                &mut usage,
-                completion.output(),
-                completion.usage(),
-                accepted.limits(),
-            ) {
-                return Ok(Some(control_failure_decision(
+        KernelInput::ModelSettled(settled) if outstanding_model_settlement(state, settled) => {
+            if let ModelSettlement::Completed { completion, .. } = &settled.outcome
+                && let Some(decision) = project_or_fail(
                     state,
                     env,
-                    failure.code,
-                    failure.message,
-                    ErrorCategory::Limit,
-                )?));
+                    &mut usage,
+                    accepted,
+                    completion.output(),
+                    completion.usage(),
+                )?
+            {
+                return Ok(Some(decision));
             }
         }
-        KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
-            completion, ..
-        }) => {
+        KernelInput::ToolBatchSettled(settled) if outstanding_tool_settlement(state, settled) => {
+            if let ToolSettlement::Completed(completion) = &settled.outcome
+                && let Some(decision) = project_or_fail(
+                    state,
+                    env,
+                    &mut usage,
+                    accepted,
+                    completion.output(),
+                    completion.usage(),
+                )?
+            {
+                return Ok(Some(decision));
+            }
+        }
+        KernelInput::ExternalEffectCompleted(input)
+            if outstanding_external_completion(state, input) =>
+        {
+            let ExternalEffectCompletedInput { completion, .. } = input;
             if let ExternalEffectOutcome::Completed {
                 output,
                 usage: completion_usage,
@@ -299,6 +328,126 @@ pub(super) fn decide_limit(
     }))
 }
 
+fn settlement_admissible_for_cost(state: &KernelState, input: &KernelInput) -> bool {
+    match input {
+        KernelInput::ModelSettled(settled) => outstanding_model_settlement(state, settled),
+        KernelInput::ToolBatchSettled(settled) => outstanding_tool_settlement(state, settled),
+        KernelInput::ExternalEffectCompleted(completed) => {
+            outstanding_external_completion(state, completed)
+        }
+        _ => false,
+    }
+}
+
+fn stage_boundary(state: &KernelState, cursor: &StageCursor) -> bool {
+    expected_stage_cursor(state).as_ref() == Some(cursor)
+}
+
+fn compaction_boundary(state: &KernelState, input: &RequestCompactionModel) -> bool {
+    match &input.relation.purpose {
+        EffectPurpose::CompactionSummary { .. } => {
+            state.phase == Some(RunPhase::BeforeModel) && state.pending_model_effect.is_none()
+        }
+        EffectPurpose::NestedModel {
+            kind: NestedModelKind::McpSampling,
+        } => state.phase == Some(RunPhase::AwaitingTools) && state.pending_model_effect.is_none(),
+    }
+}
+
+fn outstanding_model_settlement(state: &KernelState, input: &ModelSettled) -> bool {
+    let Some(pending) = state.pending_model_effect.as_ref() else {
+        return false;
+    };
+    let effect_id = match &input.outcome {
+        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
+        ModelSettlement::Deferred(deferred) => deferred.effect_id,
+        ModelSettlement::Failed(failed) => failed.effect_id(),
+    };
+    pending.turn_id == input.turn_id
+        && pending.model_request_id == input.model_request_id
+        && pending.requested.effect_id() == effect_id
+}
+
+fn outstanding_tool_settlement(state: &KernelState, input: &ToolBatchSettled) -> bool {
+    let Some(batch) = state.active_tool_batch.as_ref() else {
+        return false;
+    };
+    if batch.opened.tool_batch_id != input.tool_batch_id {
+        return false;
+    }
+    let effect_id = match &input.outcome {
+        ToolSettlement::Completed(value) => value.effect_id(),
+        ToolSettlement::Deferred(value) => value.effect_id,
+        ToolSettlement::Failed(value) => value.effect_id(),
+    };
+    batch.call(effect_id).is_some_and(|call| {
+        matches!(call.status, ActiveToolCallStatus::Requested { .. })
+            && call.assigned.group_index == batch.current_group
+    })
+}
+
+fn outstanding_external_completion(
+    state: &KernelState,
+    input: &ExternalEffectCompletedInput,
+) -> bool {
+    if is_known_tool_effect(state, input.completion.effect_id) {
+        return state.active_tool_batch.as_ref().is_some_and(|batch| {
+            batch.call(input.completion.effect_id).is_some_and(|call| {
+                matches!(
+                    call.status,
+                    ActiveToolCallStatus::Requested {
+                        deferred: Some(_),
+                        ..
+                    }
+                )
+            })
+        });
+    }
+    state.phase == Some(RunPhase::AwaitingExternal)
+        && state.pending_model_effect.as_ref().is_some_and(|pending| {
+            pending.requested.effect_id() == input.completion.effect_id
+                && pending.deferred.is_some()
+        })
+}
+
+fn bump_model_requests(
+    state: &KernelState,
+    env: &TransitionEnv,
+    usage: &mut LimitUsage,
+) -> Result<Option<Decision>, KernelError> {
+    let Some(model_requests) = usage.model_requests.checked_add(1) else {
+        return Ok(Some(control_failure_decision(
+            state,
+            env,
+            "model_requests_overflow",
+            "model-request accounting overflowed",
+            ErrorCategory::Limit,
+        )?));
+    };
+    usage.model_requests = model_requests;
+    Ok(None)
+}
+
+fn project_or_fail(
+    state: &KernelState,
+    env: &TransitionEnv,
+    usage: &mut LimitUsage,
+    accepted: &crate::RunAccepted,
+    output: &crate::RawJson,
+    completion: Option<&crate::Usage>,
+) -> Result<Option<Decision>, KernelError> {
+    if let Err(failure) = project_completed_usage(usage, output, completion, accepted.limits()) {
+        return Ok(Some(control_failure_decision(
+            state,
+            env,
+            failure.code,
+            failure.message,
+            ErrorCategory::Limit,
+        )?));
+    }
+    Ok(None)
+}
+
 fn unknown_cost_policy(
     accepted: &crate::RunAccepted,
     input: &KernelInput,
@@ -348,24 +497,6 @@ fn control_failure_decision(
         actions: Vec::new(),
         diagnostics: Vec::new(),
     })
-}
-
-fn reserve_remaining_cost(
-    usage: &mut LimitUsage,
-    limits: &crate::RunLimits,
-) -> Result<(), KernelError> {
-    let Some(maximum) = limits.max_cost.as_ref() else {
-        return Ok(());
-    };
-    usage.cost = Some(
-        crate::CostAmount::try_new(
-            maximum.unit(),
-            maximum.micros(),
-            maximum.pricing_policy_version(),
-        )
-        .map_err(|_| KernelError::InvariantViolation)?,
-    );
-    Ok(())
 }
 
 fn largest_tool_group(calls: &[crate::ToolCallPlan]) -> Result<u32, ()> {

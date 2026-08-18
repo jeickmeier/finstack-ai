@@ -75,7 +75,14 @@ pub(super) fn decide_request_compaction_model(
         }
     }
     if state.current_turn.is_none() {
-        return Err(KernelError::InvariantViolation);
+        let input = match &input.relation.purpose {
+            EffectPurpose::CompactionSummary { .. } => "request_compaction_model",
+            EffectPurpose::NestedModel { .. } => "request_nested_model",
+        };
+        return Err(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input,
+        });
     }
     if input.output_contract.kind != EffectOutputKind::ModelResponse {
         return Err(KernelError::ModelRequestContractMismatch);
@@ -276,7 +283,7 @@ fn decide_normalized_model(
     let pending = state
         .pending_model_effect
         .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     if pending.turn_id != input.turn_id
         || pending.model_request_id != input.model_request_id
         || pending.requested.effect_id() != effect_id

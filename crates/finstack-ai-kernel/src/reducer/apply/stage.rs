@@ -84,7 +84,7 @@ pub(super) fn apply_stage_outcome(
             let turn = state
                 .current_turn
                 .as_mut()
-                .ok_or(KernelError::InvariantViolation)?;
+                .ok_or(KernelError::InvalidRecordOrder)?;
             turn.model_request_id = Some(*model_request_id);
             turn.effect_id = Some(*effect_id);
         }

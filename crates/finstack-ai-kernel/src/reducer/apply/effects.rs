@@ -98,7 +98,7 @@ pub(super) fn apply_effect_requested(
     let turn = state
         .current_turn
         .as_mut()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidRecordOrder)?;
     let model_request_id = if let Some(model_request_id) = turn.model_request_id {
         model_request_id
     } else if requested.is_runtime_owned_child_model() {
@@ -107,7 +107,7 @@ pub(super) fn apply_effect_requested(
         turn.effect_id = Some(requested.effect_id());
         model_request_id
     } else {
-        return Err(KernelError::InvariantViolation);
+        return Err(KernelError::InvalidRecordOrder);
     };
     let turn_id = turn.turn_id;
     state.pending_model_effect = Some(PendingModelEffect {
@@ -149,9 +149,6 @@ pub(super) fn apply_completed_usage(
                 .map_err(|_| KernelError::InvalidRecordOrder)?,
         )
         .ok_or(KernelError::InvalidRecordOrder)?;
-    if completed.usage().and_then(crate::Usage::cost).is_none() {
-        reserve_unknown_cost(state)?;
-    }
     let Some(usage) = completed.usage() else {
         return Ok(());
     };
@@ -200,28 +197,6 @@ pub(super) fn apply_completed_usage(
     Ok(())
 }
 
-fn reserve_unknown_cost(state: &mut KernelState) -> Result<(), KernelError> {
-    let Some(maximum) = state
-        .accepted
-        .as_ref()
-        .and_then(|accepted| accepted.limits().max_cost.as_ref())
-    else {
-        return Ok(());
-    };
-    if maximum.unknown_usage() != crate::UnknownUsagePolicy::AllowWithinReservedMaximum {
-        return Ok(());
-    }
-    state.limit_usage.cost = Some(
-        crate::CostAmount::try_new(
-            maximum.unit(),
-            maximum.micros(),
-            maximum.pricing_policy_version(),
-        )
-        .map_err(|_| KernelError::InvalidRecordOrder)?,
-    );
-    Ok(())
-}
-
 pub(super) fn apply_effect_deferred(
     state: &mut KernelState,
     deferred: &crate::EffectDeferred,
@@ -261,7 +236,7 @@ pub(super) fn apply_effect_deferred(
     let pending = state
         .pending_model_effect
         .as_mut()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     pending.deferred = Some(deferred.clone());
     state.phase = Some(RunPhase::AwaitingExternal);
     Ok(())
@@ -347,7 +322,7 @@ pub(super) fn apply_entry_appended(
             ..
         }) if effect_id == entry.effect_id && candidate_message_id == message_id
     ) {
-        return Err(KernelError::InvariantViolation);
+        return Err(KernelError::AssistantMessageMismatch);
     }
     state.pending_model_effect = None;
     state.phase = Some(RunPhase::AfterModel);
@@ -373,7 +348,7 @@ pub(super) fn apply_effect_failed(
     let pending = state
         .pending_model_effect
         .take()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     state.terminal_candidate = Some(TerminalCandidate::Failed {
         cycle: pending.cycle,
         turn_id: Some(pending.turn_id),
@@ -392,7 +367,7 @@ fn apply_compaction_completed(
     let pending = state
         .pending_model_effect
         .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     let digest = completed_compaction_digest(pending, completed)?;
     insert_model_identity(
         state,
@@ -404,7 +379,7 @@ fn apply_compaction_completed(
     let pending = state
         .pending_model_effect
         .take()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     if let Some(turn) = state.current_turn.as_mut()
         && turn.effect_id == Some(pending.requested.effect_id())
     {
@@ -427,7 +402,7 @@ pub(super) fn index_completed_settlement(
     let pending = state
         .pending_model_effect
         .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     let digest = completed_record_digest(pending, completed, &entry.message)?;
     insert_model_identity(
         state,
@@ -445,7 +420,7 @@ pub(super) fn index_failed_settlement(
     let pending = state
         .pending_model_effect
         .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::ModelSettlementMismatch)?;
     let digest = failed_record_digest(pending, failed)?;
     insert_model_identity(
         state,

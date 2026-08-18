@@ -894,6 +894,23 @@ mod tests {
                 .to_string()
                 .contains("source span")
         );
+        let deep = "[".repeat(RAW_JSON_MAX_DEPTH + 1) + &"]".repeat(RAW_JSON_MAX_DEPTH + 1);
+        assert!(
+            serde_json::from_str::<RawJson>(&deep)
+                .expect_err("raw depth")
+                .to_string()
+                .contains("nesting")
+        );
+        let too_many = (0..=METADATA_MAX_MEMBERS)
+            .map(|i| format!(r#""k{i}":1"#))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            serde_json::from_str::<Metadata>(&format!("{{{too_many}}}"))
+                .expect_err("metadata members")
+                .to_string()
+                .contains("too many metadata members")
+        );
     }
 
     #[test]

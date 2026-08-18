@@ -12,7 +12,7 @@ use crate::primitives::Digest;
 use crate::primitives::{
     AssigneeHint, BudgetReservationId, BudgetScopeId, ComponentId, ComponentRef, EffectId,
     ExternalHandleRef, InteractionId, LimitKey, MessageId, ModelRequestId, RunId, ToolBatchId,
-    ToolCallId, ToolId, TurnId, Version,
+    ToolCallId, TurnId, Version,
 };
 use crate::primitives::{CostAmount, PrincipalRef};
 use crate::primitives::{Duration, Timestamp};
@@ -31,13 +31,11 @@ use crate::records::run::{
     RunAccepted, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext,
 };
 use crate::records::tools::{
-    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, SyntheticToolClosure,
-    ToolBatchClosed, ToolBatchContinuation, ToolBatchOutcome, ToolCallPlan, ToolExecutionMode,
-    ToolFailurePolicy, ValidatedToolCall,
+    ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchClosed, ToolBatchContinuation,
 };
 use crate::state::projection::{
-    ContentProjection, ContentSeq, EffectDeferredProjection, ErrorProjection, MessageSeq,
-    UsageProjection,
+    AssignedToolCallProjection, ContentSeq, EffectDeferredProjection, ErrorProjection, MessageSeq,
+    ToolBatchOutcomeProjection, ToolResultProjection, UsageProjection,
 };
 
 use super::super::{
@@ -214,89 +212,6 @@ impl<'a> From<&'a crate::ToolBatchOpened> for ToolBatchOpenedProjection<'a> {
 }
 
 #[derive(Serialize)]
-struct AssignedToolCallProjection<'a> {
-    source_index: u32,
-    group_index: u32,
-    effect_id: EffectId,
-    plan: ToolCallPlanProjection<'a>,
-}
-
-impl<'a> From<&'a AssignedToolCall> for AssignedToolCallProjection<'a> {
-    fn from(value: &'a AssignedToolCall) -> Self {
-        Self {
-            source_index: value.source_index,
-            group_index: value.group_index,
-            effect_id: value.effect_id,
-            plan: ToolCallPlanProjection::from(&value.plan),
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ToolCallPlanProjection<'a> {
-    Execute(ValidatedToolCallProjection<'a>),
-    SyntheticClosure(Box<SyntheticToolClosureProjection<'a>>),
-}
-
-impl<'a> From<&'a ToolCallPlan> for ToolCallPlanProjection<'a> {
-    fn from(value: &'a ToolCallPlan) -> Self {
-        match value {
-            ToolCallPlan::Execute(call) => Self::Execute(ValidatedToolCallProjection::from(call)),
-            ToolCallPlan::SyntheticClosure(closure) => {
-                Self::SyntheticClosure(Box::new(SyntheticToolClosureProjection::from(closure)))
-            }
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct ValidatedToolCallProjection<'a> {
-    call: &'a crate::ToolCallBlock,
-    tool_id: ToolId,
-    component: Option<&'a ComponentInvocation>,
-    output_contract: &'a crate::EffectOutputContract,
-    retry_safety: crate::RetrySafety,
-    deadline: Option<Timestamp>,
-    execution: ToolExecutionMode,
-    failure_policy: ToolFailurePolicy,
-}
-
-impl<'a> From<&'a ValidatedToolCall> for ValidatedToolCallProjection<'a> {
-    fn from(value: &'a ValidatedToolCall) -> Self {
-        Self {
-            call: &value.call,
-            tool_id: value.tool_id.clone(),
-            component: value.component.as_ref(),
-            output_contract: &value.output_contract,
-            retry_safety: value.retry_safety,
-            deadline: value.deadline,
-            execution: value.execution,
-            failure_policy: value.failure_policy,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct SyntheticToolClosureProjection<'a> {
-    call: &'a crate::ToolCallBlock,
-    execution: ToolExecutionMode,
-    failure_policy: ToolFailurePolicy,
-    error: ErrorProjection<'a>,
-}
-
-impl<'a> From<&'a SyntheticToolClosure> for SyntheticToolClosureProjection<'a> {
-    fn from(value: &'a SyntheticToolClosure) -> Self {
-        Self {
-            call: &value.call,
-            execution: value.execution,
-            failure_policy: value.failure_policy,
-            error: ErrorProjection::from(&value.error),
-        }
-    }
-}
-
-#[derive(Serialize)]
 struct ActiveToolCallProjection<'a> {
     assigned: AssignedToolCallProjection<'a>,
     status: ActiveToolCallStatusProjection<'a>,
@@ -365,27 +280,6 @@ impl<'a> From<&'a ActiveToolCallStatus> for ActiveToolCallStatusProjection<'a> {
 }
 
 #[derive(Serialize)]
-struct ToolResultProjection<'a> {
-    tool_call_id: ToolCallId,
-    content: Vec<ContentProjection<'a>>,
-    is_error: bool,
-}
-
-impl<'a> From<&'a crate::ToolResultBlock> for ToolResultProjection<'a> {
-    fn from(value: &'a crate::ToolResultBlock) -> Self {
-        Self {
-            tool_call_id: *value.tool_call_id(),
-            content: value
-                .content()
-                .iter()
-                .map(ContentProjection::from)
-                .collect(),
-            is_error: value.is_error(),
-        }
-    }
-}
-
-#[derive(Serialize)]
 pub struct ToolBatchClosedProjection<'a> {
     cycle: u64,
     turn_id: TurnId,
@@ -406,26 +300,6 @@ impl<'a> From<&'a ToolBatchClosed> for ToolBatchClosedProjection<'a> {
             result_message_ids: &value.result_message_ids,
             outcome: ToolBatchOutcomeProjection::from(&value.outcome),
             close_digest: value.close_digest,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ToolBatchOutcomeProjection<'a> {
-    ContinueModel,
-    Finalize,
-    Failed { error: Box<ErrorProjection<'a>> },
-}
-
-impl<'a> From<&'a ToolBatchOutcome> for ToolBatchOutcomeProjection<'a> {
-    fn from(value: &'a ToolBatchOutcome) -> Self {
-        match value {
-            ToolBatchOutcome::ContinueModel => Self::ContinueModel,
-            ToolBatchOutcome::Finalize => Self::Finalize,
-            ToolBatchOutcome::Failed { error } => Self::Failed {
-                error: Box::new(ErrorProjection::from(error)),
-            },
         }
     }
 }
@@ -1000,7 +874,7 @@ impl<'a> From<&'a BudgetRequest> for BudgetRequestProjection<'a> {
             input_tokens: value.input_tokens,
             output_tokens: value.output_tokens,
             cost: value.cost.as_ref(),
-            extension_counters: &value.extension_counters,
+            extension_counters: value.extension_counters.as_inner(),
         }
     }
 }

@@ -185,6 +185,47 @@ fn reconcile_cancelled_timer_does_not_start_a_fresh_cycle() {
 }
 
 #[test]
+fn timer_fired_after_uncertain_suspend_is_rejected() {
+    let mut harness = drive_to_sleeping();
+    harness.apply_input(
+        cancellation_env(1_600, &[20], &[], &[800]),
+        KernelInput::CancelRequested(finstack_ai_kernel::CancelRequested {
+            initiator: finstack_ai_kernel::CancellationInitiator::RuntimeShutdown,
+            reason: Some(Arc::from("shutdown")),
+        }),
+    );
+    harness.apply_input(
+        transition_env(1_650, &[21, 22], &[10], &[], &[], &[], &[]),
+        KernelInput::CancellationReconciled(finstack_ai_kernel::CancellationReconciledInput {
+            request_id: id::<finstack_ai_kernel::CancellationRequestTag>(800),
+            completed_effects: Arc::from([]),
+            cancelled_effects: Arc::from([]),
+            uncertain_effects: Arc::from([id::<finstack_ai_kernel::EffectTag>(701)]),
+        }),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::Suspended));
+    let before = harness.kernel.state().clone();
+    assert_error_code(
+        harness.kernel.decide(
+            &empty_env(1_750),
+            KernelInput::TimerFired(finstack_ai_kernel::TimerFiredInput {
+                effect_id: id::<finstack_ai_kernel::EffectTag>(701),
+                due_at: timestamp(1_750),
+                fired_at: timestamp(1_750),
+            }),
+        ),
+        "invalid_phase_input",
+    );
+    assert_eq!(harness.kernel.state(), &before);
+    let replayed = replay(&harness.batches);
+    assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
+    );
+}
+
+#[test]
 fn timer_fired_after_cancel_is_rejected() {
     let mut harness = drive_to_sleeping();
     harness.apply_input(
@@ -444,6 +485,10 @@ fn tool_cancellation_chunks_close_every_call_in_source_order() {
     assert!(harness.kernel.state().active_tool_batch.is_none());
     let replayed = replay(&harness.batches);
     assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
+    );
     assert_termination_golden("valid--pr011-tool-cancel.json", &harness);
 }
 

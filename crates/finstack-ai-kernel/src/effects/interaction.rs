@@ -68,7 +68,8 @@ impl<'de> Deserialize<'de> for InteractionKind {
             Wire::Review => Self::Review,
             Wire::Correction => Self::Correction,
             Wire::Custom { name } => Self::Custom {
-                name: Arc::from(name.into_inner()),
+                name: validated_label(&name.into_inner(), "interaction_kind")
+                    .map_err(de::Error::custom)?,
             },
         })
     }

@@ -240,3 +240,47 @@ fn interaction_request_rejects_empty_assignee_role() {
     .expect_err("empty role");
     assert_eq!(err.code(), "invalid_label");
 }
+
+#[test]
+fn interaction_kind_custom_rejects_empty_and_nul_names() {
+    for invalid in [
+        r#"{"kind":"custom","name":""}"#,
+        "{\"kind\":\"custom\",\"name\":\"a\\u0000b\"}",
+    ] {
+        assert!(
+            serde_json::from_str::<InteractionKind>(invalid).is_err(),
+            "invalid custom interaction kind was accepted: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn interaction_request_rejects_empty_custom_kind_name() {
+    let interaction = InteractionId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id");
+    let effect = EffectId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("id");
+    let err = InteractionRequest::try_new(
+        1,
+        interaction,
+        effect,
+        InteractionKind::Custom {
+            name: Arc::from(""),
+        },
+        vec![],
+        RawJson::parse("{}").expect("schema"),
+        ComponentRef::new(
+            ComponentId::parse("policy.approval").expect("component"),
+            None,
+        ),
+        Version {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        },
+        None,
+        None,
+        false,
+        Metadata::empty(),
+    )
+    .expect_err("empty custom kind");
+    assert_eq!(err.code(), "invalid_label");
+}

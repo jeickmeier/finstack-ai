@@ -105,8 +105,6 @@ impl BudgetError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use crate::{BudgetRequest, LimitKey};
 
     #[test]
@@ -115,18 +113,25 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(20),
             cost: None,
-            extension_counters: BTreeMap::new(),
+            extension_counters: Default::default(),
         };
         let encoded = serde_json::to_vec(&request).expect("JSON");
         let decoded: BudgetRequest = serde_json::from_slice(&encoded).expect("request");
         assert_eq!(request, decoded);
 
         let mut oversized = BudgetRequest::default();
+        let mut counters = serde_json::Map::new();
         for index in 0..=32 {
             let key =
                 LimitKey::parse(format!("finstack.counter.{index}")).expect("namespaced counter");
-            oversized.extension_counters.insert(key, 1);
+            oversized.extension_counters.insert(key.clone(), 1);
+            counters.insert(key.as_str().to_owned(), serde_json::json!(1));
         }
         assert!(oversized.validate().is_err());
+        let encoded = serde_json::to_vec(&serde_json::json!({
+            "extension_counters": counters,
+        }))
+        .expect("oversized JSON");
+        assert!(serde_json::from_slice::<BudgetRequest>(&encoded).is_err());
     }
 }

@@ -652,6 +652,73 @@ fn assert_duplicate(decision: &Decision) {
     );
 }
 
+#[test]
+fn over_limit_settlement_after_model_is_rejected_without_mutation() {
+    let mut limits = RunLimits::empty();
+    limits.max_output_tokens = Some(10);
+    let mut harness = super::termination::drive_to_awaiting_model_with_limits(limits);
+    let legal = finstack_ai_kernel::Usage::try_new(None, Some(4), None, None, BTreeMap::new())
+        .expect("legal usage");
+    harness.apply_input(
+        transition_env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[FINAL_MESSAGE_ONE]),
+        super::termination::completed_input_with_usage(
+            TURN_ONE,
+            MODEL_REQUEST_ONE,
+            EFFECT_ONE,
+            FINAL_MESSAGE_ONE,
+            1_400,
+            "legal-completion",
+            legal,
+        ),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterModel));
+    let before = harness.kernel.state().clone();
+    let before_hash = before.state_hash().expect("live hash");
+    let over = finstack_ai_kernel::Usage::try_new(None, Some(100), None, None, BTreeMap::new())
+        .expect("over-limit usage");
+    assert_error_code(
+        harness.kernel.decide(
+            &empty_env(1_401),
+            super::termination::completed_input_with_usage(
+                TURN_TWO,
+                MODEL_REQUEST_TWO,
+                EFFECT_TWO,
+                FINAL_MESSAGE_TWO,
+                1_401,
+                "late-over-limit",
+                over.clone(),
+            ),
+        ),
+        "invalid_phase_input",
+    );
+    assert_error_code(
+        harness.kernel.decide(
+            &empty_env(1_402),
+            super::termination::completed_input_with_usage(
+                TURN_ONE,
+                MODEL_REQUEST_ONE,
+                EFFECT_ONE,
+                FINAL_MESSAGE_TWO,
+                1_402,
+                "legal-completion",
+                over,
+            ),
+        ),
+        "conflicting_completion_id",
+    );
+    assert_eq!(harness.kernel.state(), &before);
+    assert_eq!(
+        harness.kernel.state().state_hash().expect("unchanged hash"),
+        before_hash
+    );
+    let replayed = replay(&harness.batches);
+    assert_eq!(harness.kernel.state(), replayed.state());
+    assert_eq!(
+        harness.kernel.state().state_hash().expect("live hash"),
+        replayed.state().state_hash().expect("replay hash")
+    );
+}
+
 fn set_external_output(input: &mut KernelInput, json: &str) {
     let KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
         completion:

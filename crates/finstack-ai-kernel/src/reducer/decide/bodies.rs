@@ -61,11 +61,12 @@ pub(super) fn requested_model_bodies(
     if output_contract.kind != EffectOutputKind::ModelResponse {
         return Err(KernelError::ModelRequestContractMismatch);
     }
-    let turn_id = state
-        .current_turn
-        .as_ref()
-        .map(|turn| turn.turn_id)
-        .ok_or(KernelError::InvariantViolation)?;
+    let turn_id = state.current_turn.as_ref().map(|turn| turn.turn_id).ok_or(
+        KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "stage_settled",
+        },
+    )?;
     let model_request_id = required(env.ids.model_request_ids(), 0, "model_request_ids")?;
     let effect_id = required(env.ids.effect_ids(), 0, "effect_ids")?;
     let requested = EffectRequested::try_new(

@@ -156,7 +156,7 @@ pub enum ModelSettlementKind {
 pub struct ModelSettlementFingerprint {
     /// Terminal settlement kind.
     pub kind: ModelSettlementKind,
-    /// Domain-separated `model-settlement` digest (fingerprint schema 1).
+    /// Domain-separated `model-settlement` digest.
     pub digest: Digest,
 }
 

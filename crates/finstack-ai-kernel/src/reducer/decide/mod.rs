@@ -6,6 +6,7 @@ mod external;
 mod limit;
 mod model;
 mod output;
+mod precheck;
 mod shared;
 mod stage;
 
@@ -28,6 +29,7 @@ use external::decide_external_command_rejected;
 use limit::decide_limit;
 use model::{decide_external, decide_model, decide_request_compaction_model};
 use output::{decide_capabilities_activated, decide_configure_output, decide_output_validated};
+use precheck::precheck;
 use stage::{decide_accept, decide_stage};
 
 pub(super) use shared::{
@@ -66,6 +68,7 @@ pub(super) fn decide(
     if let Some(decision) = equal_committed_redelivery(state, &input)? {
         return Ok(decision);
     }
+    precheck(state, &input)?;
     if let Some(decision) = decide_limit(state, env, &input, context_canonical)? {
         return Ok(decision);
     }
@@ -106,9 +109,7 @@ fn equal_committed_redelivery(
 ) -> Result<Option<Decision>, KernelError> {
     match input {
         KernelInput::StageSettled(input) => {
-            let Ok(digest) = stage_digest(input) else {
-                return Ok(None);
-            };
+            let digest = stage_digest(input)?;
             equal_index_duplicate(
                 state,
                 state.stage_settlements.get(&input.cursor).copied(),
@@ -116,9 +117,7 @@ fn equal_committed_redelivery(
             )
         }
         KernelInput::ModelSettled(input) => {
-            let Ok(digest) = direct_digest(input) else {
-                return Ok(None);
-            };
+            let digest = direct_digest(input)?;
             if let Some(decision) = equal_completion_or_model_duplicate(
                 state,
                 model_settlement_completion_id(&input.outcome),
@@ -130,9 +129,7 @@ fn equal_committed_redelivery(
             equal_model_deferred_duplicate(state, input, digest)
         }
         KernelInput::ToolBatchSettled(input) => {
-            let Ok(digest) = direct_tool_digest(input.tool_batch_id, &input.outcome) else {
-                return Ok(None);
-            };
+            let digest = direct_tool_digest(input.tool_batch_id, &input.outcome)?;
             if let Some(decision) = equal_completion_or_tool_duplicate(
                 state,
                 tool_settlement_completion_id(&input.outcome),
@@ -147,9 +144,7 @@ fn equal_committed_redelivery(
             equal_external_completion_duplicate(state, input)
         }
         KernelInput::InteractionSettled(InteractionSettled::Resolved(resolution)) => {
-            let Ok(digest) = resolution_digest(resolution) else {
-                return Ok(None);
-            };
+            let digest = resolution_digest(resolution)?;
             equal_index_duplicate(
                 state,
                 state
@@ -169,6 +164,11 @@ fn equal_external_completion_duplicate(
 ) -> Result<Option<Decision>, KernelError> {
     let effect_id = input.completion.effect_id;
     let completion_id = input.completion.completion_id.as_ref();
+    if let Some(existing) = state.completion_identities.get(completion_id)
+        && existing.effect_id != effect_id
+    {
+        return Err(KernelError::ConflictingCompletionId);
+    }
     if is_known_tool_effect(state, effect_id) {
         let Some(tool_batch_id) = state
             .active_tool_batch
@@ -184,14 +184,10 @@ fn equal_external_completion_duplicate(
         else {
             return Ok(None);
         };
-        let Ok(digest) = external_tool_digest(tool_batch_id, input) else {
-            return Ok(None);
-        };
+        let digest = external_tool_digest(tool_batch_id, input)?;
         return equal_completion_or_tool_duplicate(state, Some(completion_id), effect_id, digest);
     }
-    let Ok(digest) = external_digest(input) else {
-        return Ok(None);
-    };
+    let digest = external_digest(input)?;
     equal_completion_or_model_duplicate(state, Some(completion_id), effect_id, digest)
 }
 
@@ -280,13 +276,11 @@ fn equal_model_deferred_duplicate(
     let Some(existing) = pending.deferred.as_ref() else {
         return Ok(None);
     };
-    let Ok(existing_digest) = direct_digest(&ModelSettled {
+    let existing_digest = direct_digest(&ModelSettled {
         turn_id: pending.turn_id,
         model_request_id: pending.model_request_id,
         outcome: ModelSettlement::Deferred(existing.clone()),
-    }) else {
-        return Ok(None);
-    };
+    })?;
     if existing_digest == digest {
         duplicate_decision(state).map(Some)
     } else {
@@ -319,12 +313,10 @@ fn equal_tool_deferred_duplicate(
     else {
         return Ok(None);
     };
-    let Ok(existing_digest) = direct_tool_digest(
+    let existing_digest = direct_tool_digest(
         input.tool_batch_id,
         &ToolSettlement::Deferred(existing.clone()),
-    ) else {
-        return Ok(None);
-    };
+    )?;
     if existing_digest == digest {
         duplicate_decision(state).map(Some)
     } else {

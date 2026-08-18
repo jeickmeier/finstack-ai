@@ -68,6 +68,35 @@ pub enum RunEventKind {
 }
 
 impl RunEventKind {
+    /// Section 20.2.1 kind string (`snake_case` wire name).
+    #[must_use]
+    pub const fn kind_name(self) -> &'static str {
+        match self {
+            Self::RunAccepted => "run_accepted",
+            Self::EffectRequested => "effect_requested",
+            Self::EffectDeferred => "effect_deferred",
+            Self::EffectCompleted => "effect_completed",
+            Self::EffectFailed => "effect_failed",
+            Self::EffectCancelled => "effect_cancelled",
+            Self::InteractionRequested => "interaction_requested",
+            Self::InteractionResolved => "interaction_resolved",
+            Self::InteractionExpired => "interaction_expired",
+            Self::InteractionCancelled => "interaction_cancelled",
+            Self::MessageFinalized => "message_finalized",
+            Self::ToolSettled => "tool_settled",
+            Self::LimitReached => "limit_reached",
+            Self::RunSuspended => "run_suspended",
+            Self::RunCompleted => "run_completed",
+            Self::RunFailed => "run_failed",
+            Self::RunCancelled => "run_cancelled",
+            Self::ModelTextDelta => "model_text_delta",
+            Self::ReasoningDelta => "reasoning_delta",
+            Self::ToolProgress => "tool_progress",
+            Self::QueueDepthWarning => "queue_depth_warning",
+            Self::ProviderHeartbeat => "provider_heartbeat",
+        }
+    }
+
     /// Semantic class for this kind.
     #[must_use]
     pub const fn class(self) -> RunEventClass {

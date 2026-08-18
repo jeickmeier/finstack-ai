@@ -9,13 +9,13 @@ use crate::records::tools::{
     AssignedToolCall, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome,
 };
 use crate::state::projection::{
-    ArtifactSeq, EffectCompletedProjection, EffectDeferredProjection, EffectFailedProjection,
-    ErrorProjection, UsageProjection,
+    ArtifactSeq, AssignedToolCallProjection, EffectCompletedProjection, EffectDeferredProjection,
+    EffectFailedProjection, ErrorProjection, ToolBatchOutcomeProjection, ToolResultProjection,
+    UsageProjection,
 };
 
 use super::types::{
-    AssignedToolCallFingerprintV1, ToolBatchCloseFingerprintV1, ToolBatchOutcomeFingerprintV1,
-    ToolBatchPlanFingerprintV1, ToolResultFingerprintV1, ToolSettlementFingerprintV1,
+    ToolBatchCloseFingerprintV1, ToolBatchPlanFingerprintV1, ToolSettlementFingerprintV1,
 };
 
 pub fn tool_batch_plan_digest(
@@ -33,10 +33,7 @@ pub fn tool_batch_plan_digest(
             turn_id,
             tool_batch_id,
             source_message_id,
-            calls: calls
-                .iter()
-                .map(AssignedToolCallFingerprintV1::from)
-                .collect(),
+            calls: calls.iter().map(AssignedToolCallProjection::from).collect(),
             continuation,
         },
     )
@@ -114,7 +111,7 @@ pub fn synthetic_tool_digest(
             tool_batch_id,
             tool_call_id,
             effect_id,
-            result: ToolResultFingerprintV1::from(result),
+            result: ToolResultProjection::from(result),
             error: ErrorProjection::from(error),
         },
     )
@@ -184,7 +181,7 @@ pub fn tool_batch_close_digest(
             tool_batch_id,
             source_message_id,
             result_message_ids,
-            outcome: ToolBatchOutcomeFingerprintV1::from(outcome),
+            outcome: ToolBatchOutcomeProjection::from(outcome),
         },
     )
 }

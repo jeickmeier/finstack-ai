@@ -46,13 +46,13 @@ pub fn draft_for_state(
     env: &TransitionEnv,
     bodies: Vec<RecordBody>,
 ) -> Result<Vec<RecordDraft>, KernelError> {
-    let session_id = state.session_id.ok_or(KernelError::InvariantViolation)?;
-    let lane_id = state.lane_id.ok_or(KernelError::InvariantViolation)?;
+    let session_id = state.session_id.ok_or(KernelError::InvalidRunAcceptance)?;
+    let lane_id = state.lane_id.ok_or(KernelError::InvalidRunAcceptance)?;
     let run_id = state
         .accepted
         .as_ref()
         .map(crate::records::run::RunAccepted::run_id)
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidRunAcceptance)?;
     let mut event_index = 0;
     let mut records = Vec::with_capacity(bodies.len());
     for (record_index, body) in bodies.into_iter().enumerate() {

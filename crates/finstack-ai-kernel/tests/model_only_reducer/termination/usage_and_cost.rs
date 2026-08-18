@@ -47,21 +47,18 @@ fn missing_cost_usage_obeys_fail_closed_and_suspend_policies() {
         assert_eq!(decision.records[0].body().kind_name(), expected_kind);
         assert!(decision.actions.is_empty());
         if policy == finstack_ai_kernel::UnknownUsagePolicy::AllowWithinReservedMaximum {
-            let cost = harness
-                .kernel
-                .state()
-                .limit_usage
-                .cost
-                .as_ref()
-                .expect("reserved maximum");
-            assert_eq!(cost.unit(), "USD");
-            assert_eq!(cost.micros(), 1_000_000);
-            assert_eq!(cost.pricing_policy_version(), "prices-v1");
+            assert!(harness.kernel.state().limit_usage.cost.is_none());
             assert!(
                 !decision
                     .records
                     .iter()
                     .any(|record| matches!(record.body(), RecordBody::RunFailed(_)))
+            );
+            let replayed = replay(&harness.batches);
+            assert_eq!(replayed.state(), harness.kernel.state());
+            assert_eq!(
+                replayed.state().state_hash().expect("replay hash"),
+                harness.kernel.state().state_hash().expect("live hash")
             );
         }
     }
@@ -279,5 +276,162 @@ fn checked_extension_counter_overflow_fails_without_limit_reached() {
             .records
             .iter()
             .any(|record| matches!(record.body(), RecordBody::LimitReached(_)))
+    );
+}
+
+#[test]
+fn structural_apply_does_not_charge_completed_usage() {
+    let mut limits = RunLimits::empty();
+    limits.max_cost = Some(
+        finstack_ai_kernel::CostLimit::try_new(
+            "USD",
+            1_000_000,
+            "prices-v1",
+            finstack_ai_kernel::UnknownUsagePolicy::AllowWithinReservedMaximum,
+        )
+        .expect("cost limit"),
+    );
+    let mut harness = drive_to_awaiting_model_with_limits(limits);
+    harness.apply_input(
+        transition_env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[FINAL_MESSAGE_ONE]),
+        completed_input(
+            TURN_ONE,
+            MODEL_REQUEST_ONE,
+            EFFECT_ONE,
+            FINAL_MESSAGE_ONE,
+            1_400,
+            "structural-cost",
+            "hello",
+        ),
+    );
+    let before_cost = harness.kernel.state().limit_usage.cost.clone();
+    assert!(before_cost.is_none());
+    let next = harness
+        .kernel
+        .state()
+        .last_applied_sequence
+        .checked_add(1)
+        .expect("next sequence");
+    let record = RecordEnvelope::try_new(
+        RECORD_FORMAT_VERSION,
+        RECORD_KIND_VERSION,
+        id::<finstack_ai_kernel::RecordTag>(9_001),
+        id::<finstack_ai_kernel::SessionTag>(SESSION),
+        id::<finstack_ai_kernel::LaneTag>(LANE),
+        None,
+        next,
+        timestamp(1_500),
+        None,
+        Digest::raw_json(b"payload"),
+        None,
+        Digest::raw_json(b"checksum"),
+        vec![],
+        RecordBody::LaneCreated(finstack_ai_kernel::LaneCreated::try_new("research").expect("lane")),
+    )
+    .expect("structural envelope");
+    let batch = CommittedBatch::try_new(
+        id::<finstack_ai_kernel::AppendBatchTag>(9_002),
+        next,
+        next,
+        vec![record],
+    )
+    .expect("structural batch");
+    let first_transient = u64::try_from(harness.events.len()).expect("events");
+    harness
+        .kernel
+        .apply(&batch, first_transient)
+        .expect("structural apply");
+    harness.batches.push(batch);
+    assert_eq!(harness.kernel.state().limit_usage.cost, before_cost);
+    let replayed = replay(&harness.batches);
+    assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
+    );
+}
+
+#[test]
+fn costless_allow_fails_when_accrued_already_equals_maximum() {
+    let mut limits = RunLimits::empty();
+    limits.max_cost = Some(
+        finstack_ai_kernel::CostLimit::try_new(
+            "USD",
+            1_000_000,
+            "prices-v1",
+            finstack_ai_kernel::UnknownUsagePolicy::AllowWithinReservedMaximum,
+        )
+        .expect("cost limit"),
+    );
+    let mut harness = drive_to_awaiting_model_with_limits(limits);
+    let exact = finstack_ai_kernel::Usage::try_new(
+        None,
+        None,
+        None,
+        Some(finstack_ai_kernel::CostAmount::try_new("USD", 1_000_000, "prices-v1").expect("cost")),
+        BTreeMap::new(),
+    )
+    .expect("usage");
+    harness.apply_input(
+        transition_env(1_400, &[7, 8], &[3, 4], &[], &[], &[], &[FINAL_MESSAGE_ONE]),
+        completed_input_with_usage(
+            TURN_ONE,
+            MODEL_REQUEST_ONE,
+            EFFECT_ONE,
+            FINAL_MESSAGE_ONE,
+            1_400,
+            "exact-cost",
+            exact,
+        ),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterModel));
+    let accrued = harness
+        .kernel
+        .state()
+        .limit_usage
+        .cost
+        .as_ref()
+        .expect("observed cost");
+    assert_eq!(accrued.micros(), 1_000_000);
+    settle_after_model(&mut harness, 0, false);
+    harness.apply_input(
+        transition_env(2_000, &[12], &[], &[], &[], &[], &[]),
+        stage_input(
+            0,
+            Stage::BeforeFinalize,
+            ReducerStageOutcome::ContinueModel { reason: None },
+        ),
+    );
+    prepare_context(&mut harness, 1, true);
+    request_model(&mut harness, 1, true);
+    let decision = harness.apply_input(
+        transition_env(2_300, &[17], &[7], &[], &[], &[], &[]),
+        completed_input(
+            TURN_TWO,
+            MODEL_REQUEST_TWO,
+            EFFECT_TWO,
+            FINAL_MESSAGE_TWO,
+            2_300,
+            "costless-after-max",
+            "hello",
+        ),
+    );
+    let RecordBody::RunFailed(failed) = decision.records[0].body() else {
+        panic!("exhausted headroom must fail without a fabricated charge");
+    };
+    assert_eq!(failed.error.code.as_str(), "unknown_cost_usage");
+    assert_eq!(failed.error.category, ErrorCategory::Limit);
+    assert!(!failed.error.retryable);
+    assert!(
+        !decision
+            .records
+            .iter()
+            .any(|record| matches!(record.body(), RecordBody::LimitReached(_)))
+    );
+    let replayed = replay(&harness.batches);
+    assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
     );
 }

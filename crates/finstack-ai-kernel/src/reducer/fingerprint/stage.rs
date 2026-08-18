@@ -7,11 +7,10 @@ use crate::primitives::Digest;
 use crate::records::lifecycle::{
     ContextPrepared, StageCursor, StageDisposition, StageOutcomeRecorded,
 };
-use crate::state::projection::{ErrorProjection, MessageSeq};
+use crate::state::projection::{ErrorProjection, MessageSeq, ToolCallPlanProjection};
 
 use super::types::{
     ModelRequestPreparedFingerprintV1, StageFailFingerprintV1, StageSettlementFingerprintV1,
-    ToolCallPlanFingerprintV1,
 };
 
 pub fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
@@ -46,7 +45,7 @@ pub fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
             continuation,
         } => StageSettlementFingerprintV1::ToolBatchPrepared {
             cursor: input.cursor,
-            calls: calls.iter().map(ToolCallPlanFingerprintV1::from).collect(),
+            calls: calls.iter().map(ToolCallPlanProjection::from).collect(),
             continuation: *continuation,
         },
         ReducerStageOutcome::FinalizeAccepted => StageSettlementFingerprintV1::FinalizeAccepted {
@@ -109,7 +108,7 @@ pub fn stage_record_digest(
                 calls: opened
                     .calls
                     .iter()
-                    .map(|assigned| ToolCallPlanFingerprintV1::from(&assigned.plan))
+                    .map(|assigned| ToolCallPlanProjection::from(&assigned.plan))
                     .collect(),
                 continuation: opened.continuation,
             }

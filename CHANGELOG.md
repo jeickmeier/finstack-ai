@@ -59,12 +59,25 @@ unpublished.
 
 ### Changed
 
+- `UnknownUsagePolicy::AllowWithinReservedMaximum` records no fabricated
+  observed cost. A costless completion fails only when accrued cost is
+  already at or above the configured maximum (`unknown_cost_usage`).
+  Exact observed equality still does not terminate. TDD 0.20.
+- `BudgetRequest.extension_counters` is a `BoundedMap` (32-entry
+  deserialize ceiling). Source-breaking; 1.0.0 pre-publication; no ADR;
+  no major bump.
+- Kernel state-hash `ContentProjection::ToolCall` now includes
+  `provider_call_id`. Existing seven pinned kernel-state hashes are unchanged;
+  `valid--tool-call-hash.json` pins the new tool-call-bearing digest.
 - Official OpenAI integration now uses stateless Responses requests through
   `finstack-ai-provider-openai` and Python `Agent.openai`. Ollama now uses its
   native `/api/chat` protocol through `finstack-ai-provider-ollama`.
 
 ### Removed
 
+- Removed unused inherent methods `RecordDraft::validate_run_lineage` and
+  `OperationSummary::invocation_effect_id` (1.0.0 pre-publication; no major
+  bump). Callers read `RunRelation::parent_effect_id` directly.
 - Removed the generic OpenAI-compatible Chat Completions crate, Python factory,
   browser adapter, and vLLM/LM Studio/gateway endpoint surface. This breaking
   migration remains unpublished.

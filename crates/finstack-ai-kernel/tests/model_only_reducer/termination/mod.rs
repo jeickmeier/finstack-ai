@@ -12,7 +12,7 @@ fn accept_with(harness: &mut Harness, limits: RunLimits, deadline: Option<Timest
     );
 }
 
-fn completed_input_with_usage(
+pub(super) fn completed_input_with_usage(
     turn_ordinal: u64,
     request_ordinal: u64,
     effect_ordinal: u64,
@@ -41,7 +41,7 @@ fn completed_input_with_usage(
     })
 }
 
-fn drive_to_awaiting_model_with_limits(limits: RunLimits) -> Harness {
+pub(super) fn drive_to_awaiting_model_with_limits(limits: RunLimits) -> Harness {
     let mut harness = Harness::default();
     accept_with(&mut harness, limits, None);
     settle_before_run(&mut harness);

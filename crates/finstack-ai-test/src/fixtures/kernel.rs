@@ -1,9 +1,11 @@
 //! Public-API compatibility fixtures for PR-009 through PR-014 reducer contracts.
 
 use finstack_ai_kernel::{
-    APPEND_BATCH_MAX_RECORDS, CommittedBatch, ExternalCommandRejected,
+    APPEND_BATCH_MAX_RECORDS, CommittedBatch, ContentBlock, ExternalCommandRejected,
     ExternalEffectCompletionCommand, InteractionResolutionCommand, Kernel, KernelInput,
-    KernelState, OperationLocator, RECORD_KIND_VERSION, RecordEnvelope, RunEvent, RunPhase,
+    KernelState, Message, MessageRole, Metadata, OperationLocator, ProviderIds,
+    RECORD_KIND_VERSION, RawJson, RecordEnvelope, RunEvent, RunPhase, ToolCallBlock,
+    ToolCallIdentity, ToolCallTag,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -539,6 +541,7 @@ fn run_kernel_state(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureEr
                 .map_err(|error| fail(error.to_string()))?
                 .kernel_state
         }
+        "tool_call_hash" => tool_call_bearing_state()?,
         other => match accepted_hash_version(other) {
             Some(version) => representative_accepted_state(fixture, version)?,
             None => return Err(fail(format!("unsupported kernel-state operation {other}"))),
@@ -604,6 +607,43 @@ fn representative_accepted_state(
         lane_id: Some(oracle_id::<finstack_ai_kernel::LaneTag>(2)),
         accepted: Some(oracle_root_acceptance()?),
         accepted_at,
+        ..KernelState::default()
+    })
+}
+
+fn tool_call_bearing_state() -> Result<KernelState, PublicApiFixtureError> {
+    let source_message_id = oracle_id::<finstack_ai_kernel::MessageTag>(902);
+    let turn_id = oracle_id::<finstack_ai_kernel::TurnTag>(903);
+    let call = ToolCallBlock::try_new_with_provider_call_id(
+        oracle_id::<ToolCallTag>(901),
+        "lookup_price",
+        RawJson::parse(r#"{"q":1}"#).map_err(|error| fail(error.to_string()))?,
+        Some("call-provider-1"),
+    )
+    .map_err(|error| fail(error.to_string()))?;
+    let identity = ToolCallIdentity {
+        cycle: 0,
+        turn_id,
+        source_message_id,
+        tool_batch_id: None,
+        effect_id: None,
+        call: call.clone(),
+    };
+    let message = Message::try_new(
+        source_message_id,
+        MessageRole::Assistant,
+        vec![ContentBlock::ToolCall(call.clone())],
+        finstack_ai_kernel::Timestamp::from_unix_ms(4_000)
+            .map_err(|error| fail(error.to_string()))?,
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .map_err(|error| fail(error.to_string()))?;
+    Ok(KernelState {
+        state_version: 2,
+        messages: std::sync::Arc::new(vec![message]),
+        tool_calls: [(*call.tool_call_id(), identity)].into_iter().collect(),
         ..KernelState::default()
     })
 }

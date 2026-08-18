@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::StageCursor;
 use crate::content::ContentBlock;
-use crate::primitives::{EffectId, ToolCallId};
+use crate::primitives::{BudgetReservationId, EffectId, ToolCallId};
 use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::records::{RecordBody, RecordEnvelope};
 use crate::state::KernelState;
@@ -21,8 +21,16 @@ pub(super) struct StateGrowth<'a> {
     pub tool_calls: &'a [ToolCallId],
     pub tool_settlements: &'a [EffectId],
     pub extra_tool_settlements: usize,
+    pub timer_firings: Option<EffectId>,
+    pub child_preparations: Option<EffectId>,
+    pub budget_reservations: Option<BudgetReservationId>,
+    pub budget_charges: Option<EffectId>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "decision preflight keeps every semantic collection ceiling in one fail-closed pass"
+)]
 pub(super) fn preflight_decision(
     state: &KernelState,
     growth: StateGrowth<'_>,
@@ -99,6 +107,46 @@ pub(super) fn preflight_decision(
         state.tool_settlements.len(),
         tool_settlement_growth,
         SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "timer_firings",
+        state.retry.timer_firings.len(),
+        usize::from(
+            growth
+                .timer_firings
+                .is_some_and(|key| !state.retry.timer_firings.contains_key(&key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "child_preparations",
+        state.child_preparations.len(),
+        usize::from(
+            growth
+                .child_preparations
+                .is_some_and(|key| !state.child_preparations.contains_key(&key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "budget_reservations",
+        state.budget_reservations.len(),
+        usize::from(
+            growth
+                .budget_reservations
+                .is_some_and(|key| !state.budget_reservations.contains_key(&key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "budget_charges",
+        state.budget_charges.len(),
+        usize::from(
+            growth
+                .budget_charges
+                .is_some_and(|key| !state.budget_charges.contains_key(&key)),
+        ),
+        SEMANTIC_MAP_MAX_ENTRIES,
     )
 }
 
@@ -117,6 +165,10 @@ pub(super) fn preflight_batch(
     let mut resolution_keys = BTreeSet::new();
     let mut tool_call_keys = BTreeSet::new();
     let mut tool_settlement_keys = BTreeSet::new();
+    let mut timer_firing_keys = BTreeSet::new();
+    let mut child_preparation_keys = BTreeSet::new();
+    let mut budget_reservation_keys = BTreeSet::new();
+    let mut budget_charge_keys = BTreeSet::new();
     for record in records {
         match record.body() {
             RecordBody::StageOutcomeRecorded(outcome) => {
@@ -162,6 +214,35 @@ pub(super) fn preflight_batch(
                     && !state.completion_identities.contains_key(id)
                 {
                     completion_keys.insert(id);
+                }
+            }
+            RecordBody::TimerFired(fired) => {
+                if !state.retry.timer_firings.contains_key(&fired.effect_id) {
+                    timer_firing_keys.insert(fired.effect_id);
+                }
+            }
+            RecordBody::ChildRunPrepared(prepared) => {
+                if !state
+                    .child_preparations
+                    .contains_key(&prepared.parent_effect_id)
+                {
+                    child_preparation_keys.insert(prepared.parent_effect_id);
+                }
+            }
+            RecordBody::BudgetReservationRequested(requested) => {
+                if !state
+                    .budget_reservations
+                    .contains_key(&requested.request.reservation_id)
+                {
+                    budget_reservation_keys.insert(requested.request.reservation_id);
+                }
+            }
+            RecordBody::BudgetChargeRecorded(charged) => {
+                if !state
+                    .budget_charges
+                    .contains_key(&charged.receipt.effect_id)
+                {
+                    budget_charge_keys.insert(charged.receipt.effect_id);
                 }
             }
             RecordBody::EffectFailed(value) => {
@@ -224,6 +305,30 @@ pub(super) fn preflight_batch(
         state.tool_settlements.len(),
         tool_settlement_keys.len(),
         SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "timer_firings",
+        state.retry.timer_firings.len(),
+        timer_firing_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "child_preparations",
+        state.child_preparations.len(),
+        child_preparation_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "budget_reservations",
+        state.budget_reservations.len(),
+        budget_reservation_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
+    )?;
+    check(
+        "budget_charges",
+        state.budget_charges.len(),
+        budget_charge_keys.len(),
+        SEMANTIC_MAP_MAX_ENTRIES,
     )
 }
 
@@ -269,6 +374,10 @@ mod tests {
             ("stage_settlements", SEMANTIC_MAP_MAX_ENTRIES),
             ("model_settlements", SEMANTIC_MAP_MAX_ENTRIES),
             ("completion_identities", SEMANTIC_MAP_MAX_ENTRIES),
+            ("timer_firings", SEMANTIC_MAP_MAX_ENTRIES),
+            ("child_preparations", SEMANTIC_MAP_MAX_ENTRIES),
+            ("budget_reservations", SEMANTIC_MAP_MAX_ENTRIES),
+            ("budget_charges", SEMANTIC_MAP_MAX_ENTRIES),
         ] {
             assert_eq!(check(field, maximum, 0, maximum), Ok(()));
             assert_eq!(
@@ -690,6 +799,269 @@ mod tests {
         bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
         ToolCallId::from_bytes(bytes)
+    }
+
+    #[test]
+    fn four_map_preflight_allows_duplicates_and_rejects_one_over() {
+        let state = four_map_capacity_state();
+        let duplicate = StateGrowth {
+            timer_firings: Some(full_timer_key()),
+            child_preparations: Some(full_child_key()),
+            budget_reservations: Some(full_reservation_key()),
+            budget_charges: Some(full_charge_key()),
+            ..StateGrowth::default()
+        };
+        assert_eq!(preflight_decision(&state, duplicate), Ok(()));
+
+        let mut one_below = state.clone();
+        one_below.retry.timer_firings.remove(&full_timer_key());
+        one_below.child_preparations.remove(&full_child_key());
+        one_below
+            .budget_reservations
+            .remove(&full_reservation_key());
+        one_below.budget_charges.remove(&full_charge_key());
+        assert_eq!(preflight_decision(&one_below, duplicate), Ok(()));
+
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    timer_firings: Some(effect_id(20_000)),
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "timer_firings"
+            })
+        );
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    child_preparations: Some(effect_id(20_001)),
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "child_preparations"
+            })
+        );
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    budget_reservations: Some(reservation_id(20_002)),
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "budget_reservations"
+            })
+        );
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    budget_charges: Some(effect_id(20_003)),
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "budget_charges"
+            })
+        );
+    }
+
+    #[test]
+    fn four_map_preflight_reports_field_precedence() {
+        let state = four_map_capacity_state();
+        let error = preflight_decision(
+            &state,
+            StateGrowth {
+                timer_firings: Some(effect_id(20_000)),
+                child_preparations: Some(effect_id(20_001)),
+                budget_reservations: Some(reservation_id(20_002)),
+                budget_charges: Some(effect_id(20_003)),
+                ..StateGrowth::default()
+            },
+        )
+        .expect_err("compound four-map growth reports the first overflowing field");
+        assert_eq!(
+            error,
+            KernelError::StateCapacityExceeded {
+                field: "timer_firings"
+            }
+        );
+    }
+
+    #[test]
+    fn preflight_decision_timer_bound_rejects_unhashable_growth() {
+        let state = four_map_capacity_state();
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    timer_firings: Some(full_timer_key()),
+                    ..StateGrowth::default()
+                },
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            preflight_decision(
+                &state,
+                StateGrowth {
+                    timer_firings: Some(effect_id(20_000)),
+                    ..StateGrowth::default()
+                },
+            ),
+            Err(KernelError::StateCapacityExceeded {
+                field: "timer_firings"
+            })
+        );
+    }
+
+    fn four_map_capacity_state() -> KernelState {
+        KernelState {
+            retry: crate::RetryState {
+                timer_firings: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                    .map(|ordinal| {
+                        let effect_id =
+                            effect_id(u64::try_from(ordinal + 800).expect("ordinal fits u64"));
+                        (
+                            effect_id,
+                            crate::TimerFired {
+                                effect_id,
+                                due_at: Timestamp::from_unix_ms(1_000).expect("due"),
+                                fired_at: Timestamp::from_unix_ms(1_000).expect("fired"),
+                            },
+                        )
+                    })
+                    .collect(),
+                ..crate::RetryState::default()
+            },
+            child_preparations: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                .map(|ordinal| {
+                    let ordinal = u64::try_from(ordinal).expect("ordinal fits u64");
+                    let prepared = child_prepared(ordinal);
+                    (prepared.parent_effect_id, prepared)
+                })
+                .collect(),
+            budget_reservations: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                .map(|ordinal| {
+                    let ordinal = u64::try_from(ordinal).expect("ordinal fits u64");
+                    let replay = budget_replay(ordinal);
+                    (replay.request.reservation_id, replay)
+                })
+                .collect(),
+            budget_charges: (0..SEMANTIC_MAP_MAX_ENTRIES)
+                .map(|ordinal| {
+                    let ordinal = u64::try_from(ordinal + 900).expect("ordinal fits u64");
+                    (
+                        effect_id(ordinal),
+                        crate::BudgetChargeReceipt {
+                            scope_id: scope_id(ordinal),
+                            reservation_id: reservation_id(ordinal),
+                            effect_id: effect_id(ordinal),
+                            charged_usage: crate::Usage::empty(),
+                            cumulative_usage: crate::Usage::empty(),
+                            usage_digest: Digest::raw_json(b"usage"),
+                            receipt_digest: Digest::raw_json(b"charge"),
+                        },
+                    )
+                })
+                .collect(),
+            ..KernelState::default()
+        }
+    }
+
+    fn full_timer_key() -> EffectId {
+        effect_id(800)
+    }
+
+    fn full_child_key() -> EffectId {
+        effect_id(1_000)
+    }
+
+    fn full_reservation_key() -> crate::BudgetReservationId {
+        reservation_id(0)
+    }
+
+    fn full_charge_key() -> EffectId {
+        effect_id(900)
+    }
+
+    fn child_prepared(ordinal: u64) -> crate::ChildRunPrepared {
+        let parent_run = run_id(ordinal);
+        crate::ChildRunPrepared {
+            parent_run_id: parent_run,
+            parent_effect_id: effect_id(ordinal + 1_000),
+            child: crate::ChildRunLocator {
+                operation: crate::OperationLocator::try_new(
+                    "tenant-a",
+                    session_id(ordinal),
+                    lane_id(ordinal),
+                    run_id(ordinal + 50_000),
+                )
+                .expect("child locator"),
+                remote: None,
+            },
+            request_digest: Digest::raw_json(b"child-request"),
+            placement: crate::ChildPlacement::CompatibleLaneInParentSession,
+            budget_reservation_id: None,
+        }
+    }
+
+    fn budget_replay(ordinal: u64) -> crate::BudgetReservationReplay {
+        let reservation_id = reservation_id(ordinal);
+        let run_id = run_id(ordinal + 50_000);
+        let amount = crate::BudgetRequest::default();
+        let request_digest = crate::BudgetReserveRequest::compute_digest(
+            scope_id(ordinal),
+            reservation_id,
+            run_id,
+            &amount,
+        )
+        .expect("request digest");
+        crate::BudgetReservationReplay {
+            request: crate::BudgetReserveRequest {
+                scope_id: scope_id(ordinal),
+                reservation_id,
+                run_id,
+                amount,
+                request_digest,
+            },
+            settlement: None,
+            release: None,
+        }
+    }
+
+    fn reservation_id(ordinal: u64) -> crate::BudgetReservationId {
+        typed_id(ordinal)
+    }
+
+    fn scope_id(ordinal: u64) -> crate::BudgetScopeId {
+        typed_id(ordinal)
+    }
+
+    fn run_id(ordinal: u64) -> RunId {
+        typed_id(ordinal)
+    }
+
+    fn session_id(ordinal: u64) -> SessionId {
+        typed_id(ordinal)
+    }
+
+    fn lane_id(ordinal: u64) -> LaneId {
+        typed_id(ordinal)
+    }
+
+    fn typed_id<T: crate::IdTag>(ordinal: u64) -> crate::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        crate::Id::from_bytes(bytes)
     }
 
     fn tool_call_identity(ordinal: u64) -> ToolCallIdentity {

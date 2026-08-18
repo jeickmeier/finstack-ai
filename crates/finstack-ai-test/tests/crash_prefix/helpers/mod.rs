@@ -880,7 +880,7 @@ pub(crate) fn reserve_request() -> BudgetReserveRequest {
         input_tokens: Some(1_000),
         output_tokens: Some(250),
         cost: None,
-        extension_counters: BTreeMap::new(),
+        extension_counters: Default::default(),
     };
     let request_digest =
         BudgetReserveRequest::compute_digest(id(342), id(343), id(51), &amount).expect("digest");

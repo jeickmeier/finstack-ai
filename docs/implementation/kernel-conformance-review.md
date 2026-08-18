@@ -450,3 +450,17 @@ merged into a single entry.
 F1, F11 and F12 were confirmed directly against source or by executing a probe, not by
 trusting an agent report. Where two agents disagreed, F9 records the disagreement rather
 than picking a side.
+
+## Phase 13 dispositions (HEAD, PR-080)
+
+These rows record status at the Phase 13 authorization baseline. They do not rewrite the
+finding bodies above and do not claim merge, gate, or completion.
+
+| ID | Disposition | Notes |
+| --- | --- | --- |
+| F1 | Fixed at HEAD | Do not re-implement. |
+| F2 | Fixed at HEAD | Do not re-implement. |
+| F3 | Fixed at HEAD | Do not re-implement. |
+| F9 | Resolved by this program's #1 and #10 | Ordering fact confirmed; #10 supplies the concrete redelivery re-count. Not a fresh contested item. See [kernel-remediation-review.md](kernel-remediation-review.md). |
+| F13 | Closed as finding #5 Option A | TDD 0.20: no fabricated observed charge; both reserve twins deleted. |
+| F23 | Fixed at HEAD | Live `state_hash` rustdoc already covers versions 1–6. Remaining #23 rustdoc (not this entry) stays with PR-081. |

@@ -268,7 +268,7 @@ pub enum UnknownUsagePolicy {
     FailClosed,
     /// Suspend for an operator/application decision.
     SuspendForDecision,
-    /// Allow within a reserved maximum.
+    /// Allow a costless completion that still has remaining headroom; record no fabricated charge.
     AllowWithinReservedMaximum,
 }
 

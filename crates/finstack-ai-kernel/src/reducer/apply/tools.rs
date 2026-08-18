@@ -189,7 +189,7 @@ pub(super) fn apply_tool_effect_completed(
     let batch = state
         .active_tool_batch
         .as_mut()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidRecordOrder)?;
     batch.set_call_status(
         index,
         ActiveToolCallStatus::Buffered {
@@ -241,7 +241,7 @@ pub(super) fn apply_tool_effect_failed(
     let batch = state
         .active_tool_batch
         .as_mut()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidRecordOrder)?;
     batch.set_call_status(
         index,
         ActiveToolCallStatus::Buffered {
@@ -378,7 +378,7 @@ pub(super) fn apply_tool_call_settled(
     let batch = state
         .active_tool_batch
         .as_mut()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidRecordOrder)?;
     batch.set_call_status(
         index,
         ActiveToolCallStatus::Settled {
@@ -393,7 +393,6 @@ pub(super) fn apply_tool_call_settled(
         .next_source_index
         .checked_add(1)
         .ok_or(KernelError::InvariantViolation)?;
-    batch.note_source_advanced();
     Arc::make_mut(&mut state.messages).push(settled.message.clone());
     Ok(())
 }
@@ -440,7 +439,7 @@ pub(super) fn apply_tool_batch_closed(
                 effect_id: Some(*effect_id),
                 error: error.clone(),
             },
-            _ => return Err(KernelError::InvariantViolation),
+            _ => return Err(KernelError::InvalidRecordOrder),
         });
     }
     state.last_tool_batch = Some(closed.clone());

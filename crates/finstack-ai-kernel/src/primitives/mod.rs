@@ -24,7 +24,8 @@ mod usage;
 mod refs_tests;
 
 pub use allocated_ids::AllocatedIds;
-pub(crate) use bounds::{BoundedMap, BoundedString, BoundedVec};
+pub use bounds::BoundedMap;
+pub(crate) use bounds::{BoundedString, BoundedVec};
 pub use bounds::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 pub use diagnostic::{Diagnostic, DiagnosticSeverity, Sensitivity};
 pub use digest::{

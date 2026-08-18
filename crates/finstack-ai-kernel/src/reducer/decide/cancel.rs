@@ -2,7 +2,7 @@ use crate::effects::{EffectCancelled, InteractionCancelled};
 use crate::primitives::ErrorCode;
 use crate::records::lifecycle::{RunCancelled, RunSuspended, TimerFired};
 use crate::records::{APPEND_BATCH_MAX_RECORDS, RECORD_KIND_VERSION, RecordBody};
-use crate::state::{KernelState, TransitionEnv};
+use crate::state::{KernelState, RunPhase, TransitionEnv};
 use crate::{
     CancellationInitiator, CancellationReconciled, CancellationRequest, CancellationRequested,
 };
@@ -329,7 +329,7 @@ pub(super) fn decide_timer_fired(
             Err(KernelError::ConflictingSettlement)
         };
     }
-    if state.cancellation.is_some() {
+    if state.phase != Some(RunPhase::Sleeping) || state.cancellation.is_some() {
         return Err(KernelError::InvalidPhaseInput {
             phase: state.phase,
             input: "timer_fired",
@@ -349,6 +349,13 @@ pub(super) fn decide_timer_fired(
     {
         return Err(KernelError::ConflictingSettlement);
     }
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            timer_firings: Some(input.effect_id),
+            ..StateGrowth::default()
+        },
+    )?;
     validate_allocated_ids(&env.ids, IdRequirements::new(1, 0, 0, 0, 0, 0))?;
     let records = draft_for_state(
         state,

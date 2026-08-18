@@ -55,7 +55,6 @@ impl ToolCallBlock {
         tool_name: impl AsRef<str>,
         arguments: RawJson,
     ) -> Result<Self, ContentError> {
-        let tool_name = validated_label(tool_name.as_ref(), "tool_name")?;
         Self::try_new_with_provider_call_id(tool_call_id, tool_name, arguments, None::<&str>)
     }
 

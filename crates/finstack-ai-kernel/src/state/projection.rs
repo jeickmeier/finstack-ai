@@ -10,17 +10,24 @@ use crate::content::{
     BlobRef, ContentBlock, MediaRef, OpaquePayload, ToolCallBlock, ToolResultBlock,
 };
 use crate::conversation::{Message, MessageRole, ModelRef, ProviderIds, ThinkingLevel};
-use crate::effects::{EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract};
+use crate::effects::{
+    ComponentInvocation, EffectCompleted, EffectDeferred, EffectFailed, EffectOutputContract,
+    RetrySafety,
+};
 use crate::primitives::Digest;
 use crate::primitives::Timestamp;
 use crate::primitives::{
     AppendBatchId, ArtifactId, BudgetReservationId, BudgetScopeId, CancellationRequestId, EffectId,
     EventId, InteractionId, LaneId, LimitKey, MessageId, ModelRequestId, RecordId, RunId,
-    SessionId, ToolBatchId, ToolCallId, TurnId,
+    SessionId, ToolBatchId, ToolCallId, ToolId, TurnId,
 };
 use crate::primitives::{ArtifactRef, CostAmount, ExternalHandleRef, Usage};
 use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor, ErrorIdentifiers};
 use crate::primitives::{Metadata, RawJson};
+use crate::records::tools::{
+    AssignedToolCall, SyntheticToolClosure, ToolBatchOutcome, ToolCallPlan, ToolExecutionMode,
+    ToolFailurePolicy, ValidatedToolCall,
+};
 
 /// Serializes a borrowed slice through a per-element projection, lazily.
 ///
@@ -229,6 +236,7 @@ pub(crate) enum ContentProjection<'a> {
         tool_call_id: ToolCallId,
         tool_name: &'a str,
         arguments: &'a RawJson,
+        provider_call_id: Option<&'a str>,
     },
     ToolResult {
         tool_call_id: ToolCallId,
@@ -276,14 +284,144 @@ fn tool_call_projection(block: &ToolCallBlock) -> ContentProjection<'_> {
         tool_call_id: *block.tool_call_id(),
         tool_name: block.tool_name(),
         arguments: block.arguments(),
+        provider_call_id: block.provider_call_id(),
     }
 }
 
 fn tool_result_projection(block: &ToolResultBlock) -> ContentProjection<'_> {
+    let ToolResultProjection {
+        tool_call_id,
+        content,
+        is_error,
+    } = ToolResultProjection::from(block);
     ContentProjection::ToolResult {
-        tool_call_id: *block.tool_call_id(),
-        content: ContentSeq::new(block.content()),
-        is_error: block.is_error(),
+        tool_call_id,
+        content,
+        is_error,
+    }
+}
+
+/// Shared tool-result projection for fingerprints and state hashes.
+#[derive(Serialize)]
+pub(crate) struct ToolResultProjection<'a> {
+    pub(crate) tool_call_id: ToolCallId,
+    pub(crate) content: ContentSeq<'a>,
+    pub(crate) is_error: bool,
+}
+
+impl<'a> From<&'a ToolResultBlock> for ToolResultProjection<'a> {
+    fn from(value: &'a ToolResultBlock) -> Self {
+        Self {
+            tool_call_id: *value.tool_call_id(),
+            content: ContentSeq::new(value.content()),
+            is_error: value.is_error(),
+        }
+    }
+}
+
+/// Shared assigned-call projection for fingerprints and state hashes.
+#[derive(Serialize)]
+pub(crate) struct AssignedToolCallProjection<'a> {
+    pub(crate) source_index: u32,
+    pub(crate) group_index: u32,
+    pub(crate) effect_id: EffectId,
+    pub(crate) plan: ToolCallPlanProjection<'a>,
+}
+
+impl<'a> From<&'a AssignedToolCall> for AssignedToolCallProjection<'a> {
+    fn from(value: &'a AssignedToolCall) -> Self {
+        Self {
+            source_index: value.source_index,
+            group_index: value.group_index,
+            effect_id: value.effect_id,
+            plan: ToolCallPlanProjection::from(&value.plan),
+        }
+    }
+}
+
+/// Shared tool-plan projection for fingerprints and state hashes.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ToolCallPlanProjection<'a> {
+    Execute(ValidatedToolCallProjection<'a>),
+    SyntheticClosure(Box<SyntheticToolClosureProjection<'a>>),
+}
+
+impl<'a> From<&'a ToolCallPlan> for ToolCallPlanProjection<'a> {
+    fn from(value: &'a ToolCallPlan) -> Self {
+        match value {
+            ToolCallPlan::Execute(call) => Self::Execute(ValidatedToolCallProjection::from(call)),
+            ToolCallPlan::SyntheticClosure(closure) => {
+                Self::SyntheticClosure(Box::new(SyntheticToolClosureProjection::from(closure)))
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct ValidatedToolCallProjection<'a> {
+    pub(crate) call: &'a ToolCallBlock,
+    pub(crate) tool_id: ToolId,
+    pub(crate) component: Option<&'a ComponentInvocation>,
+    pub(crate) output_contract: &'a EffectOutputContract,
+    pub(crate) retry_safety: RetrySafety,
+    pub(crate) deadline: Option<Timestamp>,
+    pub(crate) execution: ToolExecutionMode,
+    pub(crate) failure_policy: ToolFailurePolicy,
+}
+
+impl<'a> From<&'a ValidatedToolCall> for ValidatedToolCallProjection<'a> {
+    fn from(value: &'a ValidatedToolCall) -> Self {
+        Self {
+            call: &value.call,
+            tool_id: value.tool_id.clone(),
+            component: value.component.as_ref(),
+            output_contract: &value.output_contract,
+            retry_safety: value.retry_safety,
+            deadline: value.deadline,
+            execution: value.execution,
+            failure_policy: value.failure_policy,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct SyntheticToolClosureProjection<'a> {
+    pub(crate) call: &'a ToolCallBlock,
+    pub(crate) execution: ToolExecutionMode,
+    pub(crate) failure_policy: ToolFailurePolicy,
+    pub(crate) error: ErrorProjection<'a>,
+}
+
+impl<'a> From<&'a SyntheticToolClosure> for SyntheticToolClosureProjection<'a> {
+    fn from(value: &'a SyntheticToolClosure) -> Self {
+        Self {
+            call: &value.call,
+            execution: value.execution,
+            failure_policy: value.failure_policy,
+            error: ErrorProjection::from(&value.error),
+        }
+    }
+}
+
+/// Shared batch-outcome projection for fingerprints and state hashes.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ToolBatchOutcomeProjection<'a> {
+    ContinueModel,
+    Finalize,
+    Failed { error: Box<ErrorProjection<'a>> },
+}
+
+impl<'a> From<&'a ToolBatchOutcome> for ToolBatchOutcomeProjection<'a> {
+    fn from(value: &'a ToolBatchOutcome) -> Self {
+        match value {
+            ToolBatchOutcome::ContinueModel => Self::ContinueModel,
+            ToolBatchOutcome::Finalize => Self::Finalize,
+            ToolBatchOutcome::Failed { error } => Self::Failed {
+                error: Box::new(ErrorProjection::from(error)),
+            },
+        }
     }
 }
 

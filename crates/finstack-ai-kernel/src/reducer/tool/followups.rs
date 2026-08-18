@@ -138,7 +138,6 @@ fn finalize_buffered_prefix(
             .next_source_index
             .checked_add(1)
             .ok_or(KernelError::InvariantViolation)?;
-        batch.note_source_advanced();
         finalized_effects.push(batch.calls[index].assigned.effect_id);
         message_index += 1;
     }

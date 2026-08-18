@@ -13,11 +13,11 @@ date: "2026-08-10"
 |---|---|
 | Product | `finstack-ai` |
 | Document | Technical Design Document (TDD) |
-| Version | 0.19 |
+| Version | 0.20 |
 | Status | Implementation baseline |
 | Primary language | Rust |
 | Bindings | Python/PyO3; JavaScript/WebAssembly; optional WIT Component Model |
-| Related documents | Engineering Standards v0.5; Product Requirements Document v0.7; Architecture Specification v0.10; Implementation Plan v0.18; Security and Threat Model v0.6 |
+| Related documents | Engineering Standards v0.5; Product Requirements Document v0.8; Architecture Specification v0.11; Implementation Plan v0.24; Security and Threat Model v0.6 |
 
 # 1. Technical objective
 
@@ -3750,7 +3750,7 @@ Exact maxima are allowed. The first representable observation greater than its m
 | cost | checked sum of matching `CostAmount.micros` |
 | extension | checked sum of each normalized usage entry registered in `RunLimits.extension_counters` |
 
-Only `EffectCompleted.usage` changes token, cost, or extension counters. Missing token counters are unknown but not themselves an error. When a cost limit exists and completion usage has no cost, `FailClosed` fails with `unknown_cost_usage`; `SuspendForDecision` suspends with the same reason code; `AllowWithinReservedMaximum` conservatively reserves the remaining configured maximum and records no fabricated observed charge. A present cost must exactly match configured unit and pricing-policy version or fail `cost_policy_mismatch`.
+Only `EffectCompleted.usage` changes token, cost, or extension counters. Missing token counters are unknown but not themselves an error. When a cost limit exists and completion usage has no cost, `FailClosed` fails with `unknown_cost_usage`; `SuspendForDecision` suspends with the same reason code; `AllowWithinReservedMaximum` records no fabricated observed charge. A present cost must exactly match configured unit and pricing-policy version or fail `cost_policy_mismatch`.
 
 Every extension usage key must be registered by `RunLimits`; an unregistered key fails `unregistered_extension_counter`. Extension values are deltas. Checked addition overflow fails terminally with `counter_overflow`. Checked token, byte, request, turn, tool, retry, or duration overflow fails with `<dimension>_overflow`. Cost overflow uses the already mandated `cost_overflow` behavior. Overflow failures do not emit `LimitReached` because no representable observation exists.
 

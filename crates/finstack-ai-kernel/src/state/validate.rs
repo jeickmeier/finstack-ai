@@ -13,12 +13,13 @@ use crate::reducer::KernelError;
 use super::{KernelState, RetryState, RunPhase, TerminalCandidate, TerminalState};
 
 impl KernelState {
-    /// Validate v1 collection ceilings for a programmatically assembled state.
+    /// Validate frozen semantic collection ceilings for a programmatically
+    /// assembled state. The ceilings apply across state-hash versions 1–6.
     ///
     /// # Errors
     ///
     /// Returns [`KernelError::InvalidInputPayload`] when a semantic collection
-    /// exceeds its frozen v1 ceiling.
+    /// exceeds its frozen ceiling.
     #[expect(
         clippy::too_many_lines,
         reason = "state validation keeps all cross-field replay invariants in one fail-closed boundary"
@@ -115,6 +116,41 @@ impl KernelState {
                 reason_code: "inconsistent",
             });
         }
+        // Completed/Failed stay legal at v1; Cancelled always promotes to v3.
+        // Apply writes phase and terminal together, so a terminal phase without
+        // its payload is not a committed-reducer shape.
+        let terminal_phase_matches = matches!(
+            (&self.terminal, self.phase),
+            (Some(TerminalState::Completed(_)), Some(RunPhase::Completed))
+                | (Some(TerminalState::Failed(_)), Some(RunPhase::Failed))
+                | (Some(TerminalState::Cancelled(_)), Some(RunPhase::Cancelled))
+                | (
+                    None,
+                    None | Some(
+                        RunPhase::Accepted
+                            | RunPhase::BeforeRun
+                            | RunPhase::PreparingContext
+                            | RunPhase::BeforeModel
+                            | RunPhase::AwaitingModel
+                            | RunPhase::AfterModel
+                            | RunPhase::BeforeToolBatch
+                            | RunPhase::AwaitingTools
+                            | RunPhase::AfterToolBatch
+                            | RunPhase::BeforeFinalize
+                            | RunPhase::AwaitingInteraction
+                            | RunPhase::AwaitingExternal
+                            | RunPhase::Sleeping
+                            | RunPhase::Cancelling
+                            | RunPhase::Suspended
+                    )
+                )
+        );
+        if !terminal_phase_matches {
+            return Err(KernelError::InvalidInputPayload {
+                field: "terminal",
+                reason_code: "inconsistent_phase",
+            });
+        }
         if self.state_version >= 2 && has_tool_state {
             self.validate_tool_state()?;
         }
@@ -125,15 +161,22 @@ impl KernelState {
                     reason_code: "inconsistent",
                 });
             }
-            if self.cancellation.is_some()
-                != matches!(
+            if (self.cancellation.is_some()
+                && !matches!(
                     self.phase,
                     Some(RunPhase::Cancelling | RunPhase::Suspended | RunPhase::Cancelled)
-                )
-                && self.cancellation.is_some()
+                ))
+                || (matches!(self.phase, Some(RunPhase::Cancelling | RunPhase::Cancelled))
+                    && self.cancellation.is_none())
             {
                 return Err(KernelError::InvalidInputPayload {
                     field: "cancellation",
+                    reason_code: "inconsistent",
+                });
+            }
+            if self.phase == Some(RunPhase::Suspended) && self.suspension.is_none() {
+                return Err(KernelError::InvalidInputPayload {
+                    field: "suspension",
                     reason_code: "inconsistent",
                 });
             }
@@ -222,19 +265,6 @@ impl KernelState {
                         reason_code: "overlapping_effect_sets",
                     });
                 }
-            }
-            let terminal_phase_matches = matches!(
-                (&self.terminal, self.phase),
-                (Some(TerminalState::Completed(_)), Some(RunPhase::Completed))
-                    | (Some(TerminalState::Failed(_)), Some(RunPhase::Failed))
-                    | (Some(TerminalState::Cancelled(_)), Some(RunPhase::Cancelled))
-                    | (None, _)
-            );
-            if !terminal_phase_matches {
-                return Err(KernelError::InvalidInputPayload {
-                    field: "terminal",
-                    reason_code: "inconsistent_phase",
-                });
             }
         }
         if self.state_version >= 5 {

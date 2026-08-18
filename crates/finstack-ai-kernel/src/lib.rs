@@ -164,9 +164,9 @@ pub use primitives::{
     ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId, TurnTag,
 };
 pub use primitives::{
-    AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, ComponentRef, CostAmount,
-    Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef, RefsError,
-    Sensitivity, Usage, Version,
+    AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, BoundedMap, ComponentRef,
+    CostAmount, Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef,
+    RefsError, Sensitivity, Usage, Version,
 };
 pub use records::lifecycle::{
     ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,

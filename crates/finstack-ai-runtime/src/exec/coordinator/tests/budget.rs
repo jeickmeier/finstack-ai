@@ -34,7 +34,7 @@ fn budget_charge_and_release_are_post_commit_and_idempotent() {
         input_tokens: Some(1_000),
         output_tokens: Some(250),
         cost: None,
-        extension_counters: BTreeMap::new(),
+        extension_counters: Default::default(),
     };
     let scope_id = id(342);
     let reservation_id = id(343);

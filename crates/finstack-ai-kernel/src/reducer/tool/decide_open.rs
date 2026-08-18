@@ -47,11 +47,17 @@ pub fn decide_batch_prepared(
     let turn = state
         .current_turn
         .as_ref()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "stage_settled",
+        })?;
     let source_message = state
         .messages
         .last()
-        .ok_or(KernelError::InvariantViolation)?;
+        .ok_or(KernelError::InvalidPhaseInput {
+            phase: state.phase,
+            input: "stage_settled",
+        })?;
     let source_calls = assistant_calls(source_message);
     validate_plans(state, &source_calls, calls)?;
     validate_record_batch_bounds(calls)?;

@@ -433,14 +433,6 @@ pub struct OperationSummary {
     pub terminal: bool,
 }
 
-impl OperationSummary {
-    /// Parent invocation effect when this is a child or delegated run.
-    #[must_use]
-    pub fn invocation_effect_id(&self) -> Option<EffectId> {
-        self.relation.parent_effect_id()
-    }
-}
-
 /// Session-level conversation, lane, operation, and child-mapping projection.
 ///
 /// Rebuilt from the journal. Not part of `kernel-state` and not hashed.

@@ -6,8 +6,13 @@
 //! and compares that digest to [`KernelState::state_hash`]. Expected hex lives
 //! under `fixtures/compatibility/public-rust-api/v1/kernel-state/`.
 
+use std::sync::Arc;
+
 use super::*;
-use finstack_ai_kernel::KernelState;
+use finstack_ai_kernel::{
+    ContentBlock, KernelState, Message, MessageRole, Metadata, ProviderIds, RawJson, ToolCallBlock,
+    ToolCallIdentity, ToolCallTag,
+};
 use serde_json::Value;
 
 const ACCEPTED_AT_MS: i64 = 1_000;
@@ -210,5 +215,118 @@ fn accepted_states_match_independent_jcs_oracles_for_versions_2_through_6() {
     assert_eq!(
         live_hex, expected,
         "pinned digest hex for accepted v2–v6 states"
+    );
+}
+
+fn tool_call_bearing_state() -> KernelState {
+    let source_message_id = id::<finstack_ai_kernel::MessageTag>(902);
+    let turn_id = id::<finstack_ai_kernel::TurnTag>(903);
+    let call = ToolCallBlock::try_new_with_provider_call_id(
+        id::<ToolCallTag>(901),
+        "lookup_price",
+        RawJson::parse(r#"{"q":1}"#).expect("args"),
+        Some("call-provider-1"),
+    )
+    .expect("call");
+    let identity = ToolCallIdentity {
+        cycle: 0,
+        turn_id,
+        source_message_id,
+        tool_batch_id: None,
+        effect_id: None,
+        call: call.clone(),
+    };
+    let message = Message::try_new(
+        source_message_id,
+        MessageRole::Assistant,
+        vec![ContentBlock::ToolCall(call.clone())],
+        timestamp(4_000),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("message");
+    KernelState {
+        state_version: 2,
+        messages: Arc::new(vec![message]),
+        tool_calls: [(*call.tool_call_id(), identity)].into_iter().collect(),
+        ..KernelState::default()
+    }
+}
+
+fn tool_call_independent_projection() -> Value {
+    json!({
+        "state_version": 2,
+        "last_applied_sequence": 0,
+        "session_id": null,
+        "lane_id": null,
+        "accepted": null,
+        "phase": null,
+        "cycle": 0,
+        "current_turn": null,
+        "messages": [{
+            "id": id::<finstack_ai_kernel::MessageTag>(902),
+            "role": "assistant",
+            "content": [{
+                "kind": "tool_call",
+                "tool_call_id": id::<ToolCallTag>(901),
+                "tool_name": "lookup_price",
+                "arguments": {"q": 1},
+                "provider_call_id": "call-provider-1",
+            }],
+            "created_at": timestamp(4_000),
+            "model": null,
+            "provider_ids": {
+                "request_id": null,
+                "response_id": null,
+                "continuation_id": null,
+            },
+            "metadata": {},
+        }],
+        "pending_model_effect": null,
+        "terminal_candidate": null,
+        "stage_settlements": [],
+        "model_settlements": [],
+        "completion_identities": [],
+        "active_tool_batch": null,
+        "tool_calls": [{
+            "tool_call_id": id::<ToolCallTag>(901),
+            "cycle": 0,
+            "turn_id": id::<finstack_ai_kernel::TurnTag>(903),
+            "source_message_id": id::<finstack_ai_kernel::MessageTag>(902),
+            "tool_batch_id": null,
+            "effect_id": null,
+            "call": {
+                "tool_call_id": id::<ToolCallTag>(901),
+                "tool_name": "lookup_price",
+                "arguments": {"q": 1},
+                "provider_call_id": "call-provider-1",
+            },
+        }],
+        "tool_settlements": [],
+        "last_tool_batch": null,
+        "terminal": null,
+    })
+}
+
+#[test]
+fn tool_call_bearing_state_hash_includes_provider_call_id() {
+    let state = tool_call_bearing_state();
+    let independent = kernel_state_digest(2, &tool_call_independent_projection());
+    let live = state.state_hash().expect("tool-call state hash");
+    assert_eq!(
+        live, independent,
+        "live hash must include ContentProjection::ToolCall.provider_call_id"
+    );
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../fixtures/compatibility/public-rust-api/v1/kernel-state/valid--tool-call-hash.json"
+    ))
+    .expect("parse tool-call hash fixture");
+    assert_eq!(
+        live.to_hex(),
+        fixture["expect"]["state_hash"]
+            .as_str()
+            .expect("fixture state_hash"),
+        "pinned tool-call digest hex"
     );
 }

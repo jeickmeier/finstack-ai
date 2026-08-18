@@ -365,6 +365,79 @@ fn second_defer_on_a_different_call_in_the_same_group_applies() {
     ));
 }
 
+#[test]
+fn decided_tool_settlement_counts_apply_and_replay() {
+    // `tool_settlement_shape` uses `ActiveToolBatch::predicted_settlement_counts`
+    // as the count owner. Decide output that applies pins those two paths.
+    let calls = vec![call(CALL_A, "alpha"), call(CALL_B, "beta")];
+    let mut harness = model_with_calls(&calls);
+    settle_after_model_for_tools(&mut harness);
+    harness.apply_input(
+        tool_env(
+            1_600,
+            &[7_000, 7_001, 7_002, 7_003],
+            &[7_000, 7_001],
+            &[TOOL_EFFECT_A, TOOL_EFFECT_B],
+            &[],
+            &[BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([
+                    execute(
+                        &calls[0],
+                        ToolExecutionMode::Parallel,
+                        ToolFailurePolicy::ReturnToModel,
+                    ),
+                    execute(
+                        &calls[1],
+                        ToolExecutionMode::Parallel,
+                        ToolFailurePolicy::ReturnToModel,
+                    ),
+                ]),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    let output = tool_result_output(&calls[0], "first");
+    harness.apply_input(
+        tool_env(
+            1_700,
+            &[7_010, 7_011],
+            &[7_010, 7_011, 7_012],
+            &[],
+            &[7_020],
+            &[],
+            &[],
+        ),
+        KernelInput::ToolBatchSettled(ToolBatchSettled {
+            tool_batch_id: id::<ToolBatchTag>(BATCH),
+            outcome: ToolSettlement::Completed(
+                EffectCompleted::try_new(
+                    id::<finstack_ai_kernel::EffectTag>(TOOL_EFFECT_A),
+                    tool_contract(),
+                    output,
+                    None,
+                    vec![],
+                    ProviderIds::empty(),
+                    Some("tool-a"),
+                    None,
+                )
+                .expect("completed tool"),
+            ),
+        }),
+    );
+    let replayed = replay(&harness.batches);
+    assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
+    );
+}
+
 fn deferred_tool(effect_ordinal: u64, handle: &str) -> EffectDeferred {
     EffectDeferred {
         effect_id: id::<finstack_ai_kernel::EffectTag>(effect_ordinal),

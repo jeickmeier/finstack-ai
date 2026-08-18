@@ -81,7 +81,7 @@ pub enum StageDisposition {
     ToolBatchPrepared {
         /// Stable batch identity.
         tool_batch_id: ToolBatchId,
-        /// `tool-batch-plan` schema-1 digest.
+        /// Domain-separated `tool-batch-plan` digest.
         plan_digest: Digest,
     },
     /// The current terminal candidate was accepted.
@@ -374,7 +374,7 @@ pub struct StageOutcomeRecorded {
     pub cursor: StageCursor,
     /// Replay-complete disposition.
     pub disposition: StageDisposition,
-    /// `stage-settlement` schema-1 digest of the normalized input.
+    /// Domain-separated `stage-settlement` digest of the normalized input.
     pub settlement_digest: Digest,
 }
 
@@ -387,7 +387,7 @@ pub struct ContextPrepared {
     pub turn_id: TurnId,
     /// Prepared provider-neutral messages.
     pub messages: Arc<[Message]>,
-    /// `model-context` schema-1 digest of `messages`.
+    /// Domain-separated `model-context` digest of `messages`.
     pub context_digest: Digest,
 }
 

@@ -581,6 +581,32 @@ fn kernel_input_interaction_commands_round_trip() {
 }
 
 #[test]
+fn conflicting_resolution_is_rejected_without_mutation() {
+    let mut harness = request_and_await(InteractionKind::Approval);
+    harness.apply_input(
+        resolve_env(1_600),
+        KernelInput::InteractionSettled(InteractionSettled::Resolved(accepted_resolution(true))),
+    );
+    let before = harness.kernel.state().clone();
+    assert_error_code(
+        harness.kernel.decide(
+            &resolve_env(1_601),
+            KernelInput::InteractionSettled(InteractionSettled::Resolved(accepted_resolution(
+                false,
+            ))),
+        ),
+        "conflicting_settlement",
+    );
+    assert_eq!(harness.kernel.state(), &before);
+    let replayed = replay(&harness.batches);
+    assert_eq!(replayed.state(), harness.kernel.state());
+    assert_eq!(
+        replayed.state().state_hash().expect("replay hash"),
+        harness.kernel.state().state_hash().expect("live hash")
+    );
+}
+
+#[test]
 fn non_interaction_histories_keep_their_existing_state_version() {
     let mut harness = Harness::default();
     accept(&mut harness);

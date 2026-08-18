@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::primitives::Timestamp;
 use crate::primitives::{BoundedVec, SEMANTIC_ARRAY_MAX_ITEMS};
 use crate::primitives::{EventId, LaneId, RecordId, RunId, SessionId};
-use crate::records::run::{RunAccepted, RunRelationKind};
 
 use super::body::RecordBody;
 use super::error::RecordError;
@@ -157,25 +156,6 @@ impl RecordDraft {
     #[must_use]
     pub fn body(&self) -> &RecordBody {
         &self.body
-    }
-
-    /// Validate a structurally decoded child `RunAccepted` body against its parent.
-    ///
-    /// Other record bodies and root runs are returned unchanged.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RecordError::Run`] when child lineage or attenuation is invalid.
-    pub fn validate_run_lineage(mut self, parent: &RunAccepted) -> Result<Self, RecordError> {
-        self.body = match self.body {
-            RecordBody::RunAccepted(accepted)
-                if accepted.relation().kind() != RunRelationKind::Root =>
-            {
-                RecordBody::RunAccepted(accepted.validate_against_parent(parent)?)
-            }
-            body => body,
-        };
-        Ok(self)
     }
 }
 

@@ -348,6 +348,264 @@ mod validate_structured_output_tests {
     }
 }
 
+mod validate_control_state_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::primitives::{ErrorCategory, ErrorCode, ErrorDescriptor};
+    use crate::records::lifecycle::{RunCancelled, RunCompleted, RunFailed, RunSuspended};
+    use crate::records::run::{CancellationInitiator, CancellationRequest};
+    use crate::state::CancellationState;
+
+    fn id<T: crate::IdTag>(ordinal: u64) -> crate::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        crate::Id::from_bytes(bytes)
+    }
+
+    fn accepted_v3() -> KernelState {
+        let timestamp = crate::Timestamp::from_unix_ms(1_000).expect("timestamp");
+        let run_id = id::<crate::RunTag>(12);
+        let accepted = crate::RunAccepted::try_new(
+            run_id,
+            crate::RunRelation::root(run_id).expect("root relation"),
+            crate::RunSecurityContext::try_new(
+                "tenant-a",
+                crate::PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                    .expect("principal"),
+                "oidc",
+                "high",
+                "policy-v1",
+                "decision-v1",
+                None,
+            )
+            .expect("security"),
+            None,
+            crate::RunLimits::empty(),
+            crate::RunPropagationPolicy {
+                cancellation: crate::CancellationPropagation::Cascade,
+                deadline: crate::DeadlinePropagation::MinimumOfParentAndChild,
+                budget: crate::BudgetPropagation::ReservedChildAllocation,
+                principal: crate::PrincipalPropagation::Inherit,
+            },
+            crate::Digest::raw_json(b"agent-lock"),
+            None,
+        )
+        .expect("accepted");
+        KernelState {
+            state_version: 3,
+            session_id: Some(id::<crate::SessionTag>(10)),
+            lane_id: Some(id::<crate::LaneTag>(11)),
+            accepted: Some(accepted),
+            accepted_at: Some(timestamp),
+            phase: Some(RunPhase::BeforeFinalize),
+            ..KernelState::default()
+        }
+    }
+
+    fn completed_payload() -> RunCompleted {
+        RunCompleted {
+            cycle: 0,
+            turn_id: id::<crate::TurnTag>(1),
+            model_request_id: id::<crate::ModelRequestTag>(2),
+            effect_id: id::<crate::EffectTag>(3),
+            result_message_id: id::<crate::MessageTag>(4),
+            result_digest: crate::Digest::raw_json(b"result"),
+        }
+    }
+
+    fn failed_payload() -> RunFailed {
+        RunFailed {
+            cycle: 0,
+            turn_id: None,
+            model_request_id: None,
+            effect_id: None,
+            error: ErrorDescriptor::new(
+                "limit_reached",
+                "configured run limit reached",
+                ErrorCategory::Limit,
+                false,
+            )
+            .expect("error"),
+        }
+    }
+
+    fn cancelled_payload() -> RunCancelled {
+        RunCancelled {
+            request_id: id::<crate::CancellationRequestTag>(20),
+            reason_code: ErrorCode::new("cancelled").expect("reason"),
+        }
+    }
+
+    fn cancellation_state() -> CancellationState {
+        CancellationState {
+            request: CancellationRequest::try_new(
+                id::<crate::CancellationRequestTag>(20),
+                CancellationInitiator::Deadline,
+                None::<&str>,
+            )
+            .expect("request"),
+            prior_phase: RunPhase::BeforeFinalize,
+            completed_effects: Arc::from([]),
+            cancelled_effects: Arc::from([]),
+            uncertain_effects: Arc::from([]),
+            outstanding_effects: Arc::from([]),
+        }
+    }
+
+    #[test]
+    fn terminal_phase_without_payload_is_rejected_at_every_state_version() {
+        for (phase, payload) in [
+            (
+                RunPhase::Completed,
+                TerminalState::Completed(completed_payload()),
+            ),
+            (RunPhase::Failed, TerminalState::Failed(failed_payload())),
+            (
+                RunPhase::Cancelled,
+                TerminalState::Cancelled(cancelled_payload()),
+            ),
+        ] {
+            let mut paired = accepted_v3();
+            if matches!(phase, RunPhase::Cancelled) {
+                paired.cancellation = Some(cancellation_state());
+            }
+            paired.phase = Some(phase);
+            paired.terminal = Some(payload);
+            assert_eq!(
+                paired.validate(),
+                Ok(()),
+                "apply-paired {phase:?} must remain legal"
+            );
+
+            let mut unpaired = paired.clone();
+            unpaired.terminal = None;
+            assert_eq!(
+                unpaired.validate(),
+                Err(KernelError::InvalidInputPayload {
+                    field: "terminal",
+                    reason_code: "inconsistent_phase",
+                }),
+                "terminal phase {phase:?} without payload is unproducible"
+            );
+        }
+
+        let mut v1_completed = KernelState {
+            phase: Some(RunPhase::Completed),
+            terminal: Some(TerminalState::Completed(completed_payload())),
+            ..KernelState::default()
+        };
+        assert_eq!(v1_completed.validate(), Ok(()));
+        v1_completed.terminal = None;
+        assert_eq!(
+            v1_completed.validate(),
+            Err(KernelError::InvalidInputPayload {
+                field: "terminal",
+                reason_code: "inconsistent_phase",
+            })
+        );
+    }
+
+    #[test]
+    fn cancelling_or_cancelled_without_cancellation_is_rejected() {
+        for phase in [RunPhase::Cancelling, RunPhase::Cancelled] {
+            let mut paired = accepted_v3();
+            paired.phase = Some(phase);
+            paired.cancellation = Some(cancellation_state());
+            if phase == RunPhase::Cancelled {
+                paired.terminal = Some(TerminalState::Cancelled(cancelled_payload()));
+            }
+            assert_eq!(paired.validate(), Ok(()), "apply-paired {phase:?}");
+
+            let mut unpaired = paired.clone();
+            unpaired.cancellation = None;
+            assert_eq!(
+                unpaired.validate(),
+                Err(KernelError::InvalidInputPayload {
+                    field: "cancellation",
+                    reason_code: "inconsistent",
+                }),
+                "{phase:?} without cancellation is unproducible"
+            );
+        }
+    }
+
+    #[test]
+    fn suspended_without_suspension_is_rejected() {
+        let mut paired = accepted_v3();
+        paired.phase = Some(RunPhase::Suspended);
+        paired.suspension = Some(RunSuspended {
+            reason_code: ErrorCode::new("unknown_cost_usage").expect("reason"),
+            cancellation_request_id: None,
+        });
+        assert_eq!(paired.validate(), Ok(()));
+
+        let mut unpaired = paired.clone();
+        unpaired.suspension = None;
+        assert_eq!(
+            unpaired.validate(),
+            Err(KernelError::InvalidInputPayload {
+                field: "suspension",
+                reason_code: "inconsistent",
+            })
+        );
+    }
+
+    #[test]
+    fn already_enforced_validate_gaps_still_reject() {
+        let mut pending_without_phase = accepted_v3();
+        pending_without_phase.state_version = 6;
+        pending_without_phase.pending_interaction = Some(crate::state::PendingInteraction {
+            request: crate::effects::InteractionRequest::try_new(
+                1,
+                id::<crate::InteractionTag>(20),
+                id::<crate::EffectTag>(21),
+                crate::effects::InteractionKind::Approval,
+                vec![],
+                crate::RawJson::parse("{}").expect("schema"),
+                crate::ComponentRef::new(
+                    crate::ComponentId::parse("policy.approval").expect("component"),
+                    None,
+                ),
+                crate::Version {
+                    major: 1,
+                    minor: 0,
+                    patch: 0,
+                },
+                None,
+                None,
+                false,
+                crate::Metadata::empty(),
+            )
+            .expect("request"),
+            prior_phase: RunPhase::BeforeFinalize,
+            cursor: crate::records::lifecycle::StageCursor {
+                cycle: 0,
+                stage: crate::records::lifecycle::Stage::BeforeFinalize,
+            },
+        });
+        assert_eq!(
+            pending_without_phase.validate(),
+            Err(KernelError::InvalidInputPayload {
+                field: "pending_interaction",
+                reason_code: "inconsistent",
+            })
+        );
+
+        let mut accepted_at_mismatch = accepted_v3();
+        accepted_at_mismatch.accepted_at = None;
+        assert_eq!(
+            accepted_at_mismatch.validate(),
+            Err(KernelError::InvalidInputPayload {
+                field: "accepted_at",
+                reason_code: "inconsistent",
+            })
+        );
+    }
+}
+
 mod v1_v2_snapshot_sidecar_tests {
     use super::*;
     use crate::records::policy::LimitUsage;
