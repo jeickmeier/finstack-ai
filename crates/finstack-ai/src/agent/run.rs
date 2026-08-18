@@ -169,6 +169,12 @@ impl AgentRun {
         &self.inner.locator
     }
 
+    /// Borrow the journal store that owns this run.
+    #[must_use]
+    pub(crate) fn journal_store(&self) -> &Arc<dyn finstack_ai_runtime::JournalStore> {
+        &self.inner.store
+    }
+
     /// Number of [`finstack_ai_runtime::AgentInvoker::start_or_attach`] calls
     /// issued while preparing children on this run.
     #[must_use]

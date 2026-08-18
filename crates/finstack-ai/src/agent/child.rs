@@ -9,16 +9,16 @@ use finstack_ai_kernel::{
     AppendBatchTag, BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement,
     ChildRunLocator, ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId,
     EffectTag, Metadata, OperationLocator, PrincipalPropagation, RecordTag, RunAccepted,
-    RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock,
+    RunPropagationPolicy, RunRelation, RunRelationKind, RunTag, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
     AuthorizationContext, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
-    ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalClock,
-    ExternalEffectCompletionCommand, PortFuture, child_relation_digest,
+    ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalEffectCompletionCommand,
+    PortFuture, child_relation_digest,
 };
 #[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::{ExternalRouteOutcome, WorkflowSession};
+use finstack_ai_runtime::{ExternalCompletionRouter, ExternalRouteOutcome};
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 use finstack_ai_runtime::host_driver as driver;
@@ -63,6 +63,74 @@ impl AgentInvoker for RecordingChildInvoker {
 }
 
 impl AgentRun {
+    /// Start or attach a child run for a parent effect via [`ChildRunCoordinator`].
+    ///
+    /// This is the effect-binding facade used by deferred child settlement.
+    /// The Agent-based [`Self::start_child`] remains the composition path.
+    /// Authorization is copied from the recovered accepted run, matching
+    /// runtime dispatch security context.
+    ///
+    /// Equal retries attach to the committed mapping. A conflicting
+    /// `request_digest` fails closed.
+    ///
+    /// # Arguments
+    ///
+    /// * `invoker` - Idempotent child start-or-attach service.
+    /// * `parent_effect_id` - Parent effect that authorizes this child.
+    /// * `request` - Frozen child request including locator and digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns a runtime failure when the parent is not accepted, the durable
+    /// mapping conflicts, or the invoker rejects the child.
+    #[cfg(feature = "native-tokio")]
+    pub async fn start_or_attach_child(
+        &self,
+        invoker: Arc<dyn AgentInvoker>,
+        parent_effect_id: EffectId,
+        request: ChildRunRequest,
+    ) -> Result<ChildRunHandle, AgentRunError> {
+        let mut commit =
+            CommitCoordinator::recover(Arc::clone(self.journal_store()), self.locator().session_id)
+                .await
+                .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        let accepted = commit
+            .state()
+            .accepted
+            .as_ref()
+            .ok_or_else(|| AgentRunError::runtime_message("parent run is not accepted"))?;
+        if accepted.run_id() != self.locator().run_id {
+            return Err(AgentRunError::runtime_message(
+                "recovered acceptance does not match this run",
+            ));
+        }
+        let security = accepted.security();
+        let context = ChildRunContext {
+            parent: self.locator().clone(),
+            parent_effect_id,
+            authorization: AuthorizationContext {
+                principal: security.principal().clone(),
+                authentication_method: Arc::from(security.authentication_method()),
+                assurance_level: Arc::from(security.assurance_level()),
+                roles: Arc::from([]),
+                permitted_scopes: Arc::from([Arc::from(security.tenant_scope())]),
+                safe_claims: Metadata::empty(),
+                policy_version: Arc::from(security.authorization_policy_version()),
+                decision_id: Arc::from(security.authorization_decision_id()),
+            },
+        };
+        let ids = ChildCoordinationIds {
+            preparation_batch_id: NativeIds::generate::<AppendBatchTag>()?,
+            preparation_record_id: NativeIds::generate::<RecordTag>()?,
+            reservation_request_record_id: None,
+            reservation_settlement: None,
+        };
+        ChildRunCoordinator::new(invoker)
+            .start_or_attach(&mut commit, context, request, None, ids, NativeIds::now()?)
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))
+    }
+
     /// Commit one [`ChildRunPrepared`] mapping through [`ChildRunCoordinator`].
     ///
     /// Enforces the parent [`crate::ChildRunPolicy`] before allocating a
@@ -285,10 +353,10 @@ impl AgentRun {
         Ok(accepted)
     }
 
-    /// Route one authenticated external completion through the workflow ingress.
+    /// Route one authenticated external completion through ingress.
     ///
-    /// Patterned on [`WorkflowSession::complete_external`]. The command locator
-    /// must match this run.
+    /// The command locator must match this run. Submission time is the
+    /// current native clock.
     ///
     /// # Arguments
     ///
@@ -304,21 +372,31 @@ impl AgentRun {
         &self,
         command: ExternalEffectCompletionCommand,
     ) -> Result<ExternalRouteOutcome, AgentRunError> {
-        if command.locator != self.inner.locator {
+        Box::pin(self.complete_external_at(command, NativeIds::now()?)).await
+    }
+
+    /// Route one authenticated external completion at an explicit timestamp.
+    ///
+    /// # Errors
+    ///
+    /// Returns a runtime failure when the locator does not match or ingress
+    /// rejects the command.
+    #[cfg(feature = "native-tokio")]
+    pub async fn complete_external_at(
+        &self,
+        command: ExternalEffectCompletionCommand,
+        submitted_at: Timestamp,
+    ) -> Result<ExternalRouteOutcome, AgentRunError> {
+        if command.locator != *self.locator() {
             return Err(AgentRunError::runtime_message(
                 "external completion locator does not match this run",
             ));
         }
-        let now = NativeIds::now()?;
-        let session = WorkflowSession::trusted(
-            Arc::clone(&self.inner.store),
-            self.inner.locator.clone(),
-            ExternalClock::new(now),
-            u64::try_from(now.as_unix_ms()).unwrap_or(1),
-        )
-        .await
-        .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
-        Box::pin(session.complete_external(command, now))
+        let router = ExternalCompletionRouter::trusted(Arc::clone(self.journal_store()))
+            .await
+            .map_err(|error| AgentRunError::runtime_message(error.to_string()))?;
+        router
+            .route(command, submitted_at)
             .await
             .map_err(|error| AgentRunError::runtime_message(error.to_string()))
     }

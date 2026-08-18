@@ -44,6 +44,19 @@ impl ExternalCompletionRouter {
         self
     }
 
+    /// Construct a router over a direct store and an in-process no-op audit gate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExternalRouteError::IngressRejected`] when the trusted gate
+    /// cannot be enabled.
+    pub async fn trusted(store: Arc<dyn JournalStore>) -> Result<Self, ExternalRouteError> {
+        let audit = SecurityAuditGate::enable_noop()
+            .await
+            .map_err(|_| ExternalRouteError::IngressRejected)?;
+        Ok(Self::new(store, audit))
+    }
+
     /// Route one fully authenticated command without accepting raw callback tokens.
     ///
     /// # Errors

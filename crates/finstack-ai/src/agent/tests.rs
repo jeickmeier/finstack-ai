@@ -1,23 +1,30 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, AgentId, AuthorizationEvidence, BundleId, CapabilityActivationSource,
-    CapabilityId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock,
-    ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome, ProviderIds,
-    RawJson, RunEventClass, RunSecurityContext, TerminalState, TextBlock, Usage, Version,
+    ActiveCapability, ActiveToolCallStatus, AgentId, AuthorizationEvidence, BundleId,
+    CapabilityActivationSource, CapabilityId, ChildPlacement, ChildRunLocator, ComponentId,
+    ComponentRef, ContentBlock, Digest, EffectId, EffectTag, ExternalEffectCompletion,
+    ExternalEffectCompletionCommand, ExternalEffectOutcome, OperationLocator, ProviderIds, RawJson,
+    RunEventClass, RunPhase, RunSecurityContext, RunTag, TerminalState, TextBlock,
+    ToolExecutionMode, ToolId, Usage, Version,
 };
 use finstack_ai_runtime::{
-    CommitCoordinator, ExternalHandleRef, ExternalRouteOutcome, JournalStore, LoadRequest,
-    Metadata, Model, ModelContextProfile, ModelDeferral, ModelName, ModelResponse, ModelStreamItem,
-    ModelToolCall, NoopObserver, Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
-    ReconciliationPolicy, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Toolset,
+    AgentInvokeError, AgentInvoker, AgentRef, ApprovalMetadata, ApprovalRequirement, BudgetRequest,
+    ChildRunContext, ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalHandleRef,
+    ExternalRouteOutcome, JournalStore, LoadRequest, Metadata, Model, ModelContextProfile,
+    ModelDeferral, ModelName, ModelResponse, ModelStreamItem, ModelToolCall, NoopObserver,
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
+    ReconciliationPolicy, RetrySafety, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
+    ToolCallDelta, ToolDeferral, ToolDeferralSupport, ToolSpec, ToolStreamItem, Toolset,
+    child_relation_digest,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ManualGate, ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedObserver,
-    ScriptedObserverAction,
+    ScriptedObserverAction, ScriptedToolAction, ScriptedToolPlan, ScriptedToolset,
 };
 use finstack_ai_tools_calculator::CalculatorToolset;
 
@@ -1302,4 +1309,349 @@ async fn remote_start_child_without_a_route_fails_closed() {
     .expect("missing route");
     assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
     assert!(error.to_string().contains("explicit route"));
+}
+
+struct RecordingEffectInvoker {
+    starts: AtomicUsize,
+}
+
+impl AgentInvoker for RecordingEffectInvoker {
+    fn start_or_attach(
+        &self,
+        context: ChildRunContext,
+        request: ChildRunRequest,
+    ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let relation_digest = match child_relation_digest(&context, &request) {
+            Ok(digest) => digest,
+            Err(error) => {
+                return Box::pin(async move {
+                    Err(AgentInvokeError::InvalidRequest {
+                        message: Arc::from(error.to_string()),
+                    })
+                });
+            }
+        };
+        let locator = request.locator;
+        Box::pin(async move {
+            Ok(ChildRunHandle {
+                locator,
+                relation_digest,
+            })
+        })
+    }
+}
+
+async fn wait_accepted(store: &Arc<dyn JournalStore>, parent: &AgentRun) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(commit) =
+                CommitCoordinator::recover(Arc::clone(store), parent.locator().session_id).await
+                && commit
+                    .state()
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.run_id() == parent.locator().run_id)
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("parent accepted");
+}
+
+async fn isolated_child_request(
+    store: Arc<dyn JournalStore>,
+    parent: &AgentRun,
+) -> ChildRunRequest {
+    let session = Session::create(store, Arc::clone(&parent.locator().tenant_scope))
+        .await
+        .expect("child session");
+    let lane = session.lane("main").await.expect("child lane");
+    let run_id = super::prepare::NativeIds::generate::<RunTag>().expect("child run");
+    let locator = ChildRunLocator {
+        operation: OperationLocator::try_new(
+            parent.locator().tenant_scope.as_ref(),
+            session.session_id(),
+            lane.lane_id(),
+            run_id,
+        )
+        .expect("child locator"),
+        remote: None,
+    };
+    ChildRunRequest {
+        agent: AgentRef {
+            id: AgentId::parse("finstack.agent.child").expect("agent"),
+            bundle: None,
+            spec_digest: Digest::raw_json(br#"{"agent":"child"}"#),
+        },
+        input: Arc::from([ContentBlock::Text(
+            TextBlock::try_new("work").expect("text"),
+        )]),
+        placement: ChildPlacement::IsolatedChildSession,
+        locator,
+        requested_deadline: None,
+        requested_budget: BudgetRequest::default(),
+        delegation_id: None,
+        metadata: Metadata::empty(),
+        request_digest: Digest::raw_json(br#"{"request":"child-a"}"#),
+    }
+}
+
+fn echo_tool_spec() -> ToolSpec {
+    ToolSpec {
+        id: ToolId::parse("finstack.tools.echo").expect("tool id"),
+        model_name: Arc::from("echo"),
+        title: Arc::from("echo"),
+        description: Arc::from("scripted deterministic tool"),
+        input_schema: RawJson::parse(
+            br#"{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}"#,
+        )
+        .expect("input schema"),
+        output_schema: Some(
+            RawJson::parse(
+                br#"{"additionalProperties":false,"properties":{"ok":{"type":"boolean"},"value":{"type":"integer"}},"required":["ok","value"],"type":"object"}"#,
+            )
+            .expect("output schema"),
+        ),
+        execution: ToolExecutionMode::Parallel,
+        side_effect: SideEffectClass::ReadOnly,
+        retry_safety: RetrySafety::SafeToRetry,
+        approval: ApprovalMetadata {
+            requirement: ApprovalRequirement::NotRequired,
+            reason: None,
+            attributes: Metadata::empty(),
+        },
+        max_result_bytes: 4_096,
+        metadata: Metadata::empty(),
+        deferral: ToolDeferralSupport::Supported,
+    }
+}
+
+fn echo_tool_call() -> ScriptedModelPlan {
+    let arguments = RawJson::parse(br#"{"value":1}"#).expect("arguments");
+    ScriptedModelPlan {
+        actions: vec![
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
+                index: 0,
+                name: Some(Arc::from("echo")),
+                arguments_delta: Arc::from(arguments.as_str()),
+                provider_call_id: Some(Arc::from("call-echo")),
+            }))),
+            ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
+                assistant_content: Arc::from([]),
+                tool_calls: Arc::from([ModelToolCall {
+                    name: Arc::from("echo"),
+                    arguments,
+                    provider_call_id: Some(Arc::from("call-echo")),
+                }]),
+                usage: Usage::empty(),
+                provider_ids: ProviderIds::empty(),
+                completion_id: Arc::from("echo-tool-completion"),
+                continuation_state: None,
+            }))),
+        ],
+    }
+}
+
+async fn wait_deferred_tool_effect(store: &Arc<dyn JournalStore>, parent: &AgentRun) -> EffectId {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(commit) =
+                CommitCoordinator::recover(Arc::clone(store), parent.locator().session_id).await
+                && commit.state().phase == Some(RunPhase::AwaitingExternal)
+                && let Some(batch) = commit.state().active_tool_batch.as_ref()
+                && let Some(call) = batch.calls.first()
+                && matches!(
+                    &call.status,
+                    ActiveToolCallStatus::Requested {
+                        deferred: Some(_),
+                        ..
+                    }
+                )
+            {
+                return call.assigned.effect_id;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("deferred tool effect")
+}
+
+#[tokio::test]
+async fn start_or_attach_child_is_idempotent_for_an_equal_request() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("parent")],
+    ));
+    let (agent, store) = child_capable_agent(model).await;
+    let store: Arc<dyn JournalStore> = store;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    wait_accepted(&store, &parent).await;
+    let effect_id = super::prepare::NativeIds::generate::<EffectTag>().expect("effect");
+    let child_request = isolated_child_request(Arc::clone(&store), &parent).await;
+    let invoker = Arc::new(RecordingEffectInvoker {
+        starts: AtomicUsize::new(0),
+    });
+    let first = parent
+        .start_or_attach_child(
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+            effect_id,
+            child_request.clone(),
+        )
+        .await
+        .expect("first start_or_attach_child");
+    let attached = parent
+        .start_or_attach_child(
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+            effect_id,
+            child_request,
+        )
+        .await
+        .expect("equal retry");
+    assert_eq!(first, attached);
+    assert_eq!(invoker.starts.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn start_or_attach_child_rejects_a_conflicting_digest() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("parent")],
+    ));
+    let (agent, store) = child_capable_agent(model).await;
+    let store: Arc<dyn JournalStore> = store;
+    let parent = agent.start(request("parent work")).expect("parent start");
+    wait_accepted(&store, &parent).await;
+    let effect_id = super::prepare::NativeIds::generate::<EffectTag>().expect("effect");
+    let child_request = isolated_child_request(Arc::clone(&store), &parent).await;
+    let invoker = Arc::new(RecordingEffectInvoker {
+        starts: AtomicUsize::new(0),
+    });
+    parent
+        .start_or_attach_child(
+            Arc::clone(&invoker) as Arc<dyn AgentInvoker>,
+            effect_id,
+            child_request.clone(),
+        )
+        .await
+        .expect("first start_or_attach_child");
+    let mut conflicting = child_request;
+    conflicting.request_digest = Digest::raw_json(br#"{"request":"child-b"}"#);
+    let error = parent
+        .start_or_attach_child(invoker, effect_id, conflicting)
+        .await
+        .expect_err("conflicting digest");
+    assert_eq!(error.code(), AGENT_RUN_RUNTIME_FAILURE);
+    assert!(
+        error.to_string().contains("sidecar conflicts"),
+        "conflicting digest must fail closed: {error}"
+    );
+}
+
+#[tokio::test]
+async fn complete_external_routes_a_deferred_tool_effect() {
+    let mut spec = echo_tool_spec();
+    spec.deferral = ToolDeferralSupport::Supported;
+    let toolset: Arc<dyn Toolset> = Arc::new(ScriptedToolset::new(
+        Arc::from([spec]),
+        vec![ScriptedToolPlan {
+            panic_on_call: None,
+            actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+                ToolDeferral {
+                    handle: ExternalHandleRef::try_new(
+                        ComponentId::parse("finstack.tool.scripted").expect("component"),
+                        "job-1",
+                        RawJson::parse(b"{}").expect("metadata"),
+                    )
+                    .expect("handle"),
+                    reconciliation: ReconciliationPolicy::CallbackOrPoll,
+                    next_poll_at: None,
+                    expires_at: None,
+                },
+            )))],
+        }],
+    ));
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![echo_tool_call(), completed("unused parent retry")],
+    ));
+    let store: Arc<dyn JournalStore> = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 4,
+            batches_per_session: 64,
+            records_per_session: 512,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store"),
+    );
+    let agent = Agent::builder(
+        AgentId::parse("test.agent.tool-defer").expect("agent"),
+        BundleId::parse("test.bundle.tool-defer").expect("bundle"),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.model.tool-defer").expect("model"),
+                Some(VERSION),
+            ),
+            model,
+        ),
+        (
+            ComponentRef::new(
+                ComponentId::parse("test.store.tool-defer").expect("store"),
+                Some(VERSION),
+            ),
+            Arc::clone(&store),
+        ),
+    )
+    .toolset(
+        ComponentRef::new(
+            ComponentId::parse("test.tools.echo").expect("toolset"),
+            Some(VERSION),
+        ),
+        toolset,
+    )
+    .build()
+    .await
+    .expect("agent");
+    let parent = agent
+        .start(request("defer the tool"))
+        .expect("parent start");
+    let effect_id = wait_deferred_tool_effect(&store, &parent).await;
+    let command = ExternalEffectCompletionCommand::try_new(
+        parent.locator().clone(),
+        security().principal().clone(),
+        AuthorizationEvidence::try_new(
+            security().authorization_policy_version(),
+            security().authorization_decision_id(),
+        )
+        .expect("auth"),
+        ExternalEffectCompletion::try_new(
+            effect_id,
+            "ext-tool-1",
+            ExternalEffectOutcome::Failed {
+                error: finstack_ai_kernel::ErrorDescriptor::new(
+                    "provider_failed",
+                    "provider failed",
+                    finstack_ai_kernel::ErrorCategory::Model,
+                    true,
+                )
+                .expect("error"),
+            },
+        )
+        .expect("completion"),
+    )
+    .expect("command");
+    let outcome = Box::pin(parent.complete_external(command))
+        .await
+        .expect("complete_external");
+    assert!(
+        matches!(
+            outcome,
+            ExternalRouteOutcome::Committed(_) | ExternalRouteOutcome::Rejected { .. }
+        ),
+        "external completion must route a deferred tool effect"
+    );
 }
