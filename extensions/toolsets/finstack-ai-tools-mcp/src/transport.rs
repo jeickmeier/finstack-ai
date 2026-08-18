@@ -189,7 +189,9 @@ impl StdioConfig {
     /// Request the same runtime confinement service used by the shell crate.
     ///
     /// Unconfined stdio stays the default T1 path. Requested-and-unavailable
-    /// fails closed at spawn.
+    /// fails closed at spawn. Windows uses `ProcessConfinement::spawn`
+    /// (`CreateProcessAsUser` plus Job Object); it does not fall back to
+    /// an unconfined tokio spawn.
     #[must_use]
     pub fn with_confinement(
         mut self,
@@ -210,10 +212,17 @@ impl StdioConfig {
     }
 }
 
-struct StdioState {
-    _child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+enum StdioState {
+    Unconfined {
+        _child: Child,
+        stdin: ChildStdin,
+        stdout: BufReader<ChildStdout>,
+    },
+    Confined {
+        _child: finstack_ai_runtime::ConfinedChild,
+        stdin: tokio::fs::File,
+        stdout: BufReader<tokio::fs::File>,
+    },
 }
 
 /// Newline-framed stdio transport. T1; not a sandbox.
@@ -224,7 +233,7 @@ pub(crate) struct StdioTransport {
 
 impl StdioTransport {
     pub(crate) fn try_spawn(config: &StdioConfig) -> Result<Self, McpError> {
-        let mut child = if let Some((confinement, profile)) = &config.confinement {
+        let state = if let Some((confinement, profile)) = &config.confinement {
             if confinement.is_unavailable() {
                 return Err(McpError::stable(
                     finstack_ai_runtime::CONFINEMENT_UNAVAILABLE,
@@ -238,14 +247,23 @@ impl StdioTransport {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            confinement
-                .configure(&mut command, profile)
+            let mut child = confinement
+                .spawn(command, profile)
                 .map_err(|error| McpError::stable(error.code(), error.message().to_string()))?;
-            let mut command = Command::from(command);
-            command.kill_on_drop(true);
-            command.spawn().map_err(|error| {
-                McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
-            })?
+            let stdin = child.stdin.take().ok_or_else(|| {
+                McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdin is unavailable")
+            })?;
+            let stdout = child.stdout.take().ok_or_else(|| {
+                McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdout is unavailable")
+            })?;
+            if let Some(stderr) = child.stderr.take() {
+                drain_std_stderr(stderr);
+            }
+            StdioState::Confined {
+                _child: child,
+                stdin: tokio_file_from_stdin(stdin),
+                stdout: BufReader::new(tokio_file_from_stdout(stdout)),
+            }
         } else {
             let mut command = Command::new(&config.program);
             command
@@ -255,31 +273,32 @@ impl StdioTransport {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
-            command.spawn().map_err(|error| {
+            let mut child = command.spawn().map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio spawn failed: {error}"))
-            })?
-        };
-        let stdin = child.stdin.take().ok_or_else(|| {
-            McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdin is unavailable")
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdout is unavailable")
-        })?;
-        if let Some(mut stderr) = child.stderr.take() {
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(&mut stderr);
-                let mut line = String::new();
-                while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
-                    line.clear();
-                }
-            });
-        }
-        Ok(Self {
-            state: tokio::sync::Mutex::new(StdioState {
+            })?;
+            let stdin = child.stdin.take().ok_or_else(|| {
+                McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdin is unavailable")
+            })?;
+            let stdout = child.stdout.take().ok_or_else(|| {
+                McpError::stable(MCP_TRANSPORT_ERROR, "stdio child stdout is unavailable")
+            })?;
+            if let Some(mut stderr) = child.stderr.take() {
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(&mut stderr);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+                        line.clear();
+                    }
+                });
+            }
+            StdioState::Unconfined {
                 _child: child,
                 stdin,
                 stdout: BufReader::new(stdout),
-            }),
+            }
+        };
+        Ok(Self {
+            state: tokio::sync::Mutex::new(state),
             next_id: AtomicU64::new(1),
         })
     }
@@ -315,24 +334,9 @@ impl StdioTransport {
         let message = jsonrpc_request(&id, method, &params);
         let line = Self::encode_line(&message)?;
         let mut state = self.state.lock().await;
-        state
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|error| {
-                McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio write failed: {error}"))
-            })?;
-        state.stdin.flush().await.map_err(|error| {
-            McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio flush failed: {error}"))
-        })?;
+        write_stdio_line(&mut state, line.as_bytes()).await?;
         let mut response = String::new();
-        let read = state
-            .stdout
-            .read_line(&mut response)
-            .await
-            .map_err(|error| {
-                McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio read failed: {error}"))
-            })?;
+        let read = read_stdio_line(&mut state, &mut response).await?;
         if read == 0 {
             return Err(McpError::stable(
                 MCP_TRANSPORT_ERROR,
@@ -340,6 +344,99 @@ impl StdioTransport {
             ));
         }
         parse_jsonrpc_response(&response)
+    }
+}
+
+async fn write_stdio_line(state: &mut StdioState, line: &[u8]) -> Result<(), McpError> {
+    match state {
+        StdioState::Unconfined { stdin, .. } => {
+            stdin
+                .write_all(line)
+                .await
+                .map_err(|error| stdio_io(&error))?;
+            stdin.flush().await.map_err(|error| stdio_io(&error))
+        }
+        StdioState::Confined { stdin, .. } => {
+            stdin
+                .write_all(line)
+                .await
+                .map_err(|error| stdio_io(&error))?;
+            stdin.flush().await.map_err(|error| stdio_io(&error))
+        }
+    }
+}
+
+async fn read_stdio_line(state: &mut StdioState, response: &mut String) -> Result<usize, McpError> {
+    match state {
+        StdioState::Unconfined { stdout, .. } => stdout
+            .read_line(response)
+            .await
+            .map_err(|error| stdio_io(&error)),
+        StdioState::Confined { stdout, .. } => stdout
+            .read_line(response)
+            .await
+            .map_err(|error| stdio_io(&error)),
+    }
+}
+
+fn stdio_io(error: &std::io::Error) -> McpError {
+    McpError::stable(MCP_TRANSPORT_ERROR, format!("stdio i/o failed: {error}"))
+}
+
+fn drain_std_stderr(stderr: std::process::ChildStderr) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(stderr);
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            line.clear();
+        }
+    });
+}
+
+fn tokio_file_from_stdin(stdin: std::process::ChildStdin) -> tokio::fs::File {
+    tokio::fs::File::from_std(std_file_from_stdin(stdin))
+}
+
+fn tokio_file_from_stdout(stdout: std::process::ChildStdout) -> tokio::fs::File {
+    tokio::fs::File::from_std(std_file_from_stdout(stdout))
+}
+
+#[allow(
+    unsafe_code,
+    reason = "stdio confinement wraps owned child pipes as tokio files"
+)]
+fn std_file_from_stdin(stdin: std::process::ChildStdin) -> std::fs::File {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        // SAFETY: `ChildStdin` owns the fd; `into_raw_fd` transfers it.
+        unsafe { std::fs::File::from_raw_fd(stdin.into_raw_fd()) }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawHandle, IntoRawHandle};
+        // SAFETY: `ChildStdin` owns the handle; `into_raw_handle` transfers it.
+        unsafe { std::fs::File::from_raw_handle(stdin.into_raw_handle()) }
+    }
+}
+
+#[allow(
+    unsafe_code,
+    reason = "stdio confinement wraps owned child pipes as tokio files"
+)]
+fn std_file_from_stdout(stdout: std::process::ChildStdout) -> std::fs::File {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        // SAFETY: `ChildStdout` owns the fd; `into_raw_fd` transfers it.
+        unsafe { std::fs::File::from_raw_fd(stdout.into_raw_fd()) }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{FromRawHandle, IntoRawHandle};
+        // SAFETY: `ChildStdout` owns the handle; `into_raw_handle` transfers it.
+        unsafe { std::fs::File::from_raw_handle(stdout.into_raw_handle()) }
     }
 }
 

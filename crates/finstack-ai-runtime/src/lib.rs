@@ -105,7 +105,7 @@ pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
 };
 pub use services::process_confinement::{
-    CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinementBackend,
+    CONFINEMENT_DENIED, CONFINEMENT_IO, CONFINEMENT_UNAVAILABLE, ConfinedChild, ConfinementBackend,
     ConfinementError, ConfinementProfile, ProcessConfinement,
 };
 pub use session::{

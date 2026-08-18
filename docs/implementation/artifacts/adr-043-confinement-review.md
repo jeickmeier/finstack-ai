@@ -24,23 +24,20 @@ Verified security review and does not invent a review identifier.
   allowlisted binary, and `file-write*` outside the capability root,
   then re-allow the root. Existing user-writable `file-read-data` denies
   remain. Apple deprecation is unchanged.
-- Windows: restricted-token *creation* is still required so a host
-  without that primitive fails closed. The live spawn boundary is still
-  the Job Object. `CreateProcessAsUser` so the child actually runs under
-  the restricted token is not applied in this cut: stable `std::process::Child`
-  has no supported wrap from `PROCESS_INFORMATION`. Residual stays
-  documented; do not claim the token is the running process token.
+- Windows: `CreateProcessAsUser` starts the child under the restricted
+  token; the Job Object remains assigned. Missing token, job, or
+  `CreateProcessAsUser` privilege fails closed. `ConfinedChild` owns the
+  process and job handles because `std::process::Child` has no supported
+  wrap from `PROCESS_INFORMATION`.
 - MCP stdio: optional `StdioConfig::with_confinement` /
-  `McpConfig::stdio_confined`. Unix backends apply `pre_exec` via
-  `ProcessConfinement::configure` then `tokio::process` spawn.
-  Requested-and-unavailable fails closed. Unconfined stdio stays T1.
-  Windows `configure` fails closed (token cannot attach to a later tokio
-  spawn); confined MCP stdio is unix-only in this cut.
+  `McpConfig::stdio_confined` calls `ProcessConfinement::spawn` on every
+  platform, including Windows token+job. Requested-and-unavailable fails
+  closed. Unconfined stdio stays T1.
 
 ## Residuals
 
-- Windows token-on-child (`CreateProcessAsUser` / `CreateProcessWithTokenW`
-  plus a supported Child wrap)
-- Windows confined MCP stdio (same token-on-child gap)
 - Seatbelt deprecation / Darwin deny-default abort
 - No isolation-label upgrade (T1 unchanged)
+- `CreateProcessAsUser` still requires `SeAssignPrimaryTokenPrivilege`;
+  hosts without that privilege fail closed rather than spawning
+  Job-Object-only.

@@ -56,10 +56,10 @@ Process confinement is an **internal runtime service**, not a port:
   Deny-default Seatbelt aborts under current Darwin + dyld shared
   cache. The enforced profile is allow-default, deny `file-read-data`
   on user-writable trees, then re-allow the capability root.
-- Windows requires restricted-token creation and assigns the child to a
-  Job Object. `std::process::Command` cannot take the restricted token
-  (`CreateProcessAsUser` is a remaining gap). A host that cannot create
-  the token or the job refuses to spawn.
+- Windows creates a restricted token, starts the child with
+  `CreateProcessAsUser`, and assigns the child to a Job Object. A host
+  that cannot create the token, the job, or apply the token refuses to
+  spawn.
 - The existing unconfined `std::process` runner stays reachable and is
   labeled `ProcessSandboxKind::UnconfinedStdProcess`.
 - FR-03 stdio is a follow-on consumer of the same service. No E2B or
@@ -77,8 +77,9 @@ control, not isolation.
   spawn.
 - Seatbelt deprecation is an accepted residual risk until Apple ships a
   supported in-process replacement.
-- Windows token-on-child remains incomplete; Job Object assignment is
-  the live Windows boundary.
+- Windows token-on-child is applied via `CreateProcessAsUser`; Job
+  Object assignment remains required. Missing `SeAssignPrimaryTokenPrivilege`
+  fails closed.
 
 ## Rejected alternatives
 
@@ -112,9 +113,9 @@ service and optional shell constructor.
   invent a passed threat-model review id.
 - Residual: Seatbelt is Apple-deprecated; deny-default is not viable on
   current Darwin so macOS denies user-writable `file-read-data` rather
-  than default-deny; Windows does not yet apply the restricted token to
-  the child process; Landlock ABI/kernel support varies; T1 label is
-  unchanged.
+  than default-deny; Windows `CreateProcessAsUser` requires
+  `SeAssignPrimaryTokenPrivilege` and otherwise fails closed; Landlock
+  ABI/kernel support varies; T1 label is unchanged.
 
 ## Affected requirements, design, and delivery
 
@@ -143,5 +144,5 @@ superseding ADR.
   (`cargo test -p finstack-ai-runtime --locked --features native-tokio --lib services::process_confinement`;
   `cargo test -p finstack-ai-tools-mcp --locked`). Review file
   [`../artifacts/adr-043-confinement-review.md`](../artifacts/adr-043-confinement-review.md).
-  No published evidence id and no invented review id. Windows
-  `CreateProcessAsUser` and Seatbelt deny-default remain residuals.
+  No published evidence id and no invented review id. Seatbelt
+  deny-default remains a residual.

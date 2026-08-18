@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,10 +19,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use finstack_ai_runtime::ToolStreamItem;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    ConfinementError, ConfinementProfile, ErrorCategory, Metadata, PortFuture, ProcessConfinement,
-    RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext, ToolError, ToolEventStream,
-    ToolExecutionMode, ToolId, ToolResult, ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall,
-    stage_required_artifact,
+    ConfinedChild, ConfinementError, ConfinementProfile, ErrorCategory, Metadata, PortFuture,
+    ProcessConfinement, RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext,
+    ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, Toolset,
+    ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -606,19 +606,19 @@ fn run_process(
         if let Some(cwd) = &request.cwd {
             profile = profile.with_authorized_cwd(cwd).map_err(map_confinement)?;
         }
-        service.spawn(command, &profile).map_err(map_confinement)?
+        RunningChild::Confined(service.spawn(command, &profile).map_err(map_confinement)?)
     } else {
         #[cfg(unix)]
         if let Some(cwd) = &request.cwd {
             apply_authorized_cwd(&mut command, cwd)?;
         }
-        command.spawn().map_err(|_| {
+        RunningChild::Plain(command.spawn().map_err(|_| {
             tool_error(
                 SHELL_IO_ERROR,
                 ErrorCategory::Tool,
                 "shell process could not be started",
             )
-        })?
+        })?)
     };
     let started = Instant::now();
     loop {
@@ -634,10 +634,10 @@ fn run_process(
             Ok(Some(status)) => {
                 let mut stdout = Vec::new();
                 let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
+                if let Some(mut pipe) = child.stdout() {
                     std::io::Read::read_to_end(&mut pipe, &mut stdout).ok();
                 }
-                if let Some(mut pipe) = child.stderr.take() {
+                if let Some(mut pipe) = child.stderr() {
                     std::io::Read::read_to_end(&mut pipe, &mut stderr).ok();
                 }
                 if stdout.len().saturating_add(stderr.len()) > request.max_output_bytes {
@@ -662,6 +662,48 @@ fn run_process(
                     "shell process status is unavailable",
                 ));
             }
+        }
+    }
+}
+
+enum RunningChild {
+    Confined(ConfinedChild),
+    Plain(Child),
+}
+
+impl RunningChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Confined(child) => child.kill(),
+            Self::Plain(child) => child.kill(),
+        }
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        match self {
+            Self::Confined(child) => child.wait(),
+            Self::Plain(child) => child.wait(),
+        }
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        match self {
+            Self::Confined(child) => child.try_wait(),
+            Self::Plain(child) => child.try_wait(),
+        }
+    }
+
+    fn stdout(&mut self) -> Option<ChildStdout> {
+        match self {
+            Self::Confined(child) => child.stdout.take(),
+            Self::Plain(child) => child.stdout.take(),
+        }
+    }
+
+    fn stderr(&mut self) -> Option<ChildStderr> {
+        match self {
+            Self::Confined(child) => child.stderr.take(),
+            Self::Plain(child) => child.stderr.take(),
         }
     }
 }

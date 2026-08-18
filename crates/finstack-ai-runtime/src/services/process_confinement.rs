@@ -6,7 +6,7 @@
 //! `std::process` runner stays in the shell crate as a separate path.
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
 
 use thiserror::Error;
 
@@ -209,6 +209,10 @@ impl ProcessConfinement {
 
     /// Spawn `command` under `profile`. Refuses when the backend is missing.
     ///
+    /// Windows applies the restricted token with `CreateProcessAsUser` and
+    /// assigns the child to a Job Object. Either primitive missing fails
+    /// closed. Unix backends keep `pre_exec` confinement.
+    ///
     /// # Errors
     ///
     /// Returns a stable [`ConfinementError`] and does not leave an unconfined
@@ -217,7 +221,7 @@ impl ProcessConfinement {
         &self,
         command: Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         match self.backend {
             ConfinementBackend::Unavailable => Err(ConfinementError::unavailable(
                 "process confinement is unavailable on this target",
@@ -225,6 +229,86 @@ impl ProcessConfinement {
             ConfinementBackend::LinuxLandlock => linux::spawn(command, profile),
             ConfinementBackend::MacosSeatbelt => macos::spawn(command, profile),
             ConfinementBackend::WindowsRestrictedJob => windows::spawn(command, profile),
+        }
+    }
+}
+
+/// Child started by [`ProcessConfinement::spawn`].
+///
+/// Unix wraps `std::process::Child`. Windows owns the `CreateProcessAsUser`
+/// process handle plus the Job Object so kill-on-job-close stays live.
+#[derive(Debug)]
+pub struct ConfinedChild {
+    #[cfg(not(windows))]
+    inner: std::process::Child,
+    #[cfg(windows)]
+    process: std::os::windows::io::OwnedHandle,
+    #[cfg(windows)]
+    _job: std::os::windows::io::OwnedHandle,
+    /// Optional stdin pipe.
+    pub stdin: Option<ChildStdin>,
+    /// Optional stdout pipe.
+    pub stdout: Option<ChildStdout>,
+    /// Optional stderr pipe.
+    pub stderr: Option<ChildStderr>,
+}
+
+impl ConfinedChild {
+    #[cfg(not(windows))]
+    fn from_std(mut inner: std::process::Child) -> Self {
+        Self {
+            stdin: inner.stdin.take(),
+            stdout: inner.stdout.take(),
+            stderr: inner.stderr.take(),
+            inner,
+        }
+    }
+
+    /// Force-terminate the child.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O failure when the platform kill primitive fails.
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        #[cfg(not(windows))]
+        {
+            self.inner.kill()
+        }
+        #[cfg(windows)]
+        {
+            windows::terminate(&self.process)
+        }
+    }
+
+    /// Block until the child exits.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O failure when the platform wait primitive fails.
+    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        #[cfg(not(windows))]
+        {
+            self.inner.wait()
+        }
+        #[cfg(windows)]
+        {
+            windows::wait(&self.process)
+        }
+    }
+
+    /// Return the exit status when the child has already exited.
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O failure when the platform wait primitive fails.
+    pub fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        #[cfg(not(windows))]
+        {
+            self.inner.try_wait()
+        }
+        #[cfg(windows)]
+        {
+            windows::try_wait(&self.process)
         }
     }
 }
@@ -263,14 +347,14 @@ const fn current_backend() -> ConfinementBackend {
 mod linux {
     use std::os::fd::AsRawFd;
     use std::path::Path;
-    use std::process::{Child, Command};
+    use std::process::Command;
 
     use std::os::fd::{FromRawFd, OwnedFd};
 
     use rustix::fs::{Mode, OFlags, open};
     use rustix::thread::set_no_new_privs;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     const SYS_LANDLOCK_CREATE_RULESET: i64 = 444;
     const SYS_LANDLOCK_ADD_RULE: i64 = 445;
@@ -328,10 +412,11 @@ mod linux {
     pub(super) fn spawn(
         mut command: Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         configure(&mut command, profile)?;
         command
             .spawn()
+            .map(ConfinedChild::from_std)
             .map_err(|_| ConfinementError::io("confined linux process could not be started"))
     }
 
@@ -430,9 +515,9 @@ mod linux {
 
 #[cfg(not(target_os = "linux"))]
 mod linux {
-    use std::process::{Child, Command};
+    use std::process::Command;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     pub(super) fn configure(
         _command: &mut Command,
@@ -446,7 +531,7 @@ mod linux {
     pub(super) fn spawn(
         _command: Command,
         _profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         Err(ConfinementError::unavailable(
             "linux landlock is not compiled on this target",
         ))
@@ -462,9 +547,9 @@ mod macos {
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_int};
     use std::path::Path;
-    use std::process::{Child, Command};
+    use std::process::Command;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     unsafe extern "C" {
         fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
@@ -496,10 +581,11 @@ mod macos {
     pub(super) fn spawn(
         mut command: Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         configure(&mut command, profile)?;
         command
             .spawn()
+            .map(ConfinedChild::from_std)
             .map_err(|_| ConfinementError::io("confined macos process could not be started"))
     }
 
@@ -556,9 +642,9 @@ mod macos {
 
 #[cfg(not(target_os = "macos"))]
 mod macos {
-    use std::process::{Child, Command};
+    use std::process::Command;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     pub(super) fn configure(
         _command: &mut Command,
@@ -572,7 +658,7 @@ mod macos {
     pub(super) fn spawn(
         _command: Command,
         _profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         Err(ConfinementError::unavailable(
             "macos seatbelt is not compiled on this target",
         ))
@@ -582,23 +668,33 @@ mod macos {
 #[cfg(target_os = "windows")]
 #[allow(
     unsafe_code,
-    reason = "Job Object and restricted-token FFI have no safe std equivalent"
+    reason = "CreateProcessAsUser, Job Object, and restricted-token FFI have no safe std equivalent"
 )]
 mod windows {
-    use std::os::windows::io::{FromRawHandle, OwnedHandle};
-    use std::os::windows::process::CommandExt;
-    use std::process::{Child, Command};
+    use std::collections::BTreeMap;
+    use std::ffi::{OsStr, OsString};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
+    use std::os::windows::process::ExitStatusExt;
+    use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
     use std::ptr;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
     const JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION: u32 = 0x0000_0400;
     const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
+    const CREATE_SUSPENDED: u32 = 0x0000_0004;
+    const STARTF_USESTDHANDLES: u32 = 0x0000_0100;
+    const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
     const TOKEN_ALL_ACCESS: u32 = 0x000F_01FF;
     const DISABLE_MAX_PRIVILEGE: u32 = 0x01;
+    const WAIT_OBJECT_0: u32 = 0;
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+    const INFINITE: u32 = 0xFFFF_FFFF;
 
     #[repr(C)]
     struct JobObjectBasicLimitInformation {
@@ -631,6 +727,43 @@ mod windows {
         job_memory_limit: usize,
         peak_process_memory_used: usize,
         peak_job_memory_used: usize,
+    }
+
+    #[repr(C)]
+    struct SecurityAttributes {
+        length: u32,
+        descriptor: *mut core::ffi::c_void,
+        inherit: i32,
+    }
+
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        reserved: *mut u16,
+        desktop: *mut u16,
+        title: *mut u16,
+        x: u32,
+        y: u32,
+        x_size: u32,
+        y_size: u32,
+        x_count_chars: u32,
+        y_count_chars: u32,
+        fill_attribute: u32,
+        flags: u32,
+        show_window: u16,
+        cb_reserved2: u16,
+        lp_reserved2: *mut u8,
+        std_input: *mut core::ffi::c_void,
+        std_output: *mut core::ffi::c_void,
+        std_error: *mut core::ffi::c_void,
+    }
+
+    #[repr(C)]
+    struct ProcessInformation {
+        process: *mut core::ffi::c_void,
+        thread: *mut core::ffi::c_void,
+        process_id: u32,
+        thread_id: u32,
     }
 
     unsafe extern "system" {
@@ -666,40 +799,300 @@ mod windows {
             sids_to_restrict: *const core::ffi::c_void,
             new_token: *mut *mut core::ffi::c_void,
         ) -> i32;
+        fn CreateProcessAsUserW(
+            token: *mut core::ffi::c_void,
+            application: *const u16,
+            command_line: *mut u16,
+            process_attributes: *const core::ffi::c_void,
+            thread_attributes: *const core::ffi::c_void,
+            inherit_handles: i32,
+            creation_flags: u32,
+            environment: *const u16,
+            current_directory: *const u16,
+            startup: *const StartupInfoW,
+            process_information: *mut ProcessInformation,
+        ) -> i32;
+        fn CreatePipe(
+            read: *mut *mut core::ffi::c_void,
+            write: *mut *mut core::ffi::c_void,
+            attributes: *const SecurityAttributes,
+            size: u32,
+        ) -> i32;
+        fn SetHandleInformation(handle: *mut core::ffi::c_void, mask: u32, flags: u32) -> i32;
+        fn ResumeThread(thread: *mut core::ffi::c_void) -> u32;
+        fn TerminateProcess(process: *mut core::ffi::c_void, exit_code: u32) -> i32;
+        fn WaitForSingleObject(handle: *mut core::ffi::c_void, milliseconds: u32) -> u32;
+        fn GetExitCodeProcess(process: *mut core::ffi::c_void, exit_code: *mut u32) -> i32;
     }
 
     pub(super) fn spawn(
-        mut command: Command,
+        command: Command,
         profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
-        let _ = profile;
+    ) -> Result<ConfinedChild, ConfinementError> {
         let job = create_job()?;
-        let restricted = create_restricted_token()?;
-        // Restricted-token creation is required so a host without that
-        // primitive fails closed. `std::process::Command` cannot take the
-        // token; the live boundary is the Job Object assigned immediately
-        // after spawn. CreateProcessAsUser remains a documented gap.
-        drop(restricted);
-        command.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
-        let mut child = command.spawn().map_err(|_| {
+        let restricted = create_restricted_token().inspect_err(|_| close(job))?;
+        let pipes = match create_stdio_pipes() {
+            Ok(pipes) => pipes,
+            Err(error) => {
+                close(job);
+                return Err(error);
+            }
+        };
+        let mut command_line = wide_command_line(&command)?;
+        let application = wide_os(command.get_program());
+        let cwd = profile
+            .cwd()
+            .or_else(|| command.get_current_dir())
+            .map(wide_os);
+        let environment = environment_block(&command);
+        let mut startup = StartupInfoW {
+            cb: u32::try_from(std::mem::size_of::<StartupInfoW>()).expect("startup info size"),
+            reserved: ptr::null_mut(),
+            desktop: ptr::null_mut(),
+            title: ptr::null_mut(),
+            x: 0,
+            y: 0,
+            x_size: 0,
+            y_size: 0,
+            x_count_chars: 0,
+            y_count_chars: 0,
+            fill_attribute: 0,
+            flags: STARTF_USESTDHANDLES,
+            show_window: 0,
+            cb_reserved2: 0,
+            lp_reserved2: ptr::null_mut(),
+            std_input: pipes.child_stdin,
+            std_output: pipes.child_stdout,
+            std_error: pipes.child_stderr,
+        };
+        let mut info = ProcessInformation {
+            process: ptr::null_mut(),
+            thread: ptr::null_mut(),
+            process_id: 0,
+            thread_id: 0,
+        };
+        let created = unsafe {
+            CreateProcessAsUserW(
+                raw_handle(&restricted),
+                application.as_ptr(),
+                command_line.as_mut_ptr(),
+                ptr::null(),
+                ptr::null(),
+                1,
+                CREATE_BREAKAWAY_FROM_JOB | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+                environment.as_ptr(),
+                cwd.as_ref().map_or(ptr::null(), Vec::as_ptr),
+                &raw const startup,
+                &raw mut info,
+            )
+        };
+        close(pipes.child_stdin);
+        close(pipes.child_stdout);
+        close(pipes.child_stderr);
+        if created == 0 || info.process.is_null() {
+            close(pipes.parent_stdin);
+            close(pipes.parent_stdout);
+            close(pipes.parent_stderr);
             close(job);
-            ConfinementError::io("confined windows process could not be started")
-        })?;
-        let assigned = unsafe { AssignProcessToJobObject(job, child.as_raw_handle_mut()) };
+            close(info.thread);
+            close(info.process);
+            return Err(ConfinementError::unavailable(
+                "windows CreateProcessAsUser is unavailable",
+            ));
+        }
+        let assigned = unsafe { AssignProcessToJobObject(job, info.process) };
         if assigned == 0 {
-            let _ = child.kill();
-            let _ = child.wait();
+            let _ = unsafe { TerminateProcess(info.process, 1) };
+            close(pipes.parent_stdin);
+            close(pipes.parent_stdout);
+            close(pipes.parent_stderr);
+            close(info.thread);
+            close(info.process);
             close(job);
             return Err(ConfinementError::unavailable(
                 "windows job object assignment failed",
             ));
         }
-        // Leak the job handle into the child lifetime via OwnedHandle drop
-        // disable: keep the job open until process exit by storing it on a
-        // forgotten handle. Kill-on-job-close would kill the child if we
-        // closed now; forget the job so it outlives this function.
-        std::mem::forget(unsafe { OwnedHandle::from_raw_handle(job) });
-        Ok(child)
+        if unsafe { ResumeThread(info.thread) } == u32::MAX {
+            let _ = unsafe { TerminateProcess(info.process, 1) };
+            close(pipes.parent_stdin);
+            close(pipes.parent_stdout);
+            close(pipes.parent_stderr);
+            close(info.thread);
+            close(info.process);
+            close(job);
+            return Err(ConfinementError::unavailable(
+                "windows confined child could not be resumed",
+            ));
+        }
+        close(info.thread);
+        // SAFETY: `CreateProcessAsUser` returns a new process handle we own.
+        // Pipe parent ends are new handles; `ChildStd*` take them via FromRawHandle.
+        Ok(unsafe {
+            ConfinedChild {
+                process: OwnedHandle::from_raw_handle(info.process),
+                _job: OwnedHandle::from_raw_handle(job),
+                stdin: Some(ChildStdin::from_raw_handle(pipes.parent_stdin)),
+                stdout: Some(ChildStdout::from_raw_handle(pipes.parent_stdout)),
+                stderr: Some(ChildStderr::from_raw_handle(pipes.parent_stderr)),
+            }
+        })
+    }
+
+    pub(super) fn terminate(process: &OwnedHandle) -> std::io::Result<()> {
+        if unsafe { TerminateProcess(raw_handle(process), 1) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn wait(process: &OwnedHandle) -> std::io::Result<ExitStatus> {
+        wait_for(process, INFINITE)?
+            .ok_or_else(|| std::io::Error::other("windows wait returned without an exit status"))
+    }
+
+    pub(super) fn try_wait(process: &OwnedHandle) -> std::io::Result<Option<ExitStatus>> {
+        wait_for(process, 0)
+    }
+
+    fn wait_for(process: &OwnedHandle, milliseconds: u32) -> std::io::Result<Option<ExitStatus>> {
+        match unsafe { WaitForSingleObject(raw_handle(process), milliseconds) } {
+            WAIT_OBJECT_0 => {
+                let mut code = 0_u32;
+                if unsafe { GetExitCodeProcess(raw_handle(process), &raw mut code) } == 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(Some(ExitStatus::from_raw(code)))
+            }
+            WAIT_TIMEOUT => Ok(None),
+            _ => Err(std::io::Error::last_os_error()),
+        }
+    }
+
+    struct StdioPipes {
+        parent_stdin: RawHandle,
+        parent_stdout: RawHandle,
+        parent_stderr: RawHandle,
+        child_stdin: *mut core::ffi::c_void,
+        child_stdout: *mut core::ffi::c_void,
+        child_stderr: *mut core::ffi::c_void,
+    }
+
+    fn create_stdio_pipes() -> Result<StdioPipes, ConfinementError> {
+        let (parent_stdin, child_stdin) = create_pipe(true)?;
+        let (parent_stdout, child_stdout) = create_pipe(false)?;
+        let (parent_stderr, child_stderr) = create_pipe(false)?;
+        Ok(StdioPipes {
+            parent_stdin,
+            parent_stdout,
+            parent_stderr,
+            child_stdin,
+            child_stdout,
+            child_stderr,
+        })
+    }
+
+    fn create_pipe(
+        parent_writes: bool,
+    ) -> Result<(RawHandle, *mut core::ffi::c_void), ConfinementError> {
+        let mut read = ptr::null_mut();
+        let mut write = ptr::null_mut();
+        let attributes = SecurityAttributes {
+            length: u32::try_from(std::mem::size_of::<SecurityAttributes>()).expect("sa size"),
+            descriptor: ptr::null_mut(),
+            inherit: 1,
+        };
+        if unsafe { CreatePipe(&raw mut read, &raw mut write, &raw const attributes, 0) } == 0 {
+            return Err(ConfinementError::io("windows pipe creation failed"));
+        }
+        let parent = if parent_writes { write } else { read };
+        let child = if parent_writes { read } else { write };
+        if unsafe { SetHandleInformation(parent, HANDLE_FLAG_INHERIT, 0) } == 0 {
+            close(read);
+            close(write);
+            return Err(ConfinementError::io("windows pipe inherit mask failed"));
+        }
+        Ok((parent, child))
+    }
+
+    fn wide_os(value: impl AsRef<OsStr>) -> Vec<u16> {
+        value
+            .as_ref()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    fn wide_command_line(command: &Command) -> Result<Vec<u16>, ConfinementError> {
+        let mut line = String::new();
+        quote_windows_arg(&command.get_program().to_string_lossy(), &mut line);
+        for arg in command.get_args() {
+            line.push(' ');
+            quote_windows_arg(&arg.to_string_lossy(), &mut line);
+        }
+        if line.contains('\0') {
+            return Err(ConfinementError::denied(
+                "windows command line contains NUL",
+            ));
+        }
+        Ok(wide_os(&line))
+    }
+
+    fn quote_windows_arg(arg: &str, buf: &mut String) {
+        let needs_quotes = arg.is_empty() || arg.contains([' ', '\t', '\n', '"']);
+        if !needs_quotes {
+            buf.push_str(arg);
+            return;
+        }
+        buf.push('"');
+        let mut backslashes = 0_usize;
+        for ch in arg.chars() {
+            match ch {
+                '\\' => backslashes += 1,
+                '"' => {
+                    buf.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                    buf.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    buf.extend(std::iter::repeat_n('\\', backslashes));
+                    buf.push(ch);
+                    backslashes = 0;
+                }
+            }
+        }
+        buf.extend(std::iter::repeat_n('\\', backslashes * 2));
+        buf.push('"');
+    }
+
+    fn environment_block(command: &Command) -> Vec<u16> {
+        let mut vars = BTreeMap::<OsString, OsString>::new();
+        for (key, value) in command.get_envs() {
+            if let Some(value) = value {
+                vars.insert(key.to_owned(), value.to_owned());
+            }
+        }
+        if !vars
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("SYSTEMROOT"))
+            && let Some(system_root) = std::env::var_os("SYSTEMROOT")
+        {
+            vars.insert(OsString::from("SYSTEMROOT"), system_root);
+        }
+        let mut block = Vec::new();
+        for (key, value) in vars {
+            block.extend(key.encode_wide());
+            block.push(u16::from(b'='));
+            block.extend(value.encode_wide());
+            block.push(0);
+        }
+        block.push(0);
+        block
+    }
+
+    fn raw_handle(handle: &OwnedHandle) -> *mut core::ffi::c_void {
+        use std::os::windows::io::AsRawHandle;
+        handle.as_raw_handle()
     }
 
     fn create_job() -> Result<*mut core::ffi::c_void, ConfinementError> {
@@ -807,14 +1200,14 @@ mod windows {
 
 #[cfg(not(target_os = "windows"))]
 mod windows {
-    use std::process::{Child, Command};
+    use std::process::Command;
 
-    use super::{ConfinementError, ConfinementProfile};
+    use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     pub(super) fn spawn(
         _command: Command,
         _profile: &ConfinementProfile,
-    ) -> Result<Child, ConfinementError> {
+    ) -> Result<ConfinedChild, ConfinementError> {
         Err(ConfinementError::unavailable(
             "windows restricted token and job object are not compiled on this target",
         ))
@@ -895,5 +1288,26 @@ mod tests {
             .expect("confined echo");
         let status = child.wait().expect("wait");
         assert!(status.success(), "confined echo must exit 0: {status:?}");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_confined_spawn_applies_token_or_fails_closed() {
+        let root = std::env::temp_dir();
+        let profile = ConfinementProfile::try_new(&root).expect("temp root");
+        let mut command = Command::new("cmd.exe");
+        command.args(["/c", "echo", "confined"]);
+        match ProcessConfinement::for_current_platform().spawn(command, &profile) {
+            Ok(mut child) => {
+                let status = child.wait().expect("wait");
+                assert!(
+                    status.success() || status.code().is_some(),
+                    "confined windows child must terminate: {status:?}"
+                );
+            }
+            Err(error) => {
+                assert_eq!(error.code(), CONFINEMENT_UNAVAILABLE);
+            }
+        }
     }
 }
