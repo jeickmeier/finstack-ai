@@ -155,11 +155,12 @@ async fn complete_parent_tool(
                 stream,
                 resolved.output_validator.as_deref(),
                 resolved.spec.max_result_bytes,
+                resolved.spec.deferral,
             )
             .await
             .map(|assembled| AssembledToolTerminal {
                 usage: assembled.usage,
-                result: assembled.result,
+                terminal: assembled.terminal,
             }),
         Err(error) => Err(error),
     }

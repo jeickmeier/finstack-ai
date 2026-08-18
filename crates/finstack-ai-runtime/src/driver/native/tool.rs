@@ -596,6 +596,7 @@ async fn execute_tool(
             stream,
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            resolved.spec.deferral,
             move |progress| {
                 let sender = progress_results.clone();
                 async move {

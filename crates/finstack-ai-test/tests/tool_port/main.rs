@@ -16,10 +16,11 @@ use finstack_ai_runtime::{
     EventHubConfig, EventLagPolicy, EventSubscriptionConfig, JournalStore,
     JsonSchemaToolValidatorCompiler, LoadRequest, Model, ModelStreamLimits, ModelTaskConfig,
     ProgressCoalescing, ResolvedToolCatalog, RunHandleError, RunStatus, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, StoreError, TOOL_RECONCILIATION_UNSUPPORTED, ToolError,
-    ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult, ToolResumeAction,
-    ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, ToolValidator,
-    ToolValidatorCompiler, Toolset, ToolsetRegistration, UsageDelta, tool_resume_action,
+    RunTaskOwner, SameIdentityRetryPolicy, StoreError, TOOL_RECONCILIATION_UNSUPPORTED,
+    ToolDeferralSupport, ToolError, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult,
+    ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits,
+    ToolTaskConfig, ToolTerminal, ToolValidator, ToolValidatorCompiler, Toolset,
+    ToolsetRegistration, UsageDelta, tool_resume_action,
 };
 use finstack_ai_test::{
     FixedClock, ScriptedModel, ScriptedToolAction, ScriptedToolPlan, ScriptedToolset,

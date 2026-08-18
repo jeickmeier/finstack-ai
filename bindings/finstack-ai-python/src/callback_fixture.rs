@@ -9,7 +9,7 @@ use finstack_ai::runtime::{
     ModelStreamLimits, ModelTerminal, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
     RawJson, RetrySafety, RunCallContext, RunId, SessionId, TextBlock, ToolBatchId, ToolCallBlock,
     ToolCallContext, ToolCallId, ToolExecutionMode, ToolFailurePolicy, ToolResult,
-    ToolStreamLimits, Usage, ValidatedToolCall,
+    ToolStreamLimits, ToolTerminal, Usage, ValidatedToolCall,
 };
 use finstack_ai_test::{
     ModelConformanceCase, ToolsetConformanceCase, check_model_conformance,
@@ -152,7 +152,7 @@ fn callback_port_conformance<'py>(
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
-                result,
+                terminal: ToolTerminal::Completed(result),
             },
             stream_limits: ToolStreamLimits::default(),
             max_result_bytes: spec.max_result_bytes,

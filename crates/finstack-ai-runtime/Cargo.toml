@@ -35,6 +35,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 rustix = { workspace = true, features = ["thread"] }
 
 [dev-dependencies]
+futures-util = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

@@ -73,6 +73,7 @@ pub struct OpaqueProviderEvent {
 /// Normalized model stream item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ModelStreamItem {
     /// Assistant text fragment.
     TextDelta(TextDelta),

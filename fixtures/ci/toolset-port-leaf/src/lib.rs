@@ -105,7 +105,7 @@ mod tests {
         AssembledToolStream, AuthorizationContext, CancellationSignal, Digest,
         EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PrincipalRef,
         RunCallContext, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
-        ToolFailurePolicy, ToolStreamLimits, Usage,
+        ToolFailurePolicy, ToolStreamLimits, ToolTerminal, Usage,
     };
     use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
 
@@ -189,7 +189,7 @@ mod tests {
         let expected = AssembledToolStream {
             progress: Arc::from([]),
             usage: None,
-            result: LeafToolset::result(),
+            terminal: ToolTerminal::Completed(LeafToolset::result()),
         };
         let assembled = check_toolset_conformance(
             &toolset,

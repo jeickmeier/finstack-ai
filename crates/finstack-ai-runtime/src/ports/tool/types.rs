@@ -56,6 +56,7 @@ pub struct ToolResult {
 /// Normalized Toolset stream item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ToolStreamItem {
     /// Transient progress update.
     Progress(ToolProgress),
@@ -63,6 +64,8 @@ pub enum ToolStreamItem {
     Usage(UsageDelta),
     /// Exactly one terminal result.
     Completed(ToolResult),
+    /// Externally deferred terminal result.
+    Deferred(ToolDeferral),
 }
 
 /// Boxed target-correct tool event stream.

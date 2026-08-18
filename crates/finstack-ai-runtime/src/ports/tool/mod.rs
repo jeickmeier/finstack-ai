@@ -28,7 +28,7 @@ pub use resume::{map_tool_reconcile_result, tool_resume_action, tool_retry_allow
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use stream::AssembledToolTerminal;
 pub use stream::{
-    AssembledToolStream, ToolStreamAssembler, ToolStreamLimits, normalize_tool_result,
+    AssembledToolStream, ToolStreamAssembler, ToolStreamLimits, ToolTerminal, normalize_tool_result,
 };
 pub use types::{
     NestedSample, PendingToolEffect, ToolCallContext, ToolDeferral, ToolEventStream,

@@ -115,6 +115,7 @@ async fn tool_reported_errors_remain_bounded_and_stably_classified() {
             stream(vec![Err(reported)]),
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("tool-reported stream error");
@@ -130,10 +131,14 @@ async fn tool_reported_errors_remain_bounded_and_stably_classified() {
             stream(vec![Ok(ToolStreamItem::Completed(application_error))]),
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect("bounded application errors bypass success schema validation");
-    assert!(assembled.result.is_error);
+    match assembled.terminal {
+        ToolTerminal::Completed(result) => assert!(result.is_error),
+        ToolTerminal::Deferred(_) => panic!("completed-only fixture deferred"),
+    }
 
     let deadline = ToolError::try_new(
         finstack_ai_runtime::TOOL_DEADLINE_EXCEEDED,

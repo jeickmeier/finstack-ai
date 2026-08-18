@@ -209,7 +209,7 @@ pub async fn check_toolset_conformance(
             PortConformanceFailure::new("Toolset", "toolset.call.starts", error.to_string())
         })?;
     let assembled = ToolStreamAssembler::new(case.stream_limits)
-        .assemble(stream, None, case.max_result_bytes)
+        .assemble(stream, None, case.max_result_bytes, spec.deferral)
         .await
         .map_err(|error| {
             PortConformanceFailure::new("Toolset", "toolset.stream.normalized", error.to_string())

@@ -4,10 +4,11 @@ use finstack_ai_kernel::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, AssignedToolCall, ComponentId, Digest,
     EffectDeferred, EffectInput, EffectKind, EffectOutputContract, EffectOutputKind,
     EffectRequested, ErrorCategory, ErrorDescriptor, ExternalHandleRef, Id, IdTag, KernelState,
-    Metadata, RawJson, ReconciliationPolicy, RetrySafety, SyntheticToolClosure,
+    Metadata, RawJson, ReconciliationPolicy, RetrySafety, SyntheticToolClosure, Timestamp,
     ToolBatchContinuation, ToolBatchOpened, ToolCallBlock, ToolCallPlan, ToolExecutionMode,
     ToolFailurePolicy, ToolId, ToolSettlementFingerprint, ToolSettlementKind, ValidatedToolCall,
 };
+use futures_util::stream;
 
 use crate::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
@@ -21,6 +22,24 @@ fn id<T: IdTag>(ordinal: u64) -> Id<T> {
     bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Id::from_bytes(bytes)
+}
+
+fn tool_deferral(next_poll_at: Option<Timestamp>, expires_at: Option<Timestamp>) -> ToolDeferral {
+    ToolDeferral {
+        handle: ExternalHandleRef::try_new(
+            ComponentId::parse("finstack.tools.scripted").expect("component"),
+            "handle-1",
+            RawJson::parse(b"{}").expect("metadata"),
+        )
+        .expect("handle"),
+        reconciliation: ReconciliationPolicy::CallbackOrPoll,
+        next_poll_at,
+        expires_at,
+    }
+}
+
+fn tool_stream(items: Vec<Result<ToolStreamItem, ToolError>>) -> ToolEventStream {
+    Box::pin(stream::iter(items))
 }
 
 fn tool_call() -> ToolCallBlock {
@@ -156,6 +175,81 @@ fn spec(side_effect: SideEffectClass, retry_safety: RetrySafety) -> ToolSpec {
         metadata: Metadata::empty(),
         deferral: ToolDeferralSupport::Never,
     }
+}
+
+#[tokio::test]
+async fn tool_stream_rejects_undeclared_deferral() {
+    let error = ToolStreamAssembler::default()
+        .assemble(
+            tool_stream(vec![Ok(ToolStreamItem::Deferred(tool_deferral(
+                None, None,
+            )))]),
+            None,
+            1_024,
+            ToolDeferralSupport::Never,
+        )
+        .await
+        .expect_err("undeclared deferral");
+
+    assert_eq!(error.code(), TOOL_DEFERRAL_NOT_DECLARED);
+}
+
+#[tokio::test]
+async fn tool_stream_rejects_deferral_with_poll_after_expiry() {
+    let error = ToolStreamAssembler::default()
+        .assemble(
+            tool_stream(vec![Ok(ToolStreamItem::Deferred(tool_deferral(
+                Some(Timestamp::from_unix_ms(2).expect("next poll")),
+                Some(Timestamp::from_unix_ms(1).expect("expiry")),
+            )))]),
+            None,
+            1_024,
+            ToolDeferralSupport::Supported,
+        )
+        .await
+        .expect_err("invalid deferral");
+
+    assert_eq!(error.code(), TOOL_DEFERRAL_INVALID);
+}
+
+#[tokio::test]
+async fn tool_stream_rejects_items_after_deferral() {
+    let error = ToolStreamAssembler::new(ToolStreamLimits {
+        max_items: 1,
+        max_stream_bytes: 1_024,
+    })
+    .assemble(
+        tool_stream(vec![
+            Ok(ToolStreamItem::Deferred(tool_deferral(None, None))),
+            Ok(ToolStreamItem::Completed(ToolResult {
+                output: RawJson::parse(br#"{"ok":true}"#).expect("output"),
+                is_error: false,
+            })),
+        ]),
+        None,
+        1_024,
+        ToolDeferralSupport::Supported,
+    )
+    .await
+    .expect_err("post-terminal item");
+
+    assert_eq!(error.code(), TOOL_STREAM_INVALID);
+}
+
+#[tokio::test]
+async fn tool_stream_accepts_declared_deferral() {
+    let deferral = tool_deferral(None, None);
+    let assembled = ToolStreamAssembler::default()
+        .assemble(
+            tool_stream(vec![Ok(ToolStreamItem::Deferred(deferral.clone()))]),
+            None,
+            1_024,
+            ToolDeferralSupport::Supported,
+        )
+        .await
+        .expect("declared deferral");
+
+    assert_eq!(assembled.terminal, ToolTerminal::Deferred(deferral));
 }
 
 #[test]

@@ -36,7 +36,8 @@ use finstack_ai_runtime::{
     ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings,
     ModelStreamAssembler, ModelStreamItem, ModelStreamLimits, ModelTokenEstimate, PortFuture,
     RunCallContext, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    ToolError, ToolEventStream, ToolResult, ToolStreamAssembler, ToolStreamItem, UsageDelta,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolStreamAssembler,
+    ToolStreamItem, UsageDelta,
 };
 use finstack_ai_test::{
     ConformanceRunner, NoOpRustAdapter, ReducerRustAdapter, compare_normalized_bytes,
@@ -395,7 +396,12 @@ fn stream_throughput(c: &mut Criterion) {
     tool_group.bench_function("assemble_256_usage_items", |bencher| {
         bencher.iter(|| {
             let assembled = runtime
-                .block_on(tool_assembler.assemble(tool_stream(ITEMS), None, 1_024))
+                .block_on(tool_assembler.assemble(
+                    tool_stream(ITEMS),
+                    None,
+                    1_024,
+                    ToolDeferralSupport::Never,
+                ))
                 .expect("tool stream");
             black_box(assembled);
         });

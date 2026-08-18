@@ -7,7 +7,7 @@ use finstack_ai_runtime::{
     NestedSample, OperationLocator, PendingToolEffect, PrincipalRef, RawJson, ReconcileContext,
     RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass, TextBlock, ToolBatchId,
     ToolCallBlock, ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult,
-    ToolStreamItem, ToolStreamLimits, Toolset, ValidatedToolCall,
+    ToolStreamItem, ToolStreamLimits, ToolTerminal, Toolset, ValidatedToolCall,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -338,10 +338,10 @@ async fn toolset_satisfies_the_published_port_conformance_suite() {
     let expected = AssembledToolStream {
         progress: Arc::from([]),
         usage: None,
-        result: finstack_ai_runtime::ToolResult {
+        terminal: ToolTerminal::Completed(finstack_ai_runtime::ToolResult {
             output: expected_output,
             is_error: false,
-        },
+        }),
     };
     check_toolset_conformance(
         &toolset,

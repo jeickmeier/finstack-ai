@@ -544,6 +544,7 @@ async fn drive_tool(
             stream,
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            resolved.spec.deferral,
             |item| {
                 progress.push(item);
                 core::future::ready(Ok(()))

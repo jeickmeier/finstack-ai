@@ -17,7 +17,8 @@ use crate::{
     CancellationSignal, Clock, PendingToolEffect, RandomSource, ReconcileContext,
     ResolvedToolCatalog, RunCallContext, ToolCallContext, ToolDeferral, ToolError, ToolProgress,
     ToolReconcileResult, ToolResult, ToolResumeAction, ToolStreamAssembler, ToolStreamLimits,
-    map_tool_reconcile_result, normalize_tool_result, tool_resume_action, tool_retry_allowed,
+    ToolTerminal, map_tool_reconcile_result, normalize_tool_result, tool_resume_action,
+    tool_retry_allowed,
 };
 
 use super::cancel::reconcile_cancelled_effect;
@@ -154,11 +155,12 @@ pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
                 stream,
                 resolved.output_validator.as_deref(),
                 resolved.spec.max_result_bytes,
+                resolved.spec.deferral,
             )
             .await
             .map(|assembled| AssembledToolTerminal {
                 usage: assembled.usage,
-                result: assembled.result,
+                terminal: assembled.terminal,
             }),
         Err(error) => Err(error),
     };
@@ -308,33 +310,36 @@ fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, R
     let requested = &result.seed.requested;
     let effect_id = requested.effect_id();
     let outcome = match result.result {
-        Ok(assembled) => {
-            let block = normalize_tool_result(result.seed.tool_call_id, assembled.result)
-                .map_err(|error| tool_handle_error(&error))?;
-            let bytes = serde_json_canonicalizer::to_vec(&block).map_err(|_| {
-                RunHandleError::ToolSettlement {
-                    code: "tool_result_serialize_failed",
-                }
-            })?;
-            let output = RawJson::parse(bytes).map_err(|_| RunHandleError::ToolSettlement {
-                code: "tool_result_output_invalid",
-            })?;
-            ToolSettlement::Completed(
-                EffectCompleted::try_new(
-                    effect_id,
-                    requested.output_contract().clone(),
-                    output,
-                    assembled.usage,
-                    Vec::new(),
-                    ProviderIds::empty(),
-                    None::<&str>,
-                    None,
+        Ok(assembled) => match assembled.terminal {
+            ToolTerminal::Completed(tool_result) => {
+                let block = normalize_tool_result(result.seed.tool_call_id, tool_result)
+                    .map_err(|error| tool_handle_error(&error))?;
+                let bytes = serde_json_canonicalizer::to_vec(&block).map_err(|_| {
+                    RunHandleError::ToolSettlement {
+                        code: "tool_result_serialize_failed",
+                    }
+                })?;
+                let output = RawJson::parse(bytes).map_err(|_| RunHandleError::ToolSettlement {
+                    code: "tool_result_output_invalid",
+                })?;
+                ToolSettlement::Completed(
+                    EffectCompleted::try_new(
+                        effect_id,
+                        requested.output_contract().clone(),
+                        output,
+                        assembled.usage,
+                        Vec::new(),
+                        ProviderIds::empty(),
+                        None::<&str>,
+                        None,
+                    )
+                    .map_err(|_| RunHandleError::ToolSettlement {
+                        code: "tool_effect_completion_invalid",
+                    })?,
                 )
-                .map_err(|_| RunHandleError::ToolSettlement {
-                    code: "tool_effect_completion_invalid",
-                })?,
-            )
-        }
+            }
+            ToolTerminal::Deferred(_) => unreachable!("first-pass deferral is Task 4"),
+        },
         Err(error) => {
             let descriptor = error
                 .to_descriptor()
@@ -653,7 +658,7 @@ async fn settle_reconciled_tool<C: Clock, R: RandomSource>(
         seed,
         result: Ok(AssembledToolTerminal {
             usage: None,
-            result,
+            terminal: ToolTerminal::Completed(result),
         }),
     };
     if deferred {

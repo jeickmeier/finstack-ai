@@ -16,6 +16,7 @@ async fn stream_normalization_rejects_invalid_output_duplicates_and_all_oversize
             stream(vec![Ok(ToolStreamItem::Completed(invalid))]),
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("invalid output");
@@ -33,6 +34,7 @@ async fn stream_normalization_rejects_invalid_output_duplicates_and_all_oversize
             ]),
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("duplicate completion");
@@ -47,6 +49,7 @@ async fn stream_normalization_rejects_invalid_output_duplicates_and_all_oversize
             stream(vec![Ok(ToolStreamItem::Completed(oversized_error))]),
             resolved.output_validator.as_deref(),
             4,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("error result is also bounded");
@@ -57,6 +60,7 @@ async fn stream_normalization_rejects_invalid_output_duplicates_and_all_oversize
             stream(Vec::new()),
             resolved.output_validator.as_deref(),
             resolved.spec.max_result_bytes,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("completion is required");
@@ -89,6 +93,7 @@ async fn progress_usage_and_stream_limits_are_normalized_before_settlement() {
             ]),
             None,
             4_096,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect("normalized stream");
@@ -104,6 +109,7 @@ async fn progress_usage_and_stream_limits_are_normalized_before_settlement() {
             ]),
             None,
             4_096,
+            ToolDeferralSupport::Never,
         )
         .await
         .expect_err("usage must not regress");
@@ -122,6 +128,7 @@ async fn progress_usage_and_stream_limits_are_normalized_before_settlement() {
         ]),
         None,
         4_096,
+        ToolDeferralSupport::Never,
     )
     .await
     .expect_err("stream limits must apply");

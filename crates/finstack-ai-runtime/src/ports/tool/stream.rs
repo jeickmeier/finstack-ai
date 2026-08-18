@@ -6,11 +6,12 @@ use finstack_ai_kernel::{
 };
 
 use super::error::{
-    TOOL_OUTPUT_INVALID, TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID,
-    TOOL_STREAM_LIMIT_EXCEEDED, ToolError,
+    TOOL_DEFERRAL_INVALID, TOOL_DEFERRAL_NOT_DECLARED, TOOL_OUTPUT_INVALID,
+    TOOL_RESULT_LIMIT_EXCEEDED, TOOL_STREAM_INVALID, TOOL_STREAM_LIMIT_EXCEEDED, ToolError,
 };
-use super::types::{ToolEventStream, ToolResult, ToolStreamItem};
+use super::types::{ToolDeferral, ToolEventStream, ToolResult, ToolStreamItem};
 use super::validator::ToolValidator;
+use crate::ToolDeferralSupport;
 
 /// Target-neutral stream limits applied before durable settlement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,15 @@ impl Default for ToolStreamLimits {
     }
 }
 
+/// Validated direct-tool stream terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolTerminal {
+    /// Successful tool result.
+    Completed(ToolResult),
+    /// External suspension.
+    Deferred(ToolDeferral),
+}
+
 /// Fully normalized direct tool stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssembledToolStream {
@@ -37,14 +47,14 @@ pub struct AssembledToolStream {
     pub progress: Arc<[ToolProgress]>,
     /// Final cumulative usage, when supplied.
     pub usage: Option<Usage>,
-    /// Exactly one completed result.
-    pub result: ToolResult,
+    /// Exactly one validated terminal.
+    pub terminal: ToolTerminal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AssembledToolTerminal {
     pub(crate) usage: Option<Usage>,
-    pub(crate) result: ToolResult,
+    pub(crate) terminal: ToolTerminal,
 }
 
 /// Target-neutral strict tool stream driver.
@@ -64,25 +74,33 @@ impl ToolStreamAssembler {
     ///
     /// # Errors
     ///
-    /// Rejects missing/duplicate completion, post-terminal items or errors,
-    /// regressing usage, oversized streams/results, and invalid successful output.
+    /// Rejects missing/duplicate terminals, post-terminal items or errors,
+    /// invalid deferrals, regressing usage, oversized streams/results, and
+    /// invalid successful output.
     pub async fn assemble(
         self,
         stream: ToolEventStream,
         output_validator: Option<&dyn ToolValidator>,
         max_result_bytes: u64,
+        deferral: ToolDeferralSupport,
     ) -> Result<AssembledToolStream, ToolError> {
         let mut progress = Vec::new();
         let terminal = self
-            .assemble_incremental(stream, output_validator, max_result_bytes, |item| {
-                progress.push(item);
-                ready(Ok(()))
-            })
+            .assemble_incremental(
+                stream,
+                output_validator,
+                max_result_bytes,
+                deferral,
+                |item| {
+                    progress.push(item);
+                    ready(Ok(()))
+                },
+            )
             .await?;
         Ok(AssembledToolStream {
             progress: progress.into(),
             usage: terminal.usage,
-            result: terminal.result,
+            terminal: terminal.terminal,
         })
     }
 
@@ -91,6 +109,7 @@ impl ToolStreamAssembler {
         mut stream: ToolEventStream,
         output_validator: Option<&dyn ToolValidator>,
         max_result_bytes: u64,
+        deferral: ToolDeferralSupport,
         mut emit_progress: F,
     ) -> Result<AssembledToolTerminal, ToolError>
     where
@@ -100,28 +119,21 @@ impl ToolStreamAssembler {
         let mut count = 0_usize;
         let mut stream_bytes = 0_usize;
         let mut usage: Option<Usage> = None;
-        let mut result = None;
+        let mut terminal = None;
         while let Some(item) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
+            if terminal.is_some() {
+                let message = if item.is_err() {
+                    "tool stream emitted an error after its terminal item"
+                } else {
+                    "tool stream emitted data after its terminal item"
+                };
+                return Err(ToolError::stable(TOOL_STREAM_INVALID, message));
+            }
             count = count.checked_add(1).ok_or_else(stream_limit)?;
             if count > self.limits.max_items {
                 return Err(stream_limit());
             }
-            if result.is_some() {
-                return Err(ToolError::stable(
-                    TOOL_STREAM_INVALID,
-                    "tool stream emitted data after completion",
-                ));
-            }
-            let item = item.map_err(|error| {
-                if result.is_some() {
-                    ToolError::stable(
-                        TOOL_STREAM_INVALID,
-                        "tool stream emitted an error after completion",
-                    )
-                } else {
-                    error
-                }
-            })?;
+            let item = item?;
             match item {
                 ToolStreamItem::Progress(value) => {
                     add_stream_bytes(
@@ -166,17 +178,37 @@ impl ToolStreamAssembler {
                             "successful tool output does not satisfy the registered schema",
                         ));
                     }
-                    result = Some(value);
+                    terminal = Some(ToolTerminal::Completed(value));
+                }
+                ToolStreamItem::Deferred(value) => {
+                    if deferral == ToolDeferralSupport::Never {
+                        return Err(ToolError::stable(
+                            TOOL_DEFERRAL_NOT_DECLARED,
+                            "tool returned an undeclared deferral",
+                        ));
+                    }
+                    if value.handle.handle().is_empty()
+                        || matches!(
+                            (value.next_poll_at, value.expires_at),
+                            (Some(next_poll_at), Some(expires_at)) if next_poll_at > expires_at
+                        )
+                    {
+                        return Err(ToolError::stable(
+                            TOOL_DEFERRAL_INVALID,
+                            "tool returned an invalid deferral",
+                        ));
+                    }
+                    terminal = Some(ToolTerminal::Deferred(value));
                 }
             }
         }
-        let result = result.ok_or_else(|| {
+        let terminal = terminal.ok_or_else(|| {
             ToolError::stable(
                 TOOL_STREAM_INVALID,
-                "tool stream ended without a completion",
+                "tool stream ended without a terminal item",
             )
         })?;
-        Ok(AssembledToolTerminal { usage, result })
+        Ok(AssembledToolTerminal { usage, terminal })
     }
 }
 

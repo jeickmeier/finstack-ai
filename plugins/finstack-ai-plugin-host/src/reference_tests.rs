@@ -10,8 +10,9 @@ use finstack_ai_runtime::{
     ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
     ContextProvider, ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind,
     LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunCallContext, RunId,
-    SessionId, ToolCallBlock, ToolCallContext, ToolExecutionMode, ToolFailurePolicy, ToolId,
-    ToolResult, ToolStreamAssembler, ToolStreamLimits, Toolset, ValidatedToolCall, Version,
+    SessionId, ToolCallBlock, ToolCallContext, ToolDeferralSupport, ToolExecutionMode,
+    ToolFailurePolicy, ToolId, ToolResult, ToolStreamAssembler, ToolStreamLimits, ToolTerminal,
+    Toolset, ValidatedToolCall, Version,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -241,8 +242,15 @@ async fn assemble(
 ) -> Result<AssembledToolStream, finstack_ai_runtime::ToolError> {
     let stream = toolset.call(tool_ctx(), call).await?;
     ToolStreamAssembler::new(ToolStreamLimits::default())
-        .assemble(stream, None, 1_024)
+        .assemble(stream, None, 1_024, ToolDeferralSupport::Never)
         .await
+}
+
+fn completed_result(assembled: &AssembledToolStream) -> &ToolResult {
+    match &assembled.terminal {
+        ToolTerminal::Completed(result) => result,
+        ToolTerminal::Deferred(_) => panic!("completed-only fixture deferred"),
+    }
 }
 
 #[test]
@@ -337,10 +345,10 @@ async fn load_enabled_reference_lock_passes_published_conformance() {
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
-                result: ToolResult {
-                    output: native_add.result.output.clone(),
+                terminal: ToolTerminal::Completed(ToolResult {
+                    output: completed_result(&native_add).output.clone(),
                     is_error: false,
-                },
+                }),
             },
             stream_limits: ToolStreamLimits::default(),
             max_result_bytes: 1_024,
@@ -366,7 +374,10 @@ async fn calculator_matches_native_evaluate_and_conformance() {
     )
     .await
     .expect("native add");
-    assert_eq!(native_add.result.output.as_bytes(), br#"{"result":6}"#);
+    assert_eq!(
+        completed_result(&native_add).output.as_bytes(),
+        br#"{"result":6}"#
+    );
     check_toolset_conformance(
         &wasm,
         ToolsetConformanceCase {
@@ -380,10 +391,10 @@ async fn calculator_matches_native_evaluate_and_conformance() {
             expected: AssembledToolStream {
                 progress: Arc::from([]),
                 usage: None,
-                result: ToolResult {
-                    output: native_add.result.output.clone(),
+                terminal: ToolTerminal::Completed(ToolResult {
+                    output: completed_result(&native_add).output.clone(),
                     is_error: false,
-                },
+                }),
             },
             stream_limits: ToolStreamLimits::default(),
             max_result_bytes: 1_024,
@@ -420,8 +431,14 @@ async fn calculator_multiply_divide_and_overflow_match_native() {
     )
     .await
     .expect("wasm multiply");
-    assert_eq!(native_mul.result.output, wasm_mul.result.output);
-    assert_eq!(wasm_mul.result.output.as_bytes(), br#"{"result":1}"#);
+    assert_eq!(
+        completed_result(&native_mul).output,
+        completed_result(&wasm_mul).output
+    );
+    assert_eq!(
+        completed_result(&wasm_mul).output.as_bytes(),
+        br#"{"result":1}"#
+    );
 
     let divide_zero = assemble(
         &wasm,
@@ -596,7 +613,7 @@ async fn filesystem_sandbox_lists_and_reads_under_preopen() {
     .await
     .expect("list");
     let value: serde_json::Value =
-        serde_json::from_slice(listed.result.output.as_bytes()).expect("list json");
+        serde_json::from_slice(completed_result(&listed).output.as_bytes()).expect("list json");
     let entries = value["entries"].as_array().expect("entries");
     assert!(
         entries.iter().any(|entry| entry.as_str() == Some("a.txt")),
@@ -615,7 +632,7 @@ async fn filesystem_sandbox_lists_and_reads_under_preopen() {
     .await
     .expect("read");
     let read_value: serde_json::Value =
-        serde_json::from_slice(read.result.output.as_bytes()).expect("read json");
+        serde_json::from_slice(completed_result(&read).output.as_bytes()).expect("read json");
     assert_eq!(read_value["bytes"].as_str(), Some("hello-sandbox"));
 }
 
