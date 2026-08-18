@@ -22,7 +22,7 @@ the public index and does not replace either layer.
 | [WASM](wasm.md) | `@finstack/ai` worker default |
 | [Durability](durability.md) | Journals, inspect-not-continue, at-least-once |
 | [Providers](provider.md) | Separate crates; no secrets in `AgentSpec` |
-| [Toolsets](toolset.md) | Calculator, filesystem, shell |
+| [Toolsets](toolset.md) | Calculator, filesystem, MCP, shell |
 | [Middleware](middleware.md) | Stage fold, what can land, compaction status |
 | [Plugins](plugin.md) | Frozen `@1.0.0` WIT; experimental `@0.0.4` stays loadable |
 | [Server](server.md) | Loopback/Unix reference server |

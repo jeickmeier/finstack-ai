@@ -1,0 +1,29 @@
+[package]
+name = "finstack-ai-tools-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Model Context Protocol client Toolset for finstack-ai"
+readme = "README.md"
+
+[dependencies]
+base64 = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_canonicalizer = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process"] }
+
+[dev-dependencies]
+finstack-ai-test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

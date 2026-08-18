@@ -28,6 +28,7 @@ FORBIDDEN_WASM = frozenset(
         "finstack-ai-provider-openai",
         "finstack-ai-provider-ollama",
         "finstack-ai-provider-anthropic",
+        "finstack-ai-tools-mcp",
         "finstack-ai-tools-shell",
         "finstack-ai-tools-subagent",
         "finstack-ai-context-repository",

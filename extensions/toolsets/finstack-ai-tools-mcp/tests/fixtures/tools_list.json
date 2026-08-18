@@ -1,0 +1,16 @@
+{
+  "resultType": "complete",
+  "tools": [
+    {
+      "name": "echo",
+      "title": "Echo",
+      "description": "Echo text back to the caller",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        }
+      }
+    }
+  ]
+}
