@@ -285,7 +285,7 @@ pub struct BudgetReservationReplay {
 /// Sorted state-hash projection entry for one stage settlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StageSettlementHashEntryV1 {
+pub(crate) struct StageSettlementHashEntryV1 {
     /// Settled cycle.
     pub cycle: u64,
     /// Settled stage.
@@ -297,7 +297,7 @@ pub struct StageSettlementHashEntryV1 {
 /// Sorted state-hash projection entry for one model settlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ModelSettlementHashEntryV1 {
+pub(crate) struct ModelSettlementHashEntryV1 {
     /// Settled effect identity.
     pub effect_id: EffectId,
     /// Settlement kind.
@@ -308,7 +308,7 @@ pub struct ModelSettlementHashEntryV1 {
 
 /// Sorted state-hash projection entry for one external completion identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CompletionIdentityHashEntryV1 {
+pub(crate) struct CompletionIdentityHashEntryV1 {
     /// External completion identity.
     pub completion_id: Arc<str>,
     /// Settled effect identity.
@@ -320,7 +320,7 @@ pub struct CompletionIdentityHashEntryV1 {
 /// Sorted state-hash projection entry for one persistent tool call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToolCallIdentityHashEntryV2 {
+pub(crate) struct ToolCallIdentityHashEntryV2 {
     /// Persistent call identity.
     pub tool_call_id: ToolCallId,
     /// Model cycle that produced the call.
@@ -354,7 +354,7 @@ pub(crate) struct ToolCallIdentityHashRef<'a> {
 /// Sorted state-hash projection entry for one tool settlement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToolSettlementHashEntryV2 {
+pub(crate) struct ToolSettlementHashEntryV2 {
     /// Settled effect identity.
     pub effect_id: EffectId,
     /// Settlement kind.
@@ -390,7 +390,7 @@ impl<'de> Deserialize<'de> for CompletionIdentityHashEntryV1 {
 
 /// Sorted state-hash projection entry for one interaction resolution identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ResolutionIdentityHashEntryV6 {
+pub(crate) struct ResolutionIdentityHashEntryV6 {
     /// External resolution identity.
     pub resolution_id: Arc<str>,
     /// Settled interaction identity.

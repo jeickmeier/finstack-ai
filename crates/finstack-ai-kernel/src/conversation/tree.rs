@@ -236,38 +236,9 @@ impl ConversationError {
 /// Returns [`ConversationError`] for a missing parent, self-parent, or a
 /// conflicting reuse of an existing identity.
 ///
-/// # Examples
-///
-/// ```
-/// use std::collections::BTreeMap;
-/// use finstack_ai_kernel::{
-///     ContentBlock, ConversationEntry, EntryBody, EntryId, LaneId, Message, MessageId,
-///     MessageRole, Metadata, ProviderIds, TextBlock, Timestamp, apply_conversation_entry,
-/// };
-///
-/// let message = Message::try_new(
-///     MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("id"),
-///     MessageRole::User,
-///     vec![ContentBlock::Text(TextBlock::try_new("hello").expect("text"))],
-///     Timestamp::from_unix_ms(0).expect("epoch"),
-///     None,
-///     ProviderIds::empty(),
-///     Metadata::empty(),
-/// )
-/// .expect("message");
-/// let entry = ConversationEntry::try_new(
-///     EntryId::from_bytes(message.id().to_bytes()),
-///     None,
-///     LaneId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("lane"),
-///     1,
-///     EntryBody::Message(message),
-/// )
-/// .expect("entry");
-/// let mut entries = BTreeMap::new();
-/// apply_conversation_entry(&mut entries, entry.clone()).expect("apply");
-/// assert_eq!(entries.len(), 1);
-/// ```
-pub fn apply_conversation_entry(
+/// Public callers apply committed envelopes through
+/// [`SessionProjection::apply_envelope`].
+pub(crate) fn apply_conversation_entry(
     entries: &mut BTreeMap<EntryId, ConversationEntry>,
     entry: ConversationEntry,
 ) -> Result<(), ConversationError> {
@@ -308,6 +279,7 @@ fn preview_conversation_entry(
 ///
 /// Inspect and mid-run restore use this path. Model-facing history still goes
 /// through [`extract_history`], which rejects an open tool-call/result pair.
+/// Public callers use [`SessionProjection::walk`].
 ///
 /// # Arguments
 ///
@@ -318,7 +290,7 @@ fn preview_conversation_entry(
 /// # Errors
 ///
 /// Returns [`ConversationError`] for a missing leaf/parent or a cycle.
-pub fn walk_conversation(
+pub(crate) fn walk_conversation(
     entries: &BTreeMap<EntryId, ConversationEntry>,
     leaf_id: EntryId,
 ) -> Result<Vec<ConversationEntry>, ConversationError> {
@@ -356,7 +328,9 @@ pub fn walk_conversation(
 ///
 /// Returns [`ConversationError`] for a missing leaf/parent, a cycle, or an
 /// invalid tool-call/result pair.
-pub fn extract_history(
+///
+/// Public callers use [`SessionProjection::history`].
+pub(crate) fn extract_history(
     entries: &BTreeMap<EntryId, ConversationEntry>,
     leaf_id: EntryId,
 ) -> Result<Vec<ConversationEntry>, ConversationError> {

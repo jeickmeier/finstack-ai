@@ -19,8 +19,5 @@ pub use content_block::ContentBlock;
 pub use error::ContentError;
 pub(crate) use error::validate_content_items;
 pub use opaque::{OpaqueBlock, OpaquePayload};
-pub use text::{
-    CONTENT_MAX_ITEMS, JsonBlock, LABEL_MAX_BYTES, TEXT_MAX_BYTES, TextBlock, hex_nibble,
-    label_is_valid,
-};
+pub use text::{CONTENT_MAX_ITEMS, JsonBlock, LABEL_MAX_BYTES, TEXT_MAX_BYTES, TextBlock};
 pub use tool::{ToolCallBlock, ToolResultBlock};

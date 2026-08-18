@@ -194,14 +194,6 @@ async fn extract_history_keeps_tool_pairs_and_ignores_compaction() {
     let mut projection = coordinator.session().clone();
     projection.apply_envelope(&envelope).expect("ignore");
     assert_eq!(projection.history(tool_entry.id()).expect("still"), history);
-    let split = assistant_entry.clone();
-    let mut incomplete = BTreeMap::new();
-    incomplete.insert(user, coordinator.session().entries()[&user].clone());
-    incomplete.insert(split.id(), split.clone());
-    assert_eq!(
-        finstack_ai_kernel::extract_history(&incomplete, split.id()),
-        Err(ConversationError::InvalidToolPair)
-    );
 }
 
 #[test]

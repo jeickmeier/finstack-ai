@@ -30,7 +30,7 @@ pub struct CancellationToolFollowups {
     pub messages: usize,
 }
 
-pub fn buffer_cancelled_effect(
+pub(crate) fn buffer_cancelled_effect(
     batch: &mut ActiveToolBatch,
     effect_id: crate::EffectId,
 ) -> Result<bool, KernelError> {
@@ -51,7 +51,7 @@ pub fn buffer_cancelled_effect(
     Ok(true)
 }
 
-pub fn buffer_reconciled_tool_closures(
+pub(crate) fn buffer_reconciled_tool_closures(
     batch: &mut ActiveToolBatch,
     completed_effects: &[crate::EffectId],
 ) -> Result<(), KernelError> {
@@ -78,7 +78,7 @@ pub fn buffer_reconciled_tool_closures(
     Ok(())
 }
 
-pub fn buffer_cancellation_result(
+pub(super) fn buffer_cancellation_result(
     call: &mut ActiveToolCall,
     tool_batch_id: crate::ToolBatchId,
     error: &crate::ErrorDescriptor,
@@ -108,7 +108,7 @@ pub fn buffer_cancellation_result(
 /// output. Undispatched calls receive the identical closure. Buffered real
 /// results remain real. Canonical result records are emitted only for the
 /// contiguous source prefix, so bounded reconciliation chunks are replay-safe.
-pub fn cancellation_followups(
+pub(crate) fn cancellation_followups(
     state: &KernelState,
     env: &TransitionEnv,
     newly_completed: &[crate::EffectId],

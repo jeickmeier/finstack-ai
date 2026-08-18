@@ -1198,6 +1198,9 @@ pub finstack_ai_kernel::ModelSettlement::Completed::assistant_message: finstack_
 pub finstack_ai_kernel::ModelSettlement::Completed::completion: finstack_ai_kernel::EffectCompleted
 pub finstack_ai_kernel::ModelSettlement::Deferred(finstack_ai_kernel::EffectDeferred)
 pub finstack_ai_kernel::ModelSettlement::Failed(finstack_ai_kernel::EffectFailed)
+impl finstack_ai_kernel::ModelSettlement
+pub fn finstack_ai_kernel::ModelSettlement::completion_id(&self) -> core::option::Option<&str>
+pub fn finstack_ai_kernel::ModelSettlement::effect_id(&self) -> finstack_ai_kernel::EffectId
 impl core::clone::Clone for finstack_ai_kernel::ModelSettlement
 pub fn finstack_ai_kernel::ModelSettlement::clone(&self) -> finstack_ai_kernel::ModelSettlement
 impl core::cmp::Eq for finstack_ai_kernel::ModelSettlement
@@ -2142,6 +2145,9 @@ pub enum finstack_ai_kernel::ToolSettlement
 pub finstack_ai_kernel::ToolSettlement::Completed(finstack_ai_kernel::EffectCompleted)
 pub finstack_ai_kernel::ToolSettlement::Deferred(finstack_ai_kernel::EffectDeferred)
 pub finstack_ai_kernel::ToolSettlement::Failed(finstack_ai_kernel::EffectFailed)
+impl finstack_ai_kernel::ToolSettlement
+pub fn finstack_ai_kernel::ToolSettlement::completion_id(&self) -> core::option::Option<&str>
+pub fn finstack_ai_kernel::ToolSettlement::effect_id(&self) -> finstack_ai_kernel::EffectId
 impl core::clone::Clone for finstack_ai_kernel::ToolSettlement
 pub fn finstack_ai_kernel::ToolSettlement::clone(&self) -> finstack_ai_kernel::ToolSettlement
 impl core::cmp::Eq for finstack_ai_kernel::ToolSettlement
@@ -2874,22 +2880,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::CompletionIdentity
 pub fn finstack_ai_kernel::CompletionIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CompletionIdentity
 pub fn finstack_ai_kernel::CompletionIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub finstack_ai_kernel::CompletionIdentityHashEntryV1::completion_id: alloc::sync::Arc<str>
-pub finstack_ai_kernel::CompletionIdentityHashEntryV1::effect_id: finstack_ai_kernel::EffectId
-pub finstack_ai_kernel::CompletionIdentityHashEntryV1::settlement_digest: finstack_ai_kernel::Digest
-impl core::clone::Clone for finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub fn finstack_ai_kernel::CompletionIdentityHashEntryV1::clone(&self) -> finstack_ai_kernel::CompletionIdentityHashEntryV1
-impl core::cmp::Eq for finstack_ai_kernel::CompletionIdentityHashEntryV1
-impl core::cmp::PartialEq for finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub fn finstack_ai_kernel::CompletionIdentityHashEntryV1::eq(&self, &finstack_ai_kernel::CompletionIdentityHashEntryV1) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub fn finstack_ai_kernel::CompletionIdentityHashEntryV1::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::CompletionIdentityHashEntryV1
-impl serde_core::ser::Serialize for finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub fn finstack_ai_kernel::CompletionIdentityHashEntryV1::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::CompletionIdentityHashEntryV1
-pub fn finstack_ai_kernel::CompletionIdentityHashEntryV1::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::ComponentInvocation
 pub finstack_ai_kernel::ComponentInvocation::component: finstack_ai_kernel::ComponentId
 pub finstack_ai_kernel::ComponentInvocation::configuration_digest: finstack_ai_kernel::Digest
@@ -4027,22 +4017,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::ModelSettlementFingerpri
 pub fn finstack_ai_kernel::ModelSettlementFingerprint::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ModelSettlementFingerprint
 pub fn finstack_ai_kernel::ModelSettlementFingerprint::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::ModelSettlementHashEntryV1
-pub finstack_ai_kernel::ModelSettlementHashEntryV1::effect_id: finstack_ai_kernel::EffectId
-pub finstack_ai_kernel::ModelSettlementHashEntryV1::kind: finstack_ai_kernel::ModelSettlementKind
-pub finstack_ai_kernel::ModelSettlementHashEntryV1::settlement_digest: finstack_ai_kernel::Digest
-impl core::clone::Clone for finstack_ai_kernel::ModelSettlementHashEntryV1
-pub fn finstack_ai_kernel::ModelSettlementHashEntryV1::clone(&self) -> finstack_ai_kernel::ModelSettlementHashEntryV1
-impl core::cmp::Eq for finstack_ai_kernel::ModelSettlementHashEntryV1
-impl core::cmp::PartialEq for finstack_ai_kernel::ModelSettlementHashEntryV1
-pub fn finstack_ai_kernel::ModelSettlementHashEntryV1::eq(&self, &finstack_ai_kernel::ModelSettlementHashEntryV1) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ModelSettlementHashEntryV1
-pub fn finstack_ai_kernel::ModelSettlementHashEntryV1::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ModelSettlementHashEntryV1
-impl serde_core::ser::Serialize for finstack_ai_kernel::ModelSettlementHashEntryV1
-pub fn finstack_ai_kernel::ModelSettlementHashEntryV1::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ModelSettlementHashEntryV1
-pub fn finstack_ai_kernel::ModelSettlementHashEntryV1::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::ModelTextDelta
 impl finstack_ai_kernel::ModelTextDelta
 pub fn finstack_ai_kernel::ModelTextDelta::text(&self) -> &str
@@ -4472,22 +4446,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::ResolutionIdentity
 pub fn finstack_ai_kernel::ResolutionIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ResolutionIdentity
 pub fn finstack_ai_kernel::ResolutionIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub finstack_ai_kernel::ResolutionIdentityHashEntryV6::interaction_id: finstack_ai_kernel::InteractionId
-pub finstack_ai_kernel::ResolutionIdentityHashEntryV6::resolution_id: alloc::sync::Arc<str>
-pub finstack_ai_kernel::ResolutionIdentityHashEntryV6::settlement_digest: finstack_ai_kernel::Digest
-impl core::clone::Clone for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub fn finstack_ai_kernel::ResolutionIdentityHashEntryV6::clone(&self) -> finstack_ai_kernel::ResolutionIdentityHashEntryV6
-impl core::cmp::Eq for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-impl core::cmp::PartialEq for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub fn finstack_ai_kernel::ResolutionIdentityHashEntryV6::eq(&self, &finstack_ai_kernel::ResolutionIdentityHashEntryV6) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub fn finstack_ai_kernel::ResolutionIdentityHashEntryV6::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-impl serde_core::ser::Serialize for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub fn finstack_ai_kernel::ResolutionIdentityHashEntryV6::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ResolutionIdentityHashEntryV6
-pub fn finstack_ai_kernel::ResolutionIdentityHashEntryV6::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::RetryDirective
 pub finstack_ai_kernel::RetryDirective::backoff: finstack_ai_kernel::Duration
 pub finstack_ai_kernel::RetryDirective::classification: finstack_ai_kernel::RetryClassification
@@ -4899,22 +4857,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::StageSettled
 pub fn finstack_ai_kernel::StageSettled::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::StageSettled
 pub fn finstack_ai_kernel::StageSettled::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::StageSettlementHashEntryV1
-pub finstack_ai_kernel::StageSettlementHashEntryV1::cycle: u64
-pub finstack_ai_kernel::StageSettlementHashEntryV1::settlement_digest: finstack_ai_kernel::Digest
-pub finstack_ai_kernel::StageSettlementHashEntryV1::stage: finstack_ai_kernel::Stage
-impl core::clone::Clone for finstack_ai_kernel::StageSettlementHashEntryV1
-pub fn finstack_ai_kernel::StageSettlementHashEntryV1::clone(&self) -> finstack_ai_kernel::StageSettlementHashEntryV1
-impl core::cmp::Eq for finstack_ai_kernel::StageSettlementHashEntryV1
-impl core::cmp::PartialEq for finstack_ai_kernel::StageSettlementHashEntryV1
-pub fn finstack_ai_kernel::StageSettlementHashEntryV1::eq(&self, &finstack_ai_kernel::StageSettlementHashEntryV1) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::StageSettlementHashEntryV1
-pub fn finstack_ai_kernel::StageSettlementHashEntryV1::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::StageSettlementHashEntryV1
-impl serde_core::ser::Serialize for finstack_ai_kernel::StageSettlementHashEntryV1
-pub fn finstack_ai_kernel::StageSettlementHashEntryV1::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::StageSettlementHashEntryV1
-pub fn finstack_ai_kernel::StageSettlementHashEntryV1::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::SyntheticToolClosure
 pub finstack_ai_kernel::SyntheticToolClosure::call: finstack_ai_kernel::ToolCallBlock
 pub finstack_ai_kernel::SyntheticToolClosure::error: finstack_ai_kernel::ErrorDescriptor
@@ -5110,26 +5052,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::ToolCallIdentity
 pub fn finstack_ai_kernel::ToolCallIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolCallIdentity
 pub fn finstack_ai_kernel::ToolCallIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::call: finstack_ai_kernel::ToolCallBlock
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::cycle: u64
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::effect_id: core::option::Option<finstack_ai_kernel::EffectId>
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::source_message_id: finstack_ai_kernel::MessageId
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::tool_batch_id: core::option::Option<finstack_ai_kernel::ToolBatchId>
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::tool_call_id: finstack_ai_kernel::ToolCallId
-pub finstack_ai_kernel::ToolCallIdentityHashEntryV2::turn_id: finstack_ai_kernel::TurnId
-impl core::clone::Clone for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub fn finstack_ai_kernel::ToolCallIdentityHashEntryV2::clone(&self) -> finstack_ai_kernel::ToolCallIdentityHashEntryV2
-impl core::cmp::Eq for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-impl core::cmp::PartialEq for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub fn finstack_ai_kernel::ToolCallIdentityHashEntryV2::eq(&self, &finstack_ai_kernel::ToolCallIdentityHashEntryV2) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub fn finstack_ai_kernel::ToolCallIdentityHashEntryV2::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-impl serde_core::ser::Serialize for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub fn finstack_ai_kernel::ToolCallIdentityHashEntryV2::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolCallIdentityHashEntryV2
-pub fn finstack_ai_kernel::ToolCallIdentityHashEntryV2::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::ToolCallSettled
 pub finstack_ai_kernel::ToolCallSettled::cycle: u64
 pub finstack_ai_kernel::ToolCallSettled::effect_id: finstack_ai_kernel::EffectId
@@ -5204,22 +5126,6 @@ impl serde_core::ser::Serialize for finstack_ai_kernel::ToolSettlementFingerprin
 pub fn finstack_ai_kernel::ToolSettlementFingerprint::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolSettlementFingerprint
 pub fn finstack_ai_kernel::ToolSettlementFingerprint::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai_kernel::ToolSettlementHashEntryV2
-pub finstack_ai_kernel::ToolSettlementHashEntryV2::effect_id: finstack_ai_kernel::EffectId
-pub finstack_ai_kernel::ToolSettlementHashEntryV2::kind: finstack_ai_kernel::ToolSettlementKind
-pub finstack_ai_kernel::ToolSettlementHashEntryV2::settlement_digest: finstack_ai_kernel::Digest
-impl core::clone::Clone for finstack_ai_kernel::ToolSettlementHashEntryV2
-pub fn finstack_ai_kernel::ToolSettlementHashEntryV2::clone(&self) -> finstack_ai_kernel::ToolSettlementHashEntryV2
-impl core::cmp::Eq for finstack_ai_kernel::ToolSettlementHashEntryV2
-impl core::cmp::PartialEq for finstack_ai_kernel::ToolSettlementHashEntryV2
-pub fn finstack_ai_kernel::ToolSettlementHashEntryV2::eq(&self, &finstack_ai_kernel::ToolSettlementHashEntryV2) -> bool
-impl core::fmt::Debug for finstack_ai_kernel::ToolSettlementHashEntryV2
-pub fn finstack_ai_kernel::ToolSettlementHashEntryV2::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for finstack_ai_kernel::ToolSettlementHashEntryV2
-impl serde_core::ser::Serialize for finstack_ai_kernel::ToolSettlementHashEntryV2
-pub fn finstack_ai_kernel::ToolSettlementHashEntryV2::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_kernel::ToolSettlementHashEntryV2
-pub fn finstack_ai_kernel::ToolSettlementHashEntryV2::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_kernel::TransitionEnv
 pub finstack_ai_kernel::TransitionEnv::ids: finstack_ai_kernel::AllocatedIds
 pub finstack_ai_kernel::TransitionEnv::now: finstack_ai_kernel::Timestamp
@@ -5427,13 +5333,10 @@ pub const finstack_ai_kernel::LimitTag::REQUIRES_NAMESPACE: bool
 impl finstack_ai_kernel::KeyTag for finstack_ai_kernel::ToolTag
 pub const finstack_ai_kernel::ToolTag::NAME: &'static str
 pub const finstack_ai_kernel::ToolTag::REQUIRES_NAMESPACE: bool
-pub fn finstack_ai_kernel::apply_conversation_entry(&mut alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EntryId, finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::ConversationEntry) -> core::result::Result<(), finstack_ai_kernel::ConversationError>
 pub fn finstack_ai_kernel::derived_event_kind(&finstack_ai_kernel::RecordBody, u16, usize) -> core::result::Result<finstack_ai_kernel::RunEventKind, finstack_ai_kernel::EventError>
-pub fn finstack_ai_kernel::extract_history(&alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EntryId, finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::EntryId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::ConversationError>
 pub const fn finstack_ai_kernel::hex_nibble(u8) -> core::option::Option<u8>
 pub fn finstack_ai_kernel::is_internal_tool_name(&str) -> bool
 pub fn finstack_ai_kernel::label_is_valid(&str) -> bool
-pub fn finstack_ai_kernel::walk_conversation(&alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::EntryId, finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::EntryId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::ConversationEntry>, finstack_ai_kernel::ConversationError>
 pub type finstack_ai_kernel::AgentId = finstack_ai_kernel::Key<finstack_ai_kernel::AgentTag>
 pub type finstack_ai_kernel::AppendBatchId = finstack_ai_kernel::Id<finstack_ai_kernel::AppendBatchTag>
 pub type finstack_ai_kernel::ArtifactId = finstack_ai_kernel::Id<finstack_ai_kernel::ArtifactTag>

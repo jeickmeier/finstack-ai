@@ -6,12 +6,11 @@ use crate::primitives::{EffectId, ToolCallId};
 use crate::records::lifecycle::{Stage, StageCursor};
 use crate::records::tools::{ToolCallIdentity, ToolSettlementFingerprint};
 
-use super::types::ToolCallIdentityHashRef;
-use super::{
-    CompletionIdentity, CompletionIdentityHashEntryV1, ModelSettlementFingerprint,
-    ModelSettlementHashEntryV1, ResolutionIdentity, ResolutionIdentityHashEntryV6,
-    StageSettlementHashEntryV1, ToolSettlementHashEntryV2,
+use super::types::{
+    CompletionIdentityHashEntryV1, ModelSettlementHashEntryV1, ResolutionIdentityHashEntryV6,
+    StageSettlementHashEntryV1, ToolCallIdentityHashRef, ToolSettlementHashEntryV2,
 };
+use super::{CompletionIdentity, ModelSettlementFingerprint, ResolutionIdentity};
 
 pub(super) fn stage_hash_entries(
     entries: &BTreeMap<StageCursor, Digest>,

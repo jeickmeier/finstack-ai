@@ -677,10 +677,9 @@ fn validate_role_blocks(role: MessageRole, content: &[ContentBlock]) -> Result<(
 }
 
 fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, MessageError> {
-    if !crate::label_is_valid(value) {
-        return Err(MessageError::InvalidLabel { field });
-    }
-    Ok(Arc::<str>::from(value))
+    crate::primitives::label::validated_label(value, field, |field| MessageError::InvalidLabel {
+        field,
+    })
 }
 
 fn optional_provider_string(

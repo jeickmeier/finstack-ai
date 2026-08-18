@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::tree::{apply_conversation_entry, extract_history, walk_conversation};
 use super::*;
 use crate::content::{BlobRef, ContentBlock, MediaRef, TextBlock, ToolCallBlock, ToolResultBlock};
 use crate::primitives::Timestamp;

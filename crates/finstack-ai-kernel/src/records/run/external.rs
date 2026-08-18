@@ -481,10 +481,9 @@ impl ExternalCommandError {
 }
 
 fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, ExternalCommandError> {
-    if !crate::label_is_valid(value) {
-        return Err(ExternalCommandError::InvalidLabel { field });
-    }
-    Ok(Arc::from(value))
+    crate::primitives::label::validated_label(value, field, |field| {
+        ExternalCommandError::InvalidLabel { field }
+    })
 }
 
 #[cfg(test)]

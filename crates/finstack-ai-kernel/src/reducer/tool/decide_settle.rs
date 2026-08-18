@@ -18,11 +18,9 @@ use crate::state::{KernelState, RunPhase, TransitionEnv};
 use super::followups::followup_records;
 use super::planning::ensure_record_batch_bound;
 use super::records::synthetic_result;
-use super::records::{
-    decode_tool_result, requirements_for_bodies, settlement_completion_id, settlement_effect_id,
-};
+use super::records::{decode_tool_result, requirements_for_bodies};
 
-pub fn decide_tool_settled(
+pub(crate) fn decide_tool_settled(
     state: &KernelState,
     env: &TransitionEnv,
     input: &ToolBatchSettled,
@@ -41,7 +39,7 @@ pub fn decide_tool_settled(
     )
 }
 
-pub fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
+pub(crate) fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
     state
         .active_tool_batch
         .as_ref()
@@ -52,7 +50,7 @@ pub fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> 
             .any(|identity| identity.effect_id == Some(effect_id))
 }
 
-pub fn decide_external_tool(
+pub(crate) fn decide_external_tool(
     state: &KernelState,
     env: &TransitionEnv,
     input: ExternalEffectCompletedInput,
@@ -166,8 +164,8 @@ fn settle_normalized_tool(
     settlement_digest: crate::Digest,
     external: bool,
 ) -> Result<Decision, KernelError> {
-    let effect_id = settlement_effect_id(outcome);
-    let completion_id = settlement_completion_id(outcome);
+    let effect_id = outcome.effect_id();
+    let completion_id = outcome.completion_id();
     if let Some(completion_id) = completion_id
         && let Some(existing) = state.completion_identities.get(completion_id)
     {

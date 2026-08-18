@@ -120,8 +120,8 @@ fn equal_committed_redelivery(
             let digest = direct_digest(input)?;
             if let Some(decision) = equal_completion_or_model_duplicate(
                 state,
-                model_settlement_completion_id(&input.outcome),
-                model_settlement_effect_id(&input.outcome),
+                input.outcome.completion_id(),
+                input.outcome.effect_id(),
                 digest,
             )? {
                 return Ok(Some(decision));
@@ -132,8 +132,8 @@ fn equal_committed_redelivery(
             let digest = direct_tool_digest(input.tool_batch_id, &input.outcome)?;
             if let Some(decision) = equal_completion_or_tool_duplicate(
                 state,
-                tool_settlement_completion_id(&input.outcome),
-                tool_settlement_effect_id(&input.outcome),
+                input.outcome.completion_id(),
+                input.outcome.effect_id(),
                 digest,
             )? {
                 return Ok(Some(decision));
@@ -302,7 +302,7 @@ fn equal_tool_deferred_duplicate(
     if batch.opened.tool_batch_id != input.tool_batch_id {
         return Ok(None);
     }
-    let effect_id = tool_settlement_effect_id(&input.outcome);
+    let effect_id = input.outcome.effect_id();
     let Some(active) = batch.call(effect_id) else {
         return Ok(None);
     };
@@ -321,37 +321,5 @@ fn equal_tool_deferred_duplicate(
         duplicate_decision(state).map(Some)
     } else {
         Ok(None)
-    }
-}
-
-fn model_settlement_effect_id(outcome: &ModelSettlement) -> crate::EffectId {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
-        ModelSettlement::Deferred(deferred) => deferred.effect_id,
-        ModelSettlement::Failed(failed) => failed.effect_id(),
-    }
-}
-
-fn model_settlement_completion_id(outcome: &ModelSettlement) -> Option<&str> {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.completion_id(),
-        ModelSettlement::Deferred(_) => None,
-        ModelSettlement::Failed(failed) => failed.completion_id(),
-    }
-}
-
-fn tool_settlement_effect_id(outcome: &ToolSettlement) -> crate::EffectId {
-    match outcome {
-        ToolSettlement::Completed(value) => value.effect_id(),
-        ToolSettlement::Deferred(value) => value.effect_id,
-        ToolSettlement::Failed(value) => value.effect_id(),
-    }
-}
-
-fn tool_settlement_completion_id(outcome: &ToolSettlement) -> Option<&str> {
-    match outcome {
-        ToolSettlement::Completed(value) => value.completion_id(),
-        ToolSettlement::Deferred(_) => None,
-        ToolSettlement::Failed(value) => value.completion_id(),
     }
 }

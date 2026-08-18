@@ -14,6 +14,7 @@ mod error;
 mod handles;
 mod identity;
 mod ids;
+pub(crate) mod label;
 mod raw_json;
 mod refs_error;
 mod time;
@@ -57,6 +58,7 @@ pub use ids::{
     SessionTag, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
     TurnTag,
 };
+pub use label::{hex_nibble, label_is_valid};
 pub use raw_json::{
     METADATA_MAX_BYTES, METADATA_MAX_DEPTH, METADATA_MAX_KEY_BYTES, METADATA_MAX_MEMBERS, Metadata,
     RAW_JSON_MAX_BYTES, RAW_JSON_MAX_DEPTH, RawJson, RawJsonError,

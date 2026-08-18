@@ -11,17 +11,17 @@ use crate::state::TransitionEnv;
 use super::cancellation::ToolFollowups;
 use super::records::synthetic_result;
 use super::records::{
-    BufferedToolResult, aborted_error, append_group_requests, close_record, group_is_terminal,
-    next_executable_group, outcome_for_continuation, tool_settled_record,
+    BufferedToolResult, aborted_error, append_group_requests, close_record,
+    outcome_for_continuation, tool_settled_record,
 };
 
-pub fn followup_records(
+pub(super) fn followup_records(
     batch: &mut ActiveToolBatch,
     env: &TransitionEnv,
 ) -> Result<ToolFollowups, KernelError> {
     let mut bodies = Vec::new();
     let mut actions = Vec::new();
-    let current_group_complete = group_is_terminal(batch, batch.current_group);
+    let current_group_complete = batch.group_is_terminal(batch.current_group);
     if batch.fatal_error.is_some() && current_group_complete {
         abort_undispatched_calls(batch)?;
     }
@@ -30,7 +30,7 @@ pub fn followup_records(
 
     if batch.fatal_error.is_none()
         && current_group_complete
-        && let Some(group) = next_executable_group(batch)
+        && let Some(group) = batch.next_executable_group()
     {
         append_group_requests(&batch.opened.calls, group, &mut bodies, &mut actions)?;
         batch.set_current_group(group);

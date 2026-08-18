@@ -10,7 +10,9 @@ use crate::records::APPEND_BATCH_MAX_RECORDS;
 use crate::records::tools::{AssignedToolCall, ToolCallPlan, ToolFailurePolicy};
 use crate::state::{KernelState, TransitionEnv};
 
-pub fn opening_id_requirements(plans: &[ToolCallPlan]) -> Result<IdRequirements, KernelError> {
+pub(super) fn opening_id_requirements(
+    plans: &[ToolCallPlan],
+) -> Result<IdRequirements, KernelError> {
     let groups = execution_groups(plans)?;
     let first_executable_group = plans
         .iter()
@@ -34,7 +36,7 @@ pub fn opening_id_requirements(plans: &[ToolCallPlan]) -> Result<IdRequirements,
     Ok(IdRequirements::new(records, events, plans.len(), 0, 0, synthetic).with_tools(1, 0))
 }
 
-pub fn validate_plans(
+pub(super) fn validate_plans(
     state: &KernelState,
     source: &[&ToolCallBlock],
     plans: &[ToolCallPlan],
@@ -72,7 +74,7 @@ pub fn validate_plans(
     Ok(())
 }
 
-pub fn assign_plans(
+pub(super) fn assign_plans(
     env: &TransitionEnv,
     plans: &[ToolCallPlan],
 ) -> Result<Vec<AssignedToolCall>, KernelError> {
@@ -92,7 +94,7 @@ pub fn assign_plans(
     Ok(assigned)
 }
 
-pub fn execution_groups(plans: &[ToolCallPlan]) -> Result<Vec<u32>, KernelError> {
+pub(super) fn execution_groups(plans: &[ToolCallPlan]) -> Result<Vec<u32>, KernelError> {
     let mut groups = Vec::with_capacity(plans.len());
     let mut group = 0_u32;
     for (index, plan) in plans.iter().enumerate() {
@@ -112,7 +114,7 @@ pub fn execution_groups(plans: &[ToolCallPlan]) -> Result<Vec<u32>, KernelError>
     Ok(groups)
 }
 
-pub fn validate_record_batch_bounds(plans: &[ToolCallPlan]) -> Result<(), KernelError> {
+pub(super) fn validate_record_batch_bounds(plans: &[ToolCallPlan]) -> Result<(), KernelError> {
     let groups = execution_groups(plans)?;
     let executable_groups = plans
         .iter()
@@ -181,7 +183,7 @@ pub fn validate_record_batch_bounds(plans: &[ToolCallPlan]) -> Result<(), Kernel
     Ok(())
 }
 
-pub fn ensure_record_batch_bound(count: usize) -> Result<(), KernelError> {
+pub(super) fn ensure_record_batch_bound(count: usize) -> Result<(), KernelError> {
     if count > APPEND_BATCH_MAX_RECORDS {
         return Err(KernelError::InvalidInputPayload {
             field: "records",

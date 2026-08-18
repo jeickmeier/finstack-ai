@@ -258,10 +258,10 @@ fn decide_normalized_model(
     input_name: &'static str,
     settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
-    let effect_id = settlement_effect_id(&input.outcome);
+    let effect_id = input.outcome.effect_id();
     if let Some(decision) = classify_model_duplicate(
         state,
-        settlement_completion_id(&input.outcome),
+        input.outcome.completion_id(),
         effect_id,
         settlement_digest,
         Some(input),
@@ -456,7 +456,7 @@ fn assistant_completion_bodies(
         settlement_digest,
     )?;
     validate_assistant_semantics(state, env, assistant_message, completion)?;
-    let tool_call_ids = assistant_tool_calls(assistant_message)
+    let tool_call_ids = assistant_tool_calls(assistant_message, false)
         .iter()
         .map(|call| *call.tool_call_id())
         .collect::<Vec<_>>();
@@ -531,20 +531,4 @@ fn failed_settlement_bodies(
         IdRequirements::new(1, 1, 0, 0, 0, 0),
         vec![RecordBody::EffectFailed(failed.clone())],
     ))
-}
-
-fn settlement_effect_id(outcome: &ModelSettlement) -> crate::EffectId {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
-        ModelSettlement::Deferred(deferred) => deferred.effect_id,
-        ModelSettlement::Failed(failed) => failed.effect_id(),
-    }
-}
-
-fn settlement_completion_id(outcome: &ModelSettlement) -> Option<&str> {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.completion_id(),
-        ModelSettlement::Deferred(_) => None,
-        ModelSettlement::Failed(failed) => failed.completion_id(),
-    }
 }

@@ -59,10 +59,7 @@ impl RefsError {
 }
 
 pub(crate) fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, RefsError> {
-    if !crate::label_is_valid(value) {
-        return Err(RefsError::InvalidLabel { field });
-    }
-    Ok(Arc::<str>::from(value))
+    super::label::validated_label(value, field, |field| RefsError::InvalidLabel { field })
 }
 
 pub(crate) fn validated_text(value: &str, field: &'static str) -> Result<Arc<str>, RefsError> {

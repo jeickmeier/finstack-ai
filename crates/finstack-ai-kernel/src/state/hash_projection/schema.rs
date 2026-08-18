@@ -9,11 +9,11 @@ use crate::records::policy::ActiveCapability;
 use crate::records::policy::LimitReached;
 use crate::state::projection::MessageSeq;
 
-use super::super::types::ToolCallIdentityHashRef;
-use super::super::{
-    CompletionIdentityHashEntryV1, KernelState, ModelSettlementHashEntryV1,
-    ResolutionIdentityHashEntryV6, RunPhase, StageSettlementHashEntryV1, ToolSettlementHashEntryV2,
+use super::super::types::{
+    CompletionIdentityHashEntryV1, ModelSettlementHashEntryV1, ResolutionIdentityHashEntryV6,
+    StageSettlementHashEntryV1, ToolCallIdentityHashRef, ToolSettlementHashEntryV2,
 };
+use super::super::{KernelState, RunPhase};
 
 use super::projections::{
     ActiveToolBatchProjection, BudgetChargeReceiptProjection, BudgetReservationReplayProjection,

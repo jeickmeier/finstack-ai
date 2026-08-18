@@ -198,35 +198,6 @@ fn context_and_retained_completion_ids_enforce_bounds_and_semantics() {
         );
     assert!(serde_json::from_value::<ContextPrepared>(mismatched_context).is_err());
 
-    let completion_entry = |completion_id: String| {
-        json!({
-            "completion_id": completion_id,
-            "effect_id": id::<finstack_ai_kernel::EffectTag>(EFFECT_ONE),
-            "settlement_digest": Digest::raw_json(b"settlement"),
-        })
-    };
-    assert!(
-        serde_json::from_value::<finstack_ai_kernel::CompletionIdentityHashEntryV1>(
-            completion_entry("x".repeat(finstack_ai_kernel::LABEL_MAX_BYTES)),
-        )
-        .is_ok()
-    );
-    assert!(
-        serde_json::from_value::<finstack_ai_kernel::CompletionIdentityHashEntryV1>(
-            completion_entry("x".repeat(finstack_ai_kernel::LABEL_MAX_BYTES + 1)),
-        )
-        .is_err()
-    );
-    let mut unknown = completion_entry("valid".to_owned());
-    unknown
-        .as_object_mut()
-        .expect("completion entry")
-        .insert("future".to_owned(), Value::Bool(true));
-    assert!(
-        serde_json::from_value::<finstack_ai_kernel::CompletionIdentityHashEntryV1>(unknown)
-            .is_err()
-    );
-
     let mut invalid_state = KernelState::default();
     invalid_state.completion_identities.insert(
         Arc::from(""),

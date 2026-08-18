@@ -2,8 +2,8 @@
 //!
 //! [`Message`] is the provider-neutral content value. [`ConversationEntry`] and
 //! [`SessionProjection`] model the session-level conversation tree; they are
-//! not part of [`crate::KernelState`]. [`apply_conversation_entry`],
-//! [`walk_conversation`], and [`extract_history`] project lanes and histories.
+//! not part of [`crate::KernelState`]. [`SessionProjection::walk`] and
+//! [`SessionProjection::history`] project lanes and histories.
 
 mod message;
 mod tree;
@@ -17,5 +17,5 @@ pub use message::{
 };
 pub use tree::{
     ConversationEntry, ConversationError, EntryBody, LaneProjection, OperationSummary,
-    SessionProjection, apply_conversation_entry, extract_history, walk_conversation,
+    SessionProjection,
 };

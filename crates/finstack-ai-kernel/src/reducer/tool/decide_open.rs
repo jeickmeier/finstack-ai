@@ -6,6 +6,7 @@ use super::super::decide::{draft_for_state, next_sequence, required};
 use super::super::decision::{Decision, KernelError};
 use super::super::fingerprint::{synthetic_tool_digest, tool_batch_plan_digest};
 use super::super::input::StageSettled;
+use super::super::validation::assistant_tool_calls;
 use crate::records::RecordBody;
 use crate::records::lifecycle::{StageDisposition, StageOutcomeRecorded};
 use crate::records::tools::{ToolBatchOpened, ToolCallPlan};
@@ -17,15 +18,15 @@ use super::planning::{
 };
 use super::records::synthetic_result;
 use super::records::{
-    BufferedToolResult, append_group_requests, assistant_calls, close_record,
-    first_executable_group, outcome_for_continuation, requirements_for_bodies, tool_settled_record,
+    BufferedToolResult, append_group_requests, close_record, first_executable_group,
+    outcome_for_continuation, requirements_for_bodies, tool_settled_record,
 };
 
 #[expect(
     clippy::too_many_lines,
     reason = "batch opening keeps the frozen validation, record order, and ID preflight in one path"
 )]
-pub fn decide_batch_prepared(
+pub(crate) fn decide_batch_prepared(
     state: &KernelState,
     env: &TransitionEnv,
     input: &StageSettled,
@@ -58,7 +59,7 @@ pub fn decide_batch_prepared(
             phase: state.phase,
             input: "stage_settled",
         })?;
-    let source_calls = assistant_calls(source_message);
+    let source_calls = assistant_tool_calls(source_message, true);
     validate_plans(state, &source_calls, calls)?;
     validate_record_batch_bounds(calls)?;
     let synthetic_prefix = calls

@@ -38,12 +38,10 @@ use hash_projection::{KernelStateHashV1, KernelStateHashV2};
 
 pub use env::TransitionEnv;
 pub use types::{
-    BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
-    CurrentTurn, InteractionTerminal, InteractionTerminalOutcome, ModelSettlementFingerprint,
-    ModelSettlementHashEntryV1, ModelSettlementKind, PendingInteraction, PendingModelEffect,
-    ResolutionIdentity, ResolutionIdentityHashEntryV6, RetryState, RunPhase,
-    StageSettlementHashEntryV1, TerminalCandidate, TerminalState, ToolCallIdentityHashEntryV2,
-    ToolSettlementHashEntryV2,
+    BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
+    InteractionTerminal, InteractionTerminalOutcome, ModelSettlementFingerprint,
+    ModelSettlementKind, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
+    RunPhase, TerminalCandidate, TerminalState,
 };
 
 /// Complete authoritative state derived only from committed records.

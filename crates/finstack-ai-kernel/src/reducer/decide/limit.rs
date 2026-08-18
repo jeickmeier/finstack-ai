@@ -358,11 +358,7 @@ fn outstanding_model_settlement(state: &KernelState, input: &ModelSettled) -> bo
     let Some(pending) = state.pending_model_effect.as_ref() else {
         return false;
     };
-    let effect_id = match &input.outcome {
-        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
-        ModelSettlement::Deferred(deferred) => deferred.effect_id,
-        ModelSettlement::Failed(failed) => failed.effect_id(),
-    };
+    let effect_id = input.outcome.effect_id();
     pending.turn_id == input.turn_id
         && pending.model_request_id == input.model_request_id
         && pending.requested.effect_id() == effect_id
@@ -375,11 +371,7 @@ fn outstanding_tool_settlement(state: &KernelState, input: &ToolBatchSettled) ->
     if batch.opened.tool_batch_id != input.tool_batch_id {
         return false;
     }
-    let effect_id = match &input.outcome {
-        ToolSettlement::Completed(value) => value.effect_id(),
-        ToolSettlement::Deferred(value) => value.effect_id,
-        ToolSettlement::Failed(value) => value.effect_id(),
-    };
+    let effect_id = input.outcome.effect_id();
     batch.call(effect_id).is_some_and(|call| {
         matches!(call.status, ActiveToolCallStatus::Requested { .. })
             && call.assigned.group_index == batch.current_group

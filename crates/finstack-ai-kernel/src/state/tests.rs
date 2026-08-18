@@ -703,6 +703,51 @@ mod v1_v2_snapshot_sidecar_tests {
     }
 }
 
+mod completion_identity_hash_entry_decode_bounds_tests {
+    use serde_json::{Value, json};
+
+    use super::super::types::CompletionIdentityHashEntryV1;
+    use crate::content::LABEL_MAX_BYTES;
+
+    fn id<T: crate::IdTag>(ordinal: u64) -> crate::Id<T> {
+        let mut bytes = [0_u8; 16];
+        bytes[6] = 0x70;
+        bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        crate::Id::from_bytes(bytes)
+    }
+
+    fn completion_entry(completion_id: &str) -> Value {
+        json!({
+            "completion_id": completion_id,
+            "effect_id": id::<crate::EffectTag>(1),
+            "settlement_digest": crate::Digest::raw_json(b"settlement"),
+        })
+    }
+
+    #[test]
+    fn completion_identity_hash_entry_enforces_label_bounds_and_unknown_fields() {
+        assert!(
+            serde_json::from_value::<CompletionIdentityHashEntryV1>(completion_entry(
+                &"x".repeat(LABEL_MAX_BYTES)
+            ))
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_value::<CompletionIdentityHashEntryV1>(completion_entry(
+                &"x".repeat(LABEL_MAX_BYTES + 1)
+            ))
+            .is_err()
+        );
+        let mut unknown = completion_entry("valid");
+        unknown
+            .as_object_mut()
+            .expect("completion entry")
+            .insert("future".to_owned(), Value::Bool(true));
+        assert!(serde_json::from_value::<CompletionIdentityHashEntryV1>(unknown).is_err());
+    }
+}
+
 mod kernel_state_eq_tests {
     use super::*;
 

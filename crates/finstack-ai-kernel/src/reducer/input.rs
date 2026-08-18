@@ -330,6 +330,28 @@ pub enum ToolSettlement {
     Failed(EffectFailed),
 }
 
+impl ToolSettlement {
+    /// Effect identity shared by every settlement variant.
+    #[must_use]
+    pub fn effect_id(&self) -> EffectId {
+        match self {
+            Self::Completed(value) => value.effect_id(),
+            Self::Deferred(value) => value.effect_id,
+            Self::Failed(value) => value.effect_id(),
+        }
+    }
+
+    /// Provider completion identity, if the variant recorded one.
+    #[must_use]
+    pub fn completion_id(&self) -> Option<&str> {
+        match self {
+            Self::Completed(value) => value.completion_id(),
+            Self::Deferred(_) => None,
+            Self::Failed(value) => value.completion_id(),
+        }
+    }
+}
+
 /// Direct model-effect settlement command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -357,6 +379,28 @@ pub enum ModelSettlement {
     Deferred(EffectDeferred),
     /// Failed model completion.
     Failed(EffectFailed),
+}
+
+impl ModelSettlement {
+    /// Effect identity shared by every settlement variant.
+    #[must_use]
+    pub fn effect_id(&self) -> EffectId {
+        match self {
+            Self::Completed { completion, .. } => completion.effect_id(),
+            Self::Deferred(deferred) => deferred.effect_id,
+            Self::Failed(failed) => failed.effect_id(),
+        }
+    }
+
+    /// Provider completion identity, if the variant recorded one.
+    #[must_use]
+    pub fn completion_id(&self) -> Option<&str> {
+        match self {
+            Self::Completed { completion, .. } => completion.completion_id(),
+            Self::Deferred(_) => None,
+            Self::Failed(failed) => failed.completion_id(),
+        }
+    }
 }
 
 /// Deferred effect completion command and optional successful assistant message.

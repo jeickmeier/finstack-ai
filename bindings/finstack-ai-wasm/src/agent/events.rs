@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::{EventBatch as RuntimeEventBatch, RunEventClass, RunEventKind};
+use finstack_ai::runtime::{EventBatch as RuntimeEventBatch, RunEventClass};
 use finstack_ai_kernel::RunEvent;
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
@@ -16,7 +16,7 @@ impl Event {
     /// Event kind name.
     #[wasm_bindgen(getter)]
     pub fn kind(&self) -> String {
-        event_kind_name(self.inner.kind()).to_owned()
+        self.inner.kind().kind_name().to_owned()
     }
 
     /// Durable or transient class.
@@ -127,32 +127,5 @@ impl EventBatch {
             .as_ref()
             .map(Arc::as_ref)
             .map_err(|()| js_sys::Error::new("event batch serialization failed").into())
-    }
-}
-
-const fn event_kind_name(kind: RunEventKind) -> &'static str {
-    match kind {
-        RunEventKind::RunAccepted => "run_accepted",
-        RunEventKind::EffectRequested => "effect_requested",
-        RunEventKind::EffectDeferred => "effect_deferred",
-        RunEventKind::EffectCompleted => "effect_completed",
-        RunEventKind::EffectFailed => "effect_failed",
-        RunEventKind::EffectCancelled => "effect_cancelled",
-        RunEventKind::InteractionRequested => "interaction_requested",
-        RunEventKind::InteractionResolved => "interaction_resolved",
-        RunEventKind::InteractionExpired => "interaction_expired",
-        RunEventKind::InteractionCancelled => "interaction_cancelled",
-        RunEventKind::MessageFinalized => "message_finalized",
-        RunEventKind::ToolSettled => "tool_settled",
-        RunEventKind::LimitReached => "limit_reached",
-        RunEventKind::RunSuspended => "run_suspended",
-        RunEventKind::RunCompleted => "run_completed",
-        RunEventKind::RunFailed => "run_failed",
-        RunEventKind::RunCancelled => "run_cancelled",
-        RunEventKind::ModelTextDelta => "model_text_delta",
-        RunEventKind::ReasoningDelta => "reasoning_delta",
-        RunEventKind::ToolProgress => "tool_progress",
-        RunEventKind::QueueDepthWarning => "queue_depth_warning",
-        RunEventKind::ProviderHeartbeat => "provider_heartbeat",
     }
 }

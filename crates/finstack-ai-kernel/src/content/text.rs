@@ -1,4 +1,4 @@
-//! Text/JSON blocks and shared label/hex helpers.
+//! Text/JSON blocks and shared hex encode/decode helpers.
 
 use core::fmt;
 use std::sync::Arc;
@@ -20,51 +20,10 @@ pub const CONTENT_MAX_ITEMS: usize = 4_096;
 /// V1 ceiling for media-type, blob-id, tool-name, and similar short labels.
 pub const LABEL_MAX_BYTES: usize = 256;
 
-/// Whether a semantic label is non-empty, bounded, and NUL-free.
-///
-/// # Arguments
-///
-/// * `value` - Candidate label. Must be 1..=[`LABEL_MAX_BYTES`] UTF-8 bytes and
-///   must not contain a NUL byte.
-///
-/// # Examples
-///
-/// ```
-/// assert!(finstack_ai_kernel::label_is_valid("gpt-4"));
-/// assert!(!finstack_ai_kernel::label_is_valid(""));
-/// ```
-#[must_use]
-pub fn label_is_valid(value: &str) -> bool {
-    !value.is_empty() && value.len() <= LABEL_MAX_BYTES && !value.as_bytes().contains(&0)
-}
-
-/// Decode one ASCII hex nibble.
-///
-/// # Arguments
-///
-/// * `byte` - ASCII `0-9`, `a-f`, or `A-F`. Any other byte returns `None`.
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(finstack_ai_kernel::hex_nibble(b'a'), Some(10));
-/// assert_eq!(finstack_ai_kernel::hex_nibble(b'x'), None);
-/// ```
-#[must_use]
-pub const fn hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 pub(super) fn validated_label(value: &str, field: &'static str) -> Result<Arc<str>, ContentError> {
-    if !label_is_valid(value) {
-        return Err(ContentError::InvalidLabel { field });
-    }
-    Ok(Arc::<str>::from(value))
+    crate::primitives::label::validated_label(value, field, |field| ContentError::InvalidLabel {
+        field,
+    })
 }
 
 pub(super) fn hex_encode(bytes: &[u8]) -> String {
@@ -81,8 +40,8 @@ pub(super) fn hex_decode(input: &str) -> Result<Bytes, ContentError> {
     }
     let mut bytes = Vec::with_capacity(input.len() / 2);
     for chunk in input.as_bytes().chunks_exact(2) {
-        let hi = hex_nibble(chunk[0]).ok_or(ContentError::InvalidHex)?;
-        let lo = hex_nibble(chunk[1]).ok_or(ContentError::InvalidHex)?;
+        let hi = crate::hex_nibble(chunk[0]).ok_or(ContentError::InvalidHex)?;
+        let lo = crate::hex_nibble(chunk[1]).ok_or(ContentError::InvalidHex)?;
         bytes.push((hi << 4) | lo);
     }
     Ok(Bytes::from(bytes))

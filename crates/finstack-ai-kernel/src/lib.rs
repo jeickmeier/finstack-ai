@@ -122,12 +122,11 @@ mod state;
 pub use content::{
     BlobRef, CONTENT_MAX_ITEMS, ContentBlock, ContentError, JsonBlock, LABEL_MAX_BYTES, MediaRef,
     OpaqueBlock, OpaquePayload, TEXT_MAX_BYTES, TextBlock, ToolCallBlock, ToolResultBlock,
-    hex_nibble, label_is_valid,
 };
 pub use conversation::{
     ConversationEntry, ConversationError, EntryBody, LaneProjection, MODEL_CONTEXT_LENGTH_MAX,
     Message, MessageError, MessageRole, ModelRef, OperationSummary, ProviderIds, SessionProjection,
-    ThinkingLevel, apply_conversation_entry, extract_history, walk_conversation,
+    ThinkingLevel,
 };
 pub use effects::{
     ComponentInvocation, EffectCancelled, EffectCompleted, EffectDeferred, EffectError,
@@ -166,7 +165,7 @@ pub use primitives::{
 pub use primitives::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, BoundedMap, ComponentRef,
     CostAmount, Diagnostic, DiagnosticSeverity, ExternalHandleRef, MiddlewareRef, PrincipalRef,
-    RefsError, Sensitivity, Usage, Version,
+    RefsError, Sensitivity, Usage, Version, hex_nibble, label_is_valid,
 };
 pub use records::lifecycle::{
     ContextPrepared, ContextPreparedError, EntryAppended, EntryError, RetryClassification,
@@ -212,10 +211,8 @@ pub use reducer::{
     StageSettled, TimerFiredInput, ToolBatchSettled, ToolSettlement,
 };
 pub use state::{
-    BudgetReservationReplay, CancellationState, CompletionIdentity, CompletionIdentityHashEntryV1,
-    CurrentTurn, InteractionTerminal, InteractionTerminalOutcome, KernelState,
-    ModelSettlementFingerprint, ModelSettlementHashEntryV1, ModelSettlementKind,
-    PendingInteraction, PendingModelEffect, ResolutionIdentity, ResolutionIdentityHashEntryV6,
-    RetryState, RunPhase, StageSettlementHashEntryV1, TerminalCandidate, TerminalState,
-    ToolCallIdentityHashEntryV2, ToolSettlementHashEntryV2, TransitionEnv,
+    BudgetReservationReplay, CancellationState, CompletionIdentity, CurrentTurn,
+    InteractionTerminal, InteractionTerminalOutcome, KernelState, ModelSettlementFingerprint,
+    ModelSettlementKind, PendingInteraction, PendingModelEffect, ResolutionIdentity, RetryState,
+    RunPhase, TerminalCandidate, TerminalState, TransitionEnv,
 };

@@ -33,7 +33,7 @@ pub(super) fn validate_assistant_semantics(
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut final_output_calls = 0_usize;
-    for call in assistant_tool_calls(message) {
+    for call in assistant_tool_calls(message, false) {
         if !seen.insert(*call.tool_call_id()) || state.tool_calls.contains_key(call.tool_call_id())
         {
             return Err(KernelError::DuplicateToolCall);
@@ -59,12 +59,19 @@ pub(super) fn validate_assistant_semantics(
     Ok(())
 }
 
-pub(super) fn assistant_tool_calls(message: &Message) -> Vec<&crate::ToolCallBlock> {
+pub(super) fn assistant_tool_calls(
+    message: &Message,
+    skip_internal: bool,
+) -> Vec<&crate::ToolCallBlock> {
     message
         .content()
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) => Some(call),
+            ContentBlock::ToolCall(call)
+                if !skip_internal || !crate::is_internal_tool_name(call.tool_name()) =>
+            {
+                Some(call)
+            }
             _ => None,
         })
         .collect()
@@ -74,7 +81,7 @@ pub(super) fn validate_assistant_tool_call_ids(
     allocated: &[ToolCallId],
     message: &Message,
 ) -> Result<(), KernelError> {
-    if assistant_tool_calls(message)
+    if assistant_tool_calls(message, false)
         .iter()
         .map(|call| *call.tool_call_id())
         .ne(allocated.iter().copied())

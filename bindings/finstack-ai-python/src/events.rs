@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::{RunEvent, RunEventClass, RunEventKind};
+use finstack_ai::runtime::{RunEvent, RunEventClass};
 use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -56,7 +56,7 @@ pub(crate) struct PyEvent {
 impl PyEvent {
     #[getter]
     fn kind(&self) -> &'static str {
-        event_kind_name(self.inner.kind())
+        self.inner.kind().kind_name()
     }
 
     #[getter]
@@ -147,32 +147,5 @@ impl PyEventBatch {
             })
             .as_ref()
             .map_err(|message| PyException::new_err(message.to_string()))
-    }
-}
-
-const fn event_kind_name(kind: RunEventKind) -> &'static str {
-    match kind {
-        RunEventKind::RunAccepted => "run_accepted",
-        RunEventKind::EffectRequested => "effect_requested",
-        RunEventKind::EffectDeferred => "effect_deferred",
-        RunEventKind::EffectCompleted => "effect_completed",
-        RunEventKind::EffectFailed => "effect_failed",
-        RunEventKind::EffectCancelled => "effect_cancelled",
-        RunEventKind::InteractionRequested => "interaction_requested",
-        RunEventKind::InteractionResolved => "interaction_resolved",
-        RunEventKind::InteractionExpired => "interaction_expired",
-        RunEventKind::InteractionCancelled => "interaction_cancelled",
-        RunEventKind::MessageFinalized => "message_finalized",
-        RunEventKind::ToolSettled => "tool_settled",
-        RunEventKind::LimitReached => "limit_reached",
-        RunEventKind::RunSuspended => "run_suspended",
-        RunEventKind::RunCompleted => "run_completed",
-        RunEventKind::RunFailed => "run_failed",
-        RunEventKind::RunCancelled => "run_cancelled",
-        RunEventKind::ModelTextDelta => "model_text_delta",
-        RunEventKind::ReasoningDelta => "reasoning_delta",
-        RunEventKind::ToolProgress => "tool_progress",
-        RunEventKind::QueueDepthWarning => "queue_depth_warning",
-        RunEventKind::ProviderHeartbeat => "provider_heartbeat",
     }
 }

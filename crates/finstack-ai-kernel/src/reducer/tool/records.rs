@@ -3,19 +3,18 @@
 use super::super::allocated_ids::IdRequirements;
 use super::super::decision::{KernelError, PostCommitAction};
 use super::super::fingerprint::tool_batch_close_digest;
-use super::super::input::ToolSettlement;
 use crate::content::{ContentBlock, JsonBlock, ToolCallBlock, ToolResultBlock};
 use crate::conversation::{Message, MessageRole, ProviderIds};
 use crate::effects::{EffectCompleted, EffectInput, EffectKind, EffectRequested};
 use crate::primitives::{Metadata, RawJson};
 use crate::records::RecordBody;
 use crate::records::tools::{
-    ActiveToolBatch, AssignedToolCall, ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened,
-    ToolBatchOutcome, ToolCallPlan, ToolCallSettled,
+    AssignedToolCall, ToolBatchClosed, ToolBatchContinuation, ToolBatchOpened, ToolBatchOutcome,
+    ToolCallPlan, ToolCallSettled,
 };
 use crate::state::TransitionEnv;
 
-pub fn append_group_requests(
+pub(super) fn append_group_requests(
     assigned: &[AssignedToolCall],
     group: u32,
     bodies: &mut Vec<RecordBody>,
@@ -47,7 +46,7 @@ pub fn append_group_requests(
     Ok(())
 }
 
-pub fn tool_settled_record(
+pub(super) fn tool_settled_record(
     opened: &ToolBatchOpened,
     assigned: &AssignedToolCall,
     message_id: crate::MessageId,
@@ -84,7 +83,7 @@ pub struct BufferedToolResult {
     pub(super) error: Option<crate::ErrorDescriptor>,
 }
 
-pub fn close_record(
+pub(super) fn close_record(
     opened: &ToolBatchOpened,
     result_message_ids: Vec<crate::MessageId>,
     outcome: ToolBatchOutcome,
@@ -108,7 +107,7 @@ pub fn close_record(
     })
 }
 
-pub fn synthetic_result(
+pub(crate) fn synthetic_result(
     call: &ToolCallBlock,
     error: &crate::ErrorDescriptor,
 ) -> Result<ToolResultBlock, KernelError> {
@@ -122,7 +121,7 @@ pub fn synthetic_result(
     .map_err(|_| KernelError::InvariantViolation)
 }
 
-pub fn decode_tool_result(
+pub(crate) fn decode_tool_result(
     completion: &EffectCompleted,
     call: &ToolCallBlock,
 ) -> Result<ToolResultBlock, KernelError> {
@@ -134,41 +133,20 @@ pub fn decode_tool_result(
     Ok(result)
 }
 
-pub fn assistant_calls(message: &Message) -> Vec<&ToolCallBlock> {
-    message
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) if !crate::is_internal_tool_name(call.tool_name()) => {
-                Some(call)
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-pub fn first_executable_group(assigned: &[AssignedToolCall]) -> Option<u32> {
+pub(super) fn first_executable_group(assigned: &[AssignedToolCall]) -> Option<u32> {
     assigned
         .iter()
         .find_map(|call| matches!(call.plan, ToolCallPlan::Execute(_)).then_some(call.group_index))
 }
 
-pub fn next_executable_group(batch: &ActiveToolBatch) -> Option<u32> {
-    batch.next_executable_group()
-}
-
-pub fn group_is_terminal(batch: &ActiveToolBatch, group: u32) -> bool {
-    batch.group_is_terminal(group)
-}
-
-pub fn outcome_for_continuation(continuation: ToolBatchContinuation) -> ToolBatchOutcome {
+pub(super) fn outcome_for_continuation(continuation: ToolBatchContinuation) -> ToolBatchOutcome {
     match continuation {
         ToolBatchContinuation::ContinueModel => ToolBatchOutcome::ContinueModel,
         ToolBatchContinuation::Finalize => ToolBatchOutcome::Finalize,
     }
 }
 
-pub fn aborted_error() -> Result<crate::ErrorDescriptor, KernelError> {
+pub(super) fn aborted_error() -> Result<crate::ErrorDescriptor, KernelError> {
     crate::ErrorDescriptor::new(
         "tool_batch_aborted",
         "tool call was not dispatched because the batch failed",
@@ -178,7 +156,7 @@ pub fn aborted_error() -> Result<crate::ErrorDescriptor, KernelError> {
     .map_err(|_| KernelError::InvariantViolation)
 }
 
-pub fn cancelled_error() -> Result<crate::ErrorDescriptor, KernelError> {
+pub(super) fn cancelled_error() -> Result<crate::ErrorDescriptor, KernelError> {
     crate::ErrorDescriptor::new(
         "cancelled",
         "tool call was cancelled before run termination",
@@ -188,23 +166,7 @@ pub fn cancelled_error() -> Result<crate::ErrorDescriptor, KernelError> {
     .map_err(|_| KernelError::InvariantViolation)
 }
 
-pub fn settlement_effect_id(outcome: &ToolSettlement) -> crate::EffectId {
-    match outcome {
-        ToolSettlement::Completed(value) => value.effect_id(),
-        ToolSettlement::Deferred(value) => value.effect_id,
-        ToolSettlement::Failed(value) => value.effect_id(),
-    }
-}
-
-pub fn settlement_completion_id(outcome: &ToolSettlement) -> Option<&str> {
-    match outcome {
-        ToolSettlement::Completed(value) => value.completion_id(),
-        ToolSettlement::Deferred(_) => None,
-        ToolSettlement::Failed(value) => value.completion_id(),
-    }
-}
-
-pub fn requirements_for_bodies(
+pub(super) fn requirements_for_bodies(
     bodies: &[RecordBody],
     messages: usize,
     effects: usize,

@@ -26,22 +26,22 @@ pub(super) fn precheck(state: &KernelState, input: &KernelInput) -> Result<(), K
             let digest = direct_digest(input)?;
             reject_completion_or_map_conflict(
                 state,
-                model_settlement_completion_id(&input.outcome),
-                model_settlement_effect_id(&input.outcome),
+                input.outcome.completion_id(),
+                input.outcome.effect_id(),
                 digest,
                 state
                     .model_settlements
-                    .get(&model_settlement_effect_id(&input.outcome))
+                    .get(&input.outcome.effect_id())
                     .map(|existing| existing.digest),
             )?;
             reject_model_deferred_conflict(state, input, digest)
         }
         KernelInput::ToolBatchSettled(input) => {
             let digest = direct_tool_digest(input.tool_batch_id, &input.outcome)?;
-            let effect_id = tool_settlement_effect_id(&input.outcome);
+            let effect_id = input.outcome.effect_id();
             reject_completion_or_map_conflict(
                 state,
-                tool_settlement_completion_id(&input.outcome),
+                input.outcome.completion_id(),
                 effect_id,
                 digest,
                 state
@@ -179,7 +179,7 @@ fn reject_tool_deferred_conflict(
     if batch.opened.tool_batch_id != input.tool_batch_id {
         return Ok(());
     }
-    let effect_id = tool_settlement_effect_id(&input.outcome);
+    let effect_id = input.outcome.effect_id();
     let Some(active) = batch.call(effect_id) else {
         return Ok(());
     };
@@ -195,36 +195,4 @@ fn reject_tool_deferred_conflict(
         &ToolSettlement::Deferred(existing.clone()),
     )?;
     reject_digest_conflict(Some(existing_digest), digest)
-}
-
-fn model_settlement_effect_id(outcome: &ModelSettlement) -> crate::EffectId {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.effect_id(),
-        ModelSettlement::Deferred(deferred) => deferred.effect_id,
-        ModelSettlement::Failed(failed) => failed.effect_id(),
-    }
-}
-
-fn model_settlement_completion_id(outcome: &ModelSettlement) -> Option<&str> {
-    match outcome {
-        ModelSettlement::Completed { completion, .. } => completion.completion_id(),
-        ModelSettlement::Deferred(_) => None,
-        ModelSettlement::Failed(failed) => failed.completion_id(),
-    }
-}
-
-fn tool_settlement_effect_id(outcome: &ToolSettlement) -> crate::EffectId {
-    match outcome {
-        ToolSettlement::Completed(value) => value.effect_id(),
-        ToolSettlement::Deferred(value) => value.effect_id,
-        ToolSettlement::Failed(value) => value.effect_id(),
-    }
-}
-
-fn tool_settlement_completion_id(outcome: &ToolSettlement) -> Option<&str> {
-    match outcome {
-        ToolSettlement::Completed(value) => value.completion_id(),
-        ToolSettlement::Deferred(_) => None,
-        ToolSettlement::Failed(value) => value.completion_id(),
-    }
 }

@@ -10,7 +10,7 @@ use crate::state::{KernelState, RunPhase, TerminalCandidate, TransitionEnv};
 
 use super::super::decision::{Decision, KernelError};
 
-pub fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
+pub(crate) fn outstanding_requested_effects(state: &KernelState) -> Vec<crate::EffectId> {
     let mut effects = state
         .pending_model_effect
         .as_ref()
@@ -41,7 +41,7 @@ pub(super) fn timer_firing_contract() -> EffectOutputContract {
     }
 }
 
-pub fn draft_for_state(
+pub(crate) fn draft_for_state(
     state: &KernelState,
     env: &TransitionEnv,
     bodies: Vec<RecordBody>,
@@ -133,7 +133,7 @@ pub(super) fn terminal_body_from_candidate(state: &KernelState) -> Result<Record
     }
 }
 
-pub fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
+pub(crate) fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
     let expected_stage = match state.phase? {
         RunPhase::BeforeRun => Stage::BeforeRun,
         RunPhase::PreparingContext => Stage::PrepareContext,
@@ -150,7 +150,7 @@ pub fn expected_stage_cursor(state: &KernelState) -> Option<StageCursor> {
     })
 }
 
-pub fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> {
+pub(crate) fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> {
     let diagnostic = Diagnostic::try_new(
         "duplicate_settlement",
         "equal committed settlement was ignored",
@@ -161,7 +161,7 @@ pub fn duplicate_decision(state: &KernelState) -> Result<Decision, KernelError> 
     Ok(Decision::duplicate(next_sequence(state)?, diagnostic))
 }
 
-pub fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
+pub(crate) fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
     if matches!(
         state.phase,
         Some(RunPhase::Completed | RunPhase::Failed | RunPhase::Cancelled)
@@ -172,14 +172,18 @@ pub fn reject_terminal(state: &KernelState) -> Result<(), KernelError> {
     Ok(())
 }
 
-pub fn next_sequence(state: &KernelState) -> Result<u64, KernelError> {
+pub(crate) fn next_sequence(state: &KernelState) -> Result<u64, KernelError> {
     state
         .last_applied_sequence
         .checked_add(1)
         .ok_or(KernelError::InvariantViolation)
 }
 
-pub fn required<T: Copy>(values: &[T], index: usize, kind: &'static str) -> Result<T, KernelError> {
+pub(crate) fn required<T: Copy>(
+    values: &[T],
+    index: usize,
+    kind: &'static str,
+) -> Result<T, KernelError> {
     values
         .get(index)
         .copied()

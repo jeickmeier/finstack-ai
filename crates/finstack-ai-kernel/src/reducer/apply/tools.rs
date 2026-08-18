@@ -16,6 +16,7 @@ use super::super::fingerprint::{
     completed_tool_record_digest, failed_tool_record_digest, synthetic_tool_digest,
 };
 use super::super::tool::decode_tool_result;
+use super::super::validation::assistant_tool_calls;
 
 #[expect(
     clippy::too_many_lines,
@@ -136,15 +137,9 @@ pub(super) fn source_tool_calls_for_open(
         .messages
         .last()
         .ok_or(KernelError::InvalidRecordOrder)?;
-    let calls = source
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) if !crate::is_internal_tool_name(call.tool_name()) => {
-                Some(call.clone())
-            }
-            _ => None,
-        })
+    let calls = assistant_tool_calls(source, true)
+        .into_iter()
+        .cloned()
         .collect::<Vec<_>>();
     if calls.len() != opened.calls.len() {
         return Err(KernelError::ToolBatchPlanMismatch);
