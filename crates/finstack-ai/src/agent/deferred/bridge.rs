@@ -1,10 +1,14 @@
 //! Child-run bridge that settles deferred parent tool effects.
 
+use std::future::{Future, poll_fn};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::task::Poll;
 
 use finstack_ai_kernel::{
-    AuthorizationEvidence, EffectDeferred, ErrorCategory, ErrorDescriptor,
+    AuthorizationEvidence, ContentBlock, EffectDeferred, ErrorCategory, ErrorDescriptor,
     ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome, RawJson,
+    TextBlock, ToolResultBlock,
 };
 use finstack_ai_runtime::{
     AgentInvoker, CommitCoordinator, ExternalRouteOutcome, native_driver as driver,
@@ -162,9 +166,7 @@ impl ChildRunBridge {
         self.pump_child(&child, &events).await;
         let (outcome, settle) = match child.result().await {
             Ok(output) => {
-                let output = output.structured_json().cloned().unwrap_or_else(|| {
-                    RawJson::parse(r#"{"ok":true}"#).expect("child completion json")
-                });
+                let output = tool_result_output(parent, deferred, &output.text(), false).await?;
                 (
                     ExternalEffectOutcome::Completed {
                         output,
@@ -242,7 +244,16 @@ impl ChildRunBridge {
                         let sink = Arc::clone(sink);
                         let context = context.clone();
                         let _ = driver::spawn(Box::pin(async move {
-                            let _ = sink.on_batch(&context, &batch).await;
+                            let mut fut = sink.on_batch(&context, &batch);
+                            poll_fn(move |cx| {
+                                match catch_unwind(AssertUnwindSafe(|| {
+                                    Future::poll(fut.as_mut(), cx)
+                                })) {
+                                    Ok(poll) => poll.map(|_| ()),
+                                    Err(_) => Poll::Ready(()),
+                                }
+                            })
+                            .await;
                         }));
                     }
                 }
@@ -276,7 +287,7 @@ async fn completion_command(
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
     let completion = ExternalEffectCompletion::try_new(
         deferred.effect_id,
-        format!("{}", deferred.effect_id),
+        deferred.effect_id.to_canonical_string(),
         outcome,
     )
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
@@ -287,4 +298,40 @@ async fn completion_command(
         completion,
     )
     .map_err(|error| ChildRunBridgeError::failed(error.to_string()))
+}
+
+async fn tool_result_output(
+    parent: &AgentRun,
+    deferred: &EffectDeferred,
+    text: &str,
+    is_error: bool,
+) -> Result<RawJson, ChildRunBridgeError> {
+    let commit = CommitCoordinator::recover(
+        Arc::clone(parent.journal_store()),
+        parent.locator().session_id,
+    )
+    .await
+    .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+    let call = commit
+        .state()
+        .active_tool_batch
+        .as_ref()
+        .and_then(|batch| {
+            batch
+                .calls
+                .iter()
+                .find(|call| call.assigned.effect_id == deferred.effect_id)
+        })
+        .ok_or_else(|| ChildRunBridgeError::failed("deferred tool call is not active"))?;
+    let result = ToolResultBlock::try_new(
+        *call.assigned.plan.call().tool_call_id(),
+        vec![ContentBlock::Text(TextBlock::try_new(text).map_err(
+            |error| ChildRunBridgeError::failed(error.to_string()),
+        )?)],
+        is_error,
+    )
+    .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+    let encoded = serde_json::to_string(&result)
+        .map_err(|error| ChildRunBridgeError::failed(error.to_string()))?;
+    RawJson::parse(encoded).map_err(|error| ChildRunBridgeError::failed(error.to_string()))
 }
