@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::ModelName;
+use finstack_ai::{
+    AnthropicAgentSpec, ChildRunPolicy, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
+};
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;
 
@@ -97,6 +100,87 @@ impl Agent {
             )
             .await
             .map(JsValue::from)
+        })
+    }
+
+    /// Construct an official OpenAI Responses agent.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen]
+    pub fn openai(model: String, api_key: String) -> js_sys::Promise {
+        executor::drive(async move {
+            FacadeAgent::openai(OpenAiAgentSpec {
+                model,
+                api_key,
+                instruction: None,
+                capabilities: Vec::new(),
+                active_capabilities: Vec::new(),
+                reasoning_effort: None,
+                reasoning_summary: None,
+                ports: LinkedAgentPorts::default(),
+                child_runs: ChildRunPolicy::Deny,
+            })
+            .await
+            .map(|built| {
+                JsValue::from(Agent {
+                    inner: Arc::new(built.agent),
+                    model: built.model,
+                })
+            })
+            .map_err(|error| agent_error(&error, None))
+        })
+    }
+
+    /// Construct an Anthropic Messages agent.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen]
+    pub fn anthropic(base_url: String, model: String, api_key: Option<String>) -> js_sys::Promise {
+        executor::drive(async move {
+            FacadeAgent::anthropic(AnthropicAgentSpec {
+                base_url,
+                model,
+                api_key,
+                instruction: None,
+                capabilities: Vec::new(),
+                active_capabilities: Vec::new(),
+                ports: LinkedAgentPorts::default(),
+                child_runs: ChildRunPolicy::Deny,
+            })
+            .await
+            .map(|built| {
+                JsValue::from(Agent {
+                    inner: Arc::new(built.agent),
+                    model: built.model,
+                })
+            })
+            .map_err(|error| agent_error(&error, None))
+        })
+    }
+
+    /// Construct a keyless Ollama agent.
+    ///
+    /// wasm-host fails closed with `agent_run_unsupported_plan`.
+    #[wasm_bindgen]
+    pub fn ollama(base_url: String, model: String) -> js_sys::Promise {
+        executor::drive(async move {
+            FacadeAgent::ollama(OllamaAgentSpec {
+                base_url,
+                model,
+                instruction: None,
+                capabilities: Vec::new(),
+                active_capabilities: Vec::new(),
+                ports: LinkedAgentPorts::default(),
+                child_runs: ChildRunPolicy::Deny,
+            })
+            .await
+            .map(|built| {
+                JsValue::from(Agent {
+                    inner: Arc::new(built.agent),
+                    model: built.model,
+                })
+            })
+            .map_err(|error| agent_error(&error, None))
         })
     }
 

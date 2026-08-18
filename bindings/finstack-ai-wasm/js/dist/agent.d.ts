@@ -135,6 +135,61 @@ export declare class Agent {
      */
     static create(options: AgentOptions): Promise<Agent>;
     /**
+     * Construct an official OpenAI Responses agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Model name and explicit API key. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the provider.
+     * @example
+     * ```ts
+     * await Agent.openai({ model: "gpt-5", apiKey: "sk-..." });
+     * ```
+     */
+    static openai(options: {
+        model: string;
+        apiKey: string;
+    }): Promise<Agent>;
+    /**
+     * Construct an Anthropic Messages agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Base URL, model, and optional API key. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the provider.
+     * @example
+     * ```ts
+     * await Agent.anthropic({
+     *   baseUrl: "https://api.anthropic.com",
+     *   model: "claude-sonnet-4-6",
+     * });
+     * ```
+     */
+    static anthropic(options: {
+        baseUrl: string;
+        model: string;
+        apiKey?: string;
+    }): Promise<Agent>;
+    /**
+     * Construct a keyless Ollama `/api/chat` agent.
+     *
+     * wasm-host fails closed with `agent_run_unsupported_plan` from Rust.
+     *
+     * @param options - Base URL and model name. Does not read env.
+     * @returns A resolved Agent handle on native hosts.
+     * @throws {FinstackError} When the platform cannot construct the provider.
+     * @example
+     * ```ts
+     * await Agent.ollama({ baseUrl: "http://127.0.0.1:11434", model: "llama3" });
+     * ```
+     */
+    static ollama(options: {
+        baseUrl: string;
+        model: string;
+    }): Promise<Agent>;
+    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * @returns Compact catalog entries visible to model selection.

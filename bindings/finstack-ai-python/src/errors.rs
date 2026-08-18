@@ -9,14 +9,6 @@ use pyo3::prelude::*;
 use crate::locator::locator_dict;
 use crate::{CancelledError, ConfigurationError, RuntimeError, TimeoutError};
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "used directly as a Result::map_err adapter"
-)]
-pub(crate) fn model_configuration_error(error: finstack_ai::runtime::ModelError) -> AgentRunError {
-    configuration_error(format!("{}: {}", error.code(), error.message()))
-}
-
 pub(crate) fn configuration_error(message: impl Into<String>) -> AgentRunError {
     AgentRunError::Configuration {
         code: AGENT_RUN_INVALID_CONFIGURATION,
