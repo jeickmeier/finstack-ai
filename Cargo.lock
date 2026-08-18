@@ -1086,7 +1086,9 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
+ "finstack-ai-tools-subagent",
  "futures-core",
+ "futures-util",
  "jsonschema",
  "proptest",
  "serde",
@@ -1134,6 +1136,19 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-tools-subagent"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

@@ -1,0 +1,13 @@
+{
+  "case": "subagent-start-await-incorporate",
+  "placement": "isolated_child_session",
+  "required_kinds": [
+    "child_run_prepared",
+    "run_accepted"
+  ],
+  "expect": {
+    "parent_incorporates_child_text": true,
+    "deny_leaves_no_child_records": true,
+    "cancel_fans_out_compatible_and_isolated_only": true
+  }
+}

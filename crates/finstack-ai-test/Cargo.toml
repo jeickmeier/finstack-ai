@@ -27,10 +27,12 @@ finstack-ai = { workspace = true, default-features = false, features = ["native-
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
+finstack-ai-tools-subagent = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
+futures-util = { workspace = true }
 
 [[bin]]
 name = "generate-journal-fixtures"

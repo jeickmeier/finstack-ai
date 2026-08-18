@@ -17,6 +17,7 @@ members = [
     "extensions/toolsets/finstack-ai-tools-calculator",
     "extensions/toolsets/finstack-ai-tools-filesystem",
     "extensions/toolsets/finstack-ai-tools-shell",
+    "extensions/toolsets/finstack-ai-tools-subagent",
     "extensions/context/finstack-ai-context-repository",
     "extensions/context/finstack-ai-context-memory",
     "extensions/middleware/finstack-ai-middleware-compaction",
@@ -76,6 +77,7 @@ finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-prov
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
 finstack-ai-tools-filesystem = { path = "extensions/toolsets/finstack-ai-tools-filesystem", version = "1.0.0" }
 finstack-ai-tools-shell = { path = "extensions/toolsets/finstack-ai-tools-shell", version = "1.0.0" }
+finstack-ai-tools-subagent = { path = "extensions/toolsets/finstack-ai-tools-subagent", version = "1.0.0" }
 finstack-ai-context-repository = { path = "extensions/context/finstack-ai-context-repository", version = "1.0.0" }
 finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-memory", version = "1.0.0" }
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
