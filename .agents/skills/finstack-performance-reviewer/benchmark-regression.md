@@ -11,9 +11,9 @@ Use when reviewing runtime or allocation changes in performance-sensitive finsta
 
 ## Finstack Commands
 
-- WASM package size: `mise run check-size-budgets`
-- WASM benches: `mise run benchmark-wasm` when the host or JS facade changed
-- Broad final checks: `mise run check` and relevant targeted tests after code changes
+- WASM package size: `uv run --no-project python tools/perf/check_size_budgets.py`
+- WASM benches: `mise run bench-wasm` when the host or JS facade changed
+- Broad final checks: `mise run check-all` and relevant targeted tests after code changes
 
 ## Review Questions
 

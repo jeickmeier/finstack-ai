@@ -15,7 +15,7 @@ Install from this repository until those registries publish.
 | --- | --- | --- |
 | Rust | [docs/site/rust.md](docs/site/rust.md) | `cargo run -p finstack-ai-native-examples --bin minimal --offline --locked` |
 | Python | [docs/site/python.md](docs/site/python.md) | `uv run --isolated --no-project --with-editable bindings/finstack-ai-python python examples/python-minimal/python-callback/main.py` |
-| JavaScript / WASM | [docs/site/wasm.md](docs/site/wasm.md) | `mise run stage-wasm` then [examples/browser-minimal](examples/browser-minimal/README.md) |
+| JavaScript / WASM | [docs/site/wasm.md](docs/site/wasm.md) | `mise run build-wasm -- release` then [examples/browser-minimal](examples/browser-minimal/README.md) |
 
 Public guides: [docs/site/README.md](docs/site/README.md).
 Concept: [docs/site/concept.md](docs/site/concept.md).
@@ -28,19 +28,16 @@ This repository uses [mise](https://mise.jdx.dev/) for pinned tools and
 checked-in tasks.
 
 1. Install mise: <https://mise.jdx.dev/getting-started.html>
-2. From the repository root: `mise install`
+2. From the repository root: `mise run install-all`
 
 Common tasks:
 
-- `mise run format` — write-mode Rust and Python formatter
-- `mise run check` — formatting, Clippy, Ruff, and mypy
-- `mise run test` — Rust workspace tests and Python tests
-- `mise run kernel` / `runtime` / `python-binding` / `wasm-binding` — narrow crate gates (`check` / `ci` stay the workspace gate)
-- `mise run coverage` — diagnostic Rust, Python, and WASM coverage reports
-- `mise run ci` — `check` plus `test` (hosted CI)
-- `mise run docs-links` — relative markdown links on the public set
-- `mise run docs-quickstarts` — offline public-package starters
-- `mise run docs-notebooks` — Python learning notebooks
+- `mise run ci-all` — same required checks as hosted CI
+- `mise run build-all` / `build-rust` / `build-python` / `build-wasm` — optional profile after `--`
+- `mise run check-all` / `check-rust` / `check-python` / `check-wasm` — formatting, lint, and typecheck
+- `mise run test-all` / `test-rust` / `test-python` / `test-wasm` — language test suites
+- `mise run coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports
+- `mise run bench-all` / `bench-rust` / `bench-python` / `bench-wasm` — language benchmarks
 
 Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
 [`mise.toml`](mise.toml). Hosted CI lives under

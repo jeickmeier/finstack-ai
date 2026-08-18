@@ -1,8 +1,8 @@
 # WASM / JavaScript guide
 
 Public package: `@finstack/ai`. It is staged, not on npm. Consume a packed
-tarball from `mise run stage-wasm` or the checkout after
-`mise run generate-wasm`.
+tarball after `mise run build-wasm -- release`, or pack with
+`uv run --no-project python tools/wasm_package/stage.py`.
 
 Workspace version is **1.0.0** unpublished. The last public tag is
 `v0.1.0`. IndexedDB stays experimental.

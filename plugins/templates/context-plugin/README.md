@@ -10,5 +10,5 @@ by the isolated host.
 
 ```text
 cargo build --target wasm32-unknown-unknown --release
-mise run check-plugin-template
+uv run --no-project python tools/plugin_wasm/template_check.py
 ```

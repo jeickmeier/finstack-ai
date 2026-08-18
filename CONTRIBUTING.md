@@ -9,7 +9,7 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 This repository uses [mise](https://mise.jdx.dev/) for pinned tools and tasks.
 
 1. Install mise: <https://mise.jdx.dev/getting-started.html>
-2. From the repository root: `mise install`
+2. From the repository root: `mise run install-all`
 
 Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
 [`mise.toml`](mise.toml). See [`README.md`](README.md) and
@@ -18,31 +18,21 @@ Prefer `mise run <task>` over ad-hoc wrappers. The full task list is
 Before opening a pull request, run at least:
 
 ```bash
-mise run ci
+mise run ci-all
 ```
 
-When the change touches public docs or starters, also run:
-
-```bash
-mise run docs-links
-mise run docs-quickstarts
-mise run docs-notebooks
-```
-
-The hosted `ci.yml` workflow invokes the same task names. Do not reimplement
+The hosted `ci.yml` workflow invokes `mise run ci-all`. Do not reimplement
 checks in workflow YAML.
 
-Other tasks used by public docs:
+Tasks:
 
-- `mise run check` — formatting, Clippy, Ruff, mypy
-- `mise run test` — Rust and Python tests
-- `mise run kernel` / `runtime` / `python-binding` / `wasm-binding` — narrow crate gates; not a substitute for `check` / `ci`
-- `mise run coverage` — diagnostic Rust, Python, and WASM coverage reports
-- `mise run conformance` — published port and plugin suites
-- `mise run generate-wasm` / `mise run stage-wasm` — JS/WASM package
-- `mise run check-plugin-template` — plugin guest templates
-- `mise run docs-notebooks` — Python learning notebooks
-- `mise run migrate` — 0.1.0 → 1.0.0 in-tree migration helpers
+- `mise run install-all` — pinned tools plus Rust, Python, and WASM environments
+- `mise run ci-all` — same required checks as `.github/workflows/ci.yml`
+- `mise run build-all` / `build-rust` / `build-python` / `build-wasm` — optional profile after `--` (default `dev`)
+- `mise run check-all` / `check-rust` / `check-python` / `check-wasm` — formatting, lint, and typecheck
+- `mise run test-all` / `test-rust` / `test-python` / `test-wasm` — language test suites
+- `mise run coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports
+- `mise run bench-all` / `bench-rust` / `bench-python` / `bench-wasm` — language benchmarks
 
 ## Developer Certificate of Origin (DCO)
 

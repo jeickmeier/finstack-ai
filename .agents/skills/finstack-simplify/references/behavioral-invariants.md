@@ -59,12 +59,12 @@ When in doubt, keep the old behavior and flag the invariant in the audit. **Neve
 **Invariant:** See `binding-drift.md`. Frozen public items and conformance fixtures are how downstream users trust the bindings.
 
 **How this is broken by refactoring:**
-- Renaming a Rust public symbol without updating bindings and `mise run check-public-items`.
+- Renaming a Rust public symbol without updating bindings and `uv run --no-project python tools/compat/public_items.py --check`.
 - Deleting a Rust public symbol without deleting the binding and public-item entry.
 - Adding a Python-only or JS-only "convenience" wrapper (logic drift).
 
 **What to do:**
-- Every slice that touches a public Rust symbol re-runs `mise run check-public-items` and the affected binding tests. If they fail, the slice is not done.
+- Every slice that touches a public Rust symbol re-runs `uv run --no-project python tools/compat/public_items.py --check` and the affected binding tests. If they fail, the slice is not done.
 
 ---
 
@@ -74,7 +74,7 @@ When in doubt, keep the old behavior and flag the invariant in the audit. **Neve
 
 **How this is broken by refactoring:**
 - Editing `bindings/finstack-ai-wasm/js/generated/` by hand.
-- Changing WIT packages without running `mise run gen-wit` / `mise run check-wit`.
+- Changing WIT packages without running `uv run --no-project python tools/wit_bindgen/generate.py` / `uv run --no-project python tools/wit_bindgen/generate.py --check`.
 - Leaving generator drift uncommitted.
 
 **What to do:**
@@ -129,7 +129,7 @@ Before committing:
 - [ ] Did I change kernel decide/apply or add I/O? → run kernel tests twice; confirm I/O-free.
 - [ ] Did I change effect commit/execute ordering? → confirm commit-before-effect.
 - [ ] Did I change any serde'd public type? → check rename aliases; check JSON/TOML fixtures.
-- [ ] Did I change any public Rust symbol visible to bindings? → update both bindings; update `.pyi`; run `mise run check-public-items`.
+- [ ] Did I change any public Rust symbol visible to bindings? → update both bindings; update `.pyi`; run `uv run --no-project python tools/compat/public_items.py --check`.
 - [ ] Did I change generated artifacts? → regenerate via the documented command.
 - [ ] Did I change observer or compaction ownership? → stop and flag.
 - [ ] Did I change parallel completion vs durable order? → run ordering/conformance tests.

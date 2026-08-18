@@ -51,25 +51,10 @@ jobs:
       - name: Export Python interpreter for PyO3
         run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
 
-      - name: Check
-        run: mise run check
-
-      - name: Test
-        run: mise run test
-
-      - name: Check wasm graph
-        run: mise run check-wasm
-
-      - name: Supply chain
-        run: mise run supply-chain
-
-      - name: Generate wasm package
+      - name: CI
         env:
           FINSTACK_WASM_REPRO: "1"
-        run: mise run generate-wasm
+        run: mise run ci-all
         # Consecutive Linux rebuilds must be byte-identical. Dirty-tree vs the
         # committed Darwin glue is a same-host `check.py dirty` obligation;
         # rustc/wasm-bindgen output is not cross-OS identical.
-
-      - name: Browser package tests
-        run: mise run test-browser

@@ -35,7 +35,7 @@ Use this format verbatim.
 
 **Verify:**
 ```bash
-mise run check && mise run test
+mise run check-all && mise run test-all
 ```
 
 **Bindings touched:** none. Python/WASM tests don't need to re-run.
@@ -58,7 +58,7 @@ mise run check && mise run test
 
 **Verify:**
 ```bash
-mise run check && mise run test
+mise run check-all && mise run test-all
 ```
 
 **Bindings touched:** none (the trait was internal).
@@ -85,9 +85,9 @@ mise run check && mise run test
 
 **Verify:**
 ```bash
-mise run check && mise run test
-mise run generate-wasm && mise run check-wasm
-mise run check-public-items
+mise run check-all && mise run test-all
+mise run build-wasm -- release && mise run check-wasm
+uv run --no-project python tools/compat/public_items.py --check
 ```
 
 **Bindings touched:** Python + WASM both updated. Public-item inventory updated.
@@ -113,10 +113,10 @@ mise run check-public-items
 
 **Verify:**
 ```bash
-mise run check && mise run test
-mise run generate-wasm && mise run check-wasm
-mise run check-public-items
-mise run conformance
+mise run check-all && mise run test-all
+mise run build-wasm -- release && mise run check-wasm
+uv run --no-project python tools/compat/public_items.py --check
+cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
 ```
 
 **Bindings touched:** Yes, full stack.

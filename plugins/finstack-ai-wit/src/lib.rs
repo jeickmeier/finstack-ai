@@ -71,7 +71,10 @@ mod tests {
             .current_dir(repo_root())
             .status()
             .expect("run check-wit");
-        assert!(status.success(), "mise run check-wit equivalent failed");
+        assert!(
+            status.success(),
+            "tools/wit_bindgen/generate.py --check equivalent failed"
+        );
         assert_experimental_surface().expect("surface");
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);
         assert_eq!(TOOLSET_FUNCS, ["list-tools", "call"]);

@@ -14,9 +14,11 @@ WIT packages: finstack:ai-*@0.0.4 (default); @1.0.0 retarget in MIGRATION.md
 encode: tools/plugin_wasm/encoder
 ```
 
-Regenerate vendored WIT with `mise run gen-guest-sdk`.
-`mise run check-guest-sdk` fails on drift. Runtime discovery is
-lockfile-only (`PluginHost::load_enabled`); guests are not searched.
+Regenerate vendored WIT with
+`uv run --no-project python tools/plugin_wasm/sync_guest_wit.py`.
+`uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check`
+fails on drift. Runtime discovery is lockfile-only
+(`PluginHost::load_enabled`); guests are not searched.
 
 ## Author a guest
 
@@ -35,11 +37,11 @@ grants the matching capability and concrete resource.
 ## Local host test commands
 
 ```text
-mise run gen-guest-sdk
-mise run check-guest-sdk
-mise run gen-plugin-wasm
-mise run check-plugin-wasm
-mise run check-plugin-template
+uv run --no-project python tools/plugin_wasm/sync_guest_wit.py
+uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check
+uv run --no-project python tools/plugin_wasm/generate.py
+uv run --no-project python tools/plugin_wasm/generate.py --check
+uv run --no-project python tools/plugin_wasm/template_check.py
 cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```

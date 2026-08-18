@@ -54,8 +54,10 @@ the public index and does not replace either layer.
 ## Local verification
 
 ```text
-mise run docs-links
-mise run docs-quickstarts
-mise run docs-notebooks
-mise run check-plugin-template
+mise run check-all
+mise run test-all
+uv run --no-project python tools/docs/links.py
+uv run --no-project python tools/docs/quickstarts.py
+uv run python tools/docs/notebooks.py
+uv run --no-project python tools/plugin_wasm/template_check.py
 ```

@@ -206,7 +206,7 @@ def check_generated() -> int:
     paths = generated_paths()
     if not paths:
         print(
-            "error: generated wasm glue is missing; run mise run generate-wasm",
+            "error: generated wasm glue is missing; run `mise run build-wasm -- release`",
             file=sys.stderr,
         )
         return 1

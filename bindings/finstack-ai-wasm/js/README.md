@@ -21,7 +21,8 @@ buildMetadata();
 ## Install
 
 This package is staged, not published. Consume a packed tarball from
-`mise run stage-wasm` or the repository checkout after `mise run generate-wasm`.
+`mise run build-wasm -- release` or a tarball from
+`uv run --no-project python tools/wasm_package/stage.py`.
 See [browser security](docs/browser-security.md) and
 [benchmarks](docs/benchmarks.md).
 
@@ -164,7 +165,7 @@ not cancel. Applicable goldens run in Chromium, Firefox, and WebKit.
 ## Regenerate
 
 ```bash
-mise run generate-wasm
+mise run build-wasm -- release
 ```
 
 That command is the only supported regeneration path. It writes `generated/`

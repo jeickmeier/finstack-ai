@@ -17,7 +17,7 @@ Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm
 ## Quick start
 
 The wasm harness serves this directory at `/examples/browser-minimal/` after
-`mise run generate-wasm`. Interactive controls are labeled
+`mise run build-wasm -- release`. Interactive controls are labeled
 **Run scripted session**, **Inspect last session**, and **Clear local data**.
 
 ## Risks

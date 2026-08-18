@@ -48,7 +48,7 @@ Phase 9 entrance review or the PR-066 soak note.
 uv run --no-project python tools/migrate/migrate.py agentspec path/to/agent.json --dry-run
 uv run --no-project python tools/migrate/migrate.py journal path/to/records.jsonl --dry-run
 uv run --no-project python tools/migrate/migrate.py manifest path/to/plugin.manifest.json --out path/to/plugin.manifest.json
-mise run migrate -- agentspec path/to/agent.json --dry-run
+uv run --no-project python tools/migrate/migrate.py agentspec path/to/agent.json --dry-run
 ```
 
 Converters fail closed on unknown state-bearing fields. They are not a
@@ -64,7 +64,7 @@ Commands are recorded in
 [release-rehearsal.md](../implementation/release-rehearsal.md).
 
 ```text
-mise run release-rehearsal
+uv run --no-project python tools/docs/recreate_release.py
 ```
 
 Two local staging runs from the same commit must produce identical

@@ -4,22 +4,22 @@ Use this as the repo-specific release checklist.
 
 ## Core Gates
 
-- Format and lint: `mise run check`
-- Tests: `mise run test`
-- CI-equivalent: `mise run ci`
-- Security/audit: `mise run supply-chain`
+- Format and lint: `mise run check-all`
+- Tests: `mise run test-all`
+- CI-equivalent: `mise run ci-all`
+- Security/audit: `cargo-deny check`
 
 ## Bindings
 
-- WASM graph: `mise run check-wasm`
-- WASM glue regeneration: `mise run generate-wasm` when bindings changed
-- Browser tests: `mise run test-browser` when the JS host changed
-- Public items: `mise run check-public-items`
-- Conformance: `mise run conformance`
+- WASM graph: included in `mise run ci-all`
+- WASM glue regeneration: `mise run build-wasm -- release` when bindings changed
+- Browser tests: `mise run test-wasm` when the JS host changed
+- Public items: `uv run --no-project python tools/compat/public_items.py --check`
+- Conformance: `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`
 
 ## Examples
 
-- Quickstarts: `mise run docs-quickstarts`
+- Quickstarts: `uv run --no-project python tools/docs/quickstarts.py`
 - Rust examples: use repo-specific example tasks if present in `mise.toml`
 
 ## Release Notes

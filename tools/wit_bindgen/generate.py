@@ -560,7 +560,9 @@ def main() -> int:
                 else ""
             )
             if current != source:
-                raise WitError("generated.rs is dirty; run `mise run gen-wit`")
+                raise WitError(
+                    "generated.rs is dirty; run `uv run --no-project python tools/wit_bindgen/generate.py`"
+                )
             return 0
         write_generated(source)
         return 0

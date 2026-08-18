@@ -9,14 +9,14 @@ This page is not a marketplace and does not issue hosted badges.
 
 | Suite | Surface | How to run |
 | --- | --- | --- |
-| Model / provider | `check_model_conformance` | `mise run conformance` |
+| Model / provider | `check_model_conformance` | `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` |
 | Toolset | `check_toolset_conformance` | same |
 | Context | `check_context_conformance` | same |
-| Middleware / compaction | `check_middleware_conformance`, `check_compaction_conformance` | same |
-| Observer | `check_observer_conformance` | same |
-| Journal store | `check_journal_store_conformance` | same |
-| Plugin host | `plugins/finstack-ai-plugin-host` G6 hostile + lockfile tests | same |
-| Binding traces | `finstack-ai-test` goldens | `mise run test` |
+| Middleware / compaction | `check_middleware_conformance`, `check_compaction_conformance` | `cargo test -p finstack-ai-test --locked --test port_conformance --test compaction_conformance` |
+| Observer | `check_observer_conformance` | same as model / provider |
+| Journal store | `check_journal_store_conformance` | same as model / provider |
+| Plugin host | `plugins/finstack-ai-plugin-host` G6 hostile + lockfile tests | `cargo test -p finstack-ai-plugin-host --locked -- conformance -- --test-threads=1` |
+| Binding traces | `finstack-ai-test` goldens | `mise run test-rust` |
 
 A failed port check prints:
 

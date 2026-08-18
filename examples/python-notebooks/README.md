@@ -31,10 +31,10 @@ Or launch Jupyter from that environment:
 uv run jupyter notebook examples/python-minimal/notebooks
 ```
 
-Verification (`mise run docs-notebooks` from the repository root):
+Verification (`uv run python tools/docs/notebooks.py` from the repository root):
 
 ```bash
-mise run docs-notebooks
+uv run python tools/docs/notebooks.py
 ```
 
 ## Trust and network

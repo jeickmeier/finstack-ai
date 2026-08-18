@@ -332,7 +332,9 @@ def build_python_wheel(out: Path) -> Path:
 
 def pack_npm(out: Path) -> Path:
     if not (JS_PACKAGE / "dist" / "index.js").is_file():
-        raise SystemExit("npm dist/ missing; run mise run generate-wasm first")
+        raise SystemExit(
+            "npm dist/ missing; run `mise run build-wasm -- release` first"
+        )
     out.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
         ["npm", "pack", "--pack-destination", str(out)],

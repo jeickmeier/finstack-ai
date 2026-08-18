@@ -34,7 +34,7 @@ This is the procedural spine of the skill. Read it at the start of every session
 4. Produce the **Consolidation Plan** using `examples/consolidation-plan.md`.
 
 **Risk tiers:**
-- **Tier 1 — Delete-only:** removing dead code, unused variants, orphaned files. No call-sites change semantically. Verify: `mise run check && mise run test`.
+- **Tier 1 — Delete-only:** removing dead code, unused variants, orphaned files. No call-sites change semantically. Verify: `mise run check-all && mise run test-all`.
 - **Tier 2 — Internal collapse:** inlining private wrappers, collapsing internal single-impl traits, merging duplicate private helpers. No public surface change. Verify: Rust-side only.
 - **Tier 3 — Public surface simplification:** removing public parallel APIs, collapsing `try_*` shadows, renaming public symbols. Binding updates required. Verify: full stack.
 - **Tier 4 — Invariant-sensitive:** anything that touches serde, kernel decide/apply, commit-before-effect, public-item inventory, or generated artifacts. Verify: full stack + conformance + explicit user sign-off before merge.
@@ -75,28 +75,28 @@ This is the procedural spine of the skill. Read it at the start of every session
 ### Every slice
 
 ```bash
-mise run check
-mise run test
+mise run check-all
+mise run test-all
 ```
 
 Prefer the repo's `mise run` tasks from `AGENTS.md`. Use focused checks while iterating, then broader lint/test gates when the refactor slice crosses crate or binding boundaries.
 
 ### If the slice touches Rust that is bound to Python
 
-Rebuild the editable Python package, then re-run the Python portion of `mise run test`.
+Rebuild the editable Python package, then re-run the Python portion of `mise run test-all`.
 
 ### If the slice touches Rust that is bound to WASM
 
 ```bash
-mise run generate-wasm
+mise run build-wasm -- release
 mise run check-wasm
 ```
 
 ### If the slice is Tier 3 or Tier 4 (any public surface change or invariant-sensitive)
 
 ```bash
-mise run check-public-items
-mise run conformance
+uv run --no-project python tools/compat/public_items.py --check
+cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
 ```
 
 ### Output rule
@@ -145,7 +145,7 @@ Audit cluster 3 (apply/legacy.rs vs apply/shapes.rs). Collapsed legacy
 into shapes; legacy.rs deleted. All call-sites updated. Binding surface
 unchanged.
 
-Verified: mise run check, mise run test. All green.
+Verified: mise run check-all, mise run test-all. All green.
 ```
 
 **Do not squash multiple slices into one commit.** The user reviews slices one at a time; squashing defeats the point.
@@ -156,8 +156,8 @@ Verified: mise run check, mise run test. All green.
 
 If you change the Rust library, rebuild the Python and WASM bindings before using them in python/wasm.
 
-- Rebuild Python: reinstall the editable package used by `mise run test`.
-- Rebuild WASM: `mise run generate-wasm`.
+- Rebuild Python: reinstall the editable package used by `mise run test-all`.
+- Rebuild WASM: `mise run build-wasm -- release`.
 
 If your slice touched `crates/*` but not the binding crates, you still need to rebuild **if you want the binding tests to pick up the change.** Always rebuild before running binding tests.
 

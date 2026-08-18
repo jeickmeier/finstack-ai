@@ -10,7 +10,7 @@ deny-by-default WASI, fuel/limits, and signature policy.
 ## Quick start
 
 ```text
-mise run check-plugin-template
+uv run --no-project python tools/plugin_wasm/template_check.py
 ```
 
 Copy `plugins/templates/toolset-plugin/` or

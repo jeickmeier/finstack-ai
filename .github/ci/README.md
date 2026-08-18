@@ -2,8 +2,9 @@
 
 Owner: `me@jeickmeier.com`
 
-All executable checks are canonical mise tasks. Workflows must call
-`mise run <task>` and must not reimplement policy in YAML.
+Hosted CI calls `mise run ci-all`. Do not reimplement that policy in YAML.
+Workflows that are not the required CI gate may invoke a remaining language
+task or a documented Python tool when no mise task exists.
 
 ## Tasks
 
@@ -11,32 +12,20 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 
 | Task | Purpose |
 | --- | --- |
-| `format` | Write-mode `cargo fmt` and `ruff format` |
-| `check` | `cargo fmt --check`, Clippy with warnings denied, `ruff format --check`, `ruff check`, and `mypy --strict` |
-| `test` | `cargo test --workspace` and the Python test suite against an editable binding install |
-| `coverage` | Diagnostic Rust, Python, and WASM reports under `target/coverage/` (not in `ci`) |
-| `coverage-rust` | `cargo llvm-cov` workspace HTML + LCOV |
-| `coverage-python` | pytest-cov HTML + XML for the Python binding |
-| `coverage-wasm` | Scaffold artifact until wasm-bindgen-test coverage exists |
-| `check-wasm` | Type-check the selected wasm-host graph and reject Tokio/native I/O |
-| `generate-wasm` | Regenerate wasm-bindgen glue and the `@finstack/ai` TypeScript facade |
-| `test-browser` | Type-check and run the headless Chromium, Firefox, and WebKit package harness |
-| `stage-wasm` | Pack unpublished `@finstack/ai` artifacts and typecheck a clean install |
-| `benchmark-wasm` | Record WASM/JS crossing warning measurements |
-| `ci` | `check`, `test`, `check-wasm`, `supply-chain`, `docs-links`, `docs-license`, `check-guest-sdk`, `check-plugin-template`, and `check-plugin-lock` |
-| `supply-chain` | cargo-deny across the workspace and fuzz manifest (Eng §9; TM-18) |
-| `secret-scan` | gitleaks over the repository tree and history (SEC-INV-005; TM-04) |
-| `secret-scan-canary` | Temporary-repo negatives proving gitleaks fails on assembled canaries |
-| `fuzz-smoke` | Deterministic bounded cargo-fuzz smoke (nightly) |
-| `kernel` / `runtime` / `python-binding` / `wasm-binding` | Narrow local crate gates. Not a substitute for `check` / `ci` |
+| `install-all` | Pinned tools plus Rust, Python, and WASM environments |
+| `ci-all` | Same required checks as [`.github/workflows/ci.yml`](../workflows/ci.yml) |
+| `build-all` / `build-rust` / `build-python` / `build-wasm` | Build each language. Optional profile after `--` (default `dev`) |
+| `check-all` / `check-rust` / `check-python` / `check-wasm` | Formatting, lint, and typecheck |
+| `test-all` / `test-rust` / `test-python` / `test-wasm` | Language test suites |
+| `coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` | Diagnostic coverage reports under `target/coverage/` (not in `ci-all`) |
+| `bench-all` / `bench-rust` / `bench-python` / `bench-wasm` | Language benchmarks |
 
 ## Workflows
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `check`, `test`, `check-wasm`, `generate-wasm` (consecutive byte-identical rebuild), and `test-browser`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
-| [`security.yml`](../workflows/security.yml) | every PR, `main` push, weekly, manual | `supply-chain`, `secret-scan`, and `secret-scan-canary`. |
-| [`nightly.yml`](../workflows/nightly.yml) | daily, manual | `starter-rc` then `fuzz-smoke`. Does not publish. |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Single Ubuntu job running `ci-all`. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
+| [`nightly.yml`](../workflows/nightly.yml) | daily, manual | In-tree starter RC against staged artifacts. Does not publish. |
 | [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` artifacts. Does not publish. |
 
 Required checks intentionally have **no** `paths` / `paths-ignore` filters.
@@ -61,16 +50,25 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
 
 ## Retired automation
 
-The following historical mise tasks no longer exist: `architecture`,
-`schema-governance`, `test-schema-governance`, `docs`, `check-minimal`,
-`test-miri`, `check-nightly`, `release-smoke`, `release-reproducible`,
-`build-python-wheel-ci`, per-PR `test-pr0xx` wrappers, and the focused
-`test-kernel` / `test-model` / `test-tool` / `test-events` /
-`test-extensions` / `test-lifecycle` / `test-runtime` / `test-runtime-gate` /
-`test-sdk` slices. Historical evidence under `docs/implementation/` records
-the runs made while those gates were active.
+The following historical mise tasks no longer exist: `format`, `check`,
+`test`, `ci`, `kernel`, `runtime`, `python-binding`, `wasm-binding`,
+`coverage` (replaced by `coverage-all`),
+`generate-wasm`, `test-browser`, `stage-wasm`, `benchmark`,
+`benchmark-smoke`, `benchmark-wasm`, `supply-chain`, `secret-scan`,
+`secret-scan-canary`, `fuzz-smoke`, `fuzz-local`, `conformance`,
+`docs-links`, `docs-quickstarts`, `docs-notebooks`, `docs-license`,
+`migrate`, `gen-wit`, `check-wit`, `gen-guest-sdk`, `check-guest-sdk`,
+`gen-plugin-wasm`, `check-plugin-wasm`, `check-plugin-template`,
+`gen-plugin-lock`, `check-plugin-lock`, `check-public-items`,
+`check-size-budgets`, `measure-packaging-profile`, `starter-rc`,
+`recreate-release`, `release-rehearsal`, `hotfix-rehearsal`,
+`architecture`, `schema-governance`, `test-schema-governance`, `docs`,
+`check-minimal`, `test-miri`, `check-nightly`, `release-smoke`,
+`release-reproducible`, `build-python-wheel-ci`, per-PR `test-pr0xx`
+wrappers, and the focused `test-kernel` / `test-model` / `test-tool` /
+`test-events` / `test-extensions` / `test-lifecycle` / `test-runtime` /
+`test-runtime-gate` / `test-sdk` slices. Historical evidence under
+`docs/implementation/` records the runs made while those gates were
+active.
 
-Surviving replacements: `check`, `test`, `conformance`, `supply-chain`,
-`docs-links`, `docs-quickstarts`, `secret-scan`, `secret-scan-canary`,
-`fuzz-smoke`, `starter-rc`, and `release-rehearsal`. Do not invent a passing
-result for a retired task.
+Do not invent a passing result for a retired task.

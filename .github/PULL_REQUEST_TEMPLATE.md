@@ -49,7 +49,7 @@
 ## Verification
 
 ```text
-# Prefer: mise run ci
+# Prefer: mise run ci-all
 # Commands run and results
 ```
 

@@ -2,7 +2,7 @@
 //!
 //! [`DeferredBindingAdapter`] stays `Unavailable` in `cargo test`. Python
 //! parity evidence lives in pytest; WASM parity evidence lives in the
-//! browser Playwright harness (`mise run test-browser`). The placeholder
+//! browser Playwright harness (`mise run test-wasm`). The placeholder
 //! never reports a passing `ConformanceRunner` result.
 
 use std::fmt;

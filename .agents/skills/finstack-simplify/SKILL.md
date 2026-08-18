@@ -68,12 +68,12 @@ After the edit, produce a short **Refactor Diff** note in the format of `example
 
 Run the **full finstack verify stack** for the affected layers. These commands are project-specific and non-negotiable:
 
-- Rust touched: `mise run check && mise run test`
-- WASM touched: `mise run check-wasm` (and `mise run generate-wasm` if you changed WASM bindings)
-- Python touched: include the Python portion of `mise run test` (rebuild the editable binding if you changed Rust code that PyO3 binds)
-- Public-surface impact: `mise run check-public-items` and `mise run conformance` when names, signatures, or fixtures changed.
+- Rust touched: `mise run check-all && mise run test-all`
+- WASM touched: `mise run check-wasm` (and `mise run build-wasm -- release` if you changed WASM bindings)
+- Python touched: include the Python portion of `mise run test-all` (rebuild the editable binding if you changed Rust code that PyO3 binds)
+- Public-surface impact: `uv run --no-project python tools/compat/public_items.py --check` and `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` when names, signatures, or fixtures changed.
 
-Prefer the repo `mise run` tasks from `AGENTS.md` for verification. Use focused checks while iterating and broader `mise run ci` only when the slice is broad enough to justify it.
+Prefer the repo `mise run` tasks from `AGENTS.md` for verification. Use focused checks while iterating and broader `mise run ci-all` only when the slice is broad enough to justify it.
 
 All output must be **100% green** before moving to the next slice. Paste the actual command output in your response so the user can verify; never claim green without showing it.
 

@@ -7,8 +7,9 @@ GitHub tag is `v0.1.0`. crates.io / PyPI / npm packages are not published.
 
 From this repository. Rust crates are path dependencies until crates.io
 publishes. Python: build or editable-install
-`bindings/finstack-ai-python`. JavaScript: `mise run stage-wasm` or
-`mise run generate-wasm`, then consume the packed tarball. See
+`bindings/finstack-ai-python`. JavaScript: `mise run build-wasm -- release`,
+then consume the local package or a tarball from
+`uv run --no-project python tools/wasm_package/stage.py`. See
 [Rust](rust.md), [Python](python.md), and [WASM](wasm.md).
 
 ## Is 1.0.0 published?

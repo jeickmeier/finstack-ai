@@ -21,8 +21,8 @@ For any Rust type or function `Foo` in `crates/<crate>/src/...`:
 - **WASM binding** lives under `bindings/finstack-ai-wasm/`.
 - **Python type stubs** are at `bindings/finstack-ai-python/python/finstack_ai/*.pyi`.
 - **JS facade** is at `bindings/finstack-ai-wasm/js/src/` — hand-written over generated glue.
-- **Public items** are checked by `mise run check-public-items`.
-- **Conformance** is checked by `mise run conformance`.
+- **Public items** are checked by `uv run --no-project python tools/compat/public_items.py --check`.
+- **Conformance** is checked by `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`.
 
 Before doing any binding-touching work, list these paths for the scope you're auditing. Put the list in the audit report.
 
@@ -97,7 +97,7 @@ When you find these, the refactor is:
 
 ## Public items and conformance
 
-`mise run check-public-items` is the source of truth for frozen public names. Treat it like an API contract.
+`uv run --no-project python tools/compat/public_items.py --check` is the source of truth for frozen public names. Treat it like an API contract.
 
 During a refactor:
 
@@ -106,8 +106,8 @@ During a refactor:
 - If conformance fixtures fail after your changes, stop. Either your refactor broke an invariant or the fixture is stale — figure out which before "fixing" the test.
 
 ```bash
-mise run check-public-items
-mise run conformance
+uv run --no-project python tools/compat/public_items.py --check
+cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
 ```
 
 If you added a new canonical API, add it to the public-item inventory in the same slice when it is intended to be frozen.
@@ -155,7 +155,7 @@ The worst case. Rust has `start_run(&spec)`, Python has `start_run(spec, timeout
 3. **Categorize** each difference as: structural drift, logic drift, intentional (name collision), or unknown.
 4. **Plan** the fix as part of the larger refactor slice — binding changes and their Rust sources go in the same commit.
 5. **Implement** Rust-first, then Python binding, then WASM binding, then `.pyi`, then public items.
-6. **Verify** in order: `mise run check && mise run test` → `mise run generate-wasm` → `mise run check-wasm` → `mise run check-public-items` → `mise run conformance`.
+6. **Verify** in order: `mise run check-all && mise run test-all` → `mise run build-wasm -- release` → `mise run check-wasm` → `uv run --no-project python tools/compat/public_items.py --check` → `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`.
 
 **Do not batch multiple binding-drift slices into one commit.** Each drift repair is a discrete before/after; keeping them separate makes review tractable and rollback cheap.
 
@@ -167,7 +167,7 @@ The worst case. Rust has `start_run(&spec)`, Python has `start_run(spec, timeout
 - [ ] Rust public surface matches WASM binding symbol-for-symbol (modulo documented JS naming conventions).
 - [ ] No binding function exceeds ~20 lines unless it's doing a legitimate type-conversion batch.
 - [ ] No binding function contains arithmetic or non-trivial control flow.
-- [ ] Public-item inventory is in sync; `mise run check-public-items` passes.
+- [ ] Public-item inventory is in sync; `uv run --no-project python tools/compat/public_items.py --check` passes.
 - [ ] `.pyi` stubs type-check cleanly.
 - [ ] JS facade exposes the new surface; no raw generated-glue leaks.
 - [ ] `__all__` or package exports are set; no dynamic export discovery.

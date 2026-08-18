@@ -5,8 +5,10 @@ bindings for the toolset and context-provider worlds.
 
 The crate compiles host and guest traits from the checked-in WIT roots
 under `wit/v0.0.4/` and `wit/v1.0.0/`. Regenerated bindings live in
-`src/generated.rs` and are owned by `mise run gen-wit` /
-`mise run check-wit`. Do not hand-edit generated files.
+`src/generated.rs` and are owned by
+`uv run --no-project python tools/wit_bindgen/generate.py` /
+`uv run --no-project python tools/wit_bindgen/generate.py --check`.
+Do not hand-edit generated files.
 
 This crate does **not** instantiate Wasmtime. Isolated Wasmtime (T3)
 instantiation lives in `finstack-ai-plugin-host`. In-process adapters

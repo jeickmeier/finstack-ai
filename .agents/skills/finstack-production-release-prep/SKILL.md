@@ -20,7 +20,7 @@ Release Prep Progress:
 - [ ] Phase 7: Final verification & tagging
 ```
 
-After each phase, run `mise run ci` to confirm nothing is broken before proceeding.
+After each phase, run `mise run ci-all` to confirm nothing is broken before proceeding.
 
 ## Phase 1: Dead code audit
 
@@ -158,7 +158,7 @@ Verify these files are current and accurate:
 All examples must compile and produce correct output:
 
 ```bash
-mise run docs-quickstarts
+uv run --no-project python tools/docs/quickstarts.py
 # Check for examples referencing deprecated/removed APIs
 rg -l 'deprecated_function_name' examples/ docs/
 ```
@@ -209,7 +209,7 @@ mise run check-wasm
 ### 4d. Frozen public items
 
 ```bash
-mise run check-public-items
+uv run --no-project python tools/compat/public_items.py --check
 ```
 
 A removed frozen public item is a breaking change unless the inventory is intentionally updated in the same release.
@@ -220,8 +220,8 @@ A removed frozen public item is a breaking change unless the inventory is intent
 
 ```bash
 # WASM package size and browser benches when the release touches host or bindings
-mise run check-size-budgets
-mise run benchmark-wasm
+uv run --no-project python tools/perf/check_size_budgets.py
+mise run bench-wasm
 ```
 
 ### 5b. Review for regressions
@@ -240,8 +240,8 @@ Behavioral drift is a release blocker. Verify:
 - Golden or snapshot tests are unchanged unless the release notes the change
 
 ```bash
-mise run conformance
-mise run test
+cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
+mise run test-all
 ```
 
 ## Phase 6: Release hygiene
@@ -258,10 +258,10 @@ mise run test
 
 ```bash
 # cargo-deny: licenses, advisories, bans, and sources (uses deny.toml)
-mise run supply-chain
+cargo-deny check
 
 # Lint all components (no auto-fix — must pass clean)
-mise run check
+mise run check-all
 ```
 
 ### 6c. Publish dry-run
@@ -281,7 +281,7 @@ cargo publish -p finstack-ai-kernel --dry-run
 ### 6e. Binary and package size check
 
 ```bash
-mise run check-size-budgets
+uv run --no-project python tools/perf/check_size_budgets.py
 ```
 
 Review wheel, WASM, and CLI size budgets for unexpected regressions from the previous release.
@@ -289,8 +289,8 @@ Review wheel, WASM, and CLI size budgets for unexpected regressions from the pre
 ### 6f. API parity
 
 ```bash
-mise run check-public-items
-mise run generate-wasm
+uv run --no-project python tools/compat/public_items.py --check
+mise run build-wasm -- release
 mise run check-wasm
 ```
 
@@ -311,13 +311,13 @@ Create `RELEASE_NOTES_X.Y.Z.md` following the established template if one exists
 ### 7a. Full test suite
 
 ```bash
-mise run test
+mise run test-all
 ```
 
 ### 7b. CI and quality gates
 
 ```bash
-mise run ci
+mise run ci-all
 ```
 
 ### 7c. Pre-release checklist
@@ -382,14 +382,14 @@ After completing the audit, produce a release readiness report:
 ### Quality gates
 | Check | Status |
 |-------|--------|
-| `mise run ci` | pass/fail |
-| `mise run check` | pass/fail |
-| `mise run supply-chain` | pass/fail |
-| `mise run test` | pass/fail |
+| `mise run ci-all` | pass/fail |
+| `mise run check-all` | pass/fail |
+| `cargo-deny check` | pass/fail |
+| `mise run test-all` | pass/fail |
 | `mise run check-wasm` | pass/fail |
 | Publish dry-run | pass/fail |
 | Semver checks | pass/fail |
-| `mise run check-public-items` | pass/fail |
+| `uv run --no-project python tools/compat/public_items.py --check` | pass/fail |
 | Feature flag matrix | pass/fail |
 
 ### Remaining items

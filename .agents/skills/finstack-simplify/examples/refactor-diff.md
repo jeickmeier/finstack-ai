@@ -73,12 +73,12 @@ Mark [x] for "actually verified" not just "I think it's fine." If the slice touc
 Paste the last 5–10 lines of each command. **Do not paraphrase.**
 
 ```
-$ mise run check
+$ mise run check-all
 ... last lines ...
 ```
 
 ```
-$ mise run test
+$ mise run test-all
 ... last lines ...
 test result: ok. N passed; 0 failed
 ```

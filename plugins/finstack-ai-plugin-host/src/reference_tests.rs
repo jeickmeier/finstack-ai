@@ -657,7 +657,7 @@ async fn filesystem_sandbox_without_preopen_fails_instantiate() {
 }
 
 #[tokio::test]
-#[ignore = "invoked by mise run check-plugin-template"]
+#[ignore = "invoked by tools/plugin_wasm/template_check.py"]
 async fn template_project_builds_and_runs() {
     let path = std::env::var("FINSTACK_TEMPLATE_WASM").expect("FINSTACK_TEMPLATE_WASM");
     let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));

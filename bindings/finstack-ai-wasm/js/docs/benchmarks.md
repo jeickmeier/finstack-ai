@@ -26,7 +26,7 @@ JS host callback time.
 ## How to run
 
 ```bash
-mise run benchmark-wasm
+mise run bench-wasm
 ```
 
 The task writes `docs/implementation/artifacts/pr-063/wasm-js-crossing.json`

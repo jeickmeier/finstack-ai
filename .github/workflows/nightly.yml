@@ -46,4 +46,6 @@ jobs:
         run: echo "PYO3_PYTHON=$(uv python find 3.14)" >> "${GITHUB_ENV}"
 
       - name: Starter RC against staged canary artifacts
-        run: mise run starter-rc
+        run: |
+          mise run build-wasm -- release
+          uv run --no-project python tools/docs/starter_rc.py
