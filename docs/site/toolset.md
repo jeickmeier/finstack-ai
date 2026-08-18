@@ -32,6 +32,33 @@ Native toolsets are [T1](security-trust-levels.md). They inherit process
 authority. Do not call them a sandbox. Untrusted code belongs on the
 [plugin](plugin.md) path.
 
+## Deferring a tool call
+
+A tool that may suspend its first pass declares
+`ToolSpec.deferral = Supported`. On the first pass the stream must emit
+`ToolStreamItem::Deferred` as its **sole** terminal item — not alongside
+`Complete`, `Error`, or further progress. The runtime commits the
+deferral under the original effect id and the run enters
+`AwaitingExternal`.
+
+Completion has two paths. An external actor may finish the work and
+submit through `complete_external` (for example via a workflow driver
+session). For poll-backed deferrals the runtime derives the next wake
+from the committed `next_poll_at` and calls `Toolset::reconcile` when
+due (`due_polls` / `drive_due_polls`). A reconcile that returns
+`StillRunning` updates the committed deferral; `Complete` or `Error`
+settles the effect.
+
+### Stable codes
+
+Match on the `code` string; display messages may differ.
+
+| Code | Meaning |
+| --- | --- |
+| `tool_deferral_not_declared` | Stream emitted `Deferred` but the spec did not declare `Supported`. |
+| `tool_deferral_invalid` | Empty handle or `next_poll_at` after `expires_at`. |
+| `tool_deferral_expired` | Committed deferral reached `expires_at`. |
+
 ## License
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).

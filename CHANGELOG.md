@@ -17,6 +17,8 @@ unpublished.
 ### Added
 
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.
+- `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run (PR-079 Rust half).
+- Derived poll scheduling from committed `EffectDeferred` (`due_polls` / `drive_due_polls`); expiry uses `tool_deferral_expired`.
 - Internal `ProcessConfinement` service (not a port) for fail-closed
   local process confinement. `finstack-ai-tools-shell` can consume it;
   the labeled unconfined `std::process` runner stays reachable. The
