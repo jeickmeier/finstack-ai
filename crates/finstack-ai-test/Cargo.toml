@@ -9,6 +9,7 @@ homepage.workspace = true
 documentation = "https://docs.rs/finstack-ai-test"
 authors.workspace = true
 description = "Scripted models, fakes, and conformance utilities for finstack-ai"
+publish = false
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
