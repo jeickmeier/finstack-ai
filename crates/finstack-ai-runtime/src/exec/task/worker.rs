@@ -195,7 +195,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut due_poll_fired: mpsc::Receiver<DuePollWake>,
     due_poll_schedules: mpsc::Sender<Option<Timestamp>>,
     due_poll_cancellation: crate::CancellationSignal,
-    mut process_local_poll_deadlines: BTreeMap<EffectId, Timestamp>,
+    mut process_local_poll_deadlines: BTreeMap<EffectId, Option<Timestamp>>,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,

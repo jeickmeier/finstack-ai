@@ -19,6 +19,12 @@ fn polling_deferral(
     }
 }
 
+fn externally_waiting_deferral(handle: &str) -> ToolDeferral {
+    let mut deferral = polling_deferral(handle, 2_000, None);
+    deferral.next_poll_at = None;
+    deferral
+}
+
 #[tokio::test]
 async fn deferred_poll_reconciles_when_due_and_rearms_until_completion() {
     let mut spec = tool_spec("echo");
@@ -146,7 +152,7 @@ async fn deferred_poll_rearms_live_wait_after_still_running() {
     owner.shutdown().await;
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn deferred_poll_expiry_wakes_before_later_live_wait() {
     let mut spec = tool_spec("echo");
     spec.deferral = ToolDeferralSupport::Supported;
@@ -178,7 +184,7 @@ async fn deferred_poll_expiry_wakes_before_later_live_wait() {
     drive_to_tools(&owner.handle(), &store, tools).await;
     wait_state(&store, |_| toolset.reconcile_count() == 1).await;
     clock.set(timestamp(2_500)).expect("advance clock");
-    tokio::time::advance(StdDuration::from_millis(500)).await;
+    tokio::time::sleep(StdDuration::from_millis(500)).await;
 
     let mut error_code = None;
     for _ in 0..100 {
@@ -204,6 +210,87 @@ async fn deferred_poll_expiry_wakes_before_later_live_wait() {
 
     assert_eq!(toolset.reconcile_count(), 1);
     assert_eq!(error_code.as_deref(), Some(TOOL_DEFERRAL_EXPIRED));
+    owner.shutdown().await;
+}
+
+#[tokio::test]
+async fn deferred_poll_without_next_deadline_waits_externally() {
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", 2_000, None),
+        )))],
+    };
+    let (store, toolset, model, catalog, tools) = resume_ports(
+        1,
+        vec![plan],
+        vec![
+            ToolReconcileResult::StillRunning(externally_waiting_deferral("job-1")),
+            ToolReconcileResult::Completed(tool_result(2)),
+        ],
+        spec,
+    );
+    let owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        2_000,
+        818,
+    )
+    .await
+    .expect("owner");
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    wait_state(&store, |_| toolset.reconcile_count() == 1).await;
+    assert!(
+        tokio::time::timeout(StdDuration::from_millis(100), async {
+            while toolset.reconcile_count() == 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_err(),
+        "an undated reconciliation must wait for an external completion"
+    );
+    drop(owner);
+}
+
+#[tokio::test]
+async fn deferred_poll_uncertain_reconciliation_faults_with_tool_code() {
+    let mut spec = tool_spec("echo");
+    spec.deferral = ToolDeferralSupport::Supported;
+    let plan = ScriptedToolPlan {
+        panic_on_call: None,
+        actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Deferred(
+            polling_deferral("job-1", 2_000, None),
+        )))],
+    };
+    let (store, _toolset, model, catalog, tools) =
+        resume_ports(1, vec![plan], vec![ToolReconcileResult::Unknown], spec);
+    let mut owner = spawn_tool_owner(
+        CommitCoordinator::new(store.clone()),
+        model,
+        catalog,
+        2_000,
+        819,
+    )
+    .await
+    .expect("owner");
+    let mut status = owner.handle().observe_status();
+
+    drive_to_tools(&owner.handle(), &store, tools).await;
+    tokio::time::timeout(StdDuration::from_secs(2), status.changed())
+        .await
+        .expect("fault status")
+        .expect("status sender");
+    assert_eq!(
+        *status.borrow(),
+        RunStatus::Faulted {
+            code: TOOL_RECONCILIATION_UNSUPPORTED,
+        }
+    );
     owner.shutdown().await;
 }
 

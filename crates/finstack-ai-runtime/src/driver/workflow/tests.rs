@@ -240,5 +240,5 @@ fn fault_public_types_remain_static_and_copyable() {
         code: "timer_deadline_invalid",
     };
 
-    assert_eq!(spawn_code(&error), "faulted");
+    assert_eq!(spawn_code(&error), "timer_deadline_invalid");
 }

@@ -118,7 +118,7 @@ where
 pub(super) async fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
     schedules: &mpsc::Sender<Option<Timestamp>>,
-    process_local_deadlines: &BTreeMap<EffectId, Timestamp>,
+    process_local_deadlines: &BTreeMap<EffectId, Option<Timestamp>>,
 ) -> Result<(), RunHandleError> {
     let deadline = next_due_poll_or_expiry(coordinator.state(), process_local_deadlines);
     schedules

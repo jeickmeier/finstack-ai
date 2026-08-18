@@ -138,6 +138,12 @@ pub(crate) async fn spawn_tool_owner(
     .await
 }
 
+/// Spawn a native model-and-tool owner using the supplied semantic clock.
+///
+/// # Errors
+///
+/// Returns [`RunHandleError`] when the runtime configuration, port bindings, or
+/// startup reconciliation cannot initialize the owner.
 pub(crate) async fn spawn_tool_owner_with_clock<C>(
     coordinator: CommitCoordinator,
     model: Arc<dyn Model>,

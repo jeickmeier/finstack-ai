@@ -80,7 +80,7 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
     catalog: &ResolvedToolCatalog,
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
-    process_local_deadlines: &mut BTreeMap<EffectId, Timestamp>,
+    process_local_deadlines: &mut BTreeMap<EffectId, Option<Timestamp>>,
 ) -> Result<(), RunHandleError> {
     let now = sources.now()?;
     let expired_effects = coordinator
@@ -112,7 +112,7 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
             due.at <= now
                 && process_local_deadlines
                     .get(&due.effect_id)
-                    .is_none_or(|deadline| *deadline <= now)
+                    .is_none_or(|deadline| deadline.is_some_and(|deadline| deadline <= now))
         })
         .map(|due| due.effect_id)
         .collect::<Vec<_>>();
@@ -131,7 +131,7 @@ pub(crate) async fn drive_due_polls<C: Clock, R: RandomSource>(
 /// Return the earliest wake-up needed by committed and local deferral state.
 pub(crate) fn next_due_poll_or_expiry(
     state: &KernelState,
-    process_local_deadlines: &BTreeMap<EffectId, Timestamp>,
+    process_local_deadlines: &BTreeMap<EffectId, Option<Timestamp>>,
 ) -> Option<Timestamp> {
     state
         .active_tool_batch
@@ -142,15 +142,19 @@ pub(crate) fn next_due_poll_or_expiry(
                 deferred: Some(deferred),
                 ..
             } => {
-                let local = process_local_deadlines.get(&deferred.effect_id).copied();
+                let local = process_local_deadlines.get(&deferred.effect_id);
                 let poll = matches!(
                     deferred.reconciliation,
                     ReconciliationPolicy::Poll | ReconciliationPolicy::CallbackOrPoll
                 )
                 .then_some(deferred.next_poll_at)
                 .flatten()
-                .filter(|deadline| local.is_none_or(|local_deadline| local_deadline <= *deadline));
-                [poll, deferred.expires_at, local]
+                .filter(|deadline| {
+                    local.is_none_or(|local_deadline| {
+                        local_deadline.is_some_and(|local_deadline| local_deadline <= *deadline)
+                    })
+                });
+                [poll, deferred.expires_at, local.copied().flatten()]
             }
             _ => [None, None, None],
         })
@@ -196,15 +200,15 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
     now: Timestamp,
     sources: &SettlementSources<C, R>,
     cancellation: &CancellationSignal,
-) -> Result<Option<Timestamp>, RunHandleError> {
+) -> Result<Option<Option<Timestamp>>, RunHandleError> {
     let seed =
         deferred_tool_seed(coordinator, effect_id).ok_or(RunHandleError::ToolSettlement {
             code: "tool_resume_seed_missing",
         })?;
     let resolved = catalog
         .by_id(&seed.call.tool_id)
-        .ok_or_else(|| RunHandleError::Tool {
-            code: TOOL_RECONCILIATION_UNSUPPORTED.into(),
+        .ok_or(RunHandleError::Faulted {
+            code: TOOL_RECONCILIATION_UNSUPPORTED,
         })?;
     let result = resolved
         .toolset
@@ -234,22 +238,24 @@ async fn reconcile_due_tool<C: Clock, R: RandomSource>(
         tool_retry_allowed(&seed.requested, &resolved.spec),
     );
     if action == ToolResumeAction::SuspendUncertain {
-        return Err(RunHandleError::Tool {
-            code: TOOL_RECONCILIATION_UNSUPPORTED.into(),
+        return Err(RunHandleError::Faulted {
+            code: TOOL_RECONCILIATION_UNSUPPORTED,
         });
     }
     if apply_tool_reconcile_result(coordinator, &seed, &result, sources).await?
         == ToolResumeAction::SuspendUncertain
     {
-        return Err(RunHandleError::Tool {
-            code: TOOL_RECONCILIATION_UNSUPPORTED.into(),
+        return Err(RunHandleError::Faulted {
+            code: TOOL_RECONCILIATION_UNSUPPORTED,
         });
     }
     Ok(match result {
         ToolReconcileResult::Deferred(deferral) | ToolReconcileResult::StillRunning(deferral) => {
-            deferral
-                .next_poll_at
-                .filter(|next_poll_at| *next_poll_at > now)
+            Some(
+                deferral
+                    .next_poll_at
+                    .filter(|next_poll_at| *next_poll_at > now),
+            )
         }
         ToolReconcileResult::Completed(_)
         | ToolReconcileResult::NotStarted
