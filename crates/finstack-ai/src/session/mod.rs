@@ -253,6 +253,7 @@ impl Session {
         self.ensure().await
     }
 
+    #[cfg(feature = "native-tokio")]
     pub(crate) fn journal_store(&self) -> Arc<dyn JournalStore> {
         Arc::clone(&self.store)
     }

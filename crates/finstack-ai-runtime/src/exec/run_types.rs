@@ -89,16 +89,10 @@ impl RunTaskConfig {
 /// (`RecordBody::RetryScheduled` / `TimerFired`). Default is zero extra
 /// attempts. Journals of first-attempt success and success after N retries
 /// stay identical; observer events may differ.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SameIdentityRetryPolicy {
     /// Extra attempts after the first. Zero disables retry.
     pub max_retries: u32,
-}
-
-impl Default for SameIdentityRetryPolicy {
-    fn default() -> Self {
-        Self { max_retries: 0 }
-    }
 }
 
 /// Configuration for the private bounded model job/result path.

@@ -59,7 +59,7 @@ pub enum KernelInput {
     RequestInteraction(RequestInteraction),
     /// Settle the outstanding interaction by resolution, expiry, or cancellation.
     InteractionSettled(InteractionSettled),
-    /// Request one runtime-owned compaction-summary model effect without consuming BeforeModel.
+    /// Request one runtime-owned compaction-summary model effect without consuming `BeforeModel`.
     RequestCompactionModel(RequestCompactionModel),
 }
 

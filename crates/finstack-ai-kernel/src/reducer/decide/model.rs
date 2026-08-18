@@ -1,7 +1,8 @@
 use crate::content::LABEL_MAX_BYTES;
+use crate::conversation::Message;
 use crate::effects::{
-    EffectCompleted, EffectFailed, EffectInput, EffectKind, EffectOutputKind, EffectPurpose,
-    EffectRequested,
+    EffectCompleted, EffectDeferred, EffectFailed, EffectInput, EffectKind, EffectOutputKind,
+    EffectPurpose, EffectRequested,
 };
 use crate::primitives::Digest;
 use crate::records::RecordBody;
@@ -27,7 +28,7 @@ use super::{
 
 /// Commit one runtime-owned compaction-summary model effect (ADR-042).
 ///
-/// Does not consume the BeforeModel cursor. Emits no post-commit action; the
+/// Does not consume the `BeforeModel` cursor. Emits no post-commit action; the
 /// runtime phase executes the model after the request is journaled.
 pub(super) fn decide_request_compaction_model(
     state: &KernelState,
@@ -332,112 +333,173 @@ fn model_settlement_bodies(
         ModelSettlement::Completed {
             completion,
             assistant_message,
-        } => {
-            completion
-                .validate_against(&pending.requested)
-                .map_err(|_| KernelError::ModelSettlementMismatch)?;
-            if completion.output_contract().kind != EffectOutputKind::ModelResponse {
-                return Err(KernelError::ModelSettlementMismatch);
-            }
-            if pending.requested.is_compaction_summary() {
-                validate_completion_identity(
-                    state,
-                    completion.completion_id(),
-                    effect_id,
-                    settlement_digest,
-                )?;
-                capacity::preflight_decision(
-                    state,
-                    StateGrowth {
-                        model: Some(effect_id),
-                        completion: completion.completion_id(),
-                        ..StateGrowth::default()
-                    },
-                )?;
-                return Ok((
-                    IdRequirements::new(1, 1, 0, 0, 0, 0),
-                    vec![RecordBody::EffectCompleted(completion.clone())],
-                ));
-            }
-            validate_completion_identity(
-                state,
-                completion.completion_id(),
-                effect_id,
-                settlement_digest,
-            )?;
-            validate_assistant_semantics(state, env, assistant_message, completion)?;
-            let tool_call_ids = assistant_tool_calls(assistant_message)
-                .iter()
-                .map(|call| *call.tool_call_id())
-                .collect::<Vec<_>>();
-            capacity::preflight_decision(
-                state,
-                StateGrowth {
-                    messages: 1,
-                    model: Some(effect_id),
-                    completion: completion.completion_id(),
-                    tool_calls: &tool_call_ids,
-                    ..StateGrowth::default()
-                },
-            )?;
-            let requirements =
-                IdRequirements::new(2, 2, 0, 0, 0, 1).with_tools(0, tool_call_ids.len());
-            validate_allocated_ids(&env.ids, requirements)?;
-            let message_id = required(env.ids.message_ids(), 0, "message_ids")?;
-            validate_assistant_message_id(message_id, assistant_message)?;
-            validate_assistant_tool_call_ids(env.ids.tool_call_ids(), assistant_message)?;
-            let parent_message_id = state.messages.last().map(|message| *message.id());
-            Ok((
-                requirements,
-                vec![
-                    RecordBody::EffectCompleted(completion.clone()),
-                    RecordBody::EntryAppended(EntryAppended {
-                        cycle: pending.cycle,
-                        turn_id: pending.turn_id,
-                        model_request_id: pending.model_request_id,
-                        effect_id,
-                        parent_message_id,
-                        message: assistant_message.clone(),
-                    }),
-                ],
-            ))
-        }
-        ModelSettlement::Deferred(deferred) => {
-            if pending.requested.is_compaction_summary() {
-                return Err(KernelError::ModelSettlementMismatch);
-            }
-            deferred
-                .validate_against(&pending.requested)
-                .map_err(|_| KernelError::ModelSettlementMismatch)?;
-            Ok((
-                IdRequirements::new(1, 1, 0, 0, 0, 0),
-                vec![RecordBody::EffectDeferred(deferred.clone())],
-            ))
-        }
+        } => completed_settlement_bodies(
+            state,
+            env,
+            pending,
+            completion,
+            assistant_message,
+            effect_id,
+            settlement_digest,
+        ),
+        ModelSettlement::Deferred(deferred) => deferred_settlement_bodies(pending, deferred),
         ModelSettlement::Failed(failed) => {
-            failed
-                .validate_against(&pending.requested)
-                .map_err(|_| KernelError::ModelSettlementMismatch)?;
-            validate_completion_identity(
-                state,
-                failed.completion_id(),
-                effect_id,
-                settlement_digest,
-            )?;
-            capacity::preflight_decision(
-                state,
-                StateGrowth {
-                    model: Some(effect_id),
-                    completion: failed.completion_id(),
-                    ..StateGrowth::default()
-                },
-            )?;
-            Ok((
-                IdRequirements::new(1, 1, 0, 0, 0, 0),
-                vec![RecordBody::EffectFailed(failed.clone())],
-            ))
+            failed_settlement_bodies(state, pending, failed, effect_id, settlement_digest)
         }
     }
+}
+
+fn completed_settlement_bodies(
+    state: &KernelState,
+    env: &TransitionEnv,
+    pending: &crate::PendingModelEffect,
+    completion: &EffectCompleted,
+    assistant_message: &Message,
+    effect_id: crate::EffectId,
+    settlement_digest: Digest,
+) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
+    completion
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::ModelSettlementMismatch)?;
+    if completion.output_contract().kind != EffectOutputKind::ModelResponse {
+        return Err(KernelError::ModelSettlementMismatch);
+    }
+    if pending.requested.is_compaction_summary() {
+        return compaction_summary_completion_bodies(
+            state,
+            completion,
+            effect_id,
+            settlement_digest,
+        );
+    }
+    assistant_completion_bodies(
+        state,
+        env,
+        pending,
+        completion,
+        assistant_message,
+        effect_id,
+        settlement_digest,
+    )
+}
+
+fn compaction_summary_completion_bodies(
+    state: &KernelState,
+    completion: &EffectCompleted,
+    effect_id: crate::EffectId,
+    settlement_digest: Digest,
+) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
+    validate_completion_identity(
+        state,
+        completion.completion_id(),
+        effect_id,
+        settlement_digest,
+    )?;
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            model: Some(effect_id),
+            completion: completion.completion_id(),
+            ..StateGrowth::default()
+        },
+    )?;
+    Ok((
+        IdRequirements::new(1, 1, 0, 0, 0, 0),
+        vec![RecordBody::EffectCompleted(completion.clone())],
+    ))
+}
+
+fn assistant_completion_bodies(
+    state: &KernelState,
+    env: &TransitionEnv,
+    pending: &crate::PendingModelEffect,
+    completion: &EffectCompleted,
+    assistant_message: &Message,
+    effect_id: crate::EffectId,
+    settlement_digest: Digest,
+) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
+    validate_completion_identity(
+        state,
+        completion.completion_id(),
+        effect_id,
+        settlement_digest,
+    )?;
+    validate_assistant_semantics(state, env, assistant_message, completion)?;
+    let tool_call_ids = assistant_tool_calls(assistant_message)
+        .iter()
+        .map(|call| *call.tool_call_id())
+        .collect::<Vec<_>>();
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            messages: 1,
+            model: Some(effect_id),
+            completion: completion.completion_id(),
+            tool_calls: &tool_call_ids,
+            ..StateGrowth::default()
+        },
+    )?;
+    let requirements = IdRequirements::new(2, 2, 0, 0, 0, 1).with_tools(0, tool_call_ids.len());
+    validate_allocated_ids(&env.ids, requirements)?;
+    let message_id = required(env.ids.message_ids(), 0, "message_ids")?;
+    validate_assistant_message_id(message_id, assistant_message)?;
+    validate_assistant_tool_call_ids(env.ids.tool_call_ids(), assistant_message)?;
+    let parent_message_id = state.messages.last().map(|message| *message.id());
+    Ok((
+        requirements,
+        vec![
+            RecordBody::EffectCompleted(completion.clone()),
+            RecordBody::EntryAppended(EntryAppended {
+                cycle: pending.cycle,
+                turn_id: pending.turn_id,
+                model_request_id: pending.model_request_id,
+                effect_id,
+                parent_message_id,
+                message: assistant_message.clone(),
+            }),
+        ],
+    ))
+}
+
+fn deferred_settlement_bodies(
+    pending: &crate::PendingModelEffect,
+    deferred: &EffectDeferred,
+) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
+    if pending.requested.is_compaction_summary() {
+        return Err(KernelError::ModelSettlementMismatch);
+    }
+    deferred
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::ModelSettlementMismatch)?;
+    Ok((
+        IdRequirements::new(1, 1, 0, 0, 0, 0),
+        vec![RecordBody::EffectDeferred(deferred.clone())],
+    ))
+}
+
+fn failed_settlement_bodies(
+    state: &KernelState,
+    pending: &crate::PendingModelEffect,
+    failed: &EffectFailed,
+    effect_id: crate::EffectId,
+    settlement_digest: Digest,
+) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
+    failed
+        .validate_against(&pending.requested)
+        .map_err(|_| KernelError::ModelSettlementMismatch)?;
+    validate_completion_identity(state, failed.completion_id(), effect_id, settlement_digest)?;
+    capacity::preflight_decision(
+        state,
+        StateGrowth {
+            model: Some(effect_id),
+            completion: failed.completion_id(),
+            ..StateGrowth::default()
+        },
+    )?;
+    Ok((
+        IdRequirements::new(1, 1, 0, 0, 0, 0),
+        vec![RecordBody::EffectFailed(failed.clone())],
+    ))
 }
 
 fn settlement_effect_id(outcome: &ModelSettlement) -> crate::EffectId {

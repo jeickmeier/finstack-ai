@@ -27,7 +27,7 @@ pub struct MiddlewareStageContext {
     /// stage boundary, and it is also the input [`derived_stage_effect_id`]
     /// needs to fabricate `run.effect_id`.
     pub cursor: StageCursor,
-    /// Optional child-model result for the same BeforeModel chain re-entry.
+    /// Optional child-model result for the same `BeforeModel` chain re-entry.
     pub compaction_resume: Option<CompactionModelResume>,
 }
 

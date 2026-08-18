@@ -2,6 +2,7 @@
 
 mod activation;
 mod builder;
+#[cfg(feature = "native-tokio")]
 mod child;
 mod drive;
 mod handle;

@@ -1,6 +1,6 @@
 //! Runtime-owned model-assisted compaction phase (ADR-042).
 //!
-//! Runs between context collect and the BeforeModel middleware fold. Commits a
+//! Runs between context collect and the `BeforeModel` middleware fold. Commits a
 //! child `EffectRequested(Model)` under `EffectPurpose::CompactionSummary`,
 //! executes it through [`validate_model_request`], and re-enters the chain
 //! with [`CompactionModelResume`]. Middleware stays non-effect-bearing.
@@ -10,11 +10,13 @@ mod tests;
 
 use std::sync::Arc;
 
+#[cfg(test)]
+use finstack_ai_kernel::EffectId;
 use finstack_ai_kernel::{
-    AllocatedIds, AppendBatchTag, EffectCompleted, EffectId, EffectKind, EffectOutputKind,
-    EffectPurpose, EffectRelation, EffectTag, EventTag, KernelInput, Message, MessageRole,
-    MessageTag, Metadata, ModelRef, ModelRequestId, ModelSettled, ModelSettlement, RecordBody,
-    RecordTag, RequestCompactionModel, Stage, TransitionEnv,
+    AllocatedIds, AppendBatchTag, EffectCompleted, EffectKind, EffectOutputKind, EffectPurpose,
+    EffectRelation, EffectTag, EventTag, KernelInput, Message, MessageRole, MessageTag, Metadata,
+    ModelRef, ModelRequestId, ModelSettled, ModelSettlement, RecordBody, RecordTag,
+    RequestCompactionModel, Stage, TransitionEnv,
 };
 
 use crate::coordinator::CommitCoordinator;
@@ -56,7 +58,8 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
         return execute_and_settle(coordinator, sources, profile, model, request, cancellation)
             .await;
     }
-    validate_model_request(model, &request.request, profile).map_err(model_handle_error)?;
+    validate_model_request(model, &request.request, profile)
+        .map_err(|error| model_handle_error(&error))?;
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -113,6 +116,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
 ///
 /// Returns a stable middleware or model-settlement error when the pending
 /// compaction effect cannot be reconstructed or settled.
+#[cfg(any(test, all(feature = "wasm-host", not(feature = "native-tokio"))))]
 pub(crate) async fn resume_pending_compaction_model<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     sources: &SettlementSources<C, R>,
@@ -187,7 +191,8 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
     if !pending.requested.is_compaction_summary() {
         return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
     }
-    validate_model_request(model, &request.request, profile).map_err(model_handle_error)?;
+    validate_model_request(model, &request.request, profile)
+        .map_err(|error| model_handle_error(&error))?;
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -211,12 +216,12 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
     let stream = model
         .request(model_request)
         .await
-        .map_err(model_handle_error)?;
+        .map_err(|error| model_handle_error(&error))?;
     let assembled = ModelStreamAssembler::new(ModelStreamLimits::default())
-        .map_err(model_handle_error)?
+        .map_err(|error| model_handle_error(&error))?
         .assemble(stream)
         .await
-        .map_err(model_handle_error)?;
+        .map_err(|error| model_handle_error(&error))?;
     let ModelTerminal::Completed(response) = assembled.terminal else {
         return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
     };
@@ -349,7 +354,7 @@ pub(crate) fn first_compaction_request(
     })
 }
 
-fn model_handle_error(error: crate::ModelError) -> RunHandleError {
+fn model_handle_error(error: &crate::ModelError) -> RunHandleError {
     RunHandleError::Middleware {
         code: Arc::from(error.code()),
     }
@@ -363,7 +368,7 @@ fn stage_error(code: &'static str) -> RunHandleError {
 
 /// Reconstruct a resume from a completed compaction-summary effect in the journal.
 ///
-/// Used when the child completed but BeforeModel has not settled yet, so the
+/// Used when the child completed but `BeforeModel` has not settled yet, so the
 /// chain can re-enter without a second model call.
 pub(crate) async fn load_completed_compaction_resume(
     coordinator: &CommitCoordinator,
@@ -422,6 +427,7 @@ pub(crate) async fn load_completed_compaction_resume(
 }
 
 /// Parent linkage recorded on the child effect.
+#[cfg(test)]
 pub(crate) fn compaction_parent_effect_id(
     locator: &finstack_ai_kernel::OperationLocator,
     cycle: u64,

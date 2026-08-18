@@ -142,6 +142,7 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
 /// [`RunHandleError::Middleware`] when a component fails, when the aggregate
 /// fold has no kernel landing at this cursor, or when the folded payload cannot
 /// be rebuilt.
+#[cfg(test)]
 pub(crate) async fn settle_facade_stage<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     driver: Option<&StageDriver>,

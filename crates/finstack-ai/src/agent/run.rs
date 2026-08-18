@@ -22,6 +22,10 @@ use crate::ChildRunPolicy;
 pub(super) struct AgentRunInner {
     pub(super) locator: OperationLocator,
     pub(super) store: Arc<dyn finstack_ai_runtime::JournalStore>,
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        allow(dead_code)
+    )]
     pub(super) child_runs: ChildRunPolicy,
     pub(super) child_invoker_starts: Arc<AtomicUsize>,
     pub(super) cancellation_initiator: CancellationInitiator,
@@ -33,6 +37,10 @@ pub(super) struct AgentRunInner {
     pub(super) events_fault: OnceLock<AgentRunError>,
     pub(super) cancellation: Mutex<CancellationState>,
     pub(super) cancellation_ready: driver::Signal,
+    #[cfg_attr(
+        all(feature = "wasm-host", not(feature = "native-tokio")),
+        allow(dead_code)
+    )]
     pub(super) children: Mutex<Vec<AgentRun>>,
 }
 
