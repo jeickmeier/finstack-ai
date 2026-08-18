@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{
     ActiveToolCallStatus, AllocatedIds, AppendBatchTag, AuthorizationEvidence, Digest,
-    EffectCompleted, EffectDeferred, EffectFailed, EffectId, ErrorCategory, EventTag,
-    ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
+    EffectCompleted, EffectDeferred, EffectFailed, EffectId, EffectOutputContract, ErrorCategory,
+    EventTag, ExternalCommandKind, ExternalCommandRejected, ExternalCommandTarget,
     ExternalEffectCompletedInput, ExternalEffectCompletion, ExternalEffectOutcome, Id, IdTag,
     KernelInput, MessageTag, Metadata, ProviderIds, RawJson, RecordExternalCommandRejected,
     RecordTag, ToolBatchSettled, ToolCallBlock, ToolCallPlan, ToolFailurePolicy, ToolSettlement,
@@ -306,40 +306,51 @@ pub(crate) async fn process_tool_progress<C: Clock, R: RandomSource>(
         .map_err(RunHandleError::Coordinator)
 }
 
-fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, RunHandleError> {
+pub(crate) fn build_tool_settlement(
+    result: ToolDriverResult,
+) -> Result<ToolBatchSettled, RunHandleError> {
     let requested = &result.seed.requested;
     let effect_id = requested.effect_id();
     let outcome = match result.result {
-        Ok(assembled) => match assembled.terminal {
-            ToolTerminal::Completed(tool_result) => {
-                let block = normalize_tool_result(result.seed.tool_call_id, tool_result)
-                    .map_err(|error| tool_handle_error(&error))?;
-                let bytes = serde_json_canonicalizer::to_vec(&block).map_err(|_| {
-                    RunHandleError::ToolSettlement {
-                        code: "tool_result_serialize_failed",
-                    }
-                })?;
-                let output = RawJson::parse(bytes).map_err(|_| RunHandleError::ToolSettlement {
-                    code: "tool_result_output_invalid",
-                })?;
-                ToolSettlement::Completed(
-                    EffectCompleted::try_new(
-                        effect_id,
-                        requested.output_contract().clone(),
-                        output,
-                        assembled.usage,
-                        Vec::new(),
-                        ProviderIds::empty(),
-                        None::<&str>,
-                        None,
+        Ok(assembled) => {
+            let tool_call_id = result.seed.tool_call_id;
+            let usage = assembled.usage;
+            match assembled.terminal {
+                ToolTerminal::Completed(tool_result) => {
+                    let block = normalize_tool_result(tool_call_id, tool_result)
+                        .map_err(|error| tool_handle_error(&error))?;
+                    let bytes = serde_json_canonicalizer::to_vec(&block).map_err(|_| {
+                        RunHandleError::ToolSettlement {
+                            code: "tool_result_serialize_failed",
+                        }
+                    })?;
+                    let output =
+                        RawJson::parse(bytes).map_err(|_| RunHandleError::ToolSettlement {
+                            code: "tool_result_output_invalid",
+                        })?;
+                    ToolSettlement::Completed(
+                        EffectCompleted::try_new(
+                            effect_id,
+                            requested.output_contract().clone(),
+                            output,
+                            usage,
+                            Vec::new(),
+                            ProviderIds::empty(),
+                            None::<&str>,
+                            None,
+                        )
+                        .map_err(|_| RunHandleError::ToolSettlement {
+                            code: "tool_effect_completion_invalid",
+                        })?,
                     )
-                    .map_err(|_| RunHandleError::ToolSettlement {
-                        code: "tool_effect_completion_invalid",
-                    })?,
-                )
+                }
+                ToolTerminal::Deferred(deferral) => ToolSettlement::Deferred(tool_effect_deferred(
+                    effect_id,
+                    requested.output_contract(),
+                    &deferral,
+                )),
             }
-            ToolTerminal::Deferred(_) => unreachable!("first-pass deferral is Task 4"),
-        },
+        }
         Err(error) => {
             let descriptor = error
                 .to_descriptor()
@@ -362,6 +373,21 @@ fn build_tool_settlement(result: ToolDriverResult) -> Result<ToolBatchSettled, R
         tool_batch_id: result.seed.tool_batch_id,
         outcome,
     })
+}
+
+pub(crate) fn tool_effect_deferred(
+    effect_id: EffectId,
+    output_contract: &EffectOutputContract,
+    deferral: &ToolDeferral,
+) -> EffectDeferred {
+    EffectDeferred {
+        effect_id,
+        handle: deferral.handle.clone(),
+        reconciliation: deferral.reconciliation,
+        next_poll_at: deferral.next_poll_at,
+        expires_at: deferral.expires_at,
+        output_contract: output_contract.clone(),
+    }
 }
 
 fn allocate_tool_settlement<C: Clock, R: RandomSource>(
@@ -754,14 +780,11 @@ async fn ensure_or_wait_tool_deferred<C: Clock, R: RandomSource>(
     }
     let settled = ToolBatchSettled {
         tool_batch_id: seed.tool_batch_id,
-        outcome: ToolSettlement::Deferred(EffectDeferred {
+        outcome: ToolSettlement::Deferred(tool_effect_deferred(
             effect_id,
-            handle: deferral.handle.clone(),
-            reconciliation: deferral.reconciliation,
-            next_poll_at: deferral.next_poll_at,
-            expires_at: deferral.expires_at,
-            output_contract: seed.requested.output_contract().clone(),
-        }),
+            seed.requested.output_contract(),
+            deferral,
+        )),
     };
     submit_resume_input(coordinator, KernelInput::ToolBatchSettled(settled), sources).await?;
     Ok(ToolResumeAction::WaitExternal)

@@ -22,3 +22,4 @@ include!("allocation_unit.rs");
 include!("allocation_table.rs");
 include!("fixtures.rs");
 include!("tool_batch.rs");
+include!("deferral.rs");
