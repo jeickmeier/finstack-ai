@@ -33,16 +33,22 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
 | [service](../../examples/python-minimal/service/README.md) | T2 callback | Resolve once, health, one offline request |
 
 `import finstack_ai` does not create a provider, start Tokio, or read
-credentials. `Agent.openai()`, `Agent.anthropic()`, and
-`Agent.ollama()` are explicit T1 constructors. They accept the same
-keyword-only T2 ports as `Agent.from_python`. `openai` takes required
-keyword-only `api_key` (Bearer; HTTPS required) and optional
-`reasoning_effort`, and always uses official OpenAI Responses.
-`ollama` stays keyless and uses native `/api/chat`. OpenAI output is
-capped at 128,000 tokens and Anthropic output at 64,000 tokens, the
-current Claude ceiling; the linked context window is 1,050,000 tokens.
-Pass keys explicitly; the binding does not read environment variables.
-Lazy `finstack_ai.providers.*` stay unloaded until attribute access.
+credentials. `Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`,
+`Agent.gateway()`, and `Agent.e2b_sandbox()` are the same Rust-owned
+constructors as WASM. wasm-host fail-closed is a Rust platform error,
+not a missing method. They accept the same keyword-only T2 ports as
+`Agent.from_python`. `openai` takes required keyword-only `api_key`
+(Bearer; HTTPS required) and optional `reasoning_effort`, and always
+uses official OpenAI Responses. `ollama` stays keyless and uses native
+`/api/chat`. `gateway` takes required `wire_protocol` and
+`credential_name`. `e2b_sandbox` is a T4 leaf, not Landlock and not
+isolated. OpenAI output is capped at 128,000 tokens and Anthropic
+output at 64,000 tokens, the current Claude ceiling; the linked
+context window is 1,050,000 tokens. Pass keys explicitly; the binding
+does not read environment variables. Lazy `finstack_ai.providers.*`
+stay unloaded until attribute access. `Agent.re_resolve()` returns a
+new lock from reconstructed catalogs; in-flight runs keep the previous
+composition.
 
 Never put secrets in `AgentSpec`. See [provider security](provider-security.md).
 

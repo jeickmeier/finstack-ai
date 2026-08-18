@@ -21,9 +21,11 @@ the runtime computes `current ∪ named` and journals that complete set.
 Naming one id does not drop already-active capabilities.
 
 Activation is gated at dispatch with an active mask over the lock-time
-union. The agent is not re-resolved. `middleware_chain_digest` stays
-constant for the run (ADR-041 option b). A second `ContextCompactor` in
-an inactive capability fails **resolution**.
+union. Mid-run activation does not re-resolve the agent.
+`Agent.re_resolve()` / `Agent.reResolve()` is a new composition and a
+new lock (ADR-046). `middleware_chain_digest` stays constant for the
+run (ADR-041 option b). A second `ContextCompactor` in an inactive
+capability fails **resolution**.
 
 Recovery rebuilds the mask from `ResolvedAgentLock` plus the journaled
 `active_capabilities` chain, or fails closed.
@@ -33,6 +35,8 @@ Recovery rebuilds the mask from `ResolvedAgentLock` plus the journaled
 **Python stays instruction-only.** `Capability(id, description,
 instructions, activation=…)` does not accept toolset, context-provider,
 or middleware references. WASM matches that instruction-only surface.
+First-class constructors and `re_resolve` exist on both bindings;
+wasm-host fail-closed is a Rust platform error, not a missing method.
 
 Untrusted / `model` capabilities cannot set
 `trusted_application_instructions`. Capability instructions are never a
