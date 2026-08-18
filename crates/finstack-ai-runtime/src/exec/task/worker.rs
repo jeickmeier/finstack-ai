@@ -13,7 +13,7 @@ use crate::native::tool::ToolDriverMessage;
 use crate::run_types::RunHandleError;
 use crate::settlement::{
     SettlementSources, ToolResultDisposition, continue_after_interaction, drain_idle_cancellation,
-    parked_tool_continue, prepare_tool_batch_if_ready, process_model_progress,
+    drive_due_polls, parked_tool_continue, prepare_tool_batch_if_ready, process_model_progress,
     process_model_result, process_tool_progress, process_tool_result, reconcile_cancelled_effect,
 };
 use crate::stage_settlement::submit_command;
@@ -23,6 +23,7 @@ use crate::{
 };
 
 use super::fault::{fault_worker, model_runtime_fault, result_fault_code, runtime_fault};
+use super::owner::arm_due_poll_wait;
 use super::shared::{RunCommand, Shared};
 
 pub(super) async fn run_worker(
@@ -188,6 +189,9 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     mut model_results: mpsc::Receiver<ModelDriverMessage>,
     mut tool_results: mpsc::Receiver<ToolDriverMessage>,
     mut timer_results: mpsc::Receiver<TimerDriverMessage>,
+    mut due_poll_fired: mpsc::Receiver<()>,
+    due_poll_schedules: mpsc::Sender<Option<finstack_ai_kernel::Timestamp>>,
+    due_poll_cancellation: crate::CancellationSignal,
     shared: Arc<Shared>,
     sources: SettlementSources<C, R>,
     catalog: Arc<ResolvedToolCatalog>,
@@ -201,6 +205,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
     let mut model_path_open = true;
     let mut tool_path_open = true;
     let mut timer_path_open = true;
+    let mut due_poll_path_open = true;
     let mut parked_tool: Option<ToolDispatchSeed> = None;
     loop {
         tokio::select! {
@@ -275,6 +280,12 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                                 break;
                             }
                         }
+                        if let Err(error) =
+                            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedules).await
+                        {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
                     }
                     None => tool_path_open = false,
                 }
@@ -296,6 +307,31 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                         break;
                     }
                     None => timer_path_open = false,
+                }
+            }
+            fired = due_poll_fired.recv(), if due_poll_path_open => {
+                match fired {
+                    Some(()) => {
+                        if shared.shutting_down.load(Ordering::Acquire) {
+                            continue;
+                        }
+                        let result = async {
+                            drive_due_polls(
+                                &mut coordinator,
+                                catalog.as_ref(),
+                                &sources,
+                                &due_poll_cancellation,
+                            )
+                            .await?;
+                            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedules).await
+                        }
+                        .await;
+                        if let Err(error) = result {
+                            fault_worker(&shared, &mut receiver, runtime_fault(&error));
+                            break;
+                        }
+                    }
+                    None => due_poll_path_open = false,
                 }
             }
             command = receiver.recv() => {

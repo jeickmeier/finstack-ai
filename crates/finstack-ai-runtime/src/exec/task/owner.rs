@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai_kernel::EffectId;
+use finstack_ai_kernel::{EffectId, Timestamp};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
@@ -19,13 +19,14 @@ use crate::run_types::{
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    model_handle_error, prepare_tool_batch_if_ready, resume_pending_model_effect,
-    resume_pending_tool_effects, validate_model_binding,
+    drive_due_polls, model_handle_error, next_due_poll_or_expiry, prepare_tool_batch_if_ready,
+    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
 };
 use crate::{
     CancellationSignal, Clock, CommitCoordinator, LockedModelContextProfile,
-    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction, ModelWarmupContext, RandomSource,
-    ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED, ToolResumeAction, ToolStreamAssembler,
+    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction, ModelWarmupContext,
+    MonotonicDeadline, RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
+    ToolResumeAction, ToolStreamAssembler,
 };
 
 use super::handle::RunHandle;
@@ -106,6 +107,62 @@ where
         | ToolResumeAction::Reconcile
         | ToolResumeAction::WaitExternal => Ok(()),
     }
+}
+
+pub(super) async fn arm_due_poll_wait<C: Clock, R: RandomSource>(
+    coordinator: &CommitCoordinator,
+    sources: &SettlementSources<C, R>,
+    schedules: &mpsc::Sender<Option<Timestamp>>,
+) -> Result<(), RunHandleError> {
+    let now = sources.now()?;
+    let deadline = next_due_poll_or_expiry(coordinator.state()).filter(|deadline| *deadline > now);
+    schedules
+        .send(deadline)
+        .await
+        .map_err(|_| RunHandleError::Timer {
+            code: "poll_wait_queue_closed",
+        })
+}
+
+async fn run_due_poll_waits<C: Clock + Send + Sync + 'static>(
+    clock: Arc<C>,
+    cancellation: CancellationSignal,
+    mut schedules: mpsc::Receiver<Option<Timestamp>>,
+    fired: mpsc::Sender<()>,
+) {
+    let mut wait: Option<MonotonicDeadline> = None;
+    loop {
+        if let Some(active) = wait.as_ref() {
+            tokio::select! {
+                () = cancellation.cancelled() => break,
+                schedule = schedules.recv() => {
+                    let Some(schedule) = schedule else { break; };
+                    wait = schedule.and_then(|deadline| due_poll_wait(clock.as_ref(), deadline));
+                }
+                () = active.wait() => {
+                    if fired.send(()).await.is_err() {
+                        break;
+                    }
+                    wait = None;
+                }
+            }
+        } else {
+            tokio::select! {
+                () = cancellation.cancelled() => break,
+                schedule = schedules.recv() => {
+                    let Some(schedule) = schedule else { break; };
+                    wait = schedule.and_then(|deadline| due_poll_wait(clock.as_ref(), deadline));
+                }
+            }
+        }
+    }
+}
+
+fn due_poll_wait(clock: &impl Clock, deadline: Timestamp) -> Option<MonotonicDeadline> {
+    let scheduled_at = clock.now().ok()?;
+    (deadline > scheduled_at)
+        .then(|| MonotonicDeadline::from_persisted(clock, scheduled_at, deadline).ok())
+        .flatten()
 }
 
 /// Single owner of all tasks spawned for one run.
@@ -438,6 +495,10 @@ impl RunTaskOwner {
         let (timer_job_sender, timer_job_receiver) = mpsc::channel(run_config.command_capacity);
         let (timer_result_sender, timer_result_receiver) =
             mpsc::channel(run_config.command_capacity);
+        let (due_poll_schedule_sender, due_poll_schedule_receiver) =
+            mpsc::channel(run_config.command_capacity);
+        let (due_poll_fired_sender, due_poll_fired_receiver) =
+            mpsc::channel(run_config.command_capacity);
 
         // Cloned before the move: the worker needs the locked profile to
         // assemble `StageInput::BeforeModel`, and the dispatcher takes ownership.
@@ -511,6 +572,14 @@ impl RunTaskOwner {
                 )
                 .await?;
             }
+            drive_due_polls(
+                &mut coordinator,
+                catalog.as_ref(),
+                &sources,
+                &tool_batch_cancellation,
+            )
+            .await?;
+            arm_due_poll_wait(&coordinator, &sources, &due_poll_schedule_sender).await?;
         }
 
         let (status_sender, status_receiver) = watch::channel(RunStatus::Running);
@@ -527,12 +596,16 @@ impl RunTaskOwner {
             shared: Arc::clone(&shared),
             status: status_receiver,
         };
+        let due_poll_clock = sources.clock();
         tasks.spawn(run_worker_with_model_and_tools(
             coordinator,
             receiver,
             model_result_receiver,
             tool_result_receiver,
             timer_result_receiver,
+            due_poll_fired_receiver,
+            due_poll_schedule_sender,
+            tool_batch_cancellation,
             Arc::clone(&shared),
             sources,
             catalog,
@@ -567,6 +640,12 @@ impl RunTaskOwner {
             Arc::clone(&timer_active),
             timer_job_receiver,
             timer_result_sender,
+        ));
+        tasks.spawn(run_due_poll_waits(
+            due_poll_clock,
+            run_cancellation.child(),
+            due_poll_schedule_receiver,
+            due_poll_fired_sender,
         ));
         Ok(Self {
             handle,

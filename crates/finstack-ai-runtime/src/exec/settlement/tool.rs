@@ -491,6 +491,21 @@ pub(crate) async fn resume_pending_tool_effects<C: Clock, R: RandomSource>(
     for call in batch.calls.iter() {
         let effect_id = call.assigned.effect_id;
         let action = tool_resume_action(coordinator.state(), effect_id);
+        let poll_scheduled = matches!(
+            &call.status,
+            ActiveToolCallStatus::Requested {
+                deferred: Some(deferred),
+                ..
+            } if matches!(
+                deferred.reconciliation,
+                finstack_ai_kernel::ReconciliationPolicy::Poll
+                    | finstack_ai_kernel::ReconciliationPolicy::CallbackOrPoll
+            ) && (deferred.next_poll_at.is_some() || deferred.expires_at.is_some())
+        );
+        if action == ToolResumeAction::Reconcile && poll_scheduled {
+            first_pass.push(ToolResumeAction::WaitExternal);
+            continue;
+        }
         first_pass.push(action);
         if action == ToolResumeAction::Reconcile {
             to_reconcile.push(effect_id);
@@ -594,7 +609,7 @@ fn tool_seed_for_deferred(
         .or_else(|| deferred_tool_seed(coordinator, effect_id))
 }
 
-fn deferred_tool_seed(
+pub(super) fn deferred_tool_seed(
     coordinator: &CommitCoordinator,
     effect_id: EffectId,
 ) -> Option<ToolDispatchSeed> {
@@ -653,7 +668,7 @@ fn dispatch_security_from_state(
     ))
 }
 
-async fn apply_tool_reconcile_result<C: Clock, R: RandomSource>(
+pub(super) async fn apply_tool_reconcile_result<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     seed: &ToolDispatchSeed,
     result: &ToolReconcileResult,
