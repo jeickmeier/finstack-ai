@@ -116,9 +116,7 @@ pub(crate) async fn process_tool_result<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(ToolResultDisposition::Settled)
 }
@@ -670,6 +668,12 @@ fn dispatch_security_from_state(
     ))
 }
 
+/// Apply one reconciled outcome to the committed tool effect.
+///
+/// # Errors
+///
+/// Returns an error when the result cannot be normalized into or committed as
+/// a tool settlement.
 pub(super) async fn apply_tool_reconcile_result<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
     seed: &ToolDispatchSeed,
@@ -775,9 +779,7 @@ async fn settle_external_tool<C: Clock, R: RandomSource>(
     {
         Ok(outcome) => {
             if let Some(fault) = outcome.fault {
-                return Err(RunHandleError::Faulted {
-                    code: fault.code.into(),
-                });
+                return Err(RunHandleError::Faulted { code: fault.code });
             }
             Ok(ToolResumeAction::UseRecorded)
         }

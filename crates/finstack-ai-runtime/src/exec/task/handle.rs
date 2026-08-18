@@ -90,7 +90,7 @@ impl RunHandle {
     /// Read the latest lifecycle state without blocking.
     #[must_use]
     pub fn status(&self) -> RunStatus {
-        self.status.borrow().clone()
+        *self.status.borrow()
     }
 
     /// Clone a watch receiver for asynchronous status observation.

@@ -223,9 +223,7 @@ async fn settle_external_model<C: Clock, R: RandomSource>(
     {
         Ok(outcome) => {
             if let Some(fault) = outcome.fault {
-                return Err(RunHandleError::Faulted {
-                    code: fault.code.into(),
-                });
+                return Err(RunHandleError::Faulted { code: fault.code });
             }
             Ok(ModelResumeAction::UseRecorded)
         }
@@ -359,9 +357,7 @@ pub(crate) async fn process_model_result<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
 }

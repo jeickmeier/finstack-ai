@@ -59,9 +59,7 @@ pub(super) async fn run_worker(
                 sender.take();
             }
             receiver.close();
-            shared
-                .status
-                .send_replace(RunStatus::Faulted { code: code.into() });
+            shared.status.send_replace(RunStatus::Faulted { code });
         }
     }
     if !matches!(*shared.status.borrow(), RunStatus::Faulted { .. }) {
@@ -349,7 +347,7 @@ pub(super) async fn run_worker_with_model_and_tools<C, R>(
                         }
                     }
                     Some(DuePollWake::ConstructionFailed) => {
-                        fault_worker(&shared, &mut receiver, "poll_wait_construction_failed");
+                        fault_worker(&shared, &mut receiver, "timer_deadline_invalid");
                         break;
                     }
                     None => due_poll_path_open = false,
@@ -472,9 +470,7 @@ async fn process_timer_result<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
 }

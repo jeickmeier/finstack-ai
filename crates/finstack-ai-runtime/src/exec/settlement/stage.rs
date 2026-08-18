@@ -210,9 +210,7 @@ async fn submit_tool_batch_opening<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(true)
 }
@@ -236,9 +234,7 @@ async fn settle_tool_batch_failure<C: Clock, R: RandomSource>(
     let outcome = ReducerStageOutcome::Fail(descriptor);
     let committed = submit_folded(coordinator, sources, now, cursor, outcome).await?;
     if let Some(fault) = committed.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
 }
@@ -379,9 +375,7 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
         .await
         .map_err(RunHandleError::Coordinator)?;
     if let Some(fault) = outcome.fault {
-        return Err(RunHandleError::Faulted {
-            code: fault.code.into(),
-        });
+        return Err(RunHandleError::Faulted { code: fault.code });
     }
     Ok(())
 }

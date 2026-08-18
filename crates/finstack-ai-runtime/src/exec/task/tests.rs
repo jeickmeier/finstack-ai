@@ -35,9 +35,7 @@ fn a_middleware_failure_is_not_a_worker_fault() {
         result_fault_code(&Err(RunHandleError::ToolSettlement {
             code: "stage_allocation_model_request_contract_mismatch",
         })),
-        Some(Arc::from(
-            "stage_allocation_model_request_contract_mismatch"
-        )),
+        Some("stage_allocation_model_request_contract_mismatch"),
         "tool settlement stays a worker fault, so the re-classification is load-bearing"
     );
 }

@@ -113,7 +113,8 @@ where
 ///
 /// # Errors
 ///
-/// Returns a timer error when the bounded sibling-wait queue is closed.
+/// Returns [`RunHandleError::Timer`] with `timer_job_queue_closed` when the
+/// bounded sibling-wait queue is closed.
 pub(super) async fn arm_due_poll_wait(
     coordinator: &CommitCoordinator,
     schedules: &mpsc::Sender<Option<Timestamp>>,
@@ -124,7 +125,7 @@ pub(super) async fn arm_due_poll_wait(
         .send(deadline)
         .await
         .map_err(|_| RunHandleError::Timer {
-            code: "poll_wait_queue_closed",
+            code: "timer_job_queue_closed",
         })
 }
 

@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
@@ -10,14 +9,12 @@ use super::shared::{RunCommand, Shared};
 
 pub(super) fn result_fault_code(
     result: &Result<CommitOutcome, RunHandleError>,
-) -> Option<Arc<str>> {
+) -> Option<&'static str> {
     match result {
-        Ok(outcome) => outcome.fault.map(|fault| Arc::from(fault.code)),
-        Err(RunHandleError::Faulted { code } | RunHandleError::Tool { code }) => {
-            Some(Arc::clone(code))
-        }
+        Ok(outcome) => outcome.fault.map(|fault| fault.code),
         Err(
-            RunHandleError::ModelSettlement { code }
+            RunHandleError::Faulted { code }
+            | RunHandleError::ModelSettlement { code }
             | RunHandleError::ToolSettlement { code }
             | RunHandleError::InteractionSettlement { code }
             | RunHandleError::EventDelivery { code }
@@ -26,7 +23,7 @@ pub(super) fn result_fault_code(
                 | CommitCoordinatorError::Faulted { code }
                 | CommitCoordinatorError::EventDelivery { code },
             ),
-        ) => Some(Arc::from(*code)),
+        ) => Some(*code),
         _ => None,
     }
 }
@@ -34,22 +31,20 @@ pub(super) fn result_fault_code(
 pub(super) fn fault_worker(
     shared: &Shared,
     receiver: &mut mpsc::Receiver<RunCommand>,
-    code: impl Into<Arc<str>>,
+    code: &'static str,
 ) {
     shared.shutting_down.store(true, Ordering::Release);
     if let Ok(mut sender) = shared.sender.lock() {
         sender.take();
     }
     receiver.close();
-    shared
-        .status
-        .send_replace(RunStatus::Faulted { code: code.into() });
+    shared.status.send_replace(RunStatus::Faulted { code });
 }
 
-pub(super) fn model_runtime_fault(error: &RunHandleError) -> Arc<str> {
+pub(super) fn model_runtime_fault(error: &RunHandleError) -> &'static str {
     match error {
-        RunHandleError::Faulted { code } | RunHandleError::Model { code } => Arc::clone(code),
-        RunHandleError::ModelSettlement { code }
+        RunHandleError::Faulted { code }
+        | RunHandleError::ModelSettlement { code }
         | RunHandleError::Timer { code }
         | RunHandleError::CancellationSettlement { code }
         | RunHandleError::EventDelivery { code }
@@ -58,16 +53,15 @@ pub(super) fn model_runtime_fault(error: &RunHandleError) -> Arc<str> {
             | CommitCoordinatorError::Decision { code }
             | CommitCoordinatorError::Faulted { code }
             | CommitCoordinatorError::EventDelivery { code },
-        ) => Arc::from(*code),
-        _ => Arc::from("model_runtime_failed"),
+        ) => code,
+        _ => "model_runtime_failed",
     }
 }
 
-pub(super) fn runtime_fault(error: &RunHandleError) -> Arc<str> {
+pub(super) fn runtime_fault(error: &RunHandleError) -> &'static str {
     match error {
         RunHandleError::ToolSettlement { code }
-        | RunHandleError::InteractionSettlement { code } => Arc::from(*code),
-        RunHandleError::Tool { code } => Arc::clone(code),
+        | RunHandleError::InteractionSettlement { code } => code,
         _ => model_runtime_fault(error),
     }
 }

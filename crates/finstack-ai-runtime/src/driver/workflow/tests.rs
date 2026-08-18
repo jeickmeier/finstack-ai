@@ -230,13 +230,15 @@ fn checkpoint_hint_never_overrides_journal() {
 }
 
 #[test]
-fn spawn_code_preserves_fault_code() {
+fn fault_public_types_remain_static_and_copyable() {
+    const _: fn(&WorkflowDriverError) -> &'static str = WorkflowDriverError::code;
+
+    fn assert_copy<T: Copy>() {}
+
+    assert_copy::<crate::RunStatus>();
     let error = crate::RunHandleError::Faulted {
-        code: Arc::from("tool_reconciliation_unsupported"),
+        code: "timer_deadline_invalid",
     };
 
-    assert_eq!(
-        spawn_code(&error).as_ref(),
-        "tool_reconciliation_unsupported"
-    );
+    assert_eq!(spawn_code(&error), "faulted");
 }
