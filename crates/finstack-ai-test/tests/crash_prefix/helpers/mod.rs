@@ -24,7 +24,8 @@ use finstack_ai_kernel::{
     PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordTag, ReducerStageOutcome,
     RetrySafety, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
     RunRelationKind, RunSecurityContext, SessionTag, Stage, StageCursor, TextBlock, Timestamp,
-    TransitionEnv, Usage, Version,
+    ToolBatchContinuation, ToolCallBlock, ToolCallPlan, ToolExecutionMode, ToolFailurePolicy,
+    ToolId, TransitionEnv, Usage, ValidatedToolCall, Version,
 };
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, AgentRef, AuthorizationContext, BudgetError, BudgetLedger,
@@ -357,6 +358,113 @@ pub(crate) async fn drive_to_pending_model(store: Arc<dyn JournalStore>) -> Comm
     drive_to_model_request(&mut coordinator).await;
     drop(coordinator);
     recover(store).await
+}
+
+pub(crate) async fn drive_to_pending_tool(store: Arc<dyn JournalStore>) -> CommitCoordinator {
+    let mut coordinator = drive_to_pending_model(store).await;
+    let pending = coordinator
+        .state()
+        .pending_model_effect
+        .as_ref()
+        .expect("pending model effect")
+        .clone();
+    let tool_call = ToolCallBlock::try_new(id(301), "alpha", RawJson::parse("{}").expect("args"))
+        .expect("tool call");
+    let assistant = Message::try_new(
+        id(617),
+        MessageRole::Assistant,
+        vec![
+            ContentBlock::Text(TextBlock::try_new("calling").expect("text")),
+            ContentBlock::ToolCall(tool_call.clone()),
+        ],
+        timestamp(1_400),
+        None,
+        ProviderIds::empty(),
+        Metadata::empty(),
+    )
+    .expect("assistant");
+    let completion = EffectCompleted::try_new(
+        pending.requested.effect_id(),
+        output_contract(),
+        RawJson::parse(r#"{"text":"calling"}"#).expect("output"),
+        None,
+        vec![],
+        ProviderIds::empty(),
+        Some("cmpl-tool"),
+        None,
+    )
+    .expect("completed");
+    coordinator
+        .submit(
+            env_tools(
+                1_400,
+                &[607, 608],
+                &[603, 604],
+                &[],
+                &[617],
+                &[],
+                &[301],
+                605,
+            ),
+            KernelInput::ModelSettled(ModelSettled {
+                turn_id: pending.turn_id,
+                model_request_id: pending.model_request_id,
+                outcome: ModelSettlement::Completed {
+                    completion,
+                    assistant_message: assistant,
+                },
+            }),
+        )
+        .await
+        .expect("settle tools");
+    coordinator
+        .submit(
+            env(1_500, &[609], &[], &[], &[], &[], &[], 606),
+            stage(Stage::AfterModel, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("after model tools");
+    assert_eq!(coordinator.state().phase, Some(RunPhase::BeforeToolBatch));
+    coordinator
+        .submit(
+            env_tools(
+                1_600,
+                &[1_000, 1_001, 1_002],
+                &[1_000],
+                &[401],
+                &[],
+                &[400],
+                &[],
+                700,
+            ),
+            stage(
+                Stage::BeforeToolBatch,
+                ReducerStageOutcome::ToolBatchPrepared {
+                    calls: Arc::from([ToolCallPlan::Execute(ValidatedToolCall {
+                        call: tool_call,
+                        tool_id: ToolId::parse("finstack.tools.fixture").expect("tool"),
+                        component: None,
+                        output_contract: tool_output_contract(),
+                        retry_safety: RetrySafety::IdempotentWithKey,
+                        deadline: None,
+                        execution: ToolExecutionMode::Sequential,
+                        failure_policy: ToolFailurePolicy::ReturnToModel,
+                    })]),
+                    continuation: ToolBatchContinuation::Finalize,
+                },
+            ),
+        )
+        .await
+        .expect("tool batch");
+    coordinator
+}
+
+pub(crate) fn tool_output_contract() -> EffectOutputContract {
+    EffectOutputContract {
+        kind: EffectOutputKind::ToolResult,
+        schema_version: 1,
+        schema_digest: Digest::raw_json(br#"{"type":"tool_result"}"#),
+    }
 }
 
 pub(crate) async fn settle_and_recover(store: Arc<dyn JournalStore>) -> CommitCoordinator {
