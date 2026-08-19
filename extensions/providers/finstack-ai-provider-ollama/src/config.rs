@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
-    ModelContextProfile, ModelError, ModelName, StructuredOutputCapability, TokenEstimatorRef,
-    TokenEstimatorSource,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
+    ModelCapabilities, ModelContextProfile, ModelError, ModelName, StructuredOutputCapability,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -31,6 +31,7 @@ pub struct OllamaConfig {
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
 impl fmt::Debug for OllamaConfig {
@@ -44,6 +45,10 @@ impl fmt::Debug for OllamaConfig {
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
+            .field(
+                "media_resolver",
+                &self.media_resolver.as_ref().map(|_| "[resolver]"),
+            )
             .finish()
     }
 }
@@ -74,7 +79,19 @@ impl OllamaConfig {
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
             max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
+            media_resolver: None,
         })
+    }
+
+    /// Attach a host-supplied media resolver enabling image input.
+    #[must_use]
+    pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
+        self.media_resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
     }
 
     /// Insert one named credential entry and select it.
@@ -223,6 +240,8 @@ pub struct OllamaModelConfig {
     pub provider_overhead_tokens: u64,
     /// Whether Ollama thinking is configured for this model.
     pub reasoning: bool,
+    /// Whether this model accepts base64 image input.
+    pub input_images: bool,
 }
 
 impl OllamaModelConfig {
@@ -276,6 +295,7 @@ impl OllamaModelConfig {
             reserved_output_tokens,
             provider_overhead_tokens,
             reasoning: false,
+            input_images: false,
         })
     }
 
@@ -286,12 +306,19 @@ impl OllamaModelConfig {
         self
     }
 
+    /// Advertise base64 image input for this model only.
+    #[must_use]
+    pub const fn with_input_images(mut self, enabled: bool) -> Self {
+        self.input_images = enabled;
+        self
+    }
+
     pub(crate) fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: InputCapabilities {
                 text: true,
                 json: true,
-                images: false,
+                images: self.input_images,
                 audio: false,
                 files: false,
             },
@@ -318,6 +345,7 @@ impl OllamaModelConfig {
 
     pub(crate) fn apply_capabilities(&mut self, update: &ModelCapabilities) {
         self.reasoning = update.reasoning;
+        self.input_images = update.input.images;
         self.hard_input_bytes = update.context_profile.hard_input_bytes;
         self.context_window_tokens = update.context_profile.context_window_tokens;
         self.max_output_tokens = update.context_profile.max_output_tokens;
@@ -356,6 +384,59 @@ mod tests {
             assert!(!rendered.contains(CANARY));
         }
         assert!(format!("{secret:?}").contains("REDACTED"));
+    }
+
+    #[derive(Debug)]
+    struct FixtureResolver;
+
+    impl MediaResolver for FixtureResolver {
+        fn resolve(
+            &self,
+            _blob: &finstack_ai_kernel::BlobRef,
+        ) -> finstack_ai_runtime::PortFuture<
+            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        > {
+            Box::pin(async {
+                Ok(finstack_ai_runtime::ResolvedMedia::Url(Arc::from(
+                    "https://example.test/a.png",
+                )))
+            })
+        }
+    }
+
+    #[test]
+    fn debug_with_a_resolver_attached_still_redacts_and_hides_resolver_internals() {
+        let secret = SecretString::try_new(CANARY).expect("secret");
+        let config = OllamaConfig::try_new("https://ollama.example.test")
+            .expect("config")
+            .with_authentication(Authentication::Bearer(secret))
+            .with_media_resolver(Arc::new(FixtureResolver));
+
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains(CANARY));
+        assert!(rendered.contains("[resolver]"));
+        assert!(config.media_resolver().is_some());
+    }
+
+    #[test]
+    fn capability_round_trip_flips_input_images() {
+        let model = OllamaModelConfig::try_new("fixture-model", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model")
+            .with_input_images(true);
+        assert!(model.capabilities().input.images);
+
+        let mut refreshed = OllamaModelConfig::try_new(
+            "fixture-model",
+            1_000_000,
+            128_000,
+            4_096,
+            4_096,
+            256,
+        )
+        .expect("model");
+        assert!(!refreshed.capabilities().input.images);
+        refreshed.apply_capabilities(&model.capabilities());
+        assert!(refreshed.capabilities().input.images);
     }
 
     #[test]
