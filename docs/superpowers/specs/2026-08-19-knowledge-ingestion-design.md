@@ -540,7 +540,11 @@ does not (no embeddings API).
 - ANN index structures (memory/sqlite are brute-force/FTS5 in v1; internal upgrades are
   non-breaking).
 - External vector/graph database backends and dedicated rerank-API integrations
-  (Cohere/Voyage rerank) — future extension crates behind the existing ports.
+  (Cohere/Voyage rerank) — future extension crates behind the existing ports. Designated
+  future keyword/hybrid backend (evaluated 2026-08-19, not part of this plan): Tantivy
+  via a `finstack-ai-knowledge-tantivy` extension implementing `ChunkIndex` — native-only
+  (mmap/threads, so never in the wasm build), worthwhile once collections reach the
+  hundreds of thousands of chunks where FTS5/brute-force stops being enough.
 - Hierarchical (multi-level) community summaries — the `level` field is reserved; v1
   builds one level.
 - Chunk-level incremental updates for the **graph** branch — graph re-extraction is
