@@ -46,6 +46,24 @@ members = [
 [profile.dev]
 debug = "line-tables-only"
 
+# Unoptimized wasm32 builds of these document-parsing crates (and their
+# heaviest transitive deps) exceed wasm-bindgen's per-function local-variable
+# limit ("too many locals") at opt-level 0. A light optimization pass is
+# enough to keep `mise run build-wasm` (default dev profile) working once
+# finstack-ai-tools-document is wired into the wasm crate; keep this at the
+# lowest opt-level that still succeeds.
+[profile.dev.package.anydoc]
+opt-level = 1
+
+[profile.dev.package.pdf-inspector]
+opt-level = 1
+
+[profile.dev.package.lopdf]
+opt-level = 1
+
+[profile.dev.package.calamine]
+opt-level = 1
+
 [profile.test]
 debug = "line-tables-only"
 
