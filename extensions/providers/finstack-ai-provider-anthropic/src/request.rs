@@ -297,7 +297,10 @@ fn map_user_content(
             }
         }
     }
-    let mut wire = vec![WireContent::Text { text }];
+    let mut wire = Vec::with_capacity(blocks.len() + 1);
+    if !text.is_empty() {
+        wire.push(WireContent::Text { text });
+    }
     wire.extend(blocks);
     Ok(wire)
 }
@@ -480,7 +483,13 @@ mod tests {
         let request =
             MessagesRequest::try_from_draft(&draft, &model(), &resolved).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
-        let block = &value["messages"][0]["content"][1];
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(
+            content.len(),
+            1,
+            "media-only message must omit an empty text block"
+        );
+        let block = &content[0];
         assert_eq!(block["type"], "image");
         assert_eq!(block["source"]["type"], "url");
         assert_eq!(block["source"]["url"], "https://cdn.example/a.png");
@@ -500,7 +509,7 @@ mod tests {
         let request =
             MessagesRequest::try_from_draft(&draft, &model(), &resolved).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
-        let block = &value["messages"][0]["content"][1];
+        let block = &value["messages"][0]["content"][0];
         assert_eq!(block["type"], "image");
         assert_eq!(block["source"]["type"], "base64");
         assert_eq!(block["source"]["media_type"], "image/png");
@@ -521,9 +530,28 @@ mod tests {
         let request =
             MessagesRequest::try_from_draft(&draft, &model(), &resolved).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
-        let block = &value["messages"][0]["content"][1];
+        let block = &value["messages"][0]["content"][0];
         assert_eq!(block["type"], "document");
         assert_eq!(block["source"]["type"], "url");
+    }
+
+    #[test]
+    fn caption_text_precedes_the_image_block_and_no_extra_blocks_are_added() {
+        let draft = text_and_media_draft("describe this", ContentBlock::Image(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model(), &resolved).expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "describe this");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "url");
     }
 
     #[test]
@@ -555,10 +583,21 @@ mod tests {
     }
 
     fn media_draft(block: ContentBlock) -> ModelRequestDraft {
+        content_draft(vec![block])
+    }
+
+    fn text_and_media_draft(text: &str, block: ContentBlock) -> ModelRequestDraft {
+        content_draft(vec![
+            ContentBlock::Text(TextBlock::try_new(text).expect("text")),
+            block,
+        ])
+    }
+
+    fn content_draft(content: Vec<ContentBlock>) -> ModelRequestDraft {
         let message = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
             MessageRole::User,
-            vec![block],
+            content,
             Timestamp::from_unix_ms(0).expect("timestamp"),
             None,
             ProviderIds::empty(),

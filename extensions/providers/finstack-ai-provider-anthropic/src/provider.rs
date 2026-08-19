@@ -665,10 +665,7 @@ mod tests {
     struct OversizedResolver;
 
     impl MediaResolver for OversizedResolver {
-        fn resolve(
-            &self,
-            _blob: &BlobRef,
-        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+        fn resolve(&self, _blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
             Box::pin(async {
                 Ok(ResolvedMedia::Bytes {
                     media_type: Arc::from("image/png"),

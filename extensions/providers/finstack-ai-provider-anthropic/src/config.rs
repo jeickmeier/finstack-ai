@@ -92,7 +92,10 @@ impl fmt::Debug for AnthropicConfig {
             .field("max_stream_bytes", &self.max_stream_bytes)
             .field(
                 "media_resolver",
-                &self.media_resolver.as_ref().map_or("None", |_| "[resolver]"),
+                &self
+                    .media_resolver
+                    .as_ref()
+                    .map_or("None", |_| "[resolver]"),
             )
             .finish()
     }
