@@ -45,6 +45,67 @@ const INGEST_VERSION: Version = Version {
 /// Maximum entries retained by [`AttachmentIndex`] before FIFO eviction.
 const ATTACHMENT_INDEX_CAPACITY: usize = 1024;
 
+/// Maximum entries retained by the per-instance parse memo before FIFO
+/// eviction. Sized for the handful of distinct attachments a conversation
+/// realistically carries; the memo exists to avoid re-parsing the same
+/// attachment at every `BeforeModel` cycle of a multi-cycle run.
+const PARSE_CACHE_CAPACITY: usize = 32;
+
+/// Key identifying one pure parse-to-note computation.
+///
+/// `digest` is the digest of the *fetched* bytes (verified against the wire
+/// blob's declared digest when present), so a hit is exactly equivalent to
+/// re-running the parse on the same bytes. `media_type` and `name` are
+/// included because both feed the generated note text (`media_type` also
+/// selects the format hint).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ParseCacheKey {
+    digest: Digest,
+    media_type: String,
+    name: String,
+}
+
+/// Bounded FIFO memo of parse-derived note text, shared across the clones
+/// of one middleware instance.
+///
+/// Only the pure `bytes -> note text` computation is cached: the blob is
+/// still fetched and digest-verified on every invocation, so fail-soft
+/// semantics for index misses, store failures, and digest mismatches are
+/// unchanged. Cached and recomputed notes are byte-identical because the
+/// note is a deterministic function of the key (the configured
+/// [`DocumentLimits`] are fixed per instance). Plain `std::sync::Mutex`, no
+/// tokio, so this stays usable on `wasm32` hosts.
+#[derive(Debug, Default)]
+struct ParseCache {
+    state: Mutex<ParseCacheState>,
+}
+
+#[derive(Debug, Default)]
+struct ParseCacheState {
+    entries: BTreeMap<ParseCacheKey, String>,
+    insertion_order: VecDeque<ParseCacheKey>,
+}
+
+impl ParseCache {
+    fn lookup(&self, key: &ParseCacheKey) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.entries.get(key).cloned()
+    }
+
+    fn insert(&self, key: ParseCacheKey, note: String) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if !state.entries.contains_key(&key) {
+            state.insertion_order.push_back(key.clone());
+        }
+        state.entries.insert(key, note);
+        while state.insertion_order.len() > PARSE_CACHE_CAPACITY {
+            if let Some(oldest) = state.insertion_order.pop_front() {
+                state.entries.remove(&oldest);
+            }
+        }
+    }
+}
+
 /// Bounded blob-id -> `ArtifactRef` map populated wherever attachments are
 /// staged.
 ///
@@ -122,6 +183,7 @@ pub struct DocumentIngestMiddleware {
     store: Arc<dyn ArtifactStore>,
     index: Arc<AttachmentIndex>,
     limits: DocumentLimits,
+    parse_cache: Arc<ParseCache>,
 }
 
 impl std::fmt::Debug for DocumentIngestMiddleware {
@@ -180,6 +242,7 @@ impl DocumentIngestMiddleware {
             store,
             index,
             limits,
+            parse_cache: Arc::new(ParseCache::default()),
         })
     }
 }
@@ -262,38 +325,53 @@ impl DocumentIngestMiddleware {
     ) -> ContentBlock {
         let blob = media.blob();
         let name = blob.name().unwrap_or("attachment").to_owned();
-        let Ok(bytes) = self.fetch_blob(scope, blob).await else {
+        let Ok((bytes, digest)) = self.fetch_blob(scope, blob).await else {
             return note_block(&format!(
                 "[Attached document \"{name}\" could not be read; it was skipped.]"
             ));
         };
-        match parser::parse(&bytes, Some(blob.media_type()), &self.limits) {
-            Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => {
-                note_block(&format!(
-                    "[Attached document \"{name}\" is a scanned PDF; text extraction requires OCR, which is not enabled.]"
-                ))
-            }
+        // Memoize only the pure `bytes -> note text` computation. Every
+        // fail-soft branch above (index miss, store failure, digest
+        // mismatch) is transient and stays uncached; the branches below are
+        // deterministic functions of the fetched bytes, media type, name,
+        // and the per-instance limits, so a cached note is byte-identical
+        // to a recomputed one.
+        let key = ParseCacheKey {
+            digest,
+            media_type: blob.media_type().to_owned(),
+            name: name.clone(),
+        };
+        if let Some(note) = self.parse_cache.lookup(&key) {
+            return note_block(&note);
+        }
+        let note = match parser::parse(&bytes, Some(blob.media_type()), &self.limits) {
+            Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => format!(
+                "[Attached document \"{name}\" is a scanned PDF; text extraction requires OCR, which is not enabled.]"
+            ),
             Ok(parsed) => {
                 let pages = parsed
                     .page_count
                     .map(|count| format!(", {count} pages"))
                     .unwrap_or_default();
                 let truncated = if parsed.truncated { ", truncated" } else { "" };
-                note_block(&format!(
+                format!(
                     "Attached document \"{name}\" ({format:?}{pages}{truncated}), converted to Markdown:\n\n{markdown}",
                     format = parsed.format,
                     markdown = parsed.markdown,
-                ))
+                )
             }
-            Err(_) => note_block(&format!(
-                "[Attached document \"{name}\" could not be parsed; it was skipped.]"
-            )),
-        }
+            Err(_) => {
+                format!("[Attached document \"{name}\" could not be parsed; it was skipped.]")
+            }
+        };
+        self.parse_cache.insert(key, note.clone());
+        note_block(&note)
     }
 
     /// Resolve a `BlobRef` to its exact bytes via the `AttachmentIndex` and
     /// the artifact store, verifying the fetched content against the blob's
-    /// declared digest when one is present.
+    /// declared digest when one is present. Also returns the fetched
+    /// content's digest, which doubles as the parse-memo key.
     ///
     /// # Errors
     ///
@@ -302,19 +380,24 @@ impl DocumentIngestMiddleware {
     /// `blob.digest()`. Every branch collapses to the same fail-soft
     /// "could not be read" note at the call site, so the reason is not
     /// distinguished further.
-    async fn fetch_blob(&self, scope: &ArtifactScope, blob: &BlobRef) -> Result<Bytes, ()> {
+    async fn fetch_blob(
+        &self,
+        scope: &ArtifactScope,
+        blob: &BlobRef,
+    ) -> Result<(Bytes, Digest), ()> {
         let artifact = self.index.lookup(blob).ok_or(())?;
         let bytes = self
             .store
             .get(scope.clone(), artifact)
             .await
             .map_err(|_| ())?;
+        let digest = Digest::blob_content(&bytes);
         if let Some(expected) = blob.digest()
-            && Digest::blob_content(&bytes) != *expected
+            && digest != *expected
         {
             return Err(());
         }
-        Ok(bytes)
+        Ok((bytes, digest))
     }
 }
 

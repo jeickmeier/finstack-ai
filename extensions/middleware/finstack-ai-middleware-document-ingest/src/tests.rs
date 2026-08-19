@@ -439,6 +439,72 @@ fn digest_mismatch_is_fail_soft_note() {
 }
 
 #[test]
+fn repeated_invocations_are_byte_identical() {
+    // Multi-cycle runs hit BeforeModel repeatedly with the same attachment;
+    // the parse memo must keep every invocation's Replace JSON
+    // byte-identical to the first (cached note == recomputed note).
+    let store = Arc::new(CaptureArtifactStore::default());
+    let index = Arc::new(AttachmentIndex::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    index.insert(artifact.clone());
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let mut outputs = Vec::new();
+    for _ in 0..3 {
+        let outcome = block_on(middleware.invoke(
+            middleware_context(),
+            before_model_input_with_file(&artifact),
+        ))
+        .expect("outcome");
+        let StageOutcome::Replace(json) = outcome else {
+            panic!("expected Replace");
+        };
+        outputs.push(json.as_bytes().to_vec());
+    }
+    assert_eq!(outputs[0], outputs[1]);
+    assert_eq!(outputs[1], outputs[2]);
+}
+
+#[test]
+fn parse_memo_keys_on_declared_name() {
+    // Two File blocks carrying the same bytes under different declared
+    // names must each get a note carrying their own name — the memo key
+    // includes the name, so a cached "a.csv" note must never surface for
+    // "b.csv".
+    let store = Arc::new(CaptureArtifactStore::default());
+    let index = Arc::new(AttachmentIndex::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "a.csv");
+    index.insert(artifact.clone());
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+
+    let renamed_blob = BlobRef::try_new(
+        artifact.blob().id(),
+        "text/csv",
+        artifact.blob().length(),
+        artifact.blob().digest().copied(),
+        Some("b.csv"),
+    )
+    .expect("blob");
+    for (blob, expected_name, absent_name) in [
+        (blob_of(&artifact), "a.csv", "b.csv"),
+        (renamed_blob, "b.csv", "a.csv"),
+    ] {
+        let input = before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("please review the attachment"), file_block(blob)],
+        )]);
+        let outcome = block_on(middleware.invoke(middleware_context(), input)).expect("outcome");
+        let StageOutcome::Replace(json) = outcome else {
+            panic!("expected Replace");
+        };
+        let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
+        let all = all_text(&draft);
+        assert!(all.contains(expected_name), "note must carry its own name");
+        assert!(!all.contains(absent_name), "cached note must not leak");
+    }
+}
+
+#[test]
 fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
     let index = AttachmentIndex::default();
     let mut last = None;
