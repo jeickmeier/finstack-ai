@@ -133,6 +133,46 @@ impl OpenRouterProvider {
         Ok(())
     }
 
+    /// Fetch `GET /api/v1/models` and map it onto conservative model configs.
+    ///
+    /// The result is returned to the caller; applying it stays explicit via
+    /// [`Self::replace_model_catalog`]. The response body is bounded by the
+    /// configured `max_stream_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns transport, HTTP, limit, or `openrouter_response_invalid`
+    /// errors; never surfaces the response body.
+    pub async fn fetch_model_catalog(
+        &self,
+        hard_input_bytes: u64,
+    ) -> Result<Vec<OpenRouterModelConfig>, ModelError> {
+        let response = self
+            .client
+            .get(self.config.models_url()?)
+            .timeout(self.config.request_timeout())
+            .send()
+            .await
+            .map_err(|source| transport_error(&source))?;
+        if !response.status().is_success() {
+            let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
+            return Err(error(
+                HTTP_ERROR,
+                ErrorCategory::Model,
+                retryable,
+                "OpenRouter models endpoint returned an unsuccessful status",
+            ));
+        }
+        let body = response
+            .bytes()
+            .await
+            .map_err(|source| transport_error(&source))?;
+        if body.len() > self.config.max_stream_bytes() {
+            return Err(crate::error::stream_limit_error());
+        }
+        crate::catalog::model_configs_from_catalog_json(&body, hard_input_bytes)
+    }
+
     fn model_config(&self, name: &ModelName) -> Result<OpenRouterModelConfig, ModelError> {
         self.models
             .read()
@@ -435,5 +475,38 @@ mod tests {
             capabilities.structured_output,
             StructuredOutputCapability::Native
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_model_catalog_round_trips_through_replace() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let body = br#"{"data":[{"id":"openai/gpt-5","context_length":400000,"top_provider":{"max_completion_tokens":128000},"supported_parameters":["tools"]}]}"#;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buffer = [0_u8; 4_096];
+            let count = socket.read(&mut buffer).await.expect("read");
+            let request = String::from_utf8_lossy(&buffer[..count]).to_string();
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            socket.write_all(headers.as_bytes()).await.expect("headers");
+            socket.write_all(body).await.expect("body");
+            request
+        });
+        let config = OpenRouterConfig::try_new(format!("http://{address}")).expect("config");
+        let seed = OpenRouterModelConfig::try_new("seed", 1, 128, 16, 16, 8).expect("seed");
+        let provider = OpenRouterProvider::try_new(config, vec![seed]).expect("provider");
+        let catalog = provider.fetch_model_catalog(1_000_000).await.expect("catalog");
+        provider.replace_model_catalog(catalog).expect("replace");
+        let request = server.await.expect("server");
+        assert!(request.starts_with("GET /api/v1/models"));
+        let names = provider.descriptor().models;
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].as_str(), "openai/gpt-5");
     }
 }

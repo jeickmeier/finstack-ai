@@ -2,6 +2,7 @@
 
 #![warn(missing_docs)]
 
+mod catalog;
 mod config;
 mod error;
 mod provider;
@@ -9,6 +10,7 @@ mod request;
 mod sse;
 mod stream;
 
+pub use catalog::model_configs_from_catalog_json;
 pub use config::{OpenRouterConfig, OpenRouterModelConfig, SecretHeader};
 pub use finstack_ai_runtime::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
