@@ -1826,11 +1826,11 @@ git commit -m "Document the OpenRouter provider and catalog helper"
 
 **Interfaces:**
 - Consumes: `finstack_ai_runtime::{Toolset, ToolSpec, ToolCallContext, ValidatedToolCall, ToolEventStream, ToolError, verify_authority, ...}` (same import set as `extensions/toolsets/finstack-ai-sandbox-e2b/src/lib.rs:13`).
-- Produces: `pub struct OpenRouterMediaConfig { pub api_key: String, pub endpoint: String, pub referer: Option<String>, pub title: Option<String> }`, `pub enum OpenRouterMediaError { CredentialRequired, EndpointInvalid { reason: &'static str } }`, `pub struct OpenRouterMediaToolset` with `try_new(OpenRouterMediaConfig) -> Result<Self, OpenRouterMediaError>` publishing four `ToolSpec`s. Task 12 adds the `Toolset::call` bodies; Task 13 wires the SDK.
+- Produces: `pub struct OpenRouterMediaConfig { pub api_key: String, pub endpoint: String, pub referer: Option<String>, pub title: Option<String>, pub max_result_bytes: usize }`, `pub enum OpenRouterMediaError { CredentialRequired, EndpointInvalid { reason: &'static str } }`, `pub struct OpenRouterMediaToolset` with `try_new(OpenRouterMediaConfig) -> Result<Self, OpenRouterMediaError>` publishing five `ToolSpec`s. Task 12 adds the `Toolset::call` bodies; Task 13 wires the SDK.
 
-- [ ] **Step 0: Verify the live wire shapes (spec decision 15)**
+- [ ] **Step 0: Re-verify the live wire shapes (spec decision 15)**
 
-Before coding, fetch the current OpenRouter API reference pages for `POST /api/v1/images`, `POST /api/v1/videos`, `POST /api/v1/audio/speech`, and `POST /api/v1/audio/transcriptions` (start at `https://openrouter.ai/docs/changelog` and the API-reference index). Record for each: request fields, response fields (URL vs base64 vs job id), and content types. If a shape differs from the DTOs in Task 12, adjust the DTOs and tests to the live docs — the tool *surface* (names, bounded-JSON results, error codes) is fixed by the spec; only the private wire DTOs move.
+The shapes below were verified against the OpenRouter multimodal guides on 2026-08-19: images `POST /api/v1/images` → `{"data": [{"b64_json", "media_type"}], "usage": {"cost"}}` (base64 only, no URLs); video `POST /api/v1/videos` → 202 `{"id", "polling_url", "status"}` with polling via `GET /api/v1/videos/{id}` → `{"status", "unsigned_urls"?}`; speech `POST /api/v1/audio/speech` → binary MP3/PCM; transcription `POST /api/v1/audio/transcriptions` → JSON `{"text"}` from a base64-JSON or multipart body (≤ 25 MB, no audio URLs, 60 s upstream timeout). At implementation time, re-check the reference pages (`docs/guides/overview/multimodal/*`, `docs/api/api-reference/{speech,transcriptions}/*`) only for drift — the tool *surface* (names, bounded-JSON results, error codes) is fixed by the spec; only the private wire DTOs move.
 
 - [ ] **Step 1: Register the crate in the workspace root**
 
@@ -1861,12 +1861,16 @@ Model the file on `extensions/toolsets/finstack-ai-sandbox-e2b/src/lib.rs`. Copy
 
 const DEFAULT_ENDPOINT: &str = "https://openrouter.ai";
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-const MAX_RESULT_BYTES: usize = 256 * 1_024;
+const DEFAULT_MAX_RESULT_BYTES: usize = 256 * 1_024;
+const MAX_RESULT_BYTES_CEILING: usize = 8 * 1_048_576;
+const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
 
 const IMAGE_TOOL_ID: &str = "finstack.tools.openrouter_generate_image";
 const IMAGE_TOOL_NAME: &str = "openrouter_generate_image";
 const VIDEO_TOOL_ID: &str = "finstack.tools.openrouter_generate_video";
 const VIDEO_TOOL_NAME: &str = "openrouter_generate_video";
+const VIDEO_STATUS_TOOL_ID: &str = "finstack.tools.openrouter_get_video";
+const VIDEO_STATUS_TOOL_NAME: &str = "openrouter_get_video";
 const SPEECH_TOOL_ID: &str = "finstack.tools.openrouter_generate_speech";
 const SPEECH_TOOL_NAME: &str = "openrouter_generate_speech";
 const TRANSCRIBE_TOOL_ID: &str = "finstack.tools.openrouter_transcribe_audio";
@@ -1897,23 +1901,37 @@ pub struct OpenRouterMediaConfig {
     pub referer: Option<String>,
     /// Optional non-secret `X-Title` attribution header.
     pub title: Option<String>,
+    /// Result-size cap in bytes. Images and speech come back base64, so
+    /// hosts wanting inline media raise this. Zero or above 8 MiB fails
+    /// construction; the SDK default is 262_144.
+    pub max_result_bytes: usize,
 }
 ```
 
-`Debug` for the config redacts `api_key` exactly like `E2bSandboxConfig`'s impl. `OpenRouterMediaError` mirrors `E2bSandboxError` with the two `OPENROUTER_MEDIA_*` codes. `OpenRouterMediaToolset` mirrors `E2bSandboxToolset` (descriptor name `Arc::from("finstack-openrouter-media")`, fields `tools`, `api_key`, `endpoint`, `referer`, `title`, `client`), and `try_new` builds **four** validated `ToolSpec`s with these exact schemas and metadata (all four: `execution: Sequential`, `side_effect: NonIdempotentWrite`, `retry_safety: AtMostOnce`, `approval: ApprovalRequirement::Policy` with reason `"paid OpenRouter media generation"`, `max_result_bytes: 262_144`, `deferral: Never`):
+`try_new` rejects `max_result_bytes == 0 || max_result_bytes > MAX_RESULT_BYTES_CEILING` with `EndpointInvalid { reason: "result cap out of range" }`; every bounded read and base64-expansion check uses the configured value. All five tool specs advertise it as their `max_result_bytes`.
+
+`Debug` for the config redacts `api_key` exactly like `E2bSandboxConfig`'s impl. `OpenRouterMediaError` mirrors `E2bSandboxError` with the two `OPENROUTER_MEDIA_*` codes. `OpenRouterMediaToolset` mirrors `E2bSandboxToolset` (descriptor name `Arc::from("finstack-openrouter-media")`, fields `tools`, `api_key`, `endpoint`, `referer`, `title`, `max_result_bytes`, `client`), and `try_new` builds **five** validated `ToolSpec`s with these exact schemas and metadata (all five: `execution: Sequential`, `retry_safety: AtMostOnce`, `deferral: Never`; the four paid tools are `side_effect: NonIdempotentWrite` with `approval: ApprovalRequirement::Policy`, reason `"paid OpenRouter media generation"`; `openrouter_get_video` is a read-only poll: `side_effect: ReadOnly`, `approval: ApprovalRequirement::NotRequired`):
 
 ```rust
-// openrouter_generate_image — "Generate one image via OpenRouter."
+// openrouter_generate_image — "Generate images via OpenRouter; returns base64 image data."
 // input:
-br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#
-// output:
-br#"{"additionalProperties":false,"properties":{"b64_json":{"type":"string"},"media_type":{"type":"string"},"url":{"type":"string"}},"required":["media_type"],"type":"object"}"#
+br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"type":"string"},"model":{"minLength":1,"type":"string"},"output_format":{"type":"string"},"prompt":{"minLength":1,"type":"string"},"resolution":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#
+// output (the API returns base64 only — no hosted image URLs):
+br#"{"additionalProperties":false,"properties":{"b64_json":{"type":"string"},"media_type":{"type":"string"}},"required":["b64_json"],"type":"object"}"#
 
-// openrouter_generate_video — "Generate one video via OpenRouter; returns a URL or job id."
+// openrouter_generate_video — "Submit one asynchronous video-generation job via OpenRouter; poll it with openrouter_get_video."
 // input:
-br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"}},"required":["model","prompt"],"type":"object"}"#
+br#"{"additionalProperties":false,"properties":{"aspect_ratio":{"type":"string"},"duration":{"type":"integer"},"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"resolution":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#
 // output:
-br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"},"url":{"type":"string"}},"required":["status"],"type":"object"}"#
+br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"}},"required":["id","status"],"type":"object"}"#
+
+// openrouter_get_video — "Check one OpenRouter video job; returns download URLs when
+// completed. Set wait_seconds (0-300, default 0) to keep polling inside this call until
+// the job finishes or the time is up."
+// input:
+br#"{"additionalProperties":false,"properties":{"id":{"minLength":1,"type":"string"},"wait_seconds":{"maximum":300,"minimum":0,"type":"integer"}},"required":["id"],"type":"object"}"#
+// output:
+br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"},"urls":{"items":{"type":"string"},"type":"array"}},"required":["id","status"],"type":"object"}"#
 
 // openrouter_generate_speech — "Synthesize speech from text via OpenRouter."
 // input:
@@ -1921,14 +1939,14 @@ br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"s
 // output:
 br#"{"additionalProperties":false,"properties":{"b64_audio":{"type":"string"},"media_type":{"type":"string"}},"required":["b64_audio","media_type"],"type":"object"}"#
 
-// openrouter_transcribe_audio — "Transcribe audio at a URL via OpenRouter."
+// openrouter_transcribe_audio — "Transcribe audio at an HTTPS URL via OpenRouter (the toolset downloads and base64-submits it; OpenRouter accepts no audio URLs)."
 // input:
-br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#
+br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"format":{"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#
 // output:
 br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#
 ```
 
-(Adjust field names here only if Step 0 found the live API differs.)
+(Adjust field names here only if Step 0's re-check finds the live API drifted.)
 
 - [ ] **Step 4: Compile**
 
@@ -1959,17 +1977,54 @@ Private serde DTOs (adjusted per Task 11 Step 0 if needed):
 ```rust
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ImageArguments { model: String, prompt: String, #[serde(default)] size: Option<String> }
+struct ImageArguments {
+    model: String,
+    prompt: String,
+    #[serde(default)]
+    resolution: Option<String>,
+    #[serde(default)]
+    aspect_ratio: Option<String>,
+    #[serde(default)]
+    output_format: Option<String>,
+}
 #[derive(Deserialize)]
-struct ImageResponseItem { #[serde(default)] url: Option<String>, #[serde(default)] b64_json: Option<String> }
+struct ImageResponseItem {
+    b64_json: String,
+    #[serde(default)]
+    media_type: Option<String>,
+}
 #[derive(Deserialize)]
 struct ImageResponse { data: Vec<ImageResponseItem> }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct VideoArguments { model: String, prompt: String }
+struct VideoArguments {
+    model: String,
+    prompt: String,
+    #[serde(default)]
+    duration: Option<u32>,
+    #[serde(default)]
+    resolution: Option<String>,
+    #[serde(default)]
+    aspect_ratio: Option<String>,
+}
 #[derive(Deserialize)]
-struct VideoResponse { #[serde(default)] id: Option<String>, #[serde(default)] status: Option<String>, #[serde(default)] url: Option<String> }
+struct VideoSubmitResponse { id: String, status: String }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VideoStatusArguments {
+    id: String,
+    #[serde(default)]
+    wait_seconds: Option<u32>,
+}
+#[derive(Deserialize)]
+struct VideoStatusResponse {
+    id: String,
+    status: String,
+    #[serde(default)]
+    unsigned_urls: Vec<String>,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1977,17 +2032,23 @@ struct SpeechArguments { model: String, input: String, #[serde(default)] voice: 
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct TranscribeArguments { model: String, audio_url: String }
+struct TranscribeArguments {
+    model: String,
+    audio_url: String,
+    #[serde(default)]
+    format: Option<String>,
+}
 #[derive(Deserialize)]
 struct TranscribeResponse { text: String }
 ```
 
-`Toolset::call` mirrors the E2B `call` skeleton (`verify_authority`, identity check against the four tool ids, argument parse with `OPENROUTER_MEDIA_INVALID_ARGUMENTS`), then matches on tool name:
+`Toolset::call` mirrors the E2B `call` skeleton (`verify_authority`, identity check against the five tool ids, argument parse with `OPENROUTER_MEDIA_INVALID_ARGUMENTS`), then matches on tool name:
 
-- **image**: POST `{endpoint}/api/v1/images` with `{"model", "prompt", "size"?}` via a `send_json` helper (E2B's `post_json` renamed, with `Authorization: Bearer {api_key}` instead of `X-API-Key`, plus `HTTP-Referer`/`X-Title` when configured). Result mapping: first `data` item; prefer `url` → output `{"url", "media_type": "image/*"}`; else `b64_json` only if the serialized result stays ≤ `MAX_RESULT_BYTES`, otherwise fail with `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
-- **video**: POST `/api/v1/videos`; output `{"id"?, "status": status_or("completed"), "url"?}`; missing all of id/url → `OPENROUTER_MEDIA_TRANSPORT_FAILED`.
-- **speech**: POST `/api/v1/audio/speech`; the response is binary audio — read it with a bounds check against `MAX_RESULT_BYTES` *before* base64-expansion (reject when `bytes.len() * 4 / 3 > MAX_RESULT_BYTES`), base64-encode, output `{"b64_audio", "media_type": response Content-Type or "audio/mpeg"}`. Base64: use the workspace `base64` crate if pinned in the root `Cargo.toml` (`grep -n '^base64' Cargo.toml`); if absent, pin `base64 = "0.22"` there (this is the one allowed new dependency; record it in the Phase 3 ADR's dependency note since `MediaResolver` data-URIs need it too).
-- **transcribe**: POST `/api/v1/audio/transcriptions` with `{"model", "audio_url"}` as JSON (if Step 0 found multipart-only, send `multipart/form-data` with a `url` part instead); output `{"text"}`.
+- **image**: POST `{endpoint}/api/v1/images` with the argument fields via a `send_json` helper (E2B's `post_json` renamed, with `Authorization: Bearer {api_key}` instead of `X-API-Key`, plus `HTTP-Referer`/`X-Title` when configured). The API returns base64 only: take the first `data` item and output `{"b64_json", "media_type"?}` if the serialized result stays ≤ the configured `max_result_bytes`, otherwise fail with `OPENROUTER_MEDIA_LIMIT_EXCEEDED` (the default 256 KiB cap rejects most images — hosts wanting inline images raise `max_result_bytes`).
+- **video (submit)**: POST `/api/v1/videos` with the argument fields; the API replies 202 `{"id", "polling_url", "status"}` — output `{"id", "status"}` and let the model poll with the status tool.
+- **video (status)**: GET `/api/v1/videos/{id}` (URL-encode the id path segment); output `{"id", "status", "urls": unsigned_urls}` — `urls` empty until `status == "completed"`; never download the content bytes. When `wait_seconds > 0` (reject values above 300 with `OPENROUTER_MEDIA_INVALID_ARGUMENTS`), poll in a loop: GET, and if `status` is `pending`/`in_progress`, `tokio::select!` on `ctx.run.cancellation.cancelled()` / `wait_deadline(ctx.run.deadline)` (both → `timeout_error()`) / `tokio::time::sleep(Duration::from_secs(5))`, re-GET until terminal status or the `wait_seconds` budget is spent — then return the latest status either way (a still-running job after the wait is a normal result, not an error).
+- **speech**: POST `/api/v1/audio/speech`; the response is binary MP3/PCM — read it with a bounds check against the configured cap *before* base64-expansion (reject when `bytes.len() * 4 / 3 > max_result_bytes`), base64-encode, output `{"b64_audio", "media_type": response Content-Type or "audio/mpeg"}`. Base64: use the workspace `base64` crate if pinned in the root `Cargo.toml` (`grep -n '^base64' Cargo.toml`); if absent, pin `base64 = "0.22"` there (this is the one allowed new dependency; record it in the Phase 3 ADR's dependency note since `MediaResolver` data-URIs need it too).
+- **transcribe**: OpenRouter accepts **no audio URLs**, so the handler first downloads the caller's `audio_url` (HTTPS-only — reject `http:` for the download even on loopback endpoints; bounded to `MAX_AUDIO_DOWNLOAD_BYTES` = the documented 25 MB limit), base64-encodes it, and POSTs JSON to `/api/v1/audio/transcriptions` with the audio data, `model`, and `format` (default from the URL extension or `"mp3"`; exact request field names per the [transcriptions reference](https://openrouter.ai/docs/api/api-reference/transcriptions/create-audio-transcriptions) — re-check at implementation); output `{"text"}`. Note the endpoint's 60-second upstream timeout fits inside `REQUEST_TIMEOUT`.
 
 All results go out exactly like E2B's: serialize to JSON, `RawJson::parse`, `ToolResult { output, is_error: false }`, single `ToolStreamItem::Completed` stream.
 
@@ -1998,10 +2059,16 @@ Copy the E2B test module's scaffolding verbatim (`tool_context()`, `ValidatedToo
 1. `construction_rejects_a_missing_api_key` — expects `OpenRouterMediaError::CredentialRequired`.
 2. `construction_rejects_plaintext_non_loopback` — canary never in the error text.
 3. `debug_does_not_leak_the_api_key`.
-4. `image_tool_returns_a_hosted_url` — scripted 200 `{"data":[{"url":"https://cdn.example/img.png"}]}`; asserts the request line contains `post /api/v1/images`, the `authorization` header carries the canary, and the result JSON has `url` and no `b64_json`.
-5. `speech_tool_bounds_the_audio_payload` — scripted 200 with a >256 KiB binary body; expects `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
-6. `transcribe_tool_returns_text` — scripted 200 `{"text":"hello"}`; asserts result `text == "hello"`.
-7. `cancelled_call_does_not_reach_the_fixture` — same shape as E2B's.
+4. `image_tool_returns_bounded_base64` — scripted 200 `{"data":[{"b64_json":"aGVsbG8=","media_type":"image/png"}]}`; asserts the request line contains `post /api/v1/images`, the `authorization` header carries the canary, and the result JSON has `b64_json` and `media_type`.
+5. `image_tool_enforces_the_result_cap` — construct with `max_result_bytes: 1_024`, scripted 200 whose `b64_json` exceeds it; expects `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
+6. `video_submit_returns_the_job_id` — scripted 202 `{"id":"vid-1","polling_url":"https://openrouter.test/api/v1/videos/vid-1","status":"pending"}`; asserts result `{"id":"vid-1","status":"pending"}`.
+7. `video_status_returns_urls_when_completed` — scripted 200 `{"id":"vid-1","status":"completed","unsigned_urls":["https://openrouter.test/api/v1/videos/vid-1/content?index=0"]}`; asserts the request line contains `get /api/v1/videos/vid-1` and the result `urls` array matches.
+7b. `video_status_wait_polls_until_terminal` — `wait_seconds: 30`, scripted fixture serving `{"status":"in_progress"}` then `{"status":"completed","unsigned_urls":[...]}` across two accepts; asserts two GETs arrived and the result is the completed payload. Keep the sleep short in tests by making the 5-second poll interval a `const POLL_INTERVAL` and overriding it to milliseconds under `#[cfg(test)]`.
+7c. `video_status_rejects_oversized_wait` — `wait_seconds: 301` → `OPENROUTER_MEDIA_INVALID_ARGUMENTS` with no HTTP traffic.
+8. `speech_tool_bounds_the_audio_payload` — scripted 200 with a binary body exceeding the configured cap; expects `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
+9. `transcribe_tool_downloads_then_submits_base64` — two scripted fixtures: an audio host serving bytes and the API fixture; asserts the API request body contains the base64 of the downloaded bytes and the result is `{"text":"hello"}`. (The download fixture needs an HTTPS exception for tests: keep the HTTPS-only rule but allow `http://127.0.0.1` downloads when the *toolset endpoint* is also loopback — scripted-fixture mode, mirroring the endpoint validation's loopback carve-out.)
+10. `transcribe_tool_rejects_plaintext_download_urls` — `audio_url: "http://8.8.8.8/a.mp3"` → `OPENROUTER_MEDIA_INVALID_ARGUMENTS` with no HTTP traffic.
+11. `cancelled_call_does_not_reach_the_fixture` — same shape as E2B's.
 
 - [ ] **Step 3: Run**
 
@@ -2060,6 +2127,7 @@ fn register_openrouter_media(
         endpoint: String::new(),
         referer: spec.referer,
         title: spec.title,
+        max_result_bytes: 262_144,
     })
     .map_err(|error| {
         AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
@@ -2467,7 +2535,7 @@ fn media_reference_audio(
 }
 ```
 
-The user-message arm of `map_conversation_message` becomes `"content": map_user_content(message.content(), resolved)?`. Assistant/tool/instruction paths keep rejecting media (they still call `render_text`). Verify the `input_image`/`input_file`/`input_audio` field names against the OpenRouter Responses reference before finalizing (spec decision 18). Add `base64 = { workspace = true }` to the crate manifest (workspace-pinned per Task 12).
+The user-message arm of `map_conversation_message` becomes `"content": map_user_content(message.content(), resolved)?`. Assistant/tool/instruction paths keep rejecting media (they still call `render_text`). Verify the `input_image`/`input_file`/`input_audio` field names against the OpenRouter Responses reference before finalizing (spec decision 18). **Audio caveat**: OpenRouter documents audio input only for `/api/v1/chat/completions` (base64 only); verify with a live probe whether the Responses endpoint accepts `input_audio` — if it does not, make the `ContentBlock::Audio` arm return `request_error("openrouter responses does not accept audio input")` (keeping `with_input_audio` rejected at config level too) and record the limitation in the README; the OpenAI provider (Task 17) keeps its audio arm regardless. Add `base64 = { workspace = true }` to the crate manifest (workspace-pinned per Task 12).
 
 - [ ] **Step 3: Async resolution in the provider**
 

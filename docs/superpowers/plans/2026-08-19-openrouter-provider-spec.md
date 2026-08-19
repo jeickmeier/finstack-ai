@@ -27,7 +27,7 @@ Integrate OpenRouter across modalities in three phases:
 | Text / JSON / tools / reasoning | in + out | 1 | `Model` port over `/api/v1/responses` |
 | Image, audio, file prompts | in | 3 | `Model` port + `MediaResolver` (`ContentBlock::Image/Audio/File(MediaRef)` → `input_image`/`input_audio`/`input_file` wire items) |
 | Image generation | out | 2 | `openrouter_generate_image` → `POST /api/v1/images`; native: `openai_generate_image` → OpenAI `/v1/images/generations` |
-| Video generation | out | 2 | `openrouter_generate_video` → `POST /api/v1/videos` (no native equivalent at any of the other three vendors) |
+| Video generation | out | 2 | `openrouter_generate_video` → `POST /api/v1/videos` (async job) + `openrouter_get_video` → `GET /api/v1/videos/{id}` poll (no native equivalent at any of the other three vendors) |
 | Speech synthesis | out | 2 | `openrouter_generate_speech` → `POST /api/v1/audio/speech`; native: `openai_generate_speech` → OpenAI `/v1/audio/speech` |
 | Audio transcription | in→text | 2 | `openrouter_transcribe_audio` → `POST /api/v1/audio/transcriptions`; native: `openai_transcribe_audio` → OpenAI `/v1/audio/transcriptions` |
 
@@ -61,13 +61,20 @@ Both phases extend to the existing providers:
 
 | Provider | Images in | Files/PDF in | Audio in | Wire mapping |
 |---|---|---|---|---|
-| openrouter | ✓ | ✓ | ✓ | Responses `input_image` / `input_file` / `input_audio` |
+| openrouter | ✓ | ✓ | ✓* | Responses `input_image` / `input_file` / `input_audio` |
 | openai | ✓ | ✓ | ✓ | Responses `input_image` / `input_file` / `input_audio` (same shapes) |
 | anthropic | ✓ | ✓ (PDF `document`) | ✗ (API has no audio input) | Messages `image` / `document` source blocks (base64 or URL) |
 | ollama | ✓ (base64 bytes only) | ✗ | ✗ | `images: [<b64>, …]` on the chat message; URL resolutions rejected |
 
 Unsupported modalities keep failing closed with each provider's
 `*_request_invalid` code.
+
+\* OpenRouter documents audio input only for `/api/v1/chat/completions`
+(base64 only, no URLs); whether its Responses endpoint accepts
+`input_audio` is verified at implementation time — if it does not, the
+openrouter provider rejects `Audio` blocks fail-closed
+(`openrouter_request_invalid`) until it does. Audio always requires
+`ResolvedMedia::Bytes` on every provider (URL resolutions are rejected).
 
 ## OpenRouter API facts (verified August 2026)
 
@@ -84,7 +91,32 @@ Unsupported modalities keep failing closed with each provider's
   array; model-name suffixes `:nitro` / `:floor`.
 - `GET /api/v1/models` returns `{"data": [Model, …]}` where each `Model` has
   `id`, `name`, `context_length`, `pricing`, `top_provider`
-  (incl. `max_completion_tokens`), and `supported_parameters`.
+  (incl. `max_completion_tokens`), `supported_parameters`, and
+  `architecture` (incl. `input_modalities: ["file","image","text"]` and
+  `output_modalities`). A per-model endpoint
+  `GET /api/v1/model/{author}/{slug}` and an `output_modalities` query
+  filter also exist.
+- **Image generation** `POST /api/v1/images`: request `{model, prompt}` plus
+  optional `n`, `resolution`, `aspect_ratio`, `quality`, `output_format`,
+  `stream`, `input_references`, `provider`. Response is **base64 only**:
+  `{"data": [{"b64_json", "media_type"}], "usage": {"cost"}}` — no hosted
+  URLs.
+- **Video generation is asynchronous**: `POST /api/v1/videos`
+  (`{model, prompt}` + optional `duration`, `resolution`, `aspect_ratio`,
+  `frame_images`, `input_references`, `generate_audio`, `callback_url`)
+  returns 202 `{"id", "polling_url", "status": "pending"}`;
+  `GET /api/v1/videos/{id}` reports `pending → in_progress → completed |
+  failed` and, when completed, `unsigned_urls: [...]` pointing at
+  `GET /api/v1/videos/{id}/content`. `GET /api/v1/videos/models` lists video
+  models.
+- **Speech** `POST /api/v1/audio/speech` (OpenAI/Google/Mistral voices; MP3
+  or PCM binary out). **Transcription** `POST /api/v1/audio/transcriptions`
+  (base64-JSON body or OpenAI-style multipart file ≤ 25 MB; **no audio
+  URLs**; 60-second upstream timeout; JSON `{"text", ...}` out).
+- **Audio input to chat models** is documented for `/api/v1/chat/completions`
+  via `{"type": "input_audio", "input_audio": {"data": <b64>, "format"}}` —
+  base64 only, URLs unsupported. Whether the Responses endpoint accepts
+  `input_audio` is not documented and must be verified at implementation.
 
 ## Decisions
 
@@ -131,22 +163,36 @@ Unsupported modalities keep failing closed with each provider's
 10. Crate `extensions/toolsets/finstack-ai-tools-openrouter-media`, modeled
     line-for-line on `finstack-ai-sandbox-e2b` (explicit API key, no env
     reads, HTTPS off loopback, redacted `Debug`, bounded response reads,
-    cancellation/deadline `select!`, `verify_authority`). Four `ToolSpec`s
-    in one `Toolset`: `openrouter_generate_image`,
-    `openrouter_generate_video`, `openrouter_generate_speech`,
+    cancellation/deadline `select!`, `verify_authority`). **Five**
+    `ToolSpec`s in one `Toolset`: `openrouter_generate_image`,
+    `openrouter_generate_video` (submits the async job),
+    `openrouter_get_video` (checks job status and returns `unsigned_urls`
+    when completed; an optional `wait_seconds` argument makes it poll
+    server-side inside the one call — bounded, cancellation- and
+    deadline-aware — so the model does not burn a turn per poll; there is
+    deliberately **no separate wait tool**, since it would be a strict
+    superset of the status check), `openrouter_generate_speech`,
     `openrouter_transcribe_audio`.
-11. Tool results are JSON and **bounded** (`max_result_bytes`, default
-    256 KiB): tools prefer hosted URLs / job identifiers from the API;
-    base64 payloads are returned only when they fit the cap, otherwise the
-    call fails closed with `openrouter_media_limit_exceeded`. Raw media
-    bytes never enter the journal.
+11. Tool results are JSON and **bounded** by a configurable
+    `max_result_bytes` (default 256 KiB, hard cap 8 MiB — hosts raise it to
+    accept inline images/audio). Per the verified API shapes: image results
+    are base64 (`b64_json` + `media_type` — the API offers no hosted image
+    URLs); speech results are base64 audio; video tools return job ids and
+    `unsigned_urls` (never bytes); transcription returns text. The
+    transcription tool takes an HTTPS `audio_url`, downloads it itself
+    (bounded to the documented 25 MB limit), and submits base64 JSON —
+    OpenRouter accepts no audio URLs. Payloads exceeding the cap fail
+    closed with `openrouter_media_limit_exceeded`. Raw media bytes never
+    enter the journal.
 12. Stable tool error codes: `openrouter_media_credential_required`,
     `openrouter_media_endpoint_invalid`, `openrouter_media_invalid_arguments`,
     `openrouter_media_transport_failed`, `openrouter_media_limit_exceeded`,
     `openrouter_media_timeout`.
-13. Side-effect metadata: all four tools are
+13. Side-effect metadata: the four generating tools are
     `SideEffectClass::NonIdempotentWrite` (paid API calls),
-    `RetrySafety::AtMostOnce`, `ApprovalRequirement::Policy`.
+    `RetrySafety::AtMostOnce`, `ApprovalRequirement::Policy`;
+    `openrouter_get_video` is a read-only status poll
+    (`SideEffectClass::ReadOnly`, `ApprovalRequirement::NotRequired`).
 14. SDK wiring: `OpenRouterAgentSpec` gains `media_tools: bool`
     (default false); when true, `openrouter_inner` registers the toolset
     with the same API key and attribution. `OpenAiAgentSpec`,
