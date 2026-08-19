@@ -1346,6 +1346,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-provider-openrouter"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-python"
 version = "1.0.0"
 dependencies = [
