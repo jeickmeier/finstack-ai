@@ -10,7 +10,7 @@ authors.workspace = true
 description = "Document-to-Markdown ingestion toolset (anydoc + pdf-inspector)"
 
 [dependencies]
-finstack-ai-runtime = { path = "../../../crates/finstack-ai-runtime", default-features = false }
+finstack-ai-runtime = { workspace = true, default-features = false }
 anydoc = { workspace = true }
 pdf-inspector = { workspace = true }
 futures-util = { workspace = true }

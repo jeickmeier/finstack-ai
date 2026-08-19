@@ -172,22 +172,20 @@ pub fn parse(
         (None, None, false)
     };
 
-    let markdown = anydoc::to_markdown_bytes(bytes, anydoc_format(format))
-        .map_err(|error| match (requires_ocr, format) {
-            // A scanned PDF may yield no extractable text; that is a success.
-            (true, DocumentFormat::Pdf) => DocumentParseError::ParseFailed {
-                message: String::new(),
-            },
-            _ => DocumentParseError::ParseFailed {
-                message: bounded_message(&error.to_string()),
-            },
-        });
-    let markdown = match markdown {
+    let markdown = match anydoc::to_markdown_bytes(bytes, anydoc_format(format)) {
         Ok(text) => text,
-        Err(DocumentParseError::ParseFailed { message }) if message.is_empty() && requires_ocr => {
+        // A scanned/image PDF yielding no extractable text is a success, not
+        // an error — but only that specific "nothing to extract" case; a
+        // genuinely broken, encrypted, or over-limit PDF must still surface
+        // as a failure even when we already know it needs OCR.
+        Err(anydoc::ConvertError::Unsupported(_)) if requires_ocr && format == DocumentFormat::Pdf => {
             String::new()
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            return Err(DocumentParseError::ParseFailed {
+                message: bounded_message(&error.to_string()),
+            });
+        }
     };
 
     let (markdown, truncated) = truncate_utf8(markdown, limits.max_output_bytes);
