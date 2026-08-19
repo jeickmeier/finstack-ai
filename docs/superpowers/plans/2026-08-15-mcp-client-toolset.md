@@ -48,9 +48,9 @@ trust posture is `finstack-ai-tools-shell`'s (T1 native), not the plugin host's.
 - **Leaf crates carry no literal dependency versions.** Every dependency is
   `{ workspace = true }`; add the pin to `[workspace.dependencies]` if missing.
 - **This crate is native-only** and must be added to the `FORBIDDEN_WASM`
-  frozenset in `tools/wasm_package/check.py`, next to the
+  frozenset in `scripts/wasm_package/check.py`, next to the
   `finstack-ai-tools-shell` entry.
-- `tools/compat/public_items.py` does **not** cover extension leaves — its
+- `scripts/compat/public_items.py` does **not** cover extension leaves — its
   `RUST_LIBS` tuple is fixed to the three core `lib.rs` files. No frozen-surface
   risk here.
 - Run `mise run ci` before opening a pull request (`CONTRIBUTING.md:18`).
@@ -80,7 +80,7 @@ trust posture is `finstack-ai-tools-shell`'s (T1 native), not the plugin host's.
 - Create: `extensions/toolsets/finstack-ai-tools-mcp/src/lib.rs`
 - Create: `extensions/toolsets/finstack-ai-tools-mcp/README.md`
 - Modify: `Cargo.toml` (workspace members ~line 18, version pins ~line 75)
-- Modify: `tools/wasm_package/check.py`
+- Modify: `scripts/wasm_package/check.py`
 - Modify: `extensions/toolsets/README.md`, `docs/site/toolset.md`,
   `docs/site/README.md:25`
 
@@ -167,7 +167,7 @@ the pin to `[workspace.dependencies]`:
 finstack-ai-tools-mcp = { path = "extensions/toolsets/finstack-ai-tools-mcp", version = "1.0.0" }
 ```
 
-In `tools/wasm_package/check.py`, add `"finstack-ai-tools-mcp",` to the
+In `scripts/wasm_package/check.py`, add `"finstack-ai-tools-mcp",` to the
 `FORBIDDEN_WASM` frozenset — this crate depends on tokio and reqwest and must
 never enter a WASM bundle.
 

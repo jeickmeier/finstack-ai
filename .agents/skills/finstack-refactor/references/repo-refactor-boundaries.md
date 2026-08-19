@@ -44,7 +44,7 @@ Treat these as public surfaces even if the Rust refactor is internal:
 - Python package exports in `bindings/finstack-ai-python/python/finstack_ai/__init__.py`
 - Python stubs under `bindings/finstack-ai-python/python/finstack_ai/`
 - WASM/JS facade under `bindings/finstack-ai-wasm/js/src/`
-- frozen public items checked by `uv run --no-project python tools/compat/public_items.py --check`
+- frozen public items checked by `uv run --no-project python scripts/compat/public_items.py --check`
 - conformance fixtures checked by `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`
 
 ## Good boundary moves

@@ -158,7 +158,7 @@ Verify these files are current and accurate:
 All examples must compile and produce correct output:
 
 ```bash
-uv run --no-project python tools/docs/quickstarts.py
+uv run --no-project python scripts/docs/quickstarts.py
 # Check for examples referencing deprecated/removed APIs
 rg -l 'deprecated_function_name' examples/ docs/
 ```
@@ -209,7 +209,7 @@ mise run check-wasm
 ### 4d. Frozen public items
 
 ```bash
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 ```
 
 A removed frozen public item is a breaking change unless the inventory is intentionally updated in the same release.
@@ -220,7 +220,7 @@ A removed frozen public item is a breaking change unless the inventory is intent
 
 ```bash
 # WASM package size and browser benches when the release touches host or bindings
-uv run --no-project python tools/perf/check_size_budgets.py
+uv run --no-project python scripts/perf/check_size_budgets.py
 mise run bench-wasm
 ```
 
@@ -281,7 +281,7 @@ cargo publish -p finstack-ai-kernel --dry-run
 ### 6e. Binary and package size check
 
 ```bash
-uv run --no-project python tools/perf/check_size_budgets.py
+uv run --no-project python scripts/perf/check_size_budgets.py
 ```
 
 Review wheel, WASM, and CLI size budgets for unexpected regressions from the previous release.
@@ -289,7 +289,7 @@ Review wheel, WASM, and CLI size budgets for unexpected regressions from the pre
 ### 6f. API parity
 
 ```bash
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 mise run build-wasm -- release
 mise run check-wasm
 ```
@@ -389,7 +389,7 @@ After completing the audit, produce a release readiness report:
 | `mise run check-wasm` | pass/fail |
 | Publish dry-run | pass/fail |
 | Semver checks | pass/fail |
-| `uv run --no-project python tools/compat/public_items.py --check` | pass/fail |
+| `uv run --no-project python scripts/compat/public_items.py --check` | pass/fail |
 | Feature flag matrix | pass/fail |
 
 ### Remaining items

@@ -9,7 +9,7 @@ From this repository. Rust crates are path dependencies until crates.io
 publishes. Python: build or editable-install
 `bindings/finstack-ai-python`. JavaScript: `mise run build-wasm -- release`,
 then consume the local package or a tarball from
-`uv run --no-project python tools/wasm_package/stage.py`. See
+`uv run --no-project python scripts/wasm_package/stage.py`. See
 [Rust](rust.md), [Python](python.md), and [WASM](wasm.md).
 
 ## Is 1.0.0 published?

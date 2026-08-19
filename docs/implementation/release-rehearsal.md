@@ -5,7 +5,7 @@ PyPI, or npm. G7 passed via `G7-D-public-preview-f7c7e70b9e04`. Tag
 `v0.1.0` is cut. Registry publish remains blocked on owner credentials.
 
 ```text
-uv run --no-project python tools/docs/recreate_release.py
+uv run --no-project python scripts/docs/recreate_release.py
 ```
 
 See [release-engineering.md](release-engineering.md) for the GA tag
@@ -21,7 +21,7 @@ The runner executes two clean staging passes from the same tree with
 | --- | --- |
 | Python sdist | `uv build --sdist --project bindings/finstack-ai-python` |
 | Python wheel | in-tree `maturin build --offline --locked` (PEP 517 wheel-from-sdist fails with `locked = true` outside the workspace) |
-| npm tarball + CycloneDX | `mise run build-wasm -- release` then `uv run --no-project python tools/wasm_package/stage.py`, or `npm pack` when `dist/` exists |
+| npm tarball + CycloneDX | `mise run build-wasm -- release` then `uv run --no-project python scripts/wasm_package/stage.py`, or `npm pack` when `dist/` exists |
 | Crate metadata | `cargo package --list --locked --offline` on public crates |
 | WIT/plugin bits | already staged under `plugins/`; hashed when present |
 

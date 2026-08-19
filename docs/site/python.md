@@ -80,7 +80,7 @@ not read environment variables.
 uv sync
 uv run python -m ipykernel install --user --name=finstack-ai-notebooks \
   --display-name="finstack-ai-notebooks"
-uv run python tools/docs/notebooks.py
+uv run python scripts/docs/notebooks.py
 ```
 
 ## License

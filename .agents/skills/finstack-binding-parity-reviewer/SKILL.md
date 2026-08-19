@@ -16,7 +16,7 @@ Use this instead of generic refactor or code review when the task touches:
 - `bindings/finstack-ai-python/python/finstack_ai/**/*.pyi`
 - Python `__init__.py` exports
 - `bindings/finstack-ai-wasm/js/src/` or generated TypeScript declarations
-- `uv run --no-project python tools/compat/public_items.py --check` / `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`
+- `uv run --no-project python scripts/compat/public_items.py --check` / `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`
 - shared conformance fixtures
 
 Use `finstack-refactor` first when the change is purely internal and no public binding surface changes.

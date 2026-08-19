@@ -159,7 +159,7 @@ Give agents first-class document ingestion, in two components plus one core API 
 22. **WASM binding**: same surface with `Uint8Array` data. `finstack-ai-tools-document`
     and the middleware must appear in the wasm build; `anydoc`/`pdf-inspector` are
     wasm-clean, so **no additions to `FORBIDDEN_WASM`** in
-    `tools/wasm_package/check.py` — CI enforces the claim. Path sources return
+    `scripts/wasm_package/check.py` — CI enforces the claim. Path sources return
     `DOCUMENT_PATH_UNSUPPORTED` on wasm (decision 7).
 23. **Fixtures**: a small corpus under `fixtures/documents/` — text PDF, scanned PDF,
     table-heavy PDF, docx, xlsx, pptx, csv, an oversized file, and a corrupt file —

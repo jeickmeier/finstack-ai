@@ -37,7 +37,7 @@ jobs:
         run: mise run build-wasm -- release
 
       - name: Stage npm pack artifacts
-        run: uv run --no-project python tools/wasm_package/stage.py
+        run: uv run --no-project python scripts/wasm_package/stage.py
 
       - name: Sign staged artifacts
         uses: sigstore/gh-action-sigstore-python@a5caf349bc536fbef3668a10ed7f5cd309a4b53d # v3.2.0

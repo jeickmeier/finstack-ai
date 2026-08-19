@@ -32,7 +32,7 @@ Deployment gates: [docs/site/security-deployment.md](../site/security-deployment
 | SEC-INV-009 Terminal records immutable | PR-011 / PR-017 observers non-semantic | — | evidenced |
 | SEC-INV-010 Journal corruption fails closed | PR-039 / PR-040 / PR-041 / PR-048 | Checksums are not an authentication chain | evidenced |
 | SEC-INV-011 Grants and privileged actions observable without secrets | PR-052 / PR-057 redacted export | — | evidenced |
-| SEC-INV-012 Minimal/default builds omit privileged batteries | `tools/wasm_package/check.py graph`; cargo tree on kernel/runtime/SDK | — | evidenced |
+| SEC-INV-012 Minimal/default builds omit privileged batteries | `scripts/wasm_package/check.py graph`; cargo tree on kernel/runtime/SDK | — | evidenced |
 | SEC-INV-013 Compaction preserves policy/provenance | PR-018 / PR-023 / PR-056 / PR-057 | One late-tier `before_model` owner | evidenced |
 
 ## TM-01–TM-21

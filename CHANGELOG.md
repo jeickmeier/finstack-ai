@@ -17,7 +17,7 @@ unpublished.
 ### Added
 
 - `verify_authority(&ToolCallContext)` on the runtime Tool port (ADR-048).
-- `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `tools/compat/public_items.py`.
+- `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `scripts/compat/public_items.py`.
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.
 - `AgentRun` child-run and `complete_external` facades plus `ChildRunBridge` for binding a deferred effect to a child run (PR-079 Rust half).
 - Derived poll scheduling from committed `EffectDeferred` (`due_polls` / `drive_due_polls`); expiry uses `tool_deferral_expired`.
@@ -59,8 +59,12 @@ unpublished.
 
 ### Changed
 
-- `finstack-ai` linked construction shares one `Agent::compose` /
-  `ComposeAgentSpec` finish path. Provider specs share `LinkedCommon`.
+- `finstack-ai` linked construction finishes on
+  `NativeAgentBuilder::build_linked` with shared `LinkedCommon`.
+  `ComposeAgentSpec` / `Agent::compose` are gone. Registry factory and
+  lifecycle types live at `finstack_ai::registry`. Lane suspend/resume
+  state is session-scoped, not process-global. `finstack-ai-runtime` no
+  longer re-exports kernel types at the crate root.
   `AgentRun::start_child` / `prepare_child` take an optional remote route
   (the `_routed` twins are gone). `complete_external_at`, unused
   registrar factories, and `AgentRun::child_invoker_starts` are no longer
@@ -104,8 +108,14 @@ unpublished.
   `openai_chat` is a configuration error.
 - Subagent tool `subagent_await` is renamed `subagent_status`.
 - `finstack-ai-middleware-verify` is an in-repo fixture (`publish = false`).
+- Maintainer helpers live under `scripts/` (formerly `tools/`) so the
+  directory is not confused with product toolsets.
 
 ### Removed
+
+- Unused maintainer helpers: `scripts/loc/find_long_files.py`,
+  `scripts/docs/license_sweep.py`, `scripts/docs/rehearse_release.py`,
+  and `scripts/perf/test_python_fast_path.py`.
 
 - Removed unused `FrameworkError` and `diagnostic_contains` from
   `finstack-ai-runtime`.

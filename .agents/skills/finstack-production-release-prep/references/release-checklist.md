@@ -14,12 +14,12 @@ Use this as the repo-specific release checklist.
 - WASM graph: included in `mise run ci-all`
 - WASM glue regeneration: `mise run build-wasm -- release` when bindings changed
 - Browser tests: `mise run test-wasm` when the JS host changed
-- Public items: `uv run --no-project python tools/compat/public_items.py --check`
+- Public items: `uv run --no-project python scripts/compat/public_items.py --check`
 - Conformance: `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests`
 
 ## Examples
 
-- Quickstarts: `uv run --no-project python tools/docs/quickstarts.py`
+- Quickstarts: `uv run --no-project python scripts/docs/quickstarts.py`
 - Rust examples: use repo-specific example tasks if present in `mise.toml`
 
 ## Release Notes

@@ -116,7 +116,7 @@ jobs:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: mise run ci-wasm
         # Consecutive Linux rebuilds must be byte-identical when glue paths
-        # change (`tools/ci/lib.sh`). Dirty-tree vs the committed Darwin glue
+        # change (`scripts/ci/lib.sh`). Dirty-tree vs the committed Darwin glue
         # is a same-host `check.py dirty` obligation; rustc/wasm-bindgen
         # output is not cross-OS identical.
 

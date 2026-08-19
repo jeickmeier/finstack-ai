@@ -22,5 +22,5 @@ Use this reference to choose the right verification depth for documentation chan
 
 - Public API docs: check Rust source, PyO3/WASM bindings, stubs, exports, examples, and public-item inventory.
 - Command docs: confirm task names against `mise.toml` or `AGENTS.md`.
-- Example docs: prefer `uv run --no-project python tools/docs/quickstarts.py` when scope justifies it.
+- Example docs: prefer `uv run --no-project python scripts/docs/quickstarts.py` when scope justifies it.
 - Generated docs: update the source contract or generator where practical.

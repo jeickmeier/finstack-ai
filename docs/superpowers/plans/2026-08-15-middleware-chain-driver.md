@@ -62,7 +62,7 @@ and tests are unaffected; the feature is opt-in per agent.
   `EffectKind::Middleware` effect; stage settlement emits only
   `StageOutcomeRecorded` (`decide.rs:2369`). It is derived deterministically so
   replay reproduces it. Anything treating it as journaled is wrong.
-- **Public-surface mechanics.** `tools/compat/public_items.py` scrapes `pub use`
+- **Public-surface mechanics.** `scripts/compat/public_items.py` scrapes `pub use`
   blocks from exactly `crates/finstack-ai-kernel/src/lib.rs`,
   `crates/finstack-ai-runtime/src/lib.rs`, and `crates/finstack-ai/src/lib.rs`.
   Removals and renames fail `public_item_lists_reject_renames`
@@ -299,7 +299,7 @@ Expected: PASS
 
 - [ ] **Step 5: Verify no public surface moved**
 
-Run: `uv run --no-project python tools/compat/public_items.py --check`
+Run: `uv run --no-project python scripts/compat/public_items.py --check`
 Expected: exit 0, no missing items reported.
 
 ---
@@ -685,7 +685,7 @@ or `public_item_lists_reject_renames` will fail.
 
 Run: `cargo test -p finstack-ai-runtime --locked`
 Run: `cargo test -p finstack-ai --locked`
-Run: `uv run --no-project python tools/compat/public_items.py --check`
+Run: `uv run --no-project python scripts/compat/public_items.py --check`
 Expected: all PASS, compat exits 0.
 
 - [ ] **Step 7: Commit**
@@ -1245,7 +1245,7 @@ Add every new `pub use` name to
 `fixtures/compatibility/breaking/public-rust-api/valid--v0.1.0-public-items.txt`
 in sorted position.
 
-Run: `uv run --no-project python tools/compat/public_items.py --check`
+Run: `uv run --no-project python scripts/compat/public_items.py --check`
 Expected: exit 0.
 
 Run: `cargo test -p finstack-ai-test --offline --locked --test breaking_change`

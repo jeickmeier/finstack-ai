@@ -12,7 +12,7 @@ Use this reference when a Rust public API is intended to appear in Python or WAS
 | Python exports | `bindings/finstack-ai-python/python/finstack_ai/__init__.py` |
 | WASM bindings | `bindings/finstack-ai-wasm/**` |
 | JS facade | `bindings/finstack-ai-wasm/js/src/**` |
-| Public items | `uv run --no-project python tools/compat/public_items.py --check` |
+| Public items | `uv run --no-project python scripts/compat/public_items.py --check` |
 | Conformance | `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` |
 
 ## Required Invariants
@@ -29,5 +29,5 @@ Use the narrowest meaningful checks first:
 
 - Python binding touched: rebuild the editable package, then targeted Python tests.
 - WASM binding touched: `mise run build-wasm -- release` / `mise run check-wasm`, then targeted WASM tests if present.
-- Public API renamed or moved: search stubs, exports, examples, and run `uv run --no-project python tools/compat/public_items.py --check`.
+- Public API renamed or moved: search stubs, exports, examples, and run `uv run --no-project python scripts/compat/public_items.py --check`.
 - Rust behavior changed: run targeted Rust tests before binding conformance tests.

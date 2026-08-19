@@ -124,7 +124,7 @@ Unsupported modalities keep failing closed with each provider's
 9. Bindings: Python gains `Agent.openrouter(...)` and an availability probe;
    `linked_providers()` widens from a 3-tuple to a 4-tuple. WASM gains a
    fail-closed `openrouter` method, and the crate is added to
-   `tools/wasm_package/check.py` `FORBIDDEN_WASM`.
+   `scripts/wasm_package/check.py` `FORBIDDEN_WASM`.
 
 ## Decisions — Phase 2 (media-generation toolset)
 

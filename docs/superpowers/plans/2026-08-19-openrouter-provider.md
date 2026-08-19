@@ -1652,7 +1652,7 @@ git commit -m "Expose the OpenRouter provider through the Python binding"
 
 **Files:**
 - Modify: `bindings/finstack-ai-wasm/src/agent/agent.rs` (add fail-closed `openrouter` method, ~line 111 region)
-- Modify: `tools/wasm_package/check.py` (~line 28: forbidden list)
+- Modify: `scripts/wasm_package/check.py` (~line 28: forbidden list)
 - Modify: `bindings/finstack-ai-wasm/js/generated/*` (regenerated artifacts)
 
 **Interfaces:**
@@ -1697,7 +1697,7 @@ In `bindings/finstack-ai-wasm/src/agent/agent.rs`, add `OpenRouterAgentSpec` to 
 
 - [ ] **Step 2: Forbid the crate in the wasm bundle**
 
-In `tools/wasm_package/check.py`, add to `FORBIDDEN_WASM` next to the other providers (~line 30):
+In `scripts/wasm_package/check.py`, add to `FORBIDDEN_WASM` next to the other providers (~line 30):
 
 ```python
         "finstack-ai-provider-openrouter",
@@ -1705,13 +1705,13 @@ In `tools/wasm_package/check.py`, add to `FORBIDDEN_WASM` next to the other prov
 
 - [ ] **Step 3: Rebuild wasm artifacts and run the package check**
 
-Find the wasm build/check tasks: `grep -n "wasm" mise.toml`. Run the wasm package build task (regenerates `bindings/finstack-ai-wasm/js/generated/*`) and then the check task that executes `tools/wasm_package/check.py`.
+Find the wasm build/check tasks: `grep -n "wasm" mise.toml`. Run the wasm package build task (regenerates `bindings/finstack-ai-wasm/js/generated/*`) and then the check task that executes `scripts/wasm_package/check.py`.
 Expected: build succeeds; check reports the forbidden-crate scan clean (the openrouter crate must NOT appear in the wasm dependency graph — only the spec type from `finstack-ai` does).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add bindings/finstack-ai-wasm tools/wasm_package/check.py
+git add bindings/finstack-ai-wasm scripts/wasm_package/check.py
 git commit -m "Add the fail-closed OpenRouter method to the WASM binding"
 ```
 
@@ -2022,7 +2022,7 @@ git commit -m "Implement the OpenRouter media generation tools with bounded resu
 **Files:**
 - Modify: `crates/finstack-ai/Cargo.toml` (optional dep on the media toolset under `native-tokio`, mirroring the `finstack-ai-sandbox-e2b` entry)
 - Modify: `crates/finstack-ai/src/agent/linked.rs` (`media_tools` flag + `OpenRouterMediaToolsSpec` on the other constructors)
-- Modify: `tools/wasm_package/check.py` (`FORBIDDEN_WASM` + the E2B-style off-wasm assertion if one exists for toolsets)
+- Modify: `scripts/wasm_package/check.py` (`FORBIDDEN_WASM` + the E2B-style off-wasm assertion if one exists for toolsets)
 - Modify: `bindings/finstack-ai-python/src/agent.rs`, `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi` (media kwargs on all four factories)
 - Modify: `bindings/finstack-ai-wasm/src/agent/agent.rs` (pass the new fields in the stubs)
 - Modify: `docs/site/provider.md`, `CHANGELOG.md`
@@ -2108,12 +2108,12 @@ In `linked.rs` tests, add `openrouter_media_tools_register_the_toolset` (constru
 
 - [ ] **Step 3: Packaging checks, bindings, and docs**
 
-Python: the `openrouter` factory gains keyword-only `media_tools = False`; the `openai`, `anthropic`, and `ollama` factories gain keyword-only `openrouter_media_api_key = None`, `openrouter_media_referer = None`, `openrouter_media_title = None`, mapped to `Some(OpenRouterMediaToolsSpec { .. })` when the key is set (key `None` + other media kwargs set is a `PyValueError`); mirror the kwargs in the `.pyi` stubs. WASM: the four stubs pass `media_tools: false` / `openrouter_media: None`. Add `"finstack-ai-tools-openrouter-media"` to `FORBIDDEN_WASM` in `tools/wasm_package/check.py`; copy the `e2b_is_not_a_wasm_host_sdk_dependency` guard into the media crate's tests, asserting the media crate stays off the `wasm-host` feature line. Update `docs/site/provider.md` (toolset paragraph) and `CHANGELOG.md`. Run the wasm package check task and the python build/test tasks from `mise.toml` — PASS.
+Python: the `openrouter` factory gains keyword-only `media_tools = False`; the `openai`, `anthropic`, and `ollama` factories gain keyword-only `openrouter_media_api_key = None`, `openrouter_media_referer = None`, `openrouter_media_title = None`, mapped to `Some(OpenRouterMediaToolsSpec { .. })` when the key is set (key `None` + other media kwargs set is a `PyValueError`); mirror the kwargs in the `.pyi` stubs. WASM: the four stubs pass `media_tools: false` / `openrouter_media: None`. Add `"finstack-ai-tools-openrouter-media"` to `FORBIDDEN_WASM` in `scripts/wasm_package/check.py`; copy the `e2b_is_not_a_wasm_host_sdk_dependency` guard into the media crate's tests, asserting the media crate stays off the `wasm-host` feature line. Update `docs/site/provider.md` (toolset paragraph) and `CHANGELOG.md`. Run the wasm package check task and the python build/test tasks from `mise.toml` — PASS.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/finstack-ai bindings tools/wasm_package/check.py docs/site/provider.md CHANGELOG.md Cargo.lock
+git add crates/finstack-ai bindings scripts/wasm_package/check.py docs/site/provider.md CHANGELOG.md Cargo.lock
 git commit -m "Wire the OpenRouter media toolset into the SDK and bindings"
 ```
 
@@ -2126,7 +2126,7 @@ git commit -m "Wire the OpenRouter media toolset into the SDK and bindings"
 - Create: `extensions/toolsets/finstack-ai-tools-openai-media/Cargo.toml`
 - Create: `extensions/toolsets/finstack-ai-tools-openai-media/src/lib.rs`
 - Modify: `crates/finstack-ai/Cargo.toml`, `crates/finstack-ai/src/agent/linked.rs` (`media_tools` on `OpenAiAgentSpec`)
-- Modify: `tools/wasm_package/check.py` (`FORBIDDEN_WASM`), python/wasm binding factories (`media_tools` kwarg on `openai`), `docs/site/provider.md`, `CHANGELOG.md`
+- Modify: `scripts/wasm_package/check.py` (`FORBIDDEN_WASM`), python/wasm binding factories (`media_tools` kwarg on `openai`), `docs/site/provider.md`, `CHANGELOG.md`
 
 **Interfaces:**
 - Produces: `OpenAiMediaConfig { pub api_key: String, pub endpoint: String, pub max_result_bytes: usize }`, `OpenAiMediaToolset::try_new(OpenAiMediaConfig) -> Result<Self, OpenAiMediaError>` publishing `openai_generate_image`, `openai_generate_speech`, `openai_transcribe_audio`; `OpenAiAgentSpec.media_tools: bool`.
@@ -2178,7 +2178,7 @@ Run: `cargo test -p finstack-ai openai` and the wasm/python check tasks — PASS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-openai-media crates/finstack-ai bindings tools/wasm_package/check.py docs/site/provider.md CHANGELOG.md
+git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-openai-media crates/finstack-ai bindings scripts/wasm_package/check.py docs/site/provider.md CHANGELOG.md
 git commit -m "Add the native OpenAI media toolset and SDK wiring"
 ```
 

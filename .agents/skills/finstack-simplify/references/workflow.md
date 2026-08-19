@@ -95,7 +95,7 @@ mise run check-wasm
 ### If the slice is Tier 3 or Tier 4 (any public surface change or invariant-sensitive)
 
 ```bash
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
 ```
 

@@ -47,7 +47,7 @@ coverage.xml
 pythonpath = ["tools", "bindings/finstack-ai-python/python"]
 testpaths = [
   "tools/architecture/tests",
-  "tools/ci/tests",
+  "scripts/ci/tests",
   "tools/security/tests",
   "tools/schema_governance/tests",
   "tools/benchmark/tests",
@@ -58,7 +58,7 @@ testpaths = [
 branch = true
 source = [
   "tools/architecture",
-  "tools/ci",
+  "scripts/ci",
   "tools/security",
   "tools/schema_governance",
   "tools/benchmark",

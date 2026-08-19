@@ -87,7 +87,7 @@ mise run check-all && mise run test-all
 ```bash
 mise run check-all && mise run test-all
 mise run build-wasm -- release && mise run check-wasm
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 ```
 
 **Bindings touched:** Python + WASM both updated. Public-item inventory updated.
@@ -115,7 +115,7 @@ uv run --no-project python tools/compat/public_items.py --check
 ```bash
 mise run check-all && mise run test-all
 mise run build-wasm -- release && mise run check-wasm
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests
 ```
 

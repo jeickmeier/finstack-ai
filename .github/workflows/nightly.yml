@@ -48,4 +48,4 @@ jobs:
       - name: Starter RC against staged canary artifacts
         run: |
           mise run build-wasm -- release
-          uv run --no-project python tools/docs/starter_rc.py
+          uv run --no-project python scripts/docs/starter_rc.py

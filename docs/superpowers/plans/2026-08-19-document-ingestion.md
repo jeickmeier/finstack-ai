@@ -14,7 +14,7 @@
 
 - Workspace lints/version/edition inherited: every new crate uses `.workspace = true` keys like `extensions/toolsets/finstack-ai-tools-calculator/Cargo.toml`.
 - `pdf-inspector` MUST be `default-features = false` (no OCR/PDFium/ONNX). `anydoc` uses default features (its default set is empty).
-- No additions to `FORBIDDEN_WASM` in `tools/wasm_package/check.py`; the wasm package check must stay green.
+- No additions to `FORBIDDEN_WASM` in `scripts/wasm_package/check.py`; the wasm package check must stay green.
 - Stable string constants exactly as spec'd: toolset id `finstack.tools.document`, tools `document_parse` / `pdf_classify`, error codes `document_invalid_arguments`, `document_parse_failed`, `document_too_large`, `document_source_unavailable`, `document_unsupported_format`, `document_path_unsupported` (lower snake_case values in `pub const` SCREAMING_SNAKE names, matching `CALCULATOR_INVALID_ARGUMENTS` precedent).
 - `MAX_RUN_ATTACHMENTS = 8`; input cap = `MAX_ARTIFACT_BYTES` (4 MiB); scanned PDF is a **success** with `requires_ocr: true`.
 - Middleware is fail-soft: parse/resolve failure injects a note, never fails the run.
@@ -2110,7 +2110,7 @@ pub struct AttachmentOption {
 
 - [ ] **Step 4: Run the wasm gate**
 
-Run: `python3 tools/wasm_package/check.py` (or the mise task wrapping it — grep `mise.toml` for `wasm_package`), plus the wasm build/test task.
+Run: `python3 scripts/wasm_package/check.py` (or the mise task wrapping it — grep `mise.toml` for `wasm_package`), plus the wasm build/test task.
 Expected: PASS with zero `FORBIDDEN_WASM` additions. If `anydoc` or `pdf-inspector` drags a forbidden dep into the wasm tree, STOP and report — that falsifies the spec's wasm-clean claim and the human partner decides (feature-gate the crates out of wasm vs. upstream fix).
 
 - [ ] **Step 5: Commit**
@@ -2155,7 +2155,7 @@ cargo clippy --workspace --all-targets
 cargo test --workspace
 ```
 
-plus the python test task, the wasm build/test task, and `python3 tools/wasm_package/check.py` (exact task names from `mise.toml`). All green before claiming completion — use the superpowers:verification-before-completion skill.
+plus the python test task, the wasm build/test task, and `python3 scripts/wasm_package/check.py` (exact task names from `mise.toml`). All green before claiming completion — use the superpowers:verification-before-completion skill.
 
 - [ ] **Step 4: Commit**
 

@@ -71,7 +71,7 @@ Run the **full finstack verify stack** for the affected layers. These commands a
 - Rust touched: `mise run check-all && mise run test-all`
 - WASM touched: `mise run check-wasm` (and `mise run build-wasm -- release` if you changed WASM bindings)
 - Python touched: include the Python portion of `mise run test-all` (rebuild the editable binding if you changed Rust code that PyO3 binds)
-- Public-surface impact: `uv run --no-project python tools/compat/public_items.py --check` and `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` when names, signatures, or fixtures changed.
+- Public-surface impact: `uv run --no-project python scripts/compat/public_items.py --check` and `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` when names, signatures, or fixtures changed.
 
 Prefer the repo `mise run` tasks from `AGENTS.md` for verification. Use focused checks while iterating and broader `mise run ci-all` only when the slice is broad enough to justify it.
 

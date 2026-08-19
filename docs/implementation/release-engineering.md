@@ -12,13 +12,13 @@ label default is `1.0.0-canary`.
 
 | Artifact | Command |
 | --- | --- |
-| Two-run recreate (A01) | `uv run --no-project python tools/docs/recreate_release.py` |
-| Starter RC (A02) | `uv run --no-project python tools/docs/starter_rc.py` |
+| Two-run recreate (A01) | `uv run --no-project python scripts/docs/recreate_release.py` |
+| Starter RC (A02) | `uv run --no-project python scripts/docs/starter_rc.py` |
 | Published conformance (A03) | `cargo test -p finstack-ai-test --locked --lib -- conformance::ports::tests` |
-| Hotfix pair (A04) | `uv run --no-project python tools/docs/hotfix_rehearsal.py` |
+| Hotfix pair (A04) | `uv run --no-project python scripts/docs/hotfix_rehearsal.py` |
 | Advisories / licenses / sources | `cargo-deny check` (also via `mise run ci-all`) |
-| npm stage | `mise run build-wasm -- release` then `uv run --no-project python tools/wasm_package/stage.py` |
-| WIT | `uv run --no-project python tools/wit_bindgen/generate.py --check` |
+| npm stage | `mise run build-wasm -- release` then `uv run --no-project python scripts/wasm_package/stage.py` |
+| WIT | `uv run --no-project python scripts/wit_bindgen/generate.py --check` |
 
 `SOURCE_DATE_EPOCH=0` is the reproducibility pin (WASM and staging).
 
@@ -36,7 +36,7 @@ sentence. Tag push, registry publish, GitHub Release, announce, and
 `release/1.0` remain separately named.
 
 1. Land the release commit on the authorized target.
-2. Recreate: `uv run --no-project python tools/docs/recreate_release.py`. Retain
+2. Recreate: `uv run --no-project python scripts/docs/recreate_release.py`. Retain
    `docs/implementation/artifacts/pr-066/run-a.SHA256SUMS`.
 3. `git tag -a v1.0.0 <commit>` (executed locally; not pushed).
 4. Publish crates, wheels, npm, and WIT only after a later sentence
@@ -60,7 +60,7 @@ a **separately named** external action. Do not run it from this PR.
 
 `.github/workflows/nightly.yml` is schedule + `workflow_dispatch`.
 It builds canary staging (`0.1.0-canary`) and runs
-`uv run --no-project python tools/docs/starter_rc.py`. Dispatching hosted nightly is a separately
+`uv run --no-project python scripts/docs/starter_rc.py`. Dispatching hosted nightly is a separately
 named external action. Canary artifacts stay unpublished and must
 not claim `1.0.0`.
 
@@ -71,7 +71,7 @@ Maintainers stage patch-line set H and, after a named publish
 action, release H as the next patch. Do not rewrite published
 bytes.
 
-Rehearsal: `uv run --no-project python tools/docs/hotfix_rehearsal.py` writes `SHA256SUMS-B` and
+Rehearsal: `uv run --no-project python scripts/docs/hotfix_rehearsal.py` writes `SHA256SUMS-B` and
 `SHA256SUMS-H` under `docs/implementation/artifacts/pr-065/` and
 asserts B ≠ H while a documented pin of B still verifies.
 
@@ -97,10 +97,10 @@ restore, and rollback procedure.
 | Control | Evidence |
 | --- | --- |
 | Dependency advisories/licenses/sources checked continuously | Restored `deny.toml` + `cargo-deny check` via `mise run ci-all` (closes FIND-064-004) |
-| SBOM, checksums, provenance | `uv run --no-project python tools/docs/recreate_release.py` |
+| SBOM, checksums, provenance | `uv run --no-project python scripts/docs/recreate_release.py` |
 | Signatures where the ecosystem supports them | Procedure only; hosted Sigstore stays separately named |
 | Reproducible release | Two-run SHA-256 identity; `SOURCE_DATE_EPOCH=0` |
-| Rollback / hotfix | `uv run --no-project python tools/docs/hotfix_rehearsal.py`; yank commands documented not run |
+| Rollback / hotfix | `uv run --no-project python scripts/docs/hotfix_rehearsal.py`; yank commands documented not run |
 | Least-privilege release credentials | No registry tokens in this tree; workflows use `contents: read` |
 
 This review is not `G8-D-*`. G8 later passed via

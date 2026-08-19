@@ -61,16 +61,16 @@ mise run test-python
 description = "WASM target checks, package gates, and the three-browser harness"
 run = """
 set -euo pipefail
-. ./tools/ci/lib.sh
-uv run --no-project python tools/perf/check_size_budgets.py
+. ./scripts/ci/lib.sh
+uv run --no-project python scripts/perf/check_size_budgets.py
 cargo check -p finstack-ai-kernel --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-runtime --target wasm32-unknown-unknown --locked --features wasm-host
 cargo check -p finstack-ai --target wasm32-unknown-unknown --locked --no-default-features --features wasm-host
 cargo check -p finstack-ai-model-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-toolset-port-leaf-fixture --target wasm32-unknown-unknown --locked
 cargo check -p finstack-ai-extension-port-leaf-fixture --target wasm32-unknown-unknown --locked
-uv run --no-project python tools/wasm_package/check.py graph
-uv run --no-project python tools/wasm_package/check.py secrets
+uv run --no-project python scripts/wasm_package/check.py graph
+uv run --no-project python scripts/wasm_package/check.py secrets
 echo "controls: Engineering Standards §9; Threat Model TM-18; Threat Model §§12-13"
 mise run check-wasm
 if wasm_repro_needed; then
@@ -164,9 +164,9 @@ build_wasm() {
   build_glue
   if [ "${FINSTACK_WASM_REPRO:-0}" = "1" ]; then
     snapshot="$(mktemp)"
-    uv run --no-project python tools/wasm_package/check.py snapshot "${snapshot}"
+    uv run --no-project python scripts/wasm_package/check.py snapshot "${snapshot}"
     build_glue
-    uv run --no-project python tools/wasm_package/check.py compare "${snapshot}"
+    uv run --no-project python scripts/wasm_package/check.py compare "${snapshot}"
     rm -f "${snapshot}"
   fi
   if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
@@ -233,7 +233,7 @@ mise run test-wasm
 description = "Workspace nextest (not plugin-host), venv pytest, and Chromium-only WASM"
 run = """
 set -euo pipefail
-. ./tools/ci/lib.sh
+. ./scripts/ci/lib.sh
 export PATH="$(mise where cargo:cargo-nextest)/bin:${PATH}"
 test_fast() {
   cargo nextest run --workspace --locked --exclude finstack-ai-plugin-host --exclude finstack-ai-wasm
@@ -245,7 +245,7 @@ test_fast() {
   if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
     FINSTACK_WASM_REPRO=0 mise run build-wasm -- release-fast
   fi
-  uv run --no-project python tools/wasm_package/check.py generated
+  uv run --no-project python scripts/wasm_package/check.py generated
   if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
     npm --prefix bindings/finstack-ai-wasm/js ci
   fi
@@ -282,12 +282,12 @@ uv run pytest -q
 description = "Type-check and run the headless Chromium, Firefox, and WebKit WASM harness"
 run = """
 set -euo pipefail
-. ./tools/ci/lib.sh
+. ./scripts/ci/lib.sh
 test_wasm() {
   if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
     mise run build-wasm -- release
   fi
-  uv run --no-project python tools/wasm_package/check.py generated
+  uv run --no-project python scripts/wasm_package/check.py generated
   if [ ! -d bindings/finstack-ai-wasm/js/node_modules ]; then
     npm --prefix bindings/finstack-ai-wasm/js ci
   fi
@@ -296,7 +296,7 @@ test_wasm() {
   fi
   ensure_playwright_browsers chromium firefox webkit
   npm --prefix bindings/finstack-ai-wasm/js test
-  uv run --no-project python tools/wasm_package/check.py size
+  uv run --no-project python scripts/wasm_package/check.py size
 }
 test_wasm
 """
@@ -382,7 +382,7 @@ export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
 uv run --no-project --with maturin==1.14.1 \
   maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --features benchmark-fixture,extension-module
-uv run --no-project --with pydantic==2.12.5 python tools/perf/python_fast_path.py "$@"
+uv run --no-project --with pydantic==2.12.5 python scripts/perf/python_fast_path.py "$@"
 """
 
 [tasks.bench-wasm]
@@ -401,5 +401,5 @@ run = """
 set -euo pipefail
 mise install cargo:cargo-public-api rust@nightly-2025-08-02
 export PATH="$(mise where cargo:cargo-public-api)/bin:${PATH}"
-uv run --no-project python tools/compat/public_items.py --check
+uv run --no-project python scripts/compat/public_items.py --check
 """

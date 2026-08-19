@@ -57,8 +57,8 @@ the public index and does not replace either layer.
 mise run check-all
 mise run test-fast
 mise run test-all
-uv run --no-project python tools/docs/links.py
-uv run --no-project python tools/docs/quickstarts.py
-uv run python tools/docs/notebooks.py
-uv run --no-project python tools/plugin_wasm/template_check.py
+uv run --no-project python scripts/docs/links.py
+uv run --no-project python scripts/docs/quickstarts.py
+uv run python scripts/docs/notebooks.py
+uv run --no-project python scripts/plugin_wasm/template_check.py
 ```

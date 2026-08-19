@@ -37,7 +37,7 @@ Architecture and dependency suppressions are enforced by the surviving graph che
 
 - an accepted ADR identifier in the `ADR` column;
 - a matching entry in [`deny.toml`](../../deny.toml) (`exceptions = []` today; cargo-deny six target triples) whose exception identity equals this register's Exception ID; and
-- a non-waivable rejection for kernel I/O / forbidden kernel dependencies and six-port contract ownership, enforced by [`tools/wasm_package/check.py`](../../tools/wasm_package/check.py) `check_graph()` plus the four native graph tests in `crates/finstack-ai-test/tests/journal_v1.rs`, `extensions/stores/finstack-ai-store-sqlite/tests/faults.rs`, `plugins/finstack-ai-plugin-host/src/lib.rs`, and `plugins/finstack-ai-guest-sdk/src/lib.rs`.
+- a non-waivable rejection for kernel I/O / forbidden kernel dependencies and six-port contract ownership, enforced by [`scripts/wasm_package/check.py`](../../scripts/wasm_package/check.py) `check_graph()` plus the four native graph tests in `crates/finstack-ai-test/tests/journal_v1.rs`, `extensions/stores/finstack-ai-store-sqlite/tests/faults.rs`, `plugins/finstack-ai-plugin-host/src/lib.rs`, and `plugins/finstack-ai-guest-sdk/src/lib.rs`.
 
 ## Exception event log
 
