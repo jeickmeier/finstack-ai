@@ -26,12 +26,20 @@ struct CatalogModel {
     top_provider: Option<TopProvider>,
     #[serde(default)]
     supported_parameters: Vec<String>,
+    #[serde(default)]
+    architecture: Option<Architecture>,
 }
 
 #[derive(Deserialize)]
 struct TopProvider {
     #[serde(default)]
     max_completion_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct Architecture {
+    #[serde(default)]
+    input_modalities: Vec<String>,
 }
 
 /// Map one `GET /api/v1/models` response body onto conservative model configs.
@@ -67,6 +75,12 @@ pub fn model_configs_from_catalog_json(
         let reserved_output_tokens =
             max_output_tokens.min(context_window_tokens - PROVIDER_OVERHEAD_TOKENS);
         let supports = |name: &str| model.supported_parameters.iter().any(|p| p == name);
+        let modality = |name: &str| {
+            model
+                .architecture
+                .as_ref()
+                .is_some_and(|arch| arch.input_modalities.iter().any(|m| m == name))
+        };
         let config = OpenRouterModelConfig::try_new(
             &model.id,
             hard_input_bytes,
@@ -76,7 +90,10 @@ pub fn model_configs_from_catalog_json(
             PROVIDER_OVERHEAD_TOKENS,
         )?
         .with_parallel_tool_calls(supports("tools"))
-        .with_reasoning(supports("reasoning") || supports("include_reasoning"));
+        .with_reasoning(supports("reasoning") || supports("include_reasoning"))
+        .with_input_images(modality("image"))
+        .with_input_audio(modality("audio"))
+        .with_input_files(modality("file"));
         configs.push(config);
     }
     if configs.is_empty() {
@@ -99,7 +116,8 @@ mod tests {
           "context_length": 400000,
           "pricing": {"prompt": "0.00000125", "completion": "0.00001"},
           "top_provider": {"max_completion_tokens": 128000},
-          "supported_parameters": ["tools", "reasoning", "structured_outputs"]
+          "supported_parameters": ["tools", "reasoning", "structured_outputs"],
+          "architecture": {"input_modalities": ["text", "image"]}
         },
         {
           "id": "tiny/no-window",
@@ -122,6 +140,7 @@ mod tests {
         assert_eq!(configs[0].max_output_tokens, 128_000);
         assert!(configs[0].parallel_tool_calls);
         assert!(configs[0].reasoning);
+        assert!(configs[0].input_images && !configs[0].input_audio);
         assert_eq!(configs[1].name.as_str(), "mistral/basic");
         assert_eq!(configs[1].max_output_tokens, 32_768 / 4);
         assert!(!configs[1].parallel_tool_calls);

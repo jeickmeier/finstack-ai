@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
-    ModelContextProfile, ModelError, ModelName, SecretString, StructuredOutputCapability,
-    TokenEstimatorRef, TokenEstimatorSource,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
+    ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -79,6 +79,7 @@ pub struct OpenRouterConfig {
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
 impl fmt::Debug for OpenRouterConfig {
@@ -95,6 +96,14 @@ impl fmt::Debug for OpenRouterConfig {
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
+            .field(
+                "media_resolver",
+                if self.media_resolver.is_some() {
+                    &"[resolver]"
+                } else {
+                    &"None"
+                },
+            )
             .finish()
     }
 }
@@ -130,6 +139,7 @@ impl OpenRouterConfig {
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
             max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
+            media_resolver: None,
         })
     }
 
@@ -213,6 +223,26 @@ impl OpenRouterConfig {
         self.max_event_bytes = max_event_bytes;
         self.max_stream_bytes = max_stream_bytes;
         Ok(self)
+    }
+
+    /// Attach a host-supplied media resolver enabling image/audio/file input.
+    ///
+    /// Audio input in particular is mapped to the `OpenRouter` Responses
+    /// `input_audio` item type per this crate's [Task 16 brief][`with_input_audio`];
+    /// `OpenRouter`'s support for audio input on the Responses endpoint
+    /// (as opposed to the documented `chat/completions` path) is unverified,
+    /// so hosts should enable [`OpenRouterModelConfig::with_input_audio`]
+    /// only after confirming the target model actually accepts it.
+    ///
+    /// [`with_input_audio`]: OpenRouterModelConfig::with_input_audio
+    #[must_use]
+    pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
+        self.media_resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
     }
 
     fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
@@ -323,6 +353,10 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
 
 /// Provider facts for one configured `OpenRouter` model name.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent, host-toggled capability advertisement"
+)]
 pub struct OpenRouterModelConfig {
     /// Provider model name (opaque; `:nitro` / `:floor` suffixes are allowed).
     pub name: ModelName,
@@ -340,6 +374,12 @@ pub struct OpenRouterModelConfig {
     pub parallel_tool_calls: bool,
     /// Whether the configured model advertises reasoning content.
     pub reasoning: bool,
+    /// Whether the configured model accepts image input.
+    pub input_images: bool,
+    /// Whether the configured model accepts audio input.
+    pub input_audio: bool,
+    /// Whether the configured model accepts file input.
+    pub input_files: bool,
 }
 
 impl OpenRouterModelConfig {
@@ -394,6 +434,9 @@ impl OpenRouterModelConfig {
             provider_overhead_tokens,
             parallel_tool_calls: true,
             reasoning: false,
+            input_images: false,
+            input_audio: false,
+            input_files: false,
         })
     }
 
@@ -411,14 +454,39 @@ impl OpenRouterModelConfig {
         self
     }
 
+    /// Advertise image input support for this model only.
+    #[must_use]
+    pub const fn with_input_images(mut self, enabled: bool) -> Self {
+        self.input_images = enabled;
+        self
+    }
+
+    /// Advertise audio input support for this model only.
+    ///
+    /// `OpenRouter`'s support for `input_audio` on the Responses endpoint is
+    /// unverified (see [`OpenRouterConfig::with_media_resolver`]); enable
+    /// only after confirming the target model actually accepts it.
+    #[must_use]
+    pub const fn with_input_audio(mut self, enabled: bool) -> Self {
+        self.input_audio = enabled;
+        self
+    }
+
+    /// Advertise file input support for this model only.
+    #[must_use]
+    pub const fn with_input_files(mut self, enabled: bool) -> Self {
+        self.input_files = enabled;
+        self
+    }
+
     pub(crate) fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: InputCapabilities {
                 text: true,
                 json: true,
-                images: false,
-                audio: false,
-                files: false,
+                images: self.input_images,
+                audio: self.input_audio,
+                files: self.input_files,
             },
             context_profile: ModelContextProfile {
                 provider: Arc::from("openrouter"),
@@ -449,6 +517,9 @@ impl OpenRouterModelConfig {
         self.reserved_output_tokens = update.context_profile.reserved_output_tokens;
         self.provider_overhead_tokens = update.context_profile.provider_overhead_tokens;
         self.parallel_tool_calls = update.parallel_tool_calls;
+        self.input_images = update.input.images;
+        self.input_audio = update.input.audio;
+        self.input_files = update.input.files;
     }
 }
 
@@ -465,6 +536,24 @@ mod tests {
     use super::*;
 
     const CANARY: &str = "sk-or-secret-canary-100";
+
+    #[derive(Debug)]
+    struct FixtureResolver;
+
+    impl finstack_ai_runtime::MediaResolver for FixtureResolver {
+        fn resolve(
+            &self,
+            _blob: &finstack_ai_kernel::BlobRef,
+        ) -> finstack_ai_runtime::PortFuture<
+            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        > {
+            Box::pin(async {
+                Ok(finstack_ai_runtime::ResolvedMedia::Url(Arc::from(
+                    "https://example.test/a.png",
+                )))
+            })
+        }
+    }
 
     #[test]
     fn secret_values_are_redacted_from_all_debug_surfaces() {
@@ -484,6 +573,17 @@ mod tests {
             assert!(!rendered.contains(CANARY));
         }
         assert!(format!("{header:?}").contains("REDACTED"));
+    }
+
+    #[test]
+    fn debug_with_resolver_attached_redacts_and_hides_resolver_internals() {
+        let config = OpenRouterConfig::try_new("https://openrouter.test")
+            .expect("config")
+            .with_media_resolver(Arc::new(FixtureResolver));
+        let rendered = format!("{config:?}");
+        assert!(rendered.contains("[resolver]"));
+        assert!(!rendered.contains("FixtureResolver"));
+        assert!(config.media_resolver().is_some());
     }
 
     #[test]
