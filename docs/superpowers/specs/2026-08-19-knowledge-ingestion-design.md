@@ -79,6 +79,7 @@ does not (no embeddings API).
 
    ```rust
    pub trait ChunkIndex: PortObject {
+       fn capabilities(&self) -> ChunkIndexCapabilities;
        fn upsert(&self, records: Arc<[ChunkRecord]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
        fn search(&self, query: ChunkQuery) -> PortFuture<Result<Vec<ChunkHit>, KnowledgeStoreError>>;
        fn get_chunks(&self, source: SourceId, range: ChunkRange) -> PortFuture<Result<Vec<ChunkRecord>, KnowledgeStoreError>>;
@@ -125,13 +126,20 @@ does not (no embeddings API).
      document name, format, page/heading provenance. `chunk_digest` (digest of the chunk
      text) drives incremental re-ingest (decision 15). `vector` is optional so keyword-only
      collections work without an embedder.
-   - `ChunkQuery { collection: CollectionId, mode: SearchMode, top_k: u32, filter: Metadata }`
+   - `ChunkQuery { collection: CollectionId, mode: SearchMode, top_k: u32, filter: Metadata, options: Metadata }`
      with `SearchMode::Semantic { vector: Arc<[f32]> } | Keyword { text: Arc<str> } |
      Hybrid { vector: Arc<[f32]>, text: Arc<str> }`. Filter is exact key/value match in
-     v1. `ChunkHit { record fields, score: f32 }`, descending. Semantic scoring is cosine
-     similarity; keyword scoring is BM25 over chunk text; hybrid fuses both rankings with
-     reciprocal rank fusion (RRF, k=60) — RRF over weighted-sum because it needs no score
-     normalization across backends.
+     v1. `options` is a backend passthrough (unknown keys ignored) so engine-specific
+     tuning never needs a port change. `ChunkHit { record fields, score: f32 }`,
+     descending; scores are comparable within one result set only, never across
+     backends. **Scoring algorithms are backend-defined, not port contract**: the port
+     specifies mode semantics (vector similarity / text relevance / a fusion of both),
+     while each backend implements them with whatever library or engine it wraps — the
+     shipped backends use cosine, BM25, and RRF (decisions 26–27), an external engine
+     (Tantivy, Qdrant, pgvector+FTS) plugs in its native ranking unchanged.
+     `ChunkIndexCapabilities` reports which `SearchMode`s are native plus feature flags
+     (e.g. `native_hybrid`); callers adapt (decision 22), and querying an unsupported
+     mode returns `KnowledgeStoreError::Unsupported`.
    - `SourceRecord { collection: CollectionId, source: SourceId, name: Option<Arc<str>>,
      format: Arc<str>, page_count: Option<u32>, ingested_at: Timestamp, chunk_count: u32,
      chunk_digests: Arc<[Digest]>, graph_template: Option<(Arc<str>, u32)>,
@@ -178,10 +186,38 @@ does not (no embeddings API).
    graph branch and catalog entry are whole-source replace (`delete_by_source` + insert).
 7. **`KnowledgeStoreError`** follows existing port-error shape: stable non-secret variants
    (`Unavailable`, `InvalidQuery`, `DimensionMismatch { expected, got }`,
-   `UnknownCollection`, `Internal`), no provider/store internals leaked. A `ChunkIndex`
-   implementation must reject vectors whose dimension differs from the collection's
-   first-inserted dimension with `DimensionMismatch`. Import validates records against
-   the same rules as upsert.
+   `UnknownCollection`, `Unsupported { what }`, `Internal`), no provider/store internals
+   leaked. A `ChunkIndex` implementation must reject vectors whose dimension differs from
+   the collection's first-inserted dimension with `DimensionMismatch`. Import validates
+   records against the same rules as upsert.
+
+7a. **Evolution policy — the whole surface is built to be amended.** AI retrieval is
+    moving fast; the port layer must absorb new methods, modes, and fields without
+    breaking implementors or stored data:
+    - **Non-exhaustive everything**: every public struct and enum in `ports/embedding`
+      and `ports/knowledge` (`ChunkRecord`, `ChunkQuery`, `SearchMode`, `ChunkHit`,
+      `SourceRecord`, `Entity`, `Relation`, `Community`, `GraphQuery`, `EntityLookup`,
+      capability structs, descriptors, error enums) is `#[non_exhaustive]` with
+      constructor/builder functions, so fields and variants are additive, and matches in
+      host code carry wildcard arms from day one.
+    - **Additive trait methods**: new port-trait methods ship with default
+      implementations returning `KnowledgeStoreError::Unsupported` (or the port's
+      equivalent), so existing store/embedder/reranker implementations keep compiling.
+      Capability structs are how callers discover what a given implementation actually
+      supports; capability structs gain fields with defaults for the same reason.
+    - **Options escape hatches**: `ChunkQuery`, `GraphQuery`, `CommunityQuery`,
+      `EmbeddingBatch`, and `IngestOptions` each carry an `options: Metadata` passthrough
+      for backend/model-specific parameters. Unknown keys are ignored, never errors —
+      a new technique can be piloted through options before it earns a typed field.
+    - **Metadata on every record**: stored records keep their `Metadata` bags, so new
+      per-record annotations (e.g. an embedding-model id, a late-interaction payload, a
+      new provenance kind) need no schema change. Reserved keys are documented under a
+      `finstack.` prefix; the pipeline stamps `finstack.embedding_model` on chunk and
+      entity records so future model migrations are detectable.
+    - **Pluggable strategies over hard-coded algorithms**: keyword/hybrid scoring is
+      backend-defined (decision 4); fusion for non-native-hybrid backends is a
+      `FusionStrategy` trait (decision 8a); chunking, extraction, and reranking are
+      already traits. Nothing in the port layer names a specific algorithm or library.
 
 ### Pipeline (`extensions/ingest/finstack-ai-ingest`)
 
@@ -210,6 +246,15 @@ does not (no embeddings API).
    query/maintenance components (`ModelGraphExtractor`, `ModelReranker`,
    `CommunityBuilder`) because they share its `ModelDriver`-wrapping machinery; hosts
    construct them here and hand them to query surfaces as trait objects.
+8a. **`FusionStrategy` makes hybrid search library-agnostic.** A local trait in the
+    engine crate: `fn fuse(&self, rankings: &[&[ChunkHit]], top_k: u32) -> Vec<ChunkHit>`.
+    When a `ChunkIndex` reports `native_hybrid` (Qdrant-style engines, or the shipped
+    backends' internal fusion), `SearchMode::Hybrid` goes straight to the backend; when
+    it does not, query surfaces run the semantic and keyword searches separately and
+    fuse with the configured strategy. The engine ships `RrfFusion` (k=60, chosen as
+    default because it needs no score normalization across backends) and
+    `WeightedScoreFusion { alpha }`; hosts plug in their own. The toolset and context
+    provider accept an optional `Arc<dyn FusionStrategy>` (default `RrfFusion`).
 9. **`IngestSource`** mirrors the document toolset's source union: `Bytes { bytes, media_type_hint, name }`
    or `Artifact { store: Arc<dyn ArtifactStore>, scope, artifact }` (resolved and
    digest-verified exactly as the document middleware does). Markdown that is already
@@ -354,8 +399,14 @@ does not (no embeddings API).
     `Arc<dyn SourceCatalog>`, and optionally `Arc<dyn EmbeddingModel>` +
     `Arc<dyn ChunkIndex>`, `Arc<dyn GraphStore>`, and `Arc<dyn Reranker>`; only the tools
     whose dependencies are present appear in `tools()`.
-    - `semantic_search { query: String, top_k?: u32 (default 8, max 32), mode?: "semantic" | "keyword" | "hybrid" (default hybrid when both available), expand?: u8 (default 0, max 2), filter?: object }`
+    - `semantic_search { query: String, top_k?: u32 (default 8, max 32), mode?: "semantic" | "keyword" | "hybrid", expand?: u8 (default 0, max 2), filter?: object }`
       → embeds the query (`Query` input kind) as needed by mode, searches, optionally
+      reranks and expands. Mode handling is capability-driven: the default is the
+      richest mode the index supports (hybrid → semantic → keyword), hybrid uses the
+      backend natively or the configured `FusionStrategy` (decision 8a), and an
+      explicitly requested unsupported mode returns `KNOWLEDGE_INVALID_ARGUMENTS`
+      naming the supported modes. The tool description reflects the constructed
+      capabilities. The search then optionally
       reranks (when a `Reranker` is configured, over 4× top_k candidates, returning
       top_k), then expands each hit by `expand` neighboring chunks per side via
       `get_chunks` (merged, deduplicated). Returns ranked excerpts with text, score, and
@@ -395,14 +446,18 @@ does not (no embeddings API).
 
 26. **`finstack-ai-knowledge-memory`**: one crate implementing all three stores —
     `Vec`-backed brute-force cosine search, an in-memory inverted index with BM25 for
-    keyword/hybrid, adjacency-map graph with communities, and a `HashMap` catalog.
-    Wasm-clean; the backend used by all tests and the wasm binding.
+    keyword search, internal RRF for hybrid (reports all three modes native),
+    adjacency-map graph with communities, and a `HashMap` catalog. These algorithm
+    choices are private to the backend, per decision 4. Wasm-clean; the backend used by
+    all tests and the wasm binding.
 27. **`finstack-ai-knowledge-sqlite`**: follows the store-sqlite worker/schema pattern.
-    Vectors as BLOBs with brute-force scan in v1; keyword search via SQLite FTS5 (bundled
-    in the workspace's existing SQLite dependency) with BM25 ranking; hybrid = RRF over
-    the two queries. Graph as entity/relation/community tables with indexed name/type
-    lookups; catalog as a sources table. An sqlite-vec/ANN upgrade later is a
-    non-breaking internal change. Native-only; not in the wasm build.
+    Vectors as BLOBs with brute-force scan in v1; keyword search via SQLite FTS5
+    (bundled in the workspace's existing SQLite dependency) with BM25 ranking; hybrid
+    via internal RRF (reports all three modes native). Graph as
+    entity/relation/community tables with indexed name/type lookups; catalog as a
+    sources table. All of this is private implementation behind the ports — swapping in
+    sqlite-vec/ANN, a different tokenizer, or a different fusion later is a non-breaking
+    internal change. Native-only; not in the wasm build.
 28. **External backends (Qdrant, LanceDB, pgvector, Neo4j) are future extension crates**
     behind the same ports; out of scope for v1.
 
@@ -439,8 +494,11 @@ does not (no embeddings API).
     test calls a real provider or model.
 34. **Test tiers**: unit tests per crate — chunker boundary cases on heading-heavy/table
     Markdown; dimension-mismatch and unknown-collection rejection; collection isolation
-    (records in one collection never surface in another's queries); BM25/hybrid ranking
-    sanity and RRF fusion; `get_chunks` range clamping and `expand` merging; graph
+    (records in one collection never surface in another's queries); keyword/hybrid
+    ranking sanity per backend; capability-driven mode selection, including a test
+    double that reports no `native_hybrid` to prove the `FusionStrategy` composition
+    path and a custom strategy plugging in; `Unsupported` returned (not panics) for
+    unimplemented modes/methods; `get_chunks` range clamping and `expand` merging; graph
     merge/dedup and semantic entity lookup; community detection determinism and
     wholesale replace; catalog round-trip and list filters; idempotent re-ingest,
     unchanged-source short-circuit, and chunk-level diff (reused vs re-embedded vs
