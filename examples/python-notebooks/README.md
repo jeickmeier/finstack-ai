@@ -1,6 +1,6 @@
 # Python learning notebooks
 
-Seven notebooks that teach `finstack_ai.Agent` as the composition root.
+Eight notebooks that teach `finstack_ai.Agent` as the composition root.
 There is no Python `Harness` type. A harness is the recipe: pick a
 provider factory, attach trusted Python ports, run, and inspect events.
 
@@ -48,13 +48,14 @@ uv run python scripts/docs/notebooks.py
 | [05_ollama_and_harness.ipynb](05_ollama_and_harness.ipynb) | T1 provider + T2 ports | Construct-only unless local Ollama has `gemma4:26b` |
 | [06_openai.ipynb](06_openai.ipynb) | T1 provider + T2 ports | Construct-only unless a key is set in the notebook or `OPENAI_API_KEY`. Set `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, and `OPENAI_REASONING_SUMMARY` in the first code cell |
 | [07_anthropic.ipynb](07_anthropic.ipynb) | T1 provider + T2 ports | Construct-only unless a key is set in the notebook or `ANTHROPIC_API_KEY` |
+| [08_document_ingestion.ipynb](08_document_ingestion.ipynb) | T2 callback | None |
 
 T1 native providers and T2 Python callbacks run in-process. They are not
 isolated. See [trust levels](../../../docs/site/security-trust-levels.md).
 
 ## Live cells
 
-Notebooks 01–04 stay offline. 05 constructs `Agent.ollama` with
+Notebooks 01–04 and 08 stay offline. 05 constructs `Agent.ollama` with
 `gemma4:26b` (or `OLLAMA_MODEL`) and runs live when that model is
 installed at `http://127.0.0.1:11434`; otherwise the live cell skips
 and lists installed models. 06 and 07 construct offline and run live

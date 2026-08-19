@@ -9,7 +9,9 @@ use finstack_ai::runtime::{
     TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai::{Agent, AgentRunError};
+use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{AgentId, BundleId, ContentBlock, ProviderIds, TextBlock, Usage};
+use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,
@@ -107,6 +109,7 @@ async fn run_native_workload(deltas: usize, runs: usize) -> Result<u64, AgentRun
             None,
             empty_model_settings()?,
             "python-local",
+            Vec::new(),
         )?;
         let output = agent.inner.start(request)?.result().await?;
         black_box(output);
@@ -165,6 +168,11 @@ async fn build_agent(
             output_adapter: None,
             settings: empty_model_settings()?,
             default_timeout_seconds: 30.0,
+            // This fast-path benchmark agent registers no toolsets or
+            // middleware, so these are unused, dedicated instances rather
+            // than the shared ones a real agent factory wires up.
+            artifact_store: Arc::new(InProcessArtifactStore::default()),
+            attachment_index: Arc::new(AttachmentIndex::default()),
         },
         PyBenchmarkControl { model, control },
     ))

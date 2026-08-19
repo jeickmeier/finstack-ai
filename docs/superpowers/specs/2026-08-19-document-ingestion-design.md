@@ -112,22 +112,32 @@ Give agents first-class document ingestion, in two components plus one core API 
 13. **Create `extensions/middleware/finstack-ai-middleware-document-ingest`**
     implementing the runtime middleware trait (per compaction/verify precedent). It
     depends on `finstack-ai-tools-document` only for the `parser` module.
-14. **Middleware behavior**: during run preparation, scan incoming *user* message
-    content for `ContentBlock::File(MediaRef)` whose media type (or sniffed content)
-    is a supported document format. For each match: resolve bytes from the
-    `ArtifactStore`, verify length and digest against the `BlobRef`, parse via
-    `DocumentParser`, and **append** a `ContentBlock::Text` framed as:
-    `Attached document "<name>" (<format>, <n> pages, converted to Markdown):` followed
-    by the Markdown. The original `File` block is preserved unmodified in the
-    conversation record.
+14. **Middleware behavior** *(amended during implementation, 2026-08-19)*: implemented
+    as a `BeforeModel`-stage middleware that scans **`User`-role messages only** for
+    `ContentBlock::File(MediaRef)` whose media type is a supported document format.
+    For each match: resolve bytes via the `AttachmentIndex` + `ArtifactStore` (decision
+    19), verify the digest against the `BlobRef`, parse via `DocumentParser`, and
+    **replace** the `File` block — not append alongside it — with a `ContentBlock::Text`
+    framed as `Attached document "<name>" (<format>, <n> pages, converted to Markdown):`
+    followed by the Markdown (or a fail-soft note). The replacement happens only in the
+    model-visible `ModelRequestDraft`, emitted via `StageOutcome::Replace`; the
+    canonical, journaled `Message`s (and their `File` blocks) are never touched. Other
+    roles (`System`, `Developer`, `Assistant`, `Tool`) are passed through untouched
+    without inspection.
 15. **Scanned PDFs get a note, not content**: the appended text states the attachment
     is a scanned PDF and OCR is not enabled, so the model can respond honestly or
     reach for tools.
 16. **The middleware is fail-soft.** Resolution or parse failure appends a one-line
     explanatory note, emits an observer-visible event, and never aborts the run. A
     strict mode is not offered in v1.
-17. **Determinism**: parsing happens once, pre-model; the appended text becomes part
-    of the journaled conversation. Replay never re-parses. The middleware does no
+17. **Determinism** *(amended during implementation, 2026-08-19)*: because rewriting
+    targets the model-visible `ModelRequestDraft` rather than the journaled `Message`s
+    (decision 14), the converted Markdown is **not** part of the journaled
+    conversation — the canonical record keeps the original `File` block, unmodified,
+    forever. Parsing instead re-runs on **every** `BeforeModel` invocation that
+    includes the attachment (including replay and any retried/resumed model call),
+    each time producing the same replacement deterministically from the same staged
+    artifact bytes and the same `DocumentParser` limits. The middleware does no
     network or filesystem I/O beyond the `ArtifactStore` port.
 18. **`AgentRunRequest` gains `attachments: Arc<[AttachmentInput]>`** (empty by
     default; existing constructors unaffected):
@@ -143,11 +153,17 @@ Give agents first-class document ingestion, in two components plus one core API 
     `agent/prepare.rs` (and the session run path) maps each entry to a
     `ContentBlock::File(MediaRef(BlobRef))` on the user message. Role validation
     already permits `File` on `User`.
-19. **BlobRef↔ArtifactRef convention (frozen)**: `BlobRef.id` is the `ArtifactRef`
-    id verbatim; `BlobRef.digest` and `length` are copied from the staged artifact's
-    metadata. The middleware resolves bytes by constructing the `ArtifactRef` from
-    the `BlobRef.id` within the run's `ArtifactScope` and verifying the digest. No
-    new port or registry is introduced.
+19. **BlobRef→ArtifactRef resolution via `AttachmentIndex`** *(amended during
+    implementation, 2026-08-19)*: the original convention ("`BlobRef.id` is the
+    `ArtifactRef` id; reconstruct the ref") is unimplementable — `ArtifactStore`
+    implementations verify exact `ArtifactRef` equality against store-assigned
+    identities that a bare `BlobRef` cannot reproduce. Instead, a small bounded
+    in-process `AttachmentIndex` (`insert(ArtifactRef)`, `lookup(&BlobRef) ->
+    Option<ArtifactRef>`, keyed by blob id, FIFO-capped) is populated wherever
+    attachments are staged and injected into the ingest middleware at
+    construction. A lookup miss is a fail-soft skip note (decision 16). The
+    `ArtifactStore` port is unchanged. `BlobRef.digest`/`length` still come from
+    the staged artifact and are verified after fetch.
 20. **Attachment validation at request build time**: media type must parse; at most
     `MAX_RUN_ATTACHMENTS = 8` per run; each artifact must already be staged (the run
     API never accepts raw bytes). Violations are `AgentRunError` argument errors.

@@ -5,8 +5,8 @@ use finstack_ai_kernel::{
     AllocatedIds, AppendBatchTag, AuthorizationEvidence, BudgetPropagation, CancellationInitiator,
     CancellationPropagation, CancellationRequestTag, ContentBlock, ConversationEntry,
     DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, EventTag, KernelInput,
-    LaneCreated, LaneId, LaneMoved, LaneTag, Message, MessageId, MessageRole, MessageTag, Metadata,
-    ModelRequestTag, OperationLocator, OutputSpec, PrincipalPropagation, ProviderIds,
+    LaneCreated, LaneId, LaneMoved, LaneTag, MediaRef, Message, MessageId, MessageRole, MessageTag,
+    Metadata, ModelRequestTag, OperationLocator, OutputSpec, PrincipalPropagation, ProviderIds,
     RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, RecordBody, RecordDraft, RecordTag,
     ReducerStageOutcome, RunAccepted, RunPhase, RunPropagationPolicy, RunRelation, RunTag,
     Sensitivity, SessionCreated, SessionId, SessionTag, Stage, StageCursor, StageSettled,
@@ -39,8 +39,8 @@ use super::handle::Agent;
 use super::run::{AgentRunInner, publish_start_failure, publish_started};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
-    DEFAULT_EVENT_BATCH_BYTES, DEFAULT_EVENT_BATCH_COUNT, DEFAULT_EVENT_BATCH_INTERVAL,
-    DEFAULT_QUEUE_CAPACITY,
+    AttachmentInput, DEFAULT_EVENT_BATCH_BYTES, DEFAULT_EVENT_BATCH_COUNT,
+    DEFAULT_EVENT_BATCH_INTERVAL, DEFAULT_QUEUE_CAPACITY,
 };
 
 pub(super) struct PreparedAgentRun {
@@ -225,6 +225,7 @@ impl Agent {
                 prepared.session_id,
                 prepared.lane_id,
                 &prepared.request.input,
+                &prepared.request.attachments,
             )
             .await
             {
@@ -252,8 +253,13 @@ impl Agent {
                     return Err(error);
                 }
             };
-            if let Err(error) =
-                append_lane_input(&runtime, prepared.lane_id, &prepared.request.input).await
+            if let Err(error) = append_lane_input(
+                &runtime,
+                prepared.lane_id,
+                &prepared.request.input,
+                &prepared.request.attachments,
+            )
+            .await
             {
                 publish_start_failure(execution, &error);
                 return Err(error);
@@ -371,6 +377,7 @@ impl Agent {
     pub(super) fn context_messages(
         &self,
         input: &str,
+        attachments: &[AttachmentInput],
         committed: &[Message],
         extra_capability_instructions: &[crate::InstructionSpec],
     ) -> Result<Arc<[Message]>, AgentRunError> {
@@ -388,6 +395,7 @@ impl Agent {
                 MessageRole::System,
                 instruction.text(),
                 now,
+                &[],
             )?);
         }
         for instruction in extra_capability_instructions {
@@ -396,6 +404,7 @@ impl Agent {
                 MessageRole::System,
                 instruction.text(),
                 now,
+                &[],
             )?);
         }
         messages.push(text_message(
@@ -403,6 +412,7 @@ impl Agent {
             MessageRole::User,
             input,
             now,
+            attachments,
         )?);
         messages.extend_from_slice(committed);
         Ok(messages.into())
@@ -725,6 +735,7 @@ async fn append_lane_input(
     runtime: &SessionRuntime,
     lane_id: LaneId,
     input: &str,
+    attachments: &[AttachmentInput],
 ) -> Result<(), AgentRunError> {
     let now = NativeIds::now()?;
     let message = text_message(
@@ -732,6 +743,7 @@ async fn append_lane_input(
         MessageRole::User,
         input,
         now,
+        attachments,
     )?;
     runtime
         .append_message(
@@ -753,6 +765,7 @@ async fn bootstrap_main_lane(
     session_id: SessionId,
     lane_id: LaneId,
     input: &str,
+    attachments: &[AttachmentInput],
 ) -> Result<(), AgentRunError> {
     let now = NativeIds::now()?;
     let message = text_message(
@@ -760,6 +773,7 @@ async fn bootstrap_main_lane(
         MessageRole::User,
         input,
         now,
+        attachments,
     )?;
     let entry = ConversationEntry::from_message(&message, None, lane_id, 0).map_err(|error| {
         AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
@@ -832,15 +846,20 @@ fn text_message(
     role: MessageRole,
     text: &str,
     now: Timestamp,
+    attachments: &[AttachmentInput],
 ) -> Result<Message, AgentRunError> {
+    let mut blocks = vec![ContentBlock::Text(TextBlock::try_new(text).map_err(
+        |error| AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string()),
+    )?)];
+    for attachment in attachments {
+        blocks.push(ContentBlock::File(MediaRef::new(
+            attachment.artifact.blob().clone(),
+        )));
+    }
     Message::try_new(
         id,
         role,
-        vec![ContentBlock::Text(TextBlock::try_new(text).map_err(
-            |error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            },
-        )?)],
+        blocks,
         now,
         None,
         ProviderIds::empty(),

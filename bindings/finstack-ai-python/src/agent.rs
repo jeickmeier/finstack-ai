@@ -5,15 +5,18 @@ use std::time::Duration;
 
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
-use finstack_ai::runtime::{Model, ModelName, ModelSettings};
+use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
     GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
     OpenAiAgentSpec, Session,
 };
+use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
     AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Version,
 };
+use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
+use finstack_ai_tools_document::DocumentToolset;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -25,8 +28,8 @@ use crate::callbacks::{
 use crate::capability::PyCapability;
 use crate::errors::{agent_error, configuration_error, session_py_error};
 use crate::run::{
-    PreparedPydanticOutput, PyRun, prepare_pydantic_output, result_to_python_with_locator,
-    run_request,
+    PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
+    result_to_python_with_locator, run_request, stage_attachments,
 };
 use crate::session::PySession;
 
@@ -46,6 +49,12 @@ pub(crate) struct PyAgent {
     pub(crate) output_adapter: Option<Py<PyAny>>,
     pub(crate) settings: ModelSettings,
     pub(crate) default_timeout_seconds: f64,
+    /// Shared with the registered `DocumentToolset` and
+    /// `DocumentIngestMiddleware`. Run attachments are staged here before
+    /// submission so the middleware can resolve them back off the
+    /// `AttachmentIndex`.
+    pub(crate) artifact_store: Arc<InProcessArtifactStore>,
+    pub(crate) attachment_index: Arc<AttachmentIndex>,
 }
 
 #[pymethods]
@@ -79,7 +88,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -104,7 +113,9 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
         })
     }
 
@@ -136,7 +147,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -160,7 +171,9 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
         })
     }
 
@@ -190,7 +203,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -213,7 +226,9 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
         })
     }
 
@@ -249,7 +264,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -277,7 +292,9 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
         })
     }
 
@@ -309,7 +326,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'_, PyAny>> {
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -334,7 +351,9 @@ impl PyAgent {
                 },
             })
             .await;
-            Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
         })
     }
 
@@ -363,7 +382,7 @@ impl PyAgent {
         let model = model.borrow();
         let model_name = model.model_name();
         let model = model.registration();
-        let ports = linked_ports(
+        let (ports, artifact_store, attachment_index) = linked_ports(
             py,
             toolsets,
             context_providers,
@@ -384,6 +403,8 @@ impl PyAgent {
                 active_capabilities,
                 child_runs,
                 (sqlite_path, sqlite_durability),
+                artifact_store,
+                attachment_index,
             )
             .await;
             Python::attach(|py| match built {
@@ -424,6 +445,8 @@ impl PyAgent {
             .output_adapter
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             match agent.re_resolve().await {
                 Ok(inner) => Python::attach(|py| {
@@ -435,6 +458,8 @@ impl PyAgent {
                             output_adapter,
                             settings,
                             default_timeout_seconds,
+                            artifact_store,
+                            attachment_index,
                         },
                     )
                 }),
@@ -479,7 +504,11 @@ impl PyAgent {
     }
 
     /// Start a run and return its shared control handle immediately.
-    #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
+    #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run start forwards the same bounded run inputs plus staged attachments"
+    )]
     fn start(
         &self,
         py: Python<'_>,
@@ -488,6 +517,7 @@ impl PyAgent {
         max_cycles: u64,
         max_output_retries: u32,
         capability: Option<String>,
+        attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<PyRun> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
@@ -497,7 +527,18 @@ impl PyAgent {
             .output_adapter
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
+        let attachments = collect_attachments(py, attachments);
         py.detach(move || {
+            let runtime = pyo3_async_runtimes::tokio::get_runtime();
+            let _guard = runtime.enter();
+            let staged = runtime.block_on(stage_attachments(
+                artifact_store.as_ref(),
+                attachment_index.as_ref(),
+                "python-local",
+                attachments,
+            ))?;
             let request = run_request(
                 &model,
                 input,
@@ -507,9 +548,8 @@ impl PyAgent {
                 capability,
                 settings,
                 "python-local",
+                staged,
             )?;
-            let runtime = pyo3_async_runtimes::tokio::get_runtime();
-            let _guard = runtime.enter();
             agent.start(request).map(|inner| PyRun {
                 inner,
                 output_adapter,
@@ -519,7 +559,11 @@ impl PyAgent {
     }
 
     /// Execute one run and await its committed result.
-    #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
+    #[pyo3(signature = (input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run forwards the same bounded run inputs plus staged attachments"
+    )]
     fn run<'py>(
         &self,
         py: Python<'py>,
@@ -528,6 +572,7 @@ impl PyAgent {
         max_cycles: u64,
         max_output_retries: u32,
         capability: Option<String>,
+        attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
@@ -537,7 +582,21 @@ impl PyAgent {
             .output_adapter
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
+        let attachments = collect_attachments(py, attachments);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let staged = match stage_attachments(
+                artifact_store.as_ref(),
+                attachment_index.as_ref(),
+                "python-local",
+                attachments,
+            )
+            .await
+            {
+                Ok(staged) => staged,
+                Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
+            };
             let request = match run_request(
                 &model,
                 input,
@@ -547,6 +606,7 @@ impl PyAgent {
                 capability,
                 settings,
                 "python-local",
+                staged,
             ) {
                 Ok(request) => request,
                 Err(error) => return Python::attach(|py| Err(agent_error(py, &error, None))),
@@ -571,7 +631,7 @@ impl PyAgent {
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "lane start forwards the same bounded run inputs as Agent.start"
+        reason = "lane start forwards the same bounded run inputs plus staged attachments"
     )]
     pub(crate) fn start_on_lane(
         &self,
@@ -582,6 +642,7 @@ impl PyAgent {
         max_cycles: u64,
         max_output_retries: u32,
         capability: Option<String>,
+        attachments: Option<Vec<Py<PyAttachment>>>,
     ) -> PyResult<PyRun> {
         let model = self.model.clone();
         let agent = Arc::clone(&self.inner);
@@ -591,9 +652,20 @@ impl PyAgent {
             .output_adapter
             .as_ref()
             .map(|adapter| adapter.clone_ref(py));
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
+        let attachments = collect_attachments(py, attachments);
         let lane = lane.clone();
         let tenant_scope = lane.session().tenant_scope().to_string();
         py.detach(move || {
+            let runtime = pyo3_async_runtimes::tokio::get_runtime();
+            let _guard = runtime.enter();
+            let staged = runtime.block_on(stage_attachments(
+                artifact_store.as_ref(),
+                attachment_index.as_ref(),
+                &tenant_scope,
+                attachments,
+            ))?;
             let request = run_request(
                 &model,
                 input,
@@ -603,9 +675,8 @@ impl PyAgent {
                 capability,
                 settings,
                 &tenant_scope,
+                staged,
             )?;
-            let runtime = pyo3_async_runtimes::tokio::get_runtime();
-            let _guard = runtime.enter();
             lane.run(&agent, request).map(|inner| PyRun {
                 inner,
                 output_adapter,
@@ -632,6 +703,8 @@ fn wrap_linked_agent(
     py: Python<'_>,
     built: Result<LinkedAgent, AgentRunError>,
     output_adapter: Option<Py<PyAny>>,
+    artifact_store: Arc<InProcessArtifactStore>,
+    attachment_index: Arc<AttachmentIndex>,
 ) -> PyResult<Py<PyAgent>> {
     match built {
         Ok(value) => Py::new(
@@ -642,6 +715,8 @@ fn wrap_linked_agent(
                 output_adapter,
                 settings: value.settings,
                 default_timeout_seconds: value.default_timeout.as_secs_f64(),
+                artifact_store,
+                attachment_index,
             },
         ),
         Err(error) => Err(agent_error(py, &error, None)),
@@ -649,11 +724,72 @@ fn wrap_linked_agent(
 }
 
 struct LinkedPorts {
-    toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
+    toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
-    middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
+    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
     output: Option<PreparedPydanticOutput>,
+}
+
+/// Build a fresh, dedicated `InProcessArtifactStore` + `AttachmentIndex`
+/// pair plus the `DocumentToolset`/`DocumentIngestMiddleware` registrations
+/// that share them.
+///
+/// Every agent factory registers these unconditionally (mirroring the
+/// document-ingest lane test's wiring) so `Agent.run`/`start` can stage
+/// `Attachment` inputs against the exact store/index instances the
+/// toolset and middleware read from.
+/// `(artifact_store, attachment_index, toolset registration, middleware registration)`.
+type DocumentIngestPorts = (
+    Arc<InProcessArtifactStore>,
+    Arc<AttachmentIndex>,
+    (ComponentRef, Arc<dyn Toolset>),
+    (ComponentRef, Arc<dyn Middleware>),
+);
+
+/// `DocumentIngestMiddleware`'s checked-in invocation version
+/// (`INGEST_VERSION` in `finstack-ai-middleware-document-ingest::lib`).
+/// `validate_middleware_descriptor` requires the registered `ComponentRef`
+/// to match the handle's own reported `(component id, version)` exactly, so
+/// this must track that crate's constant rather than the binding's generic
+/// `PREVIEW_VERSION`. `DocumentToolset` has no equivalent version check, but
+/// the same value is reused for its registration for consistency (mirrors
+/// `crates/finstack-ai-test/tests/lanes/document_ingest.rs`).
+const DOCUMENT_INGEST_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
+fn document_ingest_component(id: &str) -> Result<ComponentRef, AgentRunError> {
+    Ok(ComponentRef::new(
+        ComponentId::parse(id).map_err(|error| configuration_error(error.to_string()))?,
+        Some(DOCUMENT_INGEST_VERSION),
+    ))
+}
+
+fn document_ingest_ports() -> Result<DocumentIngestPorts, AgentRunError> {
+    let artifact_store = Arc::new(InProcessArtifactStore::default());
+    let attachment_index = Arc::new(AttachmentIndex::default());
+    let dyn_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
+    let toolset = DocumentToolset::try_new()
+        .map_err(|error| configuration_error(error.to_string()))?
+        .with_artifact_store(Arc::clone(&dyn_store));
+    let middleware =
+        DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store), Arc::clone(&attachment_index))
+            .map_err(|error| configuration_error(error.to_string()))?;
+    Ok((
+        artifact_store,
+        attachment_index,
+        (
+            document_ingest_component("finstack.tools.document")?,
+            Arc::new(toolset) as Arc<dyn Toolset>,
+        ),
+        (
+            document_ingest_component("finstack.middleware.document-ingest")?,
+            Arc::new(middleware) as Arc<dyn Middleware>,
+        ),
+    ))
 }
 
 fn linked_ports(
@@ -663,32 +799,46 @@ fn linked_ports(
     middleware: Option<Vec<Py<PyPythonMiddleware>>>,
     observers: Option<Vec<Py<PyPythonObserver>>>,
     output_type: Option<Py<PyAny>>,
-) -> PyResult<LinkedPorts> {
-    Ok(LinkedPorts {
-        toolsets: toolsets
-            .unwrap_or_default()
-            .into_iter()
-            .map(|toolset| toolset.bind(py).borrow().registration())
-            .collect(),
-        context_providers: context_providers
-            .unwrap_or_default()
-            .into_iter()
-            .map(|provider| provider.bind(py).borrow().registration())
-            .collect(),
-        middleware: middleware
-            .unwrap_or_default()
-            .into_iter()
-            .map(|middleware| middleware.bind(py).borrow().registration())
-            .collect(),
-        observers: observers
-            .unwrap_or_default()
-            .into_iter()
-            .map(|observer| observer.bind(py).borrow().registration())
-            .collect(),
-        output: output_type
-            .map(|target| prepare_pydantic_output(py, target))
-            .transpose()?,
-    })
+) -> PyResult<(
+    LinkedPorts,
+    Arc<InProcessArtifactStore>,
+    Arc<AttachmentIndex>,
+)> {
+    let (artifact_store, attachment_index, document_toolset, document_middleware) =
+        document_ingest_ports().map_err(|error| agent_error(py, &error, None))?;
+    let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = toolsets
+        .unwrap_or_default()
+        .into_iter()
+        .map(|toolset| toolset.bind(py).borrow().registration())
+        .collect();
+    toolsets.push(document_toolset);
+    let mut middleware: Vec<(ComponentRef, Arc<dyn Middleware>)> = middleware
+        .unwrap_or_default()
+        .into_iter()
+        .map(|middleware| middleware.bind(py).borrow().registration())
+        .collect();
+    middleware.push(document_middleware);
+    Ok((
+        LinkedPorts {
+            toolsets,
+            context_providers: context_providers
+                .unwrap_or_default()
+                .into_iter()
+                .map(|provider| provider.bind(py).borrow().registration())
+                .collect(),
+            middleware,
+            observers: observers
+                .unwrap_or_default()
+                .into_iter()
+                .map(|observer| observer.bind(py).borrow().registration())
+                .collect(),
+            output: output_type
+                .map(|target| prepare_pydantic_output(py, target))
+                .transpose()?,
+        },
+        artifact_store,
+        attachment_index,
+    ))
 }
 
 #[expect(
@@ -704,6 +854,8 @@ async fn build_python_agent(
     active_capabilities: Vec<CapabilityId>,
     child_runs: ChildRunPolicy,
     sqlite: (Option<String>, Option<PySqliteDurability>),
+    artifact_store: Arc<InProcessArtifactStore>,
+    attachment_index: Arc<AttachmentIndex>,
 ) -> Result<PyAgent, AgentRunError> {
     let store_component = if sqlite.0.is_some() {
         "python.store.sqlite"
@@ -745,6 +897,8 @@ async fn build_python_agent(
         output_adapter: output.map(|value| value.adapter),
         settings: built.settings,
         default_timeout_seconds: built.default_timeout.as_secs_f64(),
+        artifact_store,
+        attachment_index,
     })
 }
 

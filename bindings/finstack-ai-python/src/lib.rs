@@ -29,6 +29,7 @@ mod callback_fixture;
 mod callbacks;
 mod capability;
 mod child_policy;
+mod document;
 mod errors;
 mod events;
 mod json_bridge;
@@ -49,13 +50,14 @@ use callbacks::{
 };
 use capability::PyCapability;
 use child_policy::PyChildRunPolicy;
+use document::{parse_document, parse_document_markdown};
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
 use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
     normalize_prebeta_shape,
 };
-use run::{PyRun, PyRunResult};
+use run::{PyAttachment, PyRun, PyRunResult};
 use session::{PyLane, PyMemoryExternalIdentityMap, PySession};
 use store::PySqliteDurability;
 
@@ -108,6 +110,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyCapability>()?;
     module.add_class::<PyChildRunPolicy>()?;
     module.add_class::<PyRun>()?;
+    module.add_class::<PyAttachment>()?;
     module.add_class::<PyEventIterator>()?;
     module.add_class::<PyLocator>()?;
     module.add_class::<PySession>()?;
@@ -129,6 +132,8 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(journal_known_answer, module)?)?;
     module.add_function(wrap_pyfunction!(normalize_prebeta_shape, module)?)?;
     module.add_function(wrap_pyfunction!(_normalize_pydantic_schema, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_document_markdown, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_document, module)?)?;
     #[cfg(feature = "benchmark-fixture")]
     benchmark_fixture::register(module)?;
     #[cfg(feature = "callback-fixture")]

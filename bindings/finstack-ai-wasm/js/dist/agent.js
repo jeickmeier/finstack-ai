@@ -187,7 +187,7 @@ export class Agent {
     start(input, options) {
         requireWasm();
         try {
-            return new Run(this.#handle.start(input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability));
+            return new Run(this.#handle.start(input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability, options?.attachments));
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);
@@ -208,7 +208,7 @@ export class Agent {
     async run(input, options) {
         requireWasm();
         try {
-            const handle = await this.#handle.run(input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability);
+            const handle = await this.#handle.run(input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability, options?.attachments);
             return new RunResult(handle);
         }
         catch (error) {
@@ -579,7 +579,7 @@ export class Lane {
      */
     run(agent, input, options) {
         try {
-            return new Run(this.#handle.run(agent.handle(), input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability));
+            return new Run(this.#handle.run(agent.handle(), input, options?.timeoutSeconds, options?.maxCycles, options?.maxOutputRetries, options?.capability, options?.attachments));
         }
         catch (error) {
             throw FinstackError.fromUnknown(error);

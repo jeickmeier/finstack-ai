@@ -33,6 +33,13 @@
 
 #[cfg(target_arch = "wasm32")]
 mod agent;
+// Compiled for wasm32 builds, and additionally for native `cargo test` so
+// `DocumentArtifactStore`'s FIFO/byte-budget eviction has native unit-test
+// coverage (see `document_store::tests`) without needing a wasm32 test
+// target. `build_artifact` (from `host_artifact`, unconditionally
+// compiled) is available on both.
+#[cfg(any(target_arch = "wasm32", test))]
+mod document_store;
 mod executor;
 #[cfg(any(not(target_arch = "wasm32"), feature = "scripted-trace"))]
 mod fixture;
@@ -167,6 +174,48 @@ pub fn apply_scripted_coordinator_commands(encoded: &str) -> Result<String, JsVa
 struct ScriptedCommand {
     kind: String,
     value: serde_json::Value,
+}
+
+/// Debug helper: parse a document to Markdown and return only the Markdown.
+///
+/// Runs the same `finstack-ai-tools-document` parser the ingest middleware
+/// uses, without an `Agent` or `Run`, so a developer can see exactly what
+/// would be injected for a given file.
+///
+/// # Errors
+///
+/// Returns a TypeError-equivalent carrying the stable `document_*` parse
+/// error code when the input is oversized, unsupported, or unparseable.
+#[wasm_bindgen(js_name = parseDocumentMarkdown)]
+pub fn parse_document_markdown(data: &[u8], media_type: &str) -> Result<String, JsValue> {
+    let parsed = finstack_ai_tools_document::parser::parse(
+        data,
+        Some(media_type),
+        &finstack_ai_tools_document::parser::DocumentLimits::default(),
+    )
+    .map_err(|error| js_sys::TypeError::new(&error.to_string()))?;
+    Ok(parsed.markdown)
+}
+
+/// Debug helper: parse a document and return the full detailed result.
+///
+/// # Errors
+///
+/// Returns a TypeError-equivalent carrying the stable `document_*` parse
+/// error code when the input is oversized, unsupported, or unparseable, or
+/// when the parsed result cannot be serialized.
+#[wasm_bindgen(js_name = parseDocument)]
+pub fn parse_document(data: &[u8], media_type: &str) -> Result<JsValue, JsValue> {
+    let parsed = finstack_ai_tools_document::parser::parse(
+        data,
+        Some(media_type),
+        &finstack_ai_tools_document::parser::DocumentLimits::default(),
+    )
+    .map_err(|error| js_sys::TypeError::new(&error.to_string()))?;
+    let encoded = serde_json::to_string(&parsed)
+        .map_err(|_| js_sys::TypeError::new("parsed document result serialization failed"))?;
+    js_sys::JSON::parse(&encoded)
+        .map_err(|_| js_sys::TypeError::new("parsed document result serialization failed").into())
 }
 
 /// Trusted JS model wrapper. Not an Agent handle.
@@ -675,7 +724,7 @@ mod tests {
         GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
     };
 
-    use super::health;
+    use super::{health, parse_document_markdown};
 
     fn ready<T>(future: impl Future<Output = T>) -> T {
         let mut future = std::pin::pin!(future);
@@ -745,5 +794,50 @@ mod tests {
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(e2b.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+    }
+
+    const SAMPLE_CSV: &[u8] = b"quarter,revenue\nQ1,1250\nQ2,1310\n";
+
+    // `parse_document_markdown`'s success path returns a plain `String` and
+    // never touches a `js_sys` import, so it is exercisable on a native
+    // (non-wasm32) test target. Its error path and `parse_document`
+    // (success or error) always construct a JS value — `js_sys::TypeError`
+    // or `js_sys::JSON::parse` — which panics off wasm32 ("cannot call
+    // wasm-bindgen imported functions on non-wasm targets"), matching every
+    // other JS-value-returning export in this module (`journal_known_answer`,
+    // `normalize_prebeta_shape`, `build_metadata`); those paths are covered
+    // by the Playwright suite instead (`js/src/document-parse.test.ts`).
+    #[test]
+    fn parse_document_markdown_returns_markdown_for_csv() {
+        let markdown =
+            parse_document_markdown(SAMPLE_CSV, "text/csv").expect("csv parses to markdown");
+        assert!(markdown.contains("1250"));
+        assert!(markdown.contains("revenue"));
+    }
+
+    #[test]
+    fn document_parser_matches_the_stable_parser_crate_directly() {
+        // Cross-check against `finstack_ai_tools_document::parser::parse`
+        // directly, so this test also documents that `parse_document` (the
+        // wasm-bindgen export) is a thin pass-through with no extra
+        // normalization beyond JS serialization.
+        let parsed = finstack_ai_tools_document::parser::parse(
+            SAMPLE_CSV,
+            Some("text/csv"),
+            &finstack_ai_tools_document::parser::DocumentLimits::default(),
+        )
+        .expect("csv parses");
+        assert_eq!(
+            parsed.format,
+            finstack_ai_tools_document::parser::DocumentFormat::Csv
+        );
+        assert!(!parsed.requires_ocr);
+        assert!(!parsed.truncated);
+        assert!(parsed.page_count.is_none());
+        assert!(parsed.classification.is_none());
+        assert!(parsed.markdown.contains("revenue"));
+
+        let markdown = parse_document_markdown(SAMPLE_CSV, "text/csv").expect("csv parses");
+        assert_eq!(markdown, parsed.markdown);
     }
 }

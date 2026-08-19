@@ -3,13 +3,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{ExternalRouteOutcome, ModelName, ModelSettings};
-use finstack_ai::{
-    AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RemoteChildRouteSpec,
-    RunSecurityContext,
+use finstack_ai::runtime::{
+    ArtifactMetadata, ArtifactStore, Bytes, ExternalRouteOutcome, ModelName, ModelSettings,
+    stage_required_artifact,
 };
-use finstack_ai_kernel::{CapabilityId, ChildPlacement, OperationLocator, RawJson};
-use pyo3::exceptions::{PyException, PyTypeError};
+use finstack_ai::{
+    AgentRunError, AgentRunOutput, AgentRunRequest, AttachmentInput, MAX_RUN_ATTACHMENTS,
+    PrincipalRef, RemoteChildRouteSpec, RunSecurityContext,
+};
+use finstack_ai_kernel::{
+    CapabilityId, ChildPlacement, Metadata, OperationLocator, RawJson, Sensitivity, SessionId,
+};
+use finstack_ai_middleware_document_ingest::AttachmentIndex;
+use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
@@ -150,6 +156,7 @@ impl PyRun {
                 capability,
                 settings,
                 &tenant_scope,
+                Vec::new(),
             )
             .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
             match Box::pin(parent.start_child(&child, request, placement, remote)).await {
@@ -222,6 +229,154 @@ impl PyRun {
             Ok(())
         })
     }
+}
+
+/// One in-memory run attachment staged at submit time.
+///
+/// Exactly one of `data`/`path` is required. A `path` is read (bounded by 4
+/// MiB) at construction time; its basename becomes the default `name` when
+/// `name` is not given explicitly.
+#[pyclass(
+    module = "finstack_ai._finstack_ai",
+    name = "Attachment",
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PyAttachment {
+    pub(crate) data: Vec<u8>,
+    pub(crate) media_type: String,
+    pub(crate) name: Option<String>,
+}
+
+/// V1 individual byte-string ceiling shared with `finstack-ai-runtime`'s
+/// `ArtifactStore` contract (spec decision 21).
+pub(crate) const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
+
+/// Resolve exactly one of `data`/`path` into owned bytes.
+///
+/// Shared by [`PyAttachment::new`] and the debug `parse_document*` helpers
+/// so both apply the same exactly-one-of contract and 4 MiB path cap.
+///
+/// The size cap is checked against `std::fs::metadata` *before* the file is
+/// read, mirroring the Rust document toolset's
+/// `extensions/toolsets/finstack-ai-tools-document/src/source.rs::resolve_path`
+/// — an oversized file is rejected without ever being loaded into memory.
+pub(crate) fn resolve_data_or_path(data: Option<Vec<u8>>, path: Option<&str>) -> PyResult<Vec<u8>> {
+    match (data, path) {
+        (Some(data), None) => Ok(data),
+        (None, Some(path)) => {
+            let metadata = std::fs::metadata(path)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            if metadata.len() > MAX_ATTACHMENT_PATH_BYTES as u64 {
+                return Err(PyValueError::new_err("attachment exceeds 4 MiB"));
+            }
+            let bytes =
+                std::fs::read(path).map_err(|error| PyValueError::new_err(error.to_string()))?;
+            if bytes.len() > MAX_ATTACHMENT_PATH_BYTES {
+                return Err(PyValueError::new_err("attachment exceeds 4 MiB"));
+            }
+            Ok(bytes)
+        }
+        _ => Err(PyValueError::new_err(
+            "exactly one of data or path is required",
+        )),
+    }
+}
+
+#[pymethods]
+impl PyAttachment {
+    #[new]
+    #[pyo3(signature = (media_type, data = None, path = None, name = None))]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "pyo3 #[new] constructors take owned Python-extracted arguments"
+    )]
+    fn new(
+        media_type: String,
+        data: Option<Vec<u8>>,
+        path: Option<String>,
+        name: Option<String>,
+    ) -> PyResult<Self> {
+        let data = resolve_data_or_path(data, path.as_deref())?;
+        let name = name.or_else(|| {
+            path.as_deref().and_then(|value| {
+                std::path::Path::new(value)
+                    .file_name()
+                    .map(|value| value.to_string_lossy().into_owned())
+            })
+        });
+        Ok(Self {
+            data,
+            media_type,
+            name,
+        })
+    }
+}
+
+/// Clone owned attachment payloads out of the GIL-bound handles.
+///
+/// Must run while `py` is held; the returned values are plain `Send` data
+/// that can move into a detached thread or async block.
+pub(crate) fn collect_attachments(
+    py: Python<'_>,
+    attachments: Option<Vec<Py<PyAttachment>>>,
+) -> Vec<PyAttachment> {
+    attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(|attachment| attachment.bind(py).borrow().clone())
+        .collect()
+}
+
+/// Deterministic placeholder scope used to stage run attachments ahead of
+/// the run's real session/run identity (unknown until `Agent::start`
+/// accepts the request). `InProcessArtifactStore::get` resolves purely by
+/// content-derived `ArtifactId` and ignores the scope passed to `get`, so a
+/// stable placeholder session id is sufficient here; `stage_required_artifact`
+/// only checks the staged artifact against the *same* scope passed to it.
+fn attachment_scope(tenant_scope: &str) -> finstack_ai::runtime::ArtifactScope {
+    finstack_ai::runtime::ArtifactScope {
+        tenant_scope: std::sync::Arc::from(tenant_scope),
+        session_id: SessionId::from_bytes([0_u8; 16]),
+        run_id: None,
+        sensitivity: Sensitivity::Internal,
+    }
+}
+
+/// Stage every attachment into `store` and record it in `index` so
+/// `DocumentIngestMiddleware` can resolve the `BlobRef` it sees on the
+/// journaled `File` block back to the exact staged `ArtifactRef`.
+pub(crate) async fn stage_attachments(
+    store: &dyn ArtifactStore,
+    index: &AttachmentIndex,
+    tenant_scope: &str,
+    attachments: Vec<PyAttachment>,
+) -> Result<Vec<AttachmentInput>, AgentRunError> {
+    if attachments.len() > MAX_RUN_ATTACHMENTS {
+        return Err(configuration_error(
+            "run attachments exceed MAX_RUN_ATTACHMENTS",
+        ));
+    }
+    let scope = attachment_scope(tenant_scope);
+    let mut staged = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        let artifact = stage_required_artifact(
+            store,
+            scope.clone(),
+            Bytes::from(attachment.data),
+            ArtifactMetadata {
+                kind: std::sync::Arc::from("attachment"),
+                media_type: std::sync::Arc::from(attachment.media_type),
+                name: attachment.name.map(std::sync::Arc::from),
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .map_err(|error| configuration_error(error.to_string()))?;
+        index.insert(artifact.clone());
+        staged.push(AttachmentInput { artifact });
+    }
+    Ok(staged)
 }
 
 /// Immutable successful terminal result snapshot.
@@ -357,7 +512,13 @@ pub(crate) fn run_request(
     capability: Option<String>,
     settings: ModelSettings,
     tenant_scope: &str,
+    attachments: Vec<AttachmentInput>,
 ) -> Result<AgentRunRequest, AgentRunError> {
+    if attachments.len() > MAX_RUN_ATTACHMENTS {
+        return Err(configuration_error(
+            "run attachments exceed MAX_RUN_ATTACHMENTS",
+        ));
+    }
     if !timeout_seconds.is_finite()
         || timeout_seconds <= 0.0
         || timeout_seconds > MAX_TIMEOUT_SECONDS
@@ -388,6 +549,7 @@ pub(crate) fn run_request(
                 .map_err(|error| configuration_error(error.to_string()))?,
         );
     }
+    request.attachments = attachments.into();
     Ok(request)
 }
 

@@ -34,7 +34,7 @@ fn artifact_unavailable(failure: HostFailure) -> ArtifactError {
     }
 }
 
-fn build_artifact(
+pub(crate) fn build_artifact(
     scope: &ArtifactScope,
     content: &[u8],
     metadata: &ArtifactMetadata,

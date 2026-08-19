@@ -95,4 +95,56 @@ export declare function journalKnownAnswer(kind: "record_body" | "record_envelop
  * ```
  */
 export declare function normalizePrebetaShape(kind: PrebetaKind, value: unknown): unknown;
+/**
+ * Detailed result of a debug document parse. See {@link parseDocument}.
+ */
+export interface ParsedDocument {
+    /** GitHub-Flavored Markdown output (possibly truncated). */
+    markdown: string;
+    /** Detected format; the declared media type is only a hint. */
+    format: string;
+    /** Page count when the format has pages. */
+    page_count: number | null;
+    /** PDF page-content classification. */
+    classification: string | null;
+    /** Whether recovering full text needs OCR (scanned/image PDFs). */
+    requires_ocr: boolean;
+    /** Whether `markdown` was cut at the output byte ceiling. */
+    truncated: boolean;
+}
+/**
+ * Debug helper: parse a document and return only its Markdown.
+ *
+ * Runs the same `finstack-ai-tools-document` parser the document-ingest
+ * middleware uses, without constructing an {@link Agent} or `Run`, so a
+ * developer can see exactly what would be injected for a given file.
+ *
+ * @param data - Raw document bytes.
+ * @param mediaType - Declared media type; a hint, not authoritative.
+ * @returns The parsed GitHub-Flavored Markdown (possibly truncated).
+ * @throws {TypeError} With a stable `document_*` error code when the input
+ * is oversized, unsupported, or unparseable.
+ * @example
+ * ```ts
+ * await init();
+ * const markdown = parseDocumentMarkdown(bytes, "text/csv");
+ * ```
+ */
+export declare function parseDocumentMarkdown(data: Uint8Array, mediaType: string): string;
+/**
+ * Debug helper: parse a document and return the full detailed result.
+ *
+ * @param data - Raw document bytes.
+ * @param mediaType - Declared media type; a hint, not authoritative.
+ * @returns Markdown plus format, page count, classification, OCR, and
+ * truncation flags.
+ * @throws {TypeError} With a stable `document_*` error code when the input
+ * is oversized, unsupported, or unparseable.
+ * @example
+ * ```ts
+ * await init();
+ * const parsed = parseDocument(bytes, "application/pdf");
+ * ```
+ */
+export declare function parseDocument(data: Uint8Array, mediaType: string): ParsedDocument;
 //# sourceMappingURL=index.d.ts.map

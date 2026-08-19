@@ -52,11 +52,11 @@ mod spec;
 pub use agent::{
     AGENT_RUN_CANCELLED, AGENT_RUN_INVALID_CONFIGURATION, AGENT_RUN_RUNTIME_FAILURE,
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActivationHostError, Agent, AgentRun,
-    AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec,
+    AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec, AttachmentInput,
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
     E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
-    OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
+    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
+    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{

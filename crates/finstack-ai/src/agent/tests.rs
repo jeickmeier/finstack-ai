@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, ActiveToolCallStatus, AgentId, AuthorizationEvidence, BundleId,
-    CapabilityActivationSource, CapabilityId, ChildPlacement, ChildRunLocator, ComponentId,
-    ComponentRef, ContentBlock, Digest, EffectId, EffectTag, ExternalEffectCompletion,
-    ExternalEffectCompletionCommand, ExternalEffectOutcome, OperationLocator, ProviderIds, RawJson,
-    RunEventClass, RunPhase, RunSecurityContext, RunTag, TerminalState, TextBlock,
-    ToolExecutionMode, ToolId, Usage, Version,
+    ActiveCapability, ActiveToolCallStatus, AgentId, ArtifactId, ArtifactRef,
+    AuthorizationEvidence, BlobRef, BundleId, CapabilityActivationSource, CapabilityId,
+    ChildPlacement, ChildRunLocator, ComponentId, ComponentRef, ContentBlock, Digest, EffectId,
+    EffectTag, ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome,
+    MediaRef, OperationLocator, ProviderIds, RawJson, RunEventClass, RunPhase, RunSecurityContext,
+    RunTag, TerminalState, TextBlock, ToolExecutionMode, ToolId, Usage, Version,
 };
 use finstack_ai_kernel::{
     BudgetRequest, ExternalHandleRef, Metadata, ReconciliationPolicy, RetrySafety,
@@ -302,6 +302,72 @@ fn request(input: &str) -> AgentRunRequest {
         security(),
     )
     .expect("request")
+}
+
+fn test_attachment() -> AttachmentInput {
+    let content = b"attachment bytes";
+    let digest = Digest::blob_content(content);
+    let blob = BlobRef::try_new(
+        "blob-attachment-1",
+        "text/plain",
+        u64::try_from(content.len()).expect("length"),
+        Some(digest),
+        Some("notes.txt"),
+    )
+    .expect("blob");
+    let artifact = ArtifactRef::try_new(
+        ArtifactId::from_bytes([9; 16]),
+        "document",
+        blob,
+        digest,
+        Digest::raw_json(b"scope"),
+        Metadata::empty(),
+    )
+    .expect("artifact");
+    AttachmentInput { artifact }
+}
+
+#[test]
+fn run_request_defaults_to_no_attachments() {
+    let run_request = request("unused");
+    assert!(run_request.attachments.is_empty());
+}
+
+#[test]
+fn run_request_rejects_more_than_max_attachments() {
+    let mut run_request = request("unused");
+    let attachment = test_attachment();
+    run_request.attachments = std::iter::repeat_with(|| attachment.clone())
+        .take(MAX_RUN_ATTACHMENTS + 1)
+        .collect();
+    assert!(run_request.validate().is_err());
+}
+
+#[tokio::test]
+async fn prepared_user_message_carries_file_blocks_for_attachments() {
+    let model = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed("preview ready")],
+    ));
+    let (agent, _store) = model_only_agent(Arc::clone(&model)).await;
+    let attachment = test_attachment();
+    let mut run_request = request("Say hello");
+    run_request.attachments = Arc::from([attachment.clone()]);
+    agent.run(run_request).await.expect("run");
+    let sent_request = model.last_request().expect("first request");
+    let file_blocks: Vec<&MediaRef> = sent_request
+        .draft
+        .messages
+        .iter()
+        .filter(|message| message.role() == finstack_ai_kernel::MessageRole::User)
+        .flat_map(finstack_ai_kernel::Message::content)
+        .filter_map(|block| match block {
+            ContentBlock::File(media) => Some(media),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(file_blocks.len(), 1);
+    assert_eq!(file_blocks[0].blob(), attachment.artifact.blob());
 }
 
 #[test]

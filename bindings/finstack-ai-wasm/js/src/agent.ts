@@ -29,6 +29,7 @@ import type {
 } from "./adapters.js";
 import { FinstackError } from "./errors.js";
 import type {
+  AttachmentOption,
   EventOptions,
   RunOptions,
   RunResultSnapshot,
@@ -37,6 +38,7 @@ import type {
 
 export { FinstackError } from "./errors.js";
 export type {
+  AttachmentOption,
   EventOptions,
   RunOptions,
   RunResultSnapshot,
@@ -366,6 +368,7 @@ export class Agent {
           options?.maxCycles,
           options?.maxOutputRetries,
           options?.capability,
+          options?.attachments,
         ),
       );
     } catch (error) {
@@ -394,6 +397,7 @@ export class Agent {
         options?.maxCycles,
         options?.maxOutputRetries,
         options?.capability,
+        options?.attachments,
       );
       return new RunResult(handle);
     } catch (error) {
@@ -839,6 +843,7 @@ export class Lane {
           options?.maxCycles,
           options?.maxOutputRetries,
           options?.capability,
+          options?.attachments,
         ),
       );
     } catch (error) {

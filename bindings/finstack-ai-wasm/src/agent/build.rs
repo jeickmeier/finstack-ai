@@ -2,19 +2,85 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai::runtime::{
-    CommitCoordinator, JournalStore, LoadRequest, ModelName, ModelSettings, StoreError,
+    ArtifactStore, CommitCoordinator, JournalStore, LoadRequest, Middleware, ModelName,
+    ModelSettings, StoreError, Toolset,
 };
 use finstack_ai::{
     Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, LinkedAgentPorts, LinkedCommon,
 };
-use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
+use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_kernel::{ContentBlock, SessionId, TerminalState};
+use finstack_ai_middleware_document_ingest::{AttachmentIndex, DocumentIngestMiddleware};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+use finstack_ai_tools_document::DocumentToolset;
 use wasm_bindgen::prelude::*;
+
+use crate::document_store::DocumentArtifactStore;
 
 use super::agent::Agent;
 use super::errors::{agent_error, configuration_error};
 use super::request::component;
+
+/// `DocumentIngestMiddleware`'s checked-in invocation version
+/// (`INGEST_VERSION` in `finstack-ai-middleware-document-ingest::lib`).
+/// Descriptor validation requires the registered `ComponentRef` to match the
+/// handle's own reported `(component id, version)` exactly, so this must
+/// track that crate's constant rather than the binding's generic
+/// `PREVIEW_VERSION`. `DocumentToolset` has no equivalent version check, but
+/// the same value is reused for its registration for consistency (mirrors
+/// `finstack-ai-python`'s `DOCUMENT_INGEST_VERSION`).
+const DOCUMENT_INGEST_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
+fn document_ingest_component(id: &str) -> Result<ComponentRef, JsValue> {
+    Ok(ComponentRef::new(
+        ComponentId::parse(id)
+            .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
+        Some(DOCUMENT_INGEST_VERSION),
+    ))
+}
+
+/// Shared artifact store, attachment index, and registered document
+/// toolset/middleware ports.
+///
+/// Constructing these once per `Agent` and sharing the same
+/// `Arc<dyn ArtifactStore>` / `Arc<AttachmentIndex>` across attachment
+/// staging, `DocumentToolset`, and `DocumentIngestMiddleware` is required so
+/// all three resolve the exact same staged `ArtifactRef` (mirrors
+/// `finstack-ai-python`'s `document_ingest_ports`).
+struct DocumentIngestPorts {
+    artifact_store: Arc<dyn ArtifactStore>,
+    attachment_index: Arc<AttachmentIndex>,
+    toolset: (ComponentRef, Arc<dyn Toolset>),
+    middleware: (ComponentRef, Arc<dyn Middleware>),
+}
+
+fn document_ingest_ports() -> Result<DocumentIngestPorts, JsValue> {
+    let artifact_store = Arc::new(DocumentArtifactStore::default());
+    let attachment_index = Arc::new(AttachmentIndex::default());
+    let dyn_store: Arc<dyn ArtifactStore> = Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>;
+    let toolset = DocumentToolset::try_new()
+        .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?
+        .with_artifact_store(Arc::clone(&dyn_store));
+    let middleware =
+        DocumentIngestMiddleware::try_new(Arc::clone(&dyn_store), Arc::clone(&attachment_index))
+            .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?;
+    Ok(DocumentIngestPorts {
+        artifact_store: dyn_store,
+        attachment_index,
+        toolset: (
+            document_ingest_component("finstack.tools.document")?,
+            Arc::new(toolset) as Arc<dyn Toolset>,
+        ),
+        middleware: (
+            document_ingest_component("finstack.middleware.document-ingest")?,
+            Arc::new(middleware) as Arc<dyn Middleware>,
+        ),
+    })
+}
 
 #[allow(
     clippy::too_many_arguments,
@@ -24,15 +90,18 @@ pub(super) async fn build_agent(
     model_name: ModelName,
     model_component: ComponentRef,
     model: Arc<dyn finstack_ai::runtime::Model>,
-    toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
+    mut toolsets: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Toolset>)>,
     context_providers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::ContextProvider>)>,
-    middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
+    mut middleware: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Middleware>)>,
     observers: Vec<(ComponentRef, Arc<dyn finstack_ai::runtime::Observer>)>,
     instruction: Option<String>,
     store: Option<Arc<dyn JournalStore>>,
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
 ) -> Result<Agent, JsValue> {
+    let document_ingest = document_ingest_ports()?;
+    toolsets.push(document_ingest.toolset);
+    middleware.push(document_ingest.middleware);
     let (store_component, store) = match store {
         Some(store) => (component("js.store.host")?, store),
         None => {
@@ -84,6 +153,8 @@ pub(super) async fn build_agent(
     Ok(Agent {
         inner: Arc::new(built.agent),
         model: model_name,
+        artifact_store: document_ingest.artifact_store,
+        attachment_index: document_ingest.attachment_index,
     })
 }
 
