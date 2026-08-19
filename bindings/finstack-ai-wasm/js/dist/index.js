@@ -1,4 +1,4 @@
-import initWasm, { buildMetadata as wasmBuildMetadata, health as wasmHealth, journalKnownAnswer as wasmJournalKnownAnswer, normalizePrebetaShape as wasmNormalizePrebetaShape, } from "../generated/finstack_ai_wasm.js";
+import initWasm, { buildMetadata as wasmBuildMetadata, health as wasmHealth, journalKnownAnswer as wasmJournalKnownAnswer, normalizePrebetaShape as wasmNormalizePrebetaShape, parseDocument as wasmParseDocument, parseDocumentMarkdown as wasmParseDocumentMarkdown, } from "../generated/finstack_ai_wasm.js";
 import { setAdaptersInitialized } from "./adapters.js";
 export { Agent, Event, EventBatch, FinstackError, Lane, Locator, MemoryExternalIdentityMap, Run, RunResult, Session, } from "./agent.js";
 export { POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, decodeFrame, decodeFrameLength, encodeFrame, } from "./remote.js";
@@ -127,6 +127,47 @@ export function normalizePrebetaShape(kind, value) {
     }
     const encoded = wasmNormalizePrebetaShape(kind, JSON.stringify(value));
     return JSON.parse(encoded);
+}
+/**
+ * Debug helper: parse a document and return only its Markdown.
+ *
+ * Runs the same `finstack-ai-tools-document` parser the document-ingest
+ * middleware uses, without constructing an {@link Agent} or `Run`, so a
+ * developer can see exactly what would be injected for a given file.
+ *
+ * @param data - Raw document bytes.
+ * @param mediaType - Declared media type; a hint, not authoritative.
+ * @returns The parsed GitHub-Flavored Markdown (possibly truncated).
+ * @throws {TypeError} With a stable `document_*` error code when the input
+ * is oversized, unsupported, or unparseable.
+ * @example
+ * ```ts
+ * await init();
+ * const markdown = parseDocumentMarkdown(bytes, "text/csv");
+ * ```
+ */
+export function parseDocumentMarkdown(data, mediaType) {
+    assertInitialized();
+    return wasmParseDocumentMarkdown(data, mediaType);
+}
+/**
+ * Debug helper: parse a document and return the full detailed result.
+ *
+ * @param data - Raw document bytes.
+ * @param mediaType - Declared media type; a hint, not authoritative.
+ * @returns Markdown plus format, page count, classification, OCR, and
+ * truncation flags.
+ * @throws {TypeError} With a stable `document_*` error code when the input
+ * is oversized, unsupported, or unparseable.
+ * @example
+ * ```ts
+ * await init();
+ * const parsed = parseDocument(bytes, "application/pdf");
+ * ```
+ */
+export function parseDocument(data, mediaType) {
+    assertInitialized();
+    return wasmParseDocument(data, mediaType);
 }
 function assertInitialized() {
     if (!initialized) {

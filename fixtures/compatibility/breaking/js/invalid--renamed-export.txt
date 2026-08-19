@@ -64,3 +64,5 @@ health
 init
 journalKnownAnswer
 normalizePrebetaShape
+parseDocument
+parseDocumentMarkdown

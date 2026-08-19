@@ -29,6 +29,7 @@ mod callback_fixture;
 mod callbacks;
 mod capability;
 mod child_policy;
+mod document;
 mod errors;
 mod events;
 mod json_bridge;
@@ -49,6 +50,7 @@ use callbacks::{
 };
 use capability::PyCapability;
 use child_policy::PyChildRunPolicy;
+use document::{parse_document, parse_document_markdown};
 use events::{PyEvent, PyEventBatch, PyEventIterator};
 use locator::PyLocator;
 use protocol::{
@@ -130,6 +132,8 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(journal_known_answer, module)?)?;
     module.add_function(wrap_pyfunction!(normalize_prebeta_shape, module)?)?;
     module.add_function(wrap_pyfunction!(_normalize_pydantic_schema, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_document_markdown, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_document, module)?)?;
     #[cfg(feature = "benchmark-fixture")]
     benchmark_fixture::register(module)?;
     #[cfg(feature = "callback-fixture")]

@@ -28,6 +28,8 @@
         init,
         journalKnownAnswer,
         normalizePrebetaShape,
+        parseDocument,
+        parseDocumentMarkdown,
       } from "./dist/index.js";
       import {
         OPENAI_DEFAULT_BASE_URL,
@@ -90,6 +92,8 @@
           openaiDefaultBaseUrl: OPENAI_DEFAULT_BASE_URL,
           journalKnownAnswer,
           normalizePrebetaShape,
+          parseDocument,
+          parseDocumentMarkdown,
           applyScriptedCoordinatorCommands: (commands) =>
             JSON.parse(applyScriptedCoordinatorCommands(JSON.stringify(commands))),
           driveScriptedModelRequest: async (adapter, options, signal) =>

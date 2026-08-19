@@ -27,6 +27,7 @@ import type {
   JsRandomSource,
   JsToolset,
   JsToolsetOptions,
+  ParsedDocument,
   PrebetaKind,
 } from "./index.ts";
 import type { OpenAIOptions } from "./adapters/openai.ts";
@@ -99,6 +100,8 @@ declare global {
         value: unknown,
       ) => { payload_digest: string; checksum?: string; cbor_hex: string };
       normalizePrebetaShape: (kind: PrebetaKind, value: unknown) => unknown;
+      parseDocumentMarkdown: (data: Uint8Array, mediaType: string) => string;
+      parseDocument: (data: Uint8Array, mediaType: string) => ParsedDocument;
       applyScriptedCoordinatorCommands: (
         commands: ReadonlyArray<{ kind: PrebetaKind; value: unknown }>,
       ) => { commands: Array<{ kind: string; status: string }> };

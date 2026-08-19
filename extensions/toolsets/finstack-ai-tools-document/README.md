@@ -59,6 +59,23 @@ feature on this crate that enables pdf-inspector's `ocr` feature, pairing
 native-only, pending a separate accuracy/perf spike. See the spec's
 Non-goals section for the full rationale.
 
+## Debugging
+
+`parser::parse(bytes, media_type_hint, limits) -> Result<ParsedDocument, DocumentParseError>`
+is the crate's public churn-boundary entry point (see [`src/parser.rs`](src/parser.rs))
+and needs no toolset, artifact store, or run to call directly. Both bindings
+expose a thin debug wrapper over it so a developer can see exactly what
+Markdown the ingest middleware would inject for a given file without
+constructing an `Agent` or `Run`:
+
+- Python: `finstack_ai.parse_document_markdown(media_type, data=..., path=...)`
+  returns the Markdown string; `finstack_ai.parse_document(...)` returns the
+  full `ParsedDocument` fields as a dict.
+- WASM/JS: `parseDocumentMarkdown(data, mediaType)` returns the Markdown
+  string; `parseDocument(data, mediaType)` returns the full result.
+
+Both raise/throw using the stable `document_*` error codes on parse failure.
+
 ## Fixtures
 
 `fixtures/documents/` (text PDF, scanned PDF, docx, xlsx, pptx, csv, a

@@ -250,7 +250,28 @@ pub(crate) struct PyAttachment {
 
 /// V1 individual byte-string ceiling shared with `finstack-ai-runtime`'s
 /// `ArtifactStore` contract (spec decision 21).
-const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
+
+/// Resolve exactly one of `data`/`path` into owned bytes.
+///
+/// Shared by [`PyAttachment::new`] and the debug `parse_document*` helpers
+/// so both apply the same exactly-one-of contract and 4 MiB path cap.
+pub(crate) fn resolve_data_or_path(data: Option<Vec<u8>>, path: Option<&str>) -> PyResult<Vec<u8>> {
+    match (data, path) {
+        (Some(data), None) => Ok(data),
+        (None, Some(path)) => {
+            let bytes =
+                std::fs::read(path).map_err(|error| PyValueError::new_err(error.to_string()))?;
+            if bytes.len() > MAX_ATTACHMENT_PATH_BYTES {
+                return Err(PyValueError::new_err("attachment exceeds 4 MiB"));
+            }
+            Ok(bytes)
+        }
+        _ => Err(PyValueError::new_err(
+            "exactly one of data or path is required",
+        )),
+    }
+}
 
 #[pymethods]
 impl PyAttachment {
@@ -266,22 +287,7 @@ impl PyAttachment {
         path: Option<String>,
         name: Option<String>,
     ) -> PyResult<Self> {
-        let data = match (data, &path) {
-            (Some(data), None) => data,
-            (None, Some(path)) => {
-                let bytes = std::fs::read(path)
-                    .map_err(|error| PyValueError::new_err(error.to_string()))?;
-                if bytes.len() > MAX_ATTACHMENT_PATH_BYTES {
-                    return Err(PyValueError::new_err("attachment exceeds 4 MiB"));
-                }
-                bytes
-            }
-            _ => {
-                return Err(PyValueError::new_err(
-                    "exactly one of data or path is required",
-                ));
-            }
-        };
+        let data = resolve_data_or_path(data, path.as_deref())?;
         let name = name.or_else(|| {
             path.as_deref().and_then(|value| {
                 std::path::Path::new(value)

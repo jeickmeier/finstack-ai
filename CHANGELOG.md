@@ -66,6 +66,7 @@ unpublished.
 - Add `finstack-ai-middleware-document-ingest`: fail-soft `BeforeModel` middleware replacing attached-document `File` blocks with extracted Markdown in the model-visible request.
 - Add `AgentRunRequest.attachments` (`AttachmentInput`, max 8 pre-staged artifacts) with Python (`Attachment`) and WASM (`attachments` run option) parity.
 - The checked-in `fixtures/documents/` corpus omits a table-heavy PDF (the spec's fixture list calls for one); anydoc's own upstream test corpus already covers table-heavy PDF extraction.
+- Debug parse-to-markdown helpers over `finstack-ai-tools-document`'s parser, without an `Agent` or `Run`: Python `parse_document_markdown` / `parse_document`, WASM `parseDocumentMarkdown` / `parseDocument`.
 
 ### Changed
 
