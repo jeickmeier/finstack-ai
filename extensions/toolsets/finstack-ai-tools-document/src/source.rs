@@ -111,7 +111,10 @@ fn media_type_hint_from_extension(path: &str) -> Option<String> {
 }
 
 #[cfg(not(unix))]
-async fn resolve_path(_path: &str, _limits: &DocumentLimits) -> Result<ResolvedSource, SourceError> {
+async fn resolve_path(
+    _path: &str,
+    _limits: &DocumentLimits,
+) -> Result<ResolvedSource, SourceError> {
     Err(SourceError::PathUnsupported)
 }
 
@@ -126,7 +129,10 @@ pub(crate) enum SourceError {
     TooLarge(usize),
     #[cfg_attr(
         unix,
-        allow(dead_code, reason = "only constructed by the non-unix resolve_path stub")
+        allow(
+            dead_code,
+            reason = "only constructed by the non-unix resolve_path stub"
+        )
     )]
     PathUnsupported,
 }

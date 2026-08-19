@@ -6,7 +6,9 @@ use finstack_ai_kernel::{
     ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, Message, OperationLocator, RawJson,
     RunSecurityContext,
 };
-use finstack_ai_runtime::{IdGenerationError, ModelError, ModelName, ModelSettings, RunHandleError};
+use finstack_ai_runtime::{
+    IdGenerationError, ModelError, ModelName, ModelSettings, RunHandleError,
+};
 use thiserror::Error;
 
 /// Invalid public run configuration.

@@ -178,7 +178,9 @@ pub fn parse(
         // an error — but only that specific "nothing to extract" case; a
         // genuinely broken, encrypted, or over-limit PDF must still surface
         // as a failure even when we already know it needs OCR.
-        Err(anydoc::ConvertError::Unsupported(_)) if requires_ocr && format == DocumentFormat::Pdf => {
+        Err(anydoc::ConvertError::Unsupported(_))
+            if requires_ocr && format == DocumentFormat::Pdf =>
+        {
             String::new()
         }
         Err(error) => {
@@ -258,9 +260,11 @@ pub fn parse_pages(
         });
     }
     let zero_indexed: Vec<u32> = (start - 1..end).collect();
-    let extracted = pdf_inspector::extract_pages_markdown_mem(bytes, Some(&zero_indexed))
-        .map_err(|error| DocumentParseError::ParseFailed {
-            message: bounded_message(&error.to_string()),
+    let extracted =
+        pdf_inspector::extract_pages_markdown_mem(bytes, Some(&zero_indexed)).map_err(|error| {
+            DocumentParseError::ParseFailed {
+                message: bounded_message(&error.to_string()),
+            }
         })?;
     let requires_ocr = matches!(
         classification,

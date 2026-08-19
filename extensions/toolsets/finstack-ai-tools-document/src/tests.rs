@@ -11,8 +11,12 @@ const CORRUPT: &[u8] = include_bytes!("../../../../fixtures/documents/corrupt.bi
 
 #[test]
 fn parses_text_pdf_to_markdown() {
-    let parsed = parser::parse(TEXT_PDF, Some("application/pdf"), &DocumentLimits::default())
-        .expect("text pdf parses");
+    let parsed = parser::parse(
+        TEXT_PDF,
+        Some("application/pdf"),
+        &DocumentLimits::default(),
+    )
+    .expect("text pdf parses");
     assert_eq!(parsed.format, DocumentFormat::Pdf);
     assert!(parsed.markdown.contains("Quarterly Revenue Report"));
     assert!(!parsed.requires_ocr);
@@ -21,8 +25,12 @@ fn parses_text_pdf_to_markdown() {
 
 #[test]
 fn scanned_pdf_is_success_with_requires_ocr() {
-    let parsed = parser::parse(SCANNED_PDF, Some("application/pdf"), &DocumentLimits::default())
-        .expect("scanned pdf is a successful parse");
+    let parsed = parser::parse(
+        SCANNED_PDF,
+        Some("application/pdf"),
+        &DocumentLimits::default(),
+    )
+    .expect("scanned pdf is a successful parse");
     assert!(parsed.requires_ocr);
     assert_eq!(parsed.classification, Some(DocumentClassification::Scanned));
 }
@@ -42,8 +50,8 @@ fn parses_docx_xlsx_csv() {
         ),
         (SAMPLE_CSV, "text/csv", DocumentFormat::Csv),
     ] {
-        let parsed = parser::parse(bytes, Some(media), &DocumentLimits::default())
-            .expect("fixture parses");
+        let parsed =
+            parser::parse(bytes, Some(media), &DocumentLimits::default()).expect("fixture parses");
         assert_eq!(parsed.format, format);
         assert!(!parsed.markdown.is_empty());
     }
@@ -51,8 +59,12 @@ fn parses_docx_xlsx_csv() {
 
 #[test]
 fn detected_format_wins_over_wrong_media_type() {
-    let parsed = parser::parse(SAMPLE_DOCX, Some("application/pdf"), &DocumentLimits::default())
-        .expect("content sniffing wins");
+    let parsed = parser::parse(
+        SAMPLE_DOCX,
+        Some("application/pdf"),
+        &DocumentLimits::default(),
+    )
+    .expect("content sniffing wins");
     assert_eq!(parsed.format, DocumentFormat::Docx);
 }
 
@@ -247,7 +259,11 @@ fn stage(store: &dyn ArtifactStore, bytes: &[u8], media: &str, name: &str) -> Ar
 /// Test-only: override one tool spec's `max_result_bytes` so the spill
 /// branch can be exercised without an oversized fixture. `tools` is
 /// `pub(crate)`, so this mutation is only reachable from within the crate.
-fn with_max_result_bytes(mut toolset: DocumentToolset, name: &str, max_result_bytes: u64) -> DocumentToolset {
+fn with_max_result_bytes(
+    mut toolset: DocumentToolset,
+    name: &str,
+    max_result_bytes: u64,
+) -> DocumentToolset {
     let tools: Vec<ToolSpec> = toolset
         .tools
         .iter()
@@ -263,10 +279,17 @@ fn with_max_result_bytes(mut toolset: DocumentToolset, name: &str, max_result_by
     toolset
 }
 
-fn call_tool(toolset: &DocumentToolset, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
-    let mut stream = block_on(toolset.call(call_context(), validated_call(toolset, name, arguments)))
-        .expect("call succeeds");
-    let item = block_on(stream.next()).expect("stream item").expect("stream ok");
+fn call_tool(
+    toolset: &DocumentToolset,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> serde_json::Value {
+    let mut stream =
+        block_on(toolset.call(call_context(), validated_call(toolset, name, arguments)))
+            .expect("call succeeds");
+    let item = block_on(stream.next())
+        .expect("stream item")
+        .expect("stream ok");
     let ToolStreamItem::Completed(result) = item else {
         panic!("expected a completed tool result");
     };
@@ -274,7 +297,11 @@ fn call_tool(toolset: &DocumentToolset, name: &str, arguments: &serde_json::Valu
     serde_json::from_slice(result.output.as_bytes()).expect("json output")
 }
 
-fn call_tool_err(toolset: &DocumentToolset, name: &str, arguments: &serde_json::Value) -> ToolError {
+fn call_tool_err(
+    toolset: &DocumentToolset,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> ToolError {
     match block_on(toolset.call(call_context(), validated_call(toolset, name, arguments))) {
         Err(error) => error,
         Ok(_) => panic!("call unexpectedly succeeded"),
@@ -350,7 +377,12 @@ fn document_parse_via_artifact_source_returns_markdown() {
         "artifact": serde_json::to_value(&artifact).expect("artifact json"),
     });
     let output = call_tool(&toolset, "document_parse", &arguments);
-    assert!(output["markdown"].as_str().expect("markdown").contains("Q1"));
+    assert!(
+        output["markdown"]
+            .as_str()
+            .expect("markdown")
+            .contains("Q1")
+    );
     assert_eq!(output["format"], "csv");
     assert_eq!(output["requires_ocr"], false);
 }
@@ -370,8 +402,7 @@ fn pdf_classify_via_artifact_source() {
     let toolset = DocumentToolset::try_new()
         .expect("toolset")
         .with_artifact_store(store);
-    let arguments =
-        serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let output = call_tool(&toolset, "pdf_classify", &arguments);
     assert_eq!(output["classification"], "scanned");
     assert_eq!(output["page_count"], 1);
@@ -409,8 +440,7 @@ fn unsupported_format_maps_to_stable_code() {
     let toolset = DocumentToolset::try_new()
         .expect("toolset")
         .with_artifact_store(store);
-    let arguments =
-        serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let error = call_tool_err(&toolset, "document_parse", &arguments);
     assert!(matches!(
         error.code(),
@@ -492,10 +522,8 @@ fn document_parse_spills_oversized_output_to_artifact() {
     let toolset = DocumentToolset::try_new()
         .expect("toolset")
         .with_artifact_store(Arc::clone(&store));
-    let toolset =
-        with_max_result_bytes(toolset, "document_parse", SPILL_TEST_MAX_RESULT_BYTES);
-    let arguments =
-        serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    let toolset = with_max_result_bytes(toolset, "document_parse", SPILL_TEST_MAX_RESULT_BYTES);
+    let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
     let output = call_tool(&toolset, "document_parse", &arguments);
 
     // (c) truncated flag semantics are coherent: spill always truncates the

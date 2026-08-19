@@ -4,8 +4,8 @@ use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, ContentBlock, Digest, Id, IdTag, LaneId, MediaRef, Message,
-    MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson,
-    RunId, SessionId, TextBlock, Timestamp,
+    MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
+    SessionId, TextBlock, Timestamp,
 };
 use finstack_ai_runtime::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext,
@@ -276,7 +276,11 @@ fn descriptor_declares_before_model_context_mutation() {
     let index = Arc::new(AttachmentIndex::default());
     let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
     let descriptor = middleware.descriptor();
-    assert!(descriptor.stages.contains(finstack_ai_kernel::Stage::BeforeModel));
+    assert!(
+        descriptor
+            .stages
+            .contains(finstack_ai_kernel::Stage::BeforeModel)
+    );
     assert_eq!(
         descriptor.order.tier,
         finstack_ai_runtime::OrderTier::ContextMutation
@@ -391,7 +395,13 @@ fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
         last = Some(blob);
     }
     let first_blob = BlobRef::try_new("blob-0", "text/csv", 1, None, None::<&str>).expect("blob");
-    assert!(index.lookup(&first_blob).is_none(), "oldest entry must be evicted");
+    assert!(
+        index.lookup(&first_blob).is_none(),
+        "oldest entry must be evicted"
+    );
     let last_blob = last.expect("at least one insert");
-    assert!(index.lookup(&last_blob).is_some(), "most recent entry must remain");
+    assert!(
+        index.lookup(&last_blob).is_some(),
+        "most recent entry must remain"
+    );
 }

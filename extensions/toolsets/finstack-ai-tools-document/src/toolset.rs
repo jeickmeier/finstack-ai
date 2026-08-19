@@ -6,10 +6,10 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactStore, Bytes, PortFuture,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, ToolsetDescriptor, Toolset,
-    PendingToolEffect, stage_required_artifact,
+    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactStore, Bytes,
+    PendingToolEffect, PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport,
+    ToolError, ToolEventStream, ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor, stage_required_artifact,
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -76,10 +76,9 @@ impl DocumentToolset {
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
     pub fn try_with_limits(limits: DocumentLimits) -> Result<Self, DocumentError> {
-        let parse_id =
-            ToolId::parse(PARSE_TOOL_ID).map_err(|_| DocumentError::Configuration {
-                reason: "invalid_tool_id",
-            })?;
+        let parse_id = ToolId::parse(PARSE_TOOL_ID).map_err(|_| DocumentError::Configuration {
+            reason: "invalid_tool_id",
+        })?;
         let classify_id =
             ToolId::parse(CLASSIFY_TOOL_ID).map_err(|_| DocumentError::Configuration {
                 reason: "invalid_tool_id",
@@ -311,7 +310,13 @@ async fn build_parse_result(
         .iter()
         .find(|spec| spec.model_name.as_ref() == PARSE_NAME)
         .map_or(1_048_576, |spec| spec.max_result_bytes);
-    build_parse_output(parsed, ctx, toolset.artifact_store.as_ref(), max_result_bytes).await
+    build_parse_output(
+        parsed,
+        ctx,
+        toolset.artifact_store.as_ref(),
+        max_result_bytes,
+    )
+    .await
 }
 
 fn build_classify_result(bytes: &[u8]) -> Result<serde_json::Value, ToolError> {
@@ -325,18 +330,26 @@ fn build_classify_result(bytes: &[u8]) -> Result<serde_json::Value, ToolError> {
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {
-    tool_error(crate::DOCUMENT_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
+    tool_error(
+        crate::DOCUMENT_INVALID_ARGUMENTS,
+        ErrorCategory::Validation,
+        message,
+    )
 }
 
 fn source_error(error: &crate::source::SourceError) -> ToolError {
     use crate::source::SourceError;
     match *error {
-        SourceError::InvalidArguments(message) => {
-            tool_error(crate::DOCUMENT_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
-        }
-        SourceError::Unavailable(message) => {
-            tool_error(crate::DOCUMENT_SOURCE_UNAVAILABLE, ErrorCategory::Tool, message)
-        }
+        SourceError::InvalidArguments(message) => tool_error(
+            crate::DOCUMENT_INVALID_ARGUMENTS,
+            ErrorCategory::Validation,
+            message,
+        ),
+        SourceError::Unavailable(message) => tool_error(
+            crate::DOCUMENT_SOURCE_UNAVAILABLE,
+            ErrorCategory::Tool,
+            message,
+        ),
         SourceError::TooLarge(_) => tool_error(
             crate::DOCUMENT_TOO_LARGE,
             ErrorCategory::Validation,
@@ -353,9 +366,10 @@ fn source_error(error: &crate::source::SourceError) -> ToolError {
 fn parse_error(error: &crate::parser::DocumentParseError) -> ToolError {
     use crate::parser::DocumentParseError;
     let (code, message) = match error {
-        DocumentParseError::TooLarge { .. } => {
-            (crate::DOCUMENT_TOO_LARGE, "document exceeds size or page ceiling")
-        }
+        DocumentParseError::TooLarge { .. } => (
+            crate::DOCUMENT_TOO_LARGE,
+            "document exceeds size or page ceiling",
+        ),
         DocumentParseError::UnsupportedFormat => (
             crate::DOCUMENT_UNSUPPORTED_FORMAT,
             "no supported document format detected",
@@ -426,7 +440,11 @@ async fn build_parse_output(
             "spilled artifact reference serialization failed",
         )
     })?;
-    Ok(spilled_parse_output(&parsed, &spilled_artifact, max_result_bytes))
+    Ok(spilled_parse_output(
+        &parsed,
+        &spilled_artifact,
+        max_result_bytes,
+    ))
 }
 
 /// Build the final spilled `document_parse` JSON with inline `markdown`
@@ -463,8 +481,7 @@ fn spilled_parse_output(
     let overhead = serde_json::to_vec(&build("")).map_or(u64::MAX, |bytes| bytes.len() as u64);
     let mut budget = max_result_bytes.saturating_sub(overhead);
     for _ in 0..SPILL_TRUNCATION_ATTEMPTS {
-        let (candidate_markdown, _) =
-            crate::parser::truncate_utf8(parsed.markdown.clone(), budget);
+        let (candidate_markdown, _) = crate::parser::truncate_utf8(parsed.markdown.clone(), budget);
         let candidate = build(&candidate_markdown);
         let candidate_size =
             serde_json::to_vec(&candidate).map_or(u64::MAX, |bytes| bytes.len() as u64);

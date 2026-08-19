@@ -258,9 +258,11 @@ impl DocumentIngestMiddleware {
             ));
         };
         match parser::parse(&bytes, Some(blob.media_type()), &self.limits) {
-            Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => note_block(&format!(
-                "[Attached document \"{name}\" is a scanned PDF; text extraction requires OCR, which is not enabled.]"
-            )),
+            Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => {
+                note_block(&format!(
+                    "[Attached document \"{name}\" is a scanned PDF; text extraction requires OCR, which is not enabled.]"
+                ))
+            }
             Ok(parsed) => {
                 let pages = parsed
                     .page_count
@@ -334,7 +336,10 @@ fn run_scope(ctx: &MiddlewareContext) -> ArtifactScope {
 }
 
 fn note_block(text: &str) -> ContentBlock {
-    TextBlock::try_new(text).map_or_else(|_| ContentBlock::Text(fallback_text_block()), ContentBlock::Text)
+    TextBlock::try_new(text).map_or_else(
+        |_| ContentBlock::Text(fallback_text_block()),
+        ContentBlock::Text,
+    )
 }
 
 /// A short static literal is always within `TextBlock`'s validation limits,

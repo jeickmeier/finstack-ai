@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
-use finstack_ai::runtime::{ArtifactStore, Model, ModelName, ModelSettings, Middleware, Toolset};
+use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSettings, Toolset};
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
     GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
@@ -799,7 +799,11 @@ fn linked_ports(
     middleware: Option<Vec<Py<PyPythonMiddleware>>>,
     observers: Option<Vec<Py<PyPythonObserver>>>,
     output_type: Option<Py<PyAny>>,
-) -> PyResult<(LinkedPorts, Arc<InProcessArtifactStore>, Arc<AttachmentIndex>)> {
+) -> PyResult<(
+    LinkedPorts,
+    Arc<InProcessArtifactStore>,
+    Arc<AttachmentIndex>,
+)> {
     let (artifact_store, attachment_index, document_toolset, document_middleware) =
         document_ingest_ports().map_err(|error| agent_error(py, &error, None))?;
     let mut toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)> = toolsets
