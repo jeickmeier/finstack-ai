@@ -256,10 +256,20 @@ pub(crate) const MAX_ATTACHMENT_PATH_BYTES: usize = 4 * 1024 * 1024;
 ///
 /// Shared by [`PyAttachment::new`] and the debug `parse_document*` helpers
 /// so both apply the same exactly-one-of contract and 4 MiB path cap.
+///
+/// The size cap is checked against `std::fs::metadata` *before* the file is
+/// read, mirroring the Rust document toolset's
+/// `extensions/toolsets/finstack-ai-tools-document/src/source.rs::resolve_path`
+/// — an oversized file is rejected without ever being loaded into memory.
 pub(crate) fn resolve_data_or_path(data: Option<Vec<u8>>, path: Option<&str>) -> PyResult<Vec<u8>> {
     match (data, path) {
         (Some(data), None) => Ok(data),
         (None, Some(path)) => {
+            let metadata = std::fs::metadata(path)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            if metadata.len() > MAX_ATTACHMENT_PATH_BYTES as u64 {
+                return Err(PyValueError::new_err("attachment exceeds 4 MiB"));
+            }
             let bytes =
                 std::fs::read(path).map_err(|error| PyValueError::new_err(error.to_string()))?;
             if bytes.len() > MAX_ATTACHMENT_PATH_BYTES {

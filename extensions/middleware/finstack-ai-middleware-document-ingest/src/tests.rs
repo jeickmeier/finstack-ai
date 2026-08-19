@@ -370,6 +370,75 @@ fn unsupported_media_type_file_block_is_left_alone() {
 }
 
 #[test]
+fn non_user_role_message_is_left_untouched() {
+    // Assistant messages may legally carry File blocks (per
+    // `validate_role_blocks`), but spec decision 14 scopes rewriting to
+    // User-role messages only. An Assistant-role File block must survive
+    // unchanged and the middleware must report no change (`Continue`),
+    // proving it never even inspects non-User content.
+    let store = Arc::new(CaptureArtifactStore::default());
+    let index = Arc::new(AttachmentIndex::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    index.insert(artifact.clone());
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    let input = before_model_input(vec![message(
+        1,
+        MessageRole::Assistant,
+        vec![text("here is the file"), file_block(blob_of(&artifact))],
+    )]);
+    let outcome = block_on(middleware.invoke(middleware_context(), input)).expect("outcome");
+    assert!(
+        matches!(outcome, StageOutcome::Continue),
+        "assistant-role File blocks must not be rewritten"
+    );
+}
+
+#[test]
+fn digest_mismatch_is_fail_soft_note() {
+    // The staged artifact resolves fine (index hit, store returns bytes),
+    // but the wire `BlobRef` on the message's `ContentBlock::File` declares
+    // a digest that does not match the actual stored content — e.g. a
+    // stale/forged reference. `fetch_blob` must reject the mismatch and
+    // the middleware must fall back to the same "could not be read"
+    // fail-soft note used for an unresolvable artifact, rather than
+    // feeding wrongly-attributed bytes to the parser.
+    let store = Arc::new(CaptureArtifactStore::default());
+    let index = Arc::new(AttachmentIndex::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    index.insert(artifact.clone());
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+
+    // Same blob id as the staged artifact (so the index lookup and store
+    // fetch both succeed), but a digest that belongs to different content.
+    let wrong_digest = Digest::blob_content(b"totally different content");
+    let mismatched_blob = BlobRef::try_new(
+        artifact.blob().id(),
+        "text/csv",
+        artifact.blob().length(),
+        Some(wrong_digest),
+        Some("revenue.csv"),
+    )
+    .expect("blob");
+    let input = before_model_input(vec![message(
+        1,
+        MessageRole::User,
+        vec![
+            text("please review the attachment"),
+            file_block(mismatched_blob),
+        ],
+    )]);
+
+    let outcome =
+        block_on(middleware.invoke(middleware_context(), input)).expect("fail-soft outcome is Ok");
+    let StageOutcome::Replace(json) = outcome else {
+        panic!("expected Replace");
+    };
+    let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).expect("draft");
+    assert!(all_text(&draft).contains("could not be read"));
+    assert!(!has_file_blocks(&draft));
+}
+
+#[test]
 fn attachment_index_fifo_evicts_oldest_entry_at_capacity() {
     let index = AttachmentIndex::default();
     let mut last = None;

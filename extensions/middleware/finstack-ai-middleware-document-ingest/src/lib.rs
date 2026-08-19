@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
     ArtifactRef, BlobRef, ComponentId, ComponentInvocation, ContentBlock, Digest, ErrorCategory,
-    InvocationRecovery, Message, Metadata, RawJson, Stage, TextBlock, Version,
+    InvocationRecovery, Message, MessageRole, Metadata, RawJson, Stage, TextBlock, Version,
 };
 use finstack_ai_runtime::{
     ArtifactScope, ArtifactStore, Bytes, MIDDLEWARE_OUTCOME_NOT_ALLOWED, Middleware,
@@ -225,7 +225,17 @@ impl Middleware for DocumentIngestMiddleware {
 }
 
 impl DocumentIngestMiddleware {
+    /// Rewrite a single message's `File` blocks to Markdown text.
+    ///
+    /// Per spec decision 14, only `User`-role messages carry attachments
+    /// (`ContentBlock::File` is only valid on `User`/`Assistant` per
+    /// [`finstack_ai_kernel`]'s role/block rules, and only the `User` role
+    /// is the attachment ingestion surface); other roles are returned
+    /// unchanged without inspecting their content.
     async fn rewrite_message(&self, message: &Message, scope: &ArtifactScope) -> (Message, bool) {
+        if message.role() != MessageRole::User {
+            return (message.clone(), false);
+        }
         let mut changed = false;
         let mut blocks: Vec<ContentBlock> = Vec::with_capacity(message.content().len());
         for block in message.content() {
@@ -311,6 +321,28 @@ impl DocumentIngestMiddleware {
 /// Rebuild a message with new content blocks, preserving role, id, model,
 /// provider ids, and metadata exactly. Mirrors the constructor
 /// `crates/finstack-ai/src/agent/prepare.rs` uses to build messages.
+///
+/// # Invariant: the model must never see a supported `File` block
+///
+/// `blocks` is already the caller's rewritten set (every supported `File`
+/// block replaced by a bounded [`TextBlock`] note from [`note_block`], see
+/// [`DocumentIngestMiddleware::rewrite_message`]). If `Message::try_new`
+/// rejects that rewritten set, falling back to `message.clone()` would
+/// silently reintroduce the original `File` blocks this middleware exists
+/// to strip — so the fallback below never does that. It instead builds a
+/// message carrying a single fixed, always-valid skip note, dropping every
+/// other content block rather than risk leaking a `File` block through.
+///
+/// In practice this fallback should be unreachable: after restricting
+/// rewriting to `User`-role messages (spec decision 14), `blocks` has the
+/// same length and role as the original (already-valid) message, and every
+/// substituted block is `TextBlock`, which is always allowed for `User`
+/// (see `validate_role_blocks`) and always within `Message`'s per-item
+/// content-count limit. The only other rejection modes
+/// (`RoleBlockMismatch`, tool-association checks) do not apply to a
+/// `User`-role, non-`Tool` message. No test exercises this branch because
+/// there is no constructible input that reaches it without directly
+/// violating `Message`'s own validated invariants.
 fn rebuild_message(message: &Message, blocks: Vec<ContentBlock>) -> Message {
     Message::try_new(
         *message.id(),
@@ -321,7 +353,30 @@ fn rebuild_message(message: &Message, blocks: Vec<ContentBlock>) -> Message {
         message.provider_ids().clone(),
         message.metadata().clone(),
     )
-    .unwrap_or_else(|_| message.clone())
+    .unwrap_or_else(|_| skip_note_message(message))
+}
+
+/// Last-resort fallback for [`rebuild_message`]: a message that keeps the
+/// original identity/role/model/provider-ids/metadata but replaces all
+/// content with a single fixed skip note. The note is a short static
+/// literal (see [`fallback_text_block`]), so this construction cannot fail
+/// for any `User`-role `message` — the only role this middleware rewrites.
+fn skip_note_message(message: &Message) -> Message {
+    let blocks = vec![ContentBlock::Text(fallback_text_block())];
+    Message::try_new(
+        *message.id(),
+        message.role(),
+        blocks,
+        message.created_at(),
+        message.model().cloned(),
+        message.provider_ids().clone(),
+        message.metadata().clone(),
+    )
+    .expect(
+        "a single bounded static TextBlock note is always valid for a User-role message: \
+         TextBlock is within size limits, User allows Text blocks, and non-Tool messages \
+         have no tool-association constraints",
+    )
 }
 
 /// Map the committed run context to the exact `ArtifactScope` used to stage

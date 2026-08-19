@@ -33,7 +33,12 @@
 
 #[cfg(target_arch = "wasm32")]
 mod agent;
-#[cfg(target_arch = "wasm32")]
+// Compiled for wasm32 builds, and additionally for native `cargo test` so
+// `DocumentArtifactStore`'s FIFO/byte-budget eviction has native unit-test
+// coverage (see `document_store::tests`) without needing a wasm32 test
+// target. `build_artifact` (from `host_artifact`, unconditionally
+// compiled) is available on both.
+#[cfg(any(target_arch = "wasm32", test))]
 mod document_store;
 mod executor;
 #[cfg(any(not(target_arch = "wasm32"), feature = "scripted-trace"))]
