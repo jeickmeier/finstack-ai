@@ -68,6 +68,10 @@ unpublished.
 - The checked-in `fixtures/documents/` corpus omits a table-heavy PDF (the spec's fixture list calls for one); anydoc's own upstream test corpus already covers table-heavy PDF extraction.
 - Debug parse-to-markdown helpers over `finstack-ai-tools-document`'s parser, without an `Agent` or `Run`: Python `parse_document_markdown` / `parse_document`, WASM `parseDocumentMarkdown` / `parseDocument`.
 - `examples/python-notebooks/08_document_ingestion.ipynb`: an offline, scripted-model walkthrough of PDF and `.docx` document ingestion — debug parsing, scanned-PDF classification, and an `Agent.run` attachment showing the model-visible Markdown the ingest middleware injects.
+- Added `finstack-ai-provider-openrouter`: OpenRouter Responses provider with
+  attribution headers, provider-routing passthrough, and a model-catalog
+  fetch helper; new `Agent::openrouter` constructor with Python and WASM
+  binding parity.
 
 ### Changed
 

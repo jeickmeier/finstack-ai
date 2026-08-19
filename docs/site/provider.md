@@ -8,22 +8,29 @@ a client on import.
 | `finstack-ai-provider-openai` | Official OpenAI Responses; HTTPS Bearer |
 | `finstack-ai-provider-ollama` | Native `/api/chat`; keyless loopback |
 | `finstack-ai-provider-anthropic` | Anthropic Messages leaf |
+| `finstack-ai-provider-openrouter` | OpenRouter Responses (`/api/v1/responses`); HTTPS Bearer; optional attribution headers; model-catalog fetch |
 | `finstack-ai-test` (`ScriptedModel`) | Semantic scripted tests; no HTTP |
 
 Python lazy extras (`finstack_ai.providers.*`) load on attribute access.
-`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`, and
-`Agent.gateway()` are the same Rust-owned constructors on Python and
-WASM. wasm-host methods exist; fail-closed is a Rust platform error
-(`agent_run_unsupported_plan`), not a missing method. They accept the
-same keyword-only T2 Python ports as `Agent.from_python`. `openai` maps
-required keyword-only `api_key` to Bearer auth and always targets
-official Responses. `ollama` stays keyless. The factories do not read
-environment variables. `Agent.gateway()` stays as a thin dispatcher onto
-the three dedicated crates. Supported `wire_protocol` values are
-`openai_responses`, `anthropic_messages`, and `ollama_chat`.
-`openai_chat` is a configuration error. There is no multi-protocol
-gateway crate. `Agent.e2b_sandbox()` is the T4 sandbox constructor on
-both bindings; see [toolsets](toolset.md).
+`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`,
+`Agent.openrouter()`, and `Agent.gateway()` are the same Rust-owned
+constructors on Python and WASM. wasm-host methods exist; fail-closed is
+a Rust platform error (`agent_run_unsupported_plan`), not a missing
+method. They accept the same keyword-only T2 Python ports as
+`Agent.from_python`. `openai` maps required keyword-only `api_key` to
+Bearer auth and always targets official Responses. `ollama` stays
+keyless. `openrouter` targets `https://openrouter.ai/api/v1/responses`
+and maps optional `referer`/`title` keywords to the non-secret
+`HTTP-Referer`/`X-Title` attribution headers; OpenRouter's provider
+routing (a `provider` object, a `models` fallback array, and
+`:nitro`/`:floor` model-name suffixes) passes through model settings
+unchanged rather than through dedicated constructor arguments. The
+factories do not read environment variables. `Agent.gateway()` stays as
+a thin dispatcher onto the three dedicated crates. Supported
+`wire_protocol` values are `openai_responses`, `anthropic_messages`, and
+`ollama_chat`. `openai_chat` is a configuration error. There is no
+multi-protocol gateway crate. `Agent.e2b_sandbox()` is the T4 sandbox
+constructor on both bindings; see [toolsets](toolset.md).
 
 `GatewayAgentSpec.wire_protocol` selects the dedicated leaf. Required
 construction fields include `hard_input_bytes` and `max_output_tokens`.
