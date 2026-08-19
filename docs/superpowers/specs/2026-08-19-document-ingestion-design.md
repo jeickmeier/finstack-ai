@@ -143,11 +143,17 @@ Give agents first-class document ingestion, in two components plus one core API 
     `agent/prepare.rs` (and the session run path) maps each entry to a
     `ContentBlock::File(MediaRef(BlobRef))` on the user message. Role validation
     already permits `File` on `User`.
-19. **BlobRef↔ArtifactRef convention (frozen)**: `BlobRef.id` is the `ArtifactRef`
-    id verbatim; `BlobRef.digest` and `length` are copied from the staged artifact's
-    metadata. The middleware resolves bytes by constructing the `ArtifactRef` from
-    the `BlobRef.id` within the run's `ArtifactScope` and verifying the digest. No
-    new port or registry is introduced.
+19. **BlobRef→ArtifactRef resolution via `AttachmentIndex`** *(amended during
+    implementation, 2026-08-19)*: the original convention ("`BlobRef.id` is the
+    `ArtifactRef` id; reconstruct the ref") is unimplementable — `ArtifactStore`
+    implementations verify exact `ArtifactRef` equality against store-assigned
+    identities that a bare `BlobRef` cannot reproduce. Instead, a small bounded
+    in-process `AttachmentIndex` (`insert(ArtifactRef)`, `lookup(&BlobRef) ->
+    Option<ArtifactRef>`, keyed by blob id, FIFO-capped) is populated wherever
+    attachments are staged and injected into the ingest middleware at
+    construction. A lookup miss is a fail-soft skip note (decision 16). The
+    `ArtifactStore` port is unchanged. `BlobRef.digest`/`length` still come from
+    the staged artifact and are verified after fetch.
 20. **Attachment validation at request build time**: media type must parse; at most
     `MAX_RUN_ATTACHMENTS = 8` per run; each artifact must already be staged (the run
     API never accepts raw bytes). Violations are `AgentRunError` argument errors.
