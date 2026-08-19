@@ -4,6 +4,7 @@
 
 mod config;
 mod error;
+mod provider;
 mod request;
 mod sse;
 mod stream;
@@ -13,3 +14,4 @@ pub use finstack_ai_runtime::{
     Authentication, CredentialReference, CredentialRejected, CredentialStore, SecretRejected,
     SecretString,
 };
+pub use provider::OpenRouterProvider;
