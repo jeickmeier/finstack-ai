@@ -4,6 +4,7 @@
 
 mod config;
 mod error;
+mod request;
 
 pub use config::{OpenRouterConfig, OpenRouterModelConfig, SecretHeader};
 pub use finstack_ai_runtime::{
