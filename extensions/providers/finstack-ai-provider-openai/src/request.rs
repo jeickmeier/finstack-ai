@@ -1,11 +1,14 @@
 //! Private official `OpenAI` Responses request translation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use base64::Engine;
 use finstack_ai_kernel::{
-    ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
+    ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
+    ToolCallId,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft, ToolSpec};
+use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -73,12 +76,13 @@ impl ResponsesRequest {
         draft: &ModelRequestDraft,
         model: &OpenAiModelConfig,
         continuation_state: Option<&RawJson>,
+        resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (instructions, input) = map_input(&draft.messages, continuation_state)?;
+        let (instructions, input) = map_input(&draft.messages, continuation_state, resolved)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -187,6 +191,7 @@ fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
 fn map_input(
     messages: &[Message],
     continuation_state: Option<&RawJson>,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
 ) -> Result<(Option<String>, Vec<Value>), ModelError> {
     let prefix_len = messages
         .iter()
@@ -212,13 +217,13 @@ fn map_input(
             .map_or(prefix_len, |index| index.saturating_add(1));
         let mut input = envelope.replay_items;
         for message in &messages[suffix_start..] {
-            input.extend(map_conversation_message(message, &call_ids)?);
+            input.extend(map_conversation_message(message, &call_ids, resolved)?);
         }
         input
     } else {
         let mut input = Vec::new();
         for message in &messages[prefix_len..] {
-            input.extend(map_conversation_message(message, &call_ids)?);
+            input.extend(map_conversation_message(message, &call_ids, resolved)?);
         }
         input
     };
@@ -267,17 +272,104 @@ fn provider_call_ids(messages: &[Message]) -> BTreeMap<ToolCallId, String> {
 fn map_conversation_message(
     message: &Message,
     call_ids: &BTreeMap<ToolCallId, String>,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
 ) -> Result<Vec<Value>, ModelError> {
     match message.role() {
         MessageRole::User => Ok(vec![json!({
             "type": "message",
             "role": "user",
-            "content": [{ "type": "input_text", "text": render_text(message.content())? }]
+            "content": map_user_content(message.content(), resolved)?
         })]),
         MessageRole::Assistant => map_assistant_items(message.content(), call_ids),
         MessageRole::Tool => map_tool_results(message.content(), call_ids),
         MessageRole::System | MessageRole::Developer => Err(request_error(
             "system instructions must remain a stable leading prefix",
+        )),
+    }
+}
+
+fn map_user_content(
+    content: &[ContentBlock],
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<Vec<Value>, ModelError> {
+    let mut parts = Vec::new();
+    let mut text = String::new();
+    let flush = |parts: &mut Vec<Value>, text: &mut String| {
+        if !text.is_empty() {
+            parts.push(json!({ "type": "input_text", "text": text.as_str() }));
+            text.clear();
+        }
+    };
+    for block in content {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::Image(media) => {
+                flush(&mut parts, &mut text);
+                parts.push(json!({
+                    "type": "input_image",
+                    "image_url": media_reference(media, resolved)?
+                }));
+            }
+            ContentBlock::File(media) => {
+                flush(&mut parts, &mut text);
+                parts.push(json!({
+                    "type": "input_file",
+                    "file_url": media_reference(media, resolved)?
+                }));
+            }
+            ContentBlock::Audio(media) => {
+                flush(&mut parts, &mut text);
+                let (data, format) = media_reference_audio(media, resolved)?;
+                parts.push(json!({
+                    "type": "input_audio",
+                    "input_audio": { "data": data, "format": format }
+                }));
+            }
+            _ => {
+                return Err(request_error(
+                    "message contains unsupported provider content",
+                ));
+            }
+        }
+    }
+    flush(&mut parts, &mut text);
+    Ok(parts)
+}
+
+fn media_reference(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<String, ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Url(url)) => Ok(url.to_string()),
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => Ok(format!(
+            "data:{media_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
+        )),
+    }
+}
+
+fn media_reference_audio(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<(String, String), ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => {
+            let format = media_type.rsplit('/').next().unwrap_or("mp3").to_owned();
+            Ok((
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+                format,
+            ))
+        }
+        Some(ResolvedMedia::Url(_)) => Err(request_error(
+            "audio input requires resolved bytes, not a URL",
+        )),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
         )),
     }
 }
@@ -403,7 +495,7 @@ mod tests {
         let mut draft =
             draft(br#"{"reasoning_effort":"low","reasoning_summary":"auto","temperature":0}"#);
         draft.tools = tools;
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["store"], false);
         assert_eq!(value["stream"], true);
@@ -426,7 +518,7 @@ mod tests {
     fn prompt_cache_key_is_rewritten_to_the_current_tool_catalog() {
         let mut draft = draft(br#"{"prompt_cache_key":"stale-previous-tools"}"#);
         draft.tools = Arc::from([tool("lookup", br#"{"type":"object"}"#)]);
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), None).expect("request");
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new()).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_ne!(value["prompt_cache_key"], "stale-previous-tools");
         assert_eq!(value["prompt_cache_key"], tool_catalog_key(&draft.tools));
@@ -435,7 +527,7 @@ mod tests {
     #[test]
     fn rejects_reserved_settings() {
         let draft = draft(br#"{"model":"shadow"}"#);
-        let error = ResponsesRequest::try_from_draft(&draft, &model(), None)
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect_err("reserved setting must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
@@ -447,7 +539,7 @@ mod tests {
             br#"{"reasoning_summary":"verbose"}"#.as_slice(),
             br#"{"reasoning_effort":1}"#.as_slice(),
         ] {
-            let error = ResponsesRequest::try_from_draft(&draft(settings), &model(), None)
+            let error = ResponsesRequest::try_from_draft(&draft(settings), &model(), None, &BTreeMap::new())
                 .expect_err("unsupported reasoning must fail");
             assert_eq!(error.code(), crate::error::REQUEST_INVALID);
         }
@@ -504,7 +596,7 @@ mod tests {
             br#"{"provider":"openai.responses","replay_items":[{"call_id":"call_abc","type":"function_call"},{"encrypted_content":"secret-reasoning","type":"reasoning"}],"version":1}"#,
         )
         .expect("continuation");
-        let request = ResponsesRequest::try_from_draft(&draft, &model(), Some(&continuation))
+        let request = ResponsesRequest::try_from_draft(&draft, &model(), Some(&continuation), &BTreeMap::new())
             .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["instructions"], "Be brief.");
@@ -515,6 +607,137 @@ mod tests {
         assert_eq!(value["input"][2]["call_id"], "call_abc");
         assert_eq!(value["input"][2]["output"], "ok");
         assert_ne!(value["input"][0]["type"], "message");
+    }
+
+    #[test]
+    fn image_blocks_map_to_input_image_items() {
+        use finstack_ai_kernel::BlobRef;
+
+        let blob = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let media = MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Image(media)],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+
+        let request =
+            ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved).expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["input"][0]["content"][0]["type"], "input_image");
+        assert_eq!(
+            value["input"][0]["content"][0]["image_url"],
+            "https://cdn.example/a.png"
+        );
+    }
+
+    #[test]
+    fn media_without_resolver_fails_closed() {
+        use finstack_ai_kernel::BlobRef;
+
+        let blob = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let media = MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Image(media)],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect_err("media without resolution must fail");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn audio_url_resolution_is_rejected() {
+        use finstack_ai_kernel::BlobRef;
+
+        let blob = BlobRef::try_new("blob-1", "audio/mpeg", 4, None, None::<&str>).expect("blob");
+        let media = MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Audio(media)],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.mp3")),
+        );
+
+        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved)
+            .expect_err("audio URL resolution must be rejected");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn audio_bytes_map_to_input_audio_with_base64_data_and_format() {
+        use finstack_ai_kernel::BlobRef;
+
+        let blob = BlobRef::try_new("blob-1", "audio/wav", 4, None, None::<&str>).expect("blob");
+        let media = MediaRef::new(blob);
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![ContentBlock::Audio(media)],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([message]);
+
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("audio/wav"),
+                bytes: Arc::from(b"abcd".as_slice()),
+            },
+        );
+
+        let request =
+            ResponsesRequest::try_from_draft(&draft, &model(), None, &resolved).expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["input"][0]["content"][0]["type"], "input_audio");
+        assert_eq!(
+            value["input"][0]["content"][0]["input_audio"]["data"],
+            base64::engine::general_purpose::STANDARD.encode(b"abcd")
+        );
+        assert_eq!(
+            value["input"][0]["content"][0]["input_audio"]["format"],
+            "wav"
+        );
     }
 
     fn model() -> OpenAiModelConfig {

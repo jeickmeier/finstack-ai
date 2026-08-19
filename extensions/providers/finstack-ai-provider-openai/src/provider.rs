@@ -6,10 +6,11 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
+use finstack_ai_kernel::{ContentBlock, ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
-    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, ReconcileContext,
+    MediaResolver, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
+    ModelName, ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelStreamItem,
+    ModelTokenEstimate, ReconcileContext, ResolvedMedia,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -238,12 +239,15 @@ impl Model for OpenAiProvider {
         let timeout = self.config.request_timeout();
         let max_event_bytes = self.config.max_event_bytes();
         let max_stream_bytes = self.config.max_stream_bytes();
+        let resolver = self.config.media_resolver();
         Box::pin(async move {
             let model = model?;
+            let resolved_media = resolve_draft_media(resolver.as_ref(), &request.draft).await?;
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
                 request.continuation_state.as_ref(),
+                &resolved_media,
             )?;
             let payload = serialize_request(&wire)?;
             let request_id = request.call.request_id.to_string();
@@ -379,6 +383,55 @@ async fn drive_response(
     }
 }
 
+const MAX_INLINE_MEDIA_BYTES: usize = 8 * 1_048_576;
+
+async fn resolve_draft_media(
+    resolver: Option<&Arc<dyn MediaResolver>>,
+    draft: &ModelRequestDraft,
+) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
+    let mut resolved_media = BTreeMap::new();
+    for message in draft.messages.iter() {
+        for block in message.content() {
+            let (ContentBlock::Image(media) | ContentBlock::Audio(media) | ContentBlock::File(media)) =
+                block
+            else {
+                continue;
+            };
+            let id: Arc<str> = Arc::from(media.blob().id());
+            if resolved_media.contains_key(&id) {
+                continue;
+            }
+            let Some(resolver) = resolver else {
+                return Err(crate::error::request_error(
+                    "media content requires a configured media resolver",
+                ));
+            };
+            let payload = resolver.resolve(media.blob()).await.map_err(map_resolve)?;
+            if let ResolvedMedia::Bytes { bytes, .. } = &payload
+                && bytes.len() > MAX_INLINE_MEDIA_BYTES
+            {
+                return Err(crate::error::stream_limit_error());
+            }
+            resolved_media.insert(id, payload);
+        }
+    }
+    Ok(resolved_media)
+}
+
+fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
+    use finstack_ai_runtime::MediaResolveKind;
+    match error.kind {
+        MediaResolveKind::NotFound => crate::error::request_error(error.message),
+        MediaResolveKind::Unavailable => crate::error::error(
+            TRANSPORT_ERROR,
+            ErrorCategory::Model,
+            true,
+            "OpenAI media resolution is unavailable",
+        ),
+        MediaResolveKind::Limit => crate::error::stream_limit_error(),
+    }
+}
+
 fn cancelled_error() -> ModelError {
     error(
         CANCELLED,
@@ -408,8 +461,18 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 
 #[cfg(test)]
 mod tests {
+    use finstack_ai_kernel::{
+        BlobRef, EffectId, LaneId, MediaRef, Message, MessageId, MessageRole, ModelRequestId,
+        OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId,
+        Timestamp,
+    };
+    use finstack_ai_runtime::{
+        AuthorizationContext, CancellationSignal, MediaResolveError, ModelCallContext,
+        ModelRequest, ModelRequestLimits, ModelSettings, PortFuture, RunCallContext,
+        StructuredOutputCapability,
+    };
+
     use super::*;
-    use finstack_ai_runtime::StructuredOutputCapability;
 
     #[test]
     fn unknown_model_uses_a_zeroed_profile_and_native_structured_output() {
@@ -425,5 +488,118 @@ mod tests {
             capabilities.structured_output,
             StructuredOutputCapability::Native
         );
+    }
+
+    #[test]
+    fn refresh_model_metadata_round_trips_the_input_capability_flags() {
+        let config = OpenAiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OpenAiProvider::try_new(config, vec![model]).expect("provider");
+        let name = ModelName::try_new("gpt-test").expect("name");
+        assert!(!provider.capabilities(&name).input.images);
+
+        let mut update = provider.capabilities(&name);
+        update.input.images = true;
+        provider
+            .refresh_model_metadata(&name, update)
+            .expect("refresh");
+
+        assert!(provider.capabilities(&name).input.images);
+    }
+
+    #[derive(Debug)]
+    struct OversizedResolver;
+
+    impl MediaResolver for OversizedResolver {
+        fn resolve(
+            &self,
+            _blob: &BlobRef,
+        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            Box::pin(async {
+                Ok(ResolvedMedia::Bytes {
+                    media_type: Arc::from("image/png"),
+                    bytes: Arc::from(vec![0_u8; 9 * 1_048_576]),
+                })
+            })
+        }
+    }
+
+    fn fixture_request(media: ContentBlock) -> ModelRequest {
+        let selected = ModelName::try_new("gpt-test").expect("name");
+        ModelRequest {
+            call: ModelCallContext {
+                run: RunCallContext {
+                    locator: OperationLocator::try_new(
+                        "tenant-a",
+                        SessionId::parse("01234567-89ab-7cde-89ab-0123456789a1").expect("session"),
+                        LaneId::parse("01234567-89ab-7cde-89ab-0123456789a2").expect("lane"),
+                        RunId::parse("01234567-89ab-7cde-89ab-0123456789a3").expect("run"),
+                    )
+                    .expect("locator"),
+                    authorization: AuthorizationContext {
+                        principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                            .expect("principal"),
+                        authentication_method: Arc::from("fixture"),
+                        assurance_level: Arc::from("test"),
+                        roles: Arc::from([]),
+                        permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                        safe_claims: Metadata::empty(),
+                        policy_version: Arc::from("policy-v1"),
+                        decision_id: Arc::from("decision-v1"),
+                    },
+                    effect_id: EffectId::parse("01234567-89ab-7cde-89ab-0123456789a4")
+                        .expect("effect"),
+                    attempt: 1,
+                    deadline: None,
+                    budget_scope_id: None,
+                    cancellation: CancellationSignal::new(),
+                },
+                request_id: ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789a5")
+                    .expect("request id"),
+            },
+            draft: ModelRequestDraft {
+                model: selected,
+                messages: Arc::from([Message::try_new(
+                    MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message"),
+                    MessageRole::User,
+                    vec![media],
+                    Timestamp::from_unix_ms(1).expect("ts"),
+                    None,
+                    ProviderIds::empty(),
+                    Metadata::empty(),
+                )
+                .expect("message")]),
+                tools: Arc::from([]),
+                output: OutputSpec::PlainText,
+                settings: ModelSettings {
+                    values: RawJson::parse(b"{}").expect("settings"),
+                },
+                limits: ModelRequestLimits {
+                    max_input_bytes: 1_024,
+                    max_input_tokens: 1_024,
+                    max_output_tokens: 128,
+                },
+            },
+            continuation_state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_resolved_media_fails_closed() {
+        let config = OpenAiConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_media_resolver(Arc::new(OversizedResolver));
+        let model = OpenAiModelConfig::try_new("gpt-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+            .expect("model");
+        let provider = OpenAiProvider::try_new(config, vec![model]).expect("provider");
+
+        let blob = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let request = fixture_request(ContentBlock::Image(MediaRef::new(blob)));
+
+        let Err(error) = provider.request(request).await else {
+            panic!("oversized media must fail closed");
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
     }
 }

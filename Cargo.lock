@@ -1070,6 +1070,7 @@ dependencies = [
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-provider-openrouter",
  "finstack-ai-remote-child",
  "finstack-ai-runtime",
  "finstack-ai-sandbox-e2b",
@@ -1302,6 +1303,7 @@ dependencies = [
 name = "finstack-ai-provider-anthropic"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
@@ -1321,6 +1323,7 @@ dependencies = [
 name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1335,6 +1338,7 @@ dependencies = [
 name = "finstack-ai-provider-openai"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1349,6 +1353,7 @@ dependencies = [
 name = "finstack-ai-provider-openrouter"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
