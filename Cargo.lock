@@ -1171,6 +1171,7 @@ dependencies = [
 name = "finstack-ai-middleware-document-ingest"
 version = "1.0.0"
 dependencies = [
+ "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
@@ -1497,6 +1498,7 @@ name = "finstack-ai-tools-document"
 version = "1.0.0"
 dependencies = [
  "anydoc",
+ "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",

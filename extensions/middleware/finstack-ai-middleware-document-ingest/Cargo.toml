@@ -18,5 +18,12 @@ serde_json = { workspace = true }
 serde_json_canonicalizer = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "ingest"
+harness = false
+
 [lints]
 workspace = true
