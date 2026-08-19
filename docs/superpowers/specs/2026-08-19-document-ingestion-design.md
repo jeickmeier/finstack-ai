@@ -173,7 +173,11 @@ Give agents first-class document ingestion, in two components plus one core API 
 ## Non-goals
 
 - **OCR** — no PDFium/ONNX in any build; follow-up behind an off-by-default cargo
-  feature on the toolset crate.
+  feature on the toolset crate. Designated future path (evaluated 2026-08-19, not
+  part of this plan or implementation): enable pdf-inspector's `ocr` feature, which
+  pairs `render-pdfium` rasterization with `oar-ocr` (Rust PP-OCR v3–v6 port,
+  document-tuned) on ONNX Runtime — native-only, pending a spike validating accuracy
+  on representative scans and offline model provisioning.
 - **Chunking, embeddings, RAG ingestion** — this extension produces Markdown; what
   consumes it is out of scope.
 - **Provider-native document upload** (e.g. Anthropic document blocks) and any
