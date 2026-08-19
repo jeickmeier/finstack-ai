@@ -1,4 +1,4 @@
-//! Private OpenRouter Responses request translation.
+//! Private `OpenRouter` Responses request translation.
 
 use std::collections::BTreeMap;
 

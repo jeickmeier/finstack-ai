@@ -1,4 +1,4 @@
-//! Model-port conformance for OpenRouter Responses over a loopback listener.
+//! Model-port conformance for `OpenRouter` Responses over a loopback listener.
 
 use std::sync::Arc;
 

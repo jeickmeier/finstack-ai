@@ -1,4 +1,4 @@
-//! OpenRouter Responses SSE event assembly (shared OpenAI-Responses normalization).
+//! `OpenRouter` Responses SSE event assembly (shared OpenAI-Responses normalization).
 
 use finstack_ai_runtime::{
     ModelError, ModelStreamItem, OpenAiResponsesAssembly, StreamNormError, StreamNormKind,

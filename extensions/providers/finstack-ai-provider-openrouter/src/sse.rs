@@ -1,4 +1,4 @@
-//! Incremental, bounded OpenRouter Responses Server-Sent Events framing.
+//! Incremental, bounded `OpenRouter` Responses Server-Sent Events framing.
 
 use finstack_ai_runtime::{ModelError, SseEvent, SseEventParser, SseParseError};
 

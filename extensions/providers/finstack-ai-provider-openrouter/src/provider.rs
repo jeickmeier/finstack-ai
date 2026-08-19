@@ -1,4 +1,4 @@
-//! Native OpenRouter Responses provider implementation.
+//! Native `OpenRouter` Responses provider implementation.
 
 use core::fmt;
 use core::pin::Pin;
