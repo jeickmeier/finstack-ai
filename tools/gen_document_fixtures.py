@@ -8,33 +8,70 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "fixtures" / "documents"
 
-TEXT_PDF = b"""%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
-4 0 obj<</Length 60>>stream
-BT /F1 24 Tf 72 720 Td (Quarterly Revenue Report) Tj ET
-endstream
-endobj
-5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
-trailer<</Root 1 0 R/Size 6>>
-"""
 
-# A one-page PDF whose only content is a 1x1 image XObject: no text operators.
-SCANNED_PDF = b"""%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>endobj
-4 0 obj<</Length 44>>stream
-q 612 0 0 792 0 0 cm /Im1 Do Q
-endstream
-endobj
-5 0 obj<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray/BitsPerComponent 8/Length 1>>stream
-\xff
-endstream
-endobj
-trailer<</Root 1 0 R/Size 6>>
-"""
+def build_pdf(object_bodies: list[bytes], root_obj_num: int = 1) -> bytes:
+    """Assemble a minimal but structurally valid PDF: header, numbered
+    objects, a byte-accurate xref table, and a trailer pointing at it.
+
+    `lopdf` (via pdf-inspector) requires a real xref table with correct
+    offsets — a bare `trailer` with no `xref`/`startxref` is rejected as
+    "Invalid PDF structure", which hand-written fixtures without this
+    builder produced.
+    """
+    header = b"%PDF-1.4\n"
+    body = bytearray(header)
+    offsets: list[int] = [0]  # object 0 is the free-list head
+    for index, obj_body in enumerate(object_bodies, start=1):
+        offsets.append(len(body))
+        body += f"{index} 0 obj\n".encode() + obj_body + b"\nendobj\n"
+
+    xref_offset = len(body)
+    count = len(object_bodies) + 1
+    xref = bytearray(f"xref\n0 {count}\n".encode())
+    xref += b"0000000000 65535 f \n"
+    for offset in offsets[1:]:
+        xref += f"{offset:010d} 00000 n \n".encode()
+
+    trailer = (
+        f"trailer\n<</Size {count}/Root {root_obj_num} 0 R>>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n"
+    ).encode()
+
+    return bytes(body) + bytes(xref) + trailer
+
+
+def _text_pdf() -> bytes:
+    content = b"BT /F1 24 Tf 72 720 Td (Quarterly Revenue Report) Tj ET"
+    return build_pdf([
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+        b"/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+        f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    ])
+
+
+def _scanned_pdf() -> bytes:
+    # A one-page PDF whose only content is a 1x1 image XObject: no text
+    # operators, so pdf-inspector classifies it as scanned/needs-OCR.
+    content = b"q 612 0 0 792 0 0 cm /Im1 Do Q"
+    image_data = b"\xff"
+    return build_pdf([
+        b"<</Type/Catalog/Pages 2 0 R>>",
+        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+        b"/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>",
+        f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+        f"<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray"
+        f"/BitsPerComponent 8/Length {len(image_data)}>>\nstream\n".encode()
+        + image_data
+        + b"\nendstream",
+    ])
+
+
+TEXT_PDF = _text_pdf()
+SCANNED_PDF = _scanned_pdf()
 
 CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">

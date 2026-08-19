@@ -1,0 +1,22 @@
+[package]
+name = "finstack-ai-tools-document"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Document-to-Markdown ingestion toolset (anydoc + pdf-inspector)"
+
+[dependencies]
+finstack-ai-runtime = { path = "../../../crates/finstack-ai-runtime", default-features = false }
+anydoc = { workspace = true }
+pdf-inspector = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
