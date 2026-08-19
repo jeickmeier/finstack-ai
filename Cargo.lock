@@ -1376,6 +1376,7 @@ dependencies = [
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-provider-openrouter",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
