@@ -1,0 +1,146 @@
+pub mod finstack_ai_tools_document
+pub mod finstack_ai_tools_document::parser
+pub enum finstack_ai_tools_document::parser::DocumentClassification
+pub finstack_ai_tools_document::parser::DocumentClassification::Image
+pub finstack_ai_tools_document::parser::DocumentClassification::Mixed
+pub finstack_ai_tools_document::parser::DocumentClassification::Scanned
+pub finstack_ai_tools_document::parser::DocumentClassification::Text
+impl core::clone::Clone for finstack_ai_tools_document::parser::DocumentClassification
+pub fn finstack_ai_tools_document::parser::DocumentClassification::clone(&self) -> finstack_ai_tools_document::parser::DocumentClassification
+impl core::cmp::Eq for finstack_ai_tools_document::parser::DocumentClassification
+impl core::cmp::PartialEq for finstack_ai_tools_document::parser::DocumentClassification
+pub fn finstack_ai_tools_document::parser::DocumentClassification::eq(&self, &finstack_ai_tools_document::parser::DocumentClassification) -> bool
+impl core::fmt::Debug for finstack_ai_tools_document::parser::DocumentClassification
+pub fn finstack_ai_tools_document::parser::DocumentClassification::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_document::parser::DocumentClassification
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::parser::DocumentClassification
+impl serde_core::ser::Serialize for finstack_ai_tools_document::parser::DocumentClassification
+pub fn finstack_ai_tools_document::parser::DocumentClassification::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_document::parser::DocumentClassification
+pub fn finstack_ai_tools_document::parser::DocumentClassification::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_tools_document::parser::DocumentFormat
+pub finstack_ai_tools_document::parser::DocumentFormat::Csv
+pub finstack_ai_tools_document::parser::DocumentFormat::Doc
+pub finstack_ai_tools_document::parser::DocumentFormat::Docx
+pub finstack_ai_tools_document::parser::DocumentFormat::Epub
+pub finstack_ai_tools_document::parser::DocumentFormat::Odp
+pub finstack_ai_tools_document::parser::DocumentFormat::Ods
+pub finstack_ai_tools_document::parser::DocumentFormat::Odt
+pub finstack_ai_tools_document::parser::DocumentFormat::Pdf
+pub finstack_ai_tools_document::parser::DocumentFormat::Ppt
+pub finstack_ai_tools_document::parser::DocumentFormat::Pptx
+pub finstack_ai_tools_document::parser::DocumentFormat::Rtf
+pub finstack_ai_tools_document::parser::DocumentFormat::Unknown
+pub finstack_ai_tools_document::parser::DocumentFormat::Xls
+pub finstack_ai_tools_document::parser::DocumentFormat::Xlsx
+impl finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::from_media_type(&str) -> Self
+pub fn finstack_ai_tools_document::parser::DocumentFormat::is_supported_media_type(&str) -> bool
+impl core::clone::Clone for finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::clone(&self) -> finstack_ai_tools_document::parser::DocumentFormat
+impl core::cmp::Eq for finstack_ai_tools_document::parser::DocumentFormat
+impl core::cmp::PartialEq for finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::eq(&self, &finstack_ai_tools_document::parser::DocumentFormat) -> bool
+impl core::fmt::Debug for finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_tools_document::parser::DocumentFormat
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::parser::DocumentFormat
+impl serde_core::ser::Serialize for finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_document::parser::DocumentFormat
+pub fn finstack_ai_tools_document::parser::DocumentFormat::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_tools_document::parser::DocumentParseError
+pub finstack_ai_tools_document::parser::DocumentParseError::ParseFailed
+pub finstack_ai_tools_document::parser::DocumentParseError::ParseFailed::message: alloc::string::String
+pub finstack_ai_tools_document::parser::DocumentParseError::TooLarge
+pub finstack_ai_tools_document::parser::DocumentParseError::TooLarge::len: usize
+pub finstack_ai_tools_document::parser::DocumentParseError::TooLarge::max: u64
+pub finstack_ai_tools_document::parser::DocumentParseError::UnsupportedFormat
+impl core::clone::Clone for finstack_ai_tools_document::parser::DocumentParseError
+pub fn finstack_ai_tools_document::parser::DocumentParseError::clone(&self) -> finstack_ai_tools_document::parser::DocumentParseError
+impl core::cmp::Eq for finstack_ai_tools_document::parser::DocumentParseError
+impl core::cmp::PartialEq for finstack_ai_tools_document::parser::DocumentParseError
+pub fn finstack_ai_tools_document::parser::DocumentParseError::eq(&self, &finstack_ai_tools_document::parser::DocumentParseError) -> bool
+impl core::error::Error for finstack_ai_tools_document::parser::DocumentParseError
+impl core::fmt::Debug for finstack_ai_tools_document::parser::DocumentParseError
+pub fn finstack_ai_tools_document::parser::DocumentParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_document::parser::DocumentParseError
+pub fn finstack_ai_tools_document::parser::DocumentParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::parser::DocumentParseError
+pub struct finstack_ai_tools_document::parser::DocumentLimits
+pub finstack_ai_tools_document::parser::DocumentLimits::max_input_bytes: u64
+pub finstack_ai_tools_document::parser::DocumentLimits::max_output_bytes: u64
+pub finstack_ai_tools_document::parser::DocumentLimits::max_pages: u32
+impl core::clone::Clone for finstack_ai_tools_document::parser::DocumentLimits
+pub fn finstack_ai_tools_document::parser::DocumentLimits::clone(&self) -> finstack_ai_tools_document::parser::DocumentLimits
+impl core::cmp::Eq for finstack_ai_tools_document::parser::DocumentLimits
+impl core::cmp::PartialEq for finstack_ai_tools_document::parser::DocumentLimits
+pub fn finstack_ai_tools_document::parser::DocumentLimits::eq(&self, &finstack_ai_tools_document::parser::DocumentLimits) -> bool
+impl core::default::Default for finstack_ai_tools_document::parser::DocumentLimits
+pub fn finstack_ai_tools_document::parser::DocumentLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_document::parser::DocumentLimits
+pub fn finstack_ai_tools_document::parser::DocumentLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::parser::DocumentLimits
+pub struct finstack_ai_tools_document::parser::ParsedDocument
+pub finstack_ai_tools_document::parser::ParsedDocument::classification: core::option::Option<finstack_ai_tools_document::parser::DocumentClassification>
+pub finstack_ai_tools_document::parser::ParsedDocument::format: finstack_ai_tools_document::parser::DocumentFormat
+pub finstack_ai_tools_document::parser::ParsedDocument::markdown: alloc::string::String
+pub finstack_ai_tools_document::parser::ParsedDocument::page_count: core::option::Option<u32>
+pub finstack_ai_tools_document::parser::ParsedDocument::requires_ocr: bool
+pub finstack_ai_tools_document::parser::ParsedDocument::truncated: bool
+impl core::clone::Clone for finstack_ai_tools_document::parser::ParsedDocument
+pub fn finstack_ai_tools_document::parser::ParsedDocument::clone(&self) -> finstack_ai_tools_document::parser::ParsedDocument
+impl core::cmp::Eq for finstack_ai_tools_document::parser::ParsedDocument
+impl core::cmp::PartialEq for finstack_ai_tools_document::parser::ParsedDocument
+pub fn finstack_ai_tools_document::parser::ParsedDocument::eq(&self, &finstack_ai_tools_document::parser::ParsedDocument) -> bool
+impl core::fmt::Debug for finstack_ai_tools_document::parser::ParsedDocument
+pub fn finstack_ai_tools_document::parser::ParsedDocument::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::parser::ParsedDocument
+impl serde_core::ser::Serialize for finstack_ai_tools_document::parser::ParsedDocument
+pub fn finstack_ai_tools_document::parser::ParsedDocument::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn finstack_ai_tools_document::parser::classify_pdf(&[u8]) -> core::result::Result<(finstack_ai_tools_document::parser::DocumentClassification, u32), finstack_ai_tools_document::parser::DocumentParseError>
+pub fn finstack_ai_tools_document::parser::parse(&[u8], core::option::Option<&str>, &finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<finstack_ai_tools_document::parser::ParsedDocument, finstack_ai_tools_document::parser::DocumentParseError>
+pub fn finstack_ai_tools_document::parser::parse_pages(&[u8], (u32, u32), &finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<finstack_ai_tools_document::parser::ParsedDocument, finstack_ai_tools_document::parser::DocumentParseError>
+pub enum finstack_ai_tools_document::DocumentError
+pub finstack_ai_tools_document::DocumentError::Configuration
+pub finstack_ai_tools_document::DocumentError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_document::DocumentError
+pub fn finstack_ai_tools_document::DocumentError::clone(&self) -> finstack_ai_tools_document::DocumentError
+impl core::cmp::Eq for finstack_ai_tools_document::DocumentError
+impl core::cmp::PartialEq for finstack_ai_tools_document::DocumentError
+pub fn finstack_ai_tools_document::DocumentError::eq(&self, &finstack_ai_tools_document::DocumentError) -> bool
+impl core::error::Error for finstack_ai_tools_document::DocumentError
+impl core::fmt::Debug for finstack_ai_tools_document::DocumentError
+pub fn finstack_ai_tools_document::DocumentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_document::DocumentError
+pub fn finstack_ai_tools_document::DocumentError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_document::DocumentError
+pub struct finstack_ai_tools_document::DocumentSource
+pub finstack_ai_tools_document::DocumentSource::artifact: core::option::Option<serde_json::value::Value>
+pub finstack_ai_tools_document::DocumentSource::path: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_tools_document::DocumentSource
+pub fn finstack_ai_tools_document::DocumentSource::clone(&self) -> finstack_ai_tools_document::DocumentSource
+impl core::fmt::Debug for finstack_ai_tools_document::DocumentSource
+pub fn finstack_ai_tools_document::DocumentSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_document::DocumentSource
+pub fn finstack_ai_tools_document::DocumentSource::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_tools_document::DocumentToolset
+impl finstack_ai_tools_document::DocumentToolset
+pub fn finstack_ai_tools_document::DocumentToolset::try_new() -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
+pub fn finstack_ai_tools_document::DocumentToolset::try_with_limits(finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_tools_document::DocumentError>
+pub fn finstack_ai_tools_document::DocumentToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
+impl core::clone::Clone for finstack_ai_tools_document::DocumentToolset
+pub fn finstack_ai_tools_document::DocumentToolset::clone(&self) -> finstack_ai_tools_document::DocumentToolset
+impl core::fmt::Debug for finstack_ai_tools_document::DocumentToolset
+pub fn finstack_ai_tools_document::DocumentToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_document::DocumentToolset
+pub fn finstack_ai_tools_document::DocumentToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_document::DocumentToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_document::DocumentToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_document::DocumentToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_document::DOCUMENT_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_document::DOCUMENT_PARSE_FAILED: &str
+pub const finstack_ai_tools_document::DOCUMENT_PATH_UNSUPPORTED: &str
+pub const finstack_ai_tools_document::DOCUMENT_SOURCE_UNAVAILABLE: &str
+pub const finstack_ai_tools_document::DOCUMENT_TOO_LARGE: &str
+pub const finstack_ai_tools_document::DOCUMENT_UNSUPPORTED_FORMAT: &str

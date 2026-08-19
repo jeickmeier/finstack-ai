@@ -1,0 +1,34 @@
+pub mod finstack_ai_middleware_document_ingest
+pub enum finstack_ai_middleware_document_ingest::DocumentIngestError
+pub finstack_ai_middleware_document_ingest::DocumentIngestError::Configuration
+pub finstack_ai_middleware_document_ingest::DocumentIngestError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_document_ingest::DocumentIngestError
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::clone(&self) -> finstack_ai_middleware_document_ingest::DocumentIngestError
+impl core::cmp::Eq for finstack_ai_middleware_document_ingest::DocumentIngestError
+impl core::cmp::PartialEq for finstack_ai_middleware_document_ingest::DocumentIngestError
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::eq(&self, &finstack_ai_middleware_document_ingest::DocumentIngestError) -> bool
+impl core::error::Error for finstack_ai_middleware_document_ingest::DocumentIngestError
+impl core::fmt::Debug for finstack_ai_middleware_document_ingest::DocumentIngestError
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_document_ingest::DocumentIngestError
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_document_ingest::DocumentIngestError
+pub struct finstack_ai_middleware_document_ingest::AttachmentIndex
+impl finstack_ai_middleware_document_ingest::AttachmentIndex
+pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::insert(&self, finstack_ai_kernel::primitives::handles::ArtifactRef)
+pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::lookup(&self, &finstack_ai_kernel::content::blob::BlobRef) -> core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
+impl core::default::Default for finstack_ai_middleware_document_ingest::AttachmentIndex
+pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::default() -> finstack_ai_middleware_document_ingest::AttachmentIndex
+impl core::fmt::Debug for finstack_ai_middleware_document_ingest::AttachmentIndex
+pub fn finstack_ai_middleware_document_ingest::AttachmentIndex::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+impl finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_new(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, alloc::sync::Arc<finstack_ai_middleware_document_ingest::AttachmentIndex>) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::try_with_limits(alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, alloc::sync::Arc<finstack_ai_middleware_document_ingest::AttachmentIndex>, finstack_ai_tools_document::parser::DocumentLimits) -> core::result::Result<Self, finstack_ai_middleware_document_ingest::DocumentIngestError>
+impl core::clone::Clone for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::clone(&self) -> finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
