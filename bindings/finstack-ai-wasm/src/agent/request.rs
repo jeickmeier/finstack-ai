@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use finstack_ai::runtime::ModelName;
-use finstack_ai::{AgentRunRequest, PrincipalRef, RunSecurityContext};
+use finstack_ai::{AgentRunRequest, AttachmentInput, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use wasm_bindgen::prelude::*;
 
@@ -19,6 +19,10 @@ const MAX_MAX_CYCLES: u64 = 1_024;
 const DEFAULT_MAX_OUTPUT_RETRIES: u32 = 1;
 const MAX_MAX_OUTPUT_RETRIES: u32 = 1_024;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "run_request forwards model, bounds, capability, and attachments distinctly"
+)]
 pub(super) fn run_request(
     model: &ModelName,
     input: String,
@@ -26,6 +30,7 @@ pub(super) fn run_request(
     max_cycles: Option<f64>,
     max_output_retries: Option<f64>,
     capability: Option<String>,
+    attachments: Vec<AttachmentInput>,
 ) -> Result<AgentRunRequest, JsValue> {
     let timeout_seconds = timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
     if !timeout_seconds.is_finite()
@@ -72,6 +77,7 @@ pub(super) fn run_request(
                 .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
         );
     }
+    request.attachments = attachments.into();
     Ok(request)
 }
 

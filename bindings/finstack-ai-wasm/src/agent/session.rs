@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 use crate::executor;
 
 use super::agent::Agent;
+use super::attachments::stage_attachments;
 use super::errors::{agent_error, locator_object, session_error};
 use super::request::run_request;
 use super::run::Run;
@@ -235,6 +236,10 @@ impl Lane {
     ///
     /// Returns a structured host error when the lane is busy or the agent
     /// cannot start.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wasm-bindgen Lane::run forwards bounds, capability, and attachments distinctly"
+    )]
     pub fn run(
         &self,
         agent: &Agent,
@@ -243,7 +248,13 @@ impl Lane {
         max_cycles: Option<f64>,
         max_output_retries: Option<f64>,
         capability: Option<String>,
+        attachments: JsValue,
     ) -> Result<Run, JsValue> {
+        let attachments = stage_attachments(
+            agent.artifact_store.as_ref(),
+            &agent.attachment_index,
+            &attachments,
+        )?;
         let request = run_request(
             &agent.model,
             input,
@@ -251,6 +262,7 @@ impl Lane {
             max_cycles,
             max_output_retries,
             capability,
+            attachments,
         )?;
         self.inner
             .run(agent.inner.as_ref(), request)

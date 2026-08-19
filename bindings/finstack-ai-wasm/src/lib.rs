@@ -33,6 +33,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod agent;
+#[cfg(target_arch = "wasm32")]
+mod document_store;
 mod executor;
 #[cfg(any(not(target_arch = "wasm32"), feature = "scripted-trace"))]
 mod fixture;

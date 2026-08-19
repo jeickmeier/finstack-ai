@@ -1,4 +1,20 @@
 /**
+ * One pre-staged run attachment.
+ *
+ * Staged into the agent's internal document-ingest artifact store and
+ * mapped to a `File` block on the user message. `document_parse` /
+ * `pdf_classify` convert supported media types to model-visible Markdown;
+ * unsupported media types remain an opaque attachment.
+ */
+export interface AttachmentOption {
+    /** Raw attachment bytes. */
+    data: Uint8Array;
+    /** IANA media type, e.g. `text/csv` or `application/pdf`. */
+    mediaType: string;
+    /** Optional display name. */
+    name?: string;
+}
+/**
  * Options for {@link Agent.start} and {@link Agent.run}.
  */
 export interface RunOptions {
@@ -13,6 +29,11 @@ export interface RunOptions {
      * Omitted or `undefined` runs this agent; a missing catalog id fails closed.
      */
     capability?: string;
+    /**
+     * Optional pre-staged input attachments. At most `MAX_RUN_ATTACHMENTS` (8);
+     * exceeding that fails closed with a configuration error.
+     */
+    attachments?: AttachmentOption[];
 }
 /**
  * Options for {@link Run.events}.

@@ -116,7 +116,7 @@ impl Run {
         executor::drive(async move {
             let placement = parse_child_placement(&placement)?;
             let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
-            let request = run_request(&model, input, None, None, None, None)?;
+            let request = run_request(&model, input, None, None, None, None, Vec::new())?;
             parent
                 .start_child(child_agent.as_ref(), request, placement, remote)
                 .await

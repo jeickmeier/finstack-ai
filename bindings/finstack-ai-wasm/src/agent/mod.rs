@@ -5,6 +5,7 @@
     reason = "Agent handle stays at crate::agent::Agent after the directory split"
 )]
 mod agent;
+mod attachments;
 mod build;
 mod capabilities;
 mod driver;

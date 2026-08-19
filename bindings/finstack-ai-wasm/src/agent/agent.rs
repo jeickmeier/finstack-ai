@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use finstack_ai::Agent as FacadeAgent;
-use finstack_ai::runtime::ModelName;
+use finstack_ai::runtime::{ArtifactStore, ModelName};
 use finstack_ai_kernel::SessionId;
+use finstack_ai_middleware_document_ingest::AttachmentIndex;
 use wasm_bindgen::prelude::*;
 
 use crate::executor;
 use crate::{JsJournalStore, JsModel, JsToolset};
 
+use super::attachments::stage_attachments;
 use super::build::{build_agent, inspect_session_inner};
 use super::capabilities::{catalog_array, parse_active_capabilities, parse_capabilities};
 use super::errors::{agent_error, session_error};
@@ -21,6 +23,12 @@ use super::session::Session;
 pub struct Agent {
     pub(super) inner: Arc<FacadeAgent>,
     pub(super) model: ModelName,
+    /// Shared with the registered `DocumentToolset` and
+    /// `DocumentIngestMiddleware`. Run attachments are staged here before
+    /// submission so the middleware can resolve them back off the
+    /// `AttachmentIndex`.
+    pub(super) artifact_store: Arc<dyn ArtifactStore>,
+    pub(super) attachment_index: Arc<AttachmentIndex>,
 }
 
 #[wasm_bindgen(js_class = Agent)]
@@ -127,6 +135,8 @@ impl Agent {
     pub fn re_resolve(&self) -> js_sys::Promise {
         let agent = Arc::clone(&self.inner);
         let model = self.model.clone();
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
         executor::drive(async move {
             agent
                 .re_resolve()
@@ -135,6 +145,8 @@ impl Agent {
                     JsValue::from(Agent {
                         inner: Arc::new(inner),
                         model,
+                        artifact_store,
+                        attachment_index,
                     })
                 })
                 .map_err(|error| agent_error(&error, None))
@@ -201,6 +213,10 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a structured host error when the request is invalid.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wasm-bindgen start forwards bounds, capability, and attachments distinctly"
+    )]
     pub fn start(
         &self,
         input: String,
@@ -208,7 +224,13 @@ impl Agent {
         max_cycles: Option<f64>,
         max_output_retries: Option<f64>,
         capability: Option<String>,
+        attachments: JsValue,
     ) -> Result<Run, JsValue> {
+        let attachments = stage_attachments(
+            self.artifact_store.as_ref(),
+            &self.attachment_index,
+            &attachments,
+        )?;
         let request = run_request(
             &self.model,
             input,
@@ -216,6 +238,7 @@ impl Agent {
             max_cycles,
             max_output_retries,
             capability,
+            attachments,
         )?;
         self.inner
             .start(request)
@@ -228,6 +251,10 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a structured host error when the run fails.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wasm-bindgen run forwards bounds, capability, and attachments distinctly"
+    )]
     pub fn run(
         &self,
         input: String,
@@ -235,10 +262,15 @@ impl Agent {
         max_cycles: Option<f64>,
         max_output_retries: Option<f64>,
         capability: Option<String>,
+        attachments: JsValue,
     ) -> js_sys::Promise {
         let agent = Arc::clone(&self.inner);
         let model = self.model.clone();
+        let artifact_store = Arc::clone(&self.artifact_store);
+        let attachment_index = Arc::clone(&self.attachment_index);
         executor::drive(async move {
+            let attachments =
+                stage_attachments(artifact_store.as_ref(), &attachment_index, &attachments)?;
             let request = run_request(
                 &model,
                 input,
@@ -246,6 +278,7 @@ impl Agent {
                 max_cycles,
                 max_output_retries,
                 capability,
+                attachments,
             )?;
             let run = agent
                 .start(request)

@@ -2,7 +2,7 @@ import { Agent as WasmAgent, Event as WasmEvent, EventBatch as WasmEventBatch, L
 import type { JsContextProvider, JsJournalStore, JsMiddleware, JsModel, JsObserver, JsToolset } from "./adapters.js";
 import type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot } from "./errors.js";
 export { FinstackError } from "./errors.js";
-export type { EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./errors.js";
+export type { AttachmentOption, EventOptions, RunOptions, RunResultSnapshot, SessionSnapshot, } from "./errors.js";
 /**
  * Declarative capability delivery mode. Rust owns activation semantics.
  */
