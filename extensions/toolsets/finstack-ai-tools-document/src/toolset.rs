@@ -16,7 +16,12 @@ use thiserror::Error;
 
 use crate::parser::DocumentLimits;
 
-pub(crate) const TOOL_ID: &str = "finstack.tools.document";
+/// Distinct namespaced tool ids. [`ToolCatalog`](finstack_ai_runtime) requires
+/// every registered `ToolSpec::id` to be globally unique, so each tool gets
+/// its own id even though both live in one toolset (mirrors
+/// `finstack-ai-tools-filesystem`'s per-tool ids).
+pub(crate) const PARSE_TOOL_ID: &str = "finstack.tools.document.parse";
+pub(crate) const CLASSIFY_TOOL_ID: &str = "finstack.tools.document.classify";
 pub(crate) const PARSE_NAME: &str = "document_parse";
 pub(crate) const CLASSIFY_NAME: &str = "pdf_classify";
 
@@ -41,7 +46,6 @@ pub enum DocumentError {
 pub struct DocumentToolset {
     pub(crate) descriptor: ToolsetDescriptor,
     pub(crate) tools: Arc<[ToolSpec]>,
-    pub(crate) tool_id: ToolId,
     pub(crate) limits: DocumentLimits,
     pub(crate) artifact_store: Option<Arc<dyn ArtifactStore>>,
 }
@@ -49,7 +53,6 @@ pub struct DocumentToolset {
 impl std::fmt::Debug for DocumentToolset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DocumentToolset")
-            .field("tool_id", &self.tool_id)
             .field("limits", &self.limits)
             .finish_non_exhaustive()
     }
@@ -73,11 +76,16 @@ impl DocumentToolset {
     /// Returns a configuration error only if a checked-in identity or schema
     /// constant is invalid.
     pub fn try_with_limits(limits: DocumentLimits) -> Result<Self, DocumentError> {
-        let tool_id = ToolId::parse(TOOL_ID).map_err(|_| DocumentError::Configuration {
-            reason: "invalid_tool_id",
-        })?;
+        let parse_id =
+            ToolId::parse(PARSE_TOOL_ID).map_err(|_| DocumentError::Configuration {
+                reason: "invalid_tool_id",
+            })?;
+        let classify_id =
+            ToolId::parse(CLASSIFY_TOOL_ID).map_err(|_| DocumentError::Configuration {
+                reason: "invalid_tool_id",
+            })?;
         let parse_spec = spec(
-            &tool_id,
+            &parse_id,
             PARSE_NAME,
             "Parse Document",
             "Convert an attached document (pdf, docx, xlsx, pptx, odf, rtf, epub, csv) to GitHub-Flavored Markdown. Scanned PDFs succeed with requires_ocr=true.",
@@ -86,7 +94,7 @@ impl DocumentToolset {
             1_048_576,
         )?;
         let classify_spec = spec(
-            &tool_id,
+            &classify_id,
             CLASSIFY_NAME,
             "Classify PDF",
             "Fast PDF classification (text, scanned, mixed, image) with page count; no text extraction.",
@@ -100,7 +108,6 @@ impl DocumentToolset {
                 metadata: Metadata::empty(),
             },
             tools: Arc::from([parse_spec, classify_spec]),
-            tool_id,
             limits,
             artifact_store: None,
         })
@@ -130,8 +137,14 @@ impl Toolset for DocumentToolset {
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let toolset = self.clone();
         Box::pin(async move {
-            validate_call_context(&ctx, &call, &toolset.tool_id)?;
             let name = call.call.tool_name();
+            let expected_id = toolset
+                .tools
+                .iter()
+                .find(|spec| spec.model_name.as_ref() == name)
+                .map(|spec| spec.id.clone())
+                .ok_or_else(|| invalid_arguments("unknown document tool name"))?;
+            validate_call_context(&ctx, &call, &expected_id)?;
             let args = parse_call_arguments(name, call.call.arguments().as_bytes())?;
             if let Some((start, end)) = args.page_range
                 && (start == 0 || end < start)

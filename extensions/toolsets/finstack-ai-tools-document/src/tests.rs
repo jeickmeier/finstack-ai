@@ -118,8 +118,14 @@ fn toolset_exposes_two_validated_tools() {
     assert_eq!(names, ["document_parse", "pdf_classify"]);
     for spec in tools.iter() {
         spec.validate().expect("spec validates");
-        assert_eq!(spec.id.as_str(), "finstack.tools.document");
     }
+    // Every registered `ToolSpec::id` must be globally unique per
+    // `ToolCatalog::try_new` (shared model-visible namespace), so the two
+    // document tools carry distinct ids even though they live in one
+    // toolset.
+    assert_eq!(tools[0].id.as_str(), "finstack.tools.document.parse");
+    assert_eq!(tools[1].id.as_str(), "finstack.tools.document.classify");
+    assert_ne!(tools[0].id, tools[1].id);
     assert_eq!(toolset.descriptor().name.as_ref(), "finstack-document");
 }
 

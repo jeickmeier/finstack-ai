@@ -25,3 +25,4 @@ use helpers::*;
 include!("session.rs");
 include!("subagent.rs");
 include!("property.rs");
+include!("document_ingest.rs");
