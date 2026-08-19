@@ -47,7 +47,7 @@ fn middleware_failure(failure: HostFailure) -> MiddlewareError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen JS middleware host error is valid")
+    .unwrap_or_else(MiddlewareError::from)
 }
 
 fn parse_stage(value: &str) -> Result<Stage, HostFailure> {

@@ -4,6 +4,25 @@
 //! remains non-durable (`durable = false`).
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -307,7 +326,7 @@ impl MemoryJournalStore {
         } else {
             request.from_sequence
         };
-        let limit = usize::try_from(request.limit).expect("u32 fits usize");
+        let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
         let (records, next_sequence) = slice_records(session, start, limit);
         Ok(ScanPage {
             session_id: request.session_id,

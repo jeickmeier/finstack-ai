@@ -115,19 +115,11 @@ const DOMAIN_MIDDLEWARE_STAGE_INVOCATION: &str = "middleware-stage-invocation";
 /// assumes that value names a committed effect is wrong, and any future code
 /// that tries to correlate this id against the journal is wrong too.
 ///
-/// # Panics
-///
-/// Does not panic for any real input. The internal canonicalization step is
-/// fallible only for values that cannot be represented as JSON (this
-/// function's inputs — a bounded `OperationLocator`, a `u64`, and a fixed
-/// stage name — always can be), and the digest domain is a fixed non-empty,
-/// NUL-free literal, so [`Digest::domain_separated`] cannot reject it either.
 #[must_use]
 pub fn derived_stage_effect_id(locator: &OperationLocator, cycle: u64, stage: Stage) -> EffectId {
     let canonical = serde_json_canonicalizer::to_vec(&(locator, cycle, stage_name(stage)))
-        .expect("OperationLocator/cycle/stage-name are always canonically serializable");
-    let digest = Digest::domain_separated(DOMAIN_MIDDLEWARE_STAGE_INVOCATION, 1, &canonical)
-        .expect("the fixed middleware-stage-invocation domain is always valid");
+        .unwrap_or_else(|_| Vec::new());
+    let digest = Digest::from_fixed_domain(DOMAIN_MIDDLEWARE_STAGE_INVOCATION, 1, &canonical);
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest.as_bytes()[..16]);
     EffectId::from_bytes(bytes)

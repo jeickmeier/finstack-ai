@@ -346,10 +346,14 @@ impl Registry {
                 actual_kind: descriptor.kind,
             });
         }
-        let actual = descriptor
-            .component
-            .version()
-            .expect("registrations always retain an exact version");
+        let Some(actual) = descriptor.component.version() else {
+            return Err(AgentBuildError::InvalidDescriptor {
+                request_source: request_source.clone(),
+                component,
+                registration_source: descriptor.source.id.clone(),
+                message: Arc::from("registration is missing an exact version"),
+            });
+        };
         if let Some(required) = selector.required_version()
             && required != actual
         {
@@ -388,7 +392,12 @@ impl Registry {
         diagnostics: &mut Vec<ResolutionDiagnostic>,
     ) -> Result<ResolvedComponent<dyn Model>, AgentBuildError> {
         let Some(RegisteredEntry::Model(registration)) = self.entries.get_mut(id) else {
-            unreachable!("kind checked before typed resolution");
+            return Err(typed_resolution_error(
+                &self.entries,
+                id,
+                source,
+                ComponentKind::Model,
+            ));
         };
         let outcome = ensure_ready(
             &registration.descriptor,
@@ -404,7 +413,7 @@ impl Registry {
             ..
         } = &registration.slot
         else {
-            unreachable!("factory cached before success");
+            return Err(factory_not_ready(source, id, &registration.descriptor));
         };
         let (ready, warmed) = (component.clone(), *model_warmed);
         validate_model_descriptor(&registration.descriptor, ready.handle(), source)?;
@@ -443,7 +452,7 @@ impl Registry {
 }
 
 macro_rules! resolve_port {
-    ($method:ident, $variant:ident, $trait:path, $validate:ident) => {
+    ($method:ident, $variant:ident, $trait:path, $validate:ident, $kind:expr) => {
         impl Registry {
             async fn $method(
                 &mut self,
@@ -454,7 +463,7 @@ macro_rules! resolve_port {
                 diagnostics: &mut Vec<ResolutionDiagnostic>,
             ) -> Result<ResolvedComponent<dyn $trait>, AgentBuildError> {
                 let Some(RegisteredEntry::$variant(registration)) = self.entries.get_mut(id) else {
-                    unreachable!("kind checked before typed resolution");
+                    return Err(typed_resolution_error(&self.entries, id, source, $kind));
                 };
                 let outcome = ensure_ready(
                     &registration.descriptor,
@@ -465,7 +474,7 @@ macro_rules! resolve_port {
                 )
                 .await?;
                 let RegistrationSlot::Ready { component, .. } = &registration.slot else {
-                    unreachable!("factory cached before success");
+                    return Err(factory_not_ready(source, id, &registration.descriptor));
                 };
                 let ready = component.clone();
                 $validate(&registration.descriptor, ready.handle(), source)?;
@@ -480,32 +489,72 @@ resolve_port!(
     resolve_toolset,
     Toolset,
     Toolset,
-    validate_toolset_descriptor
+    validate_toolset_descriptor,
+    ComponentKind::Toolset
 );
 resolve_port!(
     resolve_context_provider,
     ContextProvider,
     ContextProvider,
-    validate_context_descriptor
+    validate_context_descriptor,
+    ComponentKind::ContextProvider
 );
 resolve_port!(
     resolve_middleware,
     Middleware,
     Middleware,
-    validate_middleware_descriptor
+    validate_middleware_descriptor,
+    ComponentKind::Middleware
 );
 resolve_port!(
     resolve_store,
     Store,
     JournalStore,
-    validate_store_descriptor
+    validate_store_descriptor,
+    ComponentKind::Store
 );
 resolve_port!(
     resolve_observer,
     Observer,
     Observer,
-    validate_observer_descriptor
+    validate_observer_descriptor,
+    ComponentKind::Observer
 );
+
+fn typed_resolution_error(
+    entries: &BTreeMap<ComponentId, RegisteredEntry>,
+    id: &ComponentId,
+    source: &ComponentId,
+    expected_kind: ComponentKind,
+) -> AgentBuildError {
+    match entries.get(id) {
+        Some(entry) => AgentBuildError::KindMismatch {
+            request_source: source.clone(),
+            component: id.clone(),
+            registration_source: entry.descriptor().source.id.clone(),
+            expected_kind,
+            actual_kind: entry.descriptor().kind,
+        },
+        None => AgentBuildError::MissingComponent {
+            request_source: source.clone(),
+            selector: Arc::from(id.as_str()),
+            expected_kind,
+        },
+    }
+}
+
+fn factory_not_ready(
+    source: &ComponentId,
+    id: &ComponentId,
+    descriptor: &RegisteredComponentDescriptor,
+) -> AgentBuildError {
+    AgentBuildError::InvalidDescriptor {
+        request_source: source.clone(),
+        component: id.clone(),
+        registration_source: descriptor.source.id.clone(),
+        message: Arc::from("factory did not cache a ready handle"),
+    }
+}
 
 async fn ensure_ready<T: ?Sized + 'static>(
     descriptor: &RegisteredComponentDescriptor,

@@ -1,5 +1,25 @@
 //! Test-only trap guest. `call` executes `unreachable`. Not a published SDK.
 
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
+
 wit_bindgen::generate!({
     world: "toolset-plugin",
     path: "../../../wit",
@@ -42,7 +62,7 @@ fn unreachable_trap() -> ! {
     #[cfg(target_arch = "wasm32")]
     core::arch::wasm32::unreachable();
     #[cfg(not(target_arch = "wasm32"))]
-    panic!("trap guest must be compiled for wasm32");
+    std::process::abort();
 }
 
 fn catalog_digest(tools: &[ToolSpec]) -> Result<String, PluginError> {

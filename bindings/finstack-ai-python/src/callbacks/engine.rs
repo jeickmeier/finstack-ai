@@ -186,17 +186,15 @@ impl PythonCallback {
         let cancellation = context.cancellation.clone();
         let lease = CallbackLease(context.state.clone());
         let callback: PortFuture<Result<Py<PyAny>, CallbackFailure>> = if self.is_async {
+            let Some(task_locals) = self.task_locals.as_ref() else {
+                return Err(CallbackFailure::Exception);
+            };
             let callback = Python::attach(|py| {
                 let request_bytes = PyBytes::new(py, &request_bytes);
                 let request = self.json_loads.call1(py, (request_bytes,))?;
                 let context = Py::new(py, context)?;
                 let awaitable = self.callable.call1(py, (context, request))?;
-                pyo3_async_runtimes::into_future_with_locals(
-                    self.task_locals
-                        .as_ref()
-                        .expect("async callbacks retain task locals"),
-                    awaitable.into_bound(py),
-                )
+                pyo3_async_runtimes::into_future_with_locals(task_locals, awaitable.into_bound(py))
             })
             .map_err(|_| CallbackFailure::Exception)?;
             Box::pin(async move { callback.await.map_err(|_| CallbackFailure::Exception) })
@@ -259,16 +257,14 @@ impl PythonCallback {
         let request_bytes =
             serde_json::to_vec(request).map_err(|_| CallbackFailure::InvalidResult)?;
         let callback: PortFuture<Result<Py<PyAny>, CallbackFailure>> = if self.is_async {
+            let Some(task_locals) = self.task_locals.as_ref() else {
+                return Err(CallbackFailure::Exception);
+            };
             let callback = Python::attach(|py| {
                 let request_bytes = PyBytes::new(py, &request_bytes);
                 let request = self.json_loads.call1(py, (request_bytes,))?;
                 let awaitable = self.callable.call1(py, (request,))?;
-                pyo3_async_runtimes::into_future_with_locals(
-                    self.task_locals
-                        .as_ref()
-                        .expect("async callbacks retain task locals"),
-                    awaitable.into_bound(py),
-                )
+                pyo3_async_runtimes::into_future_with_locals(task_locals, awaitable.into_bound(py))
             })
             .map_err(|_| CallbackFailure::Exception)?;
             Box::pin(async move { callback.await.map_err(|_| CallbackFailure::Exception) })

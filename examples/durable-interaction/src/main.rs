@@ -1,9 +1,32 @@
 //! Typed interaction that survives a simulated worker restart.
 
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
+
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration as StdDuration;
+
+type BoxError = Box<dyn Error + Send + Sync>;
 
 use finstack_ai_kernel::ToolFailurePolicy;
 use finstack_ai_kernel::{
@@ -43,13 +66,13 @@ fn id<T: IdTag>(ordinal: u64) -> Id<T> {
 }
 
 fn timestamp(ms: i64) -> Timestamp {
-    Timestamp::from_unix_ms(ms).expect("timestamp")
+    Timestamp::from_unix_ms(ms).unwrap_or(finstack_ai_kernel::UNIX_EPOCH)
 }
 
-fn profile() -> ModelContextProfile {
-    ModelContextProfile {
+fn profile() -> Result<ModelContextProfile, BoxError> {
+    Ok(ModelContextProfile {
         provider: Arc::from("scripted"),
-        model: ModelName::try_new("scripted-1").expect("model"),
+        model: ModelName::try_new("scripted-1")?,
         hard_input_bytes: 2_000_000,
         context_window_tokens: 3_000_000,
         max_output_tokens: 1_000,
@@ -60,11 +83,16 @@ fn profile() -> ModelContextProfile {
             version: Arc::from("1"),
             source: TokenEstimatorSource::ConservativeUpperBound,
         },
-    }
+    })
 }
 
-fn locked_profile() -> LockedModelContextProfile {
-    resolve_model_context_profile(profile(), None, None, false).expect("locked profile")
+fn locked_profile() -> Result<LockedModelContextProfile, BoxError> {
+    Ok(resolve_model_context_profile(
+        profile()?,
+        None,
+        None,
+        false,
+    )?)
 }
 
 struct CounterRandom(AtomicU64);
@@ -92,8 +120,8 @@ fn env(
     model_requests: &[u64],
     messages: &[u64],
     append_batch: u64,
-) -> TransitionEnv {
-    TransitionEnv {
+) -> Result<TransitionEnv, BoxError> {
+    Ok(TransitionEnv {
         now: timestamp(now),
         ids: AllocatedIds::try_new(
             records.iter().copied().map(id).collect(),
@@ -107,26 +135,24 @@ fn env(
             Vec::new(),
             vec![id(append_batch)],
             Vec::new(),
-        )
-        .expect("ids"),
-    }
+        )?,
+    })
 }
 
-fn accepted() -> RunAccepted {
+fn accepted() -> Result<RunAccepted, BoxError> {
     let run_id = id(3);
-    RunAccepted::try_new(
+    Ok(RunAccepted::try_new(
         run_id,
-        RunRelation::root(run_id).expect("relation"),
+        RunRelation::root(run_id)?,
         RunSecurityContext::try_new(
             "tenant-a",
-            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))?,
             "oidc",
             "high",
             "policy-v1",
             "decision-v1",
             None,
-        )
-        .expect("security"),
+        )?,
         None,
         RunLimits::empty(),
         RunPropagationPolicy {
@@ -137,23 +163,19 @@ fn accepted() -> RunAccepted {
         },
         Digest::raw_json(b"agent"),
         None,
-    )
-    .expect("accepted")
+    )?)
 }
 
-fn user_message() -> Message {
-    Message::try_new(
+fn user_message() -> Result<Message, BoxError> {
+    Ok(Message::try_new(
         id(44),
         MessageRole::User,
-        vec![ContentBlock::Text(
-            TextBlock::try_new("hello").expect("text"),
-        )],
+        vec![ContentBlock::Text(TextBlock::try_new("hello")?)],
         timestamp(900),
         None,
         ProviderIds::empty(),
         Metadata::empty(),
-    )
-    .expect("message")
+    )?)
 }
 
 fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
@@ -163,37 +185,36 @@ fn stage(stage: Stage, outcome: ReducerStageOutcome) -> KernelInput {
     })
 }
 
-fn draft(messages: Arc<[Message]>, tools: Arc<[ToolSpec]>) -> ModelRequestDraft {
-    ModelRequestDraft {
-        model: profile().model,
+fn draft(messages: Arc<[Message]>, tools: Arc<[ToolSpec]>) -> Result<ModelRequestDraft, BoxError> {
+    Ok(ModelRequestDraft {
+        model: profile()?.model,
         messages,
         tools,
         output: OutputSpec::PlainText,
         settings: ModelSettings {
-            values: RawJson::parse(b"{}").expect("settings"),
+            values: RawJson::parse(b"{}")?,
         },
         limits: ModelRequestLimits {
             max_input_bytes: 2_000_000,
             max_input_tokens: 2_000_000,
             max_output_tokens: 1_000,
         },
-    }
+    })
 }
 
-fn locator() -> OperationLocator {
-    OperationLocator::try_new("tenant-a", id(1), id(2), id(3)).expect("locator")
+fn locator() -> Result<OperationLocator, BoxError> {
+    Ok(OperationLocator::try_new("tenant-a", id(1), id(2), id(3))?)
 }
 
-fn tools() -> Arc<[ToolSpec]> {
-    Arc::from([ToolSpec {
-        id: finstack_ai_kernel::ToolId::parse("finstack.tools.echo").expect("tool id"),
+fn tools() -> Result<Arc<[ToolSpec]>, BoxError> {
+    Ok(Arc::from([ToolSpec {
+        id: finstack_ai_kernel::ToolId::from_static("finstack.tools.echo"),
         model_name: Arc::from("echo"),
         title: Arc::from("echo"),
         description: Arc::from("echo"),
         input_schema: RawJson::parse(
             br#"{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}"#,
-        )
-        .expect("input"),
+        )?,
         output_schema: None,
         execution: finstack_ai_kernel::ToolExecutionMode::Parallel,
         side_effect: SideEffectClass::ReadOnly,
@@ -206,17 +227,17 @@ fn tools() -> Arc<[ToolSpec]> {
         max_result_bytes: 4_096,
         metadata: Metadata::empty(),
         deferral: ToolDeferralSupport::Never,
-    }])
+    }]))
 }
 
-fn catalog(tools: &Arc<[ToolSpec]>) -> Arc<ResolvedToolCatalog> {
+fn catalog(tools: &Arc<[ToolSpec]>) -> Result<Arc<ResolvedToolCatalog>, BoxError> {
     let toolset: Arc<dyn Toolset> = Arc::new(ScriptedToolset::new(
         Arc::clone(tools),
         vec![ScriptedToolPlan {
             panic_on_call: None,
             actions: vec![ScriptedToolAction::Emit(Ok(ToolStreamItem::Completed(
                 ToolResult {
-                    output: RawJson::parse(r#"{"ok":true,"value":1}"#).expect("out"),
+                    output: RawJson::parse(r#"{"ok":true,"value":1}"#)?,
                     is_error: false,
                 },
             )))],
@@ -235,24 +256,21 @@ fn catalog(tools: &Arc<[ToolSpec]>) -> Arc<ResolvedToolCatalog> {
             )
         })
         .collect();
-    Arc::new(
-        ResolvedToolCatalog::try_new(
-            [ToolsetRegistration {
-                toolset,
-                policies,
-                components: BTreeMap::new(),
-            }],
-            &BTreeMap::new(),
-            &JsonSchemaToolValidatorCompiler,
-        )
-        .expect("catalog"),
-    )
+    Ok(Arc::new(ResolvedToolCatalog::try_new(
+        [ToolsetRegistration {
+            toolset,
+            policies,
+            components: BTreeMap::new(),
+        }],
+        &BTreeMap::new(),
+        &JsonSchemaToolValidatorCompiler,
+    )?))
 }
 
-fn model() -> Arc<dyn Model> {
-    let arguments = RawJson::parse(br#"{"value":1}"#).expect("arguments");
-    Arc::new(ScriptedModel::from_plans(
-        profile(),
+fn model() -> Result<Arc<dyn Model>, BoxError> {
+    let arguments = RawJson::parse(br#"{"value":1}"#)?;
+    Ok(Arc::new(ScriptedModel::from_plans(
+        profile()?,
         vec![ScriptedModelPlan {
             actions: vec![
                 ScriptedModelAction::Emit(Ok(ModelStreamItem::ToolCallDelta(ToolCallDelta {
@@ -275,7 +293,7 @@ fn model() -> Arc<dyn Model> {
                 }))),
             ],
         }],
-    ))
+    )))
 }
 
 async fn spawn_owner(
@@ -284,8 +302,8 @@ async fn spawn_owner(
     catalog: Arc<ResolvedToolCatalog>,
     clock: ExternalClock,
     random: u64,
-) -> RunTaskOwner {
-    RunTaskOwner::spawn_with_model_and_tools(
+) -> Result<RunTaskOwner, BoxError> {
+    Ok(RunTaskOwner::spawn_with_model_and_tools(
         CommitCoordinator::new(store),
         RunTaskConfig {
             command_capacity: 8,
@@ -310,42 +328,39 @@ async fn spawn_owner(
             stream_limits: ToolStreamLimits::default(),
         },
         model,
-        locked_profile(),
+        locked_profile()?,
         catalog,
         clock,
         CounterRandom(AtomicU64::new(random)),
     )
-    .await
-    .expect("owner")
+    .await?)
 }
 
 async fn drive_to_after_model(
     handle: &RunHandle,
     store: &Arc<SqliteJournalStore>,
     tools: Arc<[ToolSpec]>,
-) {
+) -> Result<(), BoxError> {
     handle
         .submit(
-            env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+            env(1_000, &[1], &[1], &[], &[], &[], &[], 101)?,
             KernelInput::AcceptRun(AcceptRun {
                 session_id: id(1),
                 lane_id: id(2),
-                accepted: accepted(),
+                accepted: accepted()?,
             }),
         )
-        .await
-        .expect("accept");
+        .await?;
     handle
         .submit(
-            env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+            env(1_100, &[2], &[], &[], &[], &[], &[], 102)?,
             stage(Stage::BeforeRun, ReducerStageOutcome::Continue),
         )
-        .await
-        .expect("before run");
-    let message = user_message();
+        .await?;
+    let message = user_message()?;
     handle
         .submit(
-            env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103),
+            env(1_200, &[3, 4], &[], &[], &[101], &[], &[], 103)?,
             stage(
                 Stage::PrepareContext,
                 ReducerStageOutcome::ContextPrepared {
@@ -353,17 +368,11 @@ async fn drive_to_after_model(
                 },
             ),
         )
-        .await
-        .expect("context");
-    let raw = RawJson::parse(
-        draft(Arc::from([message]), tools)
-            .canonical_bytes()
-            .expect("canonical"),
-    )
-    .expect("raw");
+        .await?;
+    let raw = RawJson::parse(draft(Arc::from([message]), tools)?.canonical_bytes()?)?;
     handle
         .submit(
-            env(1_300, &[5, 6], &[2], &[103], &[], &[102], &[], 104),
+            env(1_300, &[5, 6], &[2], &[103], &[], &[102], &[], 104)?,
             stage(
                 Stage::BeforeModel,
                 ReducerStageOutcome::ModelRequestPrepared {
@@ -379,56 +388,52 @@ async fn drive_to_after_model(
                 },
             ),
         )
-        .await
-        .expect("model request");
-    wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await;
+        .await?;
+    wait_state(store, |state| state.phase == Some(RunPhase::AfterModel)).await?;
+    Ok(())
 }
 
 async fn wait_state(
     store: &Arc<SqliteJournalStore>,
     predicate: impl Fn(&KernelState) -> bool,
-) -> CommitCoordinator {
+) -> Result<CommitCoordinator, BoxError> {
     tokio::time::timeout(StdDuration::from_secs(2), async {
         loop {
             let recovered = CommitCoordinator::recover(Arc::clone(store) as _, id(1))
                 .await
-                .expect("recover");
+                .map_err(BoxError::from)?;
             if predicate(recovered.state()) {
-                return recovered;
+                return Ok::<_, BoxError>(recovered);
             }
             tokio::task::yield_now().await;
         }
     })
-    .await
-    .expect("state wait")
+    .await?
 }
 
-fn open_store(path: &std::path::Path) -> Arc<SqliteJournalStore> {
-    Arc::new(
-        SqliteJournalStore::try_open(SqliteStoreConfig {
-            path: path.to_path_buf(),
-            durability: SqliteDurability::Durable,
-            limits: SqliteStoreLimits {
-                sessions: 1,
-                batches_per_session: 128,
-                records_per_session: 512,
-                snapshot_bytes: 64 * 1024,
-            },
-            busy_timeout: DEFAULT_BUSY_TIMEOUT,
-        })
-        .expect("sqlite"),
-    )
+fn open_store(path: &std::path::Path) -> Result<Arc<SqliteJournalStore>, BoxError> {
+    Ok(Arc::new(SqliteJournalStore::try_open(SqliteStoreConfig {
+        path: path.to_path_buf(),
+        durability: SqliteDurability::Durable,
+        limits: SqliteStoreLimits {
+            sessions: 1,
+            batches_per_session: 128,
+            records_per_session: 512,
+            snapshot_bytes: 64 * 1024,
+        },
+        busy_timeout: DEFAULT_BUSY_TIMEOUT,
+    })?))
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let dir = tempfile::tempdir().expect("tempdir");
+async fn main() -> Result<(), BoxError> {
+    let dir = tempfile::tempdir()?;
     let path = dir.path().join("journal.sqlite");
-    let tools = tools();
-    let catalog = catalog(&tools);
-    let model = model();
+    let tools = tools()?;
+    let catalog = catalog(&tools)?;
+    let model = model()?;
     let clock = ExternalClock::new(timestamp(2_500));
-    let store = open_store(&path);
+    let store = open_store(&path)?;
     let owner = spawn_owner(
         Arc::clone(&store),
         Arc::clone(&model),
@@ -436,53 +441,46 @@ async fn main() {
         clock.clone(),
         700,
     )
-    .await;
-    drive_to_after_model(&owner.handle(), &store, tools).await;
+    .await?;
+    drive_to_after_model(&owner.handle(), &store, tools).await?;
     owner
         .handle()
         .submit(
-            env(2_100, &[7], &[], &[], &[], &[], &[], 105),
+            env(2_100, &[7], &[], &[], &[], &[], &[], 105)?,
             stage(Stage::AfterModel, ReducerStageOutcome::Continue),
         )
-        .await
-        .expect("after model");
+        .await?;
     wait_state(&store, |state| {
         state.phase == Some(RunPhase::AwaitingInteraction)
     })
-    .await;
+    .await?;
     drop(owner);
     drop(store);
 
-    let store = open_store(&path);
+    let store = open_store(&path)?;
     let mut driver: WorkflowSession =
-        WorkflowSession::trusted(Arc::clone(&store) as _, locator(), clock.clone(), 701)
-            .await
-            .expect("resume")
-            .with_ports(Arc::clone(&model), locked_profile(), Some(catalog));
-    let WorkflowWait::Interaction { interaction_id, .. } =
-        driver.drive_until_wait().await.expect("interaction")
-    else {
-        panic!("expected interaction after worker restart");
+        WorkflowSession::trusted(Arc::clone(&store) as _, locator()?, clock.clone(), 701)
+            .await?
+            .with_ports(Arc::clone(&model), locked_profile()?, Some(catalog));
+    let WorkflowWait::Interaction { interaction_id, .. } = driver.drive_until_wait().await? else {
+        return Err("expected interaction after worker restart".into());
     };
     driver
         .resolve_interaction(
             InteractionResolutionCommand::try_new(
-                locator(),
+                locator()?,
                 InteractionResolution::try_new(
                     interaction_id,
                     "resolution-1",
-                    PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
-                        .expect("principal"),
-                    AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth"),
-                    RawJson::parse(r#"{"approved":true}"#).expect("response"),
+                    PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))?,
+                    AuthorizationEvidence::try_new("policy-v1", "decision-v1")?,
+                    RawJson::parse(r#"{"approved":true}"#)?,
                     None::<&str>,
-                )
-                .expect("resolution"),
-            )
-            .expect("command"),
+                )?,
+            )?,
             timestamp(3_000),
         )
-        .await
-        .expect("resolve");
+        .await?;
     println!("durable interaction {interaction_id} survived worker restart");
+    Ok(())
 }

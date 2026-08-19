@@ -21,8 +21,10 @@ pub(crate) async fn enumerate_catalog(transport: &dyn McpTransport) -> Result<Ve
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_LIST_PAGES {
         let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref() {
-            params.as_object_mut().expect("object").insert(
+        if let Some(cursor) = cursor.as_ref()
+            && let Some(object) = params.as_object_mut()
+        {
+            object.insert(
                 "cursor".to_owned(),
                 serde_json::Value::String(cursor.clone()),
             );
@@ -78,8 +80,10 @@ pub(crate) async fn enumerate_prompts(
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_LIST_PAGES {
         let mut params = serde_json::json!({});
-        if let Some(cursor) = cursor.as_ref() {
-            params.as_object_mut().expect("object").insert(
+        if let Some(cursor) = cursor.as_ref()
+            && let Some(object) = params.as_object_mut()
+        {
+            object.insert(
                 "cursor".to_owned(),
                 serde_json::Value::String(cursor.clone()),
             );

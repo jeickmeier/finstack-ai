@@ -48,7 +48,7 @@ fn tool_failure(failure: HostFailure) -> ToolError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen JS tool host error is valid")
+    .unwrap_or_else(ToolError::from)
 }
 
 impl HostToolset {

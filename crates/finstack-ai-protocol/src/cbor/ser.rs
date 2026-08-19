@@ -54,7 +54,7 @@ impl Serializer for CanonicalSerializer {
 
     fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
         if value >= 0 {
-            Ok(CanonicalValue::Unsigned(u64::try_from(value).expect(">=0")))
+            Ok(CanonicalValue::Unsigned(value.cast_unsigned()))
         } else {
             Ok(CanonicalValue::Negative((!value).cast_unsigned()))
         }

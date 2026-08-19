@@ -4,7 +4,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, ValidatedToolCall};
 use finstack_ai_runtime::{
@@ -93,7 +93,7 @@ impl ScriptedToolsetControl {
     fn gate(&self, name: Arc<str>) -> Arc<Gate> {
         self.gates
             .lock()
-            .expect("scripted tool gate registry is not poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .entry(name)
             .or_default()
             .clone()
@@ -245,7 +245,7 @@ impl Toolset for ScriptedToolset {
                 )
             })?;
             if let Some(payload) = plan.panic_on_call {
-                panic!("{payload}");
+                std::panic::resume_unwind(Box::new(payload.to_string()));
             }
             let current = active.fetch_add(1, Ordering::AcqRel) + 1;
             maximum.fetch_max(current, Ordering::AcqRel);
@@ -356,7 +356,9 @@ impl Stream for ScriptedToolStream {
                     }
                     return Poll::Pending;
                 }
-                ScriptedToolAction::Panic(payload) => panic!("{payload}"),
+                ScriptedToolAction::Panic(payload) => {
+                    std::panic::resume_unwind(Box::new(payload.to_string()));
+                }
             }
         }
     }
@@ -364,5 +366,5 @@ impl Stream for ScriptedToolStream {
 
 fn scripted_error(code: &'static str, message: &'static str) -> ToolError {
     ToolError::try_new(code, ErrorCategory::Tool, false, message, Metadata::empty())
-        .expect("scripted tool error is valid")
+        .unwrap_or_else(ToolError::from)
 }

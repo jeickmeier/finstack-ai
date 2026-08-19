@@ -7,7 +7,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
     ComponentId, ContentBlock, ErrorCategory, ExternalHandleRef, Metadata, PendingModelEffect,
@@ -190,7 +190,7 @@ impl ScriptedModelControl {
     fn gate(&self, name: Arc<str>) -> Arc<Gate> {
         self.gates
             .lock()
-            .expect("scripted model gate registry is not poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .entry(name)
             .or_default()
             .clone()
@@ -368,7 +368,7 @@ impl Model for ScriptedModel {
                 "scripted request byte length overflow",
                 Metadata::empty(),
             )
-            .expect("scripted error")
+            .unwrap_or_else(ModelError::from)
         })?;
         Ok(ModelTokenEstimate {
             input_tokens,
@@ -381,11 +381,11 @@ impl Model for ScriptedModel {
         *self
             .last_request
             .lock()
-            .expect("scripted model last request is not poisoned") = Some(request.clone());
+            .unwrap_or_else(PoisonError::into_inner) = Some(request.clone());
         let plan = self
             .plans
             .lock()
-            .expect("scripted model plan queue is not poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .pop_front();
         let control = self.control.clone();
         let acknowledgements = Arc::clone(&self.cancellation_acknowledgements);
@@ -418,7 +418,7 @@ impl Model for ScriptedModel {
         let result = self
             .reconcile_results
             .lock()
-            .expect("scripted model reconcile queue is not poisoned")
+            .unwrap_or_else(PoisonError::into_inner)
             .pop_front()
             .unwrap_or(ModelReconcileResult::Unknown);
         Box::pin(async move { Ok(result) })
@@ -464,7 +464,7 @@ impl ScriptedStream {
             "scripted model acknowledged effect cancellation",
             Metadata::empty(),
         )
-        .expect("scripted cancellation error"))))
+        .unwrap_or_else(ModelError::from))))
     }
 }
 
@@ -605,16 +605,17 @@ fn completed_response(text: &str, calls: &[ModelToolCall], completion_id: &str) 
     let assistant_content: Arc<[ContentBlock]> = if text.is_empty() {
         Arc::from([])
     } else {
-        Arc::from([ContentBlock::Text(
-            TextBlock::try_new(text).expect("scripted fixture text is bounded by kernel DTOs"),
-        )])
+        match TextBlock::try_new(text) {
+            Ok(block) => Arc::from([ContentBlock::Text(block)]),
+            Err(_) => Arc::from([]),
+        }
     };
     ModelResponse {
         assistant_content,
         tool_calls: calls.to_vec().into(),
         usage: Usage::empty(),
         provider_ids: ProviderIds::try_new(None::<&str>, Some(completion_id), None::<&str>)
-            .expect("scripted completion id is bounded"),
+            .unwrap_or_else(|_| ProviderIds::empty()),
         completion_id: Arc::from(completion_id),
         continuation_state: None,
     }
@@ -622,14 +623,12 @@ fn completed_response(text: &str, calls: &[ModelToolCall], completion_id: &str) 
 
 fn model_deferral(step: &ScriptedStep) -> Result<ModelStreamItem, ModelError> {
     let handle = step.id.as_deref().unwrap_or("scripted-deferral");
-    let provider = ComponentId::parse("finstack.model.scripted")
-        .expect("fixed scripted provider component id");
-    let handle = ExternalHandleRef::try_new(
-        provider,
-        handle,
-        RawJson::parse(b"{}").expect("empty metadata"),
-    )
-    .map_err(|_| scripted_error("scripted_deferral_invalid", "invalid scripted deferral"))?;
+    let provider = ComponentId::from_static("finstack.model.scripted");
+    let handle =
+        ExternalHandleRef::try_new(provider, handle, Metadata::empty().as_raw_json().clone())
+            .map_err(|_| {
+                scripted_error("scripted_deferral_invalid", "invalid scripted deferral")
+            })?;
     Ok(ModelStreamItem::Deferred(ModelDeferral {
         handle,
         reconciliation: ReconciliationPolicy::CallbackOrPoll,
@@ -646,14 +645,5 @@ fn scripted_error(code: &str, message: &str) -> ModelError {
         message,
         Metadata::empty(),
     )
-    .unwrap_or_else(|_| {
-        ModelError::try_new(
-            "scripted_model_error",
-            ErrorCategory::Model,
-            false,
-            "invalid scripted model error",
-            Metadata::empty(),
-        )
-        .expect("fallback scripted error")
-    })
+    .unwrap_or_else(ModelError::from)
 }

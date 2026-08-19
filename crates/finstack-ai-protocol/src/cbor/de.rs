@@ -186,7 +186,9 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
         match self.value {
             CanonicalValue::Text(variant) => visitor.visit_enum(variant.into_deserializer()),
             CanonicalValue::Map(mut entries) if entries.len() == 1 => {
-                let (key, value) = entries.pop().expect("one entry");
+                let Some((key, value)) = entries.pop() else {
+                    return Err(ProtocolError::codec("invalid enum encoding"));
+                };
                 let CanonicalValue::Text(variant) = key else {
                     return Err(ProtocolError::codec("enum variant key must be text"));
                 };

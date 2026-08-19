@@ -282,7 +282,7 @@ pub fn model_failure(failure: HostFailure) -> ModelError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen JS model host error is valid")
+    .unwrap_or_else(ModelError::from)
 }
 
 /// Parse constructor options from a JSON object.

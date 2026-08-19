@@ -113,17 +113,13 @@ impl MessagesRequest {
         let thinking = take_thinking(&mut settings, model)?;
         let mut tools = Vec::with_capacity(draft.tools.len());
         for tool in draft.tools.iter() {
-            if matches!(draft.output, OutputSpec::JsonSchema { .. })
+            if let OutputSpec::JsonSchema { schema } = &draft.output
                 && tool.model_name.as_ref() == SUBMIT_FINAL_OUTPUT_TOOL
+                && tool.input_schema.digest() != schema.schema_digest
             {
-                let OutputSpec::JsonSchema { schema } = &draft.output else {
-                    unreachable!("JsonSchema matched above");
-                };
-                if tool.input_schema.digest() != schema.schema_digest {
-                    return Err(request_error(
-                        "structured-output schema does not match the committed schema reference",
-                    ));
-                }
+                return Err(request_error(
+                    "structured-output schema does not match the committed schema reference",
+                ));
             }
             tools.push(WireTool {
                 name: tool.model_name.to_string(),

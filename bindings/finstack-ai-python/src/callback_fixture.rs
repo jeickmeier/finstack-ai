@@ -29,22 +29,26 @@ fn id_bytes(ordinal: u64) -> [u8; 16] {
     bytes
 }
 
-fn run_context(effect_ordinal: u64) -> RunCallContext {
-    RunCallContext {
+fn fixture_error(error: impl std::fmt::Display) -> PyErr {
+    pyo3::exceptions::PyAssertionError::new_err(error.to_string())
+}
+
+fn run_context(effect_ordinal: u64) -> PyResult<RunCallContext> {
+    Ok(RunCallContext {
         locator: OperationLocator::try_new(
             "tenant-python-conformance",
             SessionId::from_bytes(id_bytes(1)),
             LaneId::from_bytes(id_bytes(2)),
             RunId::from_bytes(id_bytes(3)),
         )
-        .expect("frozen conformance locator is valid"),
+        .map_err(fixture_error)?,
         authorization: AuthorizationContext {
             principal: PrincipalRef::try_new(
                 "finstack-ai-test",
                 "python-conformance",
                 Some("tenant-python-conformance"),
             )
-            .expect("frozen conformance principal is valid"),
+            .map_err(fixture_error)?,
             authentication_method: Arc::from("fixture"),
             assurance_level: Arc::from("fixture"),
             roles: Arc::from([]),
@@ -58,7 +62,7 @@ fn run_context(effect_ordinal: u64) -> RunCallContext {
         deadline: None,
         budget_scope_id: None,
         cancellation: CancellationSignal::new(),
-    }
+    })
 }
 
 #[pyfunction(name = "_callback_port_conformance")]
@@ -73,7 +77,7 @@ fn callback_port_conformance<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let expected_model = ModelResponse {
             assistant_content: Arc::from([ContentBlock::Text(
-                TextBlock::try_new("conformant").expect("frozen conformance text is valid"),
+                TextBlock::try_new("conformant").map_err(fixture_error)?,
             )]),
             tool_calls: Arc::from([]),
             usage: Usage::empty(),
@@ -85,7 +89,7 @@ fn callback_port_conformance<'py>(
             model: model_name.clone(),
             request: ModelRequest {
                 call: ModelCallContext {
-                    run: run_context(4),
+                    run: run_context(4)?,
                     request_id: ModelRequestId::from_bytes(id_bytes(5)),
                 },
                 draft: ModelRequestDraft {
@@ -94,8 +98,7 @@ fn callback_port_conformance<'py>(
                     tools: Arc::from([]),
                     output: OutputSpec::PlainText,
                     settings: ModelSettings {
-                        values: RawJson::parse(b"{}")
-                            .expect("frozen conformance settings are valid"),
+                        values: RawJson::parse(b"{}").map_err(fixture_error)?,
                     },
                     limits: ModelRequestLimits {
                         max_input_bytes: 1_048_576,
@@ -118,22 +121,20 @@ fn callback_port_conformance<'py>(
             .first()
             .cloned()
             .ok_or_else(|| pyo3::exceptions::PyAssertionError::new_err("toolset is empty"))?;
-        let arguments =
-            RawJson::parse(br#"{"value":"ok"}"#).expect("frozen conformance arguments are valid");
+        let arguments = RawJson::parse(br#"{"value":"ok"}"#).map_err(fixture_error)?;
         let call = ToolCallBlock::try_new(
             ToolCallId::from_bytes(id_bytes(7)),
             &spec.model_name,
             arguments,
         )
-        .expect("frozen conformance tool call is valid");
+        .map_err(fixture_error)?;
         let result = ToolResult {
-            output: RawJson::parse(br#"{"value":"ok"}"#)
-                .expect("frozen conformance result is valid"),
+            output: RawJson::parse(br#"{"value":"ok"}"#).map_err(fixture_error)?,
             is_error: false,
         };
         let tool_case = ToolsetConformanceCase {
             context: ToolCallContext {
-                run: run_context(6),
+                run: run_context(6)?,
                 tool_batch_id: ToolBatchId::from_bytes(id_bytes(8)),
                 tool_call_id: ToolCallId::from_bytes(id_bytes(7)),
             },

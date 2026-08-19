@@ -126,7 +126,7 @@ impl AuthVerifier for StaticAuthVerifier {
 }
 
 fn bearer_digest(token: &[u8]) -> Digest {
-    Digest::domain_separated("remote-bearer", 1, token).expect("remote-bearer domain is valid")
+    Digest::from_fixed_domain("remote-bearer", 1, token)
 }
 
 fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {

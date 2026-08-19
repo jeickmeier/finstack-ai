@@ -178,5 +178,5 @@ pub(crate) fn now() -> Timestamp {
         .ok()
         .and_then(|duration| i64::try_from(duration.as_millis()).ok())
         .unwrap_or(0);
-    Timestamp::from_unix_ms(ms).unwrap_or_else(|_| Timestamp::from_unix_ms(0).expect("epoch"))
+    Timestamp::from_unix_ms(ms).unwrap_or(finstack_ai_kernel::UNIX_EPOCH)
 }

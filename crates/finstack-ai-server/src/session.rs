@@ -301,13 +301,10 @@ pub struct SessionHub {
 impl SessionHub {
     /// Insert or replace a replica.
     ///
-    /// # Panics
-    ///
-    /// Panics when the hub mutex is poisoned.
     pub fn insert(&self, replica: SessionReplica) {
         self.inner
             .lock()
-            .expect("session hub")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(replica.session_id.clone(), replica);
     }
 
@@ -318,15 +315,15 @@ impl SessionHub {
     /// Returns [`ServerError::UnknownLocator`] when the session is missing, or
     /// the error returned by `f`.
     ///
-    /// # Panics
-    ///
-    /// Panics when the hub mutex is poisoned.
     pub fn with<R>(
         &self,
         session_id: &str,
         f: impl FnOnce(&mut SessionReplica) -> Result<R, ServerError>,
     ) -> Result<R, ServerError> {
-        let mut guard = self.inner.lock().expect("session hub");
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let replica = guard
             .get_mut(session_id)
             .ok_or(ServerError::UnknownLocator)?;

@@ -4,6 +4,25 @@
 //! concern; policy, depth, and budget failures surface as tool results.
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -170,11 +189,12 @@ impl Toolset for SubagentToolset {
                 ));
             }
             let snapshot = table.lock().map(|guard| guard.clone()).unwrap_or_default();
-            let result = match name {
-                START_NAME => start_child(&invoker, &allow_list, &ctx, &call).await,
-                STATUS_NAME => status_child(&snapshot, &ctx, &call),
-                CANCEL_NAME => cancel_child(&invoker, &snapshot, &ctx, &call).await,
-                _ => unreachable!("name checked above"),
+            let result = if name == START_NAME {
+                start_child(&invoker, &allow_list, &ctx, &call).await
+            } else if name == STATUS_NAME {
+                status_child(&snapshot, &ctx, &call)
+            } else {
+                cancel_child(&invoker, &snapshot, &ctx, &call).await
             }?;
             if let Some(started) = result.started
                 && let Ok(mut children) = table.lock()
@@ -457,11 +477,8 @@ fn invoke_error_result(error: &AgentInvokeError) -> CallOutcome {
 
 fn error_result(code: &'static str, message: &'static str) -> CallOutcome {
     CallOutcome {
-        output: RawJson::parse(
-            serde_json::to_vec(&serde_json::json!({ "code": code, "message": message }))
-                .expect("error payload"),
-        )
-        .expect("error json"),
+        output: result_json(&serde_json::json!({ "code": code, "message": message }))
+            .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         is_error: true,
         started: None,
     }

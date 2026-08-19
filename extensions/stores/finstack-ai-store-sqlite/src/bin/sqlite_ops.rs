@@ -1,5 +1,25 @@
 //! Leaf backup, restore, export, import, diagnose, and migrate commands.
 
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
+
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -243,7 +263,10 @@ fn copy_trio(src: &Path, dest: &Path, refuse_partial: bool) -> Result<(), String
 }
 
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path.file_name().expect("file name").to_os_string();
+    let mut name = match path.file_name() {
+        Some(name) => name.to_os_string(),
+        None => "db".into(),
+    };
     name.push(suffix);
     path.with_file_name(name)
 }

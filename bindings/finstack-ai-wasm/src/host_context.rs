@@ -46,7 +46,7 @@ fn context_failure(failure: HostFailure) -> ContextError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen JS context host error is valid")
+    .unwrap_or_else(ContextError::from)
 }
 
 impl HostContextProvider {

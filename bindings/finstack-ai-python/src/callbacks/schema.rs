@@ -227,9 +227,12 @@ fn normalize_schema_node(
         }
     }
     if let Some(properties) = object.get_mut("properties") {
-        let properties = properties
-            .as_object_mut()
-            .expect("properties shape was checked above");
+        let properties = properties.as_object_mut().ok_or_else(|| {
+            format!(
+                "JSON Schema properties must be an object at {}",
+                pointer(path, "properties")
+            )
+        })?;
         for (name, property) in properties {
             normalize_schema_node(
                 property,

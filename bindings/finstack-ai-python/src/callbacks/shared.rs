@@ -16,9 +16,7 @@ const CALLBACK_VERSION: Version = Version {
 pub(super) fn callback_invocation(component: &ComponentRef) -> ComponentInvocation {
     ComponentInvocation {
         component: component.id().clone(),
-        version: component
-            .version()
-            .expect("Python callback components always have exact versions"),
+        version: component.version().unwrap_or(CALLBACK_VERSION),
         configuration_digest: Digest::raw_json(b"{}"),
         recovery: InvocationRecovery::NonRepeatable,
     }

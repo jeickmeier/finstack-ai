@@ -337,12 +337,11 @@ async fn drive_response(
             chunk = body.next() => chunk,
         };
         let Some(chunk) = chunk else {
-            let result = parser.finish().and_then(|()| {
-                Err(stream_error(
-                    "Anthropic SSE stream ended before message_stop",
-                ))
-            });
-            let _ = sender.send(result.map(|()| unreachable!())).await;
+            let error = match parser.finish() {
+                Ok(()) => stream_error("Anthropic SSE stream ended before message_stop"),
+                Err(error) => error,
+            };
+            let _ = sender.send(Err(error)).await;
             return;
         };
         let chunk = match chunk {

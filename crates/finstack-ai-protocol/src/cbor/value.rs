@@ -100,7 +100,7 @@ fn write_value(value: &CanonicalValue, out: &mut Vec<u8>) -> Result<(), Protocol
                     CANONICAL_STRING_MAX_BYTES,
                 ));
             }
-            write_uint(2, u64::try_from(bytes.len()).expect("usize fits u64"), out);
+            write_uint(2, usize_to_u64(bytes.len(), "byte_string")?, out);
             out.extend_from_slice(bytes);
         }
         CanonicalValue::Text(text) => {
@@ -110,7 +110,7 @@ fn write_value(value: &CanonicalValue, out: &mut Vec<u8>) -> Result<(), Protocol
                     CANONICAL_STRING_MAX_BYTES,
                 ));
             }
-            write_uint(3, u64::try_from(text.len()).expect("usize fits u64"), out);
+            write_uint(3, usize_to_u64(text.len(), "text_string")?, out);
             out.extend_from_slice(text.as_bytes());
         }
         CanonicalValue::Array(items) => {
@@ -120,18 +120,14 @@ fn write_value(value: &CanonicalValue, out: &mut Vec<u8>) -> Result<(), Protocol
                     CANONICAL_ARRAY_MAX_ITEMS,
                 ));
             }
-            write_uint(4, u64::try_from(items.len()).expect("usize fits u64"), out);
+            write_uint(4, usize_to_u64(items.len(), "array_items")?, out);
             for item in items {
                 write_value(item, out)?;
             }
         }
         CanonicalValue::Map(entries) => {
             let entries = sort_map(entries.clone())?;
-            write_uint(
-                5,
-                u64::try_from(entries.len()).expect("usize fits u64"),
-                out,
-            );
+            write_uint(5, usize_to_u64(entries.len(), "map_entries")?, out);
             for (key, value) in entries {
                 write_value(&key, out)?;
                 write_value(&value, out)?;
@@ -142,13 +138,19 @@ fn write_value(value: &CanonicalValue, out: &mut Vec<u8>) -> Result<(), Protocol
     Ok(())
 }
 
+fn usize_to_u64(len: usize, resource: &'static str) -> Result<u64, ProtocolError> {
+    u64::try_from(len).map_err(|_| ProtocolError::limit(resource, usize::MAX))
+}
+
 fn write_uint(major: u8, n: u64, out: &mut Vec<u8>) {
     let major = major << 5;
-    if n < 24 {
-        out.push(major | u8::try_from(n).expect("n < 24"));
-    } else if let Ok(byte) = u8::try_from(n) {
-        out.push(major | 0x18);
-        out.push(byte);
+    if let Ok(byte) = u8::try_from(n) {
+        if byte < 24 {
+            out.push(major | byte);
+        } else {
+            out.push(major | 0x18);
+            out.push(byte);
+        }
     } else if let Ok(short) = u16::try_from(n) {
         out.push(major | 0x19);
         out.extend_from_slice(&short.to_be_bytes());

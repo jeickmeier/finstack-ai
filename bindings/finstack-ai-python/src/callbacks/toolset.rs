@@ -70,7 +70,7 @@ fn tool_failure(failure: CallbackFailure) -> ToolError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen Python tool callback error is valid")
+    .unwrap_or_else(ToolError::from)
 }
 
 /// Trusted Python implementation of the Toolset port.

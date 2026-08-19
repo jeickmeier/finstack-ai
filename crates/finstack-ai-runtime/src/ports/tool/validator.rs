@@ -161,18 +161,25 @@ fn invalid_validator_outcome(
     keyword: Option<&str>,
     message: &str,
 ) -> ValidationOutcome {
-    let issue = ValidationIssue::try_new(
-        Arc::<str>::from(instance_path),
-        Arc::<str>::from(schema_path),
-        keyword.map(Arc::<str>::from),
-        Arc::<str>::from(message),
-    )
-    .expect("frozen validation fallback is bounded");
+    let issue = ValidationIssue {
+        instance_path: Arc::from(instance_path),
+        schema_path: Arc::from(schema_path),
+        keyword: keyword.map(Arc::from),
+        message: Arc::from(message),
+    };
     ValidationOutcome::try_invalid(
         Arc::from([issue]),
         Arc::<str>::from("JSON Schema validation failed"),
     )
-    .expect("frozen validation fallback is bounded")
+    .unwrap_or(ValidationOutcome::Invalid {
+        issues: Arc::from([ValidationIssue {
+            instance_path: Arc::from(""),
+            schema_path: Arc::from(""),
+            keyword: None,
+            message: Arc::from("validation failed"),
+        }]),
+        feedback: Arc::from("JSON Schema validation failed"),
+    })
 }
 
 fn validation_feedback(issues: &[ValidationIssue]) -> String {

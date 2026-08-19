@@ -684,7 +684,10 @@ async fn list_tools(
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
-                list_tools_on(slot.as_mut().expect("serialized slot"), cancel).await
+                let slot = slot.as_mut().ok_or_else(|| {
+                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
+                })?;
+                list_tools_on(slot, cancel).await
             })
             .await
         }
@@ -722,14 +725,10 @@ async fn call_tool(
                 if slot.is_none() {
                     *slot = Some(instantiate_toolset(host, ready, cancel).await?);
                 }
-                call_tool_on(
-                    slot.as_mut().expect("serialized slot"),
-                    cancel,
-                    context,
-                    tool_id,
-                    args,
-                )
-                .await
+                let slot = slot.as_mut().ok_or_else(|| {
+                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
+                })?;
+                call_tool_on(slot, cancel, context, tool_id, args).await
             })
             .await
         }
@@ -764,7 +763,10 @@ async fn collect_items(
                 if slot.is_none() {
                     *slot = Some(instantiate_context(host, ready, cancel).await?);
                 }
-                collect_items_on(slot.as_mut().expect("serialized slot"), cancel, query).await
+                let slot = slot.as_mut().ok_or_else(|| {
+                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
+                })?;
+                collect_items_on(slot, cancel, query).await
             })
             .await
         }

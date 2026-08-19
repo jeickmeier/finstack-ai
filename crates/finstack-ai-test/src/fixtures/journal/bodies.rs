@@ -472,7 +472,7 @@ fn id<T: IdTag>(ordinal: u64) -> Id<T> {
 }
 
 fn ts() -> Timestamp {
-    Timestamp::from_unix_ms(0).expect("epoch")
+    finstack_ai_kernel::UNIX_EPOCH
 }
 
 fn digest() -> Digest {

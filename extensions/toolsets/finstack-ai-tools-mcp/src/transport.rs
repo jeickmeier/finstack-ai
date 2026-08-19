@@ -61,14 +61,16 @@ fn optional_list_response(
 ) -> Result<serde_json::Value, McpError> {
     let queued = queue.front().and_then(|entry| entry.as_ref().ok());
     if queued.is_some_and(|value| value.get(items_key).is_some()) {
-        return queue.pop_front().expect("front exists");
+        return queue
+            .pop_front()
+            .unwrap_or_else(|| Ok(serde_json::json!({"resultType":"complete"})));
     }
     Ok(serde_json::json!({"resultType":"complete"}))
 }
 
 /// Merge required metadata into a params object.
 pub(crate) fn with_meta(mut params: serde_json::Value) -> serde_json::Value {
-    let meta = serde_json::to_value(Meta::default()).expect("meta serializes");
+    let meta = serde_json::to_value(Meta::default()).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(object) = params.as_object_mut() {
         object.insert("_meta".to_owned(), meta);
         return params;
@@ -585,7 +587,7 @@ impl HttpTransport {
         );
         headers.insert(
             HeaderName::from_static("mcp-method"),
-            HeaderValue::from_str(method).expect("ascii method"),
+            HeaderValue::from_str(method).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
         );
         if let Some(name) = name {
             headers.insert(
@@ -674,7 +676,8 @@ impl McpTransport for HttpTransport {
 fn encode_header_value(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or_else(|_| {
         let encoded = base64::engine::general_purpose::STANDARD.encode(value.as_bytes());
-        HeaderValue::from_str(&format!("=?base64?{encoded}?=")).expect("sentinel encoding is ascii")
+        HeaderValue::from_str(&format!("=?base64?{encoded}?="))
+            .unwrap_or_else(|_| HeaderValue::from_static("=?base64?e30=?="))
     })
 }
 

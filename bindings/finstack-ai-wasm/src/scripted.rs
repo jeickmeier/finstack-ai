@@ -40,7 +40,7 @@ fn encode_error(code: &str, category: &str) -> String {
         code: code.to_owned(),
         category: category.to_owned(),
     })
-    .expect("drive error is serializable")
+    .unwrap_or_else(|_| r#"{"ok":false,"code":"encode_failed","category":"internal"}"#.to_owned())
 }
 
 fn encode_host_failure(failure: HostFailure) -> String {

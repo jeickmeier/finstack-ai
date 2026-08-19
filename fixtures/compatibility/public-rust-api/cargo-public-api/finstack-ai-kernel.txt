@@ -3059,6 +3059,7 @@ pub fn finstack_ai_kernel::Digest::blob_content(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::domain_separated(&str, u32, &[u8]) -> core::result::Result<Self, finstack_ai_kernel::DigestError>
 pub fn finstack_ai_kernel::Digest::effect_input(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::effect_output(&[u8]) -> Self
+pub fn finstack_ai_kernel::Digest::from_fixed_domain(&'static str, u32, &[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::from_hex(&str) -> core::result::Result<Self, finstack_ai_kernel::DigestError>
 pub fn finstack_ai_kernel::Digest::middleware_chain(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::raw_json(&[u8]) -> Self
@@ -3287,6 +3288,7 @@ pub fn finstack_ai_kernel::EntryAppended::deserialize<__D>(__D) -> core::result:
 pub struct finstack_ai_kernel::ErrorCode(_)
 impl finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::as_str(&self) -> &str
+pub fn finstack_ai_kernel::ErrorCode::from_static(&'static str) -> Self
 pub fn finstack_ai_kernel::ErrorCode::new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_kernel::ErrorCodeError>
 impl core::clone::Clone for finstack_ai_kernel::ErrorCode
 pub fn finstack_ai_kernel::ErrorCode::clone(&self) -> finstack_ai_kernel::ErrorCode
@@ -3748,6 +3750,7 @@ pub fn finstack_ai_kernel::KernelState::deserialize<D>(D) -> core::result::Resul
 #[repr(transparent)] pub struct finstack_ai_kernel::Key<T: finstack_ai_kernel::KeyTag>
 impl<T: finstack_ai_kernel::KeyTag> finstack_ai_kernel::Key<T>
 pub fn finstack_ai_kernel::Key<T>::as_str(&self) -> &str
+pub fn finstack_ai_kernel::Key<T>::from_static(&'static str) -> Self
 pub fn finstack_ai_kernel::Key<T>::parse(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai_kernel::KeyParseError>
 impl<'de, T: finstack_ai_kernel::KeyTag> serde_core::de::Deserialize<'de> for finstack_ai_kernel::Key<T>
 pub fn finstack_ai_kernel::Key<T>::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
@@ -5262,6 +5265,7 @@ pub const finstack_ai_kernel::SUBMIT_FINAL_OUTPUT_TOOL: &str
 pub const finstack_ai_kernel::TEXT_MAX_BYTES: usize
 pub const finstack_ai_kernel::TIMESTAMP_MAX_MS: i64
 pub const finstack_ai_kernel::TIMESTAMP_MIN_MS: i64
+pub const finstack_ai_kernel::UNIX_EPOCH: finstack_ai_kernel::Timestamp
 pub trait finstack_ai_kernel::IdTag: core::marker::Send + core::marker::Sync + 'static
 pub const finstack_ai_kernel::IdTag::NAME: &'static str
 impl finstack_ai_kernel::IdTag for finstack_ai_kernel::AppendBatchTag

@@ -678,7 +678,7 @@ pub(crate) fn scan_session(
             next_sequence: None,
         });
     }
-    let limit = usize::try_from(request.limit).expect("u32 fits usize");
+    let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
     let has_more = fetched.len() > limit;
     let records = fetched
         .iter()
@@ -915,7 +915,11 @@ fn digest_from_blob(bytes: &[u8]) -> Result<Digest, StoreError> {
         hex[index * 2] = DIGEST_HEX[usize::from(byte >> 4)];
         hex[index * 2 + 1] = DIGEST_HEX[usize::from(byte & 0x0f)];
     }
-    let hex = core::str::from_utf8(&hex).expect("hex alphabet");
+    let Ok(hex) = core::str::from_utf8(&hex) else {
+        return Err(StoreError::Integrity {
+            reason_code: "sqlite_digest_hex",
+        });
+    };
     Digest::from_hex(hex).map_err(|_| StoreError::Integrity {
         reason_code: "sqlite_digest_hex",
     })

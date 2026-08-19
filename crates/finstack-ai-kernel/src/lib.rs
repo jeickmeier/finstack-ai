@@ -109,6 +109,25 @@
 //! ```
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 mod content;
 mod conversation;
@@ -156,7 +175,7 @@ pub use primitives::{
     RawJsonError, RecordId, RecordTag, RunId, RunTag, SEMANTIC_ARRAY_MAX_ITEMS,
     SEMANTIC_MAP_MAX_ENTRIES, SessionId, SessionTag, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError,
     Timestamp, ToolBatchId, ToolBatchTag, ToolCallId, ToolCallTag, ToolId, ToolTag, TurnId,
-    TurnTag,
+    TurnTag, UNIX_EPOCH,
 };
 pub use primitives::{
     AllocatedIds, ArtifactRef, AssigneeHint, AuthorizationEvidence, BoundedMap, ComponentRef,

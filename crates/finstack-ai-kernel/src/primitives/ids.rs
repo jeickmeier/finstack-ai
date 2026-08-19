@@ -239,8 +239,7 @@ impl UuidBuffer {
                 self.0[position + 1] = crate::primitives::HEX_DIGITS[usize::from(byte & 0x0f)];
             }
         }
-        // Only ASCII hex digits and the pre-set hyphens are ever written.
-        core::str::from_utf8(&self.0).expect("canonical UUID text is ASCII")
+        super::str_from_ascii(&self.0)
     }
 }
 
@@ -359,6 +358,34 @@ impl<T: KeyTag> Key<T> {
             value: Arc::<str>::from(input),
             _marker: PhantomData,
         })
+    }
+
+    /// Construct a key from a compile-time literal that the crate already owns.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - A validated local alias or namespaced id already owned by
+    ///   this crate. Debug builds assert the same rules as [`Key::parse`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ToolId;
+    ///
+    /// let id = ToolId::from_static("search.web");
+    /// assert_eq!(id.as_str(), "search.web");
+    /// ```
+    #[must_use]
+    pub fn from_static(input: &'static str) -> Self {
+        debug_assert!(
+            validate_key(input, T::REQUIRES_NAMESPACE).is_ok(),
+            "static {} key must be valid: {input}",
+            T::NAME
+        );
+        Self {
+            value: Arc::from(input),
+            _marker: PhantomData,
+        }
     }
 
     /// Borrow the validated key text.

@@ -11,6 +11,25 @@
 //! Browser Playwright Agent-run goldens are the WASM parity evidence path.
 
 #![warn(missing_docs)]
+// wasm-bindgen generates FFI glue that requires `unsafe`.
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 #[cfg(target_arch = "wasm32")]
 mod agent;
@@ -535,96 +554,15 @@ fn set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), JsV
 }
 
 /// Construct native host adapters so the DTO path stays in the native graph.
-///
-/// # Panics
-///
-/// Panics when a frozen fixture identity or DTO cannot be constructed.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn compile_native_host_adapters() {
-    use crate::host::{HostFailure, HostModelOptions, NativeHostResult};
+    use crate::host::{HostFailure, NativeHostResult};
     use crate::host_artifact::HostArtifactStore;
     use crate::host_clock::{HostClock, HostRandomSource};
-    use crate::host_context::{HostContextOptions, HostContextProvider};
-    use crate::host_middleware::{HostMiddleware, HostMiddlewareOptions};
-    use crate::host_model::HostModel;
-    use crate::host_observer::{HostObserver, HostObserverOptions};
     use crate::host_store::{HostJournalStore, HostJournalStoreOptions};
-    use crate::host_toolset::{HostToolset, HostToolsetOptions};
-    use finstack_ai::runtime::{
-        ArtifactStore, Clock, ContextProvider, JournalStore, Middleware, Model, Observer,
-        RandomSource, Toolset,
-    };
+    use finstack_ai::runtime::{ArtifactStore, Clock, JournalStore, RandomSource};
 
-    let model = HostModel::from_callback(
-        HostModelOptions {
-            component: "js.model.fixture".into(),
-            provider: "js-fixture".into(),
-            model: "js-fixture-model".into(),
-            hard_input_bytes: 1_024,
-            context_window_tokens: 1_024,
-            max_output_tokens: 128,
-        },
-        |_| {
-            Ok(NativeHostResult::Object(
-                r#"{"text":"ok","completion_id":"compile"}"#.into(),
-            ))
-        },
-    )
-    .expect("model");
-    let _ = model.component();
-    let _: std::sync::Arc<dyn Model> = std::sync::Arc::new(model);
-
-    let toolset = HostToolset::from_callback(
-        HostToolsetOptions {
-            component: "js.toolset.fixture".into(),
-            name: "js-fixture-tools".into(),
-            tools: vec![serde_json::from_str(crate::fixture::echo_tool_json()).expect("tool")],
-        },
-        |_, _| {
-            Ok(NativeHostResult::Object(
-                r#"{"output":{"ok":true},"is_error":false}"#.into(),
-            ))
-        },
-    )
-    .expect("toolset");
-    let _ = toolset.component();
-    let _: std::sync::Arc<dyn Toolset> = std::sync::Arc::new(toolset);
-
-    let _: std::sync::Arc<dyn ContextProvider> = std::sync::Arc::new(
-        HostContextProvider::from_callback(
-            &HostContextOptions {
-                component: "js.context.fixture".into(),
-                trusted_application_instructions: false,
-            },
-            |_| {
-                Ok(NativeHostResult::Object(
-                    r#"{"items":[],"estimated_tokens":0,"bytes":0,"cache_key":null}"#.into(),
-                ))
-            },
-        )
-        .expect("context"),
-    );
-    let _: std::sync::Arc<dyn Middleware> = std::sync::Arc::new(
-        HostMiddleware::from_callback(
-            &HostMiddlewareOptions {
-                component: "js.middleware.fixture".into(),
-                stages: vec!["before_run".into()],
-                priority: 0,
-            },
-            |_| Ok(NativeHostResult::Object(r#""continue""#.into())),
-        )
-        .expect("middleware"),
-    );
-    let _: std::sync::Arc<dyn Observer> = std::sync::Arc::new(
-        HostObserver::from_callback(
-            &HostObserverOptions {
-                component: "js.observer.fixture".into(),
-                payload_mode: "metadata_only".into(),
-            },
-            |_| Ok(NativeHostResult::Object("null".into())),
-        )
-        .expect("observer"),
-    );
+    compile_native_port_adapters();
     let store = HostJournalStore::from_callback(
         HostJournalStoreOptions {
             detail: "js_memory_prebeta".into(),
@@ -640,6 +578,91 @@ pub fn compile_native_host_adapters() {
     let artifacts = HostArtifactStore::memory();
     let _: std::sync::Arc<dyn ArtifactStore> = std::sync::Arc::new(artifacts);
     let _ = HostFailure::Failed;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn compile_native_port_adapters() {
+    use crate::host::{HostModelOptions, NativeHostResult};
+    use crate::host_context::{HostContextOptions, HostContextProvider};
+    use crate::host_middleware::{HostMiddleware, HostMiddlewareOptions};
+    use crate::host_model::HostModel;
+    use crate::host_observer::{HostObserver, HostObserverOptions};
+    use crate::host_toolset::{HostToolset, HostToolsetOptions};
+    use finstack_ai::runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
+
+    let Ok(model) = HostModel::from_callback(
+        HostModelOptions {
+            component: "js.model.fixture".into(),
+            provider: "js-fixture".into(),
+            model: "js-fixture-model".into(),
+            hard_input_bytes: 1_024,
+            context_window_tokens: 1_024,
+            max_output_tokens: 128,
+        },
+        |_| {
+            Ok(NativeHostResult::Object(
+                r#"{"text":"ok","completion_id":"compile"}"#.into(),
+            ))
+        },
+    ) else {
+        return;
+    };
+    let _ = model.component();
+    let _: std::sync::Arc<dyn Model> = std::sync::Arc::new(model);
+
+    let Ok(tool) = serde_json::from_str(crate::fixture::echo_tool_json()) else {
+        return;
+    };
+    let Ok(toolset) = HostToolset::from_callback(
+        HostToolsetOptions {
+            component: "js.toolset.fixture".into(),
+            name: "js-fixture-tools".into(),
+            tools: vec![tool],
+        },
+        |_, _| {
+            Ok(NativeHostResult::Object(
+                r#"{"output":{"ok":true},"is_error":false}"#.into(),
+            ))
+        },
+    ) else {
+        return;
+    };
+    let _ = toolset.component();
+    let _: std::sync::Arc<dyn Toolset> = std::sync::Arc::new(toolset);
+
+    let Ok(context) = HostContextProvider::from_callback(
+        &HostContextOptions {
+            component: "js.context.fixture".into(),
+            trusted_application_instructions: false,
+        },
+        |_| {
+            Ok(NativeHostResult::Object(
+                r#"{"items":[],"estimated_tokens":0,"bytes":0,"cache_key":null}"#.into(),
+            ))
+        },
+    ) else {
+        return;
+    };
+    let _: std::sync::Arc<dyn ContextProvider> = std::sync::Arc::new(context);
+    if let Ok(middleware) = HostMiddleware::from_callback(
+        &HostMiddlewareOptions {
+            component: "js.middleware.fixture".into(),
+            stages: vec!["before_run".into()],
+            priority: 0,
+        },
+        |_| Ok(NativeHostResult::Object(r#""continue""#.into())),
+    ) {
+        let _: std::sync::Arc<dyn Middleware> = std::sync::Arc::new(middleware);
+    }
+    if let Ok(observer) = HostObserver::from_callback(
+        &HostObserverOptions {
+            component: "js.observer.fixture".into(),
+            payload_mode: "metadata_only".into(),
+        },
+        |_| Ok(NativeHostResult::Object("null".into())),
+    ) {
+        let _: std::sync::Arc<dyn Observer> = std::sync::Arc::new(observer);
+    }
 }
 
 #[cfg(test)]

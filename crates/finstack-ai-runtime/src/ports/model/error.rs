@@ -70,10 +70,19 @@ impl ModelError {
         Ok(Self { data })
     }
 
-    pub(crate) fn validation(code: &'static str, message: &'static str) -> Self {
+    pub(crate) fn frozen(
+        code: &'static str,
+        category: ErrorCategory,
+        retryable: bool,
+        message: &'static str,
+    ) -> Self {
         Self {
-            data: PortErrorData::frozen(code, ErrorCategory::Validation, false, message),
+            data: PortErrorData::frozen(code, category, retryable, message),
         }
+    }
+
+    pub(crate) fn validation(code: &'static str, message: &'static str) -> Self {
+        Self::frozen(code, ErrorCategory::Validation, false, message)
     }
 
     pub(crate) fn limit(code: &'static str, message: &'static str) -> Self {

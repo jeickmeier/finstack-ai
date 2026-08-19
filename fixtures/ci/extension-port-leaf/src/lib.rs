@@ -1,5 +1,25 @@
 //! Compile-only proof that leaf extensions implement PR-018 ports through public runtime APIs.
 
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
+
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
@@ -13,9 +33,9 @@ use finstack_ai_runtime::{
     ObserverPayloadMode, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 
-fn invocation(id: &str) -> ComponentInvocation {
+fn invocation(id: &'static str) -> ComponentInvocation {
     ComponentInvocation {
-        component: ComponentId::parse(id).expect("fixture component id"),
+        component: ComponentId::from_static(id),
         version: Version {
             major: 1,
             minor: 0,
@@ -82,7 +102,7 @@ impl Observer for LeafObserver {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: finstack_ai_kernel::ComponentRef::new(
-                ComponentId::parse("fixture.observer").expect("fixture component id"),
+                ComponentId::from_static("fixture.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,

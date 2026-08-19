@@ -1,6 +1,25 @@
 //! One `before_model` context-compactor leaf with three configured strategies.
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -610,10 +629,10 @@ fn truncate_blocks(blocks: &[ContentBlock], limit: usize) -> Vec<ContentBlock> {
             other => out.push(other.clone()),
         }
     }
-    if out.is_empty() {
-        out.push(ContentBlock::Text(
-            TextBlock::try_new("[truncated]").expect("preview"),
-        ));
+    if out.is_empty()
+        && let Ok(block) = TextBlock::try_new("[truncated]")
+    {
+        out.push(ContentBlock::Text(block));
     }
     out
 }

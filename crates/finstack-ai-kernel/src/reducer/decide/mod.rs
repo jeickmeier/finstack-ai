@@ -98,9 +98,6 @@ pub(super) fn decide(
         (KernelInput::OutputValidated(input), SettlementReview::Unreviewed) => {
             decide_output_validated(state, env, input)
         }
-        (KernelInput::RecordExternalCommandRejected(_), _) => {
-            unreachable!("external rejection returns before limit processing")
-        }
         (KernelInput::RequestInteraction(input), SettlementReview::Unreviewed) => {
             super::interaction::decide_request(state, env, &input)
         }

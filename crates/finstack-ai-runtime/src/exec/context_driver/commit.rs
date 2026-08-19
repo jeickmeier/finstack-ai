@@ -61,9 +61,8 @@ pub(crate) fn derived_context_effect_id(
 ) -> EffectId {
     let canonical =
         serde_json_canonicalizer::to_vec(&(locator, cycle, CONTEXT_STAGE, provider_index))
-            .expect("locator/cycle/stage/index are always canonically serializable");
-    let digest = Digest::domain_separated(DOMAIN_CONTEXT_INVOCATION, 1, &canonical)
-        .expect("the fixed context-provider-invocation domain is always valid");
+            .unwrap_or_else(|_| Vec::new());
+    let digest = Digest::from_fixed_domain(DOMAIN_CONTEXT_INVOCATION, 1, &canonical);
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&digest.as_bytes()[..16]);
     EffectId::from_bytes(bytes)

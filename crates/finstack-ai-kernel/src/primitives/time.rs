@@ -17,6 +17,12 @@ pub const TIMESTAMP_MAX_MS: i64 = 253_402_300_799_999;
 /// Largest duration that converts losslessly to a JavaScript `number`.
 pub const DURATION_JS_SAFE_MAX_MS: u64 = 9_007_199_254_740_991;
 
+/// Unix epoch (`1970-01-01T00:00:00.000Z`). Always in range.
+///
+/// Prefer this over `Timestamp::from_unix_ms(0)` when a known-valid epoch
+/// instant is required.
+pub const UNIX_EPOCH: Timestamp = Timestamp(0);
+
 /// Canonical UTC Unix-epoch millisecond timestamp.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(i64);
@@ -151,19 +157,18 @@ impl Rfc3339Buffer {
         write_digits(&mut self.0[14..16], minute);
         write_digits(&mut self.0[17..19], second);
         write_digits(&mut self.0[20..23], millis);
-        // Only ASCII digits and fixed separators are ever written.
-        core::str::from_utf8(&self.0).expect("RFC 3339 text is ASCII")
+        super::str_from_ascii(&self.0)
     }
 }
 
 /// Write `value` right-aligned and zero-padded across the whole slice.
 ///
 /// Callers pass slices sized to the field width, and `civil_from_unix_ms`
-/// bounds every field, so truncation is unreachable.
+/// bounds every field to a single decimal digit per slot byte.
 fn write_digits(slot: &mut [u8], value: u32) {
     let mut remaining = value;
     for position in slot.iter_mut().rev() {
-        *position = b'0' + u8::try_from(remaining % 10).expect("digit fits u8");
+        *position = b'0' + (remaining % 10) as u8;
         remaining /= 10;
     }
 }

@@ -16,6 +16,12 @@ unpublished.
 
 ### Added
 
+- Kernel constructors for crate-owned literals: `ErrorCode::from_static`,
+  `Key::from_static` (including `ComponentId` / `ToolId` / `LimitKey`),
+  `Digest::from_fixed_domain`, and the `UNIX_EPOCH` timestamp constant.
+- Crate-level `forbid(unsafe_code)` (except FFI/host crates) plus Clippy
+  denials for `unwrap` / `expect` / `panic` / `unreachable` in production
+  library and binary code. Unit tests remain allowed.
 - `verify_authority(&ToolCallContext)` on the runtime Tool port (ADR-048).
 - `mise run check-public-api` compares `cargo-public-api` dumps for kernel, runtime, `finstack-ai`, and every `extensions/**` crate. Python/JS name lists stay in `scripts/compat/public_items.py`.
 - Tools may defer a first-pass call: `ToolStreamItem::Deferred` suspends under the original effect id. `ToolSpec` gains `deferral`; stream item enums are `#[non_exhaustive]`.

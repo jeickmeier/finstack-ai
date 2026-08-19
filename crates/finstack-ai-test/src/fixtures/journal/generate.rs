@@ -300,8 +300,12 @@ fn write_envelopes(root: &Path) -> Result<usize, JournalFixtureError> {
     let dir = root.join("envelope");
     let bodies = all_activated_record_bodies().map_err(JournalFixtureError::Failed)?;
     for (ordinal, body) in bodies.iter().enumerate() {
-        let envelope =
-            committed_envelope(body.clone(), u64::try_from(ordinal + 1).expect("ord"), None)?;
+        let envelope = committed_envelope(
+            body.clone(),
+            u64::try_from(ordinal.saturating_add(1))
+                .map_err(|error| JournalFixtureError::Failed(error.to_string()))?,
+            None,
+        )?;
         let bytes = encode(&envelope).map_err(|error| protocol_err(&error))?;
         let diagnostic = serde_json::to_value(&envelope)
             .map_err(|error| JournalFixtureError::Failed(error.to_string()))?;
@@ -529,7 +533,7 @@ fn json_ok(
         value["diagnostic_json"] = json;
     }
     if let Some(recipe) = recipe {
-        value["recipe"] = serde_json::to_value(recipe).expect("recipe");
+        value["recipe"] = serde_json::to_value(recipe).unwrap_or(Value::Null);
     }
     value
 }

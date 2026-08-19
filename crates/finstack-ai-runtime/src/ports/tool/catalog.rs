@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ComponentInvocation, Digest, EffectOutputContract, EffectOutputKind, RawJson,
-    SyntheticToolClosure, Timestamp, ToolCallBlock, ToolCallPlan, ToolFailurePolicy, ToolId,
-    ValidatedToolCall, ValidationOutcome,
+    ComponentInvocation, Digest, EffectOutputContract, EffectOutputKind, ErrorCode,
+    ErrorDescriptor, ErrorIdentifiers, RawJson, SyntheticToolClosure, Timestamp, ToolCallBlock,
+    ToolCallPlan, ToolFailurePolicy, ToolId, ValidatedToolCall, ValidationOutcome,
 };
 
 use serde::{Deserialize, Serialize};
@@ -388,7 +388,15 @@ fn synthetic(
 ) -> ToolCallPlan {
     let descriptor = error
         .to_descriptor()
-        .expect("frozen synthetic tool error is valid");
+        .unwrap_or_else(|fallback| ErrorDescriptor {
+            code: ErrorCode::new(fallback.code())
+                .unwrap_or_else(|_| ErrorCode::from_static("internal")),
+            message: Arc::from(fallback.message()),
+            category: fallback.category(),
+            retryable: fallback.retryable(),
+            identifiers: ErrorIdentifiers::default(),
+            safe_details: fallback.metadata().clone(),
+        });
     ToolCallPlan::SyntheticClosure(SyntheticToolClosure {
         call,
         execution,

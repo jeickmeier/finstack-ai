@@ -7,14 +7,12 @@ use super::handle::RunHandle;
 use super::shared::Shared;
 
 pub(super) fn model_cancellation_error(message: &'static str) -> ModelError {
-    ModelError::try_new(
+    ModelError::frozen(
         "model_cancelled",
         finstack_ai_kernel::ErrorCategory::Cancellation,
         false,
         message,
-        finstack_ai_kernel::Metadata::empty(),
     )
-    .expect("frozen cancellation error")
 }
 
 /// Prefer a carried settlement code; keep the host-specific fallback when the

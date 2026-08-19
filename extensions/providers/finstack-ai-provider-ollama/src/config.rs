@@ -79,19 +79,20 @@ impl OllamaConfig {
 
     /// Insert one named credential entry and select it.
     ///
-    /// # Panics
-    ///
-    /// Panics only if the reserved `default` credential name is rejected.
+    /// Returns `self` unchanged when the reserved `default` name is rejected.
     #[must_use]
     pub fn with_authentication(self, authentication: Authentication) -> Self {
         let mut store = CredentialStore::empty();
-        store
+        if store
             .insert(DEFAULT_CREDENTIAL_NAME, authentication)
-            .expect("default credential name");
-        self.with_credential_store(
-            store,
-            CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME).expect("default credential name"),
-        )
+            .is_err()
+        {
+            return self;
+        }
+        let Ok(reference) = CredentialReference::try_new(DEFAULT_CREDENTIAL_NAME) else {
+            return self;
+        };
+        self.with_credential_store(store, reference)
     }
 
     /// Bind an explicit host-supplied credential store and reference.

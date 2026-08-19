@@ -52,22 +52,28 @@ impl Agent {
                 "native Agent requires an exact resolved lock",
             )
         })?;
-        let active = lock
+        let mut active = Vec::new();
+        for capability in lock
             .capabilities
             .iter()
             .filter(|capability| capability.active)
-            .map(|capability| ActiveCapability {
+        {
+            let source = match capability.activation {
+                CapabilityActivation::Always => CapabilityActivationSource::Always,
+                CapabilityActivation::Application => CapabilityActivationSource::Application,
+                CapabilityActivation::Model => CapabilityActivationSource::Model,
+                CapabilityActivation::Disabled => {
+                    return Err(AgentRunError::configuration(
+                        AGENT_RUN_INVALID_CONFIGURATION,
+                        "a disabled capability cannot be active in a validated lock",
+                    ));
+                }
+            };
+            active.push(ActiveCapability {
                 capability_id: capability.id.clone(),
-                source: match capability.activation {
-                    CapabilityActivation::Always => CapabilityActivationSource::Always,
-                    CapabilityActivation::Application => CapabilityActivationSource::Application,
-                    CapabilityActivation::Model => CapabilityActivationSource::Model,
-                    CapabilityActivation::Disabled => {
-                        unreachable!("a disabled capability cannot be active in a validated lock")
-                    }
-                },
-            })
-            .collect::<Vec<_>>();
+                source,
+            });
+        }
         let lock_digest = lock.fingerprint().map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?;

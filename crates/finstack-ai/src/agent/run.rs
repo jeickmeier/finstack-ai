@@ -86,10 +86,11 @@ struct EventConsumerGuard {
 }
 
 impl EventConsumerGuard {
-    fn subscription_mut(&mut self) -> &mut EventSubscription {
-        self.subscription
-            .as_mut()
-            .expect("event consumer guard owns its subscription")
+    fn subscription_mut(&mut self) -> Result<&mut EventSubscription, AgentRunError> {
+        self.subscription.as_mut().ok_or_else(|| {
+            record_events_fault(&self.inner, EVENT_LOCK_POISONED);
+            AgentRunError::runtime_message(EVENT_LOCK_POISONED)
+        })
     }
 
     fn finish(mut self, batch: Option<EventBatch>) -> Result<Option<EventBatch>, AgentRunError> {
@@ -97,10 +98,10 @@ impl EventConsumerGuard {
             record_events_fault(&self.inner, EVENT_LOCK_POISONED);
             AgentRunError::runtime_message(EVENT_LOCK_POISONED)
         })?;
-        let mut subscription = self
-            .subscription
-            .take()
-            .expect("event consumer guard owns its subscription");
+        let Some(mut subscription) = self.subscription.take() else {
+            record_events_fault(&self.inner, EVENT_LOCK_POISONED);
+            return Err(AgentRunError::runtime_message(EVENT_LOCK_POISONED));
+        };
         match &*state {
             EventStreamState::CloseRequested | EventStreamState::Closed => {
                 subscription.close();
@@ -371,12 +372,13 @@ impl AgentRun {
                     EventStreamState::Closed => return Ok(None),
                     EventStreamState::StartupFailed(error) => return Err(error.clone()),
                     EventStreamState::Active(_) => {
-                        let EventStreamState::Active(subscription) =
-                            std::mem::replace(&mut *state, EventStreamState::Busy)
-                        else {
-                            unreachable!("active event state changed while locked")
-                        };
-                        Some(subscription)
+                        match std::mem::replace(&mut *state, EventStreamState::Busy) {
+                            EventStreamState::Active(subscription) => Some(subscription),
+                            other => {
+                                *state = other;
+                                None
+                            }
+                        }
                     }
                 }
             };
@@ -388,7 +390,7 @@ impl AgentRun {
                 inner: Arc::clone(&self.inner),
                 subscription: Some(subscription),
             };
-            let batch = guard.subscription_mut().next_batch().await;
+            let batch = guard.subscription_mut()?.next_batch().await;
             events_fault(&self.inner)?;
             return guard.finish(batch);
         }

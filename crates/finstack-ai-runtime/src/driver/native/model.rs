@@ -345,14 +345,12 @@ fn model_job_preflight(
 }
 
 fn model_cancellation_error(message: &'static str) -> ModelError {
-    ModelError::try_new(
+    ModelError::frozen(
         "model_cancelled",
         finstack_ai_kernel::ErrorCategory::Cancellation,
         false,
         message,
-        Metadata::empty(),
     )
-    .expect("frozen model cancellation error")
 }
 
 fn joined_model_result(
@@ -360,37 +358,31 @@ fn joined_model_result(
 ) -> Result<ModelTerminal, ModelError> {
     match joined {
         Ok(result) => result,
-        Err(_) => Err(ModelError::try_new(
+        Err(_) => Err(ModelError::frozen(
             "model_panicked",
             finstack_ai_kernel::ErrorCategory::Internal,
             false,
             "model execution failed at the native task boundary",
-            Metadata::empty(),
-        )
-        .expect("frozen model task error")),
+        )),
     }
 }
 
 fn model_deadline_error() -> ModelError {
-    ModelError::try_new(
+    ModelError::frozen(
         "model_deadline_exceeded",
         finstack_ai_kernel::ErrorCategory::Deadline,
         false,
         "model request exceeded its committed deadline",
-        Metadata::empty(),
     )
-    .expect("frozen model deadline error")
 }
 
 fn progress_delivery_error() -> ModelError {
-    ModelError::try_new(
+    ModelError::frozen(
         "model_progress_delivery_closed",
         finstack_ai_kernel::ErrorCategory::Internal,
         false,
         "runtime model progress delivery closed",
-        finstack_ai_kernel::Metadata::empty(),
     )
-    .expect("frozen model progress delivery error")
 }
 
 fn same_identity_retryable(error: &ModelError) -> bool {
@@ -477,14 +469,12 @@ async fn emit_attempt_heartbeat(
     sender: &mpsc::Sender<ModelDriverMessage>,
 ) -> Result<(), ModelError> {
     let metadata = Metadata::parse(format!(r#"{{"attempt":{attempt}}}"#)).map_err(|_| {
-        ModelError::try_new(
+        ModelError::frozen(
             "model_progress_delivery_closed",
             finstack_ai_kernel::ErrorCategory::Internal,
             false,
             "same-identity retry attempt metadata is invalid",
-            Metadata::empty(),
         )
-        .expect("frozen attempt metadata error")
     })?;
     sender
         .send(ModelDriverMessage::Progress {

@@ -4,6 +4,25 @@
 //! current set and asks the host to submit that complete set.
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -240,7 +259,10 @@ fn activate_output(complete: &[ActiveCapability]) -> RawJson {
 }
 
 fn result_json(value: &serde_json::Value) -> RawJson {
-    RawJson::parse(serde_json::to_vec(value).expect("skills payload")).expect("skills json")
+    serde_json::to_vec(value)
+        .ok()
+        .and_then(|bytes| RawJson::parse(bytes).ok())
+        .unwrap_or_else(|| Metadata::empty().as_raw_json().clone())
 }
 
 fn completed(output: RawJson, is_error: bool) -> ToolEventStream {

@@ -34,7 +34,7 @@ pub use digest::{
     DOMAIN_RECORD_PAYLOAD, Digest, DigestError, RECORD_ENVELOPE_DIGEST_SCHEMA_VERSION,
     RECORD_PAYLOAD_DIGEST_SCHEMA_VERSION,
 };
-pub(crate) use digest::{DigestWriter, HEX_DIGITS};
+pub(crate) use digest::{DigestWriter, HEX_DIGITS, str_from_ascii};
 pub use error::{
     ErrorCategory, ErrorCode, ErrorCodeError, ErrorDescriptor, ErrorDescriptorError,
     ErrorIdentifiers,
@@ -65,6 +65,7 @@ pub(crate) use refs_error::{
 };
 pub use time::{
     DURATION_JS_SAFE_MAX_MS, Duration, TIMESTAMP_MAX_MS, TIMESTAMP_MIN_MS, TimeError, Timestamp,
+    UNIX_EPOCH,
 };
 pub(crate) use transcode::CanonicalJson;
 pub use usage::{CostAmount, Usage};

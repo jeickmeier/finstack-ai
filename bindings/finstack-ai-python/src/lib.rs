@@ -1,6 +1,25 @@
 //! `PyO3` control handles for the Rust-owned `finstack-ai` engine.
 
 #![warn(missing_docs)]
+// PyO3 generates FFI glue that requires `unsafe`.
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 mod agent;
 #[cfg(feature = "benchmark-fixture")]

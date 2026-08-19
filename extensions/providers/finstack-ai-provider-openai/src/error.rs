@@ -18,7 +18,7 @@ pub(crate) fn error(
     message: &'static str,
 ) -> ModelError {
     ModelError::try_new(code, category, retryable, message, Metadata::empty())
-        .expect("frozen OpenAI provider error is valid")
+        .unwrap_or_else(ModelError::from)
 }
 
 pub(crate) fn config_error(message: &'static str) -> ModelError {

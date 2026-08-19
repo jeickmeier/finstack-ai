@@ -8,6 +8,25 @@
 //! HITL. An MCP server is not an application-instruction authority.
 
 #![warn(missing_docs)]
+// Child-process stdio ownership uses `from_raw_fd` / `from_raw_handle`.
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -728,11 +747,8 @@ fn normalize_call_result(result: &CallToolResult, max_bytes: u64) -> Result<RawJ
     let mut output = serde_json::json!({
         "content": result.content.iter().map(content_to_json).collect::<Vec<_>>(),
     });
-    if let Some(structured) = &result.structured_content {
-        output
-            .as_object_mut()
-            .expect("object")
-            .insert("structured_content".to_owned(), structured.clone());
+    if let (Some(structured), Some(object)) = (&result.structured_content, output.as_object_mut()) {
+        object.insert("structured_content".to_owned(), structured.clone());
     }
     let mut bytes = serde_json::to_vec(&output).map_err(|_| {
         tool_error(

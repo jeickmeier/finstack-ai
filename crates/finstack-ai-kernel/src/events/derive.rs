@@ -411,14 +411,7 @@ pub(crate) fn derived_event_kind(
     if kind_version != RECORD_KIND_VERSION {
         return Err(EventError::UnsupportedKindVersion { kind_version });
     }
-    if let RecordBody::ToolCallSettled(_) = body {
-        return match ordinal {
-            0 => Ok(RunEventKind::MessageFinalized),
-            1 => Ok(RunEventKind::ToolSettled),
-            _ => Err(EventError::UnsupportedOrdinal { ordinal }),
-        };
-    }
-    if ordinal != 0 {
+    if ordinal != 0 && !matches!(body, RecordBody::ToolCallSettled(_)) {
         return Err(EventError::UnsupportedOrdinal { ordinal });
     }
     let kind = match body {
@@ -433,7 +426,11 @@ pub(crate) fn derived_event_kind(
         RecordBody::InteractionExpired(_) => RunEventKind::InteractionExpired,
         RecordBody::InteractionCancelled(_) => RunEventKind::InteractionCancelled,
         RecordBody::EntryAppended(_) => RunEventKind::MessageFinalized,
-        RecordBody::ToolCallSettled(_) => unreachable!("handled above"),
+        RecordBody::ToolCallSettled(_) => match ordinal {
+            0 => RunEventKind::MessageFinalized,
+            1 => RunEventKind::ToolSettled,
+            _ => return Err(EventError::UnsupportedOrdinal { ordinal }),
+        },
         RecordBody::RunCompleted(_) => RunEventKind::RunCompleted,
         RecordBody::RunFailed(_) => RunEventKind::RunFailed,
         RecordBody::LimitReached(_) => RunEventKind::LimitReached,

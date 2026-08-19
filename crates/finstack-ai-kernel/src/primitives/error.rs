@@ -50,6 +50,32 @@ impl ErrorCode {
         Ok(Self(Arc::<str>::from(code)))
     }
 
+    /// Construct a code from a compile-time `snake_case` literal.
+    ///
+    /// Use this for frozen engine codes that are part of the crate source.
+    /// [`ErrorCode::new`] remains the fallible constructor for untrusted text.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - Lowercase `snake_case` identifier already owned by this crate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::ErrorCode;
+    ///
+    /// let code = ErrorCode::from_static("invalid_input");
+    /// assert_eq!(code.as_str(), "invalid_input");
+    /// ```
+    #[must_use]
+    pub fn from_static(code: &'static str) -> Self {
+        debug_assert!(
+            validate_error_code(code).is_ok(),
+            "static error code must be lowercase snake_case: {code}"
+        );
+        Self(Arc::from(code))
+    }
+
     /// Borrow the code text.
     #[must_use]
     pub fn as_str(&self) -> &str {

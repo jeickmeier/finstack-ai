@@ -47,7 +47,7 @@ fn middleware_failure(failure: CallbackFailure) -> MiddlewareError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen Python middleware callback error is valid")
+    .unwrap_or_else(MiddlewareError::from)
 }
 
 /// Trusted Python implementation of the Middleware port.

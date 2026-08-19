@@ -1,6 +1,5 @@
 //! Text/JSON blocks and shared hex encode/decode helpers.
 
-use core::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -29,7 +28,12 @@ pub(super) fn validated_label(value: &str, field: &'static str) -> Result<Arc<st
 pub(super) fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        fmt::Write::write_fmt(&mut out, format_args!("{byte:02x}")).expect("string write");
+        out.push(char::from(
+            crate::primitives::HEX_DIGITS[usize::from(byte >> 4)],
+        ));
+        out.push(char::from(
+            crate::primitives::HEX_DIGITS[usize::from(byte & 0x0f)],
+        ));
     }
     out
 }

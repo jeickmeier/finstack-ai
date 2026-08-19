@@ -133,8 +133,12 @@ fn prove_protected_rejection(
     invalid.evidence.projection_digest =
         compaction_projection_digest(&invalid.replacement_messages)
             .map_err(|error| failure("compaction.protected.digest", error.to_string()))?;
-    let error = validate_compaction_result(&case.descriptor, &case.input, &invalid)
-        .expect_err("removing protected content must fail");
+    let Err(error) = validate_compaction_result(&case.descriptor, &case.input, &invalid) else {
+        return Err(failure(
+            "compaction.protected.retained",
+            "removing protected content must fail",
+        ));
+    };
     ensure(
         error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID,
         "compaction.protected.retained",
@@ -178,8 +182,12 @@ fn prove_tool_pair_rejection(
     invalid.evidence.projection_digest =
         compaction_projection_digest(&invalid.replacement_messages)
             .map_err(|error| failure("compaction.tool_pair.digest", error.to_string()))?;
-    let error = validate_compaction_result(&case.descriptor, &case.input, &invalid)
-        .expect_err("retaining a tool call without its result must fail");
+    let Err(error) = validate_compaction_result(&case.descriptor, &case.input, &invalid) else {
+        return Err(failure(
+            "compaction.tool_pair.retained",
+            "retaining a tool call without its result must fail",
+        ));
+    };
     ensure(
         error.code() == finstack_ai_runtime::COMPACTION_RESULT_INVALID,
         "compaction.tool_pair.atomic",
@@ -192,8 +200,12 @@ fn prove_hard_budget_rejection(
 ) -> Result<(), PortConformanceFailure> {
     let mut invalid = case.result.clone();
     invalid.evidence.estimated_tokens_after = case.input.hard_input_tokens.saturating_add(1);
-    let error = validate_compaction_result(&case.descriptor, &case.input, &invalid)
-        .expect_err("hard-budget overrun must fail");
+    let Err(error) = validate_compaction_result(&case.descriptor, &case.input, &invalid) else {
+        return Err(failure(
+            "compaction.hard_budget.enforced",
+            "hard-budget overrun must fail",
+        ));
+    };
     ensure(
         error.code() == COMPACTION_BUDGET_EXCEEDED,
         "compaction.hard_budget.enforced",

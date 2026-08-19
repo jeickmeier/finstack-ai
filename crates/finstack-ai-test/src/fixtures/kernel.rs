@@ -299,7 +299,9 @@ fn mutate_committed_batch_json(
         "unsupported_kind_version" => {
             encoded["records"][0]["kind_version"] = Value::from(2);
         }
-        _ => unreachable!("mutation validated before application"),
+        other => {
+            return Err(fail(format!("unknown public-api mutation: {other}")));
+        }
     }
     Ok(())
 }

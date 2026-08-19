@@ -187,16 +187,20 @@ fn resolve_stage(
         let next = remaining
             .iter()
             .filter(|id| incoming.get(*id).copied().unwrap_or_default() == 0)
-            .min_by_key(|id| {
-                let item = by_id.get(*id).expect("resolved node exists");
-                (
-                    item.descriptor.order.tier,
-                    item.descriptor.order.priority,
-                    item.registration_index,
-                    (*id).clone(),
-                )
+            .filter_map(|id| {
+                let item = by_id.get(id)?;
+                Some((
+                    (
+                        item.descriptor.order.tier,
+                        item.descriptor.order.priority,
+                        item.registration_index,
+                        id.clone(),
+                    ),
+                    id.clone(),
+                ))
             })
-            .cloned()
+            .min_by(|left, right| left.0.cmp(&right.0))
+            .map(|(_, id)| id)
             .ok_or_else(|| {
                 MiddlewareError::stable(
                     MIDDLEWARE_ORDER_CYCLE,
@@ -204,7 +208,13 @@ fn resolve_stage(
                 )
             })?;
         remaining.remove(&next);
-        result.push(by_id.get(&next).expect("resolved node exists").clone());
+        let Some(item) = by_id.get(&next) else {
+            return Err(MiddlewareError::stable(
+                MIDDLEWARE_RESOLUTION_INVALID,
+                "middleware graph is missing a resolved node",
+            ));
+        };
+        result.push(item.clone());
         if let Some(targets) = outgoing.get(&next) {
             for target in targets {
                 if let Some(value) = incoming.get_mut(target) {

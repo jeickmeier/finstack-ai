@@ -52,7 +52,7 @@ impl PortErrorData {
         message: &'static str,
     ) -> Self {
         Self {
-            code: ErrorCode::new(code).expect("frozen port error code is valid"),
+            code: ErrorCode::from_static(code),
             category,
             retryable,
             message: Arc::from(message),

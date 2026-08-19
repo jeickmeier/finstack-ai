@@ -73,14 +73,11 @@ impl RawJson {
 
     /// Borrow the canonical UTF-8 JSON text.
     ///
-    /// # Panics
-    ///
-    /// Panics only if the stored canonical bytes are not UTF-8. Validated
-    /// constructors never produce that state.
+    /// Constructors store RFC 8785 canonical UTF-8. If that invariant is
+    /// broken the empty string is returned instead of panicking.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        // Canonical bytes are validated UTF-8.
-        core::str::from_utf8(&self.0).expect("canonical JSON is UTF-8")
+        core::str::from_utf8(&self.0).unwrap_or_default()
     }
 
     /// Shared byte buffer (clone-cheap).

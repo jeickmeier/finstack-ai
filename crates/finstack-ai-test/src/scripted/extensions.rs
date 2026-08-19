@@ -84,7 +84,7 @@ impl ContextProvider for ScriptedContextProvider {
                     "no scripted context action remains",
                     Metadata::empty(),
                 )
-                .expect("scripted context error is valid")),
+                .unwrap_or_else(ContextError::from)),
             }
         })
     }
@@ -159,7 +159,7 @@ impl Middleware for ScriptedMiddleware {
                     "no scripted middleware action remains",
                     Metadata::empty(),
                 )
-                .expect("scripted middleware error is valid")),
+                .unwrap_or_else(MiddlewareError::from)),
             }
         })
     }

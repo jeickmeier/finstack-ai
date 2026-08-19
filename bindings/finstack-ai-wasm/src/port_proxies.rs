@@ -67,14 +67,14 @@ fn model_response() -> ModelResponse {
 
 fn tool_spec() -> ToolSpec {
     ToolSpec {
-        id: ToolId::parse("finstack.tools.wasm_proxy").expect("tool id"),
+        id: ToolId::from_static("finstack.tools.wasm_proxy"),
         model_name: Arc::from("wasm_proxy"),
         title: Arc::from("WASM proxy"),
         description: Arc::from("Compile-only JS promise proxy"),
         input_schema: RawJson::parse(
             br#"{"additionalProperties":false,"properties":{},"type":"object"}"#,
         )
-        .expect("input schema"),
+        .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         output_schema: None,
         execution: ToolExecutionMode::Sequential,
         side_effect: SideEffectClass::ReadOnly,
@@ -92,14 +92,15 @@ fn tool_spec() -> ToolSpec {
 
 fn tool_result() -> ToolResult {
     ToolResult {
-        output: RawJson::parse(br#"{"ok":true}"#).expect("tool output"),
+        output: RawJson::parse(br#"{"ok":true}"#)
+            .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
         is_error: false,
     }
 }
 
-fn invocation(id: &str) -> ComponentInvocation {
+fn invocation(id: &'static str) -> ComponentInvocation {
     ComponentInvocation {
-        component: ComponentId::parse(id).expect("component id"),
+        component: ComponentId::from_static(id),
         version: Version {
             major: 1,
             minor: 0,
@@ -339,7 +340,7 @@ impl Observer for NativeObserverProxy {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: ComponentRef::new(
-                ComponentId::parse("wasm.native.observer").expect("component id"),
+                ComponentId::from_static("wasm.native.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,
@@ -366,8 +367,9 @@ pub fn compile_native_port_proxies() {
     assert_send_sync::<NativeMiddlewareProxy>();
     assert_send_sync::<NativeJournalStoreProxy>();
     assert_send_sync::<NativeObserverProxy>();
-    let model = NativeModelProxy::new().expect("native model proxy");
-    let _: Arc<dyn Model> = Arc::new(model);
+    if let Ok(model) = NativeModelProxy::new() {
+        let _: Arc<dyn Model> = Arc::new(model);
+    }
     let _: Arc<dyn Toolset> = Arc::new(NativeToolsetProxy);
     let _: Arc<dyn ContextProvider> = Arc::new(NativeContextProviderProxy);
     let _: Arc<dyn Middleware> = Arc::new(NativeMiddlewareProxy);
@@ -657,7 +659,7 @@ impl Observer for JsObserverProxy {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
             component: ComponentRef::new(
-                ComponentId::parse("wasm.js.observer").expect("component id"),
+                ComponentId::from_static("wasm.js.observer"),
                 Some(Version {
                     major: 1,
                     minor: 0,
@@ -684,8 +686,9 @@ impl Observer for JsObserverProxy {
 #[cfg(target_arch = "wasm32")]
 pub fn compile_js_port_proxies() {
     let ready = promise_factory("return Promise.resolve(undefined);");
-    let model = JsModelProxy::new(ready.clone()).expect("js model proxy");
-    let _: Arc<dyn Model> = Arc::new(model);
+    if let Ok(model) = JsModelProxy::new(ready.clone()) {
+        let _: Arc<dyn Model> = Arc::new(model);
+    }
     let _: Arc<dyn Toolset> = Arc::new(JsToolsetProxy::new(ready.clone()));
     let _: Arc<dyn ContextProvider> = Arc::new(JsContextProviderProxy::new(ready.clone()));
     let _: Arc<dyn Middleware> = Arc::new(JsMiddlewareProxy::new(ready.clone()));

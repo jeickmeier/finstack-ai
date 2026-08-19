@@ -485,11 +485,7 @@ fn byte_string_of_total_len(total: usize) -> Vec<u8> {
     let payload = total.saturating_sub(header);
     let mut out = Vec::with_capacity(total);
     out.push(0x5a);
-    out.extend_from_slice(
-        &u32::try_from(payload)
-            .expect("payload fits u32")
-            .to_be_bytes(),
-    );
+    out.extend_from_slice(&u32::try_from(payload).unwrap_or(u32::MAX).to_be_bytes());
     out.resize(total, 0);
     out
 }

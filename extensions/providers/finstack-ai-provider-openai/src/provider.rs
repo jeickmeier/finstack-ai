@@ -333,12 +333,13 @@ async fn drive_response(
             chunk = body.next() => chunk,
         };
         let Some(chunk) = chunk else {
-            let result = parser.finish().and_then(|()| {
-                Err(crate::error::stream_error(
-                    "OpenAI SSE stream ended before response.completed",
-                ))
-            });
-            let _ = sender.send(result.map(|()| unreachable!())).await;
+            let error = match parser.finish() {
+                Ok(()) => {
+                    crate::error::stream_error("OpenAI SSE stream ended before response.completed")
+                }
+                Err(error) => error,
+            };
+            let _ = sender.send(Err(error)).await;
             return;
         };
         let chunk = match chunk {

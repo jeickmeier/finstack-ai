@@ -180,7 +180,7 @@ fn model_failure(failure: CallbackFailure) -> ModelError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen Python model callback error is valid")
+    .unwrap_or_else(ModelError::from)
 }
 
 /// Trusted Python implementation of the Model port.

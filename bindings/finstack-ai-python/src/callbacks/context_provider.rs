@@ -46,7 +46,7 @@ fn context_failure(failure: CallbackFailure) -> ContextError {
         failure.message(),
         Metadata::empty(),
     )
-    .expect("frozen Python context callback error is valid")
+    .unwrap_or_else(ContextError::from)
 }
 
 /// Trusted Python implementation of the `ContextProvider` port.

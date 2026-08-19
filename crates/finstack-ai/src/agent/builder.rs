@@ -557,9 +557,7 @@ impl Extension for NativeAgentBuilder {
 }
 
 fn native_builder_source() -> ComponentId {
-    ComponentId::parse("finstack.sdk.native-builder").unwrap_or_else(|error| {
-        unreachable!("native builder source id is a compile-time constant: {error}")
-    })
+    ComponentId::from_static("finstack.sdk.native-builder")
 }
 
 fn registration_metadata(component: &ComponentRef) -> RegistrationMetadata {

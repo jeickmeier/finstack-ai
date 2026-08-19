@@ -1,5 +1,25 @@
 //! Leaf-crate compile proof for the public target-correct `Toolset` ABI.
 
+#![forbid(unsafe_code)]
+#![warn(clippy::float_cmp)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+#![deny(clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::indexing_slicing,
+        clippy::float_cmp,
+    )
+)]
+// Allow expect() in doc tests (they are test code)
+#![doc(test(attr(allow(clippy::expect_used))))]
+
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::Arc;
@@ -19,21 +39,17 @@ pub struct LeafToolset;
 
 impl LeafToolset {
     /// Public deterministic tool specification used by the sample.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the checked-in tool identity or schema constants become invalid.
     #[must_use]
     pub fn spec() -> ToolSpec {
         ToolSpec {
-            id: ToolId::parse("finstack.tools.leaf_echo").expect("tool id"),
+            id: ToolId::from_static("finstack.tools.leaf_echo"),
             model_name: Arc::from("leaf_echo"),
             title: Arc::from("Leaf echo"),
             description: Arc::from("Public conformance sample tool"),
             input_schema: RawJson::parse(
                 br#"{"additionalProperties":false,"properties":{},"type":"object"}"#,
             )
-            .expect("input schema"),
+            .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
             output_schema: None,
             execution: ToolExecutionMode::Sequential,
             side_effect: SideEffectClass::ReadOnly,
@@ -50,14 +66,11 @@ impl LeafToolset {
     }
 
     /// Deterministic normalized result returned by the sample.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the checked-in canonical result constant becomes invalid.
     #[must_use]
     pub fn result() -> ToolResult {
         ToolResult {
-            output: RawJson::parse(br#"{"ok":true}"#).expect("tool output"),
+            output: RawJson::parse(br#"{"ok":true}"#)
+                .unwrap_or_else(|_| Metadata::empty().as_raw_json().clone()),
             is_error: false,
         }
     }

@@ -681,6 +681,11 @@ mod windows {
 
     use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
+    fn dword_size_of<T>() -> Result<u32, ConfinementError> {
+        u32::try_from(std::mem::size_of::<T>())
+            .map_err(|_| ConfinementError::unavailable("windows structure size exceeds DWORD"))
+    }
+
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
     const JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION: u32 = 0x0000_0400;
     const JOB_OBJECT_LIMIT_ACTIVE_PROCESS: u32 = 0x0000_0008;
@@ -846,7 +851,7 @@ mod windows {
             .map(wide_os);
         let environment = environment_block(&command);
         let mut startup = StartupInfoW {
-            cb: u32::try_from(std::mem::size_of::<StartupInfoW>()).expect("startup info size"),
+            cb: dword_size_of::<StartupInfoW>()?,
             reserved: ptr::null_mut(),
             desktop: ptr::null_mut(),
             title: ptr::null_mut(),
@@ -998,7 +1003,7 @@ mod windows {
         let mut read = ptr::null_mut();
         let mut write = ptr::null_mut();
         let attributes = SecurityAttributes {
-            length: u32::try_from(std::mem::size_of::<SecurityAttributes>()).expect("sa size"),
+            length: dword_size_of::<SecurityAttributes>()?,
             descriptor: ptr::null_mut(),
             inherit: 1,
         };
@@ -1134,7 +1139,7 @@ mod windows {
                 job,
                 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
                 std::ptr::from_ref(&info).cast(),
-                u32::try_from(std::mem::size_of_val(&info)).expect("job info size"),
+                dword_size_of::<JobObjectExtendedLimitInformation>()?,
             )
         };
         if ok == 0 {

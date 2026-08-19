@@ -127,6 +127,11 @@ impl Digest {
         canonical_bytes: &[u8],
     ) -> Result<Self, DigestError> {
         validate_domain(domain)?;
+        Ok(Self::hash_domain(domain, schema_version, canonical_bytes))
+    }
+
+    /// Hash under a domain that has already been checked (or is a fixed registry name).
+    fn hash_domain(domain: &str, schema_version: u32, canonical_bytes: &[u8]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(b"finstack-ai");
         hasher.update([0]);
@@ -135,97 +140,96 @@ impl Digest {
         hasher.update(schema_version.to_be_bytes());
         hasher.update([0]);
         hasher.update(canonical_bytes);
-        Ok(Self(hasher.finalize().into()))
+        Self(hasher.finalize().into())
     }
 
     /// Digest for RFC 8785 canonical JSON under the `raw-json` domain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `raw-json` registry entry were invalid.
     #[must_use]
     pub fn raw_json(canonical_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_RAW_JSON,
             RAW_JSON_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
-        .expect("fixed raw-json domain is valid")
     }
 
     /// Digest for exact raw blob bytes under the `blob-content` domain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `blob-content` registry entry were invalid.
     #[must_use]
     pub fn blob_content(raw_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_BLOB_CONTENT,
             BLOB_CONTENT_DIGEST_SCHEMA_VERSION,
             raw_bytes,
         )
-        .expect("fixed blob-content domain is valid")
     }
 
     /// Digest under the `effect-input` domain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `effect-input` registry entry were invalid.
     #[must_use]
     pub fn effect_input(canonical_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_EFFECT_INPUT,
             EFFECT_INPUT_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
-        .expect("fixed effect-input domain is valid")
     }
 
     /// Digest under the `effect-output` domain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `effect-output` registry entry were invalid.
     #[must_use]
     pub fn effect_output(canonical_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_EFFECT_OUTPUT,
             EFFECT_OUTPUT_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
-        .expect("fixed effect-output domain is valid")
     }
 
     /// Digest under the `snapshot-state` domain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `snapshot-state` registry entry were invalid.
     #[must_use]
     pub fn snapshot_state(canonical_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_SNAPSHOT_STATE,
             SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
-        .expect("fixed snapshot-state domain is valid")
+    }
+
+    /// Hash under a crate-owned domain literal that is known to be valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `domain` - Non-empty, NUL-free domain already owned by this crate.
+    /// * `schema_version` - Domain schema version mixed into the digest.
+    /// * `canonical_bytes` - Payload bytes hashed under that domain.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_kernel::Digest;
+    ///
+    /// let digest = Digest::from_fixed_domain("raw-json", 1, b"{}");
+    /// assert_eq!(digest, Digest::raw_json(b"{}"));
+    /// ```
+    #[must_use]
+    pub fn from_fixed_domain(
+        domain: &'static str,
+        schema_version: u32,
+        canonical_bytes: &[u8],
+    ) -> Self {
+        debug_assert!(
+            domain_is_valid(domain),
+            "fixed digest domain must be non-empty and NUL-free: {domain:?}"
+        );
+        Self::hash_domain(domain, schema_version, canonical_bytes)
     }
 
     /// Digest for a canonical resolved middleware chain.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed `middleware-chain` registry entry were invalid.
     #[must_use]
     pub fn middleware_chain(canonical_bytes: &[u8]) -> Self {
-        Self::domain_separated(
+        Self::hash_domain(
             DOMAIN_MIDDLEWARE_CHAIN,
             MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION,
             canonical_bytes,
         )
-        .expect("fixed middleware-chain domain is valid")
     }
 }
 
@@ -336,9 +340,16 @@ impl HexBuffer {
             self.0[index * 2] = HEX_DIGITS[usize::from(byte >> 4)];
             self.0[index * 2 + 1] = HEX_DIGITS[usize::from(byte & 0x0f)];
         }
-        // Only ASCII hex digits are ever written.
-        core::str::from_utf8(&self.0).expect("hex text is ASCII")
+        str_from_ascii(&self.0)
     }
+}
+
+/// Interpret encoder output as UTF-8.
+///
+/// Hex, UUID, and RFC 3339 buffers write only ASCII. ASCII is a UTF-8 subset,
+/// so `from_utf8` cannot fail unless an encoder writes a non-ASCII byte.
+pub(crate) fn str_from_ascii(bytes: &[u8]) -> &str {
+    core::str::from_utf8(bytes).unwrap_or_default()
 }
 
 /// Digest parsing failure.
@@ -358,8 +369,35 @@ pub enum DigestError {
     },
 }
 
+const fn domain_is_valid(domain: &str) -> bool {
+    if domain.is_empty() {
+        return false;
+    }
+    let bytes = domain.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0 {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const _: () = {
+    assert!(domain_is_valid(DOMAIN_RAW_JSON));
+    assert!(domain_is_valid(DOMAIN_BLOB_CONTENT));
+    assert!(domain_is_valid(DOMAIN_RECORD_PAYLOAD));
+    assert!(domain_is_valid(DOMAIN_RECORD_ENVELOPE));
+    assert!(domain_is_valid(DOMAIN_EFFECT_INPUT));
+    assert!(domain_is_valid(DOMAIN_EFFECT_OUTPUT));
+    assert!(domain_is_valid(DOMAIN_SNAPSHOT_STATE));
+    assert!(domain_is_valid(DOMAIN_MIDDLEWARE_CHAIN));
+    assert!(domain_is_valid(DOMAIN_AGENT_SPEC));
+};
+
 fn validate_domain(domain: &str) -> Result<(), DigestError> {
-    if domain.is_empty() || domain.as_bytes().contains(&0) {
+    if !domain_is_valid(domain) {
         return Err(DigestError::InvalidDomain {
             domain: domain.to_owned(),
         });
