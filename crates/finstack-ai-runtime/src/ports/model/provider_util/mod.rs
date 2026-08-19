@@ -14,7 +14,7 @@ pub use ndjson::{NdjsonError, NdjsonParser};
 pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
 pub use openai_responses::OpenAiResponsesAssembly;
 pub use secret::{SECRET_MAX_BYTES, SecretRejected, SecretString, secret_is_valid};
-pub use sse::{SseEvent, SseEventParser, SseFrameError, SseFrameParser, SseParseError};
+pub use sse::{SseEvent, SseEventParser, SseParseError};
 
 /// Kind of a shared stream-normalization failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

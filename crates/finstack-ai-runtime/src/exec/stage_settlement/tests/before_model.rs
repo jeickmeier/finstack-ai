@@ -357,9 +357,8 @@ fn a_before_model_replace_that_is_not_a_model_draft_is_a_stable_payload_error() 
 
 // ---- folded-allocation rejection is a run failure, not a worker fault --
 
-/// `stage_allocation` speaks [`RunHandleError::ToolSettlement`], which both
-/// worker loops' `result_fault_code` (`task.rs:1173-1190`,
-/// `host_task.rs:1389-1406`) treat as a worker fault: intake torn down,
+/// `stage_allocation` speaks [`RunHandleError::ToolSettlement`], which
+/// `result_fault_code` treats as a worker fault: intake torn down,
 /// `RunStatus::Faulted`. A middleware fold the kernel will not admit must
 /// fail only the run.
 #[test]

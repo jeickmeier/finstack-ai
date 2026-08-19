@@ -84,7 +84,7 @@ impl ContextError {
     /// Stable error code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.data.code.as_str()
+        self.data.code()
     }
 
     /// Safe error descriptor suitable for durable failure records.
@@ -93,10 +93,10 @@ impl ContextError {
         ErrorDescriptor {
             code: self.data.code.clone(),
             message: Arc::clone(&self.data.message),
-            category: self.data.category,
+            category: self.data.category(),
             retryable: false,
             identifiers: finstack_ai_kernel::ErrorIdentifiers::default(),
-            safe_details: self.data.metadata.clone(),
+            safe_details: self.data.metadata().clone(),
         }
     }
 }

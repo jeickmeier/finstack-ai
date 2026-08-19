@@ -41,11 +41,9 @@
 //! charging a card, or appending to an external log inside `invoke`. Such a
 //! component **will repeat that action** after a crash. The
 //! `InvocationRecovery::NonRepeatable` marker on a descriptor does not save it:
-//! nothing in this design reads that marker at a stage boundary, because the
-//! recovery path that would have read it (`middleware_resume_action`) is never
-//! called — see section 5. Middleware must be pure with respect to external
-//! state. This is a documented obligation on the implementer, enforced by
-//! nothing.
+//! nothing in this design reads that marker at a stage boundary. Middleware
+//! must be pure with respect to external state. This is a documented
+//! obligation on the implementer, enforced by nothing.
 //!
 //! # 3. The derived effect id is not a real effect
 //!
@@ -122,40 +120,10 @@
 //! draft on top of the replacement draft. Sliding-window compaction does not
 //! use those fields.
 //!
-//! ## Public surface that is never called
+//! # Crate-private surface
 //!
-//! The following items were built for a per-invocation committed-effect design
-//! that the aggregate fold replaced. Nothing in the run path calls them, and
-//! nothing will under this design. They are **deprecated in place**: they are
-//! public API of a 1.0-frozen crate and cannot be removed without a major
-//! version, so they stay compiled and tested but should not be built on.
-//!
-//! - [`crate::middleware::Middleware::reconcile`] and its
-//!   [`crate::middleware::MiddlewareReconcileResult`] — the reconcile path needs
-//!   a committed effect to reconcile.
-//! - [`crate::middleware::CommittedMiddlewareCall`] — a guard proving an
-//!   invocation is backed by an `EffectRequested` record that is never written.
-//! - [`crate::middleware::RecordedMiddlewareOutcome`] — reconstructs an outcome
-//!   from request/completion envelopes that never exist.
-//! - [`crate::middleware::middleware_resume_action`] — classifies recovery from
-//!   committed request/output state; the driver instead re-runs the whole chain
-//!   (section 2).
-//! - [`crate::middleware::PendingMiddlewareEffect`] — the input to `reconcile`.
-//!
-//! The decision to keep them rather than delete them, and the design they
-//! belonged to, are recorded in the `middleware-aggregate-fold` ADR under
-//! `docs/implementation/adrs/` (written by Task 11 of the middleware-chain-driver
-//! plan, as the successor to ADR-037 `middleware-compaction`).
-//!
-//! # Public surface and the compatibility baseline
-//!
-//! `tools/compat/public_items.py` extracts frozen names from braced
-//! `pub use …{…}` blocks in the three `lib.rs` files only. Items exported by
-//! `pub mod` — everything in this module except the two names re-exported at
-//! the crate root ([`MiddlewareStageContext`] and [`invoke_middleware_stage`])
-//! — are public but **not** tracked by that baseline, so renaming or removing
-//! them would not fail `public_item_lists_reject_renames`. Treat every `pub`
-//! item here as frozen anyway; the missing tooling coverage is not permission.
+//! This module is `pub(crate)`. Callers inside the runtime reach it as
+//! `crate::middleware_driver`; it is not a crate-root public export.
 
 mod context;
 mod driver;

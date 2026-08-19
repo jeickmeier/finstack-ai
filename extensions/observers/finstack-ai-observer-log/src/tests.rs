@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     Observer, ObserverBackpressure, ObserverPayloadMode, RunEvent, Sensitivity,
-    diagnostic_contains, journal_export_jsonl,
+    journal_export_jsonl,
 };
 use finstack_ai_test::check_observer_conformance;
 use tempfile::tempdir;
@@ -91,7 +91,7 @@ async fn redacted_logs_omit_secret_and_credential_bodies() {
             || text.contains("QueueDepthWarning")
             || text.contains("kind")
     );
-    assert!(!diagnostic_contains(&text, CANARY));
+    assert!(!text.contains(CANARY));
 }
 
 #[tokio::test]
@@ -111,7 +111,7 @@ async fn secret_canary_never_appears_in_log_jsonl_or_bundle() {
         "body": { "secret": CANARY }
     })];
     let export = journal_export_jsonl(&records, ObserverPayloadMode::MetadataOnly).expect("export");
-    assert!(!diagnostic_contains(&export, CANARY));
+    assert!(!export.contains(CANARY));
     assert!(!export.contains("\"body\""));
 
     let dir = tempdir().expect("tempdir");
@@ -121,11 +121,7 @@ async fn secret_canary_never_appears_in_log_jsonl_or_bundle() {
         let path = entry.expect("entry").path();
         let bytes = std::fs::read(&path).expect("read file");
         let text = String::from_utf8_lossy(&bytes);
-        assert!(
-            !diagnostic_contains(&text, CANARY),
-            "{} leaked canary",
-            path.display()
-        );
+        assert!(!text.contains(CANARY), "{} leaked canary", path.display());
     }
 }
 

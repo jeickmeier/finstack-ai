@@ -13,7 +13,7 @@ use crate::model::Model;
 use crate::native::model::ModelDriverMessage;
 use crate::native::timer::{TimerDriverMessage, TimerDriverResult};
 use crate::native::tool::ToolDriverMessage;
-use crate::run_types::RunHandleError;
+use crate::run_types::{RunHandleError, result_fault_code};
 use crate::settlement::{
     SettlementSources, ToolResultDisposition, continue_after_interaction, drain_idle_cancellation,
     drive_due_polls, parked_tool_continue, prepare_tool_batch_if_ready, process_model_progress,
@@ -21,11 +21,11 @@ use crate::settlement::{
 };
 use crate::stage_settlement::submit_command;
 use crate::{
-    Clock, CommitCoordinator, CommitCoordinatorError, DeadlineDiagnostic,
-    LockedModelContextProfile, RandomSource, ResolvedToolCatalog, RunStatus,
+    Clock, CommitCoordinator, DeadlineDiagnostic, LockedModelContextProfile, RandomSource,
+    ResolvedToolCatalog, RunStatus,
 };
 
-use super::fault::{fault_worker, model_runtime_fault, result_fault_code, runtime_fault};
+use super::fault::{fault_worker, model_runtime_fault, runtime_fault};
 use super::owner::{DuePollWake, arm_due_poll_wait};
 use super::shared::{RunCommand, Shared};
 
@@ -43,15 +43,7 @@ pub(super) async fn run_worker(
             .submit(command.env, command.input)
             .await
             .map_err(RunHandleError::Coordinator);
-        let fault_code = match &result {
-            Ok(outcome) => outcome.fault.map(|fault| fault.code),
-            Err(RunHandleError::Coordinator(
-                CommitCoordinatorError::BoundaryFault { code }
-                | CommitCoordinatorError::Faulted { code }
-                | CommitCoordinatorError::EventDelivery { code },
-            )) => Some(*code),
-            _ => None,
-        };
+        let fault_code = result_fault_code(&result);
         let _ = command.reply.send(result);
         if let Some(code) = fault_code {
             shared.shutting_down.store(true, Ordering::Release);

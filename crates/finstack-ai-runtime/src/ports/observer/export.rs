@@ -59,12 +59,6 @@ pub fn journal_export_jsonl<T: Serialize>(
     Ok(out)
 }
 
-/// True when `haystack` contains the canary as UTF-8 text.
-#[must_use]
-pub fn diagnostic_contains(haystack: &str, canary: &str) -> bool {
-    haystack.contains(canary)
-}
-
 /// JSON object used by support-bundle version files.
 #[must_use]
 pub fn support_bundle_versions(engine: &str, observers: &[&str]) -> Value {

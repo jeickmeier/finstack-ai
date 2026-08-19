@@ -19,11 +19,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    CommitCoordinator, EventHubConfig, ExternalClock, ExternalCompletionRouter, ExternalRouteError,
-    ExternalRouteOutcome, IdGenerationError, InteractionRouter, JournalStore,
+    CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock, ExternalCompletionRouter,
+    ExternalRouteError, ExternalRouteOutcome, IdGenerationError, InteractionRouter, JournalStore,
     LockedModelContextProfile, Model, ModelCapabilities, ModelTaskConfig, RandomSource,
-    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate,
-    ToolSpec, ToolStreamLimits, ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
+    ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits, ToolTaskConfig,
+    model_retry_allowed, tool_retry_allowed,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -373,6 +374,8 @@ pub struct WorkflowSession {
     model: Option<Arc<dyn Model>>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
     capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
+    middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
+    context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     profile: Option<LockedModelContextProfile>,
     owner: Option<RunTaskOwner>,
     last_state: KernelState,
@@ -420,6 +423,8 @@ impl WorkflowSession {
             model: None,
             catalog: None,
             capability_owners: None,
+            middleware_chain: None,
+            context_providers: None,
             profile: None,
             owner: None,
             last_state: coordinator.state().clone(),
@@ -465,6 +470,25 @@ impl WorkflowSession {
         owners: Arc<BTreeMap<ComponentId, CapabilityId>>,
     ) -> Self {
         self.capability_owners = Some(owners);
+        self
+    }
+
+    /// Bind the resolved middleware chain used when the driver respawns.
+    ///
+    /// [`CommitCoordinator::recover`] drops runtime ports. Without this bind,
+    /// [`Self::respawn_owner`] passthroughs every stage fold.
+    #[must_use]
+    pub fn with_middleware_chain(mut self, chain: Arc<ResolvedMiddlewareChain>) -> Self {
+        self.middleware_chain = Some(chain);
+        self
+    }
+
+    /// Bind the resolved context providers used when the driver respawns.
+    ///
+    /// Peer of [`Self::with_middleware_chain`]. An absent list is a passthrough.
+    #[must_use]
+    pub fn with_context_providers(mut self, providers: Arc<[Arc<dyn ContextProvider>]>) -> Self {
+        self.context_providers = Some(providers);
         self
     }
 
@@ -671,7 +695,9 @@ impl WorkflowSession {
 
     /// Respawn [`RunTaskOwner`] after a park, including journal-authoritative waits.
     ///
-    /// Ports must already be bound with [`Self::with_ports`].
+    /// Ports must already be bound with [`Self::with_ports`]. Bind
+    /// [`Self::with_middleware_chain`] and [`Self::with_context_providers`]
+    /// when the recovered run should keep those owners.
     ///
     /// # Errors
     ///
@@ -711,9 +737,12 @@ impl WorkflowSession {
         {
             return Err(WorkflowDriverError::UnknownLocator);
         }
-        if let Some(owners) = self.capability_owners.clone() {
-            coordinator.install_capability_owners(owners);
-        }
+        reinstall_runtime_ports(
+            &mut coordinator,
+            self.capability_owners.clone(),
+            self.middleware_chain.clone(),
+            self.context_providers.clone(),
+        );
         let run_config = RunTaskConfig {
             command_capacity: 8,
             event_hub: EventHubConfig {
@@ -770,18 +799,24 @@ impl WorkflowSession {
 
 fn recover_error(error: &crate::CommitCoordinatorError) -> WorkflowDriverError {
     WorkflowDriverError::Recover {
-        code: match error {
-            crate::CommitCoordinatorError::Decision { code }
-            | crate::CommitCoordinatorError::Faulted { code }
-            | crate::CommitCoordinatorError::BoundaryFault { code }
-            | crate::CommitCoordinatorError::EventDelivery { code } => code,
-            crate::CommitCoordinatorError::SidecarConflict => "sidecar_conflict",
-            crate::CommitCoordinatorError::AppendBatchIdCardinality => {
-                "append_batch_id_cardinality"
-            }
-            crate::CommitCoordinatorError::Store(_) => "store_failure",
-            crate::CommitCoordinatorError::ModelRequest { .. } => "model_request",
-        },
+        code: error.stable_code(),
+    }
+}
+
+fn reinstall_runtime_ports(
+    coordinator: &mut CommitCoordinator,
+    capability_owners: Option<Arc<BTreeMap<ComponentId, CapabilityId>>>,
+    middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
+    context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
+) {
+    if let Some(owners) = capability_owners {
+        coordinator.install_capability_owners(owners);
+    }
+    if let Some(chain) = middleware_chain {
+        coordinator.install_middleware_chain(chain);
+    }
+    if let Some(providers) = context_providers {
+        coordinator.install_context_providers(providers);
     }
 }
 

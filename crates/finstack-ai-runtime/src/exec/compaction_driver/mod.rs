@@ -59,7 +59,7 @@ pub(crate) async fn fulfill_compaction_model<C: Clock, R: RandomSource>(
             .await;
     }
     validate_model_request(model, &request.request, profile)
-        .map_err(|error| model_handle_error(&error))?;
+        .map_err(|error| compaction_model_error(&error))?;
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -192,7 +192,7 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
         return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
     }
     validate_model_request(model, &request.request, profile)
-        .map_err(|error| model_handle_error(&error))?;
+        .map_err(|error| compaction_model_error(&error))?;
     let seed = coordinator
         .stage_dispatch_seed()
         .ok_or_else(|| stage_error(COMPACTION_PHASE_UNAVAILABLE))?;
@@ -216,12 +216,12 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
     let stream = model
         .request(model_request)
         .await
-        .map_err(|error| model_handle_error(&error))?;
+        .map_err(|error| compaction_model_error(&error))?;
     let assembled = ModelStreamAssembler::new(ModelStreamLimits::default())
-        .map_err(|error| model_handle_error(&error))?
+        .map_err(|error| compaction_model_error(&error))?
         .assemble(stream)
         .await
-        .map_err(|error| model_handle_error(&error))?;
+        .map_err(|error| compaction_model_error(&error))?;
     let ModelTerminal::Completed(response) = assembled.terminal else {
         return Err(stage_error(COMPACTION_PHASE_UNAVAILABLE));
     };
@@ -354,7 +354,11 @@ pub(crate) fn first_compaction_request(
     })
 }
 
-fn model_handle_error(error: &crate::ModelError) -> RunHandleError {
+/// Compaction is a middleware-owned model call. Map provider errors to
+/// [`RunHandleError::Middleware`] so they abort the submitting run and leave
+/// the worker healthy — not [`crate::settlement`]'s `model_handle_error`,
+/// which classifies the same `ModelError` as a model-port failure.
+fn compaction_model_error(error: &crate::ModelError) -> RunHandleError {
     RunHandleError::Middleware {
         code: Arc::from(error.code()),
     }

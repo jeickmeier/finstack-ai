@@ -5,6 +5,7 @@ use finstack_ai_kernel::{
     EffectId, EffectInput, KernelInput, PostCommitAction, ReducerStageOutcome, ToolCallPlan,
 };
 
+use super::shared::HostWork;
 use crate::context::{
     CONTEXT_STAGE, CommittedContextCall, ContextCallContext, ContextProvider, ContextRequest,
 };
@@ -13,13 +14,10 @@ use crate::coordinator::{
     ToolDispatchSeed,
 };
 use crate::{
-    CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelError,
-    ModelRequest, ModelRequestDraft, PortFuture, ResolvedTool, ResolvedToolCatalog, RunCallContext,
-    ToolCallContext, validate_model_request,
+    CancellationSignal, LockedModelContextProfile, Model, ModelCallContext, ModelRequest,
+    PortFuture, ResolvedTool, ResolvedToolCatalog, RunCallContext, ToolCallContext,
+    parse_committed_model_request, stable_model_dispatch_code,
 };
-
-use super::fault::stable_dispatch_code;
-use super::shared::HostWork;
 
 pub(super) struct HostDispatcher {
     pub(super) model: Arc<dyn Model>,
@@ -40,34 +38,6 @@ impl HostDispatcher {
             })?
             .push_back(work);
         Ok(())
-    }
-
-    fn parse_and_validate(
-        &self,
-        raw: &finstack_ai_kernel::RawJson,
-    ) -> Result<ModelRequestDraft, ModelError> {
-        let draft: ModelRequestDraft = serde_json::from_slice(raw.as_bytes()).map_err(|_| {
-            ModelError::try_new(
-                crate::MODEL_REQUEST_INVALID,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                false,
-                "committed model request draft is invalid",
-                finstack_ai_kernel::Metadata::empty(),
-            )
-            .expect("frozen model request error")
-        })?;
-        if draft.canonical_bytes()?.as_slice() != raw.as_bytes() {
-            return Err(ModelError::try_new(
-                crate::MODEL_REQUEST_INVALID,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                false,
-                "model request draft is not the canonical committed DTO",
-                finstack_ai_kernel::Metadata::empty(),
-            )
-            .expect("frozen model request error"));
-        }
-        validate_model_request(self.model.as_ref(), &draft, &self.profile)?;
-        Ok(draft)
     }
 
     fn resolved_for_seed(
@@ -116,10 +86,9 @@ impl HostDispatcher {
                 code: "model_request_invalid",
             });
         };
-        let draft = self
-            .parse_and_validate(raw)
+        let draft = parse_committed_model_request(self.model.as_ref(), &self.profile, raw)
             .map_err(|error| DispatchError {
-                code: stable_dispatch_code(error.code()),
+                code: stable_model_dispatch_code(error.code()),
             })?;
         let cancellation = self.parent.child();
         {
@@ -279,10 +248,10 @@ impl PostCommitDispatcher for HostDispatcher {
     fn validate_before_commit(&self, input: &KernelInput) -> Result<(), DispatchError> {
         if let KernelInput::StageSettled(settled) = input {
             if let ReducerStageOutcome::ModelRequestPrepared { request, .. } = &settled.outcome {
-                self.parse_and_validate(request)
+                parse_committed_model_request(self.model.as_ref(), &self.profile, request)
                     .map(|_| ())
                     .map_err(|error| DispatchError {
-                        code: stable_dispatch_code(error.code()),
+                        code: stable_model_dispatch_code(error.code()),
                     })?;
             }
             if let ReducerStageOutcome::ToolBatchPrepared { calls, .. } = &settled.outcome {

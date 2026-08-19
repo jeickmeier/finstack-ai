@@ -78,8 +78,8 @@ pub(super) fn stage_input(
 ///
 /// Round-tripped from the base outcome's `request: RawJson`, which the facade
 /// produced with `ModelRequestDraft::canonical_bytes` (`agent.rs:813-815`), so
-/// the trip is exact. `HostDispatcher::parse_and_validate`
-/// (`host_task.rs:650-676`) already relies on the same round trip.
+/// the trip is exact. `parse_committed_model_request` already relies on the
+/// same round trip.
 ///
 /// # `source_entries`
 ///

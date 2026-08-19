@@ -82,6 +82,8 @@ pub fn finstack_ai_workflow_local::LocalWorkflowDriver::schedule_cron(&self, &st
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::schedules(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_local::CronSchedule>, finstack_ai_workflow_local::CronError>
 pub const fn finstack_ai_workflow_local::LocalWorkflowDriver::session(&self) -> &finstack_ai_runtime::driver::workflow::WorkflowSession
 pub const fn finstack_ai_workflow_local::LocalWorkflowDriver::session_mut(&mut self) -> &mut finstack_ai_runtime::driver::workflow::WorkflowSession
+pub fn finstack_ai_workflow_local::LocalWorkflowDriver::with_context_providers(self, alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>]>) -> Self
+pub fn finstack_ai_workflow_local::LocalWorkflowDriver::with_middleware_chain(self, alloc::sync::Arc<finstack_ai_runtime::ports::middleware::chain::ResolvedMiddlewareChain>) -> Self
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::with_ports(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>, finstack_ai_runtime::ports::model::profile::LockedModelContextProfile, core::option::Option<alloc::sync::Arc<finstack_ai_runtime::ports::tool::catalog::ResolvedToolCatalog>>) -> Self
 pub fn finstack_ai_workflow_local::LocalWorkflowDriver::wrap(finstack_ai_runtime::driver::workflow::WorkflowSession, alloc::sync::Arc<dyn finstack_ai_workflow_local::CronScheduleStore>) -> Self
 impl core::ops::deref::Deref for finstack_ai_workflow_local::LocalWorkflowDriver

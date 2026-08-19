@@ -8,7 +8,7 @@ use finstack_ai_kernel::{EffectId, RunPhase};
 
 use crate::coordinator::{CommitCoordinator, ModelDispatchSeed, ToolDispatchSeed};
 use crate::middleware_driver::StageDriver;
-use crate::run_types::RunHandleError;
+use crate::run_types::{RunHandleError, result_fault_code};
 use crate::settlement::{
     ModelDriverResult, SettlementSources, ToolDriverResult, ToolResultDisposition,
     continue_after_interaction, drain_idle_cancellation, parked_tool_continue,
@@ -23,7 +23,7 @@ use crate::{
     ToolCallContext, ToolError, ToolStreamAssembler,
 };
 
-use super::fault::{fault_shared, finish_worker, model_cancellation_error, result_fault_code};
+use super::fault::{fault_shared, finish_worker, host_drain_fault, model_cancellation_error};
 use super::shared::{CommandIntake, HostWork, RunCommand, Shared};
 
 pub(super) async fn run_worker(
@@ -115,23 +115,14 @@ pub(super) async fn run_worker_with_effects<C, R>(
         {
             fault_shared(
                 &shared,
-                match error {
-                    RunHandleError::ToolSettlement { code }
-                    | RunHandleError::InteractionSettlement { code }
-                    | RunHandleError::Faulted { code } => code,
-                    _ => "host_tool_interaction_continue_failed",
-                },
+                host_drain_fault(&error, "host_tool_interaction_continue_failed"),
             );
             break;
         }
         if let Err(error) = drain_idle_cancellation(&mut coordinator, &sources, false).await {
             fault_shared(
                 &shared,
-                match error {
-                    RunHandleError::CancellationSettlement { code }
-                    | RunHandleError::Faulted { code } => code,
-                    _ => "host_idle_cancellation_failed",
-                },
+                host_drain_fault(&error, "host_idle_cancellation_failed"),
             );
             break;
         }
@@ -154,14 +145,7 @@ pub(super) async fn run_worker_with_effects<C, R>(
         {
             fault_shared(
                 &shared,
-                match error {
-                    RunHandleError::ModelSettlement { code }
-                    | RunHandleError::ToolSettlement { code }
-                    | RunHandleError::InteractionSettlement { code }
-                    | RunHandleError::EventDelivery { code }
-                    | RunHandleError::Faulted { code } => code,
-                    _ => "host_effect_drain_failed",
-                },
+                host_drain_fault(&error, "host_effect_drain_failed"),
             );
             break;
         }

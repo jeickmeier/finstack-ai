@@ -21,7 +21,6 @@ use super::interaction::{
 };
 use super::tool::{generate_tool_id, generate_tool_ids};
 
-// --- extracted from task.rs 1088-1161 ---
 /// Settle `Stage::BeforeToolBatch` when the run is parked at that cursor.
 ///
 /// The one facade stage the facade itself never settles, and therefore the one
@@ -414,10 +413,6 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
 /// not through this function. A caller that always allocates from this table
 /// unconditionally will reproduce that exact class of mismatch on any run
 /// that crosses a configured limit, not only on a deadline breach.
-#[allow(
-    dead_code,
-    reason = "consumed by the middleware driver's stage fold (Tasks 6-7); exercised directly by this module's own tests until then"
-)]
 pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
     state: &finstack_ai_kernel::KernelState,
     cursor: StageCursor,

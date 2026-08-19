@@ -2,7 +2,9 @@
 """Compare cargo-public-api dumps to frozen Rust public-API baselines.
 
 Covers finstack-ai-kernel, finstack-ai-runtime, finstack-ai, and every
-extensions/** crate. Python/JS name lists stay in public_items.py.
+extensions/** crate. Runtime also dumps `native-tokio` and `wasm-host`
+because its default feature set is empty. Python/JS name lists stay in
+public_items.py.
 """
 
 from __future__ import annotations
@@ -76,16 +78,31 @@ def cargo_public_api_bin() -> str:
     raise SystemExit(f"cargo-public-api not found under {root}")
 
 
-def dump_crate(crate_dir: Path) -> str:
+# Extra feature dumps for crates whose default features hide the production
+# surface. Runtime `default = []`, so `native-tokio` / `wasm-host` names
+# never appear in the default dump.
+FEATURED_DUMPS: dict[str, tuple[str, ...]] = {
+    "finstack-ai-runtime": ("native-tokio", "wasm-host"),
+}
+
+
+def dump_label(name: str, feature: str | None) -> str:
+    return name if feature is None else f"{name}+{feature}"
+
+
+def dump_crate(crate_dir: Path, features: str | None = None) -> str:
+    cmd = [
+        cargo_public_api_bin(),
+        "--color",
+        "never",
+        "-ss",
+        "--manifest-path",
+        str(crate_dir / "Cargo.toml"),
+    ]
+    if features:
+        cmd.extend(["--features", features])
     proc = subprocess.run(
-        [
-            cargo_public_api_bin(),
-            "--color",
-            "never",
-            "-ss",
-            "--manifest-path",
-            str(crate_dir / "Cargo.toml"),
-        ],
+        cmd,
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -93,7 +110,10 @@ def dump_crate(crate_dir: Path) -> str:
     )
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
-        raise SystemExit(f"{crate_dir}: cargo-public-api failed ({proc.returncode})")
+        label = features or "default"
+        raise SystemExit(
+            f"{crate_dir} ({label}): cargo-public-api failed ({proc.returncode})"
+        )
     return proc.stdout
 
 
@@ -123,26 +143,29 @@ def main() -> int:
     failed = False
     for crate_dir in crate_dirs():
         name = package_name(crate_dir)
-        current = dump_crate(crate_dir)
-        path = baseline_path(name)
-        if args.write:
-            write_list(path, current)
-            continue
-        if not path.is_file():
-            print(f"{name}: missing baseline {path}", file=sys.stderr)
-            failed = True
-            continue
-        removed, added = compare(current, path.read_text(encoding="utf-8"))
-        if removed:
-            print(f"{name}: removed public API:", file=sys.stderr)
-            for line in removed:
-                print(f"  - {line}", file=sys.stderr)
-            failed = True
-        if added:
-            print(f"{name}: added public API:", file=sys.stderr)
-            for line in added:
-                print(f"  + {line}", file=sys.stderr)
-            failed = True
+        features = (None,) + FEATURED_DUMPS.get(name, ())
+        for feature in features:
+            label = dump_label(name, feature)
+            current = dump_crate(crate_dir, feature)
+            path = baseline_path(label)
+            if args.write:
+                write_list(path, current)
+                continue
+            if not path.is_file():
+                print(f"{label}: missing baseline {path}", file=sys.stderr)
+                failed = True
+                continue
+            removed, added = compare(current, path.read_text(encoding="utf-8"))
+            if removed:
+                print(f"{label}: removed public API:", file=sys.stderr)
+                for line in removed:
+                    print(f"  - {line}", file=sys.stderr)
+                failed = True
+            if added:
+                print(f"{label}: added public API:", file=sys.stderr)
+                for line in added:
+                    print(f"  + {line}", file=sys.stderr)
+                failed = True
     return 1 if failed else 0
 
 

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::coordinator::{CommitCoordinator, PostCommitDispatcher};
 use crate::event_hub::event_hub;
 use crate::host_driver;
@@ -11,14 +12,13 @@ use crate::run_types::{
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    model_handle_error, prepare_tool_batch_if_ready, resume_pending_context_effects,
-    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
+    model_handle_error, model_resume_retry_seed, prepare_tool_batch_if_ready,
+    resume_pending_context_effects, resume_pending_model_effect, resume_pending_tool_effects,
+    tool_resume_retry_seeds, validate_model_binding,
 };
 use crate::{
-    CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, Clock, InvocationResumeAction,
-    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction,
-    ModelWarmupContext, RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
-    ToolResumeAction, ToolStreamAssembler,
+    CancellationSignal, Clock, InvocationResumeAction, LockedModelContextProfile, Model,
+    ModelWarmupContext, RandomSource, ResolvedToolCatalog, ToolResumeAction, ToolStreamAssembler,
 };
 
 use super::dispatcher::HostDispatcher;
@@ -222,28 +222,12 @@ impl RunTaskOwner {
             let action =
                 resume_pending_model_effect(&mut coordinator, model.as_ref(), &sources, &parent)
                     .await?;
-            match action {
-                ModelResumeAction::Retry => {
-                    let seed = coordinator.pending_model_seed().ok_or(
-                        RunHandleError::ModelSettlement {
-                            code: "model_resume_seed_missing",
-                        },
-                    )?;
-                    dispatcher
-                        .resume_request(seed)
-                        .map_err(|error| RunHandleError::Model {
-                            code: Arc::from(error.code),
-                        })?;
-                }
-                ModelResumeAction::SuspendUncertain => {
-                    return Err(RunHandleError::Model {
-                        code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
-                    });
-                }
-                ModelResumeAction::NoOutstanding
-                | ModelResumeAction::UseRecorded
-                | ModelResumeAction::Reconcile
-                | ModelResumeAction::WaitExternal => {}
+            if let Some(seed) = model_resume_retry_seed(action, coordinator.pending_model_seed())? {
+                dispatcher
+                    .resume_request(seed)
+                    .map_err(|error| RunHandleError::Model {
+                        code: Arc::from(error.code),
+                    })?;
             }
             crate::compaction_driver::resume_pending_compaction_model(
                 &mut coordinator,
@@ -294,25 +278,15 @@ impl RunTaskOwner {
             } else {
                 resume_pending_tool_effects(&mut coordinator, catalog, &sources, &parent).await?
             };
-            match action {
-                ToolResumeAction::Retry => {
-                    for seed in coordinator.pending_tool_seeds() {
-                        dispatcher
-                            .resume_call(seed)
-                            .map_err(|error| RunHandleError::Tool {
-                                code: Arc::from(error.code),
-                            })?;
-                    }
+            if let Some(seeds) = tool_resume_retry_seeds(action, coordinator.pending_tool_seeds())?
+            {
+                for seed in seeds {
+                    dispatcher
+                        .resume_call(seed)
+                        .map_err(|error| RunHandleError::Tool {
+                            code: Arc::from(error.code),
+                        })?;
                 }
-                ToolResumeAction::SuspendUncertain => {
-                    return Err(RunHandleError::Tool {
-                        code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
-                    });
-                }
-                ToolResumeAction::NoOutstanding
-                | ToolResumeAction::UseRecorded
-                | ToolResumeAction::Reconcile
-                | ToolResumeAction::WaitExternal => {}
             }
         }
 

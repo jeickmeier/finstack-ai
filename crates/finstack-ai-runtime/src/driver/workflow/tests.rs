@@ -242,3 +242,70 @@ fn fault_public_types_remain_static_and_copyable() {
 
     assert_eq!(spawn_code(&error), "timer_deadline_invalid");
 }
+
+struct UnusedStore;
+
+impl crate::JournalStore for UnusedStore {
+    fn append(
+        &self,
+        _request: finstack_ai_kernel::AppendRequest,
+    ) -> crate::PortFuture<Result<finstack_ai_kernel::CommittedBatch, crate::StoreError>> {
+        Box::pin(async {
+            Err(crate::StoreError::Unavailable {
+                reason_code: "unused",
+            })
+        })
+    }
+
+    fn load(
+        &self,
+        _request: crate::LoadRequest,
+    ) -> crate::PortFuture<Result<crate::LoadedSession, crate::StoreError>> {
+        Box::pin(async {
+            Err(crate::StoreError::Unavailable {
+                reason_code: "unused",
+            })
+        })
+    }
+
+    fn write_snapshot(
+        &self,
+        _request: crate::SnapshotRequest,
+    ) -> crate::PortFuture<Result<crate::SnapshotReceipt, crate::StoreError>> {
+        Box::pin(async {
+            Err(crate::StoreError::Unavailable {
+                reason_code: "unused",
+            })
+        })
+    }
+
+    fn health(&self) -> crate::PortFuture<Result<crate::StoreHealth, crate::StoreError>> {
+        Box::pin(async {
+            Err(crate::StoreError::Unavailable {
+                reason_code: "unused",
+            })
+        })
+    }
+}
+
+#[test]
+fn reinstall_runtime_ports_restores_chain_and_providers() {
+    let mut coordinator = crate::CommitCoordinator::new(Arc::new(UnusedStore));
+    assert!(coordinator.middleware_chain().is_none());
+    assert!(coordinator.context_providers().is_none());
+    let chain = Arc::new(crate::ResolvedMiddlewareChain::try_new(Vec::new()).expect("empty chain"));
+    reinstall_runtime_ports(
+        &mut coordinator,
+        None,
+        Some(Arc::clone(&chain)),
+        Some(Arc::from([])),
+    );
+    assert!(
+        coordinator.middleware_chain().is_some(),
+        "recover drops the chain; respawn must put it back"
+    );
+    assert!(
+        coordinator.context_providers().is_some(),
+        "recover drops context providers; respawn must put them back"
+    );
+}

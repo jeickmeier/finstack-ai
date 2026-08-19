@@ -118,7 +118,8 @@ impl MonotonicDeadline {
 ///
 /// The kernel receives only the resulting bounded backoff and never reads a
 /// random source itself.
-pub trait RetryJitterSource {
+#[cfg(test)]
+pub(crate) trait RetryJitterSource {
     /// Produce a non-negative jitter no greater than `maximum`.
     ///
     /// # Errors
@@ -128,9 +129,11 @@ pub trait RetryJitterSource {
 }
 
 /// Deterministic source that adds no jitter.
+#[cfg(test)]
 #[derive(Debug, Default, Clone, Copy)]
-pub struct NoRetryJitter;
+pub(crate) struct NoRetryJitter;
 
+#[cfg(test)]
 impl RetryJitterSource for NoRetryJitter {
     fn jitter(&self, _attempt: u32, _maximum: Duration) -> Result<Duration, RuntimeTimeError> {
         Ok(Duration::ZERO)
@@ -142,7 +145,8 @@ impl RetryJitterSource for NoRetryJitter {
 /// # Errors
 ///
 /// Returns an error if the source exceeds its bound or addition overflows.
-pub fn retry_backoff_with_jitter(
+#[cfg(test)]
+pub(crate) fn retry_backoff_with_jitter(
     base: Duration,
     maximum_jitter: Duration,
     attempt: u32,
@@ -251,6 +255,16 @@ mod tests {
             )
             .expect("backoff"),
             Duration::from_millis(120)
+        );
+        assert_eq!(
+            retry_backoff_with_jitter(
+                Duration::from_millis(100),
+                Duration::from_millis(20),
+                1,
+                &NoRetryJitter,
+            )
+            .expect("no jitter"),
+            Duration::from_millis(100)
         );
     }
 }

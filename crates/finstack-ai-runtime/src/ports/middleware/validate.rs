@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 use finstack_ai_kernel::{
-    EffectInput, EffectKind, EffectOutputKind, EffectPurpose, EffectRequested, Message, RawJson,
-    RecordBody, RecordEnvelope, ToolCallId,
+    EffectInput, EffectKind, EffectOutputKind, EffectPurpose, EffectRequested, RawJson, RecordBody,
+    RecordEnvelope,
 };
+use finstack_ai_kernel::{Message, ToolCallId};
 
 use super::digest::{
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
@@ -20,9 +22,11 @@ use super::{COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED};
 ///
 /// # Errors
 ///
-/// Returns `compaction_model_not_authorized` unless the child effect is related to the exact
-/// committed middleware parent and freezes the requested model draft.
-pub fn validate_compaction_model_effect(
+/// Returns `compaction_model_not_authorized` unless the child effect is
+/// related to the exact compaction parent and freezes the requested model
+/// draft.
+#[cfg(test)]
+pub(crate) fn validate_compaction_model_effect(
     parent: &EffectRequested,
     child_envelope: &RecordEnvelope,
     request: &CompactionModelRequest,

@@ -14,7 +14,6 @@ use finstack_ai_kernel::{
 };
 use futures_core::Stream;
 
-use super::fault::result_fault_code;
 use super::*;
 use crate::coordinator::CommitCoordinator;
 use crate::event_hub::{
@@ -27,33 +26,10 @@ use crate::{
     ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress,
     ModelRequest, ModelRequestDraft, ModelResponse, ModelSettings, ModelStreamItem,
     ModelTaskConfig, ModelTokenEstimate, ModelWarmupContext, PortFuture, RandomSource,
-    RunHandleError, RunTaskConfig, SameIdentityRetryPolicy, SnapshotReceipt, SnapshotRequest,
-    StoreError, StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, Usage, resolve_model_context_profile,
+    RunTaskConfig, SameIdentityRetryPolicy, SnapshotReceipt, SnapshotRequest, StoreError,
+    StoreHealth, StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
+    Usage, resolve_model_context_profile,
 };
-
-/// The other half of the folded-allocation fix (`stage_settlement.rs`'s
-/// `folded_allocation_error`): `RunHandleError::Middleware` must never tear
-/// the worker down. `ToolSettlement` deliberately still does — a genuine
-/// tool-settlement failure is a worker fault — which is exactly why a
-/// middleware fold's rejection has to be re-classified before it gets here.
-#[test]
-fn a_middleware_failure_is_not_a_worker_fault() {
-    assert_eq!(
-        result_fault_code(&Err(RunHandleError::Middleware {
-            code: Arc::from("stage_allocation_model_request_contract_mismatch"),
-        })),
-        None,
-        "a middleware fold failure must fail only the run, not the worker"
-    );
-    assert_eq!(
-        result_fault_code(&Err(RunHandleError::ToolSettlement {
-            code: "stage_allocation_model_request_contract_mismatch",
-        })),
-        Some("stage_allocation_model_request_contract_mismatch"),
-        "tool settlement stays a worker fault, so the re-classification is load-bearing"
-    );
-}
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);

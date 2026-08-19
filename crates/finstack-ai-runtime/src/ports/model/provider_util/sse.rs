@@ -2,7 +2,7 @@
 
 /// Incremental SSE frame splitter. Event interpretation stays in the caller.
 #[derive(Debug)]
-pub struct SseFrameParser {
+pub(crate) struct SseFrameParser {
     buffer: Vec<u8>,
     total_bytes: usize,
     max_event_bytes: usize,
@@ -62,7 +62,7 @@ impl SseFrameParser {
 
 /// SSE framing failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SseFrameError {
+pub(crate) enum SseFrameError {
     /// An event or the accumulated stream exceeded its configured ceiling.
     Limit,
 }

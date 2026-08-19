@@ -2,8 +2,9 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use finstack_ai_runtime::{
-    Clock, ExternalClock, JournalStore, LockedModelContextProfile, Model, OperationLocator,
-    ResolvedToolCatalog, WorkflowDriverError, WorkflowSession,
+    Clock, ContextProvider, ExternalClock, JournalStore, LockedModelContextProfile, Model,
+    OperationLocator, ResolvedMiddlewareChain, ResolvedToolCatalog, WorkflowDriverError,
+    WorkflowSession,
 };
 
 use crate::cron::{CronError, CronFire, CronSchedule, IntervalSchedule, validate_schedule_id};
@@ -63,6 +64,20 @@ impl LocalWorkflowDriver {
         catalog: Option<Arc<ResolvedToolCatalog>>,
     ) -> Self {
         self.session = self.session.with_ports(model, profile, catalog);
+        self
+    }
+
+    /// Bind the resolved middleware chain used when the driver respawns.
+    #[must_use]
+    pub fn with_middleware_chain(mut self, chain: Arc<ResolvedMiddlewareChain>) -> Self {
+        self.session = self.session.with_middleware_chain(chain);
+        self
+    }
+
+    /// Bind the resolved context providers used when the driver respawns.
+    #[must_use]
+    pub fn with_context_providers(mut self, providers: Arc<[Arc<dyn ContextProvider>]>) -> Self {
+        self.session = self.session.with_context_providers(providers);
         self
     }
 

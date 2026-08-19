@@ -2,31 +2,10 @@ use std::sync::atomic::Ordering;
 
 use tokio::sync::mpsc;
 
+use crate::CommitCoordinatorError;
 use crate::run_types::{RunHandleError, RunStatus};
-use crate::{CommitCoordinatorError, CommitOutcome};
 
 use super::shared::{RunCommand, Shared};
-
-pub(super) fn result_fault_code(
-    result: &Result<CommitOutcome, RunHandleError>,
-) -> Option<&'static str> {
-    match result {
-        Ok(outcome) => outcome.fault.map(|fault| fault.code),
-        Err(
-            RunHandleError::Faulted { code }
-            | RunHandleError::ModelSettlement { code }
-            | RunHandleError::ToolSettlement { code }
-            | RunHandleError::InteractionSettlement { code }
-            | RunHandleError::EventDelivery { code }
-            | RunHandleError::Coordinator(
-                CommitCoordinatorError::BoundaryFault { code }
-                | CommitCoordinatorError::Faulted { code }
-                | CommitCoordinatorError::EventDelivery { code },
-            ),
-        ) => Some(*code),
-        _ => None,
-    }
-}
 
 pub(super) fn fault_worker(
     shared: &Shared,

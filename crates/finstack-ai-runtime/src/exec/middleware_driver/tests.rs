@@ -683,7 +683,8 @@ fn run_stage_invokes_every_component_registered_for_the_stage() {
     let driver = super::StageDriver::new(counting_chain(&calls), CancellationSignal::new());
 
     let outcomes =
-        block_on(driver.run_stage(&before_run_context(), before_run_input())).expect("chain runs");
+        block_on(driver.run_stage_masked(&before_run_context(), before_run_input(), |_| true))
+            .expect("chain runs");
 
     assert_eq!(outcomes, vec![StageOutcome::Continue]);
     assert_eq!(
@@ -700,8 +701,9 @@ fn run_stage_on_a_cancelled_run_invokes_no_component_and_folds_to_identity() {
     signal.cancel();
     let driver = super::StageDriver::new(counting_chain(&calls), signal);
 
-    let outcomes = block_on(driver.run_stage(&before_run_context(), before_run_input()))
-        .expect("cancellation is not an error");
+    let outcomes =
+        block_on(driver.run_stage_masked(&before_run_context(), before_run_input(), |_| true))
+            .expect("cancellation is not an error");
 
     assert!(outcomes.is_empty());
     assert_eq!(

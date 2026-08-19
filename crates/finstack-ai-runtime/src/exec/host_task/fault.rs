@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
+use crate::ModelError;
 use crate::run_types::{RunHandleError, RunStatus};
-use crate::{CommitCoordinatorError, CommitOutcome, ModelError};
 
 use super::handle::RunHandle;
 use super::shared::Shared;
@@ -17,36 +17,19 @@ pub(super) fn model_cancellation_error(message: &'static str) -> ModelError {
     .expect("frozen cancellation error")
 }
 
-pub(super) fn stable_dispatch_code(code: &str) -> &'static str {
-    match code {
-        crate::MODEL_REQUEST_INVALID => crate::MODEL_REQUEST_INVALID,
-        crate::MODEL_PROFILE_INVALID => crate::MODEL_PROFILE_INVALID,
-        crate::MODEL_PROFILE_RELAXATION => crate::MODEL_PROFILE_RELAXATION,
-        crate::MODEL_PROFILE_OVERRIDE_NOT_ALLOWED => crate::MODEL_PROFILE_OVERRIDE_NOT_ALLOWED,
-        crate::MODEL_ESTIMATOR_MISMATCH => crate::MODEL_ESTIMATOR_MISMATCH,
-        crate::MODEL_CONTEXT_LIMIT_EXCEEDED => crate::MODEL_CONTEXT_LIMIT_EXCEEDED,
-        _ => "model_request_invalid",
-    }
-}
-
-pub(super) fn result_fault_code(
-    result: &Result<CommitOutcome, RunHandleError>,
-) -> Option<&'static str> {
-    match result {
-        Ok(outcome) => outcome.fault.map(|fault| fault.code),
-        Err(
-            RunHandleError::Faulted { code }
-            | RunHandleError::ModelSettlement { code }
-            | RunHandleError::ToolSettlement { code }
-            | RunHandleError::InteractionSettlement { code }
-            | RunHandleError::EventDelivery { code }
-            | RunHandleError::Coordinator(
-                CommitCoordinatorError::BoundaryFault { code }
-                | CommitCoordinatorError::Faulted { code }
-                | CommitCoordinatorError::EventDelivery { code },
-            ),
-        ) => Some(*code),
-        _ => None,
+/// Prefer a carried settlement code; keep the host-specific fallback when the
+/// variant is not a worker-tearing settlement fault. Native owners use
+/// `runtime_fault` / `model_runtime_fault` instead — those sets include
+/// `Timer` and `Coordinator::Decision`, which this host path does not.
+pub(super) fn host_drain_fault(error: &RunHandleError, fallback: &'static str) -> &'static str {
+    match error {
+        RunHandleError::Faulted { code }
+        | RunHandleError::ModelSettlement { code }
+        | RunHandleError::ToolSettlement { code }
+        | RunHandleError::InteractionSettlement { code }
+        | RunHandleError::CancellationSettlement { code }
+        | RunHandleError::EventDelivery { code } => code,
+        _ => fallback,
     }
 }
 

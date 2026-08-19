@@ -4,6 +4,7 @@ mod assembly;
 mod committed;
 mod error;
 mod port;
+#[cfg(all(test, feature = "native-tokio"))]
 mod projection;
 mod types;
 
@@ -11,13 +12,19 @@ mod types;
 mod tests;
 
 pub use assembly::{AssembledContext, ContextTruncationDiagnostic, assemble_context};
-pub use committed::{
-    CommittedContextCall, InvocationResumeAction, RecordedContextContribution,
-    context_resume_action, map_context_reconcile_result,
-};
+#[cfg(all(test, feature = "native-tokio"))]
+pub(crate) use committed::context_resume_action;
+#[cfg(test)]
+pub(crate) use committed::map_context_reconcile_result;
+pub use committed::{CommittedContextCall, InvocationResumeAction, RecordedContextContribution};
+#[cfg(any(
+    all(test, feature = "native-tokio"),
+    all(feature = "wasm-host", not(feature = "native-tokio")),
+))]
+pub(crate) use error::CONTEXT_RECOVERY_UNCERTAIN;
 pub use error::{
     CONTEXT_BUDGET_EXCEEDED, CONTEXT_COMMIT_REQUIRED, CONTEXT_CONFIGURATION_INVALID,
-    CONTEXT_CONTRIBUTION_INVALID, CONTEXT_RECOVERY_UNCERTAIN, ContextError,
+    CONTEXT_CONTRIBUTION_INVALID, ContextError,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use port::CONTEXT_STAGE;
@@ -25,7 +32,8 @@ pub use port::{
     ContextCallContext, ContextProvider, ContextProviderDescriptor, ContextReconcileResult,
     PendingContextEffect,
 };
-pub use projection::{
+#[cfg(all(test, feature = "native-tokio"))]
+pub(crate) use projection::{
     CapabilityContext, ContextProjectionInput, ContextProjectionItem, ContextProjectionSource,
     assemble_context_projection,
 };

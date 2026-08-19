@@ -1,4 +1,6 @@
 use finstack_ai_kernel::PendingModelEffect;
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+use finstack_ai_kernel::RawJson;
 
 use crate::{PortFuture, PortObject};
 
@@ -13,6 +15,8 @@ use super::{
     MODEL_CONTEXT_LIMIT_EXCEEDED, MODEL_ESTIMATOR_MISMATCH, MODEL_PROFILE_INVALID,
     MODEL_REQUEST_INVALID,
 };
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+use super::{MODEL_PROFILE_OVERRIDE_NOT_ALLOWED, MODEL_PROFILE_RELAXATION};
 
 /// Object-safe provider-neutral model port.
 ///
@@ -153,4 +157,44 @@ pub fn validate_model_request(
         estimated_input_tokens: estimate.input_tokens,
         available_input_tokens: available,
     })
+}
+
+/// Decode a committed model-request DTO and run [`validate_model_request`].
+///
+/// Native and host dispatchers share this so a later validation change cannot
+/// drift between owners.
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) fn parse_committed_model_request(
+    model: &dyn Model,
+    profile: &LockedModelContextProfile,
+    raw: &RawJson,
+) -> Result<ModelRequestDraft, ModelError> {
+    let draft: ModelRequestDraft = serde_json::from_slice(raw.as_bytes()).map_err(|_| {
+        ModelError::validation(
+            MODEL_REQUEST_INVALID,
+            "committed model request draft is invalid",
+        )
+    })?;
+    if draft.canonical_bytes()?.as_slice() != raw.as_bytes() {
+        return Err(ModelError::validation(
+            MODEL_REQUEST_INVALID,
+            "model request draft is not the canonical committed DTO",
+        ));
+    }
+    validate_model_request(model, &draft, profile)?;
+    Ok(draft)
+}
+
+/// Map a model-adapter code onto the dispatch table both owners share.
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+#[must_use]
+pub(crate) fn stable_model_dispatch_code(code: &str) -> &'static str {
+    match code {
+        MODEL_PROFILE_INVALID => MODEL_PROFILE_INVALID,
+        MODEL_PROFILE_RELAXATION => MODEL_PROFILE_RELAXATION,
+        MODEL_PROFILE_OVERRIDE_NOT_ALLOWED => MODEL_PROFILE_OVERRIDE_NOT_ALLOWED,
+        MODEL_ESTIMATOR_MISMATCH => MODEL_ESTIMATOR_MISMATCH,
+        MODEL_CONTEXT_LIMIT_EXCEEDED => MODEL_CONTEXT_LIMIT_EXCEEDED,
+        _ => MODEL_REQUEST_INVALID,
+    }
 }

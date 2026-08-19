@@ -16,15 +16,14 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, ExternalClock,
-    IdGenerationError, JsonSchemaToolValidatorCompiler, LocalWorkflowDriver,
-    LockedModelContextProfile, Model, ModelContextProfile, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits,
-    ModelTaskConfig, ModelToolCall, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
-    RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef,
-    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy,
-    ToolFailurePolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits,
-    ToolTaskConfig, Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait,
-    resolve_model_context_profile,
+    IdGenerationError, JsonSchemaToolValidatorCompiler, LockedModelContextProfile, Model,
+    ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
+    ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
+    RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner,
+    SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
+    ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
+    ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset,
+    ToolsetRegistration, WorkflowSession, WorkflowWait, resolve_model_context_profile,
 };
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,
@@ -454,7 +453,7 @@ async fn main() {
     drop(store);
 
     let store = open_store(&path);
-    let mut driver: LocalWorkflowDriver =
+    let mut driver: WorkflowSession =
         WorkflowSession::trusted(Arc::clone(&store) as _, locator(), clock.clone(), 701)
             .await
             .expect("resume")

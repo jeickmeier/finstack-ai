@@ -3,7 +3,9 @@
 pub(crate) mod export;
 pub(crate) mod queue;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(all(test, feature = "native-tokio"))]
+use std::sync::Mutex;
 
 use finstack_ai_kernel::{
     ComponentRef, EffectId, EventId, LaneId, Metadata, ModelRequestId, RunEvent, RunEventBody,
@@ -155,12 +157,14 @@ impl Observer for NoopObserver {
 }
 
 /// Bounded in-memory reference observer for deterministic tests and examples.
-pub struct ReferenceObserver {
+#[cfg(all(test, feature = "native-tokio"))]
+pub(crate) struct ReferenceObserver {
     descriptor: ObserverDescriptor,
     max_events: usize,
     events: Arc<Mutex<Vec<ObserverEventView>>>,
 }
 
+#[cfg(all(test, feature = "native-tokio"))]
 impl ReferenceObserver {
     /// Construct a bounded capture observer.
     ///
@@ -194,6 +198,7 @@ impl ReferenceObserver {
     }
 }
 
+#[cfg(all(test, feature = "native-tokio"))]
 impl Observer for ReferenceObserver {
     fn descriptor(&self) -> ObserverDescriptor {
         self.descriptor.clone()

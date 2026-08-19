@@ -9,36 +9,12 @@ use finstack_ai_kernel::{
 };
 use tokio::sync::Notify;
 
-use super::fault::result_fault_code;
 use super::*;
 use crate::{
     CommitCoordinator, EventHubConfig, JournalStore, LoadRequest, LoadedSession, PortFuture,
     RunHandleError, RunStatus, RunTaskConfig, ShutdownOutcome, SnapshotReceipt, SnapshotRequest,
     StoreError, StoreHealth,
 };
-
-/// The other half of the folded-allocation fix (`stage_settlement.rs`'s
-/// `folded_allocation_error`): `RunHandleError::Middleware` must never tear
-/// the worker down. `ToolSettlement` deliberately still does — a genuine
-/// tool-settlement failure is a worker fault — which is exactly why a
-/// middleware fold's rejection has to be re-classified before it gets here.
-#[test]
-fn a_middleware_failure_is_not_a_worker_fault() {
-    assert_eq!(
-        result_fault_code(&Err(RunHandleError::Middleware {
-            code: Arc::from("stage_allocation_model_request_contract_mismatch"),
-        })),
-        None,
-        "a middleware fold failure must fail only the run, not the worker"
-    );
-    assert_eq!(
-        result_fault_code(&Err(RunHandleError::ToolSettlement {
-            code: "stage_allocation_model_request_contract_mismatch",
-        })),
-        Some("stage_allocation_model_request_contract_mismatch"),
-        "tool settlement stays a worker fault, so the re-classification is load-bearing"
-    );
-}
 
 struct BlockingStore {
     calls: AtomicUsize,

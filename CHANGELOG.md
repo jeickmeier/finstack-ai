@@ -59,6 +59,19 @@ unpublished.
 
 ### Changed
 
+- `finstack-ai-runtime` crate-root prelude no longer re-exports unused
+  error-code constants, reconcile helpers, the jitter trio, or
+  `LocalWorkflowDriver`. Dead middleware reconcile types are gone. A
+  later pass also demoted unused projection/SSE/observer helpers
+  (`assemble_context_projection`, `context_resume_action`,
+  `ReferenceObserver`, `SseFrameParser`, `ModelRequestValidation`). The
+  wire code `middleware_commit_required` stays. ADR-048
+  `SECRET_MAX_BYTES` / `secret_is_valid` stay crate-root public.
+- `WorkflowSession::respawn_owner` reinstalls the bound middleware chain
+  and context providers after recover. `Lane::resume` binds them from the
+  resolved agent so stage folds do not passthrough after suspend.
+- `mise run check-public-api` also dumps `finstack-ai-runtime` with
+  `--features native-tokio` and `--features wasm-host`.
 - `UnknownUsagePolicy::AllowWithinReservedMaximum` records no fabricated
   observed cost. A costless completion fails only when accrued cost is
   already at or above the configured maximum (`unknown_cost_usage`).
@@ -79,6 +92,8 @@ unpublished.
 
 ### Removed
 
+- Removed unused `FrameworkError` and `diagnostic_contains` from
+  `finstack-ai-runtime`.
 - Removed unused inherent methods `RecordDraft::validate_run_lineage` and
   `OperationSummary::invocation_effect_id` (1.0.0 pre-publication; no major
   bump). Callers read `RunRelation::parent_effect_id` directly.

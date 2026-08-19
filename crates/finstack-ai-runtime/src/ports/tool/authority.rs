@@ -9,7 +9,7 @@ use super::types::ToolCallContext;
 ///
 /// # Errors
 ///
-/// Returns [`TOOL_POLICY_DENIED`] when the scopes differ.
+/// Returns `tool_policy_denied` when the scopes differ.
 ///
 /// # Examples
 ///

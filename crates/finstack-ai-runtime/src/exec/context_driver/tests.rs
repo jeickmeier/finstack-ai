@@ -9,6 +9,7 @@ use finstack_ai_kernel::{
     Sensitivity, TextBlock, Timestamp, Version,
 };
 
+use crate::context::CONTEXT_RECOVERY_UNCERTAIN;
 use crate::context::{
     CommittedContextCall, ContextAuthority, ContextBudget, ContextCallContext, ContextContribution,
     ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
@@ -16,8 +17,8 @@ use crate::context::{
     InvocationResumeAction, map_context_reconcile_result,
 };
 use crate::{
-    AuthorizationContext, CONTEXT_RECOVERY_UNCERTAIN, CancellationSignal, PendingContextEffect,
-    PortFuture, ReconcileContext, RunCallContext,
+    AuthorizationContext, CancellationSignal, PendingContextEffect, PortFuture, ReconcileContext,
+    RunCallContext,
 };
 
 use super::commit::{chain_digest, derived_context_effect_id};

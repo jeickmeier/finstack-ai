@@ -7,20 +7,14 @@ use finstack_ai_kernel::{
     EffectRequested, EffectTag, EntryTag, EventTag, Id, IdTag, InteractionKind, InteractionRequest,
     InteractionTag, InvocationRecovery, LaneTag, Message, MessageRole, Metadata, OutputSpec,
     PipelinePosition, ProviderIds, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RawJson, RecordBody,
-    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, TextBlock, Timestamp,
-    ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
+    RecordEnvelope, RecordTag, RetrySafety, RunTag, Sensitivity, SessionTag, Stage, TextBlock,
+    Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock, Version,
 };
 
-#[cfg(feature = "native-tokio")]
-use crate::{AuthorizationContext, CancellationSignal, InvocationResumeAction, RunCallContext};
 use crate::{
     ContextAuthority, ContextItemKind, ContextProvenance, ModelName, ModelRequestDraft,
     ModelRequestLimits, ModelSettings, PortFuture,
 };
-#[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::EffectCompleted;
-#[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::PrincipalRef;
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
     let mut bytes = [0_u8; 16];
@@ -497,35 +491,6 @@ fn compaction_preserves_protected_bytes_tool_pair_atomicity_and_canonical_histor
     );
 }
 
-#[cfg(feature = "native-tokio")]
-fn run(effect_id: EffectId) -> RunCallContext {
-    RunCallContext {
-        locator: finstack_ai_kernel::OperationLocator::try_new(
-            "tenant-a",
-            id::<SessionTag>(1),
-            id::<LaneTag>(2),
-            id::<RunTag>(3),
-        )
-        .expect("locator"),
-        authorization: AuthorizationContext {
-            principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
-                .expect("principal"),
-            authentication_method: Arc::from("fixture"),
-            assurance_level: Arc::from("high"),
-            roles: Arc::from([]),
-            permitted_scopes: Arc::from([Arc::from("tenant-a")]),
-            safe_claims: Metadata::empty(),
-            policy_version: Arc::from("v1"),
-            decision_id: Arc::from("decision-1"),
-        },
-        effect_id,
-        attempt: 1,
-        deadline: None,
-        budget_scope_id: None,
-        cancellation: CancellationSignal::new(),
-    }
-}
-
 fn envelope(sequence: u64, body: RecordBody) -> RecordEnvelope {
     let events = (0..body
         .derived_event_count(RECORD_KIND_VERSION)
@@ -582,54 +547,6 @@ fn middleware_effect(
         None,
     )
     .expect("effect")
-}
-
-#[cfg(feature = "native-tokio")]
-#[tokio::test]
-async fn committed_middleware_cursor_is_reused_and_recorded_before_application() {
-    let descriptor = descriptor("fixture.committed", &[], &[]);
-    let input = StageInput::BeforeRun {
-        value: RawJson::parse(b"{}").expect("input"),
-    };
-    let effect_id = id::<EffectTag>(4);
-    let requested = middleware_effect(effect_id, &descriptor, &input);
-    let requested_envelope = envelope(1, RecordBody::EffectRequested(requested.clone()));
-    let middleware = Stub {
-        descriptor: descriptor.clone(),
-    };
-    let context = MiddlewareContext {
-        run: run(effect_id),
-        chain_digest: Digest::raw_json(b"middleware-chain"),
-        chain_index: 0,
-        compaction_resume: None,
-    };
-    let outcome =
-        CommittedMiddlewareCall::try_new(&requested_envelope, context, input, &descriptor)
-            .expect("committed guard")
-            .invoke(&middleware)
-            .await
-            .expect("invoke");
-    let completed = EffectCompleted::try_new(
-        effect_id,
-        requested.output_contract().clone(),
-        outcome.to_raw_json().expect("outcome"),
-        None,
-        Vec::new(),
-        ProviderIds::empty(),
-        None::<&str>,
-        None,
-    )
-    .expect("completion");
-    let completed_envelope = envelope(2, RecordBody::EffectCompleted(completed.clone()));
-    let recorded =
-        RecordedMiddlewareOutcome::try_from_records(&requested_envelope, &completed_envelope)
-            .expect("recorded");
-    assert_eq!(recorded.stage, Stage::BeforeRun);
-    assert_eq!(recorded.outcome, StageOutcome::Continue);
-    assert_eq!(
-        middleware_resume_action(&requested, Some(&completed)),
-        InvocationResumeAction::UseRecorded
-    );
 }
 
 #[test]

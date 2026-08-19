@@ -23,9 +23,11 @@ use crate::coordinator::{ModelDispatchSeed, ToolDispatchSeed};
 use crate::run_types::RunHandleError;
 use crate::tool::AssembledToolTerminal;
 use crate::{
-    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile, Model,
-    ModelContextProfileOverride, ModelError, ModelRequestDraft, ModelTerminal, RandomSource,
-    ResolvedToolCatalog, ToolError, UuidV7Generator, resolve_model_context_profile,
+    CancellationSignal, Clock, IdGenerationError, LockedModelContextProfile,
+    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelContextProfileOverride, ModelError,
+    ModelRequestDraft, ModelResumeAction, ModelTerminal, RandomSource, ResolvedToolCatalog,
+    TOOL_RECONCILIATION_UNSUPPORTED, ToolError, ToolResumeAction, UuidV7Generator,
+    resolve_model_context_profile,
 };
 
 pub(crate) use cancel::drain_idle_cancellation;
@@ -65,7 +67,6 @@ pub(crate) struct ToolDriverResult {
     pub(crate) result: Result<AssembledToolTerminal, ToolError>,
 }
 
-// --- extracted from task.rs 787-862 ---
 pub(crate) struct NestedSamplingPorts {
     pub(crate) model: Arc<dyn Model>,
     pub(crate) profile: LockedModelContextProfile,
@@ -164,6 +165,44 @@ impl RandomSource for ProgressRandom {
 pub(crate) fn model_handle_error(error: &ModelError) -> RunHandleError {
     RunHandleError::Model {
         code: Arc::from(error.code()),
+    }
+}
+
+/// Classify a model resume action without owning the native or host dispatcher.
+pub(crate) fn model_resume_retry_seed(
+    action: ModelResumeAction,
+    pending_seed: Option<ModelDispatchSeed>,
+) -> Result<Option<ModelDispatchSeed>, RunHandleError> {
+    match action {
+        ModelResumeAction::Retry => pending_seed
+            .ok_or(RunHandleError::ModelSettlement {
+                code: "model_resume_seed_missing",
+            })
+            .map(Some),
+        ModelResumeAction::SuspendUncertain => Err(RunHandleError::Model {
+            code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
+        }),
+        ModelResumeAction::NoOutstanding
+        | ModelResumeAction::UseRecorded
+        | ModelResumeAction::Reconcile
+        | ModelResumeAction::WaitExternal => Ok(None),
+    }
+}
+
+/// Classify a tool resume action without owning the native or host dispatcher.
+pub(crate) fn tool_resume_retry_seeds(
+    action: ToolResumeAction,
+    pending_seeds: Vec<ToolDispatchSeed>,
+) -> Result<Option<Vec<ToolDispatchSeed>>, RunHandleError> {
+    match action {
+        ToolResumeAction::Retry => Ok(Some(pending_seeds)),
+        ToolResumeAction::SuspendUncertain => Err(RunHandleError::Tool {
+            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
+        }),
+        ToolResumeAction::NoOutstanding
+        | ToolResumeAction::UseRecorded
+        | ToolResumeAction::Reconcile
+        | ToolResumeAction::WaitExternal => Ok(None),
     }
 }
 

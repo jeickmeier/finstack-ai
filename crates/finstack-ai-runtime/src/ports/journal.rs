@@ -646,6 +646,3 @@ impl StoreError {
         }
     }
 }
-
-/// Diagnostic store commit timestamp used only by implementations that have one.
-pub type StoreCommitTimestamp = Timestamp;

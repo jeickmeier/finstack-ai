@@ -9,7 +9,7 @@ use finstack_ai_kernel::{
     CancellationPropagation, CommittedBatch, ContentBlock, DeadlinePropagation, Digest, EntryId,
     ErrorCategory, ErrorDescriptor, Id, IdTag, KernelInput, LaneTag, Message, MessageRole,
     Metadata, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordEnvelope,
-    ReducerStageOutcome, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
+    ReducerStageOutcome, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
     RunSecurityContext, Sensitivity, SessionTag, Stage, StageCursor, StageSettled, TextBlock,
     Timestamp, ToolId, TransitionEnv, Version,
 };
@@ -46,5 +46,6 @@ include!("before_model.rs");
 include!("compaction.rs");
 include!("context_providers.rs");
 include!("prepare_context.rs");
+include!("recovery.rs");
 include!("stage_input.rs");
 include!("terminal_fold.rs");

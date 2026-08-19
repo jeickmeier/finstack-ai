@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{
     ArtifactRef, BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, Digest, EntryId,
-    ErrorDescriptor, InteractionRequest, Message, Metadata, ModelRequestId, PipelinePosition,
-    RawJson, RetryDirective, Sensitivity,
+    ErrorDescriptor, InteractionRequest, Message, Metadata, ModelRequestId, RawJson,
+    RetryDirective, Sensitivity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -282,11 +282,13 @@ impl StageInput {
         }
     }
 
-    /// Canonical raw JSON committed in `EffectInput::Middleware`.
+    /// Canonical raw JSON for one stage-input payload.
     ///
     /// # Errors
     ///
-    /// Returns a stable error when canonicalization fails.
+    /// Returns the historical `middleware_commit_required` code when
+    /// canonicalization fails. That string does not imply a committed
+    /// middleware effect.
     pub fn to_raw_json(&self) -> Result<RawJson, MiddlewareError> {
         RawJson::parse(canonical_bytes(self)?).map_err(|_| {
             MiddlewareError::stable(
@@ -440,7 +442,7 @@ pub enum StageOutcome {
 }
 
 impl StageOutcome {
-    /// Convert to canonical committed middleware output.
+    /// Convert to canonical stage-outcome JSON.
     ///
     /// # Errors
     ///
@@ -481,46 +483,6 @@ pub struct CompactionModelResume {
     pub resume_state: RawJson,
 }
 
-/// Outstanding middleware effect supplied to `reconcile`.
-///
-/// # Deprecated in place: never constructed in a run
-///
-/// Input to [`Middleware::reconcile`], which nothing calls. Under the
-/// aggregate-fold design a middleware invocation is never a committed effect,
-/// so no effect is ever outstanding and there is nothing to reconcile. Kept
-/// because it is frozen 1.0 public API that cannot be removed without a major
-/// version. See section 5 of the [`crate::middleware_driver`] module contract
-/// and the `middleware-aggregate-fold` ADR under `docs/implementation/adrs/`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingMiddlewareEffect {
-    /// Frozen input.
-    pub input: StageInput,
-    /// Committed component invocation.
-    pub invocation: ComponentInvocation,
-    /// Committed pipeline position.
-    pub pipeline: PipelinePosition,
-}
-
-/// Middleware reconciliation result.
-///
-/// # Deprecated in place: never produced in a run
-///
-/// Return type of [`Middleware::reconcile`]. See
-/// [`PendingMiddlewareEffect`] for why that path is dead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MiddlewareReconcileResult {
-    /// Normalized output is available.
-    Completed(Box<StageOutcome>),
-    /// The original invocation provably did not start.
-    NotStarted,
-    /// Reusing the same effect identity is safe.
-    RetrySafe,
-    /// The component cannot classify the effect.
-    Unknown,
-    /// A non-repeatable external action may have occurred.
-    NonRepeatable,
-}
-
 pub(super) fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, MiddlewareError> {
     serde_json_canonicalizer::to_vec(value).map_err(|_| {
         MiddlewareError::stable(
@@ -545,6 +507,7 @@ pub fn stage_name(stage: Stage) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn parse_stage(value: &str) -> Option<Stage> {
     Some(match value {
         "before_run" => Stage::BeforeRun,

@@ -84,13 +84,9 @@ impl CommitCoordinator {
     /// Exact peer of [`Self::pending_model_seed`] / [`Self::pending_tool_seeds`],
     /// built from the same private [`dispatch_security_context`]. Exists
     /// because that free fn is private to this module and the stage-driver
-    /// choke point (a later task, outside this module) cannot call it
-    /// directly. `None` before a run is accepted, matching the other seeds.
+    /// choke point cannot call it directly. `None` before a run is accepted,
+    /// matching the other seeds.
     #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
-    #[allow(
-        dead_code,
-        reason = "consumed by the stage-settlement choke point wired in a later task"
-    )]
     pub(crate) fn stage_dispatch_seed(&self) -> Option<StageDispatchSeed> {
         let state = self.kernel.state();
         let (locator, authorization, budget_scope_id) = dispatch_security_context(state)?;
@@ -228,10 +224,7 @@ pub(crate) struct TimerDispatchSeed {
 /// the exact peer of [`ModelDispatchSeed`] / [`ToolDispatchSeed`] for the
 /// middleware stage boundary rather than a model or tool effect.
 #[derive(Debug, Clone)]
-#[allow(
-    dead_code,
-    reason = "consumed by the stage-settlement choke point wired in a later task"
-)]
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) struct StageDispatchSeed {
     pub(crate) locator: OperationLocator,
     pub(crate) authorization: AuthorizationContext,

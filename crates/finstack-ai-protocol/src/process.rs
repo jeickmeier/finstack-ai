@@ -45,7 +45,7 @@ pub enum ProcessPreAuth {
 #[cfg(test)]
 mod tests {
     use super::ProcessPreAuth;
-    use crate::remote::{RemotePostAuth, decode_remote_post_auth};
+    use crate::remote::RemotePostAuth;
     use crate::wire::{PayloadFamily, VersionOffer, decode_envelope, encode_envelope};
     use crate::{decode, encode};
 
@@ -54,7 +54,7 @@ mod tests {
         let offer = VersionOffer::try_new(vec![1], 1, vec!["auth".into()]).expect("offer");
         let hello = ProcessPreAuth::ProcessClientHello { offer };
         let body = encode(&hello).expect("body");
-        assert!(decode_remote_post_auth(&body).is_err());
+        assert!(decode::<RemotePostAuth>(&body).is_err());
         assert!(decode::<RemotePostAuth>(&body).is_err());
         let env = encode_envelope(PayloadFamily::Process, 1, &hello).expect("env");
         assert!(decode_envelope::<RemotePostAuth>(&env, PayloadFamily::Remote).is_err());

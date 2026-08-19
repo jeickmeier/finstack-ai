@@ -20,17 +20,6 @@ pub enum PayloadFamily {
     Process,
 }
 
-impl PayloadFamily {
-    /// Stable wire string.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Remote => "remote",
-            Self::Process => "process",
-        }
-    }
-}
-
 /// Canonical-CBOR envelope around a family-specific body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

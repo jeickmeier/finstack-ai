@@ -189,6 +189,67 @@ fn driver_for(component: &str, stage: Stage, outcome: StageOutcome) -> StageDriv
     )
 }
 
+/// Counts `invoke` so a recover test can tell "chain ran" from "cursor only".
+struct Counting {
+    descriptor: MiddlewareDescriptor,
+    calls: Arc<AtomicUsize>,
+}
+
+impl crate::middleware::Middleware for Counting {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: crate::middleware::MiddlewareContext,
+        _input: crate::middleware::StageInput,
+    ) -> PortFuture<Result<StageOutcome, crate::middleware::MiddlewareError>> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async { Ok(StageOutcome::Continue) })
+    }
+}
+
+fn counting_driver(component: &str, stage: Stage, calls: &Arc<AtomicUsize>) -> StageDriver {
+    let middleware: Arc<dyn crate::middleware::Middleware> = Arc::new(Counting {
+        descriptor: descriptor(component, stage),
+        calls: Arc::clone(calls),
+    });
+    StageDriver::new(
+        Arc::new(
+            ResolvedMiddlewareChain::try_new(vec![MiddlewareRegistration { middleware }])
+                .expect("chain"),
+        ),
+        CancellationSignal::new(),
+    )
+}
+
+fn accepted_on(store: Arc<MemoryStore>) -> CommitCoordinator {
+    let mut coordinator = CommitCoordinator::new(store);
+    block_on(coordinator.submit(
+        env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
+        accept_input(RunLimits::empty()),
+    ))
+    .expect("accept");
+    coordinator
+}
+
+fn recover(store: Arc<MemoryStore>) -> CommitCoordinator {
+    block_on(CommitCoordinator::recover(store, id::<SessionTag>(1))).expect("recover")
+}
+
+fn prepare_context_settled() -> StageSettled {
+    StageSettled {
+        cursor: StageCursor {
+            cycle: 0,
+            stage: Stage::PrepareContext,
+        },
+        outcome: ReducerStageOutcome::ContextPrepared {
+            messages: Arc::from([user_message(4, "hi")]),
+        },
+    }
+}
+
 /// Deterministic, collision-free random source.
 #[derive(Default)]
 struct CountingRandom(AtomicU64);

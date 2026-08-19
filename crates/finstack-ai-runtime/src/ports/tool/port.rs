@@ -56,7 +56,7 @@ pub trait Toolset: PortObject {
 
     /// Resume a committed tool after the runtime fulfills nested sampling.
     ///
-    /// Default implementations reject with [`super::error::MCP_SAMPLING_UNSUPPORTED`].
+    /// Default implementations reject with `mcp_sampling_unsupported`.
     /// MCP sends the sample back to the server and finishes `tools/call`.
     ///
     /// # Errors

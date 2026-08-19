@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::coordinator::CommitCoordinatorError;
+use crate::coordinator::{CommitCoordinatorError, CommitOutcome};
 use crate::{EventHubConfig, Metadata, ModelStreamAssembler, ModelStreamLimits, ToolStreamLimits};
 
 /// Observable lifecycle of one owned runtime task.
@@ -258,4 +258,58 @@ pub enum RunHandleError {
         /// Stable middleware or driver code.
         code: Arc<str>,
     },
+}
+
+/// Worker-tearing fault code from a commit result, if any.
+///
+/// [`RunHandleError::Middleware`] is excluded: a middleware failure aborts
+/// only the submitting run and leaves the worker healthy.
+pub(crate) fn result_fault_code(
+    result: &Result<CommitOutcome, RunHandleError>,
+) -> Option<&'static str> {
+    match result {
+        Ok(outcome) => outcome.fault.map(|fault| fault.code),
+        Err(
+            RunHandleError::Faulted { code }
+            | RunHandleError::ModelSettlement { code }
+            | RunHandleError::ToolSettlement { code }
+            | RunHandleError::InteractionSettlement { code }
+            | RunHandleError::EventDelivery { code }
+            | RunHandleError::Coordinator(
+                CommitCoordinatorError::BoundaryFault { code }
+                | CommitCoordinatorError::Faulted { code }
+                | CommitCoordinatorError::EventDelivery { code },
+            ),
+        ) => Some(*code),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{RunHandleError, result_fault_code};
+
+    /// The other half of the folded-allocation fix
+    /// (`stage_settlement`'s `folded_allocation_error`):
+    /// [`RunHandleError::Middleware`] must never tear the worker down.
+    /// [`RunHandleError::ToolSettlement`] deliberately still does.
+    #[test]
+    fn a_middleware_failure_is_not_a_worker_fault() {
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::Middleware {
+                code: Arc::from("stage_allocation_model_request_contract_mismatch"),
+            })),
+            None,
+            "a middleware fold failure must fail only the run, not the worker"
+        );
+        assert_eq!(
+            result_fault_code(&Err(RunHandleError::ToolSettlement {
+                code: "stage_allocation_model_request_contract_mismatch",
+            })),
+            Some("stage_allocation_model_request_contract_mismatch"),
+            "tool settlement stays a worker fault, so the re-classification is load-bearing"
+        );
+    }
 }

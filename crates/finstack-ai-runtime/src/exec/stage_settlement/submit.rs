@@ -97,7 +97,7 @@ pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
 /// `stage_allocation` reports every admissibility rejection as
 /// [`RunHandleError::ToolSettlement`] — it was written for the tool-settlement
 /// path, where that classification is right. Both worker loops' `result_fault_code`
-/// (`task.rs:1173-1190`, `host_task.rs:1389-1406`) list `ToolSettlement` among
+/// (`run_types.rs` `result_fault_code`) list `ToolSettlement` among
 /// the variants that **tear down the command intake and set
 /// `RunStatus::Faulted`**. For a folded outcome that is the wrong blast radius:
 /// a middleware fold the kernel will not admit must fail the *run* that

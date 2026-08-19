@@ -19,14 +19,14 @@ use crate::run_types::{
 };
 use crate::settlement::{
     NestedSamplingPorts, SettlementSources, apply_interaction_resume, drain_idle_cancellation,
-    drive_due_polls, model_handle_error, next_due_poll_or_expiry, prepare_tool_batch_if_ready,
-    resume_pending_model_effect, resume_pending_tool_effects, validate_model_binding,
+    drive_due_polls, model_handle_error, model_resume_retry_seed, next_due_poll_or_expiry,
+    prepare_tool_batch_if_ready, resume_pending_model_effect, resume_pending_tool_effects,
+    tool_resume_retry_seeds, validate_model_binding,
 };
 use crate::{
-    CancellationSignal, Clock, CommitCoordinator, LockedModelContextProfile,
-    MODEL_RECONCILIATION_UNSUPPORTED, Model, ModelResumeAction, ModelWarmupContext,
-    MonotonicDeadline, RandomSource, ResolvedToolCatalog, TOOL_RECONCILIATION_UNSUPPORTED,
-    ToolResumeAction, ToolStreamAssembler,
+    CancellationSignal, Clock, CommitCoordinator, LockedModelContextProfile, Model,
+    ModelWarmupContext, MonotonicDeadline, RandomSource, ResolvedToolCatalog,
+    TOOL_RECONCILIATION_UNSUPPORTED, ToolStreamAssembler,
 };
 
 use super::handle::RunHandle;
@@ -51,28 +51,15 @@ where
         cancellation,
     ))
     .await?;
-    match action {
-        ModelResumeAction::Retry => {
-            let seed = coordinator
-                .pending_model_seed()
-                .ok_or(RunHandleError::ModelSettlement {
-                    code: "model_resume_seed_missing",
-                })?;
-            dispatcher
-                .resume_request(seed)
-                .await
-                .map_err(|error| RunHandleError::Model {
-                    code: Arc::from(error.code),
-                })
-        }
-        ModelResumeAction::SuspendUncertain => Err(RunHandleError::Model {
-            code: Arc::from(MODEL_RECONCILIATION_UNSUPPORTED),
-        }),
-        ModelResumeAction::NoOutstanding
-        | ModelResumeAction::UseRecorded
-        | ModelResumeAction::Reconcile
-        | ModelResumeAction::WaitExternal => Ok(()),
-    }
+    let Some(seed) = model_resume_retry_seed(action, coordinator.pending_model_seed())? else {
+        return Ok(());
+    };
+    dispatcher
+        .resume_request(seed)
+        .await
+        .map_err(|error| RunHandleError::Model {
+            code: Arc::from(error.code),
+        })
 }
 
 async fn resume_tool_effects<C, R>(
@@ -87,26 +74,18 @@ where
     R: RandomSource + Send + Sync + 'static,
 {
     let action = resume_pending_tool_effects(coordinator, catalog, sources, cancellation).await?;
-    match action {
-        ToolResumeAction::Retry => {
-            for seed in coordinator.pending_tool_seeds() {
-                dispatcher
-                    .resume_call(seed)
-                    .await
-                    .map_err(|error| RunHandleError::Tool {
-                        code: Arc::from(error.code),
-                    })?;
-            }
-            Ok(())
-        }
-        ToolResumeAction::SuspendUncertain => Err(RunHandleError::Tool {
-            code: Arc::from(TOOL_RECONCILIATION_UNSUPPORTED),
-        }),
-        ToolResumeAction::NoOutstanding
-        | ToolResumeAction::UseRecorded
-        | ToolResumeAction::Reconcile
-        | ToolResumeAction::WaitExternal => Ok(()),
+    let Some(seeds) = tool_resume_retry_seeds(action, coordinator.pending_tool_seeds())? else {
+        return Ok(());
+    };
+    for seed in seeds {
+        dispatcher
+            .resume_call(seed)
+            .await
+            .map_err(|error| RunHandleError::Tool {
+                code: Arc::from(error.code),
+            })?;
     }
+    Ok(())
 }
 
 /// Replace the sibling poll wait with the latest committed or live-only deadline.

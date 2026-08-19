@@ -5,9 +5,10 @@ use thiserror::Error;
 
 use crate::error::{PortErrorData, PortErrorInvalid};
 
+#[cfg(test)]
+use super::COMPACTION_MODEL_NOT_AUTHORIZED;
 use super::{
-    COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED, COMPACTION_RESULT_INVALID,
-    MIDDLEWARE_COMMIT_REQUIRED, MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+    COMPACTION_BUDGET_EXCEEDED, COMPACTION_RESULT_INVALID, MIDDLEWARE_OUTCOME_NOT_ALLOWED,
 };
 
 /// Stable middleware error.
@@ -67,13 +68,6 @@ impl MiddlewareError {
         }
     }
 
-    pub(crate) fn commit_required() -> Self {
-        Self::stable(
-            MIDDLEWARE_COMMIT_REQUIRED,
-            "middleware invocation is not backed by the exact committed effect",
-        )
-    }
-
     pub(crate) fn outcome_not_allowed() -> Self {
         Self::stable(
             MIDDLEWARE_OUTCOME_NOT_ALLOWED,
@@ -88,6 +82,7 @@ impl MiddlewareError {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn compaction_model_not_authorized() -> Self {
         Self::stable(
             COMPACTION_MODEL_NOT_AUTHORIZED,
@@ -98,7 +93,7 @@ impl MiddlewareError {
     /// Stable error code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.data.code.as_str()
+        self.data.code()
     }
 
     /// Safe error descriptor suitable for durable failure records.
@@ -107,10 +102,10 @@ impl MiddlewareError {
         ErrorDescriptor {
             code: self.data.code.clone(),
             message: Arc::clone(&self.data.message),
-            category: self.data.category,
+            category: self.data.category(),
             retryable: false,
             identifiers: finstack_ai_kernel::ErrorIdentifiers::default(),
-            safe_details: self.data.metadata.clone(),
+            safe_details: self.data.metadata().clone(),
         }
     }
 }

@@ -23,7 +23,7 @@ use crate::services::identity_map::{ExternalIdentityKey, ExternalIdentityMap, Id
 
 /// In-process owner of one `(session_id, lane_id)` guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LaneOwner {
+pub(crate) enum LaneOwner {
     /// Create, navigate, or conversation mutation in flight.
     Structural,
     /// One accepted non-terminal run.
@@ -150,27 +150,14 @@ impl SessionError {
 
     fn recover(error: &CommitCoordinatorError) -> Self {
         Self::Recover {
-            code: commit_code(error),
+            code: error.stable_code(),
         }
     }
 
     fn commit(error: &CommitCoordinatorError) -> Self {
         Self::Commit {
-            code: commit_code(error),
+            code: error.stable_code(),
         }
-    }
-}
-
-fn commit_code(error: &CommitCoordinatorError) -> &'static str {
-    match error {
-        CommitCoordinatorError::Decision { code }
-        | CommitCoordinatorError::Faulted { code }
-        | CommitCoordinatorError::BoundaryFault { code }
-        | CommitCoordinatorError::EventDelivery { code } => code,
-        CommitCoordinatorError::SidecarConflict => "sidecar_conflict",
-        CommitCoordinatorError::AppendBatchIdCardinality => "append_batch_id_cardinality",
-        CommitCoordinatorError::Store(_) => "store_failure",
-        CommitCoordinatorError::ModelRequest { .. } => "model_request",
     }
 }
 

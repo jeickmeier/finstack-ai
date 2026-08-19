@@ -55,6 +55,8 @@ pub use context::{
 pub use error::ModelError;
 pub use identity::{ModelDescriptor, ModelName};
 pub use port::{Model, validate_model_request};
+#[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+pub(crate) use port::{parse_committed_model_request, stable_model_dispatch_code};
 pub use profile::{
     InputCapabilities, LockedModelContextProfile, ModelCapabilities, ModelContextProfile,
     ModelContextProfileOverride, StructuredOutputCapability, TokenEstimatorRef,
@@ -64,13 +66,12 @@ pub use provider_util::{
     AnthropicMessagesAssembly, Authentication, CredentialReference, CredentialRejected,
     CredentialStore, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
     OpenAiResponsesAssembly, SECRET_MAX_BYTES, SecretRejected, SecretString, SseEvent,
-    SseEventParser, SseFrameError, SseFrameParser, SseParseError, StreamNormError, StreamNormKind,
-    secret_is_valid,
+    SseEventParser, SseParseError, StreamNormError, StreamNormKind, secret_is_valid,
 };
 pub use request::{
     ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft, ModelRequestLimits,
-    ModelRequestValidation, ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall,
-    SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall, SideEffectClass,
+    ToolDeferralSupport, ToolSpec,
 };
 pub use stream::{
     AssembledModelStream, ModelEventStream, ModelProgress, ModelStreamAssembler, ModelStreamItem,

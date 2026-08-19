@@ -13,6 +13,8 @@ use crate::{APPEND_BATCH_MAX_BYTES, encode};
 /// Replay fields hashed into the envelope checksum (TDD §12.1).
 ///
 /// Excludes diagnostic `committed_at` and the checksum field itself.
+/// Field names and serde order are the hashed input; do not rename or reorder
+/// them.
 #[derive(Debug, Clone, Serialize)]
 struct EnvelopeChecksumView<'a> {
     format_version: u16,
@@ -29,47 +31,6 @@ struct EnvelopeChecksumView<'a> {
     previous_checksum: Option<Digest>,
     derived_event_ids: &'a [finstack_ai_kernel::EventId],
     body: &'a RecordBody,
-}
-
-impl<'a> EnvelopeChecksumView<'a> {
-    fn from_parts(
-        draft: &'a RecordDraft,
-        sequence: u64,
-        payload_digest: Digest,
-        previous_checksum: Option<Digest>,
-    ) -> Self {
-        Self {
-            format_version: draft.format_version(),
-            kind_version: draft.kind_version(),
-            record_id: draft.record_id(),
-            session_id: draft.session_id(),
-            lane_id: draft.lane_id(),
-            run_id: draft.run_id(),
-            sequence,
-            timestamp: draft.timestamp(),
-            payload_digest,
-            previous_checksum,
-            derived_event_ids: draft.derived_event_ids(),
-            body: draft.body(),
-        }
-    }
-
-    fn from_envelope(envelope: &'a RecordEnvelope) -> Self {
-        Self {
-            format_version: envelope.format_version(),
-            kind_version: envelope.kind_version(),
-            record_id: envelope.record_id(),
-            session_id: envelope.session_id(),
-            lane_id: envelope.lane_id(),
-            run_id: envelope.run_id(),
-            sequence: envelope.sequence(),
-            timestamp: envelope.timestamp(),
-            payload_digest: envelope.payload_digest(),
-            previous_checksum: envelope.previous_checksum(),
-            derived_event_ids: envelope.derived_event_ids(),
-            body: envelope.body(),
-        }
-    }
 }
 
 /// Domain-separated SHA-256 of canonical-CBOR `RecordBody` bytes.
@@ -91,7 +52,20 @@ pub fn payload_digest(body: &RecordBody) -> Result<Digest, ProtocolError> {
 ///
 /// Returns codec or digest-domain failures.
 pub fn envelope_checksum(envelope: &RecordEnvelope) -> Result<Digest, ProtocolError> {
-    checksum_of(&EnvelopeChecksumView::from_envelope(envelope))
+    checksum_of(&EnvelopeChecksumView {
+        format_version: envelope.format_version(),
+        kind_version: envelope.kind_version(),
+        record_id: envelope.record_id(),
+        session_id: envelope.session_id(),
+        lane_id: envelope.lane_id(),
+        run_id: envelope.run_id(),
+        sequence: envelope.sequence(),
+        timestamp: envelope.timestamp(),
+        payload_digest: envelope.payload_digest(),
+        previous_checksum: envelope.previous_checksum(),
+        derived_event_ids: envelope.derived_event_ids(),
+        body: envelope.body(),
+    })
 }
 
 /// Assign sequence and fill payload digest plus envelope checksum.
@@ -106,12 +80,20 @@ pub fn commit_record(
     committed_at: Option<Timestamp>,
 ) -> Result<RecordEnvelope, ProtocolError> {
     let payload_digest = payload_digest(draft.body())?;
-    let checksum = checksum_of(&EnvelopeChecksumView::from_parts(
-        draft,
+    let checksum = checksum_of(&EnvelopeChecksumView {
+        format_version: draft.format_version(),
+        kind_version: draft.kind_version(),
+        record_id: draft.record_id(),
+        session_id: draft.session_id(),
+        lane_id: draft.lane_id(),
+        run_id: draft.run_id(),
         sequence,
+        timestamp: draft.timestamp(),
         payload_digest,
         previous_checksum,
-    ))?;
+        derived_event_ids: draft.derived_event_ids(),
+        body: draft.body(),
+    })?;
     RecordEnvelope::try_new(
         draft.format_version(),
         draft.kind_version(),
@@ -232,7 +214,7 @@ pub fn verify_chain_from(
 /// # Errors
 ///
 /// Returns a limit failure when the record count or byte sum exceeds v1 ceilings.
-pub fn batch_canonical_len(envelopes: &[RecordEnvelope]) -> Result<usize, ProtocolError> {
+fn batch_canonical_len(envelopes: &[RecordEnvelope]) -> Result<usize, ProtocolError> {
     if envelopes.len() > APPEND_BATCH_MAX_RECORDS {
         return Err(ProtocolError::limit(
             "batch_records",

@@ -17,10 +17,9 @@ use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, BoundedMap, BudgetChargeReceipt, BudgetChargeRequest,
     BudgetPropagation, BudgetReleaseReceipt, BudgetReleaseRequest, BudgetRequest,
     BudgetReservationReceipt, BudgetReserveRequest, CancellationPropagation, ChildPlacement,
-    ChildRunLocator, ComponentId, ComponentInvocation, ComponentRef, ContentBlock,
-    DeadlinePropagation, Digest, EffectCompleted, EffectInput, EffectKind, EffectOutputContract,
-    EffectOutputKind, EffectRequested, Id, IdTag, InteractionKind, InteractionRequest,
-    InteractionTag, InvocationRecovery, KernelInput, LaneTag, Message, MessageRole, Metadata,
+    ChildRunLocator, ComponentId, ComponentRef, ContentBlock, DeadlinePropagation, Digest,
+    EffectCompleted, EffectOutputContract, EffectOutputKind, Id, IdTag, InteractionKind,
+    InteractionRequest, InteractionTag, KernelInput, LaneTag, Message, MessageRole, Metadata,
     ModelSettled, ModelSettlement, OperationLocator, PrincipalPropagation, PrincipalRef,
     ProviderIds, RawJson, RecordTag, ReducerStageOutcome, RetrySafety, RunAccepted, RunLimits,
     RunPhase, RunPropagationPolicy, RunRelation, RunRelationKind, RunSecurityContext, SessionTag,
@@ -916,39 +915,4 @@ pub(crate) fn release_request() -> BudgetReleaseRequest {
         request_digest: BudgetReleaseRequest::compute_digest(id(342), id(343), id(3))
             .expect("digest"),
     }
-}
-
-pub(crate) fn middleware_contract() -> EffectOutputContract {
-    EffectOutputContract {
-        kind: EffectOutputKind::MiddlewareOutcome,
-        schema_version: 1,
-        schema_digest: Digest::raw_json(br#"{"type":"middleware"}"#),
-    }
-}
-
-pub(crate) fn middleware_request(recovery: InvocationRecovery) -> EffectRequested {
-    EffectRequested::try_new(
-        id(10),
-        EffectKind::Middleware,
-        None,
-        Some(ComponentInvocation {
-            component: ComponentId::parse("finstack.middleware.compact").expect("component"),
-            version: Version {
-                major: 1,
-                minor: 0,
-                patch: 0,
-            },
-            configuration_digest: Digest::raw_json(b"{}"),
-            recovery,
-        }),
-        None,
-        middleware_contract(),
-        EffectInput::Middleware {
-            stage: Arc::from("before_model"),
-            input: RawJson::parse("{}").expect("input"),
-        },
-        RetrySafety::SafeToRetry,
-        None,
-    )
-    .expect("requested")
 }

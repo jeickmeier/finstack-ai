@@ -1,28 +1,62 @@
-#[test]
-fn prefix_c1_through_c5() {
-    let requested = middleware_request(InvocationRecovery::NonRepeatable);
-    assert_eq!(
-        middleware_resume_action(&requested, None),
-        InvocationResumeAction::SuspendUncertain,
-        "C1 missing durable summary is uncertain"
-    );
+async fn recorded_stages(store: &Arc<dyn JournalStore>) -> Vec<Stage> {
+    let loaded = store
+        .load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        })
+        .await
+        .expect("load");
+    loaded
+        .committed_batches
+        .iter()
+        .flat_map(|batch| batch.records.iter())
+        .filter_map(|envelope| match envelope.body() {
+            RecordBody::StageOutcomeRecorded(outcome) => Some(outcome.cursor.stage),
+            _ => None,
+        })
+        .collect()
+}
 
-    let completed = EffectCompleted::try_new(
-        requested.effect_id(),
-        middleware_contract(),
-        RawJson::parse(r#"{"ok":true}"#).expect("output"),
-        None,
-        vec![],
-        ProviderIds::empty(),
-        Some("mw-1"),
-        None,
-    )
-    .expect("completed");
+#[tokio::test]
+async fn prefix_c1_through_c5() {
+    let store = memory_store();
+    let coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    drop(coordinator);
+    let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        middleware_resume_action(&requested, Some(&completed)),
-        InvocationResumeAction::UseRecorded,
-        "C2 recorded inline outcome replays"
+        recovered.state().phase,
+        Some(RunPhase::BeforeRun),
+        "C1 missing StageOutcomeRecorded leaves the BeforeRun cursor open"
     );
+    assert!(
+        recorded_stages(&(Arc::clone(&store) as Arc<dyn JournalStore>))
+            .await
+            .is_empty(),
+        "C1 journal has no StageOutcomeRecorded; chain re-run is asserted in runtime recovery tests"
+    );
+    assert_legal("C1", recovered.state().phase, LegalRestore::Retryable);
+
+    let store = memory_store();
+    let mut coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    coordinator
+        .submit(
+            env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+            stage(Stage::BeforeRun, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("before run");
+    drop(coordinator);
+    let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    assert_eq!(
+        recorded_stages(&(Arc::clone(&store) as Arc<dyn JournalStore>)).await,
+        vec![Stage::BeforeRun],
+        "C2 journal has a recorded BeforeRun"
+    );
+    assert_eq!(
+        recovered.state().phase,
+        Some(RunPhase::PreparingContext),
+        "C2 recover advances past the recorded stage"
+    );
+    assert_legal("C2", recovered.state().phase, LegalRestore::Retryable);
 
     let content = b"required-summary";
     let scope = ArtifactScope {
@@ -65,10 +99,31 @@ fn prefix_c1_through_c5() {
         ARTIFACT_INTEGRITY_FAILURE
     );
 
-    let recompute = middleware_request(InvocationRecovery::RecomputeSafe);
+    let store = memory_store();
+    let mut coordinator = accept_run(Arc::clone(&store) as Arc<dyn JournalStore>).await;
+    coordinator
+        .submit(
+            env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+            stage(Stage::BeforeRun, ReducerStageOutcome::Continue),
+        )
+        .await
+        .expect("before run");
+    drop(coordinator);
+    let recovered = recover(Arc::clone(&store) as Arc<dyn JournalStore>).await;
     assert_eq!(
-        middleware_resume_action(&recompute, None),
-        InvocationResumeAction::Recompute,
-        "C5 disposable checkpoint rebuilds"
+        recorded_stages(&(Arc::clone(&store) as Arc<dyn JournalStore>)).await,
+        vec![Stage::BeforeRun]
     );
+    assert!(
+        !recorded_stages(&(Arc::clone(&store) as Arc<dyn JournalStore>))
+            .await
+            .contains(&Stage::PrepareContext),
+        "C5 journal has no PrepareContext StageOutcomeRecorded"
+    );
+    assert_eq!(
+        recovered.state().phase,
+        Some(RunPhase::PreparingContext),
+        "C5 missing PrepareContext record leaves the PrepareContext cursor open"
+    );
+    assert_legal("C5", recovered.state().phase, LegalRestore::Retryable);
 }

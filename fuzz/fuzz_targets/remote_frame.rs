@@ -2,8 +2,8 @@
 
 use finstack_ai_protocol::{
     POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PayloadFamily, ProcessPreAuth,
-    RemotePostAuth, RemotePreAuth, decode_envelope, decode_frame, decode_frame_len,
-    decode_remote_post_auth, decode_remote_pre_auth, select_version,
+    RemotePostAuth, RemotePreAuth, decode, decode_envelope, decode_frame, decode_frame_len,
+    select_version,
 };
 use libfuzzer_sys::fuzz_target;
 
@@ -45,8 +45,8 @@ fuzz_target!(|data: &[u8]| {
         );
     }
 
-    let _ = decode_remote_pre_auth(payload);
-    let _ = decode_remote_post_auth(payload);
+    let _ = decode::<RemotePreAuth>(payload);
+    let _ = decode::<RemotePostAuth>(payload);
     if let Ok(post) = decode_envelope::<RemotePostAuth>(payload, PayloadFamily::Remote) {
         assert_eq!(post.payload_family(), PayloadFamily::Remote);
         if post.protocol_version() == 0 {

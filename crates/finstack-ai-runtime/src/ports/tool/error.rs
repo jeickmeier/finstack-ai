@@ -86,8 +86,8 @@ impl ToolError {
             metadata,
             TOOL_TEXT_MAX_BYTES,
         )?;
-        if let Some(expected) = reserved_category(data.code.as_str())
-            && (data.category != expected || data.retryable)
+        if let Some(expected) = reserved_category(data.code())
+            && (data.category() != expected || data.retryable())
         {
             return Err(PortErrorInvalid::InvalidClassification);
         }
@@ -112,31 +112,31 @@ impl ToolError {
     /// Stable adapter code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.data.code.as_str()
+        self.data.code()
     }
 
     /// Stable framework category.
     #[must_use]
     pub const fn category(&self) -> ErrorCategory {
-        self.data.category
+        self.data.category()
     }
 
     /// Retryability classification.
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        self.data.retryable
+        self.data.retryable()
     }
 
     /// Safe bounded message.
     #[must_use]
     pub fn message(&self) -> &str {
-        &self.data.message
+        self.data.message()
     }
 
     /// Bounded namespaced safe metadata.
     #[must_use]
     pub const fn metadata(&self) -> &Metadata {
-        &self.data.metadata
+        self.data.metadata()
     }
 
     /// Recover a durable HITL request from [`TOOL_INTERACTION_REQUIRED`] metadata.
@@ -164,13 +164,13 @@ impl ToolError {
     /// Returns a registration error only if an internal invariant is violated.
     pub fn to_descriptor(&self) -> Result<ErrorDescriptor, Self> {
         let mut descriptor = ErrorDescriptor::new(
-            self.data.code.as_str(),
-            self.data.message.as_ref(),
-            self.data.category,
-            self.data.retryable,
+            self.data.code(),
+            self.data.message(),
+            self.data.category(),
+            self.data.retryable(),
         )
         .map_err(|_| Self::registration("tool error descriptor is invalid"))?;
-        descriptor.safe_details = self.data.metadata.clone();
+        descriptor.safe_details = self.data.metadata().clone();
         Ok(descriptor)
     }
 }

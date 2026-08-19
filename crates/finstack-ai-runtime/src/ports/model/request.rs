@@ -266,7 +266,7 @@ pub struct ModelDeferral {
 
 /// Successful pre-commit request validation result.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelRequestValidation {
+pub(crate) struct ModelRequestValidation {
     /// Exact canonical request bytes.
     pub canonical_request: Arc<[u8]>,
     /// Bound model-supplied token estimate.

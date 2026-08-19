@@ -62,8 +62,8 @@ impl ModelError {
             metadata,
             STREAM_TEXT_MAX_BYTES,
         )?;
-        if let Some(expected) = reserved_adapter_category(data.code.as_str())
-            && (data.category != expected || data.retryable)
+        if let Some(expected) = reserved_adapter_category(data.code())
+            && (data.category() != expected || data.retryable())
         {
             return Err(PortErrorInvalid::InvalidClassification);
         }
@@ -85,31 +85,31 @@ impl ModelError {
     /// Stable adapter code.
     #[must_use]
     pub fn code(&self) -> &str {
-        self.data.code.as_str()
+        self.data.code()
     }
 
     /// Stable framework category.
     #[must_use]
     pub const fn category(&self) -> ErrorCategory {
-        self.data.category
+        self.data.category()
     }
 
     /// Retryability classification.
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        self.data.retryable
+        self.data.retryable()
     }
 
     /// Safe bounded message.
     #[must_use]
     pub fn message(&self) -> &str {
-        &self.data.message
+        self.data.message()
     }
 
     /// Bounded namespaced safe metadata.
     #[must_use]
     pub const fn metadata(&self) -> &Metadata {
-        &self.data.metadata
+        self.data.metadata()
     }
 
     /// Convert to the kernel's source-free durable descriptor.
@@ -119,15 +119,15 @@ impl ModelError {
     /// Returns a stable request error only if an internal invariant is violated.
     pub fn to_descriptor(&self) -> Result<ErrorDescriptor, ModelError> {
         let mut descriptor = ErrorDescriptor::new(
-            self.data.code.as_str(),
-            self.data.message.as_ref(),
-            self.data.category,
-            self.data.retryable,
+            self.data.code(),
+            self.data.message(),
+            self.data.category(),
+            self.data.retryable(),
         )
         .map_err(|_| {
             Self::validation(MODEL_REQUEST_INVALID, "model error descriptor is invalid")
         })?;
-        descriptor.safe_details = self.data.metadata.clone();
+        descriptor.safe_details = self.data.metadata().clone();
         Ok(descriptor)
     }
 }

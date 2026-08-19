@@ -11,8 +11,9 @@ mod native {
 
     use finstack_ai_kernel::{LaneId, OperationLocator, SessionId};
     use finstack_ai_runtime::{
-        ExternalClock, LockedModelContextProfile, Model, ModelContextProfileOverride,
-        ResolvedToolCatalog, SessionError, WorkflowSession, resolve_model_context_profile,
+        ContextProvider, ExternalClock, LockedModelContextProfile, Model,
+        ModelContextProfileOverride, ResolvedToolCatalog, SessionError, WorkflowSession,
+        resolve_model_context_profile,
     };
 
     use super::{AGENT_RUN_INVALID_CONFIGURATION, Agent, AgentRun, AgentRunError};
@@ -116,9 +117,19 @@ mod native {
         .map_err(|error| workflow_error(&error))
         .and_then(|session| {
             agent.validate_restored_mask(&session.last_state().active_capabilities)?;
+            let providers: Arc<[Arc<dyn ContextProvider>]> = agent
+                .resolved
+                .run_plan()
+                .context_providers()
+                .iter()
+                .map(|component| Arc::clone(component.handle()))
+                .collect::<Vec<_>>()
+                .into();
             Ok(session
                 .with_ports(model, profile, catalog)
-                .with_capability_owners(agent.capability_index().as_arc_owners()))
+                .with_capability_owners(agent.capability_index().as_arc_owners())
+                .with_middleware_chain(Arc::clone(agent.resolved.run_plan().middleware_chain()))
+                .with_context_providers(providers))
         })
     }
 
@@ -184,8 +195,10 @@ impl crate::Lane {
     /// Recover the parked run and respawn [`finstack_ai_runtime::RunTaskOwner`].
     ///
     /// Restore uses [`finstack_ai_runtime::WorkflowSession::trusted`] plus
-    /// [`finstack_ai_runtime::WorkflowSession::with_ports`] and the
-    /// local-workflow restart respawn path.
+    /// [`finstack_ai_runtime::WorkflowSession::with_ports`],
+    /// [`finstack_ai_runtime::WorkflowSession::with_middleware_chain`],
+    /// [`finstack_ai_runtime::WorkflowSession::with_context_providers`],
+    /// and the local-workflow restart respawn path.
     ///
     /// # Errors
     ///

@@ -16,8 +16,9 @@ use crate::run_types::SameIdentityRetryPolicy;
 use crate::settlement::ModelDriverResult;
 use crate::{
     CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
-    ModelError, ModelProgress, ModelRequest, ModelRequestDraft, ModelStreamAssembler,
-    ModelTerminal, MonotonicDeadline, PortFuture, RunCallContext, validate_model_request,
+    ModelError, ModelProgress, ModelRequest, ModelStreamAssembler,
+    ModelTerminal, MonotonicDeadline, PortFuture, RunCallContext, parse_committed_model_request,
+    stable_model_dispatch_code,
 };
 
 pub(crate) struct ModelJob {
@@ -78,34 +79,6 @@ impl ModelDispatcher {
         })
         .await
     }
-
-    fn parse_and_validate(
-        &self,
-        raw: &finstack_ai_kernel::RawJson,
-    ) -> Result<ModelRequestDraft, ModelError> {
-        let draft: ModelRequestDraft = serde_json::from_slice(raw.as_bytes()).map_err(|_| {
-            ModelError::try_new(
-                crate::MODEL_REQUEST_INVALID,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                false,
-                "committed model request draft is invalid",
-                finstack_ai_kernel::Metadata::empty(),
-            )
-            .expect("frozen model request error")
-        })?;
-        if draft.canonical_bytes()?.as_slice() != raw.as_bytes() {
-            return Err(ModelError::try_new(
-                crate::MODEL_REQUEST_INVALID,
-                finstack_ai_kernel::ErrorCategory::Validation,
-                false,
-                "model request draft is not the canonical committed DTO",
-                finstack_ai_kernel::Metadata::empty(),
-            )
-            .expect("frozen model request error"));
-        }
-        validate_model_request(self.model.as_ref(), &draft, &self.profile)?;
-        Ok(draft)
-    }
 }
 
 impl PostCommitDispatcher for ModelDispatcher {
@@ -116,10 +89,10 @@ impl PostCommitDispatcher for ModelDispatcher {
         let ReducerStageOutcome::ModelRequestPrepared { request, .. } = &settled.outcome else {
             return Ok(());
         };
-        self.parse_and_validate(request)
+        parse_committed_model_request(self.model.as_ref(), &self.profile, request)
             .map(|_| ())
             .map_err(|error| DispatchError {
-                code: stable_dispatch_code(error.code()),
+                code: stable_model_dispatch_code(error.code()),
             })
     }
 
@@ -161,16 +134,17 @@ impl PostCommitDispatcher for ModelDispatcher {
                         })
                     });
                 };
-                let draft = match self.parse_and_validate(raw) {
-                    Ok(draft) => draft,
-                    Err(error) => {
-                        return Box::pin(async move {
-                            Err(DispatchError {
-                                code: stable_dispatch_code(error.code()),
-                            })
-                        });
-                    }
-                };
+                let draft =
+                    match parse_committed_model_request(self.model.as_ref(), &self.profile, raw) {
+                        Ok(draft) => draft,
+                        Err(error) => {
+                            return Box::pin(async move {
+                                Err(DispatchError {
+                                    code: stable_model_dispatch_code(error.code()),
+                                })
+                            });
+                        }
+                    };
                 let cancellation = self.parent.child();
                 {
                     let Ok(mut active) = self.active.lock() else {
@@ -592,18 +566,6 @@ where
             }
             Err(error) => return Err(error),
         }
-    }
-}
-
-fn stable_dispatch_code(code: &str) -> &'static str {
-    match code {
-        crate::MODEL_REQUEST_INVALID => crate::MODEL_REQUEST_INVALID,
-        crate::MODEL_PROFILE_INVALID => crate::MODEL_PROFILE_INVALID,
-        crate::MODEL_PROFILE_RELAXATION => crate::MODEL_PROFILE_RELAXATION,
-        crate::MODEL_PROFILE_OVERRIDE_NOT_ALLOWED => crate::MODEL_PROFILE_OVERRIDE_NOT_ALLOWED,
-        crate::MODEL_ESTIMATOR_MISMATCH => crate::MODEL_ESTIMATOR_MISMATCH,
-        crate::MODEL_CONTEXT_LIMIT_EXCEEDED => crate::MODEL_CONTEXT_LIMIT_EXCEEDED,
-        _ => "model_request_invalid",
     }
 }
 

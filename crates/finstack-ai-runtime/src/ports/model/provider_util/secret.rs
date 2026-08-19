@@ -15,7 +15,7 @@ pub const SECRET_MAX_BYTES: usize = 16 * 1_024;
 pub enum SecretRejected {
     /// Empty secret.
     Empty,
-    /// Longer than [`SECRET_MAX_BYTES`].
+    /// Longer than the 16 KiB secret ceiling.
     TooLong,
     /// Contains a NUL or a non-ASCII byte.
     NonAscii,
@@ -61,8 +61,15 @@ impl fmt::Debug for SecretString {
 
 /// Whether a configured secret is non-empty, bounded, and NUL-free.
 ///
-/// This helper keeps the historical NUL check used by existing adapters.
-/// [`SecretString`] is stricter: it also rejects non-ASCII bytes.
+/// This helper keeps the historical NUL check used by existing adapters
+/// (ADR-048). [`SecretString`] is stricter: it also rejects non-ASCII bytes.
+///
+/// ```
+/// use finstack_ai_runtime::secret_is_valid;
+///
+/// assert!(secret_is_valid("sk-test"));
+/// assert!(!secret_is_valid(""));
+/// ```
 #[must_use]
 pub fn secret_is_valid(value: &str) -> bool {
     !value.is_empty() && value.len() <= SECRET_MAX_BYTES && !value.as_bytes().contains(&0)

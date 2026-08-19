@@ -1,7 +1,9 @@
 use finstack_ai_kernel::{
-    ComponentId, EffectCompleted, EffectInput, EffectKind, EffectOutputKind, EffectRequested,
-    InvocationRecovery, RecordBody, RecordEnvelope, RetrySafety,
+    ComponentId, EffectInput, EffectKind, EffectOutputKind, EffectRequested, RecordBody,
+    RecordEnvelope, RetrySafety,
 };
+#[cfg(all(test, feature = "native-tokio"))]
+use finstack_ai_kernel::{EffectCompleted, InvocationRecovery};
 
 use crate::ReconcileContext;
 
@@ -100,7 +102,7 @@ impl CommittedContextCall {
     ///
     /// # Errors
     ///
-    /// Returns [`CONTEXT_RECOVERY_UNCERTAIN`] when the provider cannot classify
+    /// Returns `context_recovery_uncertain` when the provider cannot classify
     /// the outstanding invocation, or a collect/validation failure.
     pub async fn resume(
         self,
@@ -265,7 +267,8 @@ pub enum InvocationResumeAction {
 
 /// Determine recovery behavior from committed request/output state.
 #[must_use]
-pub fn context_resume_action(
+#[cfg(all(test, feature = "native-tokio"))]
+pub(crate) fn context_resume_action(
     requested: &EffectRequested,
     completed: Option<&EffectCompleted>,
 ) -> InvocationResumeAction {
@@ -281,11 +284,13 @@ pub fn context_resume_action(
 
 /// Map one provider reconcile result onto the existing context resume taxonomy.
 ///
-/// Mirrors [`crate::map_model_reconcile_result`]: `Completed` reuses the
+/// Mirrors the model reconcile mapper: `Completed` reuses the
 /// contribution, `NotStarted` / `RetrySafe` retry the same effect identity,
 /// and `Unknown` / `NonRepeatable` fail closed.
 #[must_use]
-pub fn map_context_reconcile_result(result: &ContextReconcileResult) -> InvocationResumeAction {
+pub(crate) fn map_context_reconcile_result(
+    result: &ContextReconcileResult,
+) -> InvocationResumeAction {
     match result {
         ContextReconcileResult::Completed(_) => InvocationResumeAction::UseRecorded,
         ContextReconcileResult::NotStarted | ContextReconcileResult::RetrySafe => {

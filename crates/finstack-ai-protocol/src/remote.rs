@@ -3,14 +3,14 @@
 use finstack_ai_kernel::Digest;
 use serde::{Deserialize, Serialize};
 
+use crate::encode;
 use crate::error::ProtocolError;
 use crate::wire::VersionOffer;
-use crate::{decode, encode};
 
 /// Domain for authenticated remote-command digests.
-pub const DOMAIN_REMOTE_COMMAND: &str = "remote-command";
+const DOMAIN_REMOTE_COMMAND: &str = "remote-command";
 /// Schema version embedded in the remote-command digest domain.
-pub const REMOTE_COMMAND_DIGEST_SCHEMA_VERSION: u32 = 1;
+const REMOTE_COMMAND_DIGEST_SCHEMA_VERSION: u32 = 1;
 
 /// Bounded pre-authentication remote messages (TDD §28.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,44 +311,16 @@ impl RemoteCommand {
         tenant_scope: impl Into<String>,
         op: RemoteCommandOp,
     ) -> Result<Self, ProtocolError> {
-        let command = Self {
-            command_id: command_id.into(),
+        let command_id = command_id.into();
+        let tenant_scope = tenant_scope.into();
+        let digest = command_digest(&command_id, &locator, &tenant_scope, op)?;
+        Ok(Self {
+            command_id,
             locator,
-            tenant_scope: tenant_scope.into(),
-            digest: Digest::from_hex(
-                "0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .map_err(|err| ProtocolError::codec(err.to_string()))?,
-            op,
-        };
-        let digest = command_digest(&command)?;
-        Ok(Self { digest, ..command })
-    }
-
-    /// Reconstruct a command after verifying the supplied digest.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::Integrity`] when the digest does not match.
-    pub fn try_verified(
-        command_id: impl Into<String>,
-        locator: RemoteLocator,
-        tenant_scope: impl Into<String>,
-        digest: Digest,
-        op: RemoteCommandOp,
-    ) -> Result<Self, ProtocolError> {
-        let command = Self {
-            command_id: command_id.into(),
-            locator,
-            tenant_scope: tenant_scope.into(),
+            tenant_scope,
             digest,
             op,
-        };
-        let expected = command_digest(&command)?;
-        if expected != digest {
-            return Err(ProtocolError::integrity("command_digest_mismatch"));
-        }
-        Ok(command)
+        })
     }
 
     /// `UUIDv7` command identity.
@@ -440,7 +412,12 @@ impl RemoteCommandResult {
 /// # Errors
 ///
 /// Returns codec or digest-domain failures.
-pub fn command_digest(command: &RemoteCommand) -> Result<Digest, ProtocolError> {
+fn command_digest(
+    command_id: &str,
+    locator: &RemoteLocator,
+    tenant_scope: &str,
+    op: RemoteCommandOp,
+) -> Result<Digest, ProtocolError> {
     #[derive(Serialize)]
     struct View<'a> {
         command_id: &'a str,
@@ -449,10 +426,10 @@ pub fn command_digest(command: &RemoteCommand) -> Result<Digest, ProtocolError> 
         op: RemoteCommandOp,
     }
     let bytes = encode(&View {
-        command_id: &command.command_id,
-        locator: &command.locator,
-        tenant_scope: &command.tenant_scope,
-        op: command.op,
+        command_id,
+        locator,
+        tenant_scope,
+        op,
     })?;
     Digest::domain_separated(
         DOMAIN_REMOTE_COMMAND,
@@ -462,29 +439,11 @@ pub fn command_digest(command: &RemoteCommand) -> Result<Digest, ProtocolError> 
     .map_err(|err| ProtocolError::codec(err.to_string()))
 }
 
-/// Decode a remote pre-auth message and reject unknown fields/variants.
-///
-/// # Errors
-///
-/// Returns codec failures for unknown fields or kinds.
-pub fn decode_remote_pre_auth(bytes: &[u8]) -> Result<RemotePreAuth, ProtocolError> {
-    decode(bytes)
-}
-
-/// Decode a remote post-auth message and reject unknown fields/variants.
-///
-/// # Errors
-///
-/// Returns codec failures for unknown fields or kinds.
-pub fn decode_remote_post_auth(bytes: &[u8]) -> Result<RemotePostAuth, ProtocolError> {
-    decode(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         RemoteAuthMethod, RemoteCommand, RemoteCommandOp, RemoteLocator, RemotePostAuth,
-        RemotePreAuth, decode_remote_post_auth,
+        RemotePreAuth,
     };
     use crate::wire::{PayloadFamily, VersionOffer, encode_envelope};
     use crate::{decode, encode};
@@ -496,7 +455,7 @@ mod tests {
             kind: &'static str,
         }
         let bytes = encode(&Unknown { kind: "store_page" }).expect("encode");
-        assert!(decode_remote_post_auth(&bytes).is_err());
+        assert!(decode::<RemotePostAuth>(&bytes).is_err());
     }
 
     #[test]

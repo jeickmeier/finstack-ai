@@ -108,6 +108,23 @@ pub enum CommitCoordinatorError {
     },
 }
 
+impl CommitCoordinatorError {
+    /// Stable fault code for session commit and workflow recover.
+    #[must_use]
+    pub(crate) fn stable_code(&self) -> &'static str {
+        match self {
+            Self::Decision { code }
+            | Self::Faulted { code }
+            | Self::BoundaryFault { code }
+            | Self::EventDelivery { code } => code,
+            Self::SidecarConflict => "sidecar_conflict",
+            Self::AppendBatchIdCardinality => "append_batch_id_cardinality",
+            Self::Store(_) => "store_failure",
+            Self::ModelRequest { .. } => "model_request",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReplayScope {
     Primary,
