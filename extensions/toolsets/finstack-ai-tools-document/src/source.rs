@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{ArtifactRef, Sensitivity};
-use finstack_ai_runtime::{ArtifactScope, ArtifactStore, ToolCallContext};
+use finstack_ai_runtime::{ArtifactScope, ArtifactStore, Bytes, ToolCallContext};
 use serde::Deserialize;
 
 use crate::parser::DocumentLimits;
@@ -23,7 +23,10 @@ pub struct DocumentSource {
 /// Document bytes resolved from a [`DocumentSource`].
 pub(crate) enum ResolvedSource {
     Bytes {
-        bytes: Vec<u8>,
+        /// Zero-copy handle: sliced straight off the artifact store's
+        /// `Bytes` for artifact sources, wrapped without copying for path
+        /// sources.
+        bytes: Bytes,
         media_type_hint: Option<String>,
         #[allow(dead_code, reason = "carried for future diagnostics/spill naming")]
         name: Option<String>,
@@ -51,7 +54,7 @@ pub(crate) async fn resolve(
                 return Err(SourceError::TooLarge(bytes.len()));
             }
             Ok(ResolvedSource::Bytes {
-                bytes: bytes.to_vec(),
+                bytes,
                 media_type_hint: Some(artifact.blob().media_type().to_owned()),
                 name: artifact.blob().name().map(str::to_owned),
             })
@@ -75,7 +78,7 @@ async fn resolve_path(path: &str, limits: &DocumentLimits) -> Result<ResolvedSou
         .and_then(|_| std::fs::read(&path).ok())
         .ok_or(SourceError::Unavailable("path_unreadable_or_oversized"))?;
     Ok(ResolvedSource::Bytes {
-        bytes,
+        bytes: Bytes::from(bytes),
         media_type_hint: media_type_hint_from_extension(&path),
         name: std::path::Path::new(&path)
             .file_name()
