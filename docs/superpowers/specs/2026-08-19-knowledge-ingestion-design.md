@@ -22,10 +22,10 @@ Three layers:
   `PortObject`/`PortFuture` bounds for native+wasm portability.
 - **Engine**: new crate `extensions/ingest/finstack-ai-ingest` — a fixed-stage,
   pluggable-implementation pipeline (parse → chunk → [embed ∥ graph-extract] → index)
-  plus the model-backed knowledge components that share its `ModelDriver`-wrapping
+  plus the model-backed knowledge components that share its `Model`-port-wrapping
   machinery: `ModelGraphExtractor`, `ModelReranker`, and the community-summary builder.
   Host apps drive it directly; a thin middleware feeds run attachments into it.
-- **Query surfaces**: a `finstack-ai-tools-knowledge` toolset (`semantic_search`,
+- **Query surfaces**: a `finstack-ai-tools-knowledge` toolset (`knowledge_search`,
   `graph_query`, `list_sources`, `knowledge_overview`) and a
   `finstack-ai-context-knowledge` `ContextProvider` for automatic top-k retrieval into
   run context.
@@ -35,7 +35,7 @@ Three layers:
 ```
 crates/finstack-ai-runtime/src/ports/
   embedding/     — EmbeddingModel port trait + types
-  knowledge/     — ChunkIndex, GraphStore, SourceCatalog, Reranker traits + shared types
+  knowledge/     — ChunkIndex, GraphStore, SourceCatalog, Reranker, FusionStrategy traits + shared types
 
 extensions/
   ingest/finstack-ai-ingest                        — pipeline engine + model-backed components (new category dir)
@@ -54,7 +54,7 @@ does not (no embeddings API).
 
 ### Ports
 
-1. **`EmbeddingModel` is a runtime port** (like `ModelDriver`), object-safe, `PortObject`
+1. **`EmbeddingModel` is a runtime port** (like the `Model` port), object-safe, `PortObject`
    bound:
 
    ```rust
@@ -70,7 +70,8 @@ does not (no embeddings API).
 
    `EmbeddingModelDescriptor` carries model id, output `dimensions: u32`, `max_batch: u32`,
    and `max_input_tokens: u32`. `EmbeddingBatch` is `Arc<[Arc<str>]>` plus an input-kind
-   hint (`Document | Query`) for models with asymmetric encodings. `EmbeddingOutput` is one
+   hint (`Document | Query`) for models with asymmetric encodings, plus an
+   `options: Metadata` passthrough (decision 7a). `EmbeddingOutput` is one
    `Vec<f32>` per input in order, plus optional usage counts. `EmbeddingCallContext` mirrors
    other port call contexts: run locator where available, deadline, cancellation.
 2. **`ChunkIndex`, `GraphStore`, and `SourceCatalog` are runtime ports** in a new
@@ -82,8 +83,8 @@ does not (no embeddings API).
        fn capabilities(&self) -> ChunkIndexCapabilities;
        fn upsert(&self, records: Arc<[ChunkRecord]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
        fn search(&self, query: ChunkQuery) -> PortFuture<Result<Vec<ChunkHit>, KnowledgeStoreError>>;
-       fn get_chunks(&self, source: SourceId, range: ChunkRange) -> PortFuture<Result<Vec<ChunkRecord>, KnowledgeStoreError>>;
-       fn delete_chunks(&self, chunks: Arc<[ChunkId]>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+       fn get_chunks(&self, collection: CollectionId, source: SourceId, range: ChunkRange) -> PortFuture<Result<Vec<ChunkRecord>, KnowledgeStoreError>>;
+       fn delete_chunks(&self, collection: CollectionId, chunks: Arc<[ChunkId]>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
        fn delete_by_source(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<u64, KnowledgeStoreError>>;
        fn export(&self, collection: CollectionId) -> PortFuture<Result<PortStream<Result<ChunkRecord, KnowledgeStoreError>>, KnowledgeStoreError>>;
        fn import(&self, records: PortStream<ChunkRecord>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
@@ -124,7 +125,7 @@ does not (no embeddings API).
    - `ChunkRecord { collection: CollectionId, chunk_id: ChunkId, chunk_digest: Digest,
      vector: Option<Arc<[f32]>>, text: Arc<str>, metadata: Metadata }` — metadata carries
      document name, format, page/heading provenance. `chunk_digest` (digest of the chunk
-     text) drives incremental re-ingest (decision 15). `vector` is optional so keyword-only
+     text) drives incremental re-ingest (decision 14). `vector` is optional so keyword-only
      collections work without an embedder.
    - `ChunkQuery { collection: CollectionId, mode: SearchMode, top_k: u32, filter: Metadata, options: Metadata }`
      with `SearchMode::Semantic { vector: Arc<[f32]> } | Keyword { text: Arc<str> } |
@@ -154,7 +155,12 @@ does not (no embeddings API).
      `Relation { from: Arc<str>, to: Arc<str>, relation_type: Arc<str>, description: Arc<str>,
      source_chunks: Vec<ChunkId>, metadata: Metadata }` — endpoints reference entities by
      name; stores resolve/merge by case-insensitive name + type. Entity `embedding` is the
-     embedded description (decision 13); optional so graph-only pipelines work.
+     embedded description (decision 13); optional so graph-only pipelines work. **Stores
+     keep per-source attribution for merged graph data**: when several sources attest the
+     same entity or relation, `delete_by_source` removes only that source's contribution
+     (its `source_chunks` provenance, its description sentences) and the entity/relation
+     survives while at least one source still attests it. `GraphExportRecord` rows carry
+     the same attribution so import rebuilds it.
    - `GraphQuery { collection, lookup: EntityLookup, depth: u8 (max 3), relation_types: Vec<Arc<str>>, ceilings }`
      with `EntityLookup::Name { name, entity_type: Option } | Semantic { vector, top_k }`.
      Semantic lookup ranks entities by cosine over stored entity embeddings, then expands
@@ -182,7 +188,7 @@ does not (no embeddings API).
    entries than candidates (dropped candidates are treated as rejected). Query surfaces
    use it as an optional post-search stage (decision 22).
 6. **Idempotent re-ingestion**: ingesting a source converges to the same stored state for
-   identical bytes. The embedding branch is incremental at chunk level (decision 15); the
+   identical bytes. The embedding branch is incremental at chunk level (decision 14); the
    graph branch and catalog entry are whole-source replace (`delete_by_source` + insert).
 7. **`KnowledgeStoreError`** follows existing port-error shape: stable non-secret variants
    (`Unavailable`, `InvalidQuery`, `DimensionMismatch { expected, got }`,
@@ -217,7 +223,9 @@ does not (no embeddings API).
     - **Pluggable strategies over hard-coded algorithms**: keyword/hybrid scoring is
       backend-defined (decision 4); fusion for non-native-hybrid backends is a
       `FusionStrategy` trait (decision 8a); chunking, extraction, and reranking are
-      already traits. Nothing in the port layer names a specific algorithm or library.
+      already traits. No port contract names a specific algorithm or library — shipped
+      defaults (`RrfFusion`, `MarkdownChunker`, BM25 in backends) are replaceable
+      implementations beside the traits, never requirements of them.
 
 ### Pipeline (`extensions/ingest/finstack-ai-ingest`)
 
@@ -230,7 +238,8 @@ does not (no embeddings API).
        .chunker(Arc::new(MarkdownChunker::default()))
        .catalog(source_catalog)                          // Arc<dyn SourceCatalog>, required
        .embedding(embedder, chunk_index)                 // Arc<dyn EmbeddingModel>, Arc<dyn ChunkIndex>
-       .keyword_only(chunk_index)                        // alternative: chunk indexing without vectors
+       // — or, mutually exclusive with .embedding(..):
+       // .keyword_only(chunk_index)                     // chunk indexing without vectors
        .graph(extractor, graph_store)                    // Arc<dyn GraphExtractor>, Arc<dyn GraphStore>
        .build()?;                                        // error if no indexing branch configured
 
@@ -244,17 +253,22 @@ does not (no embeddings API).
    chunk branch). The catalog is mandatory: every ingest writes a `SourceRecord`, and
    incremental re-ingest depends on it. The engine crate also hosts the model-backed
    query/maintenance components (`ModelGraphExtractor`, `ModelReranker`,
-   `CommunityBuilder`) because they share its `ModelDriver`-wrapping machinery; hosts
+   `CommunityBuilder`) because they share its `Model`-port-wrapping machinery; hosts
    construct them here and hand them to query surfaces as trait objects.
-8a. **`FusionStrategy` makes hybrid search library-agnostic.** A local trait in the
-    engine crate: `fn fuse(&self, rankings: &[&[ChunkHit]], top_k: u32) -> Vec<ChunkHit>`.
-    When a `ChunkIndex` reports `native_hybrid` (Qdrant-style engines, or the shipped
-    backends' internal fusion), `SearchMode::Hybrid` goes straight to the backend; when
-    it does not, query surfaces run the semantic and keyword searches separately and
-    fuse with the configured strategy. The engine ships `RrfFusion` (k=60, chosen as
-    default because it needs no score normalization across backends) and
-    `WeightedScoreFusion { alpha }`; hosts plug in their own. The toolset and context
-    provider accept an optional `Arc<dyn FusionStrategy>` (default `RrfFusion`).
+8a. **`FusionStrategy` makes hybrid search library-agnostic.** A trait in
+    `ports/knowledge` (NOT the engine crate — the toolset and context provider consume
+    it, and query surfaces must not depend on the ingestion engine and its document
+    dependencies): `fn fuse(&self, rankings: &[&[ChunkHit]], top_k: u32) -> Vec<ChunkHit>`.
+    It is synchronous pure computation, so no `PortFuture`. When a `ChunkIndex` reports
+    `native_hybrid` (Qdrant-style engines, or the shipped backends' internal fusion),
+    `SearchMode::Hybrid` goes straight to the backend; when it does not, query surfaces
+    run the semantic and keyword searches separately and fuse with the configured
+    strategy. The runtime ships `RrfFusion` (k=60, chosen as default because it needs no
+    score normalization across backends) and `WeightedScoreFusion { alpha }` next to the
+    trait — both are dependency-free pure functions, which is the bar for shipping an
+    implementation in the runtime rather than an extension; hosts plug in their own. The
+    toolset and context provider accept an optional `Arc<dyn FusionStrategy>` (default
+    `RrfFusion`).
 9. **`IngestSource`** mirrors the document toolset's source union: `Bytes { bytes, media_type_hint, name }`
    or `Artifact { store: Arc<dyn ArtifactStore>, scope, artifact }` (resolved and
    digest-verified exactly as the document middleware does). Markdown that is already
@@ -277,7 +291,7 @@ does not (no embeddings API).
     }
     ```
 
-    The shipped default `ModelGraphExtractor` wraps an existing `Arc<dyn ModelDriver>`
+    The shipped default `ModelGraphExtractor` wraps an existing `Arc<dyn Model>`
     handle: structured-output entity/relation extraction per chunk batch (JSON-schema
     constrained), followed by an in-memory dedup/merge pass (case-insensitive name + type).
     What to extract and how is not hard-coded — it comes from a **graph extraction
@@ -328,9 +342,9 @@ does not (no embeddings API).
     report says why. Consistent with "a scanned PDF is a success" (document spec decision
     9). Empty markdown from any source behaves the same.
 13. **Entity-description embeddings**: when both the embedding and graph branches are
-    configured, the pipeline embeds each merged entity's `"{name}: {description}"` (and
-    each community's summary, decision 16) with the `Document` input kind and stores the
-    vector on the entity. This enables `EntityLookup::Semantic` (GraphRAG-style local
+    configured, the pipeline embeds each merged entity's `"{name}: {description}"` with
+    the `Document` input kind and stores the vector on the entity (community summaries
+    are embedded analogously, but by the `CommunityBuilder` — decision 16). This enables `EntityLookup::Semantic` (GraphRAG-style local
     search entry points). Skipped when no embedder is configured;
     `IngestOptions { embed_entities: bool }` (default true) can disable it to save cost.
 14. **Incremental re-ingest (chunk level, embedding branch)**: before indexing, the
@@ -339,9 +353,15 @@ does not (no embeddings API).
     unless `IngestOptions { force: true }`). If the content changed, chunk digests are
     diffed: unchanged chunks keep their stored vectors (no re-embedding — embeddings are
     the expensive artifact), new/changed chunks are embedded and upserted, removed chunks
-    are deleted via `delete_chunks`. The graph branch does not diff: it re-extracts and
-    replaces the source's fragment wholesale (LLM extraction is not chunk-separable after
-    the merge pass). The catalog record is rewritten last, making it the commit point.
+    are deleted via `delete_chunks`. The diff is positional (same digest at same index =
+    unchanged), so an insertion early in a document shifts later indices and marks them
+    changed; implementations may recover shifted chunks' vectors by digest lookup
+    instead of re-embedding — an internal optimization, not a port contract. The graph
+    branch does not diff: it re-extracts and replaces the source's fragment wholesale
+    (LLM extraction is not chunk-separable after the merge pass). The catalog record is
+    rewritten last, making it the commit point: a crash mid-ingest leaves the old
+    catalog record, and the next ingest's diff re-converges the index (upserts and
+    deletes are idempotent).
 15. **Bounded everything**: `IngestLimits { max_chunks_per_document (default 2048),
     max_concurrent_embed_batches (4), max_concurrent_extract_calls (2), per_call_deadline }`
     plus the parse-stage `DocumentLimits`. Same defensive posture as the document spec.
@@ -350,7 +370,7 @@ does not (no embeddings API).
     crate. It runs label-propagation community detection over the collection's graph
     (pure Rust, deterministic given a seed, single level in v1 with the `level` field
     reserved for future hierarchies), then generates one bounded summary per community
-    via `ModelDriver` (structured output: title + summary), embeds summaries when an
+    via the `Model` port (structured output: title + summary), embeds summaries when an
     embedder is supplied, and calls `replace_communities` — wholesale replace per
     collection, idempotent. Communities are derived data: any ingest invalidates them
     only in the sense that the host re-runs the builder when it chooses (the report and
@@ -399,7 +419,7 @@ does not (no embeddings API).
     `Arc<dyn SourceCatalog>`, and optionally `Arc<dyn EmbeddingModel>` +
     `Arc<dyn ChunkIndex>`, `Arc<dyn GraphStore>`, and `Arc<dyn Reranker>`; only the tools
     whose dependencies are present appear in `tools()`.
-    - `semantic_search { query: String, top_k?: u32 (default 8, max 32), mode?: "semantic" | "keyword" | "hybrid", expand?: u8 (default 0, max 2), filter?: object }`
+    - `knowledge_search { query: String, top_k?: u32 (default 8, max 32), mode?: "semantic" | "keyword" | "hybrid", expand?: u8 (default 0, max 2), filter?: object }`
       → embeds the query (`Query` input kind) as needed by mode, searches, optionally
       reranks and expands. Mode handling is capability-driven: the default is the
       richest mode the index supports (hybrid → semantic → keyword), hybrid uses the
@@ -426,7 +446,7 @@ does not (no embeddings API).
 23. **Stable error codes** (lower snake_case values in `pub const` SCREAMING_SNAKE names,
     matching the `document_*` precedent): `KNOWLEDGE_INVALID_ARGUMENTS`,
     `KNOWLEDGE_STORE_UNAVAILABLE`, `KNOWLEDGE_EMBEDDING_FAILED`, `KNOWLEDGE_QUERY_FAILED`,
-    `KNOWLEDGE_RERANK_FAILED`. Rerank failure is fail-soft inside `semantic_search`
+    `KNOWLEDGE_RERANK_FAILED`. Rerank failure is fail-soft inside `knowledge_search`
     (results returned un-reranked, failure noted in the payload); the code exists for the
     hard failure paths (e.g. invalid reranker output).
 24. **Context provider `finstack-ai-context-knowledge`** implements `ContextProvider`:
@@ -438,7 +458,7 @@ does not (no embeddings API).
     contributes nothing (empty contribution) — fail-soft, observable via events. Graph
     context injection is out of scope for v1 (the toolset covers graph access).
 25. **`ModelReranker`** (in the engine crate) is the shipped `Reranker`: listwise
-    reranking via `ModelDriver` structured output (query + numbered candidates → ranked
+    reranking via `Model`-port structured output (query + numbered candidates → ranked
     indices with scores), bounded candidate count and per-call deadline. Hosts with a
     dedicated rerank API (Cohere, Voyage) implement the port themselves in v1.
 
@@ -506,7 +526,7 @@ does not (no embeddings API).
     validation and error codes; rerank fail-soft; template JSON load/validation,
     including rejection of malformed and oversized templates, unregistered-id selection
     errors, and template provenance on extracted fragments. Plus a `finstack-ai-test`
-    lane running the document fixture corpus end-to-end: ingest → `semantic_search`
+    lane running the document fixture corpus end-to-end: ingest → `knowledge_search`
     (each mode) returns the staged content → `knowledge_overview` after a community
     build → context provider injects excerpts into a scripted run; binding smoke tests
     in Python and wasm.
