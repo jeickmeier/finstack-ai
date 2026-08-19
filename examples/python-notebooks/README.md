@@ -17,6 +17,17 @@ environment installs editable `finstack-ai[pydantic]`, Jupyter, and
 uv sync
 ```
 
+If you have pulled new Rust changes since the extension module was last
+built (symptom: `ImportError: cannot import name ... from
+'finstack_ai._finstack_ai'`), rebuild the native module in place before
+running any notebook:
+
+```bash
+PYO3_PYTHON="$(uv python find 3.14)" uv run --no-project --with maturin==1.14.1 \
+  maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  --features extension-module
+```
+
 Register the kernel once, then select **finstack-ai-notebooks** in Jupyter
 or Cursor (the kernel uses the repository-root `.venv/bin/python`):
 
