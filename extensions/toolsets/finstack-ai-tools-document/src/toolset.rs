@@ -2,12 +2,16 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall};
-use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ArtifactStore, PortFuture, SideEffectClass,
-    ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolReconcileResult,
-    ToolSpec, ToolsetDescriptor, Toolset, PendingToolEffect,
+use finstack_ai_kernel::{
+    ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
+use finstack_ai_runtime::{
+    ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactStore, Bytes, PortFuture,
+    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
+    ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, ToolsetDescriptor, Toolset,
+    PendingToolEffect, stage_required_artifact,
+};
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::parser::DocumentLimits;
@@ -121,18 +125,45 @@ impl Toolset for DocumentToolset {
 
     fn call(
         &self,
-        _ctx: ToolCallContext,
-        _call: ValidatedToolCall,
+        ctx: ToolCallContext,
+        call: ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
-        // Call dispatch implementation lands in Task 4
-        Box::pin(async {
-            Err(ToolError::try_new(
-                "document_call_not_implemented",
-                finstack_ai_kernel::ErrorCategory::Internal,
-                false,
-                "document_call_not_implemented",
-                Metadata::empty(),
-            ).unwrap_or_else(Into::into))
+        let toolset = self.clone();
+        Box::pin(async move {
+            validate_call_context(&ctx, &call, &toolset.tool_id)?;
+            let name = call.call.tool_name();
+            let args = parse_call_arguments(name, call.call.arguments().as_bytes())?;
+            let resolved = crate::source::resolve(
+                &args.source,
+                &ctx,
+                toolset.artifact_store.as_ref(),
+                &toolset.limits,
+            )
+            .await
+            .map_err(|error| source_error(&error))?;
+            let crate::source::ResolvedSource::Bytes {
+                bytes,
+                media_type_hint,
+                ..
+            } = resolved;
+            let media_type_hint = args.media_type_hint.or(media_type_hint);
+
+            let output = match name {
+                PARSE_NAME => {
+                    build_parse_result(
+                        &toolset,
+                        &ctx,
+                        &bytes,
+                        media_type_hint.as_deref(),
+                        args.page_range,
+                        args.max_output_bytes,
+                    )
+                    .await?
+                }
+                CLASSIFY_NAME => build_classify_result(&bytes)?,
+                _ => return Err(invalid_arguments("unknown document tool name")),
+            };
+            completed_stream(&output)
         })
     }
 
@@ -143,6 +174,281 @@ impl Toolset for DocumentToolset {
     ) -> PortFuture<Result<ToolReconcileResult, ToolError>> {
         Box::pin(async { Ok(ToolReconcileResult::Unknown) })
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParseArguments {
+    #[serde(default)]
+    artifact: Option<serde_json::Value>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    media_type_hint: Option<String>,
+    #[serde(default)]
+    page_range: Option<(u32, u32)>,
+    #[serde(default)]
+    max_output_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClassifyArguments {
+    #[serde(default)]
+    artifact: Option<serde_json::Value>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+fn validate_call_context(
+    ctx: &ToolCallContext,
+    call: &ValidatedToolCall,
+    expected_id: &ToolId,
+) -> Result<(), ToolError> {
+    if call.tool_id != *expected_id {
+        return Err(invalid_arguments("document call identity is invalid"));
+    }
+    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
+    if ctx
+        .run
+        .authorization
+        .principal
+        .tenant_scope()
+        .is_some_and(|scope| scope != locator_scope)
+    {
+        return Err(invalid_arguments(
+            "document principal scope does not match the committed effect",
+        ));
+    }
+    Ok(())
+}
+
+/// Arguments common to both tools after per-tool JSON deserialization.
+struct CallArguments {
+    source: crate::DocumentSource,
+    media_type_hint: Option<String>,
+    page_range: Option<(u32, u32)>,
+    max_output_bytes: Option<u64>,
+}
+
+fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<CallArguments, ToolError> {
+    match name {
+        PARSE_NAME => {
+            let arguments: ParseArguments = serde_json::from_slice(arguments)
+                .map_err(|_| invalid_arguments("document_parse arguments are invalid"))?;
+            Ok(CallArguments {
+                source: crate::DocumentSource {
+                    artifact: arguments.artifact,
+                    path: arguments.path,
+                },
+                media_type_hint: arguments.media_type_hint,
+                page_range: arguments.page_range,
+                max_output_bytes: arguments.max_output_bytes,
+            })
+        }
+        CLASSIFY_NAME => {
+            let arguments: ClassifyArguments = serde_json::from_slice(arguments)
+                .map_err(|_| invalid_arguments("pdf_classify arguments are invalid"))?;
+            Ok(CallArguments {
+                source: crate::DocumentSource {
+                    artifact: arguments.artifact,
+                    path: arguments.path,
+                },
+                media_type_hint: None,
+                page_range: None,
+                max_output_bytes: None,
+            })
+        }
+        _ => Err(invalid_arguments("unknown document tool name")),
+    }
+}
+
+/// Run `document_parse`: optional page-range extraction, per-call output
+/// clamp, and output-spill staging.
+async fn build_parse_result(
+    toolset: &DocumentToolset,
+    ctx: &ToolCallContext,
+    bytes: &[u8],
+    media_type_hint: Option<&str>,
+    page_range: Option<(u32, u32)>,
+    max_output_bytes: Option<u64>,
+) -> Result<serde_json::Value, ToolError> {
+    let mut limits = toolset.limits.clone();
+    if let Some(requested) = max_output_bytes {
+        limits.max_output_bytes = limits.max_output_bytes.min(requested);
+    }
+    if let Some((start, end)) = page_range {
+        if start == 0 || end < start {
+            return Err(invalid_arguments("page_range is reversed or zero-based"));
+        }
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(invalid_arguments(
+                "page_range is only valid for PDF documents",
+            ));
+        }
+    }
+    let parsed = match page_range {
+        Some(range) => crate::parser::parse_pages(bytes, range, &limits)
+            .map_err(|error| parse_error(&error))?,
+        None => crate::parser::parse(bytes, media_type_hint, &limits)
+            .map_err(|error| parse_error(&error))?,
+    };
+    let max_result_bytes = toolset
+        .tools
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == PARSE_NAME)
+        .map_or(1_048_576, |spec| spec.max_result_bytes);
+    build_parse_output(parsed, ctx, toolset.artifact_store.as_ref(), max_result_bytes).await
+}
+
+fn build_classify_result(bytes: &[u8]) -> Result<serde_json::Value, ToolError> {
+    let (classification, page_count) =
+        crate::parser::classify_pdf(bytes).map_err(|error| parse_error(&error))?;
+    Ok(serde_json::json!({
+        "classification": classification,
+        "page_count": page_count,
+        "page_stats": serde_json::Value::Null,
+    }))
+}
+
+fn invalid_arguments(message: &'static str) -> ToolError {
+    tool_error(crate::DOCUMENT_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
+}
+
+fn source_error(error: &crate::source::SourceError) -> ToolError {
+    use crate::source::SourceError;
+    match *error {
+        SourceError::InvalidArguments(message) => {
+            tool_error(crate::DOCUMENT_INVALID_ARGUMENTS, ErrorCategory::Validation, message)
+        }
+        SourceError::Unavailable(message) => {
+            tool_error(crate::DOCUMENT_SOURCE_UNAVAILABLE, ErrorCategory::Tool, message)
+        }
+        SourceError::TooLarge(_) => tool_error(
+            crate::DOCUMENT_TOO_LARGE,
+            ErrorCategory::Validation,
+            "document input exceeds the byte ceiling",
+        ),
+        SourceError::PathUnsupported => tool_error(
+            crate::DOCUMENT_PATH_UNSUPPORTED,
+            ErrorCategory::Tool,
+            "path sources are unsupported on this target",
+        ),
+    }
+}
+
+fn parse_error(error: &crate::parser::DocumentParseError) -> ToolError {
+    use crate::parser::DocumentParseError;
+    let (code, message) = match error {
+        DocumentParseError::TooLarge { .. } => {
+            (crate::DOCUMENT_TOO_LARGE, "document exceeds size or page ceiling")
+        }
+        DocumentParseError::UnsupportedFormat => (
+            crate::DOCUMENT_UNSUPPORTED_FORMAT,
+            "no supported document format detected",
+        ),
+        DocumentParseError::ParseFailed { .. } => {
+            (crate::DOCUMENT_PARSE_FAILED, "document parsing failed")
+        }
+    };
+    tool_error(code, ErrorCategory::Tool, message)
+}
+
+fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
+    ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
+}
+
+/// Build the `document_parse` output, spilling to an artifact when the
+/// serialized result exceeds `max_result_bytes`.
+async fn build_parse_output(
+    parsed: crate::parser::ParsedDocument,
+    ctx: &ToolCallContext,
+    store: Option<&Arc<dyn ArtifactStore>>,
+    max_result_bytes: u64,
+) -> Result<serde_json::Value, ToolError> {
+    let base = serde_json::json!({
+        "markdown": parsed.markdown,
+        "format": parsed.format,
+        "page_count": parsed.page_count,
+        "classification": parsed.classification,
+        "requires_ocr": parsed.requires_ocr,
+        "truncated": parsed.truncated,
+        "spilled_artifact": serde_json::Value::Null,
+    });
+    let size = serde_json::to_vec(&base).map_or(u64::MAX, |bytes| bytes.len() as u64);
+    if size <= max_result_bytes {
+        return Ok(base);
+    }
+    let store = store.ok_or_else(|| {
+        tool_error(
+            crate::DOCUMENT_TOO_LARGE,
+            ErrorCategory::Limit,
+            "document result requires an artifact store for spill",
+        )
+    })?;
+    let scope = crate::source::call_scope(ctx);
+    let markdown_len = u64::try_from(parsed.markdown.len()).unwrap_or(u64::MAX);
+    let artifact = stage_required_artifact(
+        store.as_ref(),
+        scope,
+        Bytes::from(parsed.markdown.clone().into_bytes()),
+        ArtifactMetadata {
+            kind: Arc::from("tool-output"),
+            media_type: Arc::from("text/markdown"),
+            name: None,
+            attributes: Metadata::empty(),
+        },
+    )
+    .await
+    .map_err(|_| {
+        tool_error(
+            crate::DOCUMENT_TOO_LARGE,
+            ErrorCategory::Tool,
+            "document artifact staging failed",
+        )
+    })?;
+    let overhead = size.saturating_sub(markdown_len);
+    let budget = max_result_bytes.saturating_sub(overhead);
+    let (truncated_markdown, _) = crate::parser::truncate_utf8(parsed.markdown, budget);
+    let spilled_artifact = serde_json::to_value(&artifact).map_err(|_| {
+        tool_error(
+            crate::DOCUMENT_PARSE_FAILED,
+            ErrorCategory::Internal,
+            "spilled artifact reference serialization failed",
+        )
+    })?;
+    Ok(serde_json::json!({
+        "markdown": truncated_markdown,
+        "format": parsed.format,
+        "page_count": parsed.page_count,
+        "classification": parsed.classification,
+        "requires_ocr": parsed.requires_ocr,
+        "truncated": true,
+        "spilled_artifact": spilled_artifact,
+    }))
+}
+
+fn completed_stream(output: &serde_json::Value) -> Result<ToolEventStream, ToolError> {
+    let bytes = serde_json::to_vec(output).map_err(|_| {
+        tool_error(
+            crate::DOCUMENT_PARSE_FAILED,
+            ErrorCategory::Internal,
+            "document result serialization failed",
+        )
+    })?;
+    let result = ToolResult {
+        output: RawJson::parse(bytes).map_err(|_| {
+            tool_error(
+                crate::DOCUMENT_PARSE_FAILED,
+                ErrorCategory::Internal,
+                "document result normalization failed",
+            )
+        })?,
+        is_error: false,
+    };
+    Ok(Box::pin(futures_util::stream::once(async move {
+        Ok(ToolStreamItem::Completed(result))
+    })) as ToolEventStream)
 }
 
 fn spec(

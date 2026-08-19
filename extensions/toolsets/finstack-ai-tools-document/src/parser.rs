@@ -220,6 +220,69 @@ pub fn classify_pdf(bytes: &[u8]) -> Result<(DocumentClassification, u32), Docum
     ))
 }
 
+/// Parse a 1-based inclusive page range of a PDF to Markdown.
+///
+/// Only valid for PDF bytes; the range itself (non-zero, non-reversed, in
+/// bounds) is the caller's responsibility to validate against the page
+/// count returned by [`classify_pdf`] before calling this, since a
+/// reversed/zero-based range is an argument-shape error rather than a parse
+/// failure.
+///
+/// # Errors
+///
+/// Returns `UnsupportedFormat` for non-PDF bytes, `TooLarge` for an
+/// oversized input or page count, and `ParseFailed` for an out-of-bounds
+/// range or a broken PDF.
+pub fn parse_pages(
+    bytes: &[u8],
+    page_range: (u32, u32),
+    limits: &DocumentLimits,
+) -> Result<ParsedDocument, DocumentParseError> {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limits.max_input_bytes {
+        return Err(DocumentParseError::TooLarge {
+            len: bytes.len(),
+            max: limits.max_input_bytes,
+        });
+    }
+    let (classification, page_count) = classify_pdf(bytes)?;
+    if page_count > limits.max_pages {
+        return Err(DocumentParseError::TooLarge {
+            len: bytes.len(),
+            max: u64::from(limits.max_pages),
+        });
+    }
+    let (start, end) = page_range;
+    if start == 0 || end < start || end > page_count {
+        return Err(DocumentParseError::ParseFailed {
+            message: bounded_message("page_range is out of bounds"),
+        });
+    }
+    let zero_indexed: Vec<u32> = (start - 1..end).collect();
+    let extracted = pdf_inspector::extract_pages_markdown_mem(bytes, Some(&zero_indexed))
+        .map_err(|error| DocumentParseError::ParseFailed {
+            message: bounded_message(&error.to_string()),
+        })?;
+    let requires_ocr = matches!(
+        classification,
+        DocumentClassification::Scanned | DocumentClassification::Image
+    ) || extracted.pages.iter().any(|page| page.needs_ocr);
+    let markdown = extracted
+        .pages
+        .iter()
+        .map(|page| page.markdown.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let (markdown, truncated) = truncate_utf8(markdown, limits.max_output_bytes);
+    Ok(ParsedDocument {
+        markdown,
+        format: DocumentFormat::Pdf,
+        page_count: Some(page_count),
+        classification: Some(classification),
+        requires_ocr,
+        truncated,
+    })
+}
+
 fn detect_format(bytes: &[u8], hint: Option<DocumentFormat>) -> DocumentFormat {
     match anydoc::Format::from_bytes(bytes) {
         // anydoc has a single `Excel` variant covering both legacy `.xls`
@@ -291,7 +354,8 @@ fn page_count_of(classification: &pdf_inspector::PdfClassification) -> u32 {
     classification.page_count
 }
 
-fn truncate_utf8(mut text: String, max_bytes: u64) -> (String, bool) {
+/// Truncate `text` to at most `max_bytes` at a UTF-8 char boundary.
+pub(crate) fn truncate_utf8(mut text: String, max_bytes: u64) -> (String, bool) {
     let max = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     if text.len() <= max {
         return (text, false);
