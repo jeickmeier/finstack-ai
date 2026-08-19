@@ -55,7 +55,7 @@ use protocol::{
     _normalize_pydantic_schema, build_metadata, health, journal_known_answer, linked_providers,
     normalize_prebeta_shape,
 };
-use run::{PyRun, PyRunResult};
+use run::{PyAttachment, PyRun, PyRunResult};
 use session::{PyLane, PyMemoryExternalIdentityMap, PySession};
 use store::PySqliteDurability;
 
@@ -108,6 +108,7 @@ fn _finstack_ai(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyCapability>()?;
     module.add_class::<PyChildRunPolicy>()?;
     module.add_class::<PyRun>()?;
+    module.add_class::<PyAttachment>()?;
     module.add_class::<PyEventIterator>()?;
     module.add_class::<PyLocator>()?;
     module.add_class::<PySession>()?;

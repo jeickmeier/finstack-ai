@@ -5,6 +5,7 @@ from typing import TypedDict, cast
 from . import _finstack_ai as _native
 from ._finstack_ai import (
     Agent,
+    Attachment,
     CallbackContext,
     Capability,
     CancelledError,
@@ -121,6 +122,7 @@ def normalize_prebeta_shape(kind: str, value: dict[str, object]) -> dict[str, ob
 
 __all__ = [
     "Agent",
+    "Attachment",
     "BuildMetadata",
     "CallbackContext",
     "Capability",

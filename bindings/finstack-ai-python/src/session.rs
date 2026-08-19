@@ -203,7 +203,7 @@ impl PyLane {
     }
 
     /// Start a new root run on this idle lane.
-    #[pyo3(signature = (agent, input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None))]
+    #[pyo3(signature = (agent, input, *, timeout_seconds = None, max_cycles = DEFAULT_MAX_CYCLES, max_output_retries = 1, capability = None, attachments = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "lane run forwards the same bounded run inputs as Agent.start"
@@ -217,6 +217,7 @@ impl PyLane {
         max_cycles: u64,
         max_output_retries: u32,
         capability: Option<String>,
+        attachments: Option<Vec<Py<crate::run::PyAttachment>>>,
     ) -> PyResult<PyRun> {
         agent.borrow().start_on_lane(
             py,
@@ -226,6 +227,7 @@ impl PyLane {
             max_cycles,
             max_output_retries,
             capability,
+            attachments,
         )
     }
 

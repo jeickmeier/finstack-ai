@@ -1349,7 +1349,9 @@ name = "finstack-ai-python"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-context-memory",
  "finstack-ai-kernel",
+ "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
@@ -1357,6 +1359,7 @@ dependencies = [
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
+ "finstack-ai-tools-document",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",

@@ -410,6 +410,7 @@ class Lane:
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
+        attachments: list[Attachment] | None = None,
     ) -> Run:
         """Start a new root run on this idle lane.
 
@@ -424,13 +425,15 @@ class Lane:
             max_cycles: Maximum model cycles.
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id.
+            attachments: Optional pre-built attachments, staged and mapped
+                to `File` blocks on the run's user message. At most 8.
 
         Returns:
             A shared :class:`Run` handle.
 
         Raises:
-            ConfigurationError: Input, limits, tenant, or ``capability``
-                are invalid, or the lane is busy.
+            ConfigurationError: Input, limits, tenant, ``capability``, or
+                ``attachments`` are invalid, or the lane is busy.
             RuntimeError: The background task cannot be accepted.
         """
     def suspend(self) -> Awaitable[None]:
@@ -582,6 +585,36 @@ class RunResult:
     def session(self) -> Locator: ...
     def to_dict(self) -> dict[str, str]:
         """Serialize the terminal result explicitly."""
+
+class Attachment:
+    """One in-memory run attachment staged at submit time.
+
+    Exactly one of ``data``/``path`` is required. A ``path`` is read
+    (bounded to 4 MiB) at construction time; its basename becomes the
+    default ``name`` when ``name`` is not given explicitly.
+    """
+
+    def __init__(
+        self,
+        media_type: str,
+        data: bytes | None = None,
+        path: str | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Construct one attachment.
+
+        Args:
+            media_type: Blob media type.
+            data: In-memory bytes. Mutually exclusive with ``path``.
+            path: Local file path read at construction, bounded to 4 MiB.
+                Mutually exclusive with ``data``.
+            name: Optional display name. Defaults to ``path``'s basename
+                when ``path`` is given and ``name`` is omitted.
+
+        Raises:
+            ValueError: Neither or both of ``data``/``path`` are given, or
+                ``path`` cannot be read, or exceeds 4 MiB.
+        """
 
 class Run:
     """Shared control and observation handle for one Rust-owned run."""
@@ -1075,6 +1108,7 @@ class Agent:
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
+        attachments: list[Attachment] | None = None,
     ) -> Run:
         """Start a run and return its shared handle immediately.
 
@@ -1091,12 +1125,15 @@ class Agent:
             capability: Optional model-activated capability id. ``None``
                 runs this agent; a missing catalog id fails closed. User-input
                 word overlap is not used.
+            attachments: Optional pre-built attachments, staged and mapped
+                to `File` blocks on the run's user message. At most 8.
 
         Returns:
             A shared :class:`Run` handle.
 
         Raises:
-            ConfigurationError: Input, limits, or ``capability`` are invalid.
+            ConfigurationError: Input, limits, ``capability``, or
+                ``attachments`` are invalid.
             RuntimeError: The background task cannot be accepted.
 
         Examples:
@@ -1114,6 +1151,7 @@ class Agent:
         max_cycles: int = 16,
         max_output_retries: int = 1,
         capability: str | None = None,
+        attachments: list[Attachment] | None = None,
     ) -> RunResult:
         """Execute one run and await its committed result.
 
@@ -1128,12 +1166,18 @@ class Agent:
             max_output_retries: Maximum structured-output retries.
             capability: Optional model-activated capability id. ``None``
                 runs this agent; a missing catalog id fails closed.
+            attachments: Optional pre-built attachments, staged and mapped
+                to `File` blocks on the run's user message. At most 8.
+                Every element resolves to model-visible extracted Markdown
+                via the registered document-ingest middleware/toolset; the
+                journaled conversation keeps the original `File` block.
 
         Returns:
             An immutable terminal snapshot.
 
         Raises:
-            ConfigurationError: Input, limits, or ``capability`` are invalid.
+            ConfigurationError: Input, limits, ``capability``, or
+                ``attachments`` are invalid.
             RuntimeError: The runtime failed after accept.
             CancelledError: The run reached its durable cancelled terminal.
             TimeoutError: The operational deadline elapsed.
