@@ -99,13 +99,7 @@ impl ResolvedMiddlewareChain {
                 .map(|item| &item.descriptor)
                 .collect::<Vec<_>>(),
         )?;
-        let chain_digest = Digest::domain_separated("middleware-chain", 1, &descriptor_bytes)
-            .map_err(|_| {
-                MiddlewareError::stable(
-                    MIDDLEWARE_RESOLUTION_INVALID,
-                    "middleware chain digest could not be constructed",
-                )
-            })?;
+        let chain_digest = Digest::middleware_chain(&descriptor_bytes);
         let mut stages = BTreeMap::new();
         for stage in [
             Stage::BeforeRun,

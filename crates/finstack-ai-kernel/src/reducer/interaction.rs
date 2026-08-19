@@ -3,7 +3,7 @@
 use super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::canonical_digest;
 use super::capacity::{self, StateGrowth};
-use super::decide::{draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence};
+use super::decide::{draft_for_state, expected_stage_cursor, next_sequence};
 use super::decision::{Decision, KernelError};
 use super::input::{InteractionSettled, RequestInteraction};
 use crate::Digest;
@@ -91,18 +91,7 @@ pub(super) fn decide_settled(
     state: &KernelState,
     env: &TransitionEnv,
     input: &InteractionSettled,
-    settlement_digest: Option<Digest>,
 ) -> Result<Decision, KernelError> {
-    if let InteractionSettled::Resolved(resolution) = input {
-        let digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
-        if let Some(existing) = state.resolution_identities.get(resolution.resolution_id()) {
-            return if existing.settlement_digest == digest {
-                duplicate_decision(state)
-            } else {
-                Err(KernelError::ConflictingSettlement)
-            };
-        }
-    }
     reject_busy(state, "interaction_settled")?;
     if state.phase != Some(RunPhase::AwaitingInteraction) {
         return Err(KernelError::InvalidPhaseInput {

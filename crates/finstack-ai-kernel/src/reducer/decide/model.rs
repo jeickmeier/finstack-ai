@@ -12,19 +12,15 @@ use crate::state::{KernelState, RunPhase, TransitionEnv};
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::capacity::{self, StateGrowth};
 use super::super::decision::{Decision, KernelError};
-use super::super::fingerprint::direct_digest;
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ModelSettled, ModelSettlement,
     RequestCompactionModel,
 };
 use super::super::validation::{
     assistant_tool_calls, validate_assistant_message_id, validate_assistant_semantics,
-    validate_assistant_tool_call_ids, validate_completion_identity, validate_error_descriptor,
+    validate_assistant_tool_call_ids, validate_error_descriptor,
 };
-use super::{
-    draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence, reject_terminal,
-    required,
-};
+use super::{draft_for_state, expected_stage_cursor, next_sequence, reject_terminal, required};
 
 /// Commit one runtime-owned compaction-summary model effect (ADR-042).
 ///
@@ -117,12 +113,11 @@ pub(super) fn decide_model(
     state: &KernelState,
     env: &TransitionEnv,
     input: &ModelSettled,
-    settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     if let ModelSettlement::Failed(failed) = &input.outcome {
         validate_error_descriptor(failed.error())?;
     }
-    decide_normalized_model(state, env, input, "model_settled", settlement_digest)
+    decide_normalized_model(state, env, input, "model_settled")
 }
 
 fn validate_external_completion_input(
@@ -163,16 +158,7 @@ pub(super) fn decide_external(
     if super::super::tool::is_known_tool_effect(state, input.completion.effect_id) {
         return super::super::tool::decide_external_tool(state, env, input, settlement_digest);
     }
-    let settlement_digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
-    if let Some(decision) = classify_model_duplicate(
-        state,
-        Some(input.completion.completion_id.as_ref()),
-        input.completion.effect_id,
-        settlement_digest,
-        None,
-    )? {
-        return Ok(decision);
-    }
+    settlement_digest.ok_or(KernelError::InvariantViolation)?;
     if state.phase != Some(RunPhase::AwaitingExternal) {
         reject_terminal(state)?;
         return Err(KernelError::InvalidPhaseInput {
@@ -243,13 +229,7 @@ pub(super) fn decide_external(
         model_request_id: pending.model_request_id,
         outcome,
     };
-    decide_normalized_model(
-        state,
-        env,
-        &normalized,
-        "external_effect_completed",
-        settlement_digest,
-    )
+    decide_normalized_model(state, env, &normalized, "external_effect_completed")
 }
 
 fn decide_normalized_model(
@@ -257,18 +237,8 @@ fn decide_normalized_model(
     env: &TransitionEnv,
     input: &ModelSettled,
     input_name: &'static str,
-    settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     let effect_id = input.outcome.effect_id();
-    if let Some(decision) = classify_model_duplicate(
-        state,
-        input.outcome.completion_id(),
-        effect_id,
-        settlement_digest,
-        Some(input),
-    )? {
-        return Ok(decision);
-    }
     reject_terminal(state)?;
     let required_phase = match input_name {
         "model_settled" => RunPhase::AwaitingModel,
@@ -295,8 +265,7 @@ fn decide_normalized_model(
         return Err(KernelError::ModelSettlementMismatch);
     }
 
-    let (requirements, bodies) =
-        model_settlement_bodies(state, env, pending, input, effect_id, settlement_digest)?;
+    let (requirements, bodies) = model_settlement_bodies(state, env, pending, input, effect_id)?;
     validate_allocated_ids(&env.ids, requirements)?;
     let records = draft_for_state(state, env, bodies)?;
     Ok(Decision {
@@ -307,59 +276,12 @@ fn decide_normalized_model(
     })
 }
 
-fn classify_model_duplicate(
-    state: &KernelState,
-    completion_id: Option<&str>,
-    effect_id: crate::EffectId,
-    settlement_digest: Digest,
-    input: Option<&ModelSettled>,
-) -> Result<Option<Decision>, KernelError> {
-    if let Some(completion_id) = completion_id
-        && let Some(existing) = state.completion_identities.get(completion_id)
-    {
-        return if existing.effect_id == effect_id && existing.settlement_digest == settlement_digest
-        {
-            duplicate_decision(state).map(Some)
-        } else {
-            Err(KernelError::ConflictingCompletionId)
-        };
-    }
-    if let Some(existing) = state.model_settlements.get(&effect_id) {
-        return if existing.digest == settlement_digest {
-            duplicate_decision(state).map(Some)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
-    if let Some(ModelSettled {
-        outcome: ModelSettlement::Deferred(deferred),
-        ..
-    }) = input
-        && let Some(pending) = state.pending_model_effect.as_ref()
-        && pending.requested.effect_id() == deferred.effect_id
-        && let Some(existing) = pending.deferred.as_ref()
-    {
-        let existing_digest = direct_digest(&ModelSettled {
-            turn_id: pending.turn_id,
-            model_request_id: pending.model_request_id,
-            outcome: ModelSettlement::Deferred(existing.clone()),
-        })?;
-        return if existing_digest == settlement_digest {
-            duplicate_decision(state).map(Some)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
-    Ok(None)
-}
-
 fn model_settlement_bodies(
     state: &KernelState,
     env: &TransitionEnv,
     pending: &crate::PendingModelEffect,
     input: &ModelSettled,
     effect_id: crate::EffectId,
-    settlement_digest: Digest,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
     match &input.outcome {
         ModelSettlement::Completed {
@@ -372,11 +294,10 @@ fn model_settlement_bodies(
             completion,
             assistant_message,
             effect_id,
-            settlement_digest,
         ),
         ModelSettlement::Deferred(deferred) => deferred_settlement_bodies(pending, deferred),
         ModelSettlement::Failed(failed) => {
-            failed_settlement_bodies(state, pending, failed, effect_id, settlement_digest)
+            failed_settlement_bodies(state, pending, failed, effect_id)
         }
     }
 }
@@ -388,7 +309,6 @@ fn completed_settlement_bodies(
     completion: &EffectCompleted,
     assistant_message: &Message,
     effect_id: crate::EffectId,
-    settlement_digest: Digest,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
     completion
         .validate_against(&pending.requested)
@@ -397,12 +317,7 @@ fn completed_settlement_bodies(
         return Err(KernelError::ModelSettlementMismatch);
     }
     if pending.requested.is_runtime_owned_child_model() {
-        return compaction_summary_completion_bodies(
-            state,
-            completion,
-            effect_id,
-            settlement_digest,
-        );
+        return compaction_summary_completion_bodies(state, completion, effect_id);
     }
     assistant_completion_bodies(
         state,
@@ -411,7 +326,6 @@ fn completed_settlement_bodies(
         completion,
         assistant_message,
         effect_id,
-        settlement_digest,
     )
 }
 
@@ -419,14 +333,7 @@ fn compaction_summary_completion_bodies(
     state: &KernelState,
     completion: &EffectCompleted,
     effect_id: crate::EffectId,
-    settlement_digest: Digest,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
-    validate_completion_identity(
-        state,
-        completion.completion_id(),
-        effect_id,
-        settlement_digest,
-    )?;
     capacity::preflight_decision(
         state,
         StateGrowth {
@@ -448,14 +355,7 @@ fn assistant_completion_bodies(
     completion: &EffectCompleted,
     assistant_message: &Message,
     effect_id: crate::EffectId,
-    settlement_digest: Digest,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
-    validate_completion_identity(
-        state,
-        completion.completion_id(),
-        effect_id,
-        settlement_digest,
-    )?;
     validate_assistant_semantics(state, env, assistant_message, completion)?;
     let tool_call_ids = assistant_tool_calls(assistant_message, false)
         .iter()
@@ -514,12 +414,10 @@ fn failed_settlement_bodies(
     pending: &crate::PendingModelEffect,
     failed: &EffectFailed,
     effect_id: crate::EffectId,
-    settlement_digest: Digest,
 ) -> Result<(IdRequirements, Vec<RecordBody>), KernelError> {
     failed
         .validate_against(&pending.requested)
         .map_err(|_| KernelError::ModelSettlementMismatch)?;
-    validate_completion_identity(state, failed.completion_id(), effect_id, settlement_digest)?;
     capacity::preflight_decision(
         state,
         StateGrowth {

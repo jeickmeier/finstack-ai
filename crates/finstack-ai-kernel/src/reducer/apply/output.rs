@@ -2,6 +2,7 @@ use crate::content::ContentBlock;
 use crate::state::{KernelState, TerminalCandidate};
 
 use super::super::decision::KernelError;
+use super::super::validation::assistant_tool_calls;
 
 pub(super) fn apply_final_result(
     state: &mut KernelState,
@@ -38,7 +39,10 @@ pub(super) fn apply_final_result(
         .filter(|message| *message.id() == result.message_id)
         .ok_or(KernelError::InvalidRecordOrder)?;
     let expected_skipped = if *end_strategy == crate::OutputEndStrategy::Early {
-        application_tool_ids(message)
+        assistant_tool_calls(message, true)
+            .into_iter()
+            .map(|call| *call.tool_call_id())
+            .collect()
     } else {
         Vec::new()
     };
@@ -111,12 +115,16 @@ pub(super) fn apply_validation_failure(
         field: "validation_error",
         reason_code: "expected_error_unavailable",
     })?;
+    let expected_skipped = assistant_tool_calls(message, true)
+        .into_iter()
+        .map(|call| *call.tool_call_id())
+        .collect::<Vec<_>>();
     if !candidate_matches
         || &failure.schema != schema
         || failure.error != expected_error
         || structured_source_value(message, &failure.source)
             .is_none_or(|value| value.digest() != failure.candidate_digest)
-        || failure.skipped_tool_call_ids.as_ref() != application_tool_ids(message).as_slice()
+        || failure.skipped_tool_call_ids.as_ref() != expected_skipped.as_slice()
         || state.final_result.is_some()
         || state.validation_failure.is_some()
     {
@@ -160,17 +168,4 @@ pub(super) fn structured_source_value<'a>(
             })
         }
     }
-}
-
-pub(super) fn application_tool_ids(message: &crate::Message) -> Vec<crate::ToolCallId> {
-    message
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) if !crate::is_internal_tool_name(call.tool_name()) => {
-                Some(*call.tool_call_id())
-            }
-            _ => None,
-        })
-        .collect()
 }

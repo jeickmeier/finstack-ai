@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "workload": "wasm-js-crossing-v1",
-  "commit": "edff42b9c09b",
+  "commit": "8175ce67a10b",
   "platform": {
     "system": "darwin",
     "release": "25.5.0",
@@ -15,10 +15,10 @@
     "comparison": "paired_within_browser_identical_payload"
   },
   "timing_ns": {
-    "init_median": 176000000,
-    "create_median": 200000,
+    "init_median": 158000000,
+    "create_median": 100000,
     "reducer_run_median": 4800000,
-    "event_throughput_median": 10200000,
+    "event_throughput_median": 9400000,
     "host_callback_median": 0,
     "wasm_drive_median": 4800000
   },
@@ -33,11 +33,11 @@
     "js_host_callbacks": 1
   },
   "throughput": {
-    "model_deltas_per_second": 3137.254960625872
+    "model_deltas_per_second": 3404.2552846111616
   },
   "bundle": {
-    "wasm_bytes": 9464148,
-    "wasm_gzip_bytes": 2840016
+    "wasm_bytes": 9456363,
+    "wasm_gzip_bytes": 2837713
   },
   "external_io": {
     "included_in_binding_comparison": false,

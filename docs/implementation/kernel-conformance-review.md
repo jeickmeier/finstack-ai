@@ -377,6 +377,10 @@ The §20.2.1 ordinal table is exercised only indirectly and the `kind_version` g
 unexercised. Since the ordinal table is a wire-compatibility surface, it warrants a direct
 table-driven test.
 
+**Current status (2026-08-18): fixed.** `derived_event_kind` is crate-internal and
+`derived_event_kind_matches_section_20_2_1_ordinals` directly covers the ordinal table,
+unsupported kind versions, and unsupported ordinals.
+
 ### F23 — `state_hash` rustdoc claims schema-1 while the method dispatches six schemas
 
 `crates/finstack-ai-kernel/src/state/mod.rs:194`
@@ -385,6 +389,10 @@ table-driven test.
 body that builds `DigestWriter::new("kernel-state", u32::from(self.state_version))` and
 branches over versions 1–6. Documentation only, but on the crate's most
 compatibility-critical method.
+
+**Current status (2026-08-18): implementation documentation fixed.** The live rustdoc now
+describes a versioned V1–V6 projection. Planning §11.3.6 still describes schema V1 and
+requires separate change control; this review does not amend the planning contract.
 
 ### F24 — A stale test passes for the wrong reason
 
@@ -463,4 +471,5 @@ finding bodies above and do not claim merge, gate, or completion.
 | F3 | Fixed at HEAD | Do not re-implement. |
 | F9 | Resolved by this program's #1 and #10 | Ordering fact confirmed; #10 supplies the concrete redelivery re-count. Not a fresh contested item. See [kernel-remediation-review.md](kernel-remediation-review.md). |
 | F13 | Closed as finding #5 Option A | TDD 0.20: no fabricated observed charge; both reserve twins deleted. |
+| F22 | Fixed at HEAD | `derived_event_kind` is crate-internal and its ordinal/version contract has a direct table-driven test. |
 | F23 | Fixed at HEAD | Live `state_hash` rustdoc already covers versions 1–6. Remaining #23 rustdoc (not this entry) stays with PR-081. |

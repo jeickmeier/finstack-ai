@@ -73,12 +73,10 @@ pub(super) fn decide(
             context_canonical,
             digest.ok_or(KernelError::InvariantViolation)?,
         ),
-        KernelInput::ModelSettled(input) => decide_model(
-            state,
-            env,
-            &input,
-            digest.ok_or(KernelError::InvariantViolation)?,
-        ),
+        KernelInput::ModelSettled(input) => {
+            digest.ok_or(KernelError::InvariantViolation)?;
+            decide_model(state, env, &input)
+        }
         KernelInput::ExternalEffectCompleted(input) => decide_external(state, env, input, digest),
         KernelInput::ToolBatchSettled(input) => super::tool::decide_tool_settled(
             state,
@@ -101,7 +99,7 @@ pub(super) fn decide(
             super::interaction::decide_request(state, env, &input)
         }
         KernelInput::InteractionSettled(input) => {
-            super::interaction::decide_settled(state, env, &input, digest)
+            super::interaction::decide_settled(state, env, &input)
         }
         KernelInput::RequestCompactionModel(input) => {
             decide_request_compaction_model(state, env, &input)

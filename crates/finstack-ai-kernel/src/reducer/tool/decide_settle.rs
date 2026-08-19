@@ -2,13 +2,12 @@
 
 use super::super::allocated_ids::validate_allocated_ids;
 use super::super::capacity::{self, StateGrowth};
-use super::super::decide::{draft_for_state, duplicate_decision, next_sequence, reject_terminal};
+use super::super::decide::{draft_for_state, next_sequence, reject_terminal};
 use super::super::decision::{Decision, KernelError};
-use super::super::fingerprint::{direct_tool_digest, external_tool_digest};
 use super::super::input::{
     ExternalEffectCompletedInput, ExternalEffectOutcome, ToolBatchSettled, ToolSettlement,
 };
-use super::super::validation::{validate_completion_identity, validate_error_descriptor};
+use super::super::validation::validate_error_descriptor;
 use crate::conversation::ProviderIds;
 use crate::effects::{EffectCompleted, EffectFailed, EffectKind, EffectOutputKind};
 use crate::records::RecordBody;
@@ -40,14 +39,32 @@ pub(crate) fn decide_tool_settled(
 }
 
 pub(crate) fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
-    state
-        .active_tool_batch
-        .as_ref()
-        .is_some_and(|batch| batch.call_index(effect_id).is_some())
+    tool_batch_id_for_effect(state, effect_id).is_some()
         || state
             .tool_calls
             .values()
             .any(|identity| identity.effect_id == Some(effect_id))
+}
+
+pub(crate) fn tool_batch_id_for_effect(
+    state: &KernelState,
+    effect_id: crate::EffectId,
+) -> Option<crate::ToolBatchId> {
+    state
+        .active_tool_batch
+        .as_ref()
+        .and_then(|batch| {
+            batch
+                .call_index(effect_id)
+                .map(|_| batch.opened.tool_batch_id)
+        })
+        .or_else(|| {
+            state
+                .tool_calls
+                .values()
+                .find(|identity| identity.effect_id == Some(effect_id))
+                .and_then(|identity| identity.tool_batch_id)
+        })
 }
 
 pub(crate) fn decide_external_tool(
@@ -56,50 +73,12 @@ pub(crate) fn decide_external_tool(
     input: ExternalEffectCompletedInput,
     settlement_digest: Option<crate::Digest>,
 ) -> Result<Decision, KernelError> {
-    let indexed_completion = state
-        .completion_identities
-        .get(input.completion.completion_id.as_ref());
-    if indexed_completion.is_some_and(|existing| existing.effect_id != input.completion.effect_id) {
-        return Err(KernelError::ConflictingCompletionId);
-    }
-    let tool_batch_id = state
-        .active_tool_batch
-        .as_ref()
-        .and_then(|batch| {
-            batch
-                .call_index(input.completion.effect_id)
-                .map(|_| batch.opened.tool_batch_id)
-        })
-        .or_else(|| {
-            state
-                .tool_calls
-                .values()
-                .find(|identity| identity.effect_id == Some(input.completion.effect_id))
-                .and_then(|identity| identity.tool_batch_id)
-        })
-        .ok_or(KernelError::EffectNotPending {
+    let tool_batch_id = tool_batch_id_for_effect(state, input.completion.effect_id).ok_or(
+        KernelError::EffectNotPending {
             effect_id: input.completion.effect_id,
-        })?;
-    let digest = match settlement_digest {
-        Some(digest) => digest,
-        None => external_tool_digest(tool_batch_id, &input)?,
-    };
-    if let Some(existing) = indexed_completion {
-        return if existing.effect_id == input.completion.effect_id
-            && existing.settlement_digest == digest
-        {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingCompletionId)
-        };
-    }
-    if let Some(existing) = state.tool_settlements.get(&input.completion.effect_id) {
-        return if existing.digest == digest {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
+        },
+    )?;
+    let digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
     if input.assistant_message.is_some() {
         return Err(KernelError::AssistantMessagePresenceMismatch);
     }
@@ -170,23 +149,6 @@ fn settle_normalized_tool(
 ) -> Result<Decision, KernelError> {
     let effect_id = outcome.effect_id();
     let completion_id = outcome.completion_id();
-    if let Some(completion_id) = completion_id
-        && let Some(existing) = state.completion_identities.get(completion_id)
-    {
-        return if existing.effect_id == effect_id && existing.settlement_digest == settlement_digest
-        {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingCompletionId)
-        };
-    }
-    if let Some(existing) = state.tool_settlements.get(&effect_id) {
-        return if existing.digest == settlement_digest {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
     reject_terminal(state)?;
     let valid_phase = if external {
         state.phase == Some(RunPhase::AwaitingExternal)
@@ -224,14 +186,6 @@ fn settle_normalized_tool(
     else {
         return Err(KernelError::ToolSettlementMismatch);
     };
-    if !external && let (Some(existing), ToolSettlement::Deferred(_)) = (deferred, outcome) {
-        let prior = ToolSettlement::Deferred(existing.clone());
-        return if direct_tool_digest(tool_batch_id, &prior)? == settlement_digest {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
     if external != deferred.is_some() {
         return Err(KernelError::ToolSettlementMismatch);
     }
@@ -254,12 +208,6 @@ fn settle_normalized_tool(
             {
                 return Err(KernelError::ToolEffectContractMismatch);
             }
-            validate_completion_identity(
-                state,
-                completion.completion_id(),
-                effect_id,
-                settlement_digest,
-            )?;
             let result = decode_tool_result(completion, active_call.assigned.plan.call())?;
             prospective.set_call_status(
                 call_index,
@@ -276,12 +224,6 @@ fn settle_normalized_tool(
             failure
                 .validate_against(requested)
                 .map_err(|_| KernelError::ToolSettlementMismatch)?;
-            validate_completion_identity(
-                state,
-                failure.completion_id(),
-                effect_id,
-                settlement_digest,
-            )?;
             let error = failure.error().clone();
             let result = synthetic_result(active_call.assigned.plan.call(), &error)?;
             prospective.set_call_status(

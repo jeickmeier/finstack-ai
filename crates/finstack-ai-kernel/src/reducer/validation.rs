@@ -1,11 +1,10 @@
 //! Semantic validations shared by reducer decision paths.
 
-use crate::Digest;
 use crate::content::ContentBlock;
 use crate::conversation::{Message, MessageRole};
 use crate::effects::EffectCompleted;
 use crate::primitives::ErrorDescriptor;
-use crate::primitives::{EffectId, MessageId, ToolCallId};
+use crate::primitives::{MessageId, ToolCallId};
 use crate::state::{KernelState, TransitionEnv};
 
 use super::KernelError;
@@ -58,7 +57,6 @@ pub(super) fn validate_assistant_semantics(
     }
     Ok(())
 }
-
 pub(super) fn assistant_tool_calls(
     message: &Message,
     skip_internal: bool,
@@ -90,28 +88,12 @@ pub(super) fn validate_assistant_tool_call_ids(
     }
     Ok(())
 }
-
 pub(super) fn validate_assistant_message_id(
     message_id: MessageId,
     message: &Message,
 ) -> Result<(), KernelError> {
     if *message.id() != message_id {
         return Err(KernelError::AssistantMessageMismatch);
-    }
-    Ok(())
-}
-
-pub(super) fn validate_completion_identity(
-    state: &KernelState,
-    completion_id: Option<&str>,
-    effect_id: EffectId,
-    settlement_digest: Digest,
-) -> Result<(), KernelError> {
-    if let Some(completion_id) = completion_id
-        && let Some(existing) = state.completion_identities.get(completion_id)
-        && (existing.effect_id != effect_id || existing.settlement_digest != settlement_digest)
-    {
-        return Err(KernelError::ConflictingCompletionId);
     }
     Ok(())
 }

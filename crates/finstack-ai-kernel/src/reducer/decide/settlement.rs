@@ -9,7 +9,7 @@ use super::super::input::{
     ToolBatchSettled, ToolSettlement,
 };
 use super::super::interaction::resolution_digest;
-use super::super::tool::is_known_tool_effect;
+use super::super::tool::{is_known_tool_effect, tool_batch_id_for_effect};
 use crate::primitives::Digest;
 use crate::state::KernelState;
 
@@ -100,18 +100,7 @@ fn review_external(
         return Err(KernelError::ConflictingCompletionId);
     }
     if is_known_tool_effect(state, effect_id) {
-        let Some(tool_batch_id) = state
-            .active_tool_batch
-            .as_ref()
-            .map(|batch| batch.opened.tool_batch_id)
-            .or_else(|| {
-                state
-                    .tool_calls
-                    .values()
-                    .find(|identity| identity.effect_id == Some(effect_id))
-                    .and_then(|identity| identity.tool_batch_id)
-            })
-        else {
+        let Some(tool_batch_id) = tool_batch_id_for_effect(state, effect_id) else {
             return Ok(SettlementReview::Fresh { digest: None });
         };
         let digest = external_tool_digest(tool_batch_id, input)?;

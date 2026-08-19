@@ -17,10 +17,7 @@ use super::bodies::{
     requested_model_bodies,
 };
 use super::shared::{stage_record, terminal_body_from_candidate, timer_firing_contract};
-use super::{
-    draft_for_state, duplicate_decision, expected_stage_cursor, next_sequence, reject_terminal,
-    required,
-};
+use super::{draft_for_state, expected_stage_cursor, next_sequence, reject_terminal, required};
 use crate::content::TEXT_MAX_BYTES;
 use crate::primitives::SEMANTIC_ARRAY_MAX_ITEMS;
 
@@ -71,13 +68,6 @@ pub(super) fn decide_stage(
     settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     validate_stage_input(input)?;
-    if let Some(existing) = state.stage_settlements.get(&input.cursor) {
-        return if *existing == settlement_digest {
-            duplicate_decision(state)
-        } else {
-            Err(KernelError::ConflictingSettlement)
-        };
-    }
     reject_terminal(state)?;
     let expected = expected_stage_cursor(state).ok_or(KernelError::InvalidPhaseInput {
         phase: state.phase,

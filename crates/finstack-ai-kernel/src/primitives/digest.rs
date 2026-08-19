@@ -35,10 +35,8 @@ pub(crate) const DOMAIN_SNAPSHOT_STATE: &str = "snapshot-state";
 /// Schema version for the `snapshot-state` digest domain.
 pub(crate) const SNAPSHOT_STATE_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for middleware-chain digests (TDD §6.4).
-#[allow(dead_code)] // registry only; runtime hashes this domain via `Digest::domain_separated`
 pub(crate) const DOMAIN_MIDDLEWARE_CHAIN: &str = "middleware-chain";
 /// Schema version for the `middleware-chain` digest domain.
-#[allow(dead_code)]
 pub(crate) const MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION: u32 = 1;
 /// Fixed domain name for agent-spec digests (TDD §6.4).
 pub const DOMAIN_AGENT_SPEC: &str = "agent-spec";
@@ -213,6 +211,21 @@ impl Digest {
             canonical_bytes,
         )
         .expect("fixed snapshot-state domain is valid")
+    }
+
+    /// Digest for a canonical resolved middleware chain.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the fixed `middleware-chain` registry entry were invalid.
+    #[must_use]
+    pub fn middleware_chain(canonical_bytes: &[u8]) -> Self {
+        Self::domain_separated(
+            DOMAIN_MIDDLEWARE_CHAIN,
+            MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION,
+            canonical_bytes,
+        )
+        .expect("fixed middleware-chain domain is valid")
     }
 }
 
@@ -406,6 +419,15 @@ mod tests {
                 payload
             )
             .expect("snapshot-state")
+        );
+        assert_eq!(
+            Digest::middleware_chain(payload),
+            Digest::domain_separated(
+                DOMAIN_MIDDLEWARE_CHAIN,
+                MIDDLEWARE_CHAIN_DIGEST_SCHEMA_VERSION,
+                payload
+            )
+            .expect("middleware-chain")
         );
         assert_ne!(a, Digest::snapshot_state(payload));
         assert_eq!(Digest::from_hex(&a.to_hex()).expect("hex"), a);

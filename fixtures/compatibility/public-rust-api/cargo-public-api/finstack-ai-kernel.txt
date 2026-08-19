@@ -3058,6 +3058,7 @@ pub fn finstack_ai_kernel::Digest::domain_separated(&str, u32, &[u8]) -> core::r
 pub fn finstack_ai_kernel::Digest::effect_input(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::effect_output(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::from_hex(&str) -> core::result::Result<Self, finstack_ai_kernel::DigestError>
+pub fn finstack_ai_kernel::Digest::middleware_chain(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::raw_json(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::snapshot_state(&[u8]) -> Self
 pub fn finstack_ai_kernel::Digest::to_hex(&self) -> alloc::string::String

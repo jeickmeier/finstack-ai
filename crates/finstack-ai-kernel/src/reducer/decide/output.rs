@@ -10,6 +10,7 @@ use crate::{
 
 use super::super::allocated_ids::{IdRequirements, validate_allocated_ids};
 use super::super::decision::{Decision, KernelError};
+use super::super::validation::assistant_tool_calls;
 use super::{draft_for_state, duplicate_decision, next_sequence, reject_terminal};
 
 pub(super) fn decide_configure_output(
@@ -175,7 +176,10 @@ pub(super) fn decide_output_validated(
         .filter(|message| message.id() == message_id)
         .ok_or(KernelError::AssistantMessageMismatch)?;
     validate_structured_source(message, &input.source, &input.candidate)?;
-    let application_calls = application_tool_call_ids(message);
+    let application_calls = assistant_tool_calls(message, true)
+        .into_iter()
+        .map(|call| *call.tool_call_id())
+        .collect::<Vec<_>>();
     let identity = OutputCandidateIdentity {
         cycle: *cycle,
         turn_id: *turn_id,
@@ -191,19 +195,6 @@ pub(super) fn decide_output_validated(
         actions: Vec::new(),
         diagnostics: Vec::new(),
     })
-}
-
-fn application_tool_call_ids(message: &crate::Message) -> Vec<crate::ToolCallId> {
-    message
-        .content()
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::ToolCall(call) if !crate::is_internal_tool_name(call.tool_name()) => {
-                Some(*call.tool_call_id())
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 #[derive(Clone, Copy)]
