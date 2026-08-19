@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 use std::future::Future;
 use std::time::Duration;
 
-use finstack_ai_runtime::{CancellationSignal, Timestamp};
+use finstack_ai_kernel::Timestamp;
+use finstack_ai_runtime::CancellationSignal;
 use finstack_ai_wit::{MAX_STRING_BYTES, reject_before_allocation, reject_declared_len};
 use wasmtime::component::{Component, HasData, Linker, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, Trap};

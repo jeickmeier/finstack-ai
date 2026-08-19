@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::{Digest, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId};
 use finstack_ai_runtime::{
-    ApprovalMetadata, Digest, Metadata, RawJson, RetrySafety, RunCallContext, SideEffectClass,
-    ToolDeferralSupport, ToolExecutionMode, ToolId, ToolSpec as NativeToolSpec,
+    ApprovalMetadata, RunCallContext, SideEffectClass, ToolDeferralSupport,
+    ToolSpec as NativeToolSpec,
 };
 use serde_json::Value;
 
@@ -36,7 +37,7 @@ pub fn sanitize_call_context(run: &RunCallContext) -> CallContext {
             .map(|scope| scope.as_ref().to_owned())
             .collect(),
         budget_scope_id: run.budget_scope_id.map(|id| id.to_canonical_string()),
-        deadline_unix_ms: run.deadline.map(finstack_ai_runtime::Timestamp::as_unix_ms),
+        deadline_unix_ms: run.deadline.map(finstack_ai_kernel::Timestamp::as_unix_ms),
     }
 }
 
@@ -251,10 +252,13 @@ mod tests {
     use super::{catalog_digest_hex, map_tool_spec, register_catalog, sanitize_call_context};
     use crate::generated::{ToolCatalog, ToolSpec};
     use crate::limits::MAX_RAW_JSON_BYTES;
-    use finstack_ai_runtime::{
-        ApprovalRequirement, AuthorizationContext, CancellationSignal, EffectId, LaneId, Metadata,
-        OperationLocator, PrincipalRef, RunCallContext, RunId, SessionId, SideEffectClass,
+    use finstack_ai_kernel::{
+        EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId,
         ToolExecutionMode,
+    };
+    use finstack_ai_runtime::{
+        ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext,
+        SideEffectClass,
     };
 
     fn sample_spec() -> ToolSpec {

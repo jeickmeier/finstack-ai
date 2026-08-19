@@ -1,4 +1,5 @@
-use finstack_ai_runtime::{ComponentId, PortObject, Version};
+use finstack_ai_kernel::{ComponentId, Version};
+use finstack_ai_runtime::PortObject;
 
 use super::errors::RegistrationError;
 use super::registrar::Registrar;

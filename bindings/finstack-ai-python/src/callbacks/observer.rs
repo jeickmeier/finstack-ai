@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, Metadata, Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode,
-    PortFuture, RunEvent, Sensitivity,
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
 };
+use finstack_ai_kernel::{ComponentRef, Metadata, RunEvent, Sensitivity};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 

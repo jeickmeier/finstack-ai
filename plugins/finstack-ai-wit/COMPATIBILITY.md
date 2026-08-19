@@ -17,7 +17,7 @@ default for `execution-mode`, `side-effect`, `retry-safety`,
 The workspace crate version is lockstep `1.0.0`. Local tag `v1.0.0`
 exists. Registries stay unpublished. Plugin alpha `@0.x` guests keep
 loading. `@1.0.0` worlds are generated beside `@0.0.4`.
-`uv run --no-project python tools/wit_bindgen/generate.py` emits both majors.
+`uv run --no-project python scripts/wit_bindgen/generate.py` emits both majors.
 
 ## Deprecation
 

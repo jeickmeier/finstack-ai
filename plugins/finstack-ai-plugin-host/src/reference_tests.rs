@@ -4,15 +4,17 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use finstack_ai::ComponentConstructionContext;
+use finstack_ai::registry::ComponentConstructionContext;
+use finstack_ai_kernel::{
+    ComponentId, ComponentRef, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId,
+    Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId,
+    ToolCallBlock, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall, Version,
+};
 use finstack_ai_runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ComponentId, ComponentRef,
-    ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
-    ContextProvider, ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind,
-    LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunCallContext, RunId,
-    SessionId, ToolCallBlock, ToolCallContext, ToolDeferralSupport, ToolExecutionMode,
-    ToolFailurePolicy, ToolId, ToolResult, ToolStreamAssembler, ToolStreamLimits, ToolTerminal,
-    Toolset, ValidatedToolCall, Version,
+    AssembledToolStream, AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget,
+    ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider, ContextRequest,
+    RunCallContext, ToolCallContext, ToolDeferralSupport, ToolResult, ToolStreamAssembler,
+    ToolStreamLimits, ToolTerminal, Toolset,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -177,8 +179,8 @@ fn run_context() -> RunCallContext {
 fn tool_ctx() -> ToolCallContext {
     ToolCallContext {
         run: run_context(),
-        tool_batch_id: finstack_ai_runtime::ToolBatchId::from_bytes([7; 16]),
-        tool_call_id: finstack_ai_runtime::ToolCallId::from_bytes([6; 16]),
+        tool_batch_id: finstack_ai_kernel::ToolBatchId::from_bytes([7; 16]),
+        tool_call_id: finstack_ai_kernel::ToolCallId::from_bytes([6; 16]),
     }
 }
 
@@ -190,7 +192,7 @@ fn validated_call(
 ) -> ValidatedToolCall {
     ValidatedToolCall {
         call: ToolCallBlock::try_new(
-            finstack_ai_runtime::ToolCallId::from_bytes([6; 16]),
+            finstack_ai_kernel::ToolCallId::from_bytes([6; 16]),
             tool_name,
             RawJson::parse(arguments).expect("arguments"),
         )
@@ -214,8 +216,8 @@ fn context_request() -> ContextRequest {
         session_id: SessionId::from_bytes([1; 16]),
         lane_id: LaneId::from_bytes([2; 16]),
         run_id: RunId::from_bytes([3; 16]),
-        user_input: Arc::from([finstack_ai_runtime::ContentBlock::Text(
-            finstack_ai_runtime::TextBlock::try_new("hello").expect("text"),
+        user_input: Arc::from([finstack_ai_kernel::ContentBlock::Text(
+            finstack_ai_kernel::TextBlock::try_new("hello").expect("text"),
         )]),
         recent_history: Arc::from([]),
         budget: ContextBudget {
@@ -679,7 +681,7 @@ async fn filesystem_sandbox_without_preopen_fails_instantiate() {
 }
 
 #[tokio::test]
-#[ignore = "invoked by tools/plugin_wasm/template_check.py"]
+#[ignore = "invoked by scripts/plugin_wasm/template_check.py"]
 async fn template_project_builds_and_runs() {
     let path = std::env::var("FINSTACK_TEMPLATE_WASM").expect("FINSTACK_TEMPLATE_WASM");
     let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));

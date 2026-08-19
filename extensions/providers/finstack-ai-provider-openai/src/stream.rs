@@ -37,7 +37,8 @@ fn map_norm(error: StreamNormError) -> ModelError {
 
 #[cfg(test)]
 mod tests {
-    use finstack_ai_runtime::{ContentBlock, ModelStreamItem};
+    use finstack_ai_kernel::ContentBlock;
+    use finstack_ai_runtime::ModelStreamItem;
     use serde_json::Value;
 
     use super::*;

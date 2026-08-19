@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentId, ComponentRef, ErrorCategory, Metadata, PortFuture, ToolCallContext, ToolError,
-    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    ValidatedToolCall,
+    PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem,
+    Toolset, ToolsetDescriptor,
 };
+use finstack_ai_kernel::{ComponentId, ComponentRef, ErrorCategory, Metadata, ValidatedToolCall};
 use futures_util::stream;
 use serde::Deserialize;
 

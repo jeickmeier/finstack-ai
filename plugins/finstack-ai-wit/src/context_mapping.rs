@@ -1,10 +1,11 @@
 //! Fail-closed mapping from experimental context WIT values to native types.
 
 use finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS;
+use finstack_ai_kernel::{ContentBlock, Sensitivity};
 use finstack_ai_runtime::{
-    ContentBlock, ContextAuthority, ContextBudget as NativeBudget, ContextItem as NativeItem,
-    ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProviderDescriptor,
-    ContextRequest, RunCallContext, Sensitivity,
+    ContextAuthority, ContextBudget as NativeBudget, ContextItem as NativeItem, ContextItemKind,
+    ContextOverflowPolicy, ContextProvenance, ContextProviderDescriptor, ContextRequest,
+    RunCallContext,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -339,12 +340,15 @@ mod tests {
     use crate::limits::MAX_RAW_JSON_BYTES;
     use crate::manifest::PluginResourceLimits;
     use finstack_ai_kernel::SEMANTIC_ARRAY_MAX_ITEMS;
+    use finstack_ai_kernel::{
+        ComponentId, ComponentInvocation, ContentBlock, Digest, EffectId, InvocationRecovery,
+        LaneId, Metadata, OperationLocator, PrincipalRef, RunId, Sensitivity, SessionId, TextBlock,
+        Version,
+    };
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, ComponentId, ComponentInvocation, ContentBlock,
-        ContextAuthority, ContextBudget, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
-        ContextProviderDescriptor, ContextRequest, Digest, EffectId, InvocationRecovery, LaneId,
-        Metadata, OperationLocator, PrincipalRef, RunCallContext, RunId, Sensitivity, SessionId,
-        TextBlock, Version,
+        AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget, ContextItemKind,
+        ContextOverflowPolicy, ContextProvenance, ContextProviderDescriptor, ContextRequest,
+        RunCallContext,
     };
     use serde_json::Value;
     use std::sync::Arc;

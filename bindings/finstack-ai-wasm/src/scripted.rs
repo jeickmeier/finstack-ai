@@ -47,7 +47,7 @@ fn encode_host_failure(failure: HostFailure) -> String {
     encode_error(
         failure.code(),
         failure
-            .category(finstack_ai::runtime::ErrorCategory::Model)
+            .category(finstack_ai_kernel::ErrorCategory::Model)
             .as_str(),
     )
 }
@@ -115,7 +115,7 @@ pub async fn drive_scripted_model_request(
         .assistant_content
         .first()
         .and_then(|block| match block {
-            finstack_ai::runtime::ContentBlock::Text(text) => Some(text.text().to_owned()),
+            finstack_ai_kernel::ContentBlock::Text(text) => Some(text.text().to_owned()),
             _ => None,
         })
         .unwrap_or_default();

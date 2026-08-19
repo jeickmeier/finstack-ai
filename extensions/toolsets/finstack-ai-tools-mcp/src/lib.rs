@@ -12,11 +12,11 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use finstack_ai_kernel::{Digest, ErrorCategory, Metadata, RawJson, ValidatedToolCall};
 use finstack_ai_runtime::{
-    Digest, ErrorCategory, Metadata, NestedSample, PendingToolEffect, PortFuture, RawJson,
-    ReconcileContext, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID, ToolCallContext, ToolError,
-    ToolEventStream, ToolReconcileResult, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, ValidatedToolCall, verify_authority,
+    NestedSample, PendingToolEffect, PortFuture, ReconcileContext, TOOL_INTERACTION_REQUIRED,
+    TOOL_OUTPUT_INVALID, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
+    ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use thiserror::Error;
@@ -36,7 +36,7 @@ pub use transport::{HttpConfig, StdioConfig};
 use classify::{
     catalog_digest, enumerate_catalog, enumerate_prompts, invocation_digest, to_tool_spec,
 };
-use finstack_ai_runtime::InteractionRequest;
+use finstack_ai_kernel::InteractionRequest;
 use protocol::{CallToolResult, ResultType, content_to_json};
 use transport::{HttpTransport, McpTransport, StdioTransport, authorize_http, authorize_stdio};
 

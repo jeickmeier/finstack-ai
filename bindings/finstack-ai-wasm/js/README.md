@@ -22,7 +22,7 @@ buildMetadata();
 
 This package is staged, not published. Consume a packed tarball from
 `mise run build-wasm -- release` or a tarball from
-`uv run --no-project python tools/wasm_package/stage.py`.
+`uv run --no-project python scripts/wasm_package/stage.py`.
 See [browser security](docs/browser-security.md) and
 [benchmarks](docs/benchmarks.md).
 
@@ -169,7 +169,7 @@ mise run build-wasm -- release
 ```
 
 That command is the only supported regeneration path. It writes `generated/`
-and `dist/`. Same-host `python tools/wasm_package/check.py dirty` fails when
+and `dist/`. Same-host `python scripts/wasm_package/check.py dirty` fails when
 regeneration drifts from the committed tree. Hosted Ubuntu regenerates for
 consecutive identity and browser tests; rustc/wasm-bindgen output is not
 cross-OS identical.

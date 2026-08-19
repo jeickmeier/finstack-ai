@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::{
+use finstack_ai_kernel::{
     EffectId, JsonSchemaDraft, MessageId, ModelRequestId, OutputEndStrategy,
     StructuredResultSource, ToolCallId, TurnId,
 };

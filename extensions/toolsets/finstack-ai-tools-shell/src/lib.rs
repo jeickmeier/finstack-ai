@@ -18,15 +18,17 @@ use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use finstack_ai_kernel::{
+    ErrorCategory, Metadata, RawJson, Sensitivity, Timestamp, ToolExecutionMode, ToolId,
+    ValidatedToolCall,
+};
 #[cfg(unix)]
 use finstack_ai_runtime::ToolStreamItem;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
-    ConfinedChild, ConfinementError, ConfinementProfile, ErrorCategory, Metadata, PortFuture,
-    ProcessConfinement, RawJson, Sensitivity, SideEffectClass, Timestamp, ToolCallContext,
-    ToolDeferralSupport, ToolError, ToolEventStream, ToolExecutionMode, ToolId, ToolResult,
-    ToolSpec, Toolset, ToolsetDescriptor, ValidatedToolCall, stage_required_artifact,
-    verify_authority,
+    ConfinedChild, ConfinementError, ConfinementProfile, PortFuture, ProcessConfinement,
+    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream, ToolResult,
+    ToolSpec, Toolset, ToolsetDescriptor, stage_required_artifact, verify_authority,
 };
 #[cfg(unix)]
 use futures_util::stream;
@@ -983,7 +985,7 @@ fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {
         output_schema: None,
         execution: ToolExecutionMode::Sequential,
         side_effect: SideEffectClass::NonIdempotentWrite,
-        retry_safety: finstack_ai_runtime::RetrySafety::AtMostOnce,
+        retry_safety: finstack_ai_kernel::RetrySafety::AtMostOnce,
         approval: ApprovalMetadata {
             requirement: ApprovalRequirement::Policy,
             reason: None,
@@ -1113,7 +1115,7 @@ mod unix {
     fn tool_io(message: &'static str) -> ToolError {
         super::tool_error(
             super::SHELL_IO_ERROR,
-            finstack_ai_runtime::ErrorCategory::Tool,
+            finstack_ai_kernel::ErrorCategory::Tool,
             message,
         )
     }

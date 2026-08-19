@@ -4,9 +4,12 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentId, ComponentInvocation, ComponentRef, ContextCallContext, ContextContribution,
-    ContextError, ContextProvider, ContextProviderDescriptor, ContextRequest, Digest,
-    ErrorCategory, InvocationRecovery, Metadata, PortFuture,
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, PortFuture,
+};
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, ComponentRef, Digest, ErrorCategory, InvocationRecovery,
+    Metadata,
 };
 use serde::Deserialize;
 

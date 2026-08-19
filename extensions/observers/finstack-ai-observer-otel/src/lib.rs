@@ -5,10 +5,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, RunEventKind, Version};
 use finstack_ai_runtime::{
-    ComponentId, ComponentRef, Metadata, OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure,
-    ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverEventView, ObserverPayloadMode,
-    ObserverQueue, ObserverQueuePush, PortFuture, RunEvent, RunEventKind, Version,
+    OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
+    ObserverDiagnostic, ObserverError, ObserverEventView, ObserverPayloadMode, ObserverQueue,
+    ObserverQueuePush, PortFuture,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::{Span, Tracer, TracerProvider};

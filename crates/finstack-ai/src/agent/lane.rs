@@ -6,10 +6,9 @@ use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunReque
 
 #[cfg(feature = "native-tokio")]
 mod native {
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
 
-    use finstack_ai_kernel::{LaneId, OperationLocator, SessionId};
+    use finstack_ai_kernel::OperationLocator;
     use finstack_ai_runtime::{
         ContextProvider, ExternalClock, LockedModelContextProfile, Model,
         ModelContextProfileOverride, ResolvedToolCatalog, SessionError, WorkflowSession,
@@ -19,26 +18,18 @@ mod native {
     use super::{AGENT_RUN_INVALID_CONFIGURATION, Agent, AgentRun, AgentRunError};
     use crate::agent::prepare::NativeIds;
 
-    pub(super) struct LaneLive {
+    pub(crate) struct LaneLive {
         pub(super) run: Option<AgentRun>,
         pub(super) workflow: Option<WorkflowSession>,
     }
 
-    fn live_lanes() -> &'static Mutex<BTreeMap<(SessionId, LaneId), LaneLive>> {
-        static LIVE: OnceLock<Mutex<BTreeMap<(SessionId, LaneId), LaneLive>>> = OnceLock::new();
-        LIVE.get_or_init(|| Mutex::new(BTreeMap::new()))
-    }
-
-    fn live_key(lane: &crate::Lane) -> (SessionId, LaneId) {
-        (lane.session().session_id(), lane.lane_id())
-    }
-
     pub(super) fn remember_run(lane: &crate::Lane, run: AgentRun) -> Result<(), AgentRunError> {
-        live_lanes()
+        lane.session()
+            .live_lanes()
             .lock()
             .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?
             .insert(
-                live_key(lane),
+                lane.lane_id(),
                 LaneLive {
                     run: Some(run),
                     workflow: None,
@@ -48,17 +39,20 @@ mod native {
     }
 
     pub(super) fn take_live(lane: &crate::Lane) -> Result<Option<LaneLive>, SessionError> {
-        Ok(live_lanes()
+        Ok(lane
+            .session()
+            .live_lanes()
             .lock()
             .map_err(|_| SessionError::Poisoned)?
-            .remove(&live_key(lane)))
+            .remove(&lane.lane_id()))
     }
 
     pub(super) fn put_live(lane: &crate::Lane, live: LaneLive) -> Result<(), AgentRunError> {
-        live_lanes()
+        lane.session()
+            .live_lanes()
             .lock()
             .map_err(|_| AgentRunError::runtime_message("lane driver lock is poisoned"))?
-            .insert(live_key(lane), live);
+            .insert(lane.lane_id(), live);
         Ok(())
     }
 
@@ -135,15 +129,18 @@ mod native {
 
     #[cfg(test)]
     pub(super) fn workflow_owner_is_live(lane: &crate::Lane) -> bool {
-        let Ok(guard) = live_lanes().lock() else {
+        let Ok(guard) = lane.session().live_lanes().lock() else {
             return false;
         };
         guard
-            .get(&live_key(lane))
+            .get(&lane.lane_id())
             .and_then(|live| live.workflow.as_ref())
             .is_some_and(WorkflowSession::owner_is_live)
     }
 }
+
+#[cfg(feature = "native-tokio")]
+pub(crate) use native::LaneLive;
 
 impl crate::Lane {
     /// Start a new root run on this idle lane.

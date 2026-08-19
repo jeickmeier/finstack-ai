@@ -40,7 +40,7 @@ impl PySession {
         let session = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let fork = fork
-                .map(|value| finstack_ai::runtime::EntryId::parse(&value))
+                .map(|value| finstack_ai_kernel::EntryId::parse(&value))
                 .transpose()
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
             match session.create_lane(name, fork).await {
@@ -81,7 +81,7 @@ impl PySession {
     fn lane_by_id<'py>(&self, py: Python<'py>, lane_id: String) -> PyResult<Bound<'py, PyAny>> {
         let session = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let lane_id = finstack_ai::runtime::LaneId::parse(&lane_id)
+            let lane_id = finstack_ai_kernel::LaneId::parse(&lane_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
             match session.lane_by_id(lane_id).await {
                 Ok(inner) => Python::attach(|py| Py::new(py, PyLane { inner })),
@@ -101,7 +101,7 @@ impl PySession {
     ) -> PyResult<()> {
         let key = ExternalIdentityKey::try_new(channel, account, thread)
             .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
-        let lane_id = finstack_ai::runtime::LaneId::parse(lane_id)
+        let lane_id = finstack_ai_kernel::LaneId::parse(lane_id)
             .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
         self.inner
             .bind_external_identity(&map.borrow().inner, key, lane_id)
@@ -149,7 +149,7 @@ impl PyLane {
     fn navigate<'py>(&self, py: Python<'py>, entry_id: String) -> PyResult<Bound<'py, PyAny>> {
         let lane = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let entry_id = finstack_ai::runtime::EntryId::parse(&entry_id)
+            let entry_id = finstack_ai_kernel::EntryId::parse(&entry_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
             match lane.navigate(entry_id).await {
                 Ok(()) => Ok(()),

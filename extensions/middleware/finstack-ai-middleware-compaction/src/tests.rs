@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
+use finstack_ai_kernel::{ComponentRef, Digest, OperationLocator, OutputSpec, PrincipalRef, Usage};
 use finstack_ai_kernel::{
     ContentBlock, EntryTag, Id, IdTag, Message, MessageRole, Metadata, ProviderIds, RawJson,
     Sensitivity, TextBlock, Timestamp, ToolCallBlock, ToolCallTag, ToolResultBlock,
 };
 use finstack_ai_runtime::{
     AuthorizationContext, BeforeModelInput, COMPACTION_MODEL_NOT_AUTHORIZED, CancellationSignal,
-    CompactionModelResume, CompactionSourceEntry, ComponentRef, Digest, Middleware,
-    MiddlewareContext, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
-    ModelSettings, OperationLocator, OutputSpec, PrincipalRef, RunCallContext, StageInput,
-    StageOutcome, Usage, compaction_checkpoint_compatible, validate_stage_outcome,
+    CompactionModelResume, CompactionSourceEntry, Middleware, MiddlewareContext, ModelName,
+    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, RunCallContext,
+    StageInput, StageOutcome, compaction_checkpoint_compatible, validate_stage_outcome,
 };
 use finstack_ai_test::{
     CompactionConformanceCase, MiddlewareConformanceCase, SharedCompactionProjection,

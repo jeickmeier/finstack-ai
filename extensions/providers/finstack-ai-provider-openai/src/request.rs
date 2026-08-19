@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use finstack_ai_runtime::{
-    ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec, RawJson,
-    SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId, ToolSpec,
+use finstack_ai_kernel::{
+    ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL, ToolCallId,
 };
+use finstack_ai_runtime::{ModelError, ModelRequestDraft, ToolSpec};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -376,7 +376,7 @@ fn tool_catalog_key(tools: &[ToolSpec]) -> String {
         bytes.extend_from_slice(tool.input_schema.as_bytes());
         bytes.push(0);
     }
-    finstack_ai_runtime::Digest::raw_json(&bytes).to_string()
+    finstack_ai_kernel::Digest::raw_json(&bytes).to_string()
 }
 
 pub(crate) fn serialize_request(request: &ResponsesRequest) -> Result<Vec<u8>, ModelError> {
@@ -388,10 +388,13 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use finstack_ai_kernel::{
+        MessageId, Metadata, ProviderIds, RetrySafety, TextBlock, Timestamp, ToolCallBlock,
+        ToolExecutionMode, ToolId, ToolResultBlock,
+    };
     use finstack_ai_runtime::{
-        ApprovalMetadata, ApprovalRequirement, MessageId, Metadata, ModelName, ModelRequestLimits,
-        ModelSettings, ProviderIds, RetrySafety, SideEffectClass, TextBlock, Timestamp,
-        ToolCallBlock, ToolExecutionMode, ToolId, ToolResultBlock, ToolSpec,
+        ApprovalMetadata, ApprovalRequirement, ModelName, ModelRequestLimits, ModelSettings,
+        SideEffectClass, ToolSpec,
     };
 
     #[test]
@@ -453,7 +456,7 @@ mod tests {
     #[test]
     fn continuation_replays_output_items_and_appends_new_tool_results() {
         let tool_call_id =
-            finstack_ai_runtime::ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ac")
+            finstack_ai_kernel::ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789ac")
                 .expect("tool call id");
         let assistant = Message::try_new(
             MessageId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("message id"),

@@ -4,7 +4,7 @@ use finstack_ai_kernel::{
     ComponentId, ComponentRef, ContentBlock, EffectId, InteractionId, InteractionKind,
     InteractionRequest, TextBlock, Version,
 };
-use finstack_ai_runtime::{Metadata, RawJson};
+use finstack_ai_kernel::{Metadata, RawJson};
 
 use crate::protocol::CallToolResult;
 use crate::{MCP_PROTOCOL_VIOLATION, McpError};

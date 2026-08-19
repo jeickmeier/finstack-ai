@@ -25,9 +25,9 @@ cargo test -p finstack-ai-plugin-host --offline --locked -- calculator_matches
 cargo test -p finstack-ai-plugin-host --offline --locked -- context_provider_matches
 cargo test -p finstack-ai-plugin-host --offline --locked -- filesystem_sandbox
 cargo test -p finstack-ai-plugin-host --offline --locked -- conformance_tests::
-uv run --no-project python tools/plugin_lock/lock.py
-uv run --no-project python tools/plugin_lock/lock.py --check
-uv run --no-project python tools/plugin_wasm/template_check.py
+uv run --no-project python scripts/plugin_lock/lock.py
+uv run --no-project python scripts/plugin_lock/lock.py --check
+uv run --no-project python scripts/plugin_wasm/template_check.py
 ```
 
 `load_enabled` on `plugins/reference/plugin.lock.json` loads calculator and

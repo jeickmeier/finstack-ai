@@ -769,6 +769,7 @@ dependencies = [
 name = "finstack-ai-context-memory"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "thiserror",
  "tokio",
@@ -778,6 +779,7 @@ dependencies = [
 name = "finstack-ai-context-repository"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "rustix",
  "tempfile",
@@ -801,6 +803,7 @@ dependencies = [
 name = "finstack-ai-extension-port-leaf-fixture"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
 ]
 
@@ -859,6 +862,7 @@ dependencies = [
 name = "finstack-ai-model-port-leaf-fixture"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-core",
@@ -872,6 +876,7 @@ dependencies = [
  "finstack-ai",
  "finstack-ai-context-memory",
  "finstack-ai-context-repository",
+ "finstack-ai-kernel",
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-verify",
  "finstack-ai-provider-ollama",
@@ -983,6 +988,7 @@ dependencies = [
 name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-util",
@@ -996,6 +1002,7 @@ dependencies = [
 name = "finstack-ai-provider-openai"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-util",
@@ -1010,6 +1017,7 @@ name = "finstack-ai-python"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
@@ -1059,6 +1067,7 @@ dependencies = [
 name = "finstack-ai-sandbox-e2b"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",
  "reqwest",
@@ -1136,6 +1145,7 @@ name = "finstack-ai-tools-calculator"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",
  "serde",
@@ -1148,6 +1158,7 @@ dependencies = [
 name = "finstack-ai-tools-filesystem"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",
  "rustix",
@@ -1181,6 +1192,7 @@ dependencies = [
 name = "finstack-ai-tools-shell"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-util",
@@ -1197,6 +1209,7 @@ name = "finstack-ai-tools-skill-import"
 version = "1.0.0"
 dependencies = [
  "finstack-ai",
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "serde_json",
  "serde_json_canonicalizer",
@@ -1233,6 +1246,7 @@ dependencies = [
 name = "finstack-ai-toolset-port-leaf-fixture"
 version = "1.0.0"
 dependencies = [
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "futures-core",

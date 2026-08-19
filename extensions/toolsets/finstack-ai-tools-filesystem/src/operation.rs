@@ -1,6 +1,7 @@
+use finstack_ai_kernel::ErrorCategory;
 #[cfg(unix)]
 use finstack_ai_runtime::CancellationSignal;
-use finstack_ai_runtime::{ErrorCategory, ToolError};
+use finstack_ai_runtime::ToolError;
 
 #[cfg(unix)]
 use crate::FileSystemLimits;

@@ -6,21 +6,24 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ApprovalMetadata, ApprovalRequirement, ComponentId, ComponentInvocation, ComponentRef,
-    ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, Digest, InputCapabilities, InvocationRecovery,
-    JournalStore, LoadRequest, LoadedSession, Metadata, Middleware, MiddlewareContext,
-    MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, Model,
-    ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate, Observer,
-    ObserverDescriptor, ObserverError, ObserverPayloadMode, OrderTier, PortFuture, ProviderIds,
-    RawJson, RetrySafety, RunEvent, SideEffectClass, SnapshotReceipt, SnapshotRequest, Stage,
-    StageInput, StageMask, StageOutcome, StoreError, StoreHealth, StructuredOutputCapability,
-    TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolDeferralSupport, ToolError,
-    ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, Usage, ValidatedToolCall, Version,
+    ApprovalMetadata, ApprovalRequirement, ContextCallContext, ContextContribution, ContextError,
+    ContextProvider, ContextProviderDescriptor, ContextRequest, InputCapabilities, JournalStore,
+    LoadRequest, LoadedSession, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, Model, ModelCapabilities,
+    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
+    ModelResponse, ModelStreamItem, ModelTokenEstimate, Observer, ObserverDescriptor,
+    ObserverError, ObserverPayloadMode, OrderTier, PortFuture, SideEffectClass, SnapshotReceipt,
+    SnapshotRequest, StageInput, StageMask, StageOutcome, StoreError, StoreHealth,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, ToolCallContext,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use finstack_ai_kernel::{AppendRequest, CommittedBatch};
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery, Metadata,
+    ProviderIds, RawJson, RetrySafety, RunEvent, Stage, ToolExecutionMode, ToolId, Usage,
+    ValidatedToolCall, Version,
+};
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -699,7 +702,8 @@ mod tests {
         NativeModelProxy, NativeObserverProxy, NativeToolsetProxy, compile_native_port_proxies,
     };
     use crate::executor::block_on_ready;
-    use finstack_ai::runtime::{JournalStore, LoadRequest, SessionId};
+    use finstack_ai::runtime::{JournalStore, LoadRequest};
+    use finstack_ai_kernel::SessionId;
 
     #[test]
     fn native_port_proxies_are_send_sync() {

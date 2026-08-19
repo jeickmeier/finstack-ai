@@ -2,13 +2,15 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, Digest, InvocationRecovery, Metadata, RunEvent, Stage,
+    Version,
+};
 use finstack_ai_runtime::{
-    ComponentId, ComponentInvocation, ContextCallContext, ContextContribution, ContextError,
-    ContextProvider, ContextProviderDescriptor, ContextRequest, Digest, InvocationRecovery,
-    Metadata, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, OrderTier, PortFuture, RunEvent, Stage, StageInput, StageMask,
-    StageOutcome, Version,
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, Middleware, MiddlewareContext, MiddlewareDescriptor,
+    MiddlewareError, MiddlewareOrder, MiddlewareRole, Observer, ObserverDescriptor, ObserverError,
+    ObserverPayloadMode, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 
 fn invocation(id: &str) -> ComponentInvocation {
@@ -79,7 +81,7 @@ pub struct LeafObserver;
 impl Observer for LeafObserver {
     fn descriptor(&self) -> ObserverDescriptor {
         ObserverDescriptor {
-            component: finstack_ai_runtime::ComponentRef::new(
+            component: finstack_ai_kernel::ComponentRef::new(
                 ComponentId::parse("fixture.observer").expect("fixture component id"),
                 Some(Version {
                     major: 1,

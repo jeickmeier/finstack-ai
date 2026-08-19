@@ -138,10 +138,7 @@ mod tests {
     #[test]
     fn non_loopback_plaintext_is_rejected() {
         let addr = ListenAddr::plaintext_tcp("0.0.0.0:9".parse().expect("addr"));
-        assert!(matches!(
-            addr.validate(),
-            Err(ServerError::ListenInvalid)
-        ));
+        assert!(matches!(addr.validate(), Err(ServerError::ListenInvalid)));
     }
 
     #[test]
@@ -152,10 +149,7 @@ mod tests {
     #[test]
     fn loopback_constructor_is_plaintext_localhost() {
         let addr = ListenAddr::loopback(9);
-        assert_eq!(
-            addr.tcp_addr(),
-            Some("127.0.0.1:9".parse().expect("addr"))
-        );
+        assert_eq!(addr.tcp_addr(), Some("127.0.0.1:9".parse().expect("addr")));
         assert!(addr.tls_config().is_none());
     }
 }

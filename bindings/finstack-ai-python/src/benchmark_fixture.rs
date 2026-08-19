@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, ContentBlock, JournalStore, Model, ModelContextProfile, ModelName,
-    ModelResponse, ModelStreamItem, ProviderIds, TextBlock, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, Usage,
+    JournalStore, Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai::{Agent, AgentRunError};
+use finstack_ai_kernel::{AgentId, BundleId, ContentBlock, ProviderIds, TextBlock, Usage};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelControl, ScriptedModelPlan,

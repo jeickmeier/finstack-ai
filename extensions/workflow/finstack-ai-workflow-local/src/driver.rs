@@ -1,10 +1,10 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use finstack_ai_kernel::OperationLocator;
 use finstack_ai_runtime::{
     Clock, ContextProvider, ExternalClock, JournalStore, LockedModelContextProfile, Model,
-    OperationLocator, ResolvedMiddlewareChain, ResolvedToolCatalog, WorkflowDriverError,
-    WorkflowSession,
+    ResolvedMiddlewareChain, ResolvedToolCatalog, WorkflowDriverError, WorkflowSession,
 };
 
 use crate::cron::{CronError, CronFire, CronSchedule, IntervalSchedule, validate_schedule_id};

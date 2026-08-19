@@ -11,12 +11,12 @@ rust-version: 1.97.1
 target: wasm32-unknown-unknown
 wit-bindgen: 0.57.1
 WIT packages: finstack:ai-*@0.0.4 (default); @1.0.0 retarget in MIGRATION.md
-encode: tools/plugin_wasm/encoder
+encode: scripts/plugin_wasm/encoder
 ```
 
 Regenerate vendored WIT with
-`uv run --no-project python tools/plugin_wasm/sync_guest_wit.py`.
-`uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check`
+`uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py`.
+`uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py --check`
 fails on drift. Runtime discovery is lockfile-only
 (`PluginHost::load_enabled`); guests are not searched.
 
@@ -37,11 +37,11 @@ grants the matching capability and concrete resource.
 ## Local host test commands
 
 ```text
-uv run --no-project python tools/plugin_wasm/sync_guest_wit.py
-uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check
-uv run --no-project python tools/plugin_wasm/generate.py
-uv run --no-project python tools/plugin_wasm/generate.py --check
-uv run --no-project python tools/plugin_wasm/template_check.py
+uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py
+uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py --check
+uv run --no-project python scripts/plugin_wasm/generate.py
+uv run --no-project python scripts/plugin_wasm/generate.py --check
+uv run --no-project python scripts/plugin_wasm/template_check.py
 cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```

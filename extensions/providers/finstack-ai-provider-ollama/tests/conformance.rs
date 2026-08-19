@@ -3,13 +3,16 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    ContentBlock, EffectId, LaneId, Message, MessageId, MessageRole, Metadata, ModelRequestId,
+    OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, TextBlock,
+    Timestamp,
+};
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ContentBlock, EffectId, LaneId, Message, MessageId,
-    MessageRole, Metadata, Model, ModelCallContext, ModelName, ModelRequest, ModelRequestDraft,
-    ModelRequestId, ModelRequestLimits, ModelSettings, ModelTerminal, OllamaChatAssembly,
-    OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunCallContext, RunId,
-    SessionId, TextBlock, Timestamp,
+    AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelTerminal, OllamaChatAssembly,
+    RunCallContext,
 };
 use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

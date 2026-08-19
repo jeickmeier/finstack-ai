@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, JournalStore, Model,
-    ModelContextProfile, ModelName, ModelStreamItem, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, Version,
+    JournalStore, Model, ModelContextProfile, ModelName, ModelStreamItem, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai::{
     Agent, AgentRunRequest, CapabilityActivation, CapabilitySpec, InstructionSpec, PrincipalRef,
     RunSecurityContext,
 };
+use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, Version};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 
@@ -70,13 +70,13 @@ fn instruction_prefix(model: &ScriptedModel) -> Vec<String> {
         .draft
         .messages
         .iter()
-        .filter(|message| message.role() == finstack_ai::runtime::MessageRole::System)
+        .filter(|message| message.role() == finstack_ai_kernel::MessageRole::System)
         .map(|message| {
             message
                 .content()
                 .iter()
                 .filter_map(|block| match block {
-                    finstack_ai::runtime::ContentBlock::Text(text) => Some(text.text().to_owned()),
+                    finstack_ai_kernel::ContentBlock::Text(text) => Some(text.text().to_owned()),
                     _ => None,
                 })
                 .collect::<String>()
@@ -195,12 +195,12 @@ fn completed(text: &str) -> ScriptedModelPlan {
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
                 finstack_ai::runtime::ModelResponse {
-                    assistant_content: Arc::from([finstack_ai::runtime::ContentBlock::Text(
-                        finstack_ai::runtime::TextBlock::try_new(text).expect("text"),
+                    assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Text(
+                        finstack_ai_kernel::TextBlock::try_new(text).expect("text"),
                     )]),
                     tool_calls: Arc::from([]),
-                    usage: finstack_ai::runtime::Usage::empty(),
-                    provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                    usage: finstack_ai_kernel::Usage::empty(),
+                    provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                     completion_id: Arc::from("capability-1"),
                     continuation_state: None,
                 },

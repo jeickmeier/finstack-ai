@@ -157,7 +157,8 @@ impl WorkflowDriverError {
 /// # Examples
 ///
 /// ```
-/// use finstack_ai_runtime::{KernelState, classify_wait};
+/// use finstack_ai_kernel::KernelState;
+/// use finstack_ai_runtime::classify_wait;
 ///
 /// assert!(classify_wait(&KernelState::default()).is_none());
 /// ```
@@ -234,10 +235,8 @@ pub const fn resolve_checkpoint_sequence(journal_seq: u64, hint: Option<u64>) ->
 /// # Examples
 ///
 /// ```
-/// use finstack_ai_kernel::Id;
-/// use finstack_ai_runtime::{
-///     EffectId, KernelState, WorkflowRetryDecision, retry_decision,
-/// };
+/// use finstack_ai_kernel::{EffectId, Id, KernelState};
+/// use finstack_ai_runtime::{WorkflowRetryDecision, retry_decision};
 ///
 /// let state = KernelState::default();
 /// let effect_id = Id::from_bytes([

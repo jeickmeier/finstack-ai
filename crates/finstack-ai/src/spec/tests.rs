@@ -1,5 +1,5 @@
 use super::*;
-use finstack_ai_runtime::Version;
+use finstack_ai_kernel::Version;
 
 fn component(id: &str) -> ComponentRef {
     ComponentRef::new(

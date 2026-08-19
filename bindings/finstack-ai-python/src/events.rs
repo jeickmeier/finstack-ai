@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::RunEvent;
+use finstack_ai_kernel::RunEvent;
 use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;

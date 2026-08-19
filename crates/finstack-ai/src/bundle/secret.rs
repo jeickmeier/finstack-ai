@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{ComponentId, RawJson};
+use finstack_ai_kernel::{ComponentId, RawJson};
 
 use super::BundleResolutionError;
 

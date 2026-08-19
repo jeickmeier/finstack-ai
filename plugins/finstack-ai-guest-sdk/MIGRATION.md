@@ -27,7 +27,7 @@ components. Retarget a guest project as follows:
 3. Set manifest `version` to `1.0.0` and recompute the host digest:
 
    ```text
-   uv run --no-project python tools/migrate/migrate.py manifest \
+   uv run --no-project python scripts/migrate/migrate.py manifest \
      path/to/plugin.manifest.json --out path/to/plugin.manifest.json
    ```
 

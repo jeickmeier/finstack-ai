@@ -16,6 +16,7 @@ pub use route::RemoteChildRoute;
 mod tests {
     use std::sync::Arc;
 
+    use finstack_ai_kernel::BudgetRequest;
     use finstack_ai_kernel::{
         AgentId, BundleId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef,
         ContentBlock, Digest, EffectId, ExternalHandleRef, LaneId, Metadata, OperationLocator,
@@ -28,7 +29,7 @@ mod tests {
         encode_frame,
     };
     use finstack_ai_runtime::{
-        AgentInvoker, AuthorizationContext, BudgetRequest, ChildRunContext, ChildRunRequest,
+        AgentInvoker, AuthorizationContext, ChildRunContext, ChildRunRequest,
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;

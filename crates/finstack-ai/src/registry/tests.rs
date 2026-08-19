@@ -2,10 +2,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, Metadata, RawJson, Version};
 use finstack_ai_runtime::{
-    ComponentId, ComponentRef, Digest, JournalStore, Metadata, Model, ModelContextProfile,
-    ModelName, Observer, ObserverDescriptor, ObserverPayloadMode, PortFuture, RawJson,
-    TokenEstimatorRef, TokenEstimatorSource, Version,
+    JournalStore, Model, ModelContextProfile, ModelName, Observer, ObserverDescriptor,
+    ObserverPayloadMode, PortFuture, TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
@@ -132,7 +132,7 @@ fn bundle_spec(
 ) -> crate::BundleSpec {
     crate::BundleSpec {
         schema_version: crate::BUNDLE_SCHEMA_VERSION,
-        id: finstack_ai_runtime::BundleId::parse("test.bundle.composition").expect("bundle id"),
+        id: finstack_ai_kernel::BundleId::parse("test.bundle.composition").expect("bundle id"),
         version: VERSION,
         agents: Arc::from([agent]),
         capabilities: Arc::from([capability]),
@@ -160,10 +160,10 @@ async fn bundle_resolution_locks_capabilities_and_rebuilds_application_plan() {
         .expect("store extension");
     let mut registry = registrar.into_registry();
 
-    let capability_id = finstack_ai_runtime::CapabilityId::parse("test.capability.research")
-        .expect("capability id");
+    let capability_id =
+        finstack_ai_kernel::CapabilityId::parse("test.capability.research").expect("capability id");
     let agent = crate::AgentBuilder::new(
-        finstack_ai_runtime::AgentId::parse("test.agent.research").expect("agent id"),
+        finstack_ai_kernel::AgentId::parse("test.agent.research").expect("agent id"),
         ComponentRef::new(component("test.model.scripted"), Some(VERSION)),
         ComponentRef::new(component("test.store.memory"), Some(VERSION)),
     )
@@ -331,7 +331,7 @@ async fn bundle_conflicts_unresolved_refs_and_missing_services_fail_before_start
         .expect("store extension");
     let mut registry = registrar.into_registry();
     let capability = crate::CapabilitySpec {
-        id: finstack_ai_runtime::CapabilityId::parse("test.capability.required")
+        id: finstack_ai_kernel::CapabilityId::parse("test.capability.required")
             .expect("capability"),
         description: Arc::from("Required capability"),
         instructions: Arc::from([]),
@@ -341,7 +341,7 @@ async fn bundle_conflicts_unresolved_refs_and_missing_services_fail_before_start
         activation: crate::CapabilityActivation::Always,
     };
     let agent = crate::AgentBuilder::new(
-        finstack_ai_runtime::AgentId::parse("test.agent.required").expect("agent"),
+        finstack_ai_kernel::AgentId::parse("test.agent.required").expect("agent"),
         ComponentRef::new(component("test.model.scripted"), Some(VERSION)),
         ComponentRef::new(component("test.store.memory"), Some(VERSION)),
     )
@@ -424,7 +424,7 @@ async fn bundle_conflicts_unresolved_refs_and_missing_services_fail_before_start
 
     let mut unresolved_capability_agent = agent.clone();
     unresolved_capability_agent.capabilities = Arc::from([crate::CapabilityRef {
-        id: finstack_ai_runtime::CapabilityId::parse("test.capability.missing")
+        id: finstack_ai_kernel::CapabilityId::parse("test.capability.missing")
             .expect("missing capability"),
         bundle: None,
     }]);
@@ -527,7 +527,7 @@ async fn bundle_conflicts_unresolved_refs_and_missing_services_fail_before_start
             .resolve_agent(
                 &mut registry,
                 &service_id,
-                &finstack_ai_runtime::AgentId::parse("test.agent.missing")
+                &finstack_ai_kernel::AgentId::parse("test.agent.missing")
                     .expect("missing agent id"),
                 BTreeMap::new(),
                 AgentConstructionContext::new(),

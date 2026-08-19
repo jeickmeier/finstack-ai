@@ -12,7 +12,7 @@ Workspace version is **1.0.0** unpublished (last public tag `v0.1.0`; not on npm
 
 ```bash
 mise run build-wasm -- release
-uv run --no-project python tools/wasm_package/stage.py
+uv run --no-project python scripts/wasm_package/stage.py
 # stage.py also installs this example from the packed tarball and runs tsc
 ```
 

@@ -183,7 +183,7 @@ impl JsModel {
         Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Model>
     }
 
-    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+    pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component().clone()
     }
 
@@ -237,7 +237,7 @@ impl JsToolset {
         Arc::clone(&self.inner) as Arc<dyn finstack_ai::runtime::Toolset>
     }
 
-    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+    pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component().clone()
     }
 }
@@ -277,7 +277,7 @@ impl JsContextProvider {
     }
 
     /// Exact registered component identity.
-    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+    pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component_ref()
     }
 }
@@ -317,7 +317,7 @@ impl JsMiddleware {
     }
 
     /// Exact registered component identity.
-    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+    pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component_ref()
     }
 }
@@ -357,7 +357,7 @@ impl JsObserver {
     }
 
     /// Exact registered component identity.
-    pub(crate) fn component(&self) -> finstack_ai::runtime::ComponentRef {
+    pub(crate) fn component(&self) -> finstack_ai_kernel::ComponentRef {
         self.inner.component_ref()
     }
 }

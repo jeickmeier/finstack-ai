@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
 futures-core = { workspace = true }
 

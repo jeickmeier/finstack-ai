@@ -4,11 +4,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentId, ComponentRef, InputCapabilities, Metadata, Model, ModelCapabilities,
-    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
-    ModelStreamItem, ModelTokenEstimate, PortFuture, StructuredOutputCapability, TextDelta,
-    TokenEstimatorSource, ToolCallDelta,
+    InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, PortFuture,
+    StructuredOutputCapability, TextDelta, TokenEstimatorSource, ToolCallDelta,
 };
+use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata};
 use futures_util::stream;
 
 use crate::host::{
@@ -243,7 +243,7 @@ fn items_from_response(
         .assistant_content
         .first()
         .and_then(|block| match block {
-            finstack_ai::runtime::ContentBlock::Text(text) => Some(text.text()),
+            finstack_ai_kernel::ContentBlock::Text(text) => Some(text.text()),
             _ => None,
         })
         && !text.is_empty()
@@ -408,7 +408,7 @@ mod tests {
                 .assistant_content
                 .first()
                 .and_then(|block| match block {
-                    finstack_ai::runtime::ContentBlock::Text(text) => Some(text.text()),
+                    finstack_ai_kernel::ContentBlock::Text(text) => Some(text.text()),
                     _ => None,
                 }),
             Some("hello from JS")
@@ -456,7 +456,7 @@ mod tests {
         assert_eq!(error.code(), crate::host::JS_HOST_CANCELLED);
         assert_eq!(
             error.category(),
-            finstack_ai::runtime::ErrorCategory::Cancellation
+            finstack_ai_kernel::ErrorCategory::Cancellation
         );
     }
 

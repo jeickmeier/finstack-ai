@@ -4,27 +4,16 @@
 
 #![warn(missing_docs)]
 
-// Request-path order. rustfmt would otherwise alphabetize these.
-#[rustfmt::skip]
-mod error;
-#[rustfmt::skip]
-mod listen;
-#[rustfmt::skip]
 mod auth;
-#[rustfmt::skip]
-mod frame;
-#[rustfmt::skip]
-mod session;
-#[rustfmt::skip]
-mod credit;
-#[rustfmt::skip]
-mod handshake;
-#[rustfmt::skip]
-mod connection;
-#[rustfmt::skip]
-mod server;
-#[rustfmt::skip]
 mod client;
+mod connection;
+mod credit;
+mod error;
+mod frame;
+mod handshake;
+mod listen;
+mod server;
+mod session;
 
 pub use auth::{AuthContext, AuthVerifier, StaticAuthVerifier, TransportKind};
 pub use client::RemoteClient;

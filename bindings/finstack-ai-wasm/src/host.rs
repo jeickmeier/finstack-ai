@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::{
-    ContentBlock, ErrorCategory, JsonBlock, Metadata, ModelError, ModelResponse, ModelToolCall,
-    ProviderIds, RawJson, TextBlock, Usage,
+use finstack_ai::runtime::{ModelError, ModelResponse, ModelToolCall};
+use finstack_ai_kernel::{
+    ContentBlock, ErrorCategory, JsonBlock, Metadata, ProviderIds, RawJson, TextBlock, Usage,
 };
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -16,7 +16,7 @@ pub const JS_HOST_FAILED: &str = "js_host_failed";
 /// Stable validation code for a malformed JS host result.
 pub const JS_HOST_RESULT_INVALID: &str = "js_host_result_invalid";
 
-const HOST_VERSION: finstack_ai::runtime::Version = finstack_ai::runtime::Version {
+const HOST_VERSION: finstack_ai_kernel::Version = finstack_ai_kernel::Version {
     major: 0,
     minor: 0,
     patch: 1,
@@ -258,7 +258,7 @@ pub fn tool_output_bytes(output: &HostToolOutput) -> Result<(RawJson, bool), Hos
 
 /// Frozen callback-component version used by JS wrappers.
 #[must_use]
-pub const fn host_component_version() -> finstack_ai::runtime::Version {
+pub const fn host_component_version() -> finstack_ai_kernel::Version {
     HOST_VERSION
 }
 
@@ -702,7 +702,7 @@ mod tests {
         HostFailure, HostModelOutput, HostToolOutput, JS_HOST_CANCELLED, JS_HOST_FAILED,
         JS_HOST_RESULT_INVALID, model_failure, model_response, parse_host_json, tool_output_bytes,
     };
-    use finstack_ai::runtime::ErrorCategory;
+    use finstack_ai_kernel::ErrorCategory;
 
     #[test]
     fn host_failure_codes_are_stable() {

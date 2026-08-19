@@ -2,18 +2,22 @@
 
 use std::sync::Arc;
 
+use finstack_ai::registry::ReadyComponent;
 use finstack_ai::{
-    AgentComponentSelection, AgentConstructionContext, ComponentSelector, Extension,
-    ReadyComponent, Registrar, RegistrationMetadata, ResolveRequest,
+    AgentComponentSelection, AgentConstructionContext, ComponentSelector, Extension, Registrar,
+    RegistrationMetadata, ResolveRequest,
+};
+use finstack_ai_kernel::{
+    ComponentId, ComponentRef, ContentBlock, Digest, EffectId, EffectOutputContract,
+    EffectOutputKind, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety,
+    RunId, SessionId, TextBlock, ToolCallBlock, ToolCallId, ToolExecutionMode, ToolFailurePolicy,
+    ToolId, ValidatedToolCall, Version,
 };
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ComponentId, ComponentRef, ContentBlock,
-    ContextAuthority, ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy,
-    ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-    Model, ModelContextProfile, ModelName, OperationLocator, PrincipalRef, RawJson, RetrySafety,
-    RunCallContext, RunId, SessionId, TextBlock, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallBlock, ToolCallContext, ToolCallId, ToolExecutionMode, ToolFailurePolicy, ToolId,
-    ToolStreamItem, Toolset, ValidatedToolCall, Version,
+    AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget, ContextCallContext,
+    ContextItemKind, ContextOverflowPolicy, ContextRequest, Model, ModelContextProfile, ModelName,
+    RunCallContext, TokenEstimatorRef, TokenEstimatorSource, ToolCallContext, ToolStreamItem,
+    Toolset,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::ScriptedModel;
@@ -84,8 +88,8 @@ fn host(policy: InstancePolicy, max: u32) -> Arc<PluginHost> {
     )
 }
 
-fn construction(identity: &str) -> finstack_ai::ComponentConstructionContext {
-    finstack_ai::ComponentConstructionContext {
+fn construction(identity: &str) -> finstack_ai::registry::ComponentConstructionContext {
+    finstack_ai::registry::ComponentConstructionContext {
         component: ComponentRef::new(component(identity), Some(EXPERIMENTAL)),
         configuration: None,
         cancellation: CancellationSignal::new(),
@@ -225,7 +229,7 @@ fn validated_call(tool_id: &str, arguments: &[u8]) -> ValidatedToolCall {
 fn tool_ctx() -> ToolCallContext {
     ToolCallContext {
         run: run_context(),
-        tool_batch_id: finstack_ai_runtime::ToolBatchId::from_bytes([7; 16]),
+        tool_batch_id: finstack_ai_kernel::ToolBatchId::from_bytes([7; 16]),
         tool_call_id: ToolCallId::from_bytes([6; 16]),
     }
 }

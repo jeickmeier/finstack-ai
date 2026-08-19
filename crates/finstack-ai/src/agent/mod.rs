@@ -44,9 +44,11 @@ pub use deferred::{
     DeferredChildPlanner, DeferredPlanError, OutstandingDeferral, outstanding_deferrals,
 };
 pub use handle::Agent;
+#[cfg(feature = "native-tokio")]
+pub(crate) use lane::LaneLive;
 pub use linked::{
-    AnthropicAgentSpec, ComposeAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent,
-    LinkedAgentPorts, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
+    AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
 };
 pub use run::AgentRun;
 pub use types::{

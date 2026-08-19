@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use finstack_ai::runtime::{CapabilityId, ComponentId, ComponentRef, ModelName, Version};
+use finstack_ai::runtime::ModelName;
 use finstack_ai::{AgentRunRequest, PrincipalRef, RunSecurityContext};
+use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use wasm_bindgen::prelude::*;
 
 use super::errors::{agent_error, configuration_error};

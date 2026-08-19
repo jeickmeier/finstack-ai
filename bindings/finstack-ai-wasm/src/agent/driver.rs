@@ -30,7 +30,7 @@ struct BrowserClock;
 impl Clock for BrowserClock {
     fn now(
         &self,
-    ) -> Result<finstack_ai::runtime::Timestamp, finstack_ai::runtime::IdGenerationError> {
+    ) -> Result<finstack_ai_kernel::Timestamp, finstack_ai::runtime::IdGenerationError> {
         let millis = js_sys::Date::now();
         if !millis.is_finite() || millis < 0.0 || millis > 9_007_199_254_740_991.0 {
             return Err(finstack_ai::runtime::IdGenerationError::Source(
@@ -42,7 +42,7 @@ impl Clock for BrowserClock {
             reason = "finite millis were range-checked against i64::MAX"
         )]
         let millis = millis as i64;
-        Ok(finstack_ai::runtime::Timestamp::from_unix_ms(millis)?)
+        Ok(finstack_ai_kernel::Timestamp::from_unix_ms(millis)?)
     }
 }
 

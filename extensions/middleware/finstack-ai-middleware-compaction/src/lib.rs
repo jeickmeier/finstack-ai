@@ -5,15 +5,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    BudgetScopeId, ComponentId, ComponentInvocation, ComponentRef, ContentBlock, Digest,
+    ErrorCategory, InvocationRecovery, Message, Metadata, RawJson, Sensitivity, Stage, TextBlock,
+    ToolResultBlock, Version,
+};
 use finstack_ai_runtime::{
-    BeforeModelInput, BudgetScopeId, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
+    BeforeModelInput, COMPACTION_BUDGET_EXCEEDED, COMPACTION_MODEL_NOT_AUTHORIZED,
     CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionModelRequest,
-    CompactionResult, CompactionSourceEntry, ComponentId, ComponentInvocation, ComponentRef,
-    ContentBlock, ContextAuthority, ContextItem, ContextItemKind, ContextProvenance, Digest,
-    ErrorCategory, InvocationRecovery, Message, Metadata, Middleware, MiddlewareContext,
-    MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture,
-    PromptCacheImpact, RawJson, Sensitivity, Stage, StageInput, StageMask, StageOutcome, TextBlock,
-    ToolResultBlock, Version, compaction_projection_digest, compaction_protected_set_digest,
+    CompactionResult, CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind,
+    ContextProvenance, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
+    MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, PromptCacheImpact, StageInput,
+    StageMask, StageOutcome, compaction_projection_digest, compaction_protected_set_digest,
     compaction_source_digest, compaction_summary_digest, validate_compaction_result,
 };
 use serde::Serialize;
@@ -423,7 +426,7 @@ fn finish(
         })
         .map(|entry| entry.entry_id)
         .collect::<Vec<_>>();
-    let covered_entry_ids: Arc<[finstack_ai_runtime::EntryId]> = input
+    let covered_entry_ids: Arc<[finstack_ai_kernel::EntryId]> = input
         .source_entries
         .iter()
         .map(|entry| entry.entry_id)

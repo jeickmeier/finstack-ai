@@ -9,8 +9,9 @@ use finstack_ai_kernel::{
     PendingModelEffect, PrincipalPropagation, PrincipalRef, RawJson, RetrySafety, RunAccepted,
     RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext,
 };
+use finstack_ai_kernel::{EffectId, KernelState};
 use finstack_ai_runtime::{
-    EffectId, InputCapabilities, KernelState, ModelCapabilities, ModelContextProfile, ModelName,
+    InputCapabilities, ModelCapabilities, ModelContextProfile, ModelName,
     StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource, WorkflowRetryDecision,
     retry_decision,
 };

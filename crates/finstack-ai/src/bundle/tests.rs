@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{BundleId, ComponentId, ComponentRef, Digest, RawJson, Version};
+use finstack_ai_kernel::{BundleId, ComponentId, ComponentRef, Digest, RawJson, Version};
 
 use super::secret::ensure_secret_free_config;
 use super::*;

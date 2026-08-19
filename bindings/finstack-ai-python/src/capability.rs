@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::CapabilityId;
 use finstack_ai::{CapabilityActivation, CapabilitySpec, InstructionSpec};
+use finstack_ai_kernel::CapabilityId;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 

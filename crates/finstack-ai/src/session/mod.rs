@@ -1,5 +1,7 @@
 //! Public Session and Lane handles over [`SessionRuntime`].
 
+#[cfg(feature = "native-tokio")]
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
@@ -28,6 +30,8 @@ pub struct Session {
     session_id: SessionId,
     tenant_scope: Arc<str>,
     runtime: Arc<Mutex<Option<Arc<SessionRuntime>>>>,
+    #[cfg(feature = "native-tokio")]
+    live: Arc<Mutex<BTreeMap<LaneId, crate::agent::LaneLive>>>,
 }
 
 impl Session {
@@ -103,6 +107,8 @@ impl Session {
             session_id,
             tenant_scope,
             runtime: Arc::new(Mutex::new(runtime)),
+            #[cfg(feature = "native-tokio")]
+            live: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -118,7 +124,15 @@ impl Session {
             session_id: runtime.session_id(),
             tenant_scope: Arc::from(runtime.tenant_scope()),
             runtime: Arc::new(Mutex::new(Some(runtime))),
+            #[cfg(feature = "native-tokio")]
+            live: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// Session-scoped in-process run table used by [`crate::Lane::suspend`].
+    #[cfg(feature = "native-tokio")]
+    pub(crate) fn live_lanes(&self) -> &Mutex<BTreeMap<LaneId, crate::agent::LaneLive>> {
+        &self.live
     }
 
     /// Durable session identity.

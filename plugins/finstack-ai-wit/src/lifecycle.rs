@@ -3,11 +3,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use finstack_ai::{
-    AgentConstructionContext, ComponentConstructionContext, ComponentHealth, ComponentLifecycle,
-    LifecycleError,
+use finstack_ai::AgentConstructionContext;
+use finstack_ai::registry::{
+    ComponentConstructionContext, ComponentHealth, ComponentLifecycle, LifecycleError,
 };
-use finstack_ai_runtime::{PortFuture, Timestamp};
+use finstack_ai_kernel::Timestamp;
+use finstack_ai_runtime::PortFuture;
 use thiserror::Error;
 
 /// Stable plugin lifecycle failure. Wrap into [`LifecycleError::failed`] at the SDK boundary.
@@ -72,7 +73,7 @@ pub trait PluginGuestHooks: Send + Sync + 'static {
     }
 }
 
-/// Host-owned lifecycle state attached through [`finstack_ai::LifecycleBinding`].
+/// Host-owned lifecycle state attached through [`finstack_ai::registry::LifecycleBinding`].
 pub struct PluginLifecycle {
     hooks: Arc<dyn PluginGuestHooks>,
     initialized: AtomicBool,
@@ -207,10 +208,10 @@ mod tests {
     use super::{
         NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginLifecycleError, honor_deadline,
     };
-    use finstack_ai::{AgentConstructionContext, ComponentConstructionContext, ComponentLifecycle};
-    use finstack_ai_runtime::{
-        CancellationSignal, ComponentId, ComponentRef, Metadata, Timestamp, Version,
-    };
+    use finstack_ai::AgentConstructionContext;
+    use finstack_ai::registry::{ComponentConstructionContext, ComponentLifecycle};
+    use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, Timestamp, Version};
+    use finstack_ai_runtime::CancellationSignal;
     use std::sync::Arc;
 
     fn construction(cancelled: bool) -> ComponentConstructionContext {

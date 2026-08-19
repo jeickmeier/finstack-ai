@@ -22,7 +22,7 @@
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod agent;
 mod bundle;
-mod registry;
+pub mod registry;
 mod result;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod session;
@@ -34,8 +34,8 @@ pub use agent::{
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActivationHostError, Agent, AgentRun,
     AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec,
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
-    ComposeAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
+    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
+    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
     OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
@@ -63,20 +63,17 @@ pub use finstack_ai_runtime::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, LaneInspect,
     MemoryExternalIdentityMap, SessionError,
 };
+pub(crate) use registry::ReadyComponent;
 pub use registry::{
     AGENT_BUILD_CANCELLED, AGENT_BUILD_CONFIGURATION_CONFLICT, AGENT_BUILD_DUPLICATE_SELECTION,
     AGENT_BUILD_FACTORY_FAILED, AGENT_BUILD_INVALID_DESCRIPTOR, AGENT_BUILD_KIND_MISMATCH,
     AGENT_BUILD_MIDDLEWARE_INVALID, AGENT_BUILD_MISSING_COMPONENT, AGENT_BUILD_VERSION_MISMATCH,
     AgentBuildError, AgentComponentSelection, AgentConstructionContext, ComponentAlias,
-    ComponentConstructionContext, ComponentFactory, ComponentHealth, ComponentHealthReport,
-    ComponentKind, ComponentLifecycle, ComponentSelector, ComponentShutdownOutcome,
-    ComponentShutdownReport, ConstructionError, DuplicatePolicy, Extension, ExtensionDescriptor,
-    ExtensionTrust, LifecycleBinding, LifecycleError, MAX_COMPONENT_ALIASES,
-    MAX_REGISTERED_COMPONENTS, MAX_SELECTED_COMPONENTS, ReadyComponent,
+    ComponentKind, ComponentSelector, DuplicatePolicy, Extension, ExtensionDescriptor,
+    ExtensionTrust, MAX_COMPONENT_ALIASES, MAX_REGISTERED_COMPONENTS, MAX_SELECTED_COMPONENTS,
     RegisteredComponentDescriptor, Registrar, RegistrationError, RegistrationEvent,
     RegistrationMetadata, Registry, ResolutionDiagnostic, ResolutionDiagnosticKind,
     ResolutionReport, ResolveRequest, ResolvedAgent, ResolvedComponent, ResolvedRunPlan,
-    ShutdownOwnership,
 };
 pub use result::{
     RESULT_DECODE_INVALID_VALUE, RESULT_DECODE_SCHEMA_MISMATCH, ResultDecodeError, RunResult,

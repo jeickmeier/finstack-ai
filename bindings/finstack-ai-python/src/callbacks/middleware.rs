@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, ErrorCategory, Metadata, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask,
-    StageOutcome,
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
+use finstack_ai_kernel::{ComponentRef, ErrorCategory, Metadata};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 

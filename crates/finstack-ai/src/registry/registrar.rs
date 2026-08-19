@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{
-    ComponentId, ComponentRef, ContextProvider, Digest, JournalStore, Middleware, Model, Observer,
-    RawJson, Toolset,
-};
+use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, RawJson};
+use finstack_ai_runtime::{ContextProvider, JournalStore, Middleware, Model, Observer, Toolset};
 
 use super::errors::{RegisteredComponentDescriptor, RegistrationError, RegistrationEvent};
 use super::extension::{Extension, ExtensionDescriptor};

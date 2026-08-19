@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
-use finstack_ai::runtime::ChildPlacement;
 use finstack_ai::{AgentRun, RemoteChildRouteSpec};
+use finstack_ai_kernel::ChildPlacement;
 use wasm_bindgen::prelude::*;
 
 use crate::executor;

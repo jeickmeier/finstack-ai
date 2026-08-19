@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+    OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, TextBlock, ToolBatchId,
+    ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
+};
 use finstack_ai_runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ContentBlock, ContextAuthority,
-    ContextBudget, ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider,
-    ContextRequest, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-    NestedSample, OperationLocator, PendingToolEffect, PrincipalRef, RawJson, ReconcileContext,
-    RetrySafety, RunCallContext, RunId, SessionId, SideEffectClass, TextBlock, ToolBatchId,
-    ToolCallBlock, ToolCallContext, ToolCallId, ToolFailurePolicy, ToolReconcileResult,
-    ToolStreamItem, ToolStreamLimits, ToolTerminal, Toolset, ValidatedToolCall,
+    AssembledToolStream, AuthorizationContext, CancellationSignal, ContextAuthority, ContextBudget,
+    ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextProvider, ContextRequest,
+    NestedSample, PendingToolEffect, ReconcileContext, RunCallContext, SideEffectClass,
+    ToolCallContext, ToolReconcileResult, ToolStreamItem, ToolStreamLimits, ToolTerminal, Toolset,
 };
 use finstack_ai_test::{
     ContextConformanceCase, ToolsetConformanceCase, check_context_conformance,
@@ -52,7 +54,7 @@ fn context() -> ToolCallContext {
                 policy_version: Arc::from("policy-v1"),
                 decision_id: Arc::from("decision-v1"),
             },
-            effect_id: finstack_ai_runtime::EffectId::from_bytes([4; 16]),
+            effect_id: finstack_ai_kernel::EffectId::from_bytes([4; 16]),
             attempt: 1,
             deadline: None,
             budget_scope_id: None,
@@ -246,7 +248,7 @@ async fn input_required_maps_to_form_interaction() {
         .expect_err("elicitation parks the tool");
     assert!(format!("{error}").contains(MCP_INPUT_REQUIRED));
     let request = interaction_request_from_tool_error(&error).expect("mapped request");
-    assert_eq!(request.kind(), &finstack_ai_runtime::InteractionKind::Form);
+    assert_eq!(request.kind(), &finstack_ai_kernel::InteractionKind::Form);
     let output = call(&toolset, "ask", serde_json::json!({"city":"oslo"}))
         .await
         .expect("host resolution completes the tool");
@@ -607,8 +609,8 @@ fn preview_model() -> Arc<finstack_ai_test::ScriptedModel> {
                         TextBlock::try_new("ok").expect("text"),
                     )]),
                     tool_calls: Arc::from([]),
-                    usage: finstack_ai::runtime::Usage::empty(),
-                    provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                    usage: finstack_ai_kernel::Usage::empty(),
+                    provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                     completion_id: Arc::from("mcp-resource-1"),
                     continuation_state: None,
                 }))),
@@ -621,10 +623,9 @@ async fn run_with_mcp_provider(
     provider: McpContextProvider,
     model: Arc<finstack_ai_test::ScriptedModel>,
 ) {
-    use finstack_ai::runtime::{
-        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, Version,
-    };
+    use finstack_ai::runtime::{JournalStore, Model, ModelName};
     use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+    use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
     let store: Arc<dyn JournalStore> = Arc::new(
@@ -935,9 +936,8 @@ async fn reconstruct_signals_catalog_drift() {
 #[tokio::test]
 async fn agent_re_resolve_builds_a_new_lock_for_the_updated_catalog() {
     use finstack_ai::Agent;
-    use finstack_ai::runtime::{
-        AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Version,
-    };
+    use finstack_ai::runtime::JournalStore;
+    use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
     let transport = Arc::new(ScriptedTransport::new(vec![
@@ -1049,7 +1049,8 @@ async fn connect_read_only_mcp_agent(
     model: Arc<finstack_ai_test::ScriptedModel>,
     store: Arc<dyn finstack_ai::runtime::JournalStore>,
 ) -> finstack_ai::Agent {
-    use finstack_ai::runtime::{AgentId, BundleId, ComponentId, ComponentRef, Model, Version};
+    use finstack_ai::runtime::Model;
+    use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 
     let toolset = McpToolset::connect(
         Arc::new(ScriptedTransport::new(frames)),
@@ -1132,8 +1133,8 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
                             arguments,
                             provider_call_id: None,
                         }]),
-                        usage: finstack_ai::runtime::Usage::empty(),
-                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        usage: finstack_ai_kernel::Usage::empty(),
+                        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                         completion_id: Arc::from("mcp-elicitation-1"),
                         continuation_state: None,
                     }))),
@@ -1151,8 +1152,8 @@ fn elicitation_model() -> Arc<finstack_ai_test::ScriptedModel> {
                             TextBlock::try_new("oslo is ready").expect("text"),
                         )]),
                         tool_calls: Arc::from([]),
-                        usage: finstack_ai::runtime::Usage::empty(),
-                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        usage: finstack_ai_kernel::Usage::empty(),
+                        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                         completion_id: Arc::from("mcp-elicitation-2"),
                         continuation_state: None,
                     }))),
@@ -1289,8 +1290,8 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
                             arguments,
                             provider_call_id: None,
                         }]),
-                        usage: finstack_ai::runtime::Usage::empty(),
-                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        usage: finstack_ai_kernel::Usage::empty(),
+                        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                         completion_id: Arc::from("mcp-sampling-1"),
                         continuation_state: None,
                     }))),
@@ -1308,8 +1309,8 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
                             TextBlock::try_new("sampled").expect("text"),
                         )]),
                         tool_calls: Arc::from([]),
-                        usage: finstack_ai::runtime::Usage::empty(),
-                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        usage: finstack_ai_kernel::Usage::empty(),
+                        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                         completion_id: Arc::from("mcp-sampling-2"),
                         continuation_state: None,
                     }))),
@@ -1327,8 +1328,8 @@ fn sampling_model() -> Arc<finstack_ai_test::ScriptedModel> {
                             TextBlock::try_new("done").expect("text"),
                         )]),
                         tool_calls: Arc::from([]),
-                        usage: finstack_ai::runtime::Usage::empty(),
-                        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                        usage: finstack_ai_kernel::Usage::empty(),
+                        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                         completion_id: Arc::from("mcp-sampling-3"),
                         continuation_state: None,
                     }))),

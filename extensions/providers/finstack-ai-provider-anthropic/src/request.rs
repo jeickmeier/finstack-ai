@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use finstack_ai_runtime::{
-    ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec,
-    SUBMIT_FINAL_OUTPUT_TOOL,
+use finstack_ai_kernel::{
+    ContentBlock, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
 };
+use finstack_ai_runtime::{ModelError, ModelRequestDraft};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -192,7 +192,7 @@ fn take_thinking(
 }
 
 fn parse_settings(
-    settings: &finstack_ai_runtime::RawJson,
+    settings: &finstack_ai_kernel::RawJson,
 ) -> Result<BTreeMap<String, Value>, ModelError> {
     let value = raw_value(settings)?;
     let Value::Object(values) = value else {
@@ -201,7 +201,7 @@ fn parse_settings(
     Ok(values.into_iter().collect())
 }
 
-fn raw_value(value: &finstack_ai_runtime::RawJson) -> Result<Value, ModelError> {
+fn raw_value(value: &finstack_ai_kernel::RawJson) -> Result<Value, ModelError> {
     serde_json::from_slice(value.as_bytes())
         .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
@@ -331,10 +331,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use finstack_ai_runtime::{
-        MessageId, Metadata, ModelName, ModelRequestLimits, ModelSettings, ProviderIds, TextBlock,
-        Timestamp,
-    };
+    use finstack_ai_kernel::{MessageId, Metadata, ProviderIds, TextBlock, Timestamp};
+    use finstack_ai_runtime::{ModelName, ModelRequestLimits, ModelSettings};
 
     #[test]
     fn rejects_reserved_settings_and_keeps_system_prefix_stable() {
@@ -344,7 +342,7 @@ mod tests {
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
 
         draft.settings.values =
-            finstack_ai_runtime::RawJson::parse(br#"{"temperature":0}"#).expect("settings");
+            finstack_ai_kernel::RawJson::parse(br#"{"temperature":0}"#).expect("settings");
         let request = MessagesRequest::try_from_draft(&draft, &model()).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][0]["role"], "user");
@@ -365,7 +363,7 @@ mod tests {
             tools: Arc::from([]),
             output: OutputSpec::PlainText,
             settings: ModelSettings {
-                values: finstack_ai_runtime::RawJson::parse(b"{}").expect("settings"),
+                values: finstack_ai_kernel::RawJson::parse(b"{}").expect("settings"),
             },
             limits: ModelRequestLimits {
                 max_input_bytes: 1_000_000,
@@ -393,7 +391,7 @@ mod tests {
             tools: Arc::from([]),
             output: OutputSpec::PlainText,
             settings: ModelSettings {
-                values: finstack_ai_runtime::RawJson::parse(b"{}").expect("settings"),
+                values: finstack_ai_kernel::RawJson::parse(b"{}").expect("settings"),
             },
             limits: ModelRequestLimits {
                 max_input_bytes: 1_000_000,
@@ -437,7 +435,7 @@ mod tests {
             tools: Arc::from([]),
             output: OutputSpec::PlainText,
             settings: ModelSettings {
-                values: finstack_ai_runtime::RawJson::parse(settings).expect("settings"),
+                values: finstack_ai_kernel::RawJson::parse(settings).expect("settings"),
             },
             limits: ModelRequestLimits {
                 max_input_bytes: 1_000_000,

@@ -13,11 +13,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelContextProfile,
-    ModelName, ModelResponse, ModelStreamItem, TextDelta, TokenEstimatorRef, TokenEstimatorSource,
-    Version,
+    JournalStore, Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource,
 };
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_runtime::{
     CommitCoordinator, EventHubConfig, RunTaskConfig, RunTaskOwner, ShutdownOutcome,
 };
@@ -217,12 +217,12 @@ fn completed(text: &str) -> ScriptedModelPlan {
                 text: Arc::from(text),
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
-                assistant_content: Arc::from([finstack_ai::runtime::ContentBlock::Text(
-                    finstack_ai::runtime::TextBlock::try_new(text).expect("text"),
+                assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Text(
+                    finstack_ai_kernel::TextBlock::try_new(text).expect("text"),
                 )]),
                 tool_calls: Arc::from([]),
-                usage: finstack_ai::runtime::Usage::empty(),
-                provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                usage: finstack_ai_kernel::Usage::empty(),
+                provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                 completion_id: Arc::from("active-session"),
                 continuation_state: None,
             }))),

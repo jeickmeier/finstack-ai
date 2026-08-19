@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+};
+use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ComponentRef, Digest, ErrorCategory, InvocationRecovery,
-    Metadata, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, Stage, StageInput, StageMask,
-    StageOutcome,
+    Metadata, Stage,
 };
 use serde::Deserialize;
 

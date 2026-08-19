@@ -3,14 +3,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai::runtime::{
-    CapabilityId, ChildPlacement, ExternalRouteOutcome, ModelName, ModelSettings, OperationLocator,
-    RawJson,
-};
+use finstack_ai::runtime::{ExternalRouteOutcome, ModelName, ModelSettings};
 use finstack_ai::{
     AgentRunError, AgentRunOutput, AgentRunRequest, PrincipalRef, RemoteChildRouteSpec,
     RunSecurityContext,
 };
+use finstack_ai_kernel::{CapabilityId, ChildPlacement, OperationLocator, RawJson};
 use pyo3::exceptions::{PyException, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -181,13 +179,12 @@ impl PyRun {
         let encoded = serde_json::to_string(&py_to_json(command)?)
             .map_err(|_| PyTypeError::new_err("command is not JSON serializable"))?;
         let normalized = crate::protocol::normalize_encoded_shape::<
-            finstack_ai::runtime::ExternalEffectCompletionCommand,
+            finstack_ai_kernel::ExternalEffectCompletionCommand,
         >(&encoded)?;
-        let command =
-            serde_json::from_str::<finstack_ai::runtime::ExternalEffectCompletionCommand>(
-                &normalized,
-            )
-            .map_err(|error| PyTypeError::new_err(error.to_string()))?;
+        let command = serde_json::from_str::<finstack_ai_kernel::ExternalEffectCompletionCommand>(
+            &normalized,
+        )
+        .map_err(|error| PyTypeError::new_err(error.to_string()))?;
         let run = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let locator = run.locator().clone();

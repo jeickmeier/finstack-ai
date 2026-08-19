@@ -52,12 +52,12 @@ pub(crate) fn normalize_prebeta_shape(
     let encoded = serde_json::to_string(&py_to_json(value)?)
         .map_err(|_| PyTypeError::new_err("value is not JSON serializable"))?;
     let normalized = match kind {
-        "child_run_prepared" => normalize_shape::<finstack_ai::runtime::ChildRunPrepared>(&encoded),
+        "child_run_prepared" => normalize_shape::<finstack_ai_kernel::ChildRunPrepared>(&encoded),
         "interaction_resolution" => {
-            normalize_shape::<finstack_ai::runtime::InteractionResolutionCommand>(&encoded)
+            normalize_shape::<finstack_ai_kernel::InteractionResolutionCommand>(&encoded)
         }
         "external_effect_completion" => {
-            normalize_shape::<finstack_ai::runtime::ExternalEffectCompletionCommand>(&encoded)
+            normalize_shape::<finstack_ai_kernel::ExternalEffectCompletionCommand>(&encoded)
         }
         _ => {
             return Err(PyTypeError::new_err(format!(

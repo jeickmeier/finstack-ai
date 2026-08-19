@@ -154,7 +154,7 @@ impl ToolTaskConfig {
 /// # Deliberately not `#[non_exhaustive]`
 ///
 /// Adding a variant (most recently [`Self::Middleware`]) breaks a downstream
-/// exhaustive `match`, and `tools/compat/public_items.py` tracks item names
+/// exhaustive `match`, and `scripts/compat/public_items.py` tracks item names
 /// rather than enum variants, so no gate catches it. That was reviewed and left
 /// as is, for three reasons:
 ///

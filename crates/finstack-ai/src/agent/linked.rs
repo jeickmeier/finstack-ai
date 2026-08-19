@@ -8,13 +8,18 @@ use std::time::Duration;
 
 #[cfg(feature = "native-tokio")]
 use finstack_ai_kernel::ComponentId;
-use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, RawJson};
+#[cfg(feature = "native-tokio")]
+use finstack_ai_kernel::{AgentId, BundleId};
+use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::{
-    ContextProvider, JournalStore, Middleware, Model, ModelName, ModelSettings, Observer, Toolset,
+    ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
 };
+#[cfg(feature = "native-tokio")]
+use finstack_ai_runtime::{JournalStore, Model};
 
 use crate::{CapabilitySpec, ChildRunPolicy, RunPolicy};
 
+use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
 #[cfg(feature = "native-tokio")]
 use super::types::AGENT_RUN_INVALID_CONFIGURATION;
@@ -79,37 +84,6 @@ pub struct LinkedCommon {
     pub ports: LinkedAgentPorts,
     /// Child-run policy. Bindings default this to Deny.
     pub child_runs: ChildRunPolicy,
-}
-
-/// Shared live-handle composition input for linked factories and language bindings.
-///
-/// Provider constructors only add credentials and a model. Host-handle factories
-/// supply an already-built model and store. Both call [`Agent::compose`].
-pub struct ComposeAgentSpec {
-    /// Stable agent identity recorded in the bundle spec and lock.
-    pub agent_id: AgentId,
-    /// Bundle identity that owns this agent.
-    pub bundle_id: BundleId,
-    /// Exact-version model component plus a ready handle.
-    pub model: (ComponentRef, Arc<dyn Model>),
-    /// Exact-version journal store component plus a ready handle.
-    pub store: (ComponentRef, Arc<dyn JournalStore>),
-    /// Provider model name selected at construct time.
-    pub model_name: ModelName,
-    /// Optional system instruction.
-    pub instruction: Option<String>,
-    /// Declarative catalog entries.
-    pub capabilities: Vec<CapabilitySpec>,
-    /// Application activations selected at construct time.
-    pub active_capabilities: Vec<CapabilityId>,
-    /// Binding-resolved ports.
-    pub ports: LinkedAgentPorts,
-    /// Child-run policy.
-    pub child_runs: ChildRunPolicy,
-    /// Canonical provider settings.
-    pub settings: ModelSettings,
-    /// Default operational timeout for subsequent runs.
-    pub default_timeout: Duration,
 }
 
 /// Arguments for [`Agent::openai`].
@@ -183,8 +157,8 @@ pub struct E2bSandboxAgentSpec {
     pub common: LinkedCommon,
 }
 
-impl Agent {
-    /// Compose one live agent from ready handles.
+impl NativeAgentBuilder {
+    /// Apply binding-resolved ports and finish as a [`LinkedAgent`].
     ///
     /// This is the single finish path for linked-provider constructors and
     /// host-handle factories. It does not read environment variables.
@@ -193,10 +167,61 @@ impl Agent {
     ///
     /// Returns [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when composition,
     /// lock, or output-schema compilation fails.
-    pub async fn compose(spec: ComposeAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-        compose_agent(spec).await
+    pub async fn build_linked(
+        mut self,
+        common: LinkedCommon,
+        model_name: ModelName,
+        settings: ModelSettings,
+        default_timeout: Duration,
+    ) -> Result<LinkedAgent, AgentRunError> {
+        let LinkedCommon {
+            instruction,
+            capabilities,
+            active_capabilities,
+            ports,
+            child_runs,
+        } = common;
+        for (component, toolset) in ports.toolsets {
+            self = self.toolset(component, toolset);
+        }
+        for (component, provider) in ports.context_providers {
+            self = self.context_provider(component, provider);
+        }
+        for (component, middleware) in ports.middleware {
+            self = self.middleware(component, middleware);
+        }
+        for (component, observer) in ports.observers {
+            self = self.observer(component, observer);
+        }
+        if let Some(instruction) = instruction {
+            self = self.try_instruction(instruction)?;
+        }
+        for capability in capabilities {
+            self = self.capability(capability);
+        }
+        for capability in active_capabilities {
+            self = self.activate_application(capability);
+        }
+        self = self.policy(RunPolicy {
+            child_runs,
+            ..RunPolicy::default()
+        });
+        let agent = self.build().await?;
+        let agent = if let Some(schema) = ports.output_schema {
+            agent.try_with_output_schema(&schema)?
+        } else {
+            agent
+        };
+        Ok(LinkedAgent {
+            agent,
+            model: model_name,
+            settings,
+            default_timeout,
+        })
     }
+}
 
+impl Agent {
     /// Construct an official `OpenAI` Responses agent.
     ///
     /// Always targets `https://api.openai.com`. Does not read environment
@@ -657,61 +682,6 @@ fn unsupported(name: &str) -> Result<LinkedAgent, AgentRunError> {
     ))
 }
 
-async fn compose_agent(spec: ComposeAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    let ComposeAgentSpec {
-        agent_id,
-        bundle_id,
-        model,
-        store,
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-        settings,
-        default_timeout,
-    } = spec;
-    let mut builder = Agent::builder(agent_id, bundle_id, model, store);
-    for (component, toolset) in ports.toolsets {
-        builder = builder.toolset(component, toolset);
-    }
-    for (component, provider) in ports.context_providers {
-        builder = builder.context_provider(component, provider);
-    }
-    for (component, middleware) in ports.middleware {
-        builder = builder.middleware(component, middleware);
-    }
-    for (component, observer) in ports.observers {
-        builder = builder.observer(component, observer);
-    }
-    if let Some(instruction) = instruction {
-        builder = builder.try_instruction(instruction)?;
-    }
-    for capability in capabilities {
-        builder = builder.capability(capability);
-    }
-    for capability in active_capabilities {
-        builder = builder.activate_application(capability);
-    }
-    builder = builder.policy(RunPolicy {
-        child_runs,
-        ..RunPolicy::default()
-    });
-    let agent = builder.build().await?;
-    let agent = if let Some(schema) = ports.output_schema {
-        agent.try_with_output_schema(&schema)?
-    } else {
-        agent
-    };
-    Ok(LinkedAgent {
-        agent,
-        model: model_name,
-        settings,
-        default_timeout,
-    })
-}
-
 #[cfg(feature = "native-tokio")]
 async fn compose_provider(
     (agent_id, bundle_id, model_id): (&str, &str, &str),
@@ -721,31 +691,17 @@ async fn compose_provider(
     settings: ModelSettings,
     default_timeout: Duration,
 ) -> Result<LinkedAgent, AgentRunError> {
-    let LinkedCommon {
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-    } = common;
-    Agent::compose(ComposeAgentSpec {
-        agent_id: AgentId::parse(agent_id).map_err(|error| {
+    Agent::builder(
+        AgentId::parse(agent_id).map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?,
-        bundle_id: BundleId::parse(bundle_id).map_err(|error| {
+        BundleId::parse(bundle_id).map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?,
-        model: (component(model_id)?, provider),
-        store: memory_store()?,
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports,
-        child_runs,
-        settings,
-        default_timeout,
-    })
+        (component(model_id)?, provider),
+        memory_store()?,
+    )
+    .build_linked(common, model_name, settings, default_timeout)
     .await
 }
 
@@ -915,7 +871,7 @@ impl Model for E2bCatalogModel {
         finstack_ai_runtime::ModelDescriptor {
             provider: Arc::from("e2b"),
             models: Arc::from([self.name.clone()]),
-            metadata: finstack_ai_runtime::Metadata::empty(),
+            metadata: finstack_ai_kernel::Metadata::empty(),
         }
     }
 
@@ -992,7 +948,7 @@ impl Model for E2bCatalogModel {
                 ErrorCategory::Validation,
                 false,
                 "e2b_sandbox registers the T4 toolset and does not invoke a model",
-                finstack_ai_runtime::Metadata::empty(),
+                finstack_ai_kernel::Metadata::empty(),
             )
             .unwrap_or_else(Into::into))
         })

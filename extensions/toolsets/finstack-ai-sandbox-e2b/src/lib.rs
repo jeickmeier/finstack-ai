@@ -10,11 +10,14 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use finstack_ai_kernel::{
+    ErrorCategory, Metadata, RawJson, RetrySafety, Timestamp, ToolExecutionMode, ToolId,
+    ValidatedToolCall,
+};
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, ErrorCategory, Metadata, PortFuture, RawJson,
-    RetrySafety, SideEffectClass, Timestamp, ToolCallContext, ToolDeferralSupport, ToolError,
-    ToolEventStream, ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset,
-    ToolsetDescriptor, ValidatedToolCall, verify_authority,
+    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor, verify_authority,
 };
 use futures_util::{StreamExt, stream};
 use serde::Deserialize;
@@ -447,12 +450,12 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
 mod tests {
     use std::sync::Arc;
 
-    use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, Digest, EffectId, EffectOutputContract,
-        EffectOutputKind, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson,
-        RunCallContext, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
-        ToolFailurePolicy, Toolset, ValidatedToolCall,
+    use finstack_ai_kernel::{
+        Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+        OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
+        ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
+    use finstack_ai_runtime::{AuthorizationContext, CancellationSignal, RunCallContext, Toolset};
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;

@@ -520,7 +520,8 @@ mod tests {
     use super::{HostJournalStore, HostJournalStoreOptions};
     use crate::executor::block_on_ready;
     use crate::host::NativeHostResult;
-    use finstack_ai::runtime::{JournalStore, LoadRequest, SessionId};
+    use finstack_ai::runtime::{JournalStore, LoadRequest};
+    use finstack_ai_kernel::SessionId;
 
     #[test]
     fn scripted_store_is_ready_and_not_durable() {

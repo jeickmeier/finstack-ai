@@ -6,9 +6,9 @@ use finstack_ai_kernel::{
     ProviderIds, QueueDepthWarning, RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RunEventBody,
     RunTag, SessionTag, TextBlock, Timestamp,
 };
+use finstack_ai_kernel::{RunEvent, Sensitivity};
 use finstack_ai_runtime::{
     CompactionEvidence, CompactionResult, Observer, ObserverBackpressure, PromptCacheImpact,
-    RunEvent, Sensitivity,
 };
 use finstack_ai_test::check_observer_conformance;
 

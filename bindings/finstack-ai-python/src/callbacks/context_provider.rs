@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, ErrorCategory, Metadata, PortFuture,
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, PortFuture,
 };
+use finstack_ai_kernel::{ComponentRef, ErrorCategory, Metadata};
 use pyo3::prelude::*;
 
 use super::context::PyCallbackContext;

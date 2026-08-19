@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use finstack_ai::runtime::{
-    ArtifactError, ArtifactId, ArtifactMetadata, ArtifactRef, ArtifactScope, ArtifactStore,
-    BlobRef, Bytes, Digest, PortFuture,
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, PortFuture,
 };
+use finstack_ai_kernel::{ArtifactId, ArtifactRef, BlobRef, Digest};
 
 use crate::host::HostFailure;
 
@@ -192,9 +192,8 @@ impl ArtifactStore for HostArtifactStore {
 mod tests {
     use super::HostArtifactStore;
     use crate::executor::block_on_ready;
-    use finstack_ai::runtime::{
-        ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, Metadata, Sensitivity, SessionId,
-    };
+    use finstack_ai::runtime::{ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes};
+    use finstack_ai_kernel::{Metadata, Sensitivity, SessionId};
 
     #[test]
     fn native_artifact_store_round_trips_bytes() {

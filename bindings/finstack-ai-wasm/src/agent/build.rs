@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai::runtime::{
-    CapabilityId, CommitCoordinator, ComponentRef, JournalStore, LoadRequest, ModelName,
-    ModelSettings, RawJson, StoreError,
+    CommitCoordinator, JournalStore, LoadRequest, ModelName, ModelSettings, StoreError,
 };
 use finstack_ai::{
-    Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, ComposeAgentSpec, LinkedAgentPorts,
+    Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, LinkedAgentPorts, LinkedCommon,
 };
+use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_kernel::{ContentBlock, SessionId, TerminalState};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use wasm_bindgen::prelude::*;
@@ -53,28 +53,32 @@ pub(super) async fn build_agent(
         values: RawJson::parse(b"{}")
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
     };
-    let built = FacadeAgent::compose(ComposeAgentSpec {
-        agent_id: finstack_ai_kernel::AgentId::parse("js.agent.host")
+    let built = FacadeAgent::builder(
+        finstack_ai_kernel::AgentId::parse("js.agent.host")
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
-        bundle_id: finstack_ai_kernel::BundleId::parse("js.bundle.host")
+        finstack_ai_kernel::BundleId::parse("js.bundle.host")
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
-        model: (model_component, model),
-        store: (store_component, store),
-        model_name: model_name.clone(),
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports: LinkedAgentPorts {
-            toolsets,
-            context_providers,
-            middleware,
-            observers,
-            output_schema: None,
+        (model_component, model),
+        (store_component, store),
+    )
+    .build_linked(
+        LinkedCommon {
+            instruction,
+            capabilities,
+            active_capabilities,
+            ports: LinkedAgentPorts {
+                toolsets,
+                context_providers,
+                middleware,
+                observers,
+                output_schema: None,
+            },
+            child_runs: ChildRunPolicy::Deny,
         },
-        child_runs: ChildRunPolicy::Deny,
+        model_name.clone(),
         settings,
-        default_timeout: Duration::from_secs(30),
-    })
+        Duration::from_secs(30),
+    )
     .await
     .map_err(|error| agent_error(&error, None))?;
     Ok(Agent {

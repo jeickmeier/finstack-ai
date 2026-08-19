@@ -11,6 +11,7 @@ description = "OpenTelemetry observer for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 opentelemetry = { workspace = true, default-features = false, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
@@ -19,7 +20,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-finstack-ai-kernel = { workspace = true }
 finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 

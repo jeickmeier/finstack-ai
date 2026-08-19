@@ -4,13 +4,14 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use finstack_ai::ComponentConstructionContext;
+use finstack_ai::registry::ComponentConstructionContext;
+use finstack_ai_kernel::{
+    ComponentId, ComponentRef, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId,
+    Metadata, OperationLocator, PrincipalRef, RawJson, RetrySafety, RunId, SessionId, Timestamp,
+    ToolCallBlock, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall, Version,
+};
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, ComponentId, ComponentRef, Digest, EffectId,
-    EffectOutputContract, EffectOutputKind, LaneId, Metadata, OperationLocator, PrincipalRef,
-    RawJson, RetrySafety, RunCallContext, RunId, SessionId, Timestamp, ToolCallBlock,
-    ToolCallContext, ToolExecutionMode, ToolFailurePolicy, ToolId, Toolset, ValidatedToolCall,
-    Version,
+    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, Toolset,
 };
 use finstack_ai_wit::{
     MAX_RAW_JSON_BYTES, NoopPluginHooks, parse_manifest, reject_before_allocation,
@@ -139,15 +140,15 @@ fn tool_ctx() -> ToolCallContext {
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
         },
-        tool_batch_id: finstack_ai_runtime::ToolBatchId::from_bytes([7; 16]),
-        tool_call_id: finstack_ai_runtime::ToolCallId::from_bytes([6; 16]),
+        tool_batch_id: finstack_ai_kernel::ToolBatchId::from_bytes([7; 16]),
+        tool_call_id: finstack_ai_kernel::ToolCallId::from_bytes([6; 16]),
     }
 }
 
 fn validated_call(tool_id: &str, arguments: &[u8]) -> ValidatedToolCall {
     ValidatedToolCall {
         call: ToolCallBlock::try_new(
-            finstack_ai_runtime::ToolCallId::from_bytes([6; 16]),
+            finstack_ai_kernel::ToolCallId::from_bytes([6; 16]),
             "echo",
             RawJson::parse(arguments).expect("arguments"),
         )

@@ -1,9 +1,9 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use finstack_ai_kernel::ComponentRef;
 use finstack_ai_runtime::{
-    ComponentRef, ContextProvider, JournalStore, Middleware, Model, Observer,
-    ResolvedMiddlewareChain, Toolset,
+    ContextProvider, JournalStore, Middleware, Model, Observer, ResolvedMiddlewareChain, Toolset,
 };
 
 use super::errors::{RegisteredComponentDescriptor, ResolutionReport};

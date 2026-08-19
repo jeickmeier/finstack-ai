@@ -11,11 +11,11 @@ description = "Reference Prometheus text metrics observer for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-finstack-ai-kernel = { workspace = true }
 finstack-ai-test = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 

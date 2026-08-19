@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration as StdDuration;
 
+use finstack_ai_kernel::ToolFailurePolicy;
 use finstack_ai_kernel::{
     AuthorizationEvidence, ComponentId, Duration as KernelDuration, EffectId,
     ExternalEffectCompletion, ExternalEffectCompletionCommand, ExternalEffectOutcome,
@@ -13,14 +14,14 @@ use finstack_ai_kernel::{
     OperationLocator, PrincipalRef, ProviderIds, RawJson, ReconciliationPolicy,
     ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunPhase, Stage, Usage,
 };
+use finstack_ai_runtime::testing::ManualDriveAction;
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, Clock, CommitCoordinator, EventHubConfig, ExternalClock,
-    JournalStore, JsonSchemaToolValidatorCompiler, ManualDriveAction, Model, ModelDeferral,
-    ModelResponse, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
-    ResolvedToolCatalog, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass,
-    ToolCallDelta, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision, ToolResult,
-    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
-    WorkflowSession, WorkflowWait,
+    JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelDeferral, ModelResponse,
+    ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall, ResolvedToolCatalog,
+    RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, SideEffectClass, ToolCallDelta,
+    ToolExecutionPolicy, ToolPolicyDecision, ToolResult, ToolSpec, ToolStreamItem,
+    ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration, WorkflowSession, WorkflowWait,
 };
 use finstack_ai_store_sqlite::{
     SqliteDurability, SqliteJournalStore, SqliteStoreConfig, SqliteStoreLimits, SqliteSynchronous,

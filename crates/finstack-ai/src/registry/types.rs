@@ -3,10 +3,10 @@ use core::future::Future;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{
-    CancellationSignal, ComponentId, ComponentRef, Metadata, PortFuture, PortObject, RawJson,
-    SchemaRef, Timestamp, Version,
+use finstack_ai_kernel::{
+    ComponentId, ComponentRef, Metadata, RawJson, SchemaRef, Timestamp, Version,
 };
+use finstack_ai_runtime::{CancellationSignal, PortFuture, PortObject};
 use thiserror::Error;
 
 use super::errors::{AgentBuildError, RegistrationError};

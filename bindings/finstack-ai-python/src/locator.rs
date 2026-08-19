@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::OperationLocator;
+use finstack_ai_kernel::OperationLocator;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 

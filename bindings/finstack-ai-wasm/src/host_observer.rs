@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentId, ComponentRef, Metadata, Observer, ObserverDescriptor, ObserverError,
-    ObserverPayloadMode, PortFuture, RunEvent, Sensitivity,
+    Observer, ObserverDescriptor, ObserverError, ObserverPayloadMode, PortFuture,
 };
+use finstack_ai_kernel::{ComponentId, ComponentRef, Metadata, RunEvent, Sensitivity};
 use serde::Deserialize;
 
 use crate::host::{HostFailure, host_component_version};

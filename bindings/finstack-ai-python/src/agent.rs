@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
-use finstack_ai::runtime::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, Model, ModelName, ModelSettings,
-    RawJson, Version,
-};
+use finstack_ai::runtime::{Model, ModelName, ModelSettings};
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, ComposeAgentSpec,
-    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    OllamaAgentSpec, OpenAiAgentSpec, Session,
+    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
+    GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
+    OpenAiAgentSpec, Session,
+};
+use finstack_ai_kernel::{
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, RawJson, Version,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -469,7 +469,7 @@ impl PyAgent {
     ) -> PyResult<Bound<'py, PyAny>> {
         let store = self.inner.journal_store();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let session_id = finstack_ai::runtime::SessionId::parse(&session_id)
+            let session_id = finstack_ai_kernel::SessionId::parse(&session_id)
                 .map_err(|error| ConfigurationError::new_err(error.to_string()))?;
             match Session::open(store, session_id, tenant_scope).await {
                 Ok(inner) => Python::attach(|py| Py::new(py, PySession { inner })),
@@ -712,28 +712,32 @@ async fn build_python_agent(
     };
     let store = open_journal_store(sqlite.0, sqlite.1)?;
     let output = ports.output;
-    let built = Agent::compose(ComposeAgentSpec {
-        agent_id: AgentId::parse("python.agent.callbacks")
+    let built = Agent::builder(
+        AgentId::parse("python.agent.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
-        bundle_id: BundleId::parse("python.bundle.callbacks")
+        BundleId::parse("python.bundle.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         model,
-        store: (component(store_component)?, store),
-        model_name,
-        instruction,
-        capabilities,
-        active_capabilities,
-        ports: LinkedAgentPorts {
-            toolsets: ports.toolsets,
-            context_providers: ports.context_providers,
-            middleware: ports.middleware,
-            observers: ports.observers,
-            output_schema: output.as_ref().map(|value| value.schema.clone()),
+        (component(store_component)?, store),
+    )
+    .build_linked(
+        LinkedCommon {
+            instruction,
+            capabilities,
+            active_capabilities,
+            ports: LinkedAgentPorts {
+                toolsets: ports.toolsets,
+                context_providers: ports.context_providers,
+                middleware: ports.middleware,
+                observers: ports.observers,
+                output_schema: output.as_ref().map(|value| value.schema.clone()),
+            },
+            child_runs,
         },
-        child_runs,
-        settings: empty_model_settings()?,
-        default_timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
-    })
+        model_name,
+        empty_model_settings()?,
+        Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
+    )
     .await?;
     Ok(PyAgent {
         inner: Arc::new(built.agent),

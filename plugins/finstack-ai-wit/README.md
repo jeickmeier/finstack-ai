@@ -6,8 +6,8 @@ bindings for the toolset and context-provider worlds.
 The crate compiles host and guest traits from the checked-in WIT roots
 under `wit/v0.0.4/` and `wit/v1.0.0/`. Regenerated bindings live in
 `src/generated.rs` and are owned by
-`uv run --no-project python tools/wit_bindgen/generate.py` /
-`uv run --no-project python tools/wit_bindgen/generate.py --check`.
+`uv run --no-project python scripts/wit_bindgen/generate.py` /
+`uv run --no-project python scripts/wit_bindgen/generate.py --check`.
 Do not hand-edit generated files.
 
 This crate does **not** instantiate Wasmtime. Isolated Wasmtime (T3)

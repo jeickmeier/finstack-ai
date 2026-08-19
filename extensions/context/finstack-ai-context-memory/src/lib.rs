@@ -5,12 +5,15 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use finstack_ai_kernel::{
+    ArtifactId, ComponentId, ComponentInvocation, ContentBlock, Digest, InvocationRecovery,
+    Metadata, Sensitivity, TextBlock, Version,
+};
 use finstack_ai_runtime::{
-    ArtifactId, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ComponentId,
-    ComponentInvocation, ContentBlock, ContextAuthority, ContextCallContext, ContextContribution,
-    ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy, ContextProvenance,
-    ContextProvider, ContextProviderDescriptor, ContextRequest, Digest, InvocationRecovery,
-    Metadata, PortFuture, Sensitivity, TextBlock, Version, stage_required_artifact,
+    ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes, ContextAuthority, ContextCallContext,
+    ContextContribution, ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy,
+    ContextProvenance, ContextProvider, ContextProviderDescriptor, ContextRequest, PortFuture,
+    stage_required_artifact,
 };
 use thiserror::Error;
 
@@ -52,7 +55,7 @@ impl ArtifactStore for InProcessArtifactStore {
         scope: ArtifactScope,
         content: Bytes,
         metadata: ArtifactMetadata,
-    ) -> PortFuture<Result<finstack_ai_runtime::ArtifactRef, finstack_ai_runtime::ArtifactError>>
+    ) -> PortFuture<Result<finstack_ai_kernel::ArtifactRef, finstack_ai_runtime::ArtifactError>>
     {
         let digest = Digest::blob_content(&content);
         let mut artifact_id = [0_u8; 16];
@@ -69,7 +72,7 @@ impl ArtifactStore for InProcessArtifactStore {
             stored.map_err(|()| finstack_ai_runtime::ArtifactError::Unavailable {
                 message: Arc::from("memory artifact lock failed"),
             })?;
-            let blob = finstack_ai_runtime::BlobRef::try_new(
+            let blob = finstack_ai_kernel::BlobRef::try_new(
                 digest.to_hex(),
                 metadata.media_type.as_ref(),
                 u64::try_from(content.len()).unwrap_or(0),
@@ -81,7 +84,7 @@ impl ArtifactStore for InProcessArtifactStore {
                     message: Arc::from(error.to_string()),
                 },
             )?;
-            finstack_ai_runtime::ArtifactRef::try_new(
+            finstack_ai_kernel::ArtifactRef::try_new(
                 artifact_id,
                 metadata.kind.as_ref(),
                 blob,
@@ -100,7 +103,7 @@ impl ArtifactStore for InProcessArtifactStore {
     fn get(
         &self,
         _scope: ArtifactScope,
-        artifact: finstack_ai_runtime::ArtifactRef,
+        artifact: finstack_ai_kernel::ArtifactRef,
     ) -> PortFuture<Result<Bytes, finstack_ai_runtime::ArtifactError>> {
         let bodies = self
             .bodies
@@ -338,7 +341,7 @@ fn apply_budget(
             return match request.budget.overflow {
                 ContextOverflowPolicy::Reject => Err(ContextError::try_new(
                     finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
-                    finstack_ai_runtime::ErrorCategory::Limit,
+                    finstack_ai_kernel::ErrorCategory::Limit,
                     "memory contribution exceeds the committed budget",
                     Metadata::empty(),
                 )
@@ -361,7 +364,7 @@ fn estimate_tokens(text: &str) -> u64 {
 fn contribution_invalid(message: &'static str) -> ContextError {
     ContextError::try_new(
         finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID,
-        finstack_ai_runtime::ErrorCategory::Validation,
+        finstack_ai_kernel::ErrorCategory::Validation,
         message,
         Metadata::empty(),
     )

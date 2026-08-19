@@ -6,9 +6,9 @@ use finstack_ai_kernel::{
     EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
+use finstack_ai_kernel::{RunEvent, Sensitivity};
 use finstack_ai_runtime::{
-    Observer, ObserverBackpressure, ObserverPayloadMode, RunEvent, Sensitivity,
-    journal_export_jsonl,
+    Observer, ObserverBackpressure, ObserverPayloadMode, journal_export_jsonl,
 };
 use finstack_ai_test::check_observer_conformance;
 use tempfile::tempdir;

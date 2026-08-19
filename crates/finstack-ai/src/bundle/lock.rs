@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{BundleId, CapabilityId, ComponentRef, Digest, SchemaRef, Version};
+use finstack_ai_kernel::{BundleId, CapabilityId, ComponentRef, Digest, SchemaRef, Version};
 use serde::{Deserialize, Serialize};
 
 use crate::{CapabilityActivation, ComponentKind};

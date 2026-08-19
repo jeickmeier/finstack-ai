@@ -20,7 +20,11 @@
 #![warn(missing_docs)]
 
 pub use bytes::Bytes;
-pub use finstack_ai_kernel::{
+#[expect(
+    unused_imports,
+    reason = "feature-gated modules consume different kernel names"
+)]
+pub(crate) use finstack_ai_kernel::{
     AGENT_SPEC_DIGEST_SCHEMA_VERSION, AgentId, AppendBatchId, ArtifactId, ArtifactRef, BlobRef,
     BudgetChargeReceipt, BudgetChargeRecorded, BudgetChargeRequest, BudgetReleaseReceipt,
     BudgetReleaseRequest, BudgetRequest, BudgetReservationId, BudgetReservationReceipt,
@@ -44,7 +48,11 @@ pub use finstack_ai_kernel::{
     ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
     TurnId, Usage, ValidatedToolCall, ValidationIssue, ValidationOutcome, Version,
 };
-pub use finstack_ai_kernel::{
+#[expect(
+    unused_imports,
+    reason = "feature-gated modules consume different kernel names"
+)]
+pub(crate) use finstack_ai_kernel::{
     ModelTextDelta as RunEventModelTextDelta, ProviderHeartbeat as RunEventProviderHeartbeat,
     QueueDepthWarning as RunEventQueueDepthWarning, ReasoningDelta as RunEventReasoningDelta,
 };
@@ -54,6 +62,9 @@ mod error;
 mod exec;
 mod ports;
 mod services;
+#[cfg(feature = "native-tokio")]
+#[doc(hidden)]
+pub mod testing;
 
 #[cfg(feature = "native-tokio")]
 pub(crate) use driver::{ingress, native, workflow};
@@ -167,12 +178,6 @@ pub use model::{
 pub(crate) use model::{MODEL_PROFILE_INVALID, map_model_reconcile_result, model_retry_allowed};
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{parse_committed_model_request, stable_model_dispatch_code};
-#[cfg(feature = "native-tokio")]
-#[doc(hidden)]
-pub use native::manual_drive::{
-    ManualDriveAction, ManualDriveController, ManualDriveEffect, ManualDriveError,
-    ManualDrivePermit,
-};
 pub use observer::export::{journal_export_jsonl, observer_events_jsonl, support_bundle_versions};
 pub use observer::queue::{
     OBSERVER_QUEUE_OVERFLOW, ObserverBackpressure, ObserverDiagnostic, ObserverQueue,
@@ -204,17 +209,6 @@ pub use run_types::{
     ModelTaskConfig, RunHandleError, RunStatus, RunTaskConfig, SameIdentityRetryPolicy,
     ShutdownOutcome, ShutdownReport, TimerDiagnostics, ToolTaskConfig,
 };
-
-/// Expose committed poll derivation to cross-crate restore tests.
-#[cfg(feature = "native-tokio")]
-#[doc(hidden)]
-#[must_use]
-pub fn __test_due_polls(state: &KernelState, now: Timestamp) -> Vec<(EffectId, Timestamp)> {
-    settlement::due_polls(state, now)
-        .into_iter()
-        .map(|poll| (poll.effect_id, poll.at))
-        .collect()
-}
 
 #[cfg(feature = "native-tokio")]
 pub use task::{RunHandle, RunTaskOwner};

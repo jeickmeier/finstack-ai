@@ -2,15 +2,18 @@
 
 use std::sync::Arc;
 
+use finstack_ai::registry::{ComponentConstructionContext, LifecycleBinding, ReadyComponent};
 use finstack_ai::{
-    ComponentConstructionContext, Extension, ExtensionDescriptor, LifecycleBinding, ReadyComponent,
-    Registrar, RegistrationError, RegistrationMetadata,
+    Extension, ExtensionDescriptor, Registrar, RegistrationError, RegistrationMetadata,
+};
+use finstack_ai_kernel::{
+    ComponentRef, Digest, ErrorCategory, InvocationRecovery, Metadata, RawJson, Timestamp,
+    ValidatedToolCall, Version,
 };
 use finstack_ai_runtime::{
-    ComponentRef, ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, Digest, ErrorCategory, InvocationRecovery, Metadata,
-    PortFuture, RawJson, Timestamp, ToolCallContext, ToolError, ToolEventStream, ToolResult,
-    ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall, Version,
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, PortFuture, ToolCallContext, ToolError,
+    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use finstack_ai_wit::{
     NoopPluginHooks, PluginGuestHooks, PluginLifecycle, PluginManifest, honor_deadline,
@@ -256,7 +259,7 @@ impl WasmContextAdapter {
             .map_err(|error| PluginHostError::from_lifecycle(&error))?;
         Ok(Self {
             descriptor: ContextProviderDescriptor {
-                invocation: finstack_ai_runtime::ComponentInvocation {
+                invocation: finstack_ai_kernel::ComponentInvocation {
                     component: ready.manifest.identity.clone(),
                     version: adapter_version(&ready.manifest),
                     configuration_digest: Digest::raw_json(b"{}"),
@@ -425,8 +428,8 @@ impl Extension for WasmPluginExtension {
         );
         match (&self.context, &self.context_lifecycle) {
             (Some(provider), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::ComponentLifecycle>;
+                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
+                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
                 registrar.context_provider(
                     metadata.clone(),
                     ReadyComponent::new(Arc::clone(provider))
@@ -442,8 +445,8 @@ impl Extension for WasmPluginExtension {
         }
         match (&self.toolset, &self.toolset_lifecycle) {
             (Some(toolset), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::ComponentLifecycle>;
+                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
+                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
                 registrar.toolset(
                     metadata,
                     ReadyComponent::new(Arc::clone(toolset))
@@ -847,10 +850,8 @@ mod tests {
 
     #[test]
     fn reference_context_item_bytes() {
-        use finstack_ai_runtime::{
-            ContentBlock, ContextAuthority, ContextItemKind, ContextProvenance, Sensitivity,
-            TextBlock,
-        };
+        use finstack_ai_kernel::{ContentBlock, Sensitivity, TextBlock};
+        use finstack_ai_runtime::{ContextAuthority, ContextItemKind, ContextProvenance};
         use finstack_ai_wit::encode_guest_item;
         use std::sync::Arc;
 

@@ -4,11 +4,13 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
+};
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, Metadata, PortFuture, RawJson, RetrySafety,
-    SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
-    ToolExecutionMode, ToolId, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
-    ValidatedToolCall,
+    ApprovalMetadata, ApprovalRequirement, PortFuture, SideEffectClass, ToolCallContext,
+    ToolDeferralSupport, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset,
+    ToolsetDescriptor,
 };
 use futures_core::Stream;
 
@@ -101,11 +103,13 @@ impl Stream for SingleItemStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finstack_ai_kernel::{
+        Digest, EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PrincipalRef,
+        RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, Usage,
+    };
     use finstack_ai_runtime::{
-        AssembledToolStream, AuthorizationContext, CancellationSignal, Digest,
-        EffectOutputContract, EffectOutputKind, LaneId, OperationLocator, PrincipalRef,
-        RunCallContext, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
-        ToolFailurePolicy, ToolStreamLimits, ToolTerminal, Usage,
+        AssembledToolStream, AuthorizationContext, CancellationSignal, RunCallContext,
+        ToolStreamLimits, ToolTerminal,
     };
     use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
 
@@ -155,7 +159,7 @@ mod tests {
                     policy_version: Arc::from("policy-v1"),
                     decision_id: Arc::from("decision-v1"),
                 },
-                effect_id: finstack_ai_runtime::EffectId::parse(
+                effect_id: finstack_ai_kernel::EffectId::parse(
                     "00000000-0000-7000-8000-000000000004",
                 )
                 .expect("effect"),

@@ -1,6 +1,6 @@
 //! Typed decoding of already committed structured results.
 
-use finstack_ai_runtime::{Digest, FinalResultRecorded, RawJson, SchemaRef};
+use finstack_ai_kernel::{Digest, FinalResultRecorded, RawJson, SchemaRef};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 

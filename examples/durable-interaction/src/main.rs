@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration as StdDuration;
 
+use finstack_ai_kernel::ToolFailurePolicy;
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AuthorizationEvidence, BudgetPropagation, CancellationPropagation,
     ContentBlock, DeadlinePropagation, Digest, EffectOutputContract, EffectOutputKind, Id, IdTag,
@@ -21,9 +22,9 @@ use finstack_ai_runtime::{
     ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
     RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner,
     SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
-    ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy, ToolFailurePolicy, ToolPolicyDecision,
-    ToolResult, ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset,
-    ToolsetRegistration, WorkflowSession, WorkflowWait, resolve_model_context_profile,
+    ToolCallDelta, ToolDeferralSupport, ToolExecutionPolicy, ToolPolicyDecision, ToolResult,
+    ToolSpec, ToolStreamItem, ToolStreamLimits, ToolTaskConfig, Toolset, ToolsetRegistration,
+    WorkflowSession, WorkflowWait, resolve_model_context_profile,
 };
 use finstack_ai_store_sqlite::{
     DEFAULT_BUSY_TIMEOUT, SqliteDurability, SqliteJournalStore, SqliteStoreConfig,

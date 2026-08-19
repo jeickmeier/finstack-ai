@@ -1,6 +1,6 @@
 //! Rust-owned pre-beta shape normalization matching the Python binding.
 
-use finstack_ai::runtime::{
+use finstack_ai_kernel::{
     ChildRunPrepared, ExternalEffectCompletionCommand, InteractionResolutionCommand,
 };
 use serde::Serialize;

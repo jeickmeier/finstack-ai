@@ -1,4 +1,4 @@
-use finstack_ai::runtime::{
+use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery, Stage, Version,
 };
 use pyo3::exceptions::PyTypeError;

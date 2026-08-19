@@ -1,7 +1,7 @@
 //! Dual-major `@0.0.4` and `@1.0.0` WIT types, host imports, and in-process guest bindings.
 //!
 //! Bindings are generated from the checked-in WIT packages by
-//! `tools/wit_bindgen/generate.py`. This crate maps those values onto native
+//! `scripts/wit_bindgen/generate.py`. This crate maps those values onto native
 //! runtime types in-process. It does not instantiate Wasmtime.
 
 #![warn(missing_docs)]
@@ -65,7 +65,7 @@ mod tests {
                 "run",
                 "--no-project",
                 "python",
-                "tools/wit_bindgen/generate.py",
+                "scripts/wit_bindgen/generate.py",
                 "--check",
             ])
             .current_dir(repo_root())
@@ -73,7 +73,7 @@ mod tests {
             .expect("run check-wit");
         assert!(
             status.success(),
-            "tools/wit_bindgen/generate.py --check equivalent failed"
+            "scripts/wit_bindgen/generate.py --check equivalent failed"
         );
         assert_experimental_surface().expect("surface");
         assert_eq!(TOOLSET_WORLD_EXPORTS, ["toolset"]);

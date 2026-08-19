@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, ErrorCategory, Metadata, PortFuture, RawJson, ToolCallContext, ToolError,
-    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
+    PortFuture, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec, ToolStreamItem,
+    Toolset, ToolsetDescriptor,
 };
+use finstack_ai_kernel::{ComponentRef, ErrorCategory, Metadata, RawJson};
 use futures_util::stream;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -40,7 +41,7 @@ impl Toolset for PythonToolsetAdapter {
     fn call(
         &self,
         ctx: ToolCallContext,
-        call: finstack_ai::runtime::ValidatedToolCall,
+        call: finstack_ai_kernel::ValidatedToolCall,
     ) -> PortFuture<Result<ToolEventStream, ToolError>> {
         let callback = Arc::clone(&self.callback);
         Box::pin(async move {

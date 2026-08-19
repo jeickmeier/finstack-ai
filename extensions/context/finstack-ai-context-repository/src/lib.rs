@@ -12,11 +12,14 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, ContentBlock, Digest, InvocationRecovery, Metadata,
+    Sensitivity, TextBlock, Version,
+};
 use finstack_ai_runtime::{
-    ComponentId, ComponentInvocation, ContentBlock, ContextAuthority, ContextCallContext,
-    ContextContribution, ContextError, ContextItem, ContextItemKind, ContextOverflowPolicy,
-    ContextProvenance, ContextProvider, ContextProviderDescriptor, ContextRequest, Digest,
-    InvocationRecovery, Metadata, PortFuture, Sensitivity, TextBlock, Version,
+    ContextAuthority, ContextCallContext, ContextContribution, ContextError, ContextItem,
+    ContextItemKind, ContextOverflowPolicy, ContextProvenance, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, PortFuture,
 };
 use thiserror::Error;
 
@@ -149,7 +152,7 @@ impl ContextProvider for RepositoryContextProvider {
             return Box::pin(async {
                 Err(ContextError::try_new(
                     REPOSITORY_UNSUPPORTED,
-                    finstack_ai_runtime::ErrorCategory::Configuration,
+                    finstack_ai_kernel::ErrorCategory::Configuration,
                     "safe repository primitives are unavailable",
                     Metadata::empty(),
                 )
@@ -216,7 +219,7 @@ fn apply_budget(
             return match request.budget.overflow {
                 ContextOverflowPolicy::Reject => Err(ContextError::try_new(
                     finstack_ai_runtime::CONTEXT_BUDGET_EXCEEDED,
-                    finstack_ai_runtime::ErrorCategory::Limit,
+                    finstack_ai_kernel::ErrorCategory::Limit,
                     "repository contribution exceeds the committed budget",
                     Metadata::empty(),
                 )
@@ -241,7 +244,7 @@ fn estimate_tokens(text: &str) -> u64 {
 fn contribution_invalid() -> ContextError {
     ContextError::try_new(
         finstack_ai_runtime::CONTEXT_CONTRIBUTION_INVALID,
-        finstack_ai_runtime::ErrorCategory::Validation,
+        finstack_ai_kernel::ErrorCategory::Validation,
         "repository file text is invalid",
         Metadata::empty(),
     )

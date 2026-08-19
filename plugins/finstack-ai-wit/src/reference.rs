@@ -2,9 +2,8 @@
 
 use std::sync::Arc;
 
-use finstack_ai_runtime::{
-    ContentBlock, ContextAuthority, ContextItemKind, ContextProvenance, Sensitivity, TextBlock,
-};
+use finstack_ai_kernel::{ContentBlock, Sensitivity, TextBlock};
+use finstack_ai_runtime::{ContextAuthority, ContextItemKind, ContextProvenance};
 
 use crate::context_mapping::encode_guest_item;
 use crate::error::WitMapError;

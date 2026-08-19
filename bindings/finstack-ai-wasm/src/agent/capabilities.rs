@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use finstack_ai::runtime::CapabilityId;
 use finstack_ai::{
     ActiveCapability, CapabilityActivation, CapabilityActivationSource, CapabilityCatalogEntry,
     CapabilitySpec, InstructionSpec,
 };
+use finstack_ai_kernel::CapabilityId;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 

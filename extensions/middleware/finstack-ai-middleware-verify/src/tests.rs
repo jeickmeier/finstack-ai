@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    Digest, EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId,
+};
 use finstack_ai_runtime::{
-    AuthorizationContext, CancellationSignal, Digest, EffectId, LaneId, Metadata, Middleware,
-    MiddlewareContext, OperationLocator, PrincipalRef, RawJson, RunCallContext, RunId, SessionId,
+    AuthorizationContext, CancellationSignal, Middleware, MiddlewareContext, RunCallContext,
     StageInput, StageOutcome, validate_stage_outcome,
 };
 use finstack_ai_test::{MiddlewareConformanceCase, check_middleware_conformance};

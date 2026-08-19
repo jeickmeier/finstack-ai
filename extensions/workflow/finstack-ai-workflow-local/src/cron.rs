@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::Timestamp;
+use finstack_ai_kernel::Timestamp;
 use thiserror::Error;
 
 /// Adapter-owned cron failures. These are not kernel record errors.
@@ -54,7 +54,7 @@ impl CronError {
 /// # Examples
 ///
 /// ```
-/// use finstack_ai_runtime::Timestamp;
+/// use finstack_ai_kernel::Timestamp;
 /// use finstack_ai_workflow_local::IntervalSchedule;
 ///
 /// let expr = IntervalSchedule::parse("every 10ms").expect("expr");

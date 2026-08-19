@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use finstack_ai_runtime::{
-    ContentBlock, Message, MessageRole, ModelError, ModelRequestDraft, OutputSpec, RawJson,
-    SUBMIT_FINAL_OUTPUT_TOOL,
+use finstack_ai_kernel::{
+    ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
+use finstack_ai_runtime::{ModelError, ModelRequestDraft};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -300,7 +300,7 @@ fn map_tool_results(
 
 fn tool_name_for(
     messages: &[Message],
-    tool_call_id: &finstack_ai_runtime::ToolCallId,
+    tool_call_id: &finstack_ai_kernel::ToolCallId,
 ) -> Result<String, ModelError> {
     for message in messages {
         if message.role() != MessageRole::Assistant {
@@ -410,10 +410,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use finstack_ai_runtime::{
-        JsonSchemaDraft, MessageId, Metadata, ModelName, ModelRequestLimits, ModelSettings,
-        ProviderIds, SchemaRef, TextBlock, Timestamp, ToolCallBlock, ToolCallId, ToolResultBlock,
+    use finstack_ai_kernel::{
+        JsonSchemaDraft, MessageId, Metadata, ProviderIds, SchemaRef, TextBlock, Timestamp,
+        ToolCallBlock, ToolCallId, ToolResultBlock,
     };
+    use finstack_ai_runtime::{ModelName, ModelRequestLimits, ModelSettings};
 
     #[test]
     fn maps_native_messages_tools_limits_and_reasoning() {
@@ -628,15 +629,15 @@ mod tests {
 
     fn tool(name: &str, schema: &[u8]) -> finstack_ai_runtime::ToolSpec {
         finstack_ai_runtime::ToolSpec {
-            id: finstack_ai_runtime::ToolId::parse("finstack.tools.fixture").expect("tool id"),
+            id: finstack_ai_kernel::ToolId::parse("finstack.tools.fixture").expect("tool id"),
             model_name: Arc::from(name),
             title: Arc::from("Fixture tool"),
             description: Arc::from("A deterministic fixture tool."),
             input_schema: RawJson::parse(schema).expect("schema"),
             output_schema: None,
-            execution: finstack_ai_runtime::ToolExecutionMode::Sequential,
+            execution: finstack_ai_kernel::ToolExecutionMode::Sequential,
             side_effect: finstack_ai_runtime::SideEffectClass::ReadOnly,
-            retry_safety: finstack_ai_runtime::RetrySafety::SafeToRetry,
+            retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
             approval: finstack_ai_runtime::ApprovalMetadata {
                 requirement: finstack_ai_runtime::ApprovalRequirement::NotRequired,
                 reason: None,

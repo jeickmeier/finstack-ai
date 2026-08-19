@@ -4,12 +4,14 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, Digest, ErrorCategory, InteractionKind, InteractionRequest,
+    InvocationRecovery, Metadata, RawJson, Stage, Version,
+};
 use finstack_ai_kernel::{ErrorDescriptor, InteractionId};
 use finstack_ai_runtime::{
-    ComponentId, ComponentInvocation, Digest, ErrorCategory, InteractionKind, InteractionRequest,
-    InvocationRecovery, Metadata, Middleware, MiddlewareContext, MiddlewareDescriptor,
-    MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, PortFuture, RawJson, Stage,
-    StageInput, StageMask, StageOutcome, Version,
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
 };
 use thiserror::Error;
 
@@ -141,12 +143,12 @@ impl Middleware for VerifyMiddleware {
                         InteractionId::from_bytes(ctx.run.effect_id.to_bytes()),
                         ctx.run.effect_id,
                         InteractionKind::Approval,
-                        vec![finstack_ai_runtime::ContentBlock::Text(
-                            finstack_ai_runtime::TextBlock::try_new("approve candidate")
+                        vec![finstack_ai_kernel::ContentBlock::Text(
+                            finstack_ai_kernel::TextBlock::try_new("approve candidate")
                                 .map_err(|_| interaction_error())?,
                         )],
                         RawJson::parse(b"{}").map_err(|_| interaction_error())?,
-                        finstack_ai_runtime::ComponentRef::new(
+                        finstack_ai_kernel::ComponentRef::new(
                             ComponentId::parse("finstack.middleware.verify")
                                 .map_err(|_| interaction_error())?,
                             Some(VERIFY_VERSION),

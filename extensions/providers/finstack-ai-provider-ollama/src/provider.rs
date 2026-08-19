@@ -6,11 +6,11 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    ErrorCategory, Metadata, Model, ModelCapabilities, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
-    ModelTokenEstimate, OllamaChatAssembly, OllamaReplayEntry, OutputSpec, PendingModelEffect,
-    ReconcileContext, StreamNormError, StreamNormKind,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelReconcileResult, ModelRequest, ModelStreamItem, ModelTokenEstimate, OllamaChatAssembly,
+    OllamaReplayEntry, ReconcileContext, StreamNormError, StreamNormKind,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -478,7 +478,8 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finstack_ai_runtime::{ContentBlock, ModelStreamItem};
+    use finstack_ai_kernel::ContentBlock;
+    use finstack_ai_runtime::ModelStreamItem;
 
     #[test]
     fn assembles_text_thinking_tools_and_usage() {

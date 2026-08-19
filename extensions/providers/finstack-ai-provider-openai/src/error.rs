@@ -1,4 +1,5 @@
-use finstack_ai_runtime::{ErrorCategory, Metadata, ModelError};
+use finstack_ai_kernel::{ErrorCategory, Metadata};
+use finstack_ai_runtime::ModelError;
 
 pub(crate) const CONFIG_INVALID: &str = "openai_config_invalid";
 pub(crate) const REQUEST_INVALID: &str = "openai_request_invalid";

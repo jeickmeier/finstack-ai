@@ -3,10 +3,10 @@ use core::sync::atomic::AtomicBool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use finstack_ai_kernel::{ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_runtime::{
-    CancellationSignal, ComponentId, ComponentRef, ContextProvider, JournalStore, Middleware,
-    MiddlewareRegistration, Model, ModelWarmupContext, Observer, PortFuture, RawJson,
-    ResolvedMiddlewareChain, Toolset, Version,
+    CancellationSignal, ContextProvider, JournalStore, Middleware, MiddlewareRegistration, Model,
+    ModelWarmupContext, Observer, PortFuture, ResolvedMiddlewareChain, Toolset,
 };
 
 use super::errors::{

@@ -1,8 +1,8 @@
 //! Rust reconnect helper that enforces snapshot-tail-barrier-live order.
 
 use finstack_ai_protocol::{
-    POST_AUTH_FRAME_MAX_BYTES, RemoteAuthMethod, RemoteCommand, RemoteCommandResult,
-    RemoteLocator, RemotePostAuth, RemotePreAuth, VersionOffer,
+    POST_AUTH_FRAME_MAX_BYTES, RemoteAuthMethod, RemoteCommand, RemoteCommandResult, RemoteLocator,
+    RemotePostAuth, RemotePreAuth, VersionOffer,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 

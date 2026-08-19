@@ -5,11 +5,13 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    AuthorizationContext, CancellationSignal, ContentBlock, Digest, EffectId, EffectOutputContract,
-    EffectOutputKind, LaneId, Message, MessageId, MessageRole, Metadata, ModelCallContext,
-    ModelName, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-    OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RetrySafety, RunCallContext,
-    RunId, SessionId, TextBlock, Timestamp, ToolBatchId, ToolCallBlock, ToolCallContext,
+    AuthorizationContext, CancellationSignal, ModelCallContext, ModelName, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelSettings, RunCallContext, ToolCallContext,
+};
+use finstack_ai_kernel::{
+    ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Message,
+    MessageId, MessageRole, Metadata, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
+    RawJson, RetrySafety, RunId, SessionId, TextBlock, Timestamp, ToolBatchId, ToolCallBlock,
     ToolCallId, ToolExecutionMode, ToolFailurePolicy, ToolId, ValidatedToolCall,
 };
 
@@ -80,7 +82,7 @@ pub fn model_request(
     Ok(ModelRequest {
         call: ModelCallContext {
             run: run_call_context(cancellation)?,
-            request_id: finstack_ai::runtime::ModelRequestId::parse(REQUEST)
+            request_id: finstack_ai_kernel::ModelRequestId::parse(REQUEST)
                 .map_err(|_| "request")?,
         },
         draft: ModelRequestDraft {

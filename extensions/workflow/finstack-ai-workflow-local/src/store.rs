@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai_runtime::Timestamp;
+use finstack_ai_kernel::Timestamp;
 use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::cron::{CronError, CronSchedule, IntervalSchedule};

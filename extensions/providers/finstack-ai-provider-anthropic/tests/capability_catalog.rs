@@ -2,11 +2,10 @@
 
 use std::sync::Arc;
 
-use finstack_ai::runtime::CapabilityId;
-use finstack_ai::runtime::{
-    AgentId, BundleId, ComponentId, ComponentRef, JournalStore, Model, ModelName, Version,
-};
+use finstack_ai::runtime::{JournalStore, Model, ModelName};
 use finstack_ai::{Agent, CapabilityActivation, CapabilitySpec, InstructionSpec};
+use finstack_ai_kernel::CapabilityId;
+use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_provider_anthropic::{AnthropicConfig, AnthropicModelConfig, AnthropicProvider};
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};

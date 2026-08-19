@@ -268,13 +268,13 @@ impl CommitCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ManualDriveError::ZeroCapacity`] when `capacity` is zero.
+    /// Returns [`crate::testing::ManualDriveError::ZeroCapacity`] when `capacity` is zero.
     #[doc(hidden)]
     #[cfg(feature = "native-tokio")]
     pub fn enable_manual_drive(
         &mut self,
         capacity: usize,
-    ) -> Result<crate::ManualDriveController, crate::ManualDriveError> {
+    ) -> Result<crate::testing::ManualDriveController, crate::testing::ManualDriveError> {
         let (gate, controller) = crate::native::manual_drive::manual_drive(capacity)?;
         self.manual_drive = Some(gate);
         Ok(controller)

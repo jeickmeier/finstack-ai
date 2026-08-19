@@ -31,7 +31,10 @@ async fn manual_drive_exposes_a_recoverable_committed_prefix_before_dispatch() {
     });
     let permit = controller.next_effect().await.expect("paused dispatch");
 
-    assert_eq!(permit.effect().action, crate::ManualDriveAction::Execute);
+        assert_eq!(
+            permit.effect().action,
+            crate::testing::ManualDriveAction::Execute
+        );
     assert_eq!(store.append_calls(), 4);
     assert!(dispatcher.actions.lock().expect("lock").is_empty());
     let recovered = CommitCoordinator::recover(store.clone(), id::<SessionTag>(1))

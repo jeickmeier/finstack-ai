@@ -2,15 +2,18 @@
 
 use std::sync::Arc;
 
+use finstack_ai::registry::{ComponentConstructionContext, LifecycleBinding, ReadyComponent};
 use finstack_ai::{
-    ComponentConstructionContext, Extension, ExtensionDescriptor, LifecycleBinding, ReadyComponent,
-    Registrar, RegistrationError, RegistrationMetadata,
+    Extension, ExtensionDescriptor, Registrar, RegistrationError, RegistrationMetadata,
+};
+use finstack_ai_kernel::{
+    ComponentRef, Digest, ErrorCategory, InvocationRecovery, Metadata, RawJson, ValidatedToolCall,
+    Version,
 };
 use finstack_ai_runtime::{
-    ComponentRef, ContextCallContext, ContextContribution, ContextError, ContextProvider,
-    ContextProviderDescriptor, ContextRequest, Digest, ErrorCategory, InvocationRecovery, Metadata,
-    PortFuture, RawJson, ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolSpec,
-    ToolStreamItem, Toolset, ToolsetDescriptor, ValidatedToolCall, Version,
+    ContextCallContext, ContextContribution, ContextError, ContextProvider,
+    ContextProviderDescriptor, ContextRequest, PortFuture, ToolCallContext, ToolError,
+    ToolEventStream, ToolResult, ToolSpec, ToolStreamItem, Toolset, ToolsetDescriptor,
 };
 use futures_util::stream;
 
@@ -64,7 +67,7 @@ impl<G: GuestContextProvider + Send + Sync + 'static> WitContextAdapter<G> {
         Ok(Self {
             guest,
             descriptor: ContextProviderDescriptor {
-                invocation: finstack_ai_runtime::ComponentInvocation {
+                invocation: finstack_ai_kernel::ComponentInvocation {
                     component: manifest.identity.clone(),
                     version: adapter_version(manifest),
                     configuration_digest: Digest::raw_json(b"{}"),
@@ -286,8 +289,8 @@ impl Extension for WitPluginExtension {
         );
         match (&self.context, &self.context_lifecycle) {
             (Some(provider), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::ComponentLifecycle>;
+                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
+                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
                 registrar.context_provider(
                     metadata.clone(),
                     ReadyComponent::new(Arc::clone(provider))
@@ -303,8 +306,8 @@ impl Extension for WitPluginExtension {
         }
         match (&self.toolset, &self.toolset_lifecycle) {
             (Some(toolset), Some(lifecycle)) => {
-                let hooks: Arc<dyn finstack_ai::ComponentLifecycle> =
-                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::ComponentLifecycle>;
+                let hooks: Arc<dyn finstack_ai::registry::ComponentLifecycle> =
+                    Arc::clone(lifecycle) as Arc<dyn finstack_ai::registry::ComponentLifecycle>;
                 registrar.toolset(
                     metadata,
                     ReadyComponent::new(Arc::clone(toolset))
@@ -413,16 +416,20 @@ fn tool_error(code: &str, message: &str) -> ToolError {
 mod tests {
     use super::WitPluginExtension;
     use crate::manifest::{manifest_digest_hex, parse_manifest};
+    use finstack_ai::registry::ReadyComponent;
     use finstack_ai::{
-        AgentComponentSelection, AgentConstructionContext, ComponentSelector, Extension,
-        ReadyComponent, Registrar, RegistrationMetadata, ResolveRequest,
+        AgentComponentSelection, AgentConstructionContext, ComponentSelector, Extension, Registrar,
+        RegistrationMetadata, ResolveRequest,
+    };
+    use finstack_ai_kernel::{
+        ComponentId, ContentBlock, Digest, EffectId, LaneId, Metadata, OperationLocator,
+        PrincipalRef, RunId, SessionId, TextBlock, Version,
     };
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, ComponentId, ContentBlock, ContextBudget,
-        ContextCallContext, ContextItemKind, ContextOverflowPolicy, ContextRequest, Digest,
-        EffectId, LaneId, Metadata, Model, ModelContextProfile, ModelName, OperationLocator,
-        PrincipalRef, RecordedContextContribution, RunCallContext, RunId, SessionId, TextBlock,
-        TokenEstimatorRef, TokenEstimatorSource, Version, assemble_context,
+        AuthorizationContext, CancellationSignal, ContextBudget, ContextCallContext,
+        ContextItemKind, ContextOverflowPolicy, ContextRequest, Model, ModelContextProfile,
+        ModelName, RecordedContextContribution, RunCallContext, TokenEstimatorRef,
+        TokenEstimatorSource, assemble_context,
     };
     use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
     use finstack_ai_test::ScriptedModel;
@@ -612,17 +619,17 @@ mod tests {
             .expect("store");
         registrar.register_extension(&extension).expect("plugin");
         let mut selection = AgentComponentSelection::new(
-            ComponentSelector::Component(finstack_ai_runtime::ComponentRef::new(
+            ComponentSelector::Component(finstack_ai_kernel::ComponentRef::new(
                 component("test.model.scripted"),
                 Some(MODEL_VERSION),
             )),
-            ComponentSelector::Component(finstack_ai_runtime::ComponentRef::new(
+            ComponentSelector::Component(finstack_ai_kernel::ComponentRef::new(
                 component("test.store.memory"),
                 Some(MODEL_VERSION),
             )),
         );
         selection.context_providers = Arc::from([ComponentSelector::Component(
-            finstack_ai_runtime::ComponentRef::new(
+            finstack_ai_kernel::ComponentRef::new(
                 component("finstack.plugin.reference.context"),
                 Some(Version {
                     major: 0,
@@ -708,17 +715,17 @@ mod tests {
             .expect("store");
         registrar.register_extension(&extension).expect("plugin");
         let mut selection = AgentComponentSelection::new(
-            ComponentSelector::Component(finstack_ai_runtime::ComponentRef::new(
+            ComponentSelector::Component(finstack_ai_kernel::ComponentRef::new(
                 component("test.model.scripted"),
                 Some(MODEL_VERSION),
             )),
-            ComponentSelector::Component(finstack_ai_runtime::ComponentRef::new(
+            ComponentSelector::Component(finstack_ai_kernel::ComponentRef::new(
                 component("test.store.memory"),
                 Some(MODEL_VERSION),
             )),
         );
         selection.toolsets = Arc::from([ComponentSelector::Component(
-            finstack_ai_runtime::ComponentRef::new(
+            finstack_ai_kernel::ComponentRef::new(
                 component("finstack.plugin.reference.toolset"),
                 Some(Version {
                     major: 0,

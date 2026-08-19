@@ -5,7 +5,7 @@ fn due_polls(
     state: &finstack_ai_kernel::KernelState,
     now: finstack_ai_kernel::Timestamp,
 ) -> Vec<(finstack_ai_kernel::EffectId, finstack_ai_kernel::Timestamp)> {
-    finstack_ai_runtime::__test_due_polls(state, now)
+    finstack_ai_runtime::testing::due_polls(state, now)
 }
 
 fn polling_deferral(

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{ComponentId, ComponentRef, Digest, RawJson, Version};
+use finstack_ai_kernel::{ComponentId, ComponentRef, Digest, RawJson, Version};
 
 use crate::{
     AgentComponentSelection, AgentSpec, CapabilityActivation, ComponentSelector, ResolvedAgent,
@@ -36,7 +36,7 @@ pub(super) fn expand_spec(recipe: &CompositionRecipe) -> Result<AgentSpec, Bundl
                 continue;
             }
             middleware.push(
-                finstack_ai_runtime::MiddlewareRef::try_new(component, None::<&str>).map_err(
+                finstack_ai_kernel::MiddlewareRef::try_new(component, None::<&str>).map_err(
                     |error| BundleResolutionError::Invalid {
                         message: Arc::from(error.to_string()),
                     },

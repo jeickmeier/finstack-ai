@@ -3,11 +3,10 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, CapabilityId, ComponentId, ComponentInvocation, ComponentRef,
-    ContextContribution, ContextProvider, ContextProviderDescriptor, Digest, InvocationRecovery,
-    JournalStore, Middleware, MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, Model,
-    ModelContextProfile, ModelName, ModelStreamItem, ModelToolCall, OrderTier, Stage, StageMask,
-    StageOutcome, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta, Version,
+    ContextContribution, ContextProvider, ContextProviderDescriptor, JournalStore, Middleware,
+    MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, Model, ModelContextProfile, ModelName,
+    ModelStreamItem, ModelToolCall, OrderTier, StageMask, StageOutcome, TextDelta,
+    TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
 };
 use finstack_ai::{
     ActivationHostError, Agent, AgentRunRequest, CAPABILITY_ACTIVATION_BOUND, CapabilityActivation,
@@ -15,6 +14,10 @@ use finstack_ai::{
     PrincipalRef, RunSecurityContext,
 };
 use finstack_ai_kernel::{ActiveCapability, CapabilityActivationSource, RunId};
+use finstack_ai_kernel::{
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentInvocation, ComponentRef, Digest,
+    InvocationRecovery, Stage, Version,
+};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{
     ScriptedContextAction, ScriptedContextProvider, ScriptedMiddleware, ScriptedMiddlewareAction,
@@ -54,12 +57,12 @@ fn completed(text: &str) -> ScriptedModelPlan {
             }))),
             ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
                 finstack_ai::runtime::ModelResponse {
-                    assistant_content: Arc::from([finstack_ai::runtime::ContentBlock::Text(
-                        finstack_ai::runtime::TextBlock::try_new(text).expect("text"),
+                    assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Text(
+                        finstack_ai_kernel::TextBlock::try_new(text).expect("text"),
                     )]),
                     tool_calls: Arc::from([]),
-                    usage: finstack_ai::runtime::Usage::empty(),
-                    provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                    usage: finstack_ai_kernel::Usage::empty(),
+                    provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                     completion_id: Arc::from("capability-activation-1"),
                     continuation_state: None,
                 },
@@ -69,7 +72,7 @@ fn completed(text: &str) -> ScriptedModelPlan {
 }
 
 fn activate_call(id: &str) -> ScriptedModelPlan {
-    let arguments = finstack_ai::runtime::RawJson::parse(
+    let arguments = finstack_ai_kernel::RawJson::parse(
         serde_json::to_vec(&serde_json::json!({ "id": id })).expect("arguments"),
     )
     .expect("raw");
@@ -80,8 +83,8 @@ fn activate_call(id: &str) -> ScriptedModelPlan {
             arguments: arguments.clone(),
             provider_call_id: Some(Arc::from("call-activate")),
         }]),
-        usage: finstack_ai::runtime::Usage::empty(),
-        provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+        usage: finstack_ai_kernel::Usage::empty(),
+        provider_ids: finstack_ai_kernel::ProviderIds::empty(),
         completion_id: Arc::from("capability-activate-completion"),
         continuation_state: None,
     };
@@ -160,7 +163,7 @@ fn compactor(id: &str) -> Arc<dyn Middleware> {
                 strategy_id: Arc::from("fixture.window"),
                 strategy_version: 1,
             },
-            metadata: finstack_ai::runtime::Metadata::empty(),
+            metadata: finstack_ai_kernel::Metadata::empty(),
         },
         vec![ScriptedMiddlewareAction::Return(Ok(StageOutcome::Continue))],
     ))
@@ -178,7 +181,7 @@ fn standard_middleware(id: &str) -> Arc<dyn Middleware> {
                 after: Arc::from([]),
             },
             role: MiddlewareRole::Standard,
-            metadata: finstack_ai::runtime::Metadata::empty(),
+            metadata: finstack_ai_kernel::Metadata::empty(),
         },
         vec![ScriptedMiddlewareAction::Return(Ok(StageOutcome::Continue))],
     ))
@@ -323,7 +326,7 @@ async fn untrusted_capability_cannot_set_trusted_application_instructions() {
         ContextProviderDescriptor {
             invocation: invocation("test.context.untrusted"),
             trusted_application_instructions: true,
-            metadata: finstack_ai::runtime::Metadata::empty(),
+            metadata: finstack_ai_kernel::Metadata::empty(),
         },
         vec![ScriptedContextAction::Return(ContextContribution::try_new(
             Vec::new(),

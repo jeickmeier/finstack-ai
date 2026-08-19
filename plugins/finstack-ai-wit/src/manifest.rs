@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use finstack_ai_runtime::{ComponentId, Digest, RawJson};
+use finstack_ai_kernel::{ComponentId, Digest, RawJson};
 use serde::Deserialize;
 use serde_json::Value;
 

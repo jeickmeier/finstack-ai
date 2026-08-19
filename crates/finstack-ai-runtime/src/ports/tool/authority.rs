@@ -15,11 +15,11 @@ use super::types::ToolCallContext;
 ///
 /// ```
 /// use finstack_ai_kernel::{
-///     EffectId, LaneId, OperationLocator, PrincipalRef, RunId, SessionId, ToolBatchId, ToolCallId,
+///     EffectId, LaneId, Metadata, OperationLocator, PrincipalRef, RunId, SessionId, ToolBatchId,
+///     ToolCallId,
 /// };
 /// use finstack_ai_runtime::{
-///     AuthorizationContext, CancellationSignal, Metadata, RunCallContext, ToolCallContext,
-///     verify_authority,
+///     AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, verify_authority,
 /// };
 ///
 /// let locator = OperationLocator::try_new(

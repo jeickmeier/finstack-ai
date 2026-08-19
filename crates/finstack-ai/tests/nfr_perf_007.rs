@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    AgentId, BundleId, ComponentId, ComponentRef, JournalStore, JsonSchemaToolValidatorCompiler,
-    Model, ModelContextProfile, ModelName, ModelResponse, ModelStreamItem, RawJson,
-    TokenEstimatorRef, TokenEstimatorSource, Toolset, Version,
+    JournalStore, JsonSchemaToolValidatorCompiler, Model, ModelContextProfile, ModelName,
+    ModelResponse, ModelStreamItem, TokenEstimatorRef, TokenEstimatorSource, Toolset,
 };
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
+use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, RawJson, Version};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_tools_calculator::CalculatorToolset;
@@ -110,14 +110,14 @@ fn completed(text: &str) -> ScriptedModelPlan {
     ScriptedModelPlan {
         actions: vec![ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(
             ModelResponse {
-                assistant_content: Arc::from([finstack_ai::runtime::ContentBlock::Json(
-                    finstack_ai::runtime::JsonBlock::new(
+                assistant_content: Arc::from([finstack_ai_kernel::ContentBlock::Json(
+                    finstack_ai_kernel::JsonBlock::new(
                         RawJson::parse(text.as_bytes()).expect("json candidate"),
                     ),
                 )]),
                 tool_calls: Arc::from([]),
-                usage: finstack_ai::runtime::Usage::empty(),
-                provider_ids: finstack_ai::runtime::ProviderIds::empty(),
+                usage: finstack_ai_kernel::Usage::empty(),
+                provider_ids: finstack_ai_kernel::ProviderIds::empty(),
                 completion_id: Arc::from("nfr-perf-007-complete"),
                 continuation_state: None,
             },

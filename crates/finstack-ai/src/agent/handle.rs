@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ResolvedAgent;
+use finstack_ai_kernel::ToolFailurePolicy;
 use finstack_ai_kernel::{
     AgentId, BundleId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery,
     JsonSchemaDraft, RawJson, SchemaRef,
 };
 use finstack_ai_runtime::{
     JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog, ToolExecutionPolicy,
-    ToolFailurePolicy, ToolPolicyDecision, ToolValidator, ToolValidatorCompiler,
-    ToolsetRegistration,
+    ToolPolicyDecision, ToolValidator, ToolValidatorCompiler, ToolsetRegistration,
 };
 
 use super::activation::NativeCapabilityHost;
@@ -492,7 +492,7 @@ impl Agent {
 
     /// Execute one bounded native run through the commit-before-effect runtime.
     ///
-    /// Equivalent to [`Self::start`] followed by [`AgentRun::result`].
+    /// Start-and-wait convenience over [`Self::start`] plus [`AgentRun::result`].
     /// `request.capability` selects a model-activated variant; `None` runs `self`.
     ///
     /// # Arguments

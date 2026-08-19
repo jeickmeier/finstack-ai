@@ -17,7 +17,7 @@ resource limits, signature policy, and `WasmToolsetAdapter` /
 `WasmContextAdapter`. The default SDK bundle does not depend on it.
 
 Copy `templates/toolset-plugin/` or `templates/context-plugin/`. Encode
-with `tools/plugin_wasm/encoder`. Published reference components live
+with `scripts/plugin_wasm/encoder`. Published reference components live
 under `reference/` (calculator, context provider, read-only filesystem
 sandbox). The sandbox is a T3 fixture over a granted preopen; it is not
 `finstack-ai-tools-filesystem`. Runtime discovery reads
@@ -28,17 +28,17 @@ rust-version: 1.97.1
 target: wasm32-unknown-unknown
 wit-bindgen: 0.57.1
 WIT packages: finstack:ai-*@1.0.0 (frozen); finstack:ai-*@0.0.4 (experimental, loadable)
-encode: tools/plugin_wasm/encoder
+encode: scripts/plugin_wasm/encoder
 ```
 
 ```text
-uv run --no-project python tools/plugin_wasm/sync_guest_wit.py
-uv run --no-project python tools/plugin_wasm/sync_guest_wit.py --check
-uv run --no-project python tools/plugin_wasm/generate.py
-uv run --no-project python tools/plugin_wasm/generate.py --check
-uv run --no-project python tools/plugin_lock/lock.py
-uv run --no-project python tools/plugin_lock/lock.py --check
-uv run --no-project python tools/plugin_wasm/template_check.py
+uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py
+uv run --no-project python scripts/plugin_wasm/sync_guest_wit.py --check
+uv run --no-project python scripts/plugin_wasm/generate.py
+uv run --no-project python scripts/plugin_wasm/generate.py --check
+uv run --no-project python scripts/plugin_lock/lock.py
+uv run --no-project python scripts/plugin_lock/lock.py --check
+uv run --no-project python scripts/plugin_wasm/template_check.py
 cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```
@@ -51,7 +51,7 @@ In-process WIT guests inherit host authority and are not a sandbox.
 ## Quick start
 
 ```text
-uv run --no-project python tools/plugin_wasm/template_check.py
+uv run --no-project python scripts/plugin_wasm/template_check.py
 ```
 
 ## License and governance

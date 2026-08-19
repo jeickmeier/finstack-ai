@@ -3,13 +3,15 @@
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    AssembledToolStream, AuthorizationContext, CancellationSignal, ContentBlock, Digest, EffectId,
-    EffectOutputContract, EffectOutputKind, LaneId, Metadata, ModelCallContext, ModelRequest,
-    ModelRequestDraft, ModelRequestId, ModelRequestLimits, ModelResponse, ModelSettings,
-    ModelStreamLimits, ModelTerminal, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
-    RawJson, RetrySafety, RunCallContext, RunId, SessionId, TextBlock, ToolBatchId, ToolCallBlock,
-    ToolCallContext, ToolCallId, ToolExecutionMode, ToolFailurePolicy, ToolResult,
-    ToolStreamLimits, ToolTerminal, Usage, ValidatedToolCall,
+    AssembledToolStream, AuthorizationContext, CancellationSignal, ModelCallContext, ModelRequest,
+    ModelRequestDraft, ModelRequestLimits, ModelResponse, ModelSettings, ModelStreamLimits,
+    ModelTerminal, RunCallContext, ToolCallContext, ToolResult, ToolStreamLimits, ToolTerminal,
+};
+use finstack_ai_kernel::{
+    ContentBlock, Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+    ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RetrySafety,
+    RunId, SessionId, TextBlock, ToolBatchId, ToolCallBlock, ToolCallId, ToolExecutionMode,
+    ToolFailurePolicy, Usage, ValidatedToolCall,
 };
 use finstack_ai_test::{
     ModelConformanceCase, ToolsetConformanceCase, check_model_conformance,

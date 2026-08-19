@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use finstack_ai_kernel::Stage;
 use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, EntryTag, Id, IdTag,
     InvocationRecovery, Message, MessageRole, Metadata, OutputSpec, ProviderIds, RawJson,
@@ -11,7 +12,7 @@ use finstack_ai_runtime::{
     BeforeModelInput, CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult,
     CompactionSourceEntry, ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
     MiddlewareDescriptor, MiddlewareOrder, MiddlewareRole, ModelName, ModelRequestDraft,
-    ModelRequestLimits, ModelSettings, OrderTier, PromptCacheImpact, Stage, StageMask,
+    ModelRequestLimits, ModelSettings, OrderTier, PromptCacheImpact, StageMask,
     compaction_projection_digest, compaction_protected_set_digest, compaction_source_digest,
     compaction_summary_digest,
 };

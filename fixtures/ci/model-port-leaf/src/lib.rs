@@ -4,11 +4,11 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::Arc;
 
+use finstack_ai_kernel::{ProviderIds, Usage};
 use finstack_ai_runtime::{
     InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDescriptor, ModelError,
     ModelEventStream, ModelName, ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate,
-    PortFuture, ProviderIds, StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
-    Usage,
+    PortFuture, StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
 use futures_core::Stream;
 
@@ -62,7 +62,7 @@ impl Model for LeafModel {
         ModelDescriptor {
             provider: Arc::clone(&self.profile.provider),
             models: Arc::from([self.profile.model.clone()]),
-            metadata: finstack_ai_runtime::Metadata::empty(),
+            metadata: finstack_ai_kernel::Metadata::empty(),
         }
     }
 
@@ -122,11 +122,13 @@ impl Stream for SingleItemStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finstack_ai_kernel::{
+        EffectId, LaneId, Metadata, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef,
+        RawJson, RunId, SessionId,
+    };
     use finstack_ai_runtime::{
-        AuthorizationContext, CancellationSignal, EffectId, LaneId, Metadata, ModelCallContext,
-        ModelRequestDraft, ModelRequestId, ModelRequestLimits, ModelSettings, ModelStreamLimits,
-        ModelTerminal, OperationLocator, OutputSpec, PrincipalRef, RawJson, RunCallContext, RunId,
-        SessionId,
+        AuthorizationContext, CancellationSignal, ModelCallContext, ModelRequestDraft,
+        ModelRequestLimits, ModelSettings, ModelStreamLimits, ModelTerminal, RunCallContext,
     };
     use finstack_ai_test::{ModelConformanceCase, check_model_conformance};
 

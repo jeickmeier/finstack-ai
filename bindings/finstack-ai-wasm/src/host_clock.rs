@@ -1,6 +1,7 @@
 //! Host clock and random-source adapters.
 
-use finstack_ai::runtime::{Clock, IdGenerationError, RandomSource, Timestamp};
+use finstack_ai::runtime::{Clock, IdGenerationError, RandomSource};
+use finstack_ai_kernel::Timestamp;
 
 use crate::host::HostFailure;
 

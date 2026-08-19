@@ -81,7 +81,7 @@ impl Session {
         let session = self.inner.clone();
         executor::drive(async move {
             let fork = fork
-                .map(|value| finstack_ai::runtime::EntryId::parse(&value))
+                .map(|value| finstack_ai_kernel::EntryId::parse(&value))
                 .transpose()
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             session
@@ -148,7 +148,7 @@ impl Session {
     ) -> Result<(), JsValue> {
         let key = finstack_ai::ExternalIdentityKey::try_new(channel, account, thread)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        let lane_id = finstack_ai::runtime::LaneId::parse(&lane_id)
+        let lane_id = finstack_ai_kernel::LaneId::parse(&lane_id)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         self.inner
             .bind_external_identity(&map.inner, key, lane_id)
@@ -187,7 +187,7 @@ impl Lane {
     pub fn navigate(&self, entry_id: String) -> js_sys::Promise {
         let lane = self.inner.clone();
         executor::drive(async move {
-            let entry_id = finstack_ai::runtime::EntryId::parse(&entry_id)
+            let entry_id = finstack_ai_kernel::EntryId::parse(&entry_id)
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             lane.navigate(entry_id)
                 .await

@@ -11,6 +11,7 @@ description = "Structured JSON log observer for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,7 +19,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
-finstack-ai-kernel = { workspace = true }
 finstack-ai-test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }

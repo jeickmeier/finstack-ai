@@ -11,12 +11,12 @@ description = "In-process reference workflow driver for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 rusqlite = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-finstack-ai-kernel = { workspace = true }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true }

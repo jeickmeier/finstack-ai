@@ -11,6 +11,7 @@ description = "Deterministic calculator Toolset for finstack-ai"
 readme = "README.md"
 
 [dependencies]
+finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
 futures-util = { workspace = true }
 serde = { workspace = true }

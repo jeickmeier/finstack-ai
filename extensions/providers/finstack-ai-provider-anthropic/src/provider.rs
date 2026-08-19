@@ -6,11 +6,11 @@ use core::task::{Context, Poll};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
+use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    AnthropicMessagesAssembly, ErrorCategory, Metadata, Model, ModelCapabilities, ModelDescriptor,
-    ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
-    ModelTokenEstimate, OutputSpec, PendingModelEffect, ReconcileContext, StreamNormError,
-    StreamNormKind,
+    AnthropicMessagesAssembly, Model, ModelCapabilities, ModelDescriptor, ModelError,
+    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
+    ModelTokenEstimate, ReconcileContext, StreamNormError, StreamNormKind,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -424,7 +424,7 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use finstack_ai_runtime::{ContentBlock, LimitKey};
+    use finstack_ai_kernel::{ContentBlock, LimitKey};
 
     #[test]
     #[expect(

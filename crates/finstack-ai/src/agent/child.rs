@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ChildRunPolicy;
+use finstack_ai_kernel::ExternalEffectCompletionCommand;
 use finstack_ai_kernel::{
     AppendBatchTag, BudgetPropagation, BudgetRequest, CancellationPropagation, ChildPlacement,
     ChildRunLocator, ChildRunPrepared, ContentBlock, DeadlinePropagation, Digest, EffectId,
@@ -13,8 +14,7 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{
     AGENT_INVOKE_INVALID_ACCEPTANCE, AgentInvokeError, AgentInvoker, AgentRef,
     AuthorizationContext, ChildCoordinationIds, ChildRunContext, ChildRunCoordinator,
-    ChildRunHandle, ChildRunRequest, CommitCoordinator, ExternalEffectCompletionCommand,
-    PortFuture, child_relation_digest,
+    ChildRunHandle, ChildRunRequest, CommitCoordinator, PortFuture, child_relation_digest,
 };
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{ExternalCompletionRouter, ExternalRouteOutcome};

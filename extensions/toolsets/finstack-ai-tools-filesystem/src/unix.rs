@@ -4,7 +4,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use finstack_ai_runtime::{CancellationSignal, ErrorCategory, TOOL_CANCELLED, ToolError};
+use finstack_ai_kernel::ErrorCategory;
+use finstack_ai_runtime::{CancellationSignal, TOOL_CANCELLED, ToolError};
 use rustix::fd::OwnedFd;
 use rustix::fs::{Dir, FileType, Mode, OFlags, fstat, open, openat};
 use serde::Serialize;

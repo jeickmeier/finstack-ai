@@ -2,12 +2,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use finstack_ai::runtime::{
-    ComponentRef, ErrorCategory, ExternalHandleRef, InputCapabilities, Metadata, Model,
-    ModelCapabilities, ModelContextProfile, ModelDeferral, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelRequest, ModelResponse, ModelStreamItem, ModelTokenEstimate,
-    ModelToolCall, PortFuture, ProviderIds, RawJson, ReconciliationPolicy,
-    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
-    Usage,
+    InputCapabilities, Model, ModelCapabilities, ModelContextProfile, ModelDeferral,
+    ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest, ModelResponse,
+    ModelStreamItem, ModelTokenEstimate, ModelToolCall, PortFuture, StructuredOutputCapability,
+    TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+};
+use finstack_ai_kernel::{
+    ComponentRef, ErrorCategory, ExternalHandleRef, Metadata, ProviderIds, RawJson,
+    ReconciliationPolicy, Usage,
 };
 use futures_util::stream;
 use pyo3::prelude::*;
@@ -105,7 +107,7 @@ impl Model for PythonModelAdapter {
                 .assistant_content
                 .first()
                 .and_then(|block| match block {
-                    finstack_ai::runtime::ContentBlock::Text(text) => Some(text.text()),
+                    finstack_ai_kernel::ContentBlock::Text(text) => Some(text.text()),
                     _ => None,
                 })
                 && !text.is_empty()
@@ -138,12 +140,12 @@ fn model_response(output: PythonModelOutput) -> Result<ModelResponse, ()> {
     }
     let assistant_content = if let Some(value) = output.json {
         let bytes = serde_json::to_vec(&value).map_err(|_| ())?;
-        Arc::from([finstack_ai::runtime::ContentBlock::Json(
-            finstack_ai::runtime::JsonBlock::new(RawJson::parse(bytes).map_err(|_| ())?),
+        Arc::from([finstack_ai_kernel::ContentBlock::Json(
+            finstack_ai_kernel::JsonBlock::new(RawJson::parse(bytes).map_err(|_| ())?),
         )])
     } else if !output.text.is_empty() {
-        Arc::from([finstack_ai::runtime::ContentBlock::Text(
-            finstack_ai::runtime::TextBlock::try_new(&output.text).map_err(|_| ())?,
+        Arc::from([finstack_ai_kernel::ContentBlock::Text(
+            finstack_ai_kernel::TextBlock::try_new(&output.text).map_err(|_| ())?,
         )])
     } else {
         Arc::from([])

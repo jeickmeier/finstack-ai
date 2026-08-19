@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use finstack_ai_runtime::{ComponentId, ComponentRef, SchemaRef, Version};
+use finstack_ai_kernel::{ComponentId, ComponentRef, SchemaRef, Version};
 use thiserror::Error;
 
 use super::extension::ExtensionDescriptor;
