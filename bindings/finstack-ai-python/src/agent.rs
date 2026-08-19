@@ -9,7 +9,7 @@ use finstack_ai::runtime::{ArtifactStore, Middleware, Model, ModelName, ModelSet
 use finstack_ai::{
     Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
     GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon, OllamaAgentSpec,
-    OpenAiAgentSpec, Session,
+    OpenAiAgentSpec, OpenRouterAgentSpec, Session,
 };
 use finstack_ai_context_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
@@ -102,6 +102,71 @@ impl PyAgent {
             let built = Agent::openai(OpenAiAgentSpec {
                 model,
                 api_key,
+                reasoning_effort,
+                reasoning_summary,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
+            })
+            .await;
+            Python::attach(|py| {
+                wrap_linked_agent(py, built, output_adapter, artifact_store, attachment_index)
+            })
+        })
+    }
+
+    /// Construct a Rust-backed `OpenRouter` Responses agent.
+    ///
+    /// `api_key` is required and keyword-only. The factory always targets
+    /// `https://openrouter.ai/api/v1/responses` and does not read environment
+    /// variables. `referer` and `title` set the non-secret attribution
+    /// headers.
+    #[staticmethod]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "linked factory forwards provider auth, attribution, reasoning, and primary port components distinctly"
+    )]
+    fn openrouter(
+        py: Python<'_>,
+        model: String,
+        instruction: Option<String>,
+        capabilities: Option<Vec<Py<PyCapability>>>,
+        active_capabilities: Option<Vec<String>>,
+        api_key: String,
+        referer: Option<String>,
+        title: Option<String>,
+        reasoning_effort: Option<String>,
+        reasoning_summary: Option<String>,
+        toolsets: Option<Vec<Py<PyPythonToolset>>>,
+        context_providers: Option<Vec<Py<PyPythonContextProvider>>>,
+        middleware: Option<Vec<Py<PyPythonMiddleware>>>,
+        observers: Option<Vec<Py<PyPythonObserver>>>,
+        output_type: Option<Py<PyAny>>,
+        child_runs: Option<Py<PyChildRunPolicy>>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        let (capabilities, active_capabilities) =
+            capability_configuration(py, capabilities, active_capabilities)?;
+        let (ports, artifact_store, attachment_index) = linked_ports(
+            py,
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_type,
+        )?;
+        let child_runs = child_runs_or_deny(py, child_runs);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (ports, output_adapter) = split_linked_ports(ports);
+            let built = Agent::openrouter(OpenRouterAgentSpec {
+                model,
+                api_key,
+                referer,
+                title,
                 reasoning_effort,
                 reasoning_summary,
                 common: LinkedCommon {

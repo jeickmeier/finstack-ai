@@ -806,6 +806,65 @@ class Agent:
                 port registration is invalid.
         """
     @staticmethod
+    async def openrouter(
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        api_key: str,
+        referer: str | None = None,
+        title: str | None = None,
+        reasoning_effort: str | None = None,
+        reasoning_summary: str | None = None,
+        toolsets: list[PythonToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+    ) -> Agent:
+        """Build a Rust-backed OpenRouter Responses agent.
+
+        The native client posts to
+        ``https://openrouter.ai/api/v1/responses`` with ``store=false``.
+        Keyword-only ``toolsets``, ``context_providers``, ``middleware``,
+        ``observers``, and ``output_type`` register the same trusted T2
+        Python ports as :meth:`Agent.from_python`. This factory does not
+        read environment variables and does not accept a generic
+        ``base_url``. Output is capped at 128,000 tokens while the linked
+        context window is 1,050,000 tokens.
+
+        Args:
+            model: OpenRouter model name.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            api_key: Required Bearer credential. HTTPS is required.
+            referer: Optional non-secret ``HTTP-Referer`` attribution header.
+            title: Optional non-secret ``X-Title`` attribution header.
+            reasoning_effort: Optional Responses ``reasoning.effort``.
+                Allowed values are ``none``, ``minimal``, ``low``,
+                ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
+                provider default.
+            reasoning_summary: Optional Responses ``reasoning.summary``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The credential, model, capability set, or
+                port registration is invalid.
+        """
+    @staticmethod
     async def anthropic(
         base_url: str,
         model: str,
@@ -1203,11 +1262,11 @@ def build_metadata() -> dict[str, str | bool | int]:
         Version, engine, and feature flags. No secrets.
     """
 
-def linked_providers() -> tuple[str, ...]:
+def linked_providers() -> tuple[str, str, str, str]:
     """Return curated Rust-backed providers linked into this extension.
 
     Returns:
-        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\")``.
+        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\", \"openrouter\")``.
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:
