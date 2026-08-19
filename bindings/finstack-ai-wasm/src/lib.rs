@@ -648,8 +648,8 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use finstack_ai::{
-        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, ChildRunPolicy, E2bSandboxAgentSpec,
-        GatewayAgentSpec, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec,
+        AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, E2bSandboxAgentSpec,
+        GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
     };
 
     use super::health;
@@ -675,13 +675,9 @@ mod tests {
         let openai = ready(Agent::openai(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-unused".into(),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
             reasoning_effort: None,
             reasoning_summary: None,
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon::default(),
         }))
         .err()
         .expect("openai");
@@ -689,22 +685,14 @@ mod tests {
             base_url: "https://api.anthropic.com".into(),
             model: "fixture-model".into(),
             api_key: None,
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon::default(),
         }))
         .err()
         .expect("anthropic");
         let ollama = ready(Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon::default(),
         }))
         .err()
         .expect("ollama");
@@ -716,11 +704,7 @@ mod tests {
             hard_input_bytes: Some(1_000_000),
             auth_kind: Some("bearer".into()),
             api_key: Some("sk-unused".into()),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon::default(),
         }))
         .err()
         .expect("gateway");
@@ -729,11 +713,7 @@ mod tests {
             api_key: "e2b-unused".into(),
             endpoint: Some("https://api.e2b.dev".into()),
             template: None,
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon::default(),
         }))
         .err()
         .expect("e2b");

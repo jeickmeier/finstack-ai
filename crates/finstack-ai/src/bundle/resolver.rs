@@ -103,38 +103,15 @@ impl<'a> BundleResolver<'a> {
         capabilities: impl IntoIterator<Item = CapabilityId>,
         context: AgentConstructionContext,
     ) -> Result<ResolvedAgent, BundleResolutionError> {
-        let current_recipe =
-            current
-                .composition()
-                .ok_or_else(|| BundleResolutionError::Invalid {
-                    message: Arc::from("agent_was_not_bundle_resolved"),
-                })?;
-        let mut active = current_recipe.active_application.clone();
-        for capability_id in capabilities {
-            let (_, capability) =
-                current_recipe
-                    .capabilities
-                    .get(&capability_id)
-                    .ok_or_else(|| BundleResolutionError::Missing {
-                        item: Arc::from(capability_id.as_str()),
-                    })?;
-            if capability.activation != CapabilityActivation::Application {
-                return Err(BundleResolutionError::Invalid {
-                    message: Arc::from("capability_not_application_activated"),
-                });
-            }
-            active.insert(capability_id);
-        }
-        let recipe = Arc::new(CompositionRecipe {
-            bundle: Arc::clone(&current_recipe.bundle),
-            base_spec: Arc::clone(&current_recipe.base_spec),
-            application_config: current_recipe.application_config.clone(),
-            capabilities: current_recipe.capabilities.clone(),
-            active_application: active,
-            active_model: current_recipe.active_model.clone(),
-            services: current_recipe.services.clone(),
-        });
-        self.resolve_recipe(registry, recipe, context).await
+        self.activate(
+            registry,
+            current,
+            capabilities,
+            context,
+            CapabilityActivation::Application,
+            "capability_not_application_activated",
+        )
+        .await
     }
 
     /// Rebuild an immutable plan with bounded model-selected capability IDs active.
@@ -153,13 +130,41 @@ impl<'a> BundleResolver<'a> {
         capabilities: impl IntoIterator<Item = CapabilityId>,
         context: AgentConstructionContext,
     ) -> Result<ResolvedAgent, BundleResolutionError> {
+        self.activate(
+            registry,
+            current,
+            capabilities,
+            context,
+            CapabilityActivation::Model,
+            "capability_not_model_activated",
+        )
+        .await
+    }
+
+    async fn activate(
+        &self,
+        registry: &mut Registry,
+        current: &ResolvedAgent,
+        capabilities: impl IntoIterator<Item = CapabilityId>,
+        context: AgentConstructionContext,
+        expected: CapabilityActivation,
+        invalid_kind: &'static str,
+    ) -> Result<ResolvedAgent, BundleResolutionError> {
         let current_recipe =
             current
                 .composition()
                 .ok_or_else(|| BundleResolutionError::Invalid {
                     message: Arc::from("agent_was_not_bundle_resolved"),
                 })?;
-        let mut active = current_recipe.active_model.clone();
+        let mut active = match expected {
+            CapabilityActivation::Application => current_recipe.active_application.clone(),
+            CapabilityActivation::Model => current_recipe.active_model.clone(),
+            CapabilityActivation::Always | CapabilityActivation::Disabled => {
+                return Err(BundleResolutionError::Invalid {
+                    message: Arc::from(invalid_kind),
+                });
+            }
+        };
         for capability_id in capabilities {
             let (_, capability) =
                 current_recipe
@@ -168,20 +173,29 @@ impl<'a> BundleResolver<'a> {
                     .ok_or_else(|| BundleResolutionError::Missing {
                         item: Arc::from(capability_id.as_str()),
                     })?;
-            if capability.activation != CapabilityActivation::Model {
+            if capability.activation != expected {
                 return Err(BundleResolutionError::Invalid {
-                    message: Arc::from("capability_not_model_activated"),
+                    message: Arc::from(invalid_kind),
                 });
             }
             active.insert(capability_id);
         }
+        let (active_application, active_model) = match expected {
+            CapabilityActivation::Application => (active, current_recipe.active_model.clone()),
+            CapabilityActivation::Model => (current_recipe.active_application.clone(), active),
+            CapabilityActivation::Always | CapabilityActivation::Disabled => {
+                return Err(BundleResolutionError::Invalid {
+                    message: Arc::from(invalid_kind),
+                });
+            }
+        };
         let recipe = Arc::new(CompositionRecipe {
             bundle: Arc::clone(&current_recipe.bundle),
             base_spec: Arc::clone(&current_recipe.base_spec),
             application_config: current_recipe.application_config.clone(),
             capabilities: current_recipe.capabilities.clone(),
-            active_application: current_recipe.active_application.clone(),
-            active_model: active,
+            active_application,
+            active_model,
             services: current_recipe.services.clone(),
         });
         self.resolve_recipe(registry, recipe, context).await

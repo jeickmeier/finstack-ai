@@ -59,6 +59,21 @@ unpublished.
 
 ### Changed
 
+- `finstack-ai` linked construction shares one `Agent::compose` /
+  `ComposeAgentSpec` finish path. Provider specs share `LinkedCommon`.
+  `AgentRun::start_child` / `prepare_child` take an optional remote route
+  (the `_routed` twins are gone). `complete_external_at`, unused
+  registrar factories, and `AgentRun::child_invoker_starts` are no longer
+  public. Capability-contributed ports use `capability_*` instead of
+  `install_*`. `Session::pending` is crate-private. Browser WASM no
+  longer exposes fail-closed linked factories; use `Agent.create`.
+- `finstack-ai-server` crate-root surface is `Server`, `ListenAddr`,
+  `RemoteClient`, `ReconnectView`, session replica types, auth, credit
+  limits, and `tls13_server_config`. Twin reconnect structs, typed
+  `serve_*` wrappers, the `ListenAddr::Loopback` variant, and unused
+  re-exports (`CreditWindow`, `ConnectionLimits`, `SERVER_LISTEN_INVALID`)
+  are gone. `RemotePostAuth::kind()` is the shared message-tag helper.
+  Connection-only `SessionReplica` methods are crate-private.
 - `finstack-ai-runtime` crate-root prelude no longer re-exports unused
   error-code constants, reconcile helpers, the jitter trio, or
   `LocalWorkflowDriver`. Dead middleware reconcile types are gone. A
@@ -106,6 +121,11 @@ unpublished.
 
 ### Fixed
 
+- `finstack-ai-server` hashes reference bearer secrets and compares the
+  32-byte digests instead of short-circuiting string inequality. Command
+  receipts are indexed by `command_id`, fail closed at a retention cap
+  (`receipt_cap`), and apply `RemoteCommandOp` as a reference phase machine
+  instead of always returning `accepted = true`.
 - The Anthropic provider no longer reports zero-valued cache counters in
   `Usage.extension_counters`. Anthropic sends them on every completion, and a
   run that never registered those keys in `RunLimits` faulted with

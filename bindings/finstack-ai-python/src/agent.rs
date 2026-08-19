@@ -1,6 +1,7 @@
 //! Rust-owned resolved agent handle and linked-provider builders.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::child_policy::PyChildRunPolicy;
 use crate::store::{PySqliteDurability, open_journal_store};
@@ -9,9 +10,9 @@ use finstack_ai::runtime::{
     RawJson, Version,
 };
 use finstack_ai::{
-    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, E2bSandboxAgentSpec,
-    GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, OllamaAgentSpec, OpenAiAgentSpec, RunPolicy,
-    Session,
+    Agent, AgentRunError, AnthropicAgentSpec, CapabilitySpec, ChildRunPolicy, ComposeAgentSpec,
+    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
+    OllamaAgentSpec, OpenAiAgentSpec, Session,
 };
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -92,13 +93,15 @@ impl PyAgent {
             let built = Agent::openai(OpenAiAgentSpec {
                 model,
                 api_key,
-                instruction,
-                capabilities,
-                active_capabilities,
                 reasoning_effort,
                 reasoning_summary,
-                ports,
-                child_runs,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
             })
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
@@ -148,11 +151,13 @@ impl PyAgent {
                 base_url,
                 model,
                 api_key,
-                instruction,
-                capabilities,
-                active_capabilities,
-                ports,
-                child_runs,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
             })
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
@@ -199,11 +204,13 @@ impl PyAgent {
             let built = Agent::ollama(OllamaAgentSpec {
                 base_url,
                 model,
-                instruction,
-                capabilities,
-                active_capabilities,
-                ports,
-                child_runs,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
             })
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
@@ -261,11 +268,13 @@ impl PyAgent {
                 hard_input_bytes,
                 auth_kind: auth,
                 api_key,
-                instruction,
-                capabilities,
-                active_capabilities,
-                ports,
-                child_runs,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
             })
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
@@ -316,11 +325,13 @@ impl PyAgent {
                 api_key,
                 endpoint,
                 template,
-                instruction,
-                capabilities,
-                active_capabilities,
-                ports,
-                child_runs,
+                common: LinkedCommon {
+                    instruction,
+                    capabilities,
+                    active_capabilities,
+                    ports,
+                    child_runs,
+                },
             })
             .await;
             Python::attach(|py| wrap_linked_agent(py, built, output_adapter))
@@ -680,78 +691,6 @@ fn linked_ports(
     })
 }
 
-struct LinkedAgentSpec {
-    agent_id: &'static str,
-    bundle_id: &'static str,
-    model: (ComponentRef, Arc<dyn Model>),
-    model_name: ModelName,
-    instruction: Option<String>,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    ports: LinkedPorts,
-    child_runs: ChildRunPolicy,
-    settings: ModelSettings,
-    default_timeout_seconds: f64,
-    sqlite_path: Option<String>,
-    sqlite_durability: Option<PySqliteDurability>,
-}
-
-async fn finish_linked_agent(spec: LinkedAgentSpec) -> Result<PyAgent, AgentRunError> {
-    let store_component = if spec.sqlite_path.is_some() {
-        "python.store.sqlite"
-    } else {
-        "python.store.memory"
-    };
-    let store = open_journal_store(spec.sqlite_path, spec.sqlite_durability)?;
-    let mut builder = Agent::builder(
-        AgentId::parse(spec.agent_id).map_err(|error| configuration_error(error.to_string()))?,
-        BundleId::parse(spec.bundle_id).map_err(|error| configuration_error(error.to_string()))?,
-        spec.model,
-        (component(store_component)?, store),
-    );
-    for (component, toolset) in spec.ports.toolsets {
-        builder = builder.toolset(component, toolset);
-    }
-    for (component, provider) in spec.ports.context_providers {
-        builder = builder.context_provider(component, provider);
-    }
-    for (component, middleware) in spec.ports.middleware {
-        builder = builder.middleware(component, middleware);
-    }
-    for (component, observer) in spec.ports.observers {
-        builder = builder.observer(component, observer);
-    }
-    if let Some(instruction) = spec.instruction {
-        builder = builder.try_instruction(instruction)?;
-    }
-    for capability in spec.capabilities {
-        builder = builder.capability(capability);
-    }
-    for capability in spec.active_capabilities {
-        builder = builder.activate_application(capability);
-    }
-    builder = builder.policy(RunPolicy {
-        child_runs: spec.child_runs,
-        ..RunPolicy::default()
-    });
-    let agent = builder.build().await?;
-    let (agent, output_adapter) = if let Some(output) = spec.ports.output {
-        (
-            agent.try_with_output_schema(&output.schema)?,
-            Some(output.adapter),
-        )
-    } else {
-        (agent, None)
-    };
-    Ok(PyAgent {
-        inner: Arc::new(agent),
-        model: spec.model_name,
-        output_adapter,
-        settings: spec.settings,
-        default_timeout_seconds: spec.default_timeout_seconds,
-    })
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "callback factory forwards ports, child-run policy, and sqlite store distinctly"
@@ -766,22 +705,43 @@ async fn build_python_agent(
     child_runs: ChildRunPolicy,
     sqlite: (Option<String>, Option<PySqliteDurability>),
 ) -> Result<PyAgent, AgentRunError> {
-    finish_linked_agent(LinkedAgentSpec {
-        agent_id: "python.agent.callbacks",
-        bundle_id: "python.bundle.callbacks",
+    let store_component = if sqlite.0.is_some() {
+        "python.store.sqlite"
+    } else {
+        "python.store.memory"
+    };
+    let store = open_journal_store(sqlite.0, sqlite.1)?;
+    let output = ports.output;
+    let built = Agent::compose(ComposeAgentSpec {
+        agent_id: AgentId::parse("python.agent.callbacks")
+            .map_err(|error| configuration_error(error.to_string()))?,
+        bundle_id: BundleId::parse("python.bundle.callbacks")
+            .map_err(|error| configuration_error(error.to_string()))?,
         model,
+        store: (component(store_component)?, store),
         model_name,
         instruction,
         capabilities,
         active_capabilities,
-        ports,
+        ports: LinkedAgentPorts {
+            toolsets: ports.toolsets,
+            context_providers: ports.context_providers,
+            middleware: ports.middleware,
+            observers: ports.observers,
+            output_schema: output.as_ref().map(|value| value.schema.clone()),
+        },
         child_runs,
         settings: empty_model_settings()?,
-        default_timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
-        sqlite_path: sqlite.0,
-        sqlite_durability: sqlite.1,
+        default_timeout: Duration::from_secs_f64(DEFAULT_TIMEOUT_SECONDS),
     })
-    .await
+    .await?;
+    Ok(PyAgent {
+        inner: Arc::new(built.agent),
+        model: built.model,
+        output_adapter: output.map(|value| value.adapter),
+        settings: built.settings,
+        default_timeout_seconds: built.default_timeout.as_secs_f64(),
+    })
 }
 
 fn child_runs_or_deny(py: Python<'_>, child_runs: Option<Py<PyChildRunPolicy>>) -> ChildRunPolicy {

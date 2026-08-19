@@ -14,7 +14,7 @@ use crate::ServerError;
 /// # Errors
 ///
 /// Returns protocol, I/O, or limit failures.
-pub async fn read_frame<R: AsyncRead + Unpin>(
+pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     ceiling: usize,
 ) -> Result<Vec<u8>, ServerError> {
@@ -33,7 +33,7 @@ pub async fn read_frame<R: AsyncRead + Unpin>(
 /// # Errors
 ///
 /// Returns protocol or I/O failures.
-pub async fn write_frame<W: AsyncWrite + Unpin>(
+pub(crate) async fn write_frame<W: AsyncWrite + Unpin>(
     writer: &mut W,
     payload: &[u8],
     ceiling: usize,
@@ -49,7 +49,7 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(
 /// # Errors
 ///
 /// Returns protocol, I/O, or limit failures.
-pub async fn read_pre_auth<S: AsyncRead + Unpin>(
+pub(crate) async fn read_pre_auth<S: AsyncRead + Unpin>(
     stream: &mut S,
 ) -> Result<RemotePreAuth, ServerError> {
     let payload = read_frame(stream, PRE_AUTH_FRAME_MAX_BYTES).await?;
@@ -63,7 +63,7 @@ pub async fn read_pre_auth<S: AsyncRead + Unpin>(
 /// # Errors
 ///
 /// Returns protocol or I/O failures.
-pub async fn write_pre_auth<S: AsyncWrite + Unpin>(
+pub(crate) async fn write_pre_auth<S: AsyncWrite + Unpin>(
     stream: &mut S,
     body: &RemotePreAuth,
 ) -> Result<(), ServerError> {
@@ -76,7 +76,7 @@ pub async fn write_pre_auth<S: AsyncWrite + Unpin>(
 /// # Errors
 ///
 /// Returns protocol, I/O, or limit failures.
-pub async fn read_post_auth<S: AsyncRead + Unpin>(
+pub(crate) async fn read_post_auth<S: AsyncRead + Unpin>(
     stream: &mut S,
     ceiling: usize,
 ) -> Result<RemotePostAuth, ServerError> {
@@ -91,7 +91,7 @@ pub async fn read_post_auth<S: AsyncRead + Unpin>(
 /// # Errors
 ///
 /// Returns protocol or I/O failures.
-pub async fn write_post_auth<S: AsyncWrite + Unpin>(
+pub(crate) async fn write_post_auth<S: AsyncWrite + Unpin>(
     stream: &mut S,
     ceiling: usize,
     body: &RemotePostAuth,

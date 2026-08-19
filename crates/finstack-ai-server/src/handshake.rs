@@ -132,6 +132,8 @@ where
     }
 }
 
+/// Record an audit event without a locator digest so authentication
+/// failures cannot leak a session id.
 pub(crate) async fn audit_only(
     gate: &SecurityAuditGate,
     category: SecurityAuditCategory,

@@ -1,9 +1,13 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use finstack_ai::runtime::{
-    CapabilityId, CommitCoordinator, ComponentRef, JournalStore, LoadRequest, ModelName, StoreError,
+    CapabilityId, CommitCoordinator, ComponentRef, JournalStore, LoadRequest, ModelName,
+    ModelSettings, RawJson, StoreError,
 };
-use finstack_ai::{Agent as FacadeAgent, CapabilitySpec};
+use finstack_ai::{
+    Agent as FacadeAgent, CapabilitySpec, ChildRunPolicy, ComposeAgentSpec, LinkedAgentPorts,
+};
 use finstack_ai_kernel::{ContentBlock, SessionId, TerminalState};
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use wasm_bindgen::prelude::*;
@@ -45,43 +49,36 @@ pub(super) async fn build_agent(
             )
         }
     };
-    let mut builder = FacadeAgent::builder(
-        finstack_ai_kernel::AgentId::parse("js.agent.host")
+    let settings = ModelSettings {
+        values: RawJson::parse(b"{}")
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
-        finstack_ai_kernel::BundleId::parse("js.bundle.host")
+    };
+    let built = FacadeAgent::compose(ComposeAgentSpec {
+        agent_id: finstack_ai_kernel::AgentId::parse("js.agent.host")
             .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
-        (model_component, model),
-        (store_component, store),
-    );
-    for (component, toolset) in toolsets {
-        builder = builder.toolset(component, toolset);
-    }
-    for (component, provider) in context_providers {
-        builder = builder.context_provider(component, provider);
-    }
-    for (component, middleware) in middleware {
-        builder = builder.middleware(component, middleware);
-    }
-    for (component, observer) in observers {
-        builder = builder.observer(component, observer);
-    }
-    if let Some(instruction) = instruction {
-        builder = builder
-            .try_instruction(instruction)
-            .map_err(|error| agent_error(&error, None))?;
-    }
-    for capability in capabilities {
-        builder = builder.capability(capability);
-    }
-    for capability in active_capabilities {
-        builder = builder.activate_application(capability);
-    }
-    let inner = builder
-        .build()
-        .await
-        .map_err(|error| agent_error(&error, None))?;
+        bundle_id: finstack_ai_kernel::BundleId::parse("js.bundle.host")
+            .map_err(|error| agent_error(&configuration_error(error.to_string()), None))?,
+        model: (model_component, model),
+        store: (store_component, store),
+        model_name: model_name.clone(),
+        instruction,
+        capabilities,
+        active_capabilities,
+        ports: LinkedAgentPorts {
+            toolsets,
+            context_providers,
+            middleware,
+            observers,
+            output_schema: None,
+        },
+        child_runs: ChildRunPolicy::Deny,
+        settings,
+        default_timeout: Duration::from_secs(30),
+    })
+    .await
+    .map_err(|error| agent_error(&error, None))?;
     Ok(Agent {
-        inner: Arc::new(inner),
+        inner: Arc::new(built.agent),
         model: model_name,
     })
 }

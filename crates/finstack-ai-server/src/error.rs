@@ -31,7 +31,11 @@ pub enum ServerError {
     /// Command identity was reused with a conflicting digest.
     #[error("command idempotency conflict")]
     IdempotencyConflict,
-    /// Slow client exhausted the credit-wait deadline.
+    /// Replica reached the command-receipt retention cap.
+    #[error("receipt cap exceeded")]
+    ReceiptCap,
+    /// Ack deadline elapsed, or an outbound batch could not fit in the
+    /// remaining window. Both use the stable code `credit_timeout`.
     #[error("credit window timeout")]
     CreditTimeout,
     /// Handshake or parse deadline elapsed.
@@ -61,6 +65,7 @@ impl ServerError {
             Self::SessionBusy => "session_busy",
             Self::LiveBeforeBarrier => "live_before_barrier",
             Self::IdempotencyConflict => "idempotency_conflict",
+            Self::ReceiptCap => "receipt_cap",
             Self::CreditTimeout => "credit_timeout",
             Self::HandshakeTimeout => "handshake_timeout",
             Self::Protocol(_) => "protocol",

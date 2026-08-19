@@ -118,7 +118,7 @@ impl Run {
             let remote = remote_route(route_endpoint, route_service, route_id, route_token)?;
             let request = run_request(&model, input, None, None, None, None)?;
             parent
-                .start_child_routed(child_agent.as_ref(), request, placement, remote)
+                .start_child(child_agent.as_ref(), request, placement, remote)
                 .await
                 .map(|inner| JsValue::from(Run { inner }))
                 .map_err(|error| agent_error(&error, Some(parent.locator())))

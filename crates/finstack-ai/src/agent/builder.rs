@@ -7,9 +7,10 @@ use crate::{
     CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
     Registrar, RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
 };
-use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, MiddlewareRef, Version};
+use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, MiddlewareRef};
 use finstack_ai_runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
 
+use super::PREVIEW_ENGINE_VERSION;
 use super::handle::{Agent, ModelCapabilityVariant};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, CapabilityCatalogEntry,
@@ -78,9 +79,7 @@ impl NativeAgentBuilder {
     /// Rejects empty, NUL-bearing, or oversized instruction text.
     pub fn try_instruction(mut self, text: impl Into<Arc<str>>) -> Result<Self, AgentRunError> {
         self.instructions
-            .push(InstructionSpec::try_new(text).map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?);
+            .push(InstructionSpec::try_new(text).map_err(invalid_config)?);
         Ok(self)
     }
 
@@ -117,14 +116,18 @@ impl NativeAgentBuilder {
     /// Use this for capability-contributed toolsets so they join the lock-time
     /// union without becoming base-agent members.
     #[must_use]
-    pub fn install_toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
+    pub fn capability_toolset(
+        mut self,
+        component: ComponentRef,
+        toolset: Arc<dyn Toolset>,
+    ) -> Self {
         self.installed_toolsets.push((component, toolset));
         self
     }
 
     /// Register a context provider handle without adding it to the base spec.
     #[must_use]
-    pub fn install_context_provider(
+    pub fn capability_context_provider(
         mut self,
         component: ComponentRef,
         provider: Arc<dyn ContextProvider>,
@@ -135,7 +138,7 @@ impl NativeAgentBuilder {
 
     /// Register a Middleware handle without adding it to the base spec.
     #[must_use]
-    pub fn install_middleware(
+    pub fn capability_middleware(
         mut self,
         component: ComponentRef,
         middleware: Arc<dyn Middleware>,
@@ -230,11 +233,8 @@ impl NativeAgentBuilder {
         let mut registered_middleware = self.middleware.clone();
         registered_middleware.extend(self.installed_middleware.iter().cloned());
         let extension = NativeBuilderExtension {
-            source: finstack_ai_kernel::ComponentId::parse("finstack.sdk.native-builder").map_err(
-                |error| {
-                    AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-                },
-            )?,
+            source: finstack_ai_kernel::ComponentId::parse("finstack.sdk.native-builder")
+                .map_err(invalid_config)?,
             model: self.model.clone(),
             store: self.store.clone(),
             toolsets: registered_toolsets,
@@ -243,9 +243,9 @@ impl NativeAgentBuilder {
             observers: self.observers.clone(),
         };
         let mut registrar = Registrar::new();
-        registrar.register_extension(&extension).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        registrar
+            .register_extension(&extension)
+            .map_err(invalid_config)?;
         let mut registry = registrar.into_registry();
         let spec = builder_spec(&self)?;
         let mut catalog = BundleCatalog::default();
@@ -262,9 +262,7 @@ impl NativeAgentBuilder {
                 config_schema: None,
                 compatibility: CompatibilityRequirements::default(),
             })
-            .map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?;
+            .map_err(invalid_config)?;
         let bundle_resolver = BundleResolver::new(
             &catalog,
             PREVIEW_ENGINE_VERSION,
@@ -280,9 +278,7 @@ impl NativeAgentBuilder {
                 AgentConstructionContext::new(),
             )
             .await
-            .map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?;
+            .map_err(invalid_config)?;
         let composed_agent = if self.active_application.is_empty() {
             composed_agent
         } else {
@@ -294,9 +290,7 @@ impl NativeAgentBuilder {
                     AgentConstructionContext::new(),
                 )
                 .await
-                .map_err(|error| {
-                    AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-                })?
+                .map_err(invalid_config)?
         };
         let mut agent = Agent::try_from_resolved(Arc::new(composed_agent))?;
         agent.recompose = Some(recompose);
@@ -336,9 +330,7 @@ async fn reconstruct_toolsets(
 ) -> Result<Vec<(ComponentRef, Arc<dyn Toolset>)>, AgentRunError> {
     let mut rebuilt = Vec::with_capacity(entries.len());
     for (component, toolset) in entries {
-        let next = toolset.reconstruct().await.map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        let next = toolset.reconstruct().await.map_err(invalid_config)?;
         rebuilt.push((component, next.unwrap_or(toolset)));
     }
     Ok(rebuilt)
@@ -349,12 +341,18 @@ async fn reconstruct_providers(
 ) -> Result<Vec<(ComponentRef, Arc<dyn ContextProvider>)>, AgentRunError> {
     let mut rebuilt = Vec::with_capacity(entries.len());
     for (component, provider) in entries {
-        let next = provider.reconstruct().await.map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        let next = provider.reconstruct().await.map_err(invalid_config)?;
         rebuilt.push((component, next.unwrap_or(provider)));
     }
     Ok(rebuilt)
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "used as Result::map_err so the error must be taken by value"
+)]
+fn invalid_config(error: impl ToString) -> AgentRunError {
+    AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
 }
 
 fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentRunError> {
@@ -371,9 +369,7 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
         .middleware
         .iter()
         .map(|(component, _)| {
-            MiddlewareRef::try_new(component.clone(), None::<&str>).map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })
+            MiddlewareRef::try_new(component.clone(), None::<&str>).map_err(invalid_config)
         })
         .collect::<Result<Vec<_>, _>>()?;
     AgentBuilder::new(
@@ -407,9 +403,7 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
     .capabilities(capability_refs)
     .policy(builder.policy.clone())
     .build()
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })
+    .map_err(invalid_config)
 }
 
 fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), AgentRunError> {
@@ -458,9 +452,7 @@ async fn resolve_model_variants(
                 AgentConstructionContext::new(),
             )
             .await
-            .map_err(|error| {
-                AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-            })?;
+            .map_err(invalid_config)?;
         variants.push(ModelCapabilityVariant {
             entry: CapabilityCatalogEntry {
                 id: capability.id.clone(),
@@ -478,9 +470,7 @@ pub(super) fn validate_compact_catalog(
     let mut ids = BTreeSet::new();
     let mut bytes = 0usize;
     for capability in capabilities {
-        capability.validate().map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?;
+        capability.validate().map_err(invalid_config)?;
         if !ids.insert(capability.id.clone()) {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -508,12 +498,6 @@ pub(super) fn validate_compact_catalog(
     }
     Ok(())
 }
-
-const PREVIEW_ENGINE_VERSION: Version = Version {
-    major: 0,
-    minor: 0,
-    patch: 1,
-};
 
 struct NativeBuilderExtension {
     source: finstack_ai_kernel::ComponentId,

@@ -18,7 +18,7 @@ asserted; none exists for this project.
 | FIND-064-002 | Medium | fs-shell | Open | PR-064 (recommended) | [§2](#find-064-002) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
 | FIND-064-003 | Medium | protocol | **Closed** | Closed 2026-08-17 | [§3](#find-064-003) · `crates/finstack-ai-server/src/session.rs` |
 | FIND-064-004 | Medium | dependency/build/release provenance | **Closed** | Closed 2026-08-15 | [§4](#find-064-004) · `deny.toml`; `mise run supply-chain` |
-| FIND-064-005 | Low | protocol | Open | PR-065 (release engineering) | [§5](#find-064-005) · `crates/finstack-ai-server/src/auth.rs` |
+| FIND-064-005 | Low | protocol | **Closed** | Closed 2026-08-19 | [§5](#find-064-005) · `crates/finstack-ai-server/src/auth.rs` |
 | FIND-064-006 | Low | dependency/build/release provenance | Open | PR-064 (recommended) | [§6](#find-064-006) · `mise.toml`, `.github/workflows/ci.yml` |
 | FIND-064-007 | Low | fs-shell | **Closed** | Closed 2026-08-17 | [§7](#find-064-007) · `extensions/toolsets/finstack-ai-tools-shell/src/lib.rs` |
 | FIND-064-008 | High | plugin | **Accepted** | Not applicable — permanent non-goal; see §8 | [§8](#find-064-008) · `docs/site/security-trust-levels.md` |
@@ -42,8 +42,8 @@ asserted; none exists for this project.
 | Critical | 0 | 0 | 0 | 0 |
 | High | 0 | 1 | 5 | 6 |
 | Medium | 2 | 3 | 6 | 11 |
-| Low | 3 | 0 | 0 | 3 |
-| Total | 5 | 4 | 11 | 20 |
+| Low | 2 | 0 | 1 | 3 |
+| Total | 4 | 4 | 12 | 20 |
 
 **PR-064-A01 status: satisfied.** Every Critical/High finding is
 `Closed` or `Accepted`. FIND-064-001 is `Closed` by the directory-cache
@@ -56,8 +56,8 @@ A01. No `G8-D-*` is written from this register.
   review creates no row in
   [`docs/implementation/exceptions-register.md`](../../exceptions-register.md).
   Nothing here waives kernel I/O, a seventh port, or an unbounded queue.
-  The unbounded settlement map (FIND-064-003) is filed `Open` for that
-  reason and is deliberately not accepted.
+  The unbounded settlement map (FIND-064-003) was deliberately not
+  accepted and is now Closed by a fail-closed receipt cap.
 - FIND-064-008, FIND-064-009, and FIND-064-011 are permanent documented
   non-goals or residuals (Threat Model §2.3 and §16). They have no
   remediation date because there is no planned remediation; each carries a
@@ -350,11 +350,11 @@ PR-065 restored the pre-`f915cbf` `deny.toml`, pinned
 | ID | FIND-064-005 |
 | Severity | Low |
 | Surface | protocol (authentication hooks) |
-| Status | Open |
-| Owner | Release engineering |
+| Status | **Closed** |
+| Owner | PR-064 implementer |
 | Owning module | `crates/finstack-ai-server/src/auth.rs` (`StaticAuthVerifier::verify`) |
-| Remediation date | PR-065 (release engineering) |
-| Evidence | independent-review.md §3.2 |
+| Remediation date | Closed 2026-08-19 |
+| Evidence | `auth::tests::bearer_digest_compare_accepts_exact_secret`; `auth::tests::bearer_digest_compare_rejects_prefix_and_wrong_length` |
 | Threat model | §8.5, §10 |
 
 ### Defect
@@ -381,6 +381,15 @@ the configured value with the existing `Digest` path and compare the fixed
 32-byte outputs — or use a constant-time equality primitive. Add a rustdoc
 line stating that the verifier is a reference implementation and that
 applications own credential storage and rotation.
+
+### Remediation
+
+Closed 2026-08-19. `StaticAuthVerifier` hashes the configured bearer at
+construction (`Digest::domain_separated("remote-bearer", 1, …)`) and
+compares the presented token against that digest with a 32-byte XOR-fold.
+The configured secret is not retained. Rustdoc states that this is a
+reference verifier and that applications own storage, comparison, and
+rotation.
 
 ---
 

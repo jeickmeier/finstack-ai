@@ -136,13 +136,12 @@ impl Server {
     /// Returns listen, I/O, or protocol failures.
     pub async fn accept_once(&self) -> Result<(), ServerError> {
         match &self.listen {
-            ListenAddr::Loopback { .. } | ListenAddr::Tcp { tls: None, .. } => {
+            ListenAddr::Tcp { tls: None, .. } => {
                 let addr = self.listen.tcp_addr().ok_or(ServerError::ListenInvalid)?;
                 let bind = addr.to_string();
                 let listener = TcpListener::bind(&bind).await?;
                 let (stream, _) = listener.accept().await?;
-                self.serve_tcp(stream, TransportKind::LoopbackPlaintext)
-                    .await
+                self.serve(stream, TransportKind::LoopbackPlaintext).await
             }
             ListenAddr::Tcp {
                 addr,
@@ -152,56 +151,26 @@ impl Server {
                 let (stream, _) = listener.accept().await?;
                 let connector = tokio_rustls::TlsAcceptor::from(Arc::clone(tls));
                 let stream = connector.accept(stream).await?;
-                self.serve_tls(stream).await
+                self.serve(stream, TransportKind::Tls).await
             }
             #[cfg(unix)]
             ListenAddr::Unix { path } => {
                 let _ = std::fs::remove_file(path);
                 let listener = UnixListener::bind(path)?;
                 let (stream, _) = listener.accept().await?;
-                self.serve_unix(stream).await
+                self.serve(stream, TransportKind::Unix).await
             }
             #[cfg(not(unix))]
             ListenAddr::Unix { .. } => Err(ServerError::ListenInvalid),
         }
     }
 
-    /// Serve an already-accepted loopback TCP stream.
-    ///
-    /// # Errors
-    ///
-    /// Returns protocol or I/O failures.
-    pub async fn serve_tcp(
-        &self,
-        stream: tokio::net::TcpStream,
-        transport: TransportKind,
-    ) -> Result<(), ServerError> {
-        self.serve(stream, transport).await
-    }
-
-    /// Serve an already-accepted TLS stream.
-    ///
-    /// # Errors
-    ///
-    /// Returns protocol or I/O failures.
-    pub async fn serve_tls(
-        &self,
-        stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
-    ) -> Result<(), ServerError> {
-        self.serve(stream, TransportKind::Tls).await
-    }
-
-    /// Serve an already-accepted Unix stream.
-    ///
-    /// # Errors
-    ///
-    /// Returns protocol or I/O failures.
-    #[cfg(unix)]
-    pub async fn serve_unix(&self, stream: tokio::net::UnixStream) -> Result<(), ServerError> {
-        self.serve(stream, TransportKind::Unix).await
-    }
-
     /// Serve an already-accepted stream with an explicit transport kind.
+    ///
+    /// Callers must pass the transport that matches the stream: plaintext TCP
+    /// is [`TransportKind::LoopbackPlaintext`], TLS is [`TransportKind::Tls`],
+    /// and a Unix socket is [`TransportKind::Unix`]. Passing a mismatched kind
+    /// would change bearer-secret policy for that connection.
     ///
     /// # Errors
     ///

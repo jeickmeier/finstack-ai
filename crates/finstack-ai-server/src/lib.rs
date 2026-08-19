@@ -27,10 +27,9 @@ mod server;
 mod client;
 
 pub use auth::{AuthContext, AuthVerifier, StaticAuthVerifier, TransportKind};
-pub use client::{ReconnectView, RemoteClient};
-pub use connection::ConnectionLimits;
-pub use credit::{CreditLimits, CreditWindow};
+pub use client::RemoteClient;
+pub use credit::CreditLimits;
 pub use error::ServerError;
-pub use listen::{ListenAddr, SERVER_LISTEN_INVALID, tls13_server_config};
+pub use listen::{ListenAddr, tls13_server_config};
 pub use server::Server;
-pub use session::{ReconnectPlan, SessionHub, SessionReplica};
+pub use session::{ReconnectView, SessionHub, SessionReplica};

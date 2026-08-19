@@ -532,6 +532,7 @@ pub fn finstack_ai::VersionRequirement::deserialize<__D>(__D) -> core::result::R
 pub struct finstack_ai::Agent
 impl finstack_ai::Agent
 pub async fn finstack_ai::Agent::anthropic(finstack_ai::AnthropicAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+pub async fn finstack_ai::Agent::compose(finstack_ai::ComposeAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::e2b_sandbox(finstack_ai::E2bSandboxAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
@@ -601,15 +602,11 @@ impl finstack_ai::AgentRun
 pub async fn finstack_ai::AgentRun::accept_child(&self, &finstack_ai_kernel::records::run::child::ChildRunPrepared, &finstack_ai::Agent, finstack_ai::AgentRunRequest) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::cancel_child_locator(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> core::result::Result<(), finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::complete_external(&self, finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand) -> core::result::Result<finstack_ai_runtime::driver::ingress::types::ExternalRouteOutcome, finstack_ai::AgentRunError>
-pub async fn finstack_ai::AgentRun::complete_external_at(&self, finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::driver::ingress::types::ExternalRouteOutcome, finstack_ai::AgentRunError>
-pub async fn finstack_ai::AgentRun::prepare_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement) -> core::result::Result<finstack_ai_kernel::records::run::child::ChildRunPrepared, finstack_ai::AgentRunError>
-pub async fn finstack_ai::AgentRun::prepare_child_routed(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<finstack_ai_kernel::records::run::child::ChildRunPrepared, finstack_ai::AgentRunError>
-pub async fn finstack_ai::AgentRun::start_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement) -> core::result::Result<Self, finstack_ai::AgentRunError>
-pub async fn finstack_ai::AgentRun::start_child_routed(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::prepare_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<finstack_ai_kernel::records::run::child::ChildRunPrepared, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::start_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub async fn finstack_ai::AgentRun::start_or_attach_child(&self, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, finstack_ai_kernel::primitives::ids::EffectId, finstack_ai_runtime::services::agent_invoker::ChildRunRequest) -> core::result::Result<finstack_ai_runtime::services::agent_invoker::ChildRunHandle, finstack_ai::AgentRunError>
 impl finstack_ai::AgentRun
 pub async fn finstack_ai::AgentRun::cancel(&self) -> core::result::Result<(), finstack_ai::AgentRunError>
-pub fn finstack_ai::AgentRun::child_invoker_starts(&self) -> usize
 pub fn finstack_ai::AgentRun::close_events(&self)
 pub async fn finstack_ai::AgentRun::list_interactions(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::effects::interaction::InteractionRequest>, finstack_ai::AgentRunError>
 pub fn finstack_ai::AgentRun::locator(&self) -> &finstack_ai_kernel::records::run::external::OperationLocator
@@ -687,14 +684,10 @@ pub fn finstack_ai::AgentSpec::serialize<__S>(&self, __S) -> core::result::Resul
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::AgentSpec
 pub fn finstack_ai::AgentSpec::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai::AnthropicAgentSpec
-pub finstack_ai::AnthropicAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string::String>
 pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
-pub finstack_ai::AnthropicAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::AnthropicAgentSpec::child_runs: finstack_ai::ChildRunPolicy
-pub finstack_ai::AnthropicAgentSpec::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
-pub finstack_ai::AnthropicAgentSpec::ports: finstack_ai::LinkedAgentPorts
 pub struct finstack_ai::BundleCatalog
 impl finstack_ai::BundleCatalog
 pub fn finstack_ai::BundleCatalog::bundle(&self, &finstack_ai_kernel::primitives::ids::BundleId) -> core::option::Option<alloc::sync::Arc<finstack_ai::BundleSpec>>
@@ -912,6 +905,19 @@ pub fn finstack_ai::ComponentShutdownReport::eq(&self, &finstack_ai::ComponentSh
 impl core::fmt::Debug for finstack_ai::ComponentShutdownReport
 pub fn finstack_ai::ComponentShutdownReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::ComponentShutdownReport
+pub struct finstack_ai::ComposeAgentSpec
+pub finstack_ai::ComposeAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::ComposeAgentSpec::agent_id: finstack_ai_kernel::primitives::ids::AgentId
+pub finstack_ai::ComposeAgentSpec::bundle_id: finstack_ai_kernel::primitives::ids::BundleId
+pub finstack_ai::ComposeAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
+pub finstack_ai::ComposeAgentSpec::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::ComposeAgentSpec::default_timeout: core::time::Duration
+pub finstack_ai::ComposeAgentSpec::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::ComposeAgentSpec::model: (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>)
+pub finstack_ai::ComposeAgentSpec::model_name: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai::ComposeAgentSpec::ports: finstack_ai::LinkedAgentPorts
+pub finstack_ai::ComposeAgentSpec::settings: finstack_ai_runtime::ports::model::request::ModelSettings
+pub finstack_ai::ComposeAgentSpec::store: (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)
 pub struct finstack_ai::ConstructionError
 impl finstack_ai::ConstructionError
 pub const fn finstack_ai::ConstructionError::code(&self) -> &'static str
@@ -929,14 +935,10 @@ impl core::fmt::Display for finstack_ai::ConstructionError
 pub fn finstack_ai::ConstructionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::ConstructionError
 pub struct finstack_ai::E2bSandboxAgentSpec
-pub finstack_ai::E2bSandboxAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::E2bSandboxAgentSpec::api_key: alloc::string::String
-pub finstack_ai::E2bSandboxAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::E2bSandboxAgentSpec::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::E2bSandboxAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::E2bSandboxAgentSpec::endpoint: core::option::Option<alloc::string::String>
-pub finstack_ai::E2bSandboxAgentSpec::instruction: core::option::Option<alloc::string::String>
 pub finstack_ai::E2bSandboxAgentSpec::model: alloc::string::String
-pub finstack_ai::E2bSandboxAgentSpec::ports: finstack_ai::LinkedAgentPorts
 pub finstack_ai::E2bSandboxAgentSpec::template: core::option::Option<alloc::string::String>
 pub struct finstack_ai::ExtensionDescriptor
 pub finstack_ai::ExtensionDescriptor::id: finstack_ai_kernel::primitives::ids::ComponentId
@@ -953,17 +955,13 @@ impl core::fmt::Debug for finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::ExtensionDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::ExtensionDescriptor
 pub struct finstack_ai::GatewayAgentSpec
-pub finstack_ai::GatewayAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::GatewayAgentSpec::api_key: core::option::Option<alloc::string::String>
 pub finstack_ai::GatewayAgentSpec::auth_kind: core::option::Option<alloc::string::String>
-pub finstack_ai::GatewayAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::GatewayAgentSpec::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::GatewayAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::GatewayAgentSpec::credential_name: alloc::string::String
 pub finstack_ai::GatewayAgentSpec::endpoint: alloc::string::String
 pub finstack_ai::GatewayAgentSpec::hard_input_bytes: core::option::Option<u64>
-pub finstack_ai::GatewayAgentSpec::instruction: core::option::Option<alloc::string::String>
 pub finstack_ai::GatewayAgentSpec::model: alloc::string::String
-pub finstack_ai::GatewayAgentSpec::ports: finstack_ai::LinkedAgentPorts
 pub finstack_ai::GatewayAgentSpec::wire_protocol: alloc::string::String
 pub struct finstack_ai::InstructionSpec
 impl finstack_ai::InstructionSpec
@@ -1033,6 +1031,14 @@ pub finstack_ai::LinkedAgentPorts::output_schema: core::option::Option<finstack_
 pub finstack_ai::LinkedAgentPorts::toolsets: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>)>
 impl core::default::Default for finstack_ai::LinkedAgentPorts
 pub fn finstack_ai::LinkedAgentPorts::default() -> finstack_ai::LinkedAgentPorts
+pub struct finstack_ai::LinkedCommon
+pub finstack_ai::LinkedCommon::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
+pub finstack_ai::LinkedCommon::child_runs: finstack_ai::ChildRunPolicy
+pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::LinkedCommon::ports: finstack_ai::LinkedAgentPorts
+impl core::default::Default for finstack_ai::LinkedCommon
+pub fn finstack_ai::LinkedCommon::default() -> finstack_ai::LinkedCommon
 pub struct finstack_ai::LockedBundle
 pub finstack_ai::LockedBundle::id: finstack_ai_kernel::primitives::ids::BundleId
 pub finstack_ai::LockedBundle::version: finstack_ai_kernel::primitives::identity::Version
@@ -1089,10 +1095,10 @@ pub fn finstack_ai::NativeAgentBuilder::activate_application(self, finstack_ai_k
 pub async fn finstack_ai::NativeAgentBuilder::build(self) -> core::result::Result<finstack_ai::Agent, finstack_ai::AgentRunError>
 pub fn finstack_ai::NativeAgentBuilder::capability(self, finstack_ai::CapabilitySpec) -> Self
 pub fn finstack_ai::NativeAgentBuilder::capability_activation_host(self, alloc::sync::Arc<finstack_ai::NativeCapabilityHost>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::install_context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::install_middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::install_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::observer(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai::RunPolicy) -> Self
@@ -1113,21 +1119,13 @@ pub fn finstack_ai::NativeCapabilityHost::take_pending(&self, finstack_ai_kernel
 impl core::fmt::Debug for finstack_ai::NativeCapabilityHost
 pub fn finstack_ai::NativeCapabilityHost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai::OllamaAgentSpec
-pub finstack_ai::OllamaAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::OllamaAgentSpec::base_url: alloc::string::String
-pub finstack_ai::OllamaAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::OllamaAgentSpec::child_runs: finstack_ai::ChildRunPolicy
-pub finstack_ai::OllamaAgentSpec::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::OllamaAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
-pub finstack_ai::OllamaAgentSpec::ports: finstack_ai::LinkedAgentPorts
 pub struct finstack_ai::OpenAiAgentSpec
-pub finstack_ai::OpenAiAgentSpec::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
-pub finstack_ai::OpenAiAgentSpec::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
-pub finstack_ai::OpenAiAgentSpec::child_runs: finstack_ai::ChildRunPolicy
-pub finstack_ai::OpenAiAgentSpec::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
-pub finstack_ai::OpenAiAgentSpec::ports: finstack_ai::LinkedAgentPorts
 pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OutstandingDeferral
@@ -1164,20 +1162,14 @@ impl core::marker::StructuralPartialEq for finstack_ai::RegisteredComponentDescr
 pub struct finstack_ai::Registrar
 impl finstack_ai::Registrar
 pub fn finstack_ai::Registrar::context_provider(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::context_provider_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::into_registry(self) -> finstack_ai::Registry
 pub fn finstack_ai::Registrar::middleware(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::middleware_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::model(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::model::port::Model>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::model_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::model::port::Model>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub const fn finstack_ai::Registrar::new() -> Self
 pub fn finstack_ai::Registrar::observer(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::observer::Observer>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::observer_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::observer::Observer>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::register_extension(&mut self, &dyn finstack_ai::Extension) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::store(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::store_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::journal::JournalStore>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::toolset(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::ReadyComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> core::result::Result<(), finstack_ai::RegistrationError>
-pub fn finstack_ai::Registrar::toolset_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::ComponentFactory<dyn finstack_ai_runtime::ports::tool::port::Toolset>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 impl core::default::Default for finstack_ai::Registrar
 pub fn finstack_ai::Registrar::default() -> finstack_ai::Registrar
 pub struct finstack_ai::RegistrationEvent
@@ -1376,7 +1368,6 @@ pub async fn finstack_ai::Session::lane(&self, &str) -> core::result::Result<fin
 pub async fn finstack_ai::Session::lane_by_id(&self, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<finstack_ai::Lane, finstack_ai_runtime::services::session::SessionError>
 pub async fn finstack_ai::Session::list_lanes(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai::Lane>, finstack_ai_runtime::services::session::SessionError>
 pub async fn finstack_ai::Session::open(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::primitives::ids::SessionId, impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai_runtime::services::session::SessionError>
-pub fn finstack_ai::Session::pending(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::primitives::ids::SessionId, impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
 pub fn finstack_ai::Session::resolve_external_identity(&dyn finstack_ai_runtime::services::identity_map::ExternalIdentityMap, &finstack_ai_runtime::services::identity_map::ExternalIdentityKey) -> core::option::Option<(finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId)>
 pub fn finstack_ai::Session::session_id(&self) -> finstack_ai_kernel::primitives::ids::SessionId
 pub fn finstack_ai::Session::tenant_scope(&self) -> &str

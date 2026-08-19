@@ -1072,11 +1072,9 @@ dependencies = [
 name = "finstack-ai-server"
 version = "1.0.0"
 dependencies = [
- "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
- "finstack-ai-store-memory",
  "rustls",
  "thiserror",
  "tokio",

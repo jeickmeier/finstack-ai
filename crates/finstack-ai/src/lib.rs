@@ -10,8 +10,8 @@
 //!
 //! # Module map
 //!
-//! - `spec` — declarative `AgentSpec` / `AgentBuilder` (data only)
-//! - `agent` — live `Agent` / `NativeAgentBuilder` / `AgentRun`
+//! - `spec` — declarative `AgentSpec` / [`AgentBuilder`] (data only; start at [`AgentSpec::builder`])
+//! - `agent` — live `Agent` / [`NativeAgentBuilder`] / `AgentRun` (start at [`Agent::builder`])
 //! - `session` — journaled `Session` / `Lane` handles
 //! - `bundle` — catalog, exact lock, resolver
 //! - `registry` — registration and one-time resolution
@@ -34,8 +34,8 @@ pub use agent::{
     AGENT_RUN_TIMEOUT, AGENT_RUN_UNSUPPORTED_PLAN, ActivationHostError, Agent, AgentRun,
     AgentRunError, AgentRunOutput, AgentRunRequest, AnthropicAgentSpec,
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
-    E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
-    MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
+    ComposeAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
+    LinkedCommon, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, NativeAgentBuilder, NativeCapabilityHost,
     OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]

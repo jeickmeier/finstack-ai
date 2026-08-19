@@ -154,7 +154,7 @@ impl PyRun {
                 &tenant_scope,
             )
             .map_err(|error| Python::attach(|py| agent_error(py, &error, None)))?;
-            match Box::pin(parent.start_child_routed(&child, request, placement, remote)).await {
+            match Box::pin(parent.start_child(&child, request, placement, remote)).await {
                 Ok(inner) => Python::attach(|py| {
                     Py::new(
                         py,

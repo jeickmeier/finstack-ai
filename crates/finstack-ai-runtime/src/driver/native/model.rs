@@ -16,8 +16,8 @@ use crate::run_types::SameIdentityRetryPolicy;
 use crate::settlement::ModelDriverResult;
 use crate::{
     CancellationSignal, Clock, LockedModelContextProfile, Metadata, Model, ModelCallContext,
-    ModelError, ModelProgress, ModelRequest, ModelStreamAssembler,
-    ModelTerminal, MonotonicDeadline, PortFuture, RunCallContext, parse_committed_model_request,
+    ModelError, ModelProgress, ModelRequest, ModelStreamAssembler, ModelTerminal,
+    MonotonicDeadline, PortFuture, RunCallContext, parse_committed_model_request,
     stable_model_dispatch_code,
 };
 

@@ -56,7 +56,7 @@ impl AgentInvoker for ParentStartInvoker {
                 })
                 .unwrap_or_default();
             let run = parent
-                .start_child(&child, agent_request(&input), request.placement)
+                .start_child(&child, agent_request(&input), request.placement, None)
                 .await
                 .map_err(|error| AgentInvokeError::InvalidRequest {
                     message: Arc::from(error.to_string()),
@@ -453,6 +453,7 @@ async fn subagent_cancel_fans_out_to_isolated() {
             &child,
             agent_request("isolated work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -471,6 +472,7 @@ async fn subagent_cancel_fans_out_to_isolated() {
             &child,
             agent_request("compatible work"),
             ChildPlacement::CompatibleLaneInParentSession,
+            None,
         )),
     )
     .await

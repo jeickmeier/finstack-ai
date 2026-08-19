@@ -22,25 +22,6 @@ impl AgentRun {
         child: &Agent,
         request: AgentRunRequest,
         placement: ChildPlacement,
-    ) -> Result<ChildRunPrepared, AgentRunError> {
-        let _ = (child, request, placement);
-        unsupported("prepare_child")
-    }
-
-    /// wasm-host stub for remote-routed prepare.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`AGENT_RUN_UNSUPPORTED_PLAN`].
-    #[expect(
-        clippy::unused_async,
-        reason = "wasm-host keeps the same async signature as native-tokio"
-    )]
-    pub async fn prepare_child_routed(
-        &self,
-        child: &Agent,
-        request: AgentRunRequest,
-        placement: ChildPlacement,
         remote: Option<RemoteChildRouteSpec>,
     ) -> Result<ChildRunPrepared, AgentRunError> {
         let _ = (child, request, placement, remote);
@@ -76,25 +57,6 @@ impl AgentRun {
         reason = "wasm-host keeps the same async signature as native-tokio"
     )]
     pub async fn start_child(
-        &self,
-        child: &Agent,
-        request: AgentRunRequest,
-        placement: ChildPlacement,
-    ) -> Result<Self, AgentRunError> {
-        let _ = (child, request, placement);
-        unsupported("start_child")
-    }
-
-    /// wasm-host stub for remote-routed start.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`AGENT_RUN_UNSUPPORTED_PLAN`].
-    #[expect(
-        clippy::unused_async,
-        reason = "wasm-host keeps the same async signature as native-tokio"
-    )]
-    pub async fn start_child_routed(
         &self,
         child: &Agent,
         request: AgentRunRequest,

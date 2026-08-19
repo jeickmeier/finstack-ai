@@ -141,6 +141,26 @@ pub enum RemotePostAuth {
     },
 }
 
+impl RemotePostAuth {
+    /// Stable `snake_case` kind matching the serde tag.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::OpenSession { .. } => "open_session",
+            Self::Snapshot { .. } => "snapshot",
+            Self::NoSnapshot { .. } => "no_snapshot",
+            Self::DurableTail { .. } => "durable_tail",
+            Self::SyncBarrier { .. } => "sync_barrier",
+            Self::EventBatch { .. } => "event_batch",
+            Self::Command { .. } => "command",
+            Self::CommandResult { .. } => "command_result",
+            Self::Grant { .. } => "grant",
+            Self::Ack { .. } => "ack",
+            Self::Close { .. } => "close",
+        }
+    }
+}
+
 /// Public locator. Never a store-private handle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -486,5 +506,20 @@ mod tests {
         assert!(decode::<RemotePreAuth>(&body).is_err());
         let _ = RemoteAuthMethod::Loopback;
         let _ = encode_envelope(PayloadFamily::Process, 1, &process).expect("env");
+    }
+
+    #[test]
+    fn post_auth_kind_matches_serde_tag() {
+        assert_eq!(
+            RemotePostAuth::NoSnapshot { sequence: 0 }.kind(),
+            "no_snapshot"
+        );
+        assert_eq!(
+            RemotePostAuth::Close {
+                reason_code: "x".into()
+            }
+            .kind(),
+            "close"
+        );
     }
 }

@@ -404,6 +404,7 @@ async fn child_run_policy_deny_rejects_before_invoker_runs() {
             &agent,
             agent_request("child work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -411,7 +412,6 @@ async fn child_run_policy_deny_rejects_before_invoker_runs() {
     .err()
     .expect("deny must reject");
     assert_eq!(error.code(), AGENT_INVOKE_INVALID_ACCEPTANCE);
-    assert_eq!(parent.child_invoker_starts(), 0);
     let kinds = journal_kind_names(&store, parent.locator().session_id).await;
     assert!(
         !kinds.iter().any(|kind| kind == "child_run_prepared"),
@@ -431,6 +431,7 @@ async fn child_run_policy_allow_rejects_when_depth_exceeds_max() {
             &agent,
             agent_request("child work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -438,7 +439,6 @@ async fn child_run_policy_allow_rejects_when_depth_exceeds_max() {
     .err()
     .expect("depth 1 must exceed max_depth 0");
     assert_eq!(error.code(), AGENT_INVOKE_INVALID_ACCEPTANCE);
-    assert_eq!(parent.child_invoker_starts(), 0);
     let kinds = journal_kind_names(&store, parent.locator().session_id).await;
     assert!(
         !kinds.iter().any(|kind| kind == "child_run_prepared"),

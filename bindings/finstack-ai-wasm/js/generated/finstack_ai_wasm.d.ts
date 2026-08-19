@@ -9,12 +9,6 @@ export class Agent {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Construct an Anthropic Messages agent.
-     *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
-     */
-    static anthropic(base_url: string, model: string, api_key?: string | null): Promise<any>;
-    /**
      * Return the bounded model-activated capability catalog in identity order.
      *
      * # Errors
@@ -28,6 +22,9 @@ export class Agent {
     compactCapabilityCatalog(): string;
     /**
      * Construct an Agent over a trusted JS model and optional toolsets.
+     *
+     * Linked provider constructors (`openai`, `anthropic`, and peers) are
+     * native-only. Browser hosts use this method with a JS model adapter.
      *
      * # Errors
      *
@@ -43,18 +40,6 @@ export class Agent {
      */
     createSession(tenant_scope?: string | null): Promise<any>;
     /**
-     * Construct a T4 E2B sandbox agent.
-     *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
-     */
-    static e2bSandbox(model: string, api_key: string, endpoint?: string | null, template?: string | null): Promise<any>;
-    /**
-     * Construct a config-driven gateway agent.
-     *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
-     */
-    static gateway(endpoint: string, model: string, wire_protocol: string, credential_name: string, hard_input_bytes?: bigint | null, auth?: string | null, api_key?: string | null): Promise<any>;
-    /**
      * Replay one stored session into a provisional inspect snapshot.
      *
      * This does not continue an interrupted run or retry in-flight effects.
@@ -66,12 +51,6 @@ export class Agent {
      */
     static inspectSession(store: JsJournalStore, session_id: string): Promise<any>;
     /**
-     * Construct a keyless Ollama agent.
-     *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
-     */
-    static ollama(base_url: string, model: string): Promise<any>;
-    /**
      * Open an existing session without respawning parked runs.
      *
      * # Errors
@@ -80,12 +59,6 @@ export class Agent {
      * stored journal cannot be replayed.
      */
     openSession(session_id: string, tenant_scope?: string | null): Promise<any>;
-    /**
-     * Construct an official OpenAI Responses agent.
-     *
-     * wasm-host fails closed with `agent_run_unsupported_plan`.
-     */
-    static openai(model: string, api_key: string): Promise<any>;
     /**
      * Compose a new agent from reconstructed catalogs.
      *
@@ -713,17 +686,12 @@ export interface InitOutput {
     readonly __wbg_run_free: (a: number, b: number) => void;
     readonly __wbg_runresult_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
-    readonly agent_anthropic: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly agent_capabilityCatalog: (a: number, b: number) => void;
     readonly agent_compactCapabilityCatalog: (a: number, b: number) => void;
     readonly agent_create: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
     readonly agent_createSession: (a: number, b: number, c: number) => number;
-    readonly agent_e2bSandbox: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly agent_gateway: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: bigint, k: number, l: number, m: number, n: number) => number;
     readonly agent_inspectSession: (a: number, b: number, c: number) => number;
-    readonly agent_ollama: (a: number, b: number, c: number, d: number) => number;
     readonly agent_openSession: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly agent_openai: (a: number, b: number, c: number, d: number) => number;
     readonly agent_reResolve: (a: number) => number;
     readonly agent_run: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
     readonly agent_start: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
@@ -795,9 +763,9 @@ export interface InitOutput {
     readonly runresult_session: (a: number) => number;
     readonly driveScriptedJournalHealth: (a: number, b: number) => number;
     readonly __wbg_jsrandomsource_free: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_1868: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1882: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_436: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1831: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1845: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_421: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

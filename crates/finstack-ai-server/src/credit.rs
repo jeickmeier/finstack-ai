@@ -27,7 +27,7 @@ impl Default for CreditLimits {
 
 /// Mutable credit window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CreditWindow {
+pub(crate) struct CreditWindow {
     items: u32,
     bytes: u32,
     limits: CreditLimits,
@@ -67,7 +67,8 @@ impl CreditWindow {
     /// # Errors
     ///
     /// Returns [`ServerError::CreditTimeout`] when the window cannot cover the
-    /// batch. The caller disconnects and the client resumes from its cursor.
+    /// batch (same stable code as an ack-deadline disconnect). The caller
+    /// disconnects and the client resumes from its cursor.
     pub fn consume(&mut self, items: u32, bytes: u32) -> Result<(), ServerError> {
         if self.items < items || self.bytes < bytes {
             return Err(ServerError::CreditTimeout);

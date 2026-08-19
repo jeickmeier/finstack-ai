@@ -11,7 +11,6 @@ description = "Reference Unix-socket and loopback session server for finstack-ai
 readme = "README.md"
 
 [dependencies]
-finstack-ai = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
@@ -22,7 +21,6 @@ tokio-rustls = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 
 [dev-dependencies]
-finstack-ai-store-memory = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [lints]

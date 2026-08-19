@@ -1,7 +1,6 @@
 //! `AgentRun` child-run prepare/accept and external-completion routing.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ChildRunPolicy;
@@ -31,9 +30,7 @@ use super::prepare::NativeIds;
 use super::run::{AgentRun, AgentRunInner, CancellationState, EventStreamState};
 use super::types::{AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunRequest};
 
-struct RecordingChildInvoker {
-    starts: Arc<std::sync::atomic::AtomicUsize>,
-}
+struct RecordingChildInvoker;
 
 impl AgentInvoker for RecordingChildInvoker {
     fn start_or_attach(
@@ -41,7 +38,6 @@ impl AgentInvoker for RecordingChildInvoker {
         context: ChildRunContext,
         request: ChildRunRequest,
     ) -> PortFuture<Result<ChildRunHandle, AgentInvokeError>> {
-        self.starts.fetch_add(1, Ordering::SeqCst);
         let relation_digest = match child_relation_digest(&context, &request) {
             Ok(digest) => digest,
             Err(error) => {
@@ -67,9 +63,9 @@ impl AgentRun {
     ///
     /// This is the effect-binding facade used by deferred child settlement.
     /// It is named `start_or_attach_child` because [`Self::start_child`] is
-    /// already the pre-Phase-B composition API
-    /// (`&Agent`, [`AgentRunRequest`], [`ChildPlacement`] → [`AgentRun`])
-    /// from PR-079. Those signatures cannot share a name.
+    /// the composition API (`&Agent`, [`AgentRunRequest`], [`ChildPlacement`],
+    /// optional remote route → [`AgentRun`]). Those signatures cannot share a
+    /// name.
     /// Authorization is copied from the recovered accepted run, matching
     /// runtime dispatch security context.
     ///
@@ -143,8 +139,8 @@ impl AgentRun {
     /// acceptance handle; [`Self::accept_child`] starts the child agent on the
     /// frozen locator.
     ///
-    /// Remote placement requires [`Self::prepare_child_routed`] with an
-    /// explicit route. Missing routes stay fail-closed.
+    /// Remote placement requires an explicit `remote` route. Missing routes
+    /// stay fail-closed.
     ///
     /// # Arguments
     ///
@@ -152,31 +148,16 @@ impl AgentRun {
     ///   authoritative.
     /// * `request` - Bounded child run input.
     /// * `placement` - Isolated session (preferred) or compatible parent lane.
-    ///   Remote placement fails closed.
+    ///   Remote placement fails closed without `remote`.
+    /// * `remote` - Optional remote route for [`ChildPlacement::RemoteChildSession`].
     ///
     /// # Errors
     ///
     /// Returns a configuration or runtime failure when the parent is not yet
-    /// accepted, placement is remote, the parent turn is still open for
-    /// compatible-lane placement, or the durable mapping conflicts.
+    /// accepted, placement is remote without a route, the parent turn is still
+    /// open for compatible-lane placement, or the durable mapping conflicts.
     #[cfg(feature = "native-tokio")]
     pub async fn prepare_child(
-        &self,
-        child: &Agent,
-        request: AgentRunRequest,
-        placement: ChildPlacement,
-    ) -> Result<ChildRunPrepared, AgentRunError> {
-        Box::pin(self.prepare_child_routed(child, request, placement, None)).await
-    }
-
-    /// Commit one child mapping, optionally routing a remote child.
-    ///
-    /// # Errors
-    ///
-    /// Returns a configuration or runtime failure when the parent is not yet
-    /// accepted, remote placement has no route, or the durable mapping
-    /// conflicts.
-    pub async fn prepare_child_routed(
         &self,
         child: &Agent,
         request: AgentRunRequest,
@@ -230,9 +211,7 @@ impl AgentRun {
                 *slot = Some(Arc::clone(&invoker) as Arc<dyn AgentInvoker>);
                 invoker
             }
-            None => Arc::new(RecordingChildInvoker {
-                starts: Arc::clone(&self.inner.child_invoker_starts),
-            }),
+            None => Arc::new(RecordingChildInvoker),
         };
         let coordinator = ChildRunCoordinator::new(invoker);
         coordinator
@@ -321,6 +300,8 @@ impl AgentRun {
     /// * `child` - Child agent composition.
     /// * `request` - Bounded child run input.
     /// * `placement` - Isolated session (preferred) or compatible parent lane.
+    ///   Remote placement fails closed without `remote`.
+    /// * `remote` - Optional remote route for [`ChildPlacement::RemoteChildSession`].
     ///
     /// # Errors
     ///
@@ -331,24 +312,10 @@ impl AgentRun {
         child: &Agent,
         request: AgentRunRequest,
         placement: ChildPlacement,
-    ) -> Result<Self, AgentRunError> {
-        Box::pin(self.start_child_routed(child, request, placement, None)).await
-    }
-
-    /// Prepare then accept one child, optionally routing a remote child.
-    ///
-    /// # Errors
-    ///
-    /// Returns the prepare or accept failure.
-    pub async fn start_child_routed(
-        &self,
-        child: &Agent,
-        request: AgentRunRequest,
-        placement: ChildPlacement,
         remote: Option<RemoteChildRouteSpec>,
     ) -> Result<Self, AgentRunError> {
         let prepared =
-            Box::pin(self.prepare_child_routed(child, request.clone(), placement, remote)).await?;
+            Box::pin(self.prepare_child(child, request.clone(), placement, remote)).await?;
         let accepted = self.accept_child(&prepared, child, request).await?;
         if let Ok(mut children) = self.inner.children.lock() {
             children.push(accepted.clone());
@@ -359,12 +326,7 @@ impl AgentRun {
     /// Route one authenticated external completion through ingress.
     ///
     /// The command locator must match this run. Submission time is the
-    /// current native clock. This one-argument signature is the pre-Phase-B
-    /// public API from PR-079 (Python `Run.complete_external` and existing
-    /// callers). The timestamped form matching
-    /// [`finstack_ai_runtime::WorkflowSession::complete_external`] is
-    /// [`Self::complete_external_at`]; adding `submitted_at` here would
-    /// break that existing method.
+    /// current native clock.
     ///
     /// # Arguments
     ///
@@ -383,19 +345,8 @@ impl AgentRun {
         Box::pin(self.complete_external_at(command, NativeIds::now()?)).await
     }
 
-    /// Route one authenticated external completion at an explicit timestamp.
-    ///
-    /// Named separately from [`Self::complete_external`] because that
-    /// one-argument method already existed before Phase B. Callers that
-    /// need a host-supplied [`Timestamp`] use this method, matching
-    /// [`finstack_ai_runtime::WorkflowSession::complete_external`].
-    ///
-    /// # Errors
-    ///
-    /// Returns a runtime failure when the locator does not match or ingress
-    /// rejects the command.
     #[cfg(feature = "native-tokio")]
-    pub async fn complete_external_at(
+    pub(crate) async fn complete_external_at(
         &self,
         command: ExternalEffectCompletionCommand,
         submitted_at: Timestamp,
@@ -796,7 +747,6 @@ fn accept_remote_child(
             locator: prepared.child.operation.clone(),
             store: Arc::clone(&parent.inner.store),
             child_runs: parent.inner.child_runs,
-            child_invoker_starts: Arc::clone(&parent.inner.child_invoker_starts),
             cancellation_initiator: parent.inner.cancellation_initiator.clone(),
             handle: Mutex::new(None),
             handle_ready: driver::Signal::new(),

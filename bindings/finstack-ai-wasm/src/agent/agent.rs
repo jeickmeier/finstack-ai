@@ -2,10 +2,6 @@ use std::sync::Arc;
 
 use finstack_ai::Agent as FacadeAgent;
 use finstack_ai::runtime::ModelName;
-use finstack_ai::{
-    AnthropicAgentSpec, ChildRunPolicy, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgentPorts,
-    OllamaAgentSpec, OpenAiAgentSpec,
-};
 use finstack_ai_kernel::SessionId;
 use wasm_bindgen::prelude::*;
 
@@ -30,6 +26,9 @@ pub struct Agent {
 #[wasm_bindgen(js_class = Agent)]
 impl Agent {
     /// Construct an Agent over a trusted JS model and optional toolsets.
+    ///
+    /// Linked provider constructors (`openai`, `anthropic`, and peers) are
+    /// native-only. Browser hosts use this method with a JS model adapter.
     ///
     /// # Errors
     ///
@@ -101,159 +100,6 @@ impl Agent {
             )
             .await
             .map(JsValue::from)
-        })
-    }
-
-    /// Construct an official OpenAI Responses agent.
-    ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
-    #[wasm_bindgen]
-    pub fn openai(model: String, api_key: String) -> js_sys::Promise {
-        executor::drive(async move {
-            FacadeAgent::openai(OpenAiAgentSpec {
-                model,
-                api_key,
-                instruction: None,
-                capabilities: Vec::new(),
-                active_capabilities: Vec::new(),
-                reasoning_effort: None,
-                reasoning_summary: None,
-                ports: LinkedAgentPorts::default(),
-                child_runs: ChildRunPolicy::Deny,
-            })
-            .await
-            .map(|built| {
-                JsValue::from(Agent {
-                    inner: Arc::new(built.agent),
-                    model: built.model,
-                })
-            })
-            .map_err(|error| agent_error(&error, None))
-        })
-    }
-
-    /// Construct an Anthropic Messages agent.
-    ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
-    #[wasm_bindgen]
-    pub fn anthropic(base_url: String, model: String, api_key: Option<String>) -> js_sys::Promise {
-        executor::drive(async move {
-            FacadeAgent::anthropic(AnthropicAgentSpec {
-                base_url,
-                model,
-                api_key,
-                instruction: None,
-                capabilities: Vec::new(),
-                active_capabilities: Vec::new(),
-                ports: LinkedAgentPorts::default(),
-                child_runs: ChildRunPolicy::Deny,
-            })
-            .await
-            .map(|built| {
-                JsValue::from(Agent {
-                    inner: Arc::new(built.agent),
-                    model: built.model,
-                })
-            })
-            .map_err(|error| agent_error(&error, None))
-        })
-    }
-
-    /// Construct a keyless Ollama agent.
-    ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
-    #[wasm_bindgen]
-    pub fn ollama(base_url: String, model: String) -> js_sys::Promise {
-        executor::drive(async move {
-            FacadeAgent::ollama(OllamaAgentSpec {
-                base_url,
-                model,
-                instruction: None,
-                capabilities: Vec::new(),
-                active_capabilities: Vec::new(),
-                ports: LinkedAgentPorts::default(),
-                child_runs: ChildRunPolicy::Deny,
-            })
-            .await
-            .map(|built| {
-                JsValue::from(Agent {
-                    inner: Arc::new(built.agent),
-                    model: built.model,
-                })
-            })
-            .map_err(|error| agent_error(&error, None))
-        })
-    }
-
-    /// Construct a config-driven gateway agent.
-    ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
-    #[wasm_bindgen]
-    pub fn gateway(
-        endpoint: String,
-        model: String,
-        wire_protocol: String,
-        credential_name: String,
-        hard_input_bytes: Option<u64>,
-        auth: Option<String>,
-        api_key: Option<String>,
-    ) -> js_sys::Promise {
-        executor::drive(async move {
-            FacadeAgent::gateway(GatewayAgentSpec {
-                endpoint,
-                model,
-                wire_protocol,
-                credential_name,
-                hard_input_bytes,
-                auth_kind: auth,
-                api_key,
-                instruction: None,
-                capabilities: Vec::new(),
-                active_capabilities: Vec::new(),
-                ports: LinkedAgentPorts::default(),
-                child_runs: ChildRunPolicy::Deny,
-            })
-            .await
-            .map(|built| {
-                JsValue::from(Agent {
-                    inner: Arc::new(built.agent),
-                    model: built.model,
-                })
-            })
-            .map_err(|error| agent_error(&error, None))
-        })
-    }
-
-    /// Construct a T4 E2B sandbox agent.
-    ///
-    /// wasm-host fails closed with `agent_run_unsupported_plan`.
-    #[wasm_bindgen(js_name = e2bSandbox)]
-    pub fn e2b_sandbox(
-        model: String,
-        api_key: String,
-        endpoint: Option<String>,
-        template: Option<String>,
-    ) -> js_sys::Promise {
-        executor::drive(async move {
-            FacadeAgent::e2b_sandbox(E2bSandboxAgentSpec {
-                model,
-                api_key,
-                endpoint,
-                template,
-                instruction: None,
-                capabilities: Vec::new(),
-                active_capabilities: Vec::new(),
-                ports: LinkedAgentPorts::default(),
-                child_runs: ChildRunPolicy::Deny,
-            })
-            .await
-            .map(|built| {
-                JsValue::from(Agent {
-                    inner: Arc::new(built.agent),
-                    model: built.model,
-                })
-            })
-            .map_err(|error| agent_error(&error, None))
         })
     }
 

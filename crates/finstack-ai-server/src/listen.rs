@@ -9,9 +9,6 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use crate::ServerError;
 
-/// Stable listen-policy failure.
-pub const SERVER_LISTEN_INVALID: &str = "server_listen_invalid";
-
 /// Reference-server bind target.
 #[derive(Clone)]
 pub enum ListenAddr {
@@ -20,12 +17,8 @@ pub enum ListenAddr {
         /// Socket path.
         path: PathBuf,
     },
-    /// Loopback TCP (`127.0.0.1`). Bearer secrets are rejected on this transport.
-    Loopback {
-        /// TCP port. `0` asks the OS for an ephemeral port.
-        port: u16,
-    },
-    /// TCP bind. Non-loopback requires [`ListenAddr::tls`].
+    /// TCP bind. Non-loopback requires [`ListenAddr::tls`]. Loopback
+    /// (`127.0.0.1`) is plaintext only.
     Tcp {
         /// Bind address.
         addr: SocketAddr,
@@ -36,10 +29,14 @@ pub enum ListenAddr {
 }
 
 impl ListenAddr {
-    /// Loopback TCP on `127.0.0.1`.
+    /// Loopback TCP on `127.0.0.1`. Bearer secrets are rejected on this
+    /// transport. `0` asks the OS for an ephemeral port.
     #[must_use]
     pub const fn loopback(port: u16) -> Self {
-        Self::Loopback { port }
+        Self::Tcp {
+            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+            tls: None,
+        }
     }
 
     /// Unix-socket listen target.
@@ -76,7 +73,7 @@ impl ListenAddr {
     /// Returns [`ServerError::ListenInvalid`] when the address violates policy.
     pub fn validate(&self) -> Result<(), ServerError> {
         match self {
-            Self::Unix { .. } | Self::Loopback { .. } => Ok(()),
+            Self::Unix { .. } => Ok(()),
             Self::Tcp { addr, tls } => {
                 if addr.ip().is_loopback() {
                     if tls.is_some() {
@@ -96,9 +93,6 @@ impl ListenAddr {
     #[must_use]
     pub fn tcp_addr(&self) -> Option<SocketAddr> {
         match self {
-            Self::Loopback { port } => {
-                Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), *port))
-            }
             Self::Tcp { addr, .. } => Some(*addr),
             Self::Unix { .. } => None,
         }
@@ -109,7 +103,7 @@ impl ListenAddr {
     pub fn tls_config(&self) -> Option<&Arc<ServerConfig>> {
         match self {
             Self::Tcp { tls, .. } => tls.as_ref(),
-            Self::Unix { .. } | Self::Loopback { .. } => None,
+            Self::Unix { .. } => None,
         }
     }
 }
@@ -138,20 +132,30 @@ pub(crate) fn install_ring() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ListenAddr, SERVER_LISTEN_INVALID};
+    use super::ListenAddr;
     use crate::ServerError;
 
     #[test]
     fn non_loopback_plaintext_is_rejected() {
         let addr = ListenAddr::plaintext_tcp("0.0.0.0:9".parse().expect("addr"));
-        assert!(
-            matches!(addr.validate(), Err(ServerError::ListenInvalid)),
-            "{SERVER_LISTEN_INVALID}"
-        );
+        assert!(matches!(
+            addr.validate(),
+            Err(ServerError::ListenInvalid)
+        ));
     }
 
     #[test]
     fn loopback_plaintext_is_accepted() {
         ListenAddr::loopback(0).validate().expect("loopback");
+    }
+
+    #[test]
+    fn loopback_constructor_is_plaintext_localhost() {
+        let addr = ListenAddr::loopback(9);
+        assert_eq!(
+            addr.tcp_addr(),
+            Some("127.0.0.1:9".parse().expect("addr"))
+        );
+        assert!(addr.tls_config().is_none());
     }
 }

@@ -91,7 +91,7 @@ impl Session {
     /// * `session_id` - Durable session identity.
     /// * `tenant_scope` - Host-captured tenant scope.
     #[must_use]
-    pub fn pending(
+    pub(crate) fn pending(
         store: Arc<dyn JournalStore>,
         session_id: SessionId,
         tenant_scope: impl Into<Arc<str>>,

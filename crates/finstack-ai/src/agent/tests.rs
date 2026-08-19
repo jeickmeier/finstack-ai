@@ -937,6 +937,7 @@ async fn child_accept_and_cancel_fans_out_against_journal_fixture() {
             &agent,
             request("child work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -1024,6 +1025,7 @@ async fn compatible_start_while_parent_mid_turn_fails_closed() {
             &agent,
             request("isolated work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -1036,6 +1038,7 @@ async fn compatible_start_while_parent_mid_turn_fails_closed() {
             &agent,
             request("compatible work"),
             ChildPlacement::CompatibleLaneInParentSession,
+            None,
         )),
     )
     .await
@@ -1081,6 +1084,7 @@ async fn cancel_child_locator_and_journal_recover_do_not_require_live_handles() 
             &agent,
             request("child work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -1149,6 +1153,7 @@ async fn complete_external_routes_a_deferred_parent_effect() {
             &agent,
             request("child work"),
             ChildPlacement::IsolatedChildSession,
+            None,
         )),
     )
     .await
@@ -1243,7 +1248,7 @@ async fn restore_after_mid_run_activation_reconstructs_the_same_mask_or_fails_cl
             Arc::clone(&store),
         ),
     )
-    .install_toolset(toolset.clone(), calculator)
+    .capability_toolset(toolset.clone(), calculator)
     .capability(research_capability(toolset))
     .build()
     .await
@@ -1303,6 +1308,7 @@ async fn remote_start_child_without_a_route_fails_closed() {
         &agent,
         request("child work"),
         ChildPlacement::RemoteChildSession,
+        None,
     ))
     .await
     .err()

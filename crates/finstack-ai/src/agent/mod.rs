@@ -1,5 +1,14 @@
 //! Public native execution facade.
 
+use finstack_ai_kernel::Version;
+
+/// Preview lock/registration version used by the native builder and linked factories.
+pub(super) const PREVIEW_ENGINE_VERSION: Version = Version {
+    major: 0,
+    minor: 0,
+    patch: 1,
+};
+
 mod activation;
 mod builder;
 #[cfg(feature = "native-tokio")]
@@ -36,8 +45,8 @@ pub use deferred::{
 };
 pub use handle::Agent;
 pub use linked::{
-    AnthropicAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts,
-    OllamaAgentSpec, OpenAiAgentSpec,
+    AnthropicAgentSpec, ComposeAgentSpec, E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent,
+    LinkedAgentPorts, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
 };
 pub use run::AgentRun;
 pub use types::{

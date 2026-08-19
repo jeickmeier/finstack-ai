@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::ResolvedAgent;
 use finstack_ai_kernel::{
     AgentId, BundleId, ComponentInvocation, ComponentRef, Digest, InvocationRecovery,
-    JsonSchemaDraft, RawJson, SchemaRef, Version,
+    JsonSchemaDraft, RawJson, SchemaRef,
 };
 use finstack_ai_runtime::{
     JsonSchemaToolValidatorCompiler, Model, ResolvedToolCatalog, ToolExecutionPolicy,
@@ -111,59 +111,56 @@ impl Agent {
             ));
         }
         let plan = resolved.run_plan();
-        let registrations =
-            plan.toolsets()
-                .iter()
-                .map(|component| {
-                    let toolset = Arc::clone(component.handle());
-                    let invocation =
-                        ComponentInvocation {
-                            component: component.descriptor().component.id().clone(),
-                            version: component.descriptor().component.version().unwrap_or(
-                                Version {
-                                    major: 0,
-                                    minor: 0,
-                                    patch: 1,
-                                },
-                            ),
-                            configuration_digest: Digest::raw_json(b"{}"),
-                            recovery: InvocationRecovery::RecomputeSafe,
+        let registrations = plan
+            .toolsets()
+            .iter()
+            .map(|component| {
+                let toolset = Arc::clone(component.handle());
+                let invocation = ComponentInvocation {
+                    component: component.descriptor().component.id().clone(),
+                    version: component
+                        .descriptor()
+                        .component
+                        .version()
+                        .unwrap_or(super::PREVIEW_ENGINE_VERSION),
+                    configuration_digest: Digest::raw_json(b"{}"),
+                    recovery: InvocationRecovery::RecomputeSafe,
+                };
+                let policies = toolset
+                    .tools()
+                    .iter()
+                    .map(|tool| {
+                        let approval = match tool.approval.requirement {
+                            finstack_ai_runtime::ApprovalRequirement::NotRequired => {
+                                ToolPolicyDecision::Allow
+                            }
+                            finstack_ai_runtime::ApprovalRequirement::Required
+                            | finstack_ai_runtime::ApprovalRequirement::Policy => {
+                                ToolPolicyDecision::RequireApproval
+                            }
                         };
-                    let policies = toolset
-                        .tools()
-                        .iter()
-                        .map(|tool| {
-                            let approval = match tool.approval.requirement {
-                                finstack_ai_runtime::ApprovalRequirement::NotRequired => {
-                                    ToolPolicyDecision::Allow
-                                }
-                                finstack_ai_runtime::ApprovalRequirement::Required
-                                | finstack_ai_runtime::ApprovalRequirement::Policy => {
-                                    ToolPolicyDecision::RequireApproval
-                                }
-                            };
-                            (
-                                tool.id.clone(),
-                                ToolExecutionPolicy {
-                                    failure_policy: ToolFailurePolicy::ReturnToModel,
-                                    approval,
-                                    max_concurrency: 4,
-                                },
-                            )
-                        })
-                        .collect();
-                    let components = toolset
-                        .tools()
-                        .iter()
-                        .map(|tool| (tool.id.clone(), invocation.clone()))
-                        .collect();
-                    ToolsetRegistration {
-                        toolset,
-                        policies,
-                        components,
-                    }
-                })
-                .collect::<Vec<_>>();
+                        (
+                            tool.id.clone(),
+                            ToolExecutionPolicy {
+                                failure_policy: ToolFailurePolicy::ReturnToModel,
+                                approval,
+                                max_concurrency: 4,
+                            },
+                        )
+                    })
+                    .collect();
+                let components = toolset
+                    .tools()
+                    .iter()
+                    .map(|tool| (tool.id.clone(), invocation.clone()))
+                    .collect();
+                ToolsetRegistration {
+                    toolset,
+                    policies,
+                    components,
+                }
+            })
+            .collect::<Vec<_>>();
         let tools = ResolvedToolCatalog::try_new(
             registrations,
             &BTreeMap::new(),
@@ -449,7 +446,6 @@ impl Agent {
             locator,
             store,
             child_runs,
-            child_invoker_starts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             cancellation_initiator,
             handle: Mutex::new(None),
             handle_ready: driver::Signal::new(),

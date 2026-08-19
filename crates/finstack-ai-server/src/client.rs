@@ -2,25 +2,13 @@
 
 use finstack_ai_protocol::{
     POST_AUTH_FRAME_MAX_BYTES, RemoteAuthMethod, RemoteCommand, RemoteCommandResult,
-    RemoteEventView, RemoteLocator, RemotePostAuth, RemotePreAuth, RemoteSnapshot, VersionOffer,
+    RemoteLocator, RemotePostAuth, RemotePreAuth, VersionOffer,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::ServerError;
 use crate::frame::{read_post_auth, read_pre_auth, write_post_auth, write_pre_auth};
-
-/// Messages received after a successful reconnect barrier.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReconnectView {
-    /// Snapshot at `S`, when present.
-    pub snapshot: Option<RemoteSnapshot>,
-    /// Explicit no-snapshot sequence when `snapshot` is `None`.
-    pub snapshot_sequence: u64,
-    /// Durable tail events.
-    pub tail: Vec<RemoteEventView>,
-    /// Barrier sequence.
-    pub barrier: u64,
-}
+use crate::session::ReconnectView;
 
 /// Client-side remote session.
 pub struct RemoteClient<S> {
@@ -157,7 +145,7 @@ where
                     return Err(ServerError::Protocol(
                         finstack_ai_protocol::ProtocolError::codec(format!(
                             "unexpected {}",
-                            message_kind(&other)
+                            other.kind()
                         )),
                     ));
                 }
@@ -181,21 +169,5 @@ where
             },
         )
         .await
-    }
-}
-
-fn message_kind(message: &RemotePostAuth) -> &'static str {
-    match message {
-        RemotePostAuth::OpenSession { .. } => "open_session",
-        RemotePostAuth::Snapshot { .. } => "snapshot",
-        RemotePostAuth::NoSnapshot { .. } => "no_snapshot",
-        RemotePostAuth::DurableTail { .. } => "durable_tail",
-        RemotePostAuth::SyncBarrier { .. } => "sync_barrier",
-        RemotePostAuth::EventBatch { .. } => "event_batch",
-        RemotePostAuth::Command { .. } => "command",
-        RemotePostAuth::CommandResult { .. } => "command_result",
-        RemotePostAuth::Grant { .. } => "grant",
-        RemotePostAuth::Ack { .. } => "ack",
-        RemotePostAuth::Close { .. } => "close",
     }
 }

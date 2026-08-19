@@ -1,5 +1,6 @@
 //! Application-supplied authentication and transport restrictions.
 
+use finstack_ai_kernel::Digest;
 use finstack_ai_protocol::RemoteAuthMethod;
 
 use crate::ServerError;
@@ -67,10 +68,14 @@ pub trait AuthVerifier: Send + Sync + 'static {
     ) -> Result<AuthContext, ServerError>;
 }
 
-/// Test/reference verifier: loopback method on loopback TCP, bearer `secret` on Unix/TLS.
-#[derive(Debug, Default)]
+/// Test/reference verifier: loopback method on loopback TCP, bearer secret on Unix/TLS.
+///
+/// This is a reference implementation. Applications own credential storage,
+/// comparison, and rotation. The configured bearer is hashed at construction
+/// and never retained as plaintext.
+#[derive(Debug, Clone)]
 pub struct StaticAuthVerifier {
-    bearer: String,
+    bearer_digest: Digest,
     tenant_scope: String,
 }
 
@@ -79,9 +84,15 @@ impl StaticAuthVerifier {
     #[must_use]
     pub fn new(bearer: impl Into<String>, tenant_scope: impl Into<String>) -> Self {
         Self {
-            bearer: bearer.into(),
+            bearer_digest: bearer_digest(bearer.into().as_bytes()),
             tenant_scope: tenant_scope.into(),
         }
+    }
+}
+
+impl Default for StaticAuthVerifier {
+    fn default() -> Self {
+        Self::new("", "")
     }
 }
 
@@ -96,7 +107,10 @@ impl AuthVerifier for StaticAuthVerifier {
                 if !transport.allows_bearer() {
                     return Err(ServerError::AuthenticationFailure);
                 }
-                if token.as_str() != self.bearer {
+                if !constant_time_eq(
+                    self.bearer_digest.as_bytes(),
+                    bearer_digest(token.as_bytes()).as_bytes(),
+                ) {
                     return Err(ServerError::AuthenticationFailure);
                 }
                 Ok(AuthContext::new(&self.tenant_scope, "bearer"))
@@ -107,6 +121,55 @@ impl AuthVerifier for StaticAuthVerifier {
                 }
                 Ok(AuthContext::new(&self.tenant_scope, "loopback"))
             }
+        }
+    }
+}
+
+fn bearer_digest(token: &[u8]) -> Digest {
+    Digest::domain_separated("remote-bearer", 1, token).expect("remote-bearer domain is valid")
+}
+
+fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    let mut diff = 0_u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthVerifier, StaticAuthVerifier, TransportKind};
+    use crate::ServerError;
+    use finstack_ai_protocol::RemoteAuthMethod;
+
+    #[test]
+    fn bearer_digest_compare_accepts_exact_secret() {
+        let verifier = StaticAuthVerifier::new("secret", "tenant-a");
+        let ctx = verifier
+            .verify(
+                &RemoteAuthMethod::Bearer {
+                    token: "secret".into(),
+                },
+                TransportKind::Unix,
+            )
+            .expect("match");
+        assert_eq!(ctx.principal(), "bearer");
+    }
+
+    #[test]
+    fn bearer_digest_compare_rejects_prefix_and_wrong_length() {
+        let verifier = StaticAuthVerifier::new("secret", "tenant-a");
+        for token in ["secre", "secret-extra", "other"] {
+            let err = verifier
+                .verify(
+                    &RemoteAuthMethod::Bearer {
+                        token: token.into(),
+                    },
+                    TransportKind::Tls,
+                )
+                .expect_err(token);
+            assert!(matches!(err, ServerError::AuthenticationFailure), "{token}");
         }
     }
 }

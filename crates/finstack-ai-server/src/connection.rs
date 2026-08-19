@@ -16,11 +16,11 @@ use crate::auth::{AuthContext, AuthVerifier, TransportKind};
 use crate::credit::CreditWindow;
 use crate::frame::{read_post_auth, write_post_auth};
 use crate::handshake::{audit_digest, audit_only, handshake};
-use crate::session::SessionHub;
+use crate::session::{ReconnectView, SessionHub};
 
 /// Connection-level limits.
 #[derive(Debug, Clone)]
-pub struct ConnectionLimits {
+pub(crate) struct ConnectionLimits {
     /// Hello/auth deadline.
     pub handshake_deadline: Duration,
     /// Maximum authenticate attempts.
@@ -60,7 +60,7 @@ impl ConnectionLimits {
 ///
 /// Returns the first fail-closed protocol, auth, or I/O error.
 #[allow(clippy::too_many_arguments)]
-pub async fn serve_connection<S>(
+pub(crate) async fn serve_connection<S>(
     mut stream: S,
     transport: TransportKind,
     auth: Arc<dyn AuthVerifier>,
@@ -98,14 +98,13 @@ where
     .await
 }
 
-#[allow(clippy::too_many_lines)]
 async fn post_auth<S>(
     stream: &mut S,
     auth: &AuthContext,
     audit: &SecurityAuditGate,
     hub: &SessionHub,
     limits: &ConnectionLimits,
-    mut credit: CreditWindow,
+    credit: CreditWindow,
     connection_id: u64,
 ) -> Result<(), ServerError>
 where
@@ -163,7 +162,33 @@ where
         }
     };
 
-    if let Some(snapshot) = plan.snapshot.clone() {
+    let session_id = locator.session_id().to_owned();
+    emit_reconnect_plan(stream, hub, limits, &credit, &session_id, plan).await?;
+    serve_post_barrier(
+        stream,
+        auth,
+        audit,
+        hub,
+        limits,
+        credit,
+        connection_id,
+        &session_id,
+    )
+    .await
+}
+
+async fn emit_reconnect_plan<S>(
+    stream: &mut S,
+    hub: &SessionHub,
+    limits: &ConnectionLimits,
+    credit: &CreditWindow,
+    session_id: &str,
+    plan: ReconnectView,
+) -> Result<(), ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if let Some(snapshot) = plan.snapshot {
         write_post_auth(
             stream,
             limits.post_auth_ceiling,
@@ -195,7 +220,7 @@ where
             &RemotePostAuth::DurableTail {
                 from_sequence,
                 to_sequence: plan.barrier,
-                events: plan.tail.clone(),
+                events: plan.tail,
             },
         )
         .await?;
@@ -208,11 +233,10 @@ where
         },
     )
     .await?;
-    let _ = hub.with(locator.session_id(), |replica| {
+    let _ = hub.with(session_id, |replica| {
         replica.release_barrier();
         Ok(())
     });
-
     write_post_auth(
         stream,
         limits.post_auth_ceiling,
@@ -221,8 +245,23 @@ where
             bytes: credit.bytes(),
         },
     )
-    .await?;
+    .await
+}
 
+#[allow(clippy::too_many_arguments)]
+async fn serve_post_barrier<S>(
+    stream: &mut S,
+    auth: &AuthContext,
+    audit: &SecurityAuditGate,
+    hub: &SessionHub,
+    limits: &ConnectionLimits,
+    mut credit: CreditWindow,
+    connection_id: u64,
+    session_id: &str,
+) -> Result<(), ServerError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     loop {
         if credit.items() == 0 {
             match tokio::time::timeout(
@@ -236,22 +275,16 @@ where
                     continue;
                 }
                 Ok(Ok(RemotePostAuth::Close { .. })) => {
-                    let _ = hub.with(locator.session_id(), |replica| {
-                        replica.release_writer(connection_id);
-                        Ok(())
-                    });
+                    release_writer(hub, session_id, connection_id);
                     return Ok(());
                 }
                 _ => {
-                    let _ = hub.with(locator.session_id(), |replica| {
-                        replica.release_writer(connection_id);
-                        Ok(())
-                    });
+                    release_writer(hub, session_id, connection_id);
                     return Err(ServerError::CreditTimeout);
                 }
             }
         }
-        let live = hub.with(locator.session_id(), |replica| {
+        let live = hub.with(session_id, |replica| {
             Ok(replica.take_live(usize::try_from(credit.items()).unwrap_or(0)))
         })?;
         if !live.is_empty() {
@@ -263,10 +296,7 @@ where
             )
             .unwrap_or(u32::MAX);
             if let Err(err) = credit.consume(items, bytes) {
-                let _ = hub.with(locator.session_id(), |replica| {
-                    replica.release_writer(connection_id);
-                    Ok(())
-                });
+                release_writer(hub, session_id, connection_id);
                 return Err(err);
             }
             write_post_auth(
@@ -283,17 +313,11 @@ where
         let incoming = match read_post_auth(stream, limits.post_auth_ceiling).await {
             Ok(message) => message,
             Err(ServerError::Io(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
-                let _ = hub.with(locator.session_id(), |replica| {
-                    replica.release_writer(connection_id);
-                    Ok(())
-                });
+                release_writer(hub, session_id, connection_id);
                 return Ok(());
             }
             Err(err) => {
-                let _ = hub.with(locator.session_id(), |replica| {
-                    replica.release_writer(connection_id);
-                    Ok(())
-                });
+                release_writer(hub, session_id, connection_id);
                 return Err(err);
             }
         };
@@ -310,19 +334,13 @@ where
                         .await?;
                     }
                     Err(err) => {
-                        let _ = hub.with(locator.session_id(), |replica| {
-                            replica.release_writer(connection_id);
-                            Ok(())
-                        });
+                        release_writer(hub, session_id, connection_id);
                         return Err(err);
                     }
                 }
             }
             RemotePostAuth::Close { .. } => {
-                let _ = hub.with(locator.session_id(), |replica| {
-                    replica.release_writer(connection_id);
-                    Ok(())
-                });
+                release_writer(hub, session_id, connection_id);
                 return Ok(());
             }
             _ => {
@@ -330,18 +348,22 @@ where
                     audit,
                     SecurityAuditCategory::UnknownLocator,
                     "unexpected_post_auth",
-                    Some(locator.session_id()),
+                    Some(session_id),
                     None,
                 )
                 .await?;
-                let _ = hub.with(locator.session_id(), |replica| {
-                    replica.release_writer(connection_id);
-                    Ok(())
-                });
+                release_writer(hub, session_id, connection_id);
                 return Err(ServerError::UnknownLocator);
             }
         }
     }
+}
+
+fn release_writer(hub: &SessionHub, session_id: &str, connection_id: u64) {
+    let _ = hub.with(session_id, |replica| {
+        replica.release_writer(connection_id);
+        Ok(())
+    });
 }
 
 async fn apply_command(

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `finstack-ai-provider-openrouter` — an OpenRouter provider crate speaking the OpenAI-compatible Responses wire protocol — plus a model-catalog fetch helper, `Agent::openrouter` SDK constructor, and Python/WASM binding parity.
+**Goal:** Integrate OpenRouter across modalities: a text provider crate speaking the OpenAI-compatible Responses wire protocol with catalog fetch, SDK constructor, and binding parity (Phase 1, Tasks 1–10); media-generation Toolset crates — OpenRouter's routed endpoints registrable from every linked constructor, plus native OpenAI images/speech/transcription (Phase 2, Tasks 11–13b); and media *input* (vision/audio/file prompts) via a new host-supplied `MediaResolver` runtime contract introduced by ADR and adopted by all four providers — openrouter, openai, anthropic, ollama (Phase 3, Tasks 14–20). Anthropic and Ollama have no upstream media-generation APIs; their agents generate media through the OpenRouter toolset.
 
-**Architecture:** A fourth T1 provider leaf crate under `extensions/providers/`, mirroring `finstack-ai-provider-openai` module-for-module. It reuses the shared `OpenAiResponsesAssembly` and `SseEventParser` from `finstack-ai-runtime::provider_util`, targets `POST {base}/api/v1/responses` (OpenRouter's stateless GA Responses API), and adds two OpenRouter-specific pieces: plain attribution headers (`HTTP-Referer`, `X-Title`) and a `GET /api/v1/models` catalog parser + fetcher.
+**Architecture:** Phase 1 adds a fourth T1 provider leaf under `extensions/providers/`, mirroring `finstack-ai-provider-openai` module-for-module, reusing the shared `OpenAiResponsesAssembly`/`SseEventParser`, targeting `POST {base}/api/v1/responses`, with attribution headers and a `GET /api/v1/models` catalog parser + fetcher. Phase 2 adds `extensions/toolsets/finstack-ai-tools-openrouter-media`, modeled on the E2B sandbox toolset, exposing generation endpoints as bounded agent tools (media generation deliberately does not go through the `Model` port). Phase 3 adds `MediaResolver` to `finstack-ai-runtime::provider_util` (host-supplied object per ADR-048 precedent, not a registered port) so the provider can turn kernel `ContentBlock::Image/Audio/File` blob references into wire `input_image`/`input_audio`/`input_file` items. Phases land in order; each phase is independently shippable.
 
 **Tech Stack:** Rust workspace (edition/lints inherited), `reqwest` 0.13 (workspace-pinned, no new deps), `tokio`, `serde`/`serde_json`, pyo3 binding, wasm-bindgen stub.
 
@@ -1811,4 +1811,955 @@ Expected: PASS. Fix anything it flags before claiming completion (superpowers:ve
 ```bash
 git add docs/site/provider.md extensions/providers/finstack-ai-provider-openrouter/README.md CHANGELOG.md
 git commit -m "Document the OpenRouter provider and catalog helper"
+```
+
+---
+
+## Phase 2 — Media-generation Toolset
+
+### Task 11: `finstack-ai-tools-openrouter-media` crate — config and tool catalog
+
+**Files:**
+- Modify: `Cargo.toml` (workspace root — members + workspace deps)
+- Create: `extensions/toolsets/finstack-ai-tools-openrouter-media/Cargo.toml`
+- Create: `extensions/toolsets/finstack-ai-tools-openrouter-media/src/lib.rs`
+
+**Interfaces:**
+- Consumes: `finstack_ai_runtime::{Toolset, ToolSpec, ToolCallContext, ValidatedToolCall, ToolEventStream, ToolError, verify_authority, ...}` (same import set as `extensions/toolsets/finstack-ai-sandbox-e2b/src/lib.rs:13`).
+- Produces: `pub struct OpenRouterMediaConfig { pub api_key: String, pub endpoint: String, pub referer: Option<String>, pub title: Option<String> }`, `pub enum OpenRouterMediaError { CredentialRequired, EndpointInvalid { reason: &'static str } }`, `pub struct OpenRouterMediaToolset` with `try_new(OpenRouterMediaConfig) -> Result<Self, OpenRouterMediaError>` publishing four `ToolSpec`s. Task 12 adds the `Toolset::call` bodies; Task 13 wires the SDK.
+
+- [ ] **Step 0: Verify the live wire shapes (spec decision 15)**
+
+Before coding, fetch the current OpenRouter API reference pages for `POST /api/v1/images`, `POST /api/v1/videos`, `POST /api/v1/audio/speech`, and `POST /api/v1/audio/transcriptions` (start at `https://openrouter.ai/docs/changelog` and the API-reference index). Record for each: request fields, response fields (URL vs base64 vs job id), and content types. If a shape differs from the DTOs in Task 12, adjust the DTOs and tests to the live docs — the tool *surface* (names, bounded-JSON results, error codes) is fixed by the spec; only the private wire DTOs move.
+
+- [ ] **Step 1: Register the crate in the workspace root**
+
+Add `"extensions/toolsets/finstack-ai-tools-openrouter-media",` to `[workspace] members` (next to the other toolsets) and to `[workspace.dependencies]`:
+
+```toml
+finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
+```
+
+- [ ] **Step 2: Crate manifest**
+
+Copy `extensions/toolsets/finstack-ai-sandbox-e2b/Cargo.toml` verbatim, changing `name` to `finstack-ai-tools-openrouter-media` and `description` to `"OpenRouter media-generation toolset for finstack-ai"` (keep its dependency set — it already carries `finstack-ai-runtime` with `native-tokio`, `reqwest`, `serde`, `serde_json`, `futures-util`, `thiserror`, `tokio`; add a `vendored-tls = ["reqwest/native-tls-vendored"]` feature if E2B's manifest has one, mirroring exactly).
+
+- [ ] **Step 3: Write `src/lib.rs` — constants, config, error, construction**
+
+Model the file on `extensions/toolsets/finstack-ai-sandbox-e2b/src/lib.rs`. Copy these helpers **verbatim** from the E2B file, renaming only the error-code constants they reference: `read_bounded_json` (renamed cap constant), `deadline_elapsed`, `wait_deadline`, `now_unix_ms`, `timeout_error`, `validate_endpoint`, `endpoint_host`, `is_loopback_host`, `tool_error`. Then write the crate-specific parts:
+
+```rust
+//! T1 OpenRouter media-generation Toolset.
+//!
+//! Exposes OpenRouter's image, video, speech, and transcription endpoints as
+//! bounded agent tools. Construction requires an explicit API key and never
+//! reads environment variables. Non-loopback endpoints must be HTTPS. Tool
+//! results are bounded JSON: hosted URLs / job identifiers are preferred and
+//! base64 payloads are returned only when they fit the result cap.
+
+#![warn(missing_docs)]
+
+const DEFAULT_ENDPOINT: &str = "https://openrouter.ai";
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const MAX_RESULT_BYTES: usize = 256 * 1_024;
+
+const IMAGE_TOOL_ID: &str = "finstack.tools.openrouter_generate_image";
+const IMAGE_TOOL_NAME: &str = "openrouter_generate_image";
+const VIDEO_TOOL_ID: &str = "finstack.tools.openrouter_generate_video";
+const VIDEO_TOOL_NAME: &str = "openrouter_generate_video";
+const SPEECH_TOOL_ID: &str = "finstack.tools.openrouter_generate_speech";
+const SPEECH_TOOL_NAME: &str = "openrouter_generate_speech";
+const TRANSCRIBE_TOOL_ID: &str = "finstack.tools.openrouter_transcribe_audio";
+const TRANSCRIBE_TOOL_NAME: &str = "openrouter_transcribe_audio";
+
+/// Stable missing-credential code.
+pub const OPENROUTER_MEDIA_CREDENTIAL_REQUIRED: &str = "openrouter_media_credential_required";
+/// Stable endpoint-configuration code.
+pub const OPENROUTER_MEDIA_ENDPOINT_INVALID: &str = "openrouter_media_endpoint_invalid";
+/// Stable argument-validation code.
+pub const OPENROUTER_MEDIA_INVALID_ARGUMENTS: &str = "openrouter_media_invalid_arguments";
+/// Stable remote-transport code.
+pub const OPENROUTER_MEDIA_TRANSPORT_FAILED: &str = "openrouter_media_transport_failed";
+/// Stable output-limit code.
+pub const OPENROUTER_MEDIA_LIMIT_EXCEEDED: &str = "openrouter_media_limit_exceeded";
+/// Stable cancellation/deadline code.
+pub const OPENROUTER_MEDIA_TIMEOUT: &str = "openrouter_media_timeout";
+
+/// Explicit OpenRouter media route. Never populated from the environment.
+#[derive(Clone)]
+pub struct OpenRouterMediaConfig {
+    /// Explicit API key. Empty values fail closed.
+    pub api_key: String,
+    /// HTTPS endpoint, or loopback HTTP for scripted fixtures. Empty selects
+    /// `https://openrouter.ai`.
+    pub endpoint: String,
+    /// Optional non-secret `HTTP-Referer` attribution header.
+    pub referer: Option<String>,
+    /// Optional non-secret `X-Title` attribution header.
+    pub title: Option<String>,
+}
+```
+
+`Debug` for the config redacts `api_key` exactly like `E2bSandboxConfig`'s impl. `OpenRouterMediaError` mirrors `E2bSandboxError` with the two `OPENROUTER_MEDIA_*` codes. `OpenRouterMediaToolset` mirrors `E2bSandboxToolset` (descriptor name `Arc::from("finstack-openrouter-media")`, fields `tools`, `api_key`, `endpoint`, `referer`, `title`, `client`), and `try_new` builds **four** validated `ToolSpec`s with these exact schemas and metadata (all four: `execution: Sequential`, `side_effect: NonIdempotentWrite`, `retry_safety: AtMostOnce`, `approval: ApprovalRequirement::Policy` with reason `"paid OpenRouter media generation"`, `max_result_bytes: 262_144`, `deferral: Never`):
+
+```rust
+// openrouter_generate_image — "Generate one image via OpenRouter."
+// input:
+br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"},"size":{"type":"string"}},"required":["model","prompt"],"type":"object"}"#
+// output:
+br#"{"additionalProperties":false,"properties":{"b64_json":{"type":"string"},"media_type":{"type":"string"},"url":{"type":"string"}},"required":["media_type"],"type":"object"}"#
+
+// openrouter_generate_video — "Generate one video via OpenRouter; returns a URL or job id."
+// input:
+br#"{"additionalProperties":false,"properties":{"model":{"minLength":1,"type":"string"},"prompt":{"minLength":1,"type":"string"}},"required":["model","prompt"],"type":"object"}"#
+// output:
+br#"{"additionalProperties":false,"properties":{"id":{"type":"string"},"status":{"type":"string"},"url":{"type":"string"}},"required":["status"],"type":"object"}"#
+
+// openrouter_generate_speech — "Synthesize speech from text via OpenRouter."
+// input:
+br#"{"additionalProperties":false,"properties":{"input":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"},"voice":{"type":"string"}},"required":["model","input"],"type":"object"}"#
+// output:
+br#"{"additionalProperties":false,"properties":{"b64_audio":{"type":"string"},"media_type":{"type":"string"}},"required":["b64_audio","media_type"],"type":"object"}"#
+
+// openrouter_transcribe_audio — "Transcribe audio at a URL via OpenRouter."
+// input:
+br#"{"additionalProperties":false,"properties":{"audio_url":{"minLength":1,"type":"string"},"model":{"minLength":1,"type":"string"}},"required":["model","audio_url"],"type":"object"}"#
+// output:
+br#"{"additionalProperties":false,"properties":{"text":{"type":"string"}},"required":["text"],"type":"object"}"#
+```
+
+(Adjust field names here only if Step 0 found the live API differs.)
+
+- [ ] **Step 4: Compile**
+
+Run: `cargo check -p finstack-ai-tools-openrouter-media`
+Expected: clean (the `Toolset` impl arrives in Task 12 — if the trait bound is required to compile exported types, add the impl skeleton returning `OPENROUTER_MEDIA_INVALID_ARGUMENTS` for every call and let Task 12 replace it).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-openrouter-media
+git commit -m "Scaffold the OpenRouter media toolset with its tool catalog"
+```
+
+---
+
+### Task 12: Media toolset call dispatch, wire mapping, and tests
+
+**Files:**
+- Modify: `extensions/toolsets/finstack-ai-tools-openrouter-media/src/lib.rs`
+
+**Interfaces:**
+- Produces: `impl Toolset for OpenRouterMediaToolset` dispatching the four tools to `POST {endpoint}/api/v1/images`, `/api/v1/videos`, `/api/v1/audio/speech`, `/api/v1/audio/transcriptions`.
+
+- [ ] **Step 1: Wire DTOs and dispatch**
+
+Private serde DTOs (adjusted per Task 11 Step 0 if needed):
+
+```rust
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageArguments { model: String, prompt: String, #[serde(default)] size: Option<String> }
+#[derive(Deserialize)]
+struct ImageResponseItem { #[serde(default)] url: Option<String>, #[serde(default)] b64_json: Option<String> }
+#[derive(Deserialize)]
+struct ImageResponse { data: Vec<ImageResponseItem> }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VideoArguments { model: String, prompt: String }
+#[derive(Deserialize)]
+struct VideoResponse { #[serde(default)] id: Option<String>, #[serde(default)] status: Option<String>, #[serde(default)] url: Option<String> }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpeechArguments { model: String, input: String, #[serde(default)] voice: Option<String> }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscribeArguments { model: String, audio_url: String }
+#[derive(Deserialize)]
+struct TranscribeResponse { text: String }
+```
+
+`Toolset::call` mirrors the E2B `call` skeleton (`verify_authority`, identity check against the four tool ids, argument parse with `OPENROUTER_MEDIA_INVALID_ARGUMENTS`), then matches on tool name:
+
+- **image**: POST `{endpoint}/api/v1/images` with `{"model", "prompt", "size"?}` via a `send_json` helper (E2B's `post_json` renamed, with `Authorization: Bearer {api_key}` instead of `X-API-Key`, plus `HTTP-Referer`/`X-Title` when configured). Result mapping: first `data` item; prefer `url` → output `{"url", "media_type": "image/*"}`; else `b64_json` only if the serialized result stays ≤ `MAX_RESULT_BYTES`, otherwise fail with `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
+- **video**: POST `/api/v1/videos`; output `{"id"?, "status": status_or("completed"), "url"?}`; missing all of id/url → `OPENROUTER_MEDIA_TRANSPORT_FAILED`.
+- **speech**: POST `/api/v1/audio/speech`; the response is binary audio — read it with a bounds check against `MAX_RESULT_BYTES` *before* base64-expansion (reject when `bytes.len() * 4 / 3 > MAX_RESULT_BYTES`), base64-encode, output `{"b64_audio", "media_type": response Content-Type or "audio/mpeg"}`. Base64: use the workspace `base64` crate if pinned in the root `Cargo.toml` (`grep -n '^base64' Cargo.toml`); if absent, pin `base64 = "0.22"` there (this is the one allowed new dependency; record it in the Phase 3 ADR's dependency note since `MediaResolver` data-URIs need it too).
+- **transcribe**: POST `/api/v1/audio/transcriptions` with `{"model", "audio_url"}` as JSON (if Step 0 found multipart-only, send `multipart/form-data` with a `url` part instead); output `{"text"}`.
+
+All results go out exactly like E2B's: serialize to JSON, `RawJson::parse`, `ToolResult { output, is_error: false }`, single `ToolStreamItem::Completed` stream.
+
+- [ ] **Step 2: Tests**
+
+Copy the E2B test module's scaffolding verbatim (`tool_context()`, `ValidatedToolCall` builder, `serve_scripted`/`respond` loopback helpers, canary constant `"or-media-secret-canary-046"`) and write, using them:
+
+1. `construction_rejects_a_missing_api_key` — expects `OpenRouterMediaError::CredentialRequired`.
+2. `construction_rejects_plaintext_non_loopback` — canary never in the error text.
+3. `debug_does_not_leak_the_api_key`.
+4. `image_tool_returns_a_hosted_url` — scripted 200 `{"data":[{"url":"https://cdn.example/img.png"}]}`; asserts the request line contains `post /api/v1/images`, the `authorization` header carries the canary, and the result JSON has `url` and no `b64_json`.
+5. `speech_tool_bounds_the_audio_payload` — scripted 200 with a >256 KiB binary body; expects `OPENROUTER_MEDIA_LIMIT_EXCEEDED`.
+6. `transcribe_tool_returns_text` — scripted 200 `{"text":"hello"}`; asserts result `text == "hello"`.
+7. `cancelled_call_does_not_reach_the_fixture` — same shape as E2B's.
+
+- [ ] **Step 3: Run**
+
+Run: `cargo test -p finstack-ai-tools-openrouter-media`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add extensions/toolsets/finstack-ai-tools-openrouter-media Cargo.toml Cargo.lock
+git commit -m "Implement the OpenRouter media generation tools with bounded results"
+```
+
+---
+
+### Task 13: Media toolset SDK and packaging wiring (all four constructors)
+
+**Files:**
+- Modify: `crates/finstack-ai/Cargo.toml` (optional dep on the media toolset under `native-tokio`, mirroring the `finstack-ai-sandbox-e2b` entry)
+- Modify: `crates/finstack-ai/src/agent/linked.rs` (`media_tools` flag + `OpenRouterMediaToolsSpec` on the other constructors)
+- Modify: `tools/wasm_package/check.py` (`FORBIDDEN_WASM` + the E2B-style off-wasm assertion if one exists for toolsets)
+- Modify: `bindings/finstack-ai-python/src/agent.rs`, `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi` (media kwargs on all four factories)
+- Modify: `bindings/finstack-ai-wasm/src/agent/agent.rs` (pass the new fields in the stubs)
+- Modify: `docs/site/provider.md`, `CHANGELOG.md`
+
+- [ ] **Step 0: Shared spec type**
+
+The toolset is provider-agnostic (OpenRouter's generation endpoints route to many vendors' models), so every linked constructor can register it. Add to `linked.rs` next to the spec structs:
+
+```rust
+/// OpenRouter media-toolset registration for any linked constructor.
+///
+/// The toolset always authenticates against OpenRouter, so it carries its
+/// own API key even when the chat model is served by another provider.
+pub struct OpenRouterMediaToolsSpec {
+    /// Explicit OpenRouter API key for the media endpoints.
+    pub api_key: String,
+    /// Optional non-secret `HTTP-Referer` attribution header.
+    pub referer: Option<String>,
+    /// Optional non-secret `X-Title` attribution header.
+    pub title: Option<String>,
+}
+```
+
+Re-export it wherever the other spec types are re-exported (Task 7 Step 6's grep). Add `/// Optional OpenRouter media-toolset registration.` `pub openrouter_media: Option<OpenRouterMediaToolsSpec>,` to `OpenAiAgentSpec`, `AnthropicAgentSpec`, and `OllamaAgentSpec`; every existing construction site (linked tests, python/wasm bindings) gains `openrouter_media: None`. Add a shared helper next to `component()`:
+
+```rust
+#[cfg(feature = "native-tokio")]
+fn register_openrouter_media(
+    ports: &mut LinkedAgentPorts,
+    spec: OpenRouterMediaToolsSpec,
+) -> Result<(), AgentRunError> {
+    use finstack_ai_tools_openrouter_media::{OpenRouterMediaConfig, OpenRouterMediaToolset};
+    let toolset = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
+        api_key: spec.api_key,
+        endpoint: String::new(),
+        referer: spec.referer,
+        title: spec.title,
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    ports
+        .toolsets
+        .push((component("python.toolset.openrouter_media")?, Arc::new(toolset)));
+    Ok(())
+}
+```
+
+and in `openai_inner`, `anthropic_inner`, and `ollama_inner`, before `finish_linked_agent`:
+
+```rust
+    let mut ports = spec.ports;
+    if let Some(media) = spec.openrouter_media {
+        register_openrouter_media(&mut ports, media)?;
+    }
+```
+
+(passing `ports` onward instead of `spec.ports`).
+
+- [ ] **Step 1: OpenRouter spec field and registration**
+
+Add to `OpenRouterAgentSpec` (Task 7): `/// Register the OpenRouter media-generation toolset alongside the model.` `pub media_tools: bool,`. In `openrouter_inner`, before `finish_linked_agent`, reuse the helper — mirror how `e2b_sandbox_inner` pushes its toolset (`linked.rs:587-590`):
+
+```rust
+    let mut ports = spec.ports;
+    if spec.media_tools {
+        register_openrouter_media(
+            &mut ports,
+            OpenRouterMediaToolsSpec {
+                api_key: api_key_for_tools,
+                referer: spec.referer.clone(),
+                title: spec.title.clone(),
+            },
+        )?;
+    }
+```
+
+(`api_key_for_tools`: clone `spec.api_key` before it is consumed by `SecretString::try_new`, only when `spec.media_tools` is true. Pass `ports` instead of `spec.ports` to `finish_linked_agent`.) Every existing construction site of `OpenRouterAgentSpec` (Task 7 tests, Task 8 python method, Task 9 wasm stub) gains `media_tools: false` — the python kwarg surfaces it as `media_tools = false`.
+
+- [ ] **Step 2: Tests**
+
+In `linked.rs` tests, add `openrouter_media_tools_register_the_toolset` (construct with `media_tools: true`) and `openai_agent_registers_the_openrouter_media_toolset` (construct `Agent::openai` with `openrouter_media: Some(OpenRouterMediaToolsSpec { api_key: "sk-or-media-canary".into(), referer: None, title: None })`); both assert construction succeeds without network (if the builder exposes no toolset introspection, asserting successful construction plus `capability_catalog().is_empty()` matches the E2B test's depth). Add `openai_agent_rejects_an_empty_media_api_key` asserting `AGENT_RUN_INVALID_CONFIGURATION` (the toolset's `CredentialRequired` surfaces through the helper). Run `cargo test -p finstack-ai openrouter openai` — PASS.
+
+- [ ] **Step 3: Packaging checks, bindings, and docs**
+
+Python: the `openrouter` factory gains keyword-only `media_tools = False`; the `openai`, `anthropic`, and `ollama` factories gain keyword-only `openrouter_media_api_key = None`, `openrouter_media_referer = None`, `openrouter_media_title = None`, mapped to `Some(OpenRouterMediaToolsSpec { .. })` when the key is set (key `None` + other media kwargs set is a `PyValueError`); mirror the kwargs in the `.pyi` stubs. WASM: the four stubs pass `media_tools: false` / `openrouter_media: None`. Add `"finstack-ai-tools-openrouter-media"` to `FORBIDDEN_WASM` in `tools/wasm_package/check.py`; copy the `e2b_is_not_a_wasm_host_sdk_dependency` guard into the media crate's tests, asserting the media crate stays off the `wasm-host` feature line. Update `docs/site/provider.md` (toolset paragraph) and `CHANGELOG.md`. Run the wasm package check task and the python build/test tasks from `mise.toml` — PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/finstack-ai bindings tools/wasm_package/check.py docs/site/provider.md CHANGELOG.md Cargo.lock
+git commit -m "Wire the OpenRouter media toolset into the SDK and bindings"
+```
+
+---
+
+### Task 13b: Native OpenAI media toolset (`finstack-ai-tools-openai-media`)
+
+**Files:**
+- Modify: `Cargo.toml` (workspace root — members + workspace deps, mirroring Task 11 Step 1 with the `openai-media` names)
+- Create: `extensions/toolsets/finstack-ai-tools-openai-media/Cargo.toml`
+- Create: `extensions/toolsets/finstack-ai-tools-openai-media/src/lib.rs`
+- Modify: `crates/finstack-ai/Cargo.toml`, `crates/finstack-ai/src/agent/linked.rs` (`media_tools` on `OpenAiAgentSpec`)
+- Modify: `tools/wasm_package/check.py` (`FORBIDDEN_WASM`), python/wasm binding factories (`media_tools` kwarg on `openai`), `docs/site/provider.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Produces: `OpenAiMediaConfig { pub api_key: String, pub endpoint: String, pub max_result_bytes: usize }`, `OpenAiMediaToolset::try_new(OpenAiMediaConfig) -> Result<Self, OpenAiMediaError>` publishing `openai_generate_image`, `openai_generate_speech`, `openai_transcribe_audio`; `OpenAiAgentSpec.media_tools: bool`.
+
+- [ ] **Step 0: Verify the live wire shapes**
+
+Fetch the current OpenAI API reference for `POST /v1/images/generations`, `POST /v1/audio/speech`, and `POST /v1/audio/transcriptions` (per the `claude-api`-adjacent rule of never trusting memory for API shapes). Confirm: image response field names (`data[].b64_json` / `data[].url`), whether current image models can return hosted URLs, speech response content type, transcription multipart part names (`file`, `model`), and the current file-size limit (26 MB region). Adjust the DTOs below to what the docs say.
+
+- [ ] **Step 1: Crate**
+
+Build the crate as a structural copy of the OpenRouter media toolset (Task 11 Step 3 / Task 12), with these deltas:
+
+1. Names/constants: `DEFAULT_ENDPOINT = "https://api.openai.com"`; error codes `openai_media_credential_required`, `openai_media_endpoint_invalid`, `openai_media_invalid_arguments`, `openai_media_transport_failed`, `openai_media_limit_exceeded`, `openai_media_timeout`; descriptor name `Arc::from("finstack-openai-media")`; tool ids `finstack.tools.openai_generate_image` / `..._generate_speech` / `..._transcribe_audio`. No referer/title fields (OpenAI has no attribution headers). No video tool.
+2. `OpenAiMediaConfig` carries `max_result_bytes: usize`; `try_new` rejects values of 0 or above `8 * 1_048_576` with `EndpointInvalid { reason: "result cap out of range" }` and defaults `0`-is-not-allowed callers to pass `262_144`. All bounded reads and the base64-expansion checks use this value instead of a crate constant.
+3. **image**: POST `/v1/images/generations` with `{"model", "prompt", "size"?}`; result prefers `url` when present, else `b64_json` within the cap (`openai_media_limit_exceeded` otherwise). Same input/output schemas as `openrouter_generate_image`.
+4. **speech**: POST `/v1/audio/speech` with `{"model", "input", "voice"?}` — identical handling to the OpenRouter speech tool (binary body, cap-checked, base64 out).
+5. **transcribe**: input schema is the same `{"model", "audio_url"}`; the handler first downloads `audio_url` (HTTPS-only — reject `http:` even on loopback for the *download* URL — bounded to the documented OpenAI file limit), then sends `multipart/form-data` with parts `model` and `file` (filename from the URL path, bytes from the download) via `reqwest::multipart`; response `{"text"}` maps to the same output schema.
+6. Auth header: `Authorization: Bearer {api_key}` on every call.
+
+Tests mirror Task 12 Step 2 (canary redaction, plaintext rejection, scripted image/speech/transcribe fixtures — the transcribe fixture serves both the audio download and the multipart upload, asserting the upload contains the downloaded bytes and the bearer canary, and that an `http://` audio_url fails closed with `openai_media_invalid_arguments`).
+
+Run: `cargo test -p finstack-ai-tools-openai-media` — PASS.
+
+- [ ] **Step 2: SDK + packaging wiring**
+
+`OpenAiAgentSpec` gains `/// Register the native OpenAI media toolset alongside the model.` `pub media_tools: bool,` (default `false` at every construction site). In `openai_inner`, before `finish_linked_agent` (composing with the Task 13 `openrouter_media` block — both may fire):
+
+```rust
+    if spec.media_tools {
+        use finstack_ai_tools_openai_media::{OpenAiMediaConfig, OpenAiMediaToolset};
+        let toolset = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
+            api_key: api_key_for_tools,
+            endpoint: String::new(),
+            max_result_bytes: 262_144,
+        })
+        .map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?;
+        ports
+            .toolsets
+            .push((component("python.toolset.openai_media")?, Arc::new(toolset)));
+    }
+```
+
+(`api_key_for_tools` cloned from `spec.api_key` before consumption, as in Task 13.) Optional dep in `crates/finstack-ai/Cargo.toml` under `native-tokio`; `"finstack-ai-tools-openai-media"` into `FORBIDDEN_WASM` plus the off-wasm-feature guard test; python `openai` factory + `.pyi` gain `media_tools = False`; wasm `openai` stub passes `media_tools: false`. Linked test `openai_media_tools_register_the_toolset` (constructs with both `media_tools: true` and `openrouter_media: Some(..)`, asserting success without network). Update `docs/site/provider.md` and `CHANGELOG.md`.
+
+Run: `cargo test -p finstack-ai openai` and the wasm/python check tasks — PASS.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Cargo.toml Cargo.lock extensions/toolsets/finstack-ai-tools-openai-media crates/finstack-ai bindings tools/wasm_package/check.py docs/site/provider.md CHANGELOG.md
+git commit -m "Add the native OpenAI media toolset and SDK wiring"
+```
+
+---
+
+## Phase 3 — Media input via MediaResolver
+
+### Task 14: ADR for the MediaResolver contract
+
+**Files:**
+- Create: `docs/implementation/adrs/ADR-<next>-media-resolver.md` (find the next free number: `ls docs/implementation/adrs/ | sort | tail -3`)
+
+- [ ] **Step 1: Write the ADR**
+
+Follow the structure of `docs/implementation/adrs/ADR-048-shared-authority-and-provider-secret.md` (context / decision / consequences). Content to cover, in the repo's ADR voice:
+
+- **Context:** kernel `ContentBlock::Image/Audio/File(MediaRef)` and `InputCapabilities.{images,audio,files}` exist, but `BlobRef` is labels-only (`crates/finstack-ai-kernel/src/content/blob.rs:37` — "The kernel does not fetch the bytes") and no runtime machinery can deliver media bytes or URLs to a provider; all in-tree providers reject media blocks.
+- **Decision:** add a host-supplied `MediaResolver` object to `finstack-ai-runtime` `ports/model/provider_util/` — the ADR-048 pattern (like `CredentialStore`), explicitly **not** a seventh registered port. Providers accept `Arc<dyn MediaResolver>` via config; resolution happens inside `Model::request` before wire encoding; draft translation stays synchronous over a pre-resolved map. Missing resolver + media content fails closed with the provider's `*_request_invalid` code. Resolved byte payloads are bounded by the provider's stream limits. The kernel stays untouched.
+- **Consequences:** any provider can adopt media input without new ports; hosts own blob storage and lifetime; wasm-host is unaffected (resolution is native-only alongside the providers); one new workspace dependency (`base64`, for data-URI/`input_audio` encoding) if not already pinned.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add docs/implementation/adrs
+git commit -m "Add the media-resolver ADR for provider media input"
+```
+
+---
+
+### Task 15: `MediaResolver` in the runtime
+
+**Files:**
+- Create: `crates/finstack-ai-runtime/src/ports/model/provider_util/media.rs`
+- Modify: `crates/finstack-ai-runtime/src/ports/model/provider_util/mod.rs` (declare + re-export)
+- Modify: `crates/finstack-ai-runtime/src/ports/model/mod.rs` (public re-export, next to `CredentialStore`)
+
+**Interfaces:**
+- Produces: `pub trait MediaResolver: PortObject { fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>>; }`, `pub enum ResolvedMedia { Url(Arc<str>), Bytes { media_type: Arc<str>, bytes: Arc<[u8]> } }`, `pub struct MediaResolveError { pub kind: MediaResolveKind, pub message: &'static str }`, `pub enum MediaResolveKind { NotFound, Unavailable, Limit }`.
+
+- [ ] **Step 1: Write `media.rs`**
+
+```rust
+//! Host-supplied media-blob resolution for provider leaves (see the
+//! media-resolver ADR). Not a registered port: hosts hand resolvers to
+//! provider configs, mirroring [`super::credentials::CredentialStore`].
+
+use std::sync::Arc;
+
+use finstack_ai_kernel::BlobRef;
+
+use crate::{PortFuture, PortObject};
+
+/// Resolve one committed blob reference to provider-usable media.
+pub trait MediaResolver: PortObject {
+    /// Resolve `blob` to a URL or bounded bytes.
+    fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>>;
+}
+
+/// One resolved media payload.
+#[derive(Debug, Clone)]
+pub enum ResolvedMedia {
+    /// Provider-fetchable HTTPS URL.
+    Url(Arc<str>),
+    /// Inline bytes with their media type.
+    Bytes {
+        /// Media-type label such as `image/png`.
+        media_type: Arc<str>,
+        /// Raw payload bytes.
+        bytes: Arc<[u8]>,
+    },
+}
+
+/// Protocol-neutral resolution failure; provider leaves map it onto their
+/// own stable error codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaResolveError {
+    /// Failure class.
+    pub kind: MediaResolveKind,
+    /// Stable non-secret message.
+    pub message: &'static str,
+}
+
+/// Resolution failure class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaResolveKind {
+    /// The blob id is unknown to the host.
+    NotFound,
+    /// The host store is temporarily unavailable.
+    Unavailable,
+    /// The payload exceeds a host-side limit.
+    Limit,
+}
+```
+
+(If `PortObject` lives elsewhere than the crate root, mirror the import used by `port.rs`.)
+
+- [ ] **Step 2: Re-export**
+
+Declare `mod media;` in `provider_util/mod.rs` and re-export `MediaResolver, MediaResolveError, MediaResolveKind, ResolvedMedia` through the same chain that exports `CredentialStore` (check `ports/model/mod.rs:49-78`).
+
+- [ ] **Step 3: Test**
+
+Add to `media.rs` an inline test with a fixture resolver proving object-safety and both variants:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct FixtureResolver;
+
+    impl MediaResolver for FixtureResolver {
+        fn resolve(
+            &self,
+            blob: &BlobRef,
+        ) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            let id = blob.id().to_owned();
+            Box::pin(async move {
+                if id == "missing" {
+                    return Err(MediaResolveError {
+                        kind: MediaResolveKind::NotFound,
+                        message: "unknown blob",
+                    });
+                }
+                Ok(ResolvedMedia::Url(Arc::from("https://example.test/a.png")))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn fixture_resolver_round_trips() {
+        let resolver: Arc<dyn MediaResolver> = Arc::new(FixtureResolver);
+        let blob = BlobRef::try_new("blob-1", "image/png", 8, None, None).expect("blob");
+        let resolved = resolver.resolve(&blob).await.expect("resolved");
+        assert!(matches!(resolved, ResolvedMedia::Url(_)));
+        let missing = BlobRef::try_new("missing", "image/png", 8, None, None).expect("blob");
+        let error = resolver.resolve(&missing).await.expect_err("missing");
+        assert_eq!(error.kind, MediaResolveKind::NotFound);
+    }
+}
+```
+
+(If `BlobRef::id()` is not the accessor name, check `crates/finstack-ai-kernel/src/content/blob.rs` for the actual getter and use it consistently here and in Task 16. If `PortObject` requires `Debug + Send + Sync` only, the fixture satisfies it; otherwise mirror what `ScriptedModel` implements.)
+
+Run: `cargo test -p finstack-ai-runtime media` — PASS. Also run the ABI leaf check from `mise.toml` (the `fixtures/ci/model-port-leaf` compile proof) to confirm the new exports don't break `default-features = false` builds.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add crates/finstack-ai-runtime
+git commit -m "Add the host-supplied MediaResolver contract to provider_util"
+```
+
+---
+
+### Task 16: OpenRouter media input
+
+**Files:**
+- Modify: `extensions/providers/finstack-ai-provider-openrouter/src/config.rs` (resolver + input toggles)
+- Modify: `extensions/providers/finstack-ai-provider-openrouter/src/request.rs` (media mapping)
+- Modify: `extensions/providers/finstack-ai-provider-openrouter/src/provider.rs` (async resolution)
+- Modify: `extensions/providers/finstack-ai-provider-openrouter/src/catalog.rs` (input modalities)
+- Modify: `extensions/providers/finstack-ai-provider-openrouter/Cargo.toml` (+ `base64 = { workspace = true }`)
+
+**Interfaces:**
+- Consumes: `MediaResolver`/`ResolvedMedia` (Task 15).
+- Produces: `OpenRouterConfig::with_media_resolver(Arc<dyn MediaResolver>)`; `OpenRouterModelConfig::{with_input_images,with_input_audio,with_input_files}(bool)`; `ResponsesRequest::try_from_draft` gains a `resolved: &BTreeMap<Arc<str>, ResolvedMedia>` parameter (empty map = today's behavior).
+
+- [ ] **Step 1: Config**
+
+`OpenRouterConfig` gains `media_resolver: Option<Arc<dyn MediaResolver>>` (skipped in `Debug` via a `"[resolver]"`/`None` marker) and:
+
+```rust
+    /// Attach a host-supplied media resolver enabling image/audio/file input.
+    #[must_use]
+    pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
+        self.media_resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
+    }
+```
+
+`OpenRouterModelConfig` gains three `bool` fields `input_images`, `input_audio`, `input_files` (default `false`), three `with_*` const builders mirroring `with_reasoning`, and `capabilities()` maps them onto `InputCapabilities { images: self.input_images, audio: self.input_audio, files: self.input_files, .. }` (and `apply_capabilities` copies them back from `update.input`).
+
+- [ ] **Step 2: Request mapping**
+
+In `request.rs`, `try_from_draft` and `map_input`/`map_conversation_message` thread `resolved: &BTreeMap<Arc<str>, ResolvedMedia>` through. The `MessageRole::User` arm changes from single-`input_text` rendering to:
+
+```rust
+fn map_user_content(
+    content: &[ContentBlock],
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<Vec<Value>, ModelError> {
+    let mut parts = Vec::new();
+    let mut text = String::new();
+    let flush = |parts: &mut Vec<Value>, text: &mut String| {
+        if !text.is_empty() {
+            parts.push(json!({ "type": "input_text", "text": text.as_str() }));
+            text.clear();
+        }
+    };
+    for block in content {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::Image(media) => {
+                flush(&mut parts, &mut text);
+                parts.push(json!({
+                    "type": "input_image",
+                    "image_url": media_reference(media, resolved)?
+                }));
+            }
+            ContentBlock::File(media) => {
+                flush(&mut parts, &mut text);
+                parts.push(json!({
+                    "type": "input_file",
+                    "file_url": media_reference(media, resolved)?
+                }));
+            }
+            ContentBlock::Audio(media) => {
+                flush(&mut parts, &mut text);
+                let (data, format) = media_reference_audio(media, resolved)?;
+                parts.push(json!({
+                    "type": "input_audio",
+                    "input_audio": { "data": data, "format": format }
+                }));
+            }
+            _ => {
+                return Err(request_error(
+                    "message contains unsupported provider content",
+                ));
+            }
+        }
+    }
+    flush(&mut parts, &mut text);
+    Ok(parts)
+}
+```
+
+with helpers:
+
+```rust
+fn media_reference(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<String, ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Url(url)) => Ok(url.to_string()),
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => Ok(format!(
+            "data:{media_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
+        )),
+    }
+}
+
+fn media_reference_audio(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<(String, String), ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => {
+            let format = media_type
+                .rsplit('/')
+                .next()
+                .unwrap_or("mp3")
+                .to_owned();
+            Ok((
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+                format,
+            ))
+        }
+        Some(ResolvedMedia::Url(_)) => Err(request_error(
+            "audio input requires resolved bytes, not a URL",
+        )),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
+        )),
+    }
+}
+```
+
+The user-message arm of `map_conversation_message` becomes `"content": map_user_content(message.content(), resolved)?`. Assistant/tool/instruction paths keep rejecting media (they still call `render_text`). Verify the `input_image`/`input_file`/`input_audio` field names against the OpenRouter Responses reference before finalizing (spec decision 18). Add `base64 = { workspace = true }` to the crate manifest (workspace-pinned per Task 12).
+
+- [ ] **Step 3: Async resolution in the provider**
+
+In `provider.rs::request`, before building the wire request inside the async block:
+
+```rust
+            let resolved = resolve_draft_media(resolver.as_ref(), &request.draft).await?;
+            let wire = ResponsesRequest::try_from_draft(
+                &request.draft,
+                &model,
+                request.continuation_state.as_ref(),
+                &resolved,
+            )?;
+```
+
+where `resolver` is `self.config.media_resolver()` captured before the async block, and:
+
+```rust
+async fn resolve_draft_media(
+    resolver: Option<&Arc<dyn MediaResolver>>,
+    draft: &ModelRequestDraft,
+) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
+    let mut resolved = BTreeMap::new();
+    for message in draft.messages.iter() {
+        for block in message.content() {
+            let media = match block {
+                ContentBlock::Image(media)
+                | ContentBlock::Audio(media)
+                | ContentBlock::File(media) => media,
+                _ => continue,
+            };
+            let id: Arc<str> = Arc::from(media.blob().id());
+            if resolved.contains_key(&id) {
+                continue;
+            }
+            let Some(resolver) = resolver else {
+                return Err(crate::error::request_error(
+                    "media content requires a configured media resolver",
+                ));
+            };
+            let payload = resolver.resolve(media.blob()).await.map_err(map_resolve)?;
+            if let ResolvedMedia::Bytes { bytes, .. } = &payload
+                && bytes.len() > MAX_INLINE_MEDIA_BYTES
+            {
+                return Err(crate::error::stream_limit_error());
+            }
+            resolved.insert(id, payload);
+        }
+    }
+    Ok(resolved)
+}
+
+const MAX_INLINE_MEDIA_BYTES: usize = 8 * 1_048_576;
+
+fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
+    use finstack_ai_runtime::MediaResolveKind;
+    match error.kind {
+        MediaResolveKind::NotFound => crate::error::request_error(error.message),
+        MediaResolveKind::Unavailable => crate::error::error(
+            crate::error::TRANSPORT_ERROR,
+            finstack_ai_runtime::ErrorCategory::Model,
+            true,
+            "OpenRouter media resolution is unavailable",
+        ),
+        MediaResolveKind::Limit => crate::error::stream_limit_error(),
+    }
+}
+```
+
+All other `try_from_draft` call sites (Task 2 tests, conformance) pass `&BTreeMap::new()`.
+
+- [ ] **Step 4: Catalog modalities**
+
+In `catalog.rs`, add to `CatalogModel`:
+
+```rust
+    #[serde(default)]
+    architecture: Option<Architecture>,
+```
+
+```rust
+#[derive(Deserialize)]
+struct Architecture {
+    #[serde(default)]
+    input_modalities: Vec<String>,
+}
+```
+
+and after the existing builders:
+
+```rust
+        let modality = |name: &str| {
+            model
+                .architecture
+                .as_ref()
+                .is_some_and(|arch| arch.input_modalities.iter().any(|m| m == name))
+        };
+        let config = config
+            .with_input_images(modality("image"))
+            .with_input_audio(modality("audio"))
+            .with_input_files(modality("file"));
+```
+
+Extend the Task 5 catalog fixture's first model with `"architecture": {"input_modalities": ["text", "image"]}` and assert `configs[0].input_images && !configs[0].input_audio`.
+
+- [ ] **Step 5: Tests**
+
+1. `request.rs`: `image_blocks_map_to_input_image_items` — a user message with `ContentBlock::Image(MediaRef::new(BlobRef::try_new("blob-1", "image/png", 4, None, None)?))`, resolved map with `Url("https://cdn.example/a.png")`; assert `value["input"][0]["content"][1]["type"] == "input_image"` and `image_url` matches. `media_without_resolver_fails_closed` — same draft, empty map, expect `REQUEST_INVALID`. `audio_url_resolution_is_rejected` — Audio block + `Url` resolution, expect `REQUEST_INVALID`.
+2. `provider.rs`: `oversized_resolved_media_fails_closed` — fixture resolver returning 9 MiB of bytes, expect `STREAM_LIMIT_EXCEEDED` from `request()` before any HTTP.
+3. `config.rs`: extend the canary test to confirm `Debug` with a resolver attached still redacts and does not print resolver internals.
+
+Run: `cargo test -p finstack-ai-provider-openrouter` — PASS (including all pre-existing tests updated for the new parameter).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add extensions/providers/finstack-ai-provider-openrouter Cargo.toml Cargo.lock
+git commit -m "Support image, audio, and file input through the OpenRouter provider"
+```
+
+---
+
+### Task 17: OpenAI provider media input
+
+**Files:**
+- Modify: `extensions/providers/finstack-ai-provider-openai/src/config.rs`
+- Modify: `extensions/providers/finstack-ai-provider-openai/src/request.rs`
+- Modify: `extensions/providers/finstack-ai-provider-openai/src/provider.rs`
+- Modify: `extensions/providers/finstack-ai-provider-openai/Cargo.toml` (+ `base64 = { workspace = true }`)
+
+**Interfaces:**
+- Consumes: `MediaResolver`/`ResolvedMedia` (Task 15).
+- Produces: `OpenAiConfig::with_media_resolver(Arc<dyn MediaResolver>)`, `OpenAiModelConfig::{with_input_images,with_input_audio,with_input_files}(bool)`; `ResponsesRequest::try_from_draft` gains the `resolved` map parameter.
+
+- [ ] **Step 1: Port the OpenRouter changes**
+
+The OpenAI provider speaks the same Responses wire protocol, so this task is a mechanical port of Task 16 Steps 1–3 onto the OpenAI crate — apply the same edits with the OpenAI type names (`OpenAiConfig`, `OpenAiModelConfig`) and error helpers (`crate::error::request_error` → `openai_request_invalid`, `crate::error::stream_limit_error` → `openai_stream_limit_exceeded`, `TRANSPORT_ERROR` → `openai_transport_error`):
+
+1. `config.rs`: `media_resolver: Option<Arc<dyn MediaResolver>>` + `with_media_resolver` + crate-internal getter (identical code to Task 16 Step 1); `OpenAiModelConfig` gains the three input-toggle fields/builders and `capabilities()`/`apply_capabilities` map them onto `InputCapabilities`.
+2. `request.rs`: the same `map_user_content`, `media_reference`, and `media_reference_audio` functions (identical code to Task 16 Step 2 — the `input_image`/`input_file`/`input_audio` shapes are OpenAI's own); user-message mapping switches to `map_user_content`; all other roles keep rejecting media.
+3. `provider.rs`: the same `resolve_draft_media`, `MAX_INLINE_MEDIA_BYTES`, and `map_resolve` (identical code to Task 16 Step 3 with OpenAI error constructors); `request()` resolves before `try_from_draft` and passes the map. Existing call sites pass `&BTreeMap::new()`.
+
+There is no catalog module in the OpenAI crate — the input toggles are host-set only (or via `refresh_model_metadata`, which now round-trips them through `apply_capabilities`).
+
+- [ ] **Step 2: Tests**
+
+Port the Task 16 Step 5 request/provider/config tests with OpenAI fixtures and error codes (`openai_request_invalid`, `openai_stream_limit_exceeded`). Add one refresh test: `refresh_model_metadata` with an update whose `input.images = true` flips the advertised capability.
+
+- [ ] **Step 3: Run and commit**
+
+Run: `cargo test -p finstack-ai-provider-openai`
+Expected: PASS.
+
+```bash
+git add extensions/providers/finstack-ai-provider-openai Cargo.lock
+git commit -m "Support image, audio, and file input through the OpenAI provider"
+```
+
+---
+
+### Task 18: Anthropic provider media input
+
+**Files:**
+- Modify: `extensions/providers/finstack-ai-provider-anthropic/src/config.rs`
+- Modify: `extensions/providers/finstack-ai-provider-anthropic/src/request.rs`
+- Modify: `extensions/providers/finstack-ai-provider-anthropic/src/provider.rs`
+- Modify: `extensions/providers/finstack-ai-provider-anthropic/Cargo.toml` (+ `base64 = { workspace = true }`)
+
+**Interfaces:**
+- Produces: `AnthropicConfig::with_media_resolver(...)`, `AnthropicModelConfig::{with_input_images,with_input_files}(bool)` — **no audio toggle**: the Anthropic Messages API has no audio input; `Audio` blocks keep failing closed with `anthropic_request_invalid`.
+
+- [ ] **Step 1: Config and resolution**
+
+`config.rs` and `provider.rs` get the same resolver plumbing as Task 16 Steps 1 and 3 with Anthropic names and error codes (`anthropic_request_invalid`, `anthropic_stream_limit_exceeded`, `anthropic_transport_error`). `AnthropicModelConfig` gains only `input_images` and `input_files` toggles (`InputCapabilities.audio` stays `false`).
+
+- [ ] **Step 2: Messages wire mapping**
+
+Locate the user-content mapping in the Anthropic crate's `request.rs` (the function that renders `MessageRole::User` content into Messages `content` arrays — find it with `grep -n "fn map_\|MessageRole::User" extensions/providers/finstack-ai-provider-anthropic/src/request.rs`). Extend it so `Image`/`File` blocks become Messages source blocks; `Audio` (and any other block) keeps the existing rejection:
+
+```rust
+// ContentBlock::Image(media) =>
+json!({
+    "type": "image",
+    "source": media_source(media, resolved)?
+})
+// ContentBlock::File(media) =>
+json!({
+    "type": "document",
+    "source": media_source(media, resolved)?
+})
+```
+
+```rust
+fn media_source(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<Value, ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Url(url)) => Ok(json!({ "type": "url", "url": url.as_ref() })),
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => Ok(json!({
+            "type": "base64",
+            "media_type": media_type.as_ref(),
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes)
+        })),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
+        )),
+    }
+}
+```
+
+(Verify the `url` source type against the current Anthropic Messages reference during implementation; if URL sources are unsupported for `document`, reject `Url` resolutions for `File` blocks with `anthropic_request_invalid`.)
+
+- [ ] **Step 3: Tests, run, commit**
+
+Tests mirror Task 16 Step 5 plus `audio_blocks_stay_rejected` (a user message with an `Audio` block and a resolver that would succeed → `anthropic_request_invalid`). Run `cargo test -p finstack-ai-provider-anthropic` — PASS. Also re-run the cross-provider parity suite `cargo test -p finstack-ai-provider-anthropic --test capability_catalog` and update its expected catalog string if the new input toggles change it.
+
+```bash
+git add extensions/providers/finstack-ai-provider-anthropic Cargo.lock
+git commit -m "Support image and document input through the Anthropic provider"
+```
+
+---
+
+### Task 19: Ollama provider image input
+
+**Files:**
+- Modify: `extensions/providers/finstack-ai-provider-ollama/src/config.rs`
+- Modify: `extensions/providers/finstack-ai-provider-ollama/src/request.rs`
+- Modify: `extensions/providers/finstack-ai-provider-ollama/src/provider.rs`
+- Modify: `extensions/providers/finstack-ai-provider-ollama/Cargo.toml` (+ `base64 = { workspace = true }`)
+
+**Interfaces:**
+- Produces: `OllamaConfig::with_media_resolver(...)`, `OllamaModelConfig::with_input_images(bool)`. **Images only, bytes only**: Ollama's `/api/chat` takes per-message `images: [<base64>, …]` — no URLs, no files, no audio.
+
+- [ ] **Step 1: Config and resolution**
+
+Same resolver plumbing as Task 16 Steps 1 and 3 with Ollama names/codes (`ollama_request_invalid` etc. — read the actual constants in `extensions/providers/finstack-ai-provider-ollama/src/error.rs` and use them). `OllamaModelConfig` gains only `input_images`.
+
+- [ ] **Step 2: Chat wire mapping**
+
+In the Ollama `request.rs`, user-message mapping collects `Image` blocks into the message's `images` array; `File`/`Audio` blocks keep failing closed:
+
+```rust
+// while walking user content blocks:
+ContentBlock::Image(media) => match resolved.get(media.blob().id()) {
+    Some(ResolvedMedia::Bytes { bytes, .. }) => {
+        images.push(base64::engine::general_purpose::STANDARD.encode(bytes));
+    }
+    Some(ResolvedMedia::Url(_)) => {
+        return Err(request_error(
+            "ollama image input requires resolved bytes, not a URL",
+        ));
+    }
+    None => {
+        return Err(request_error(
+            "media content requires a configured media resolver",
+        ));
+    }
+},
+```
+
+and the wire message gains `#[serde(skip_serializing_if = "Vec::is_empty")] images: Vec<String>`.
+
+- [ ] **Step 3: Tests, run, commit**
+
+Tests: `image_bytes_map_to_the_images_array`, `image_url_resolution_is_rejected`, `file_and_audio_blocks_stay_rejected`, plus the oversized-media provider test. Run `cargo test -p finstack-ai-provider-ollama` — PASS.
+
+```bash
+git add extensions/providers/finstack-ai-provider-ollama Cargo.lock
+git commit -m "Support base64 image input through the Ollama provider"
+```
+
+---
+
+### Task 20: Phase 2+3 docs and full CI
+
+**Files:**
+- Modify: `docs/site/provider.md`, `extensions/providers/finstack-ai-provider-openrouter/README.md`, `CHANGELOG.md`
+
+- [ ] **Step 1: Docs**
+
+`provider.md`: document `with_media_resolver` + the input-capability toggles across all four providers (include the spec's per-provider modality matrix — openrouter/openai: images+files+audio; anthropic: images+documents, no audio; ollama: base64 images only), and the media toolset's four tools with the note that it registers with any linked constructor. README: add a "Media input" section showing `with_media_resolver` and noting the modality flags come from the catalog fetch; add a "Media generation" pointer to the toolset crate. CHANGELOG: one entry for the media toolset, one for `MediaResolver` + media input across the four providers (reference the ADR number).
+
+- [ ] **Step 2: Full verification**
+
+Run: `mise run ci-all`
+Expected: PASS. Fix anything flagged before claiming completion.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add docs CHANGELOG.md extensions/providers/finstack-ai-provider-openrouter/README.md
+git commit -m "Document OpenRouter media generation and media input"
 ```

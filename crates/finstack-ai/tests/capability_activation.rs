@@ -245,7 +245,7 @@ async fn second_compaction_owner_in_an_inactive_capability_fails_resolution() {
             component("test.middleware.base-compactor"),
             compactor("test.middleware.base-compactor"),
         )
-        .install_middleware(
+        .capability_middleware(
             component("test.middleware.inactive-compactor"),
             compactor("test.middleware.inactive-compactor"),
         )
@@ -281,7 +281,7 @@ async fn resolved_agent_lock_covers_inactive_capabilities() {
             component("test.middleware.base"),
             standard_middleware("test.middleware.base"),
         )
-        .install_middleware(
+        .capability_middleware(
             research.clone(),
             standard_middleware("test.middleware.research"),
         )
@@ -331,7 +331,7 @@ async fn untrusted_capability_cannot_set_trusted_application_instructions() {
         ))],
     ));
     let error = base_builder(model)
-        .install_context_provider(component("test.context.untrusted"), provider)
+        .capability_context_provider(component("test.context.untrusted"), provider)
         .capability(capability(
             "test.capability.research",
             "Research notes",
@@ -390,7 +390,7 @@ async fn activating_a_model_capability_commits_before_tools_appear() {
     let agent = base_builder(Arc::clone(&model) as Arc<dyn Model>)
         .capability_activation_host(Arc::clone(&host))
         .toolset(component("test.tools.skills"), skills)
-        .install_toolset(component("test.tools.calculator"), calculator)
+        .capability_toolset(component("test.tools.calculator"), calculator)
         .capability(capability(
             "test.capability.research",
             "Research notes",

@@ -134,7 +134,7 @@ where
             other => {
                 return Err(unavailable(format!(
                     "remote child open returned unexpected {}",
-                    post_auth_kind(&other)
+                    other.kind()
                 )));
             }
         }
@@ -159,7 +159,7 @@ where
             other => {
                 return Err(unavailable(format!(
                     "remote child command returned unexpected {}",
-                    post_auth_kind(&other)
+                    other.kind()
                 )));
             }
         }
@@ -239,20 +239,4 @@ async fn write_post_auth<S: AsyncWrite + Unpin>(
     let payload = encode_envelope(PayloadFamily::Remote, PROTOCOL_VERSION_V1, body)
         .map_err(|error| unavailable(error.to_string()))?;
     write_frame(stream, &payload, POST_AUTH_FRAME_MAX_BYTES).await
-}
-
-fn post_auth_kind(message: &RemotePostAuth) -> &'static str {
-    match message {
-        RemotePostAuth::OpenSession { .. } => "open_session",
-        RemotePostAuth::Snapshot { .. } => "snapshot",
-        RemotePostAuth::NoSnapshot { .. } => "no_snapshot",
-        RemotePostAuth::DurableTail { .. } => "durable_tail",
-        RemotePostAuth::SyncBarrier { .. } => "sync_barrier",
-        RemotePostAuth::EventBatch { .. } => "event_batch",
-        RemotePostAuth::Command { .. } => "command",
-        RemotePostAuth::CommandResult { .. } => "command_result",
-        RemotePostAuth::Grant { .. } => "grant",
-        RemotePostAuth::Ack { .. } => "ack",
-        RemotePostAuth::Close { .. } => "close",
-    }
 }

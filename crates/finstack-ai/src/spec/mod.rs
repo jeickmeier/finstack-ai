@@ -369,7 +369,8 @@ impl<'de> Deserialize<'de> for AgentSpec {
 
 /// Incremental Rust builder that produces the same immutable [`AgentSpec`] as JSON.
 ///
-/// Prefer [`AgentSpec::builder`] for spec data. Prefer [`crate::Agent::builder`]
+/// This builder never constructs a live [`crate::Agent`]. Prefer
+/// [`AgentSpec::builder`] for spec data. Prefer [`crate::Agent::builder`]
 /// ([`crate::NativeAgentBuilder`]) when composing ready native port handles.
 #[derive(Debug, Clone)]
 pub struct AgentBuilder {
@@ -539,35 +540,25 @@ pub enum AgentSpecError {
 }
 
 fn validate_instruction(text: &str) -> Result<(), AgentSpecError> {
-    if text.is_empty() {
-        return Err(AgentSpecError::InvalidInstruction { reason: "empty" });
-    }
-    if text.as_bytes().contains(&0) {
-        return Err(AgentSpecError::InvalidInstruction {
-            reason: "contains_nul",
-        });
-    }
-    if text.len() > MAX_TEXT_BYTES {
-        return Err(AgentSpecError::InvalidInstruction {
-            reason: "too_large",
-        });
-    }
-    Ok(())
+    validate_bounded_text(text, |reason| AgentSpecError::InvalidInstruction { reason })
 }
 
 fn validate_description(text: &str) -> Result<(), AgentSpecError> {
+    validate_bounded_text(text, |reason| AgentSpecError::InvalidDescription { reason })
+}
+
+fn validate_bounded_text(
+    text: &str,
+    invalid: impl Fn(&'static str) -> AgentSpecError,
+) -> Result<(), AgentSpecError> {
     if text.is_empty() {
-        return Err(AgentSpecError::InvalidDescription { reason: "empty" });
+        return Err(invalid("empty"));
     }
     if text.as_bytes().contains(&0) {
-        return Err(AgentSpecError::InvalidDescription {
-            reason: "contains_nul",
-        });
+        return Err(invalid("contains_nul"));
     }
     if text.len() > MAX_TEXT_BYTES {
-        return Err(AgentSpecError::InvalidDescription {
-            reason: "too_large",
-        });
+        return Err(invalid("too_large"));
     }
     Ok(())
 }

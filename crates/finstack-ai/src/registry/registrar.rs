@@ -180,7 +180,8 @@ impl Registrar {
     ///
     /// Returns a source-aware registration error for invalid, duplicate, or
     /// over-limit metadata.
-    pub fn model_factory(
+    #[cfg(test)]
+    pub(crate) fn model_factory(
         &mut self,
         metadata: RegistrationMetadata,
         factory: Arc<dyn ComponentFactory<dyn Model>>,
@@ -216,25 +217,6 @@ impl Registrar {
         })
     }
 
-    /// Register one `Toolset` factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a source-aware registration error for invalid, duplicate, or
-    /// over-limit metadata.
-    pub fn toolset_factory(
-        &mut self,
-        metadata: RegistrationMetadata,
-        factory: Arc<dyn ComponentFactory<dyn Toolset>>,
-    ) -> Result<(), RegistrationError> {
-        self.insert(metadata, ComponentKind::Toolset, |descriptor| {
-            RegisteredEntry::Toolset(TypedRegistration {
-                descriptor,
-                slot: RegistrationSlot::Factory(factory),
-            })
-        })
-    }
-
     /// Register one ready `ContextProvider` handle.
     ///
     /// # Errors
@@ -254,25 +236,6 @@ impl Registrar {
                     factory_configuration: None,
                     model_warmed: false,
                 },
-            })
-        })
-    }
-
-    /// Register one `ContextProvider` factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a source-aware registration error for invalid, duplicate, or
-    /// over-limit metadata.
-    pub fn context_provider_factory(
-        &mut self,
-        metadata: RegistrationMetadata,
-        factory: Arc<dyn ComponentFactory<dyn ContextProvider>>,
-    ) -> Result<(), RegistrationError> {
-        self.insert(metadata, ComponentKind::ContextProvider, |descriptor| {
-            RegisteredEntry::ContextProvider(TypedRegistration {
-                descriptor,
-                slot: RegistrationSlot::Factory(factory),
             })
         })
     }
@@ -300,25 +263,6 @@ impl Registrar {
         })
     }
 
-    /// Register one `Middleware` factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a source-aware registration error for invalid, duplicate, or
-    /// over-limit metadata.
-    pub fn middleware_factory(
-        &mut self,
-        metadata: RegistrationMetadata,
-        factory: Arc<dyn ComponentFactory<dyn Middleware>>,
-    ) -> Result<(), RegistrationError> {
-        self.insert(metadata, ComponentKind::Middleware, |descriptor| {
-            RegisteredEntry::Middleware(TypedRegistration {
-                descriptor,
-                slot: RegistrationSlot::Factory(factory),
-            })
-        })
-    }
-
     /// Register one ready `JournalStore` handle.
     ///
     /// # Errors
@@ -342,25 +286,6 @@ impl Registrar {
         })
     }
 
-    /// Register one `JournalStore` factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a source-aware registration error for invalid, duplicate, or
-    /// over-limit metadata.
-    pub fn store_factory(
-        &mut self,
-        metadata: RegistrationMetadata,
-        factory: Arc<dyn ComponentFactory<dyn JournalStore>>,
-    ) -> Result<(), RegistrationError> {
-        self.insert(metadata, ComponentKind::Store, |descriptor| {
-            RegisteredEntry::Store(TypedRegistration {
-                descriptor,
-                slot: RegistrationSlot::Factory(factory),
-            })
-        })
-    }
-
     /// Register one ready `Observer` handle.
     ///
     /// # Errors
@@ -380,25 +305,6 @@ impl Registrar {
                     factory_configuration: None,
                     model_warmed: false,
                 },
-            })
-        })
-    }
-
-    /// Register one `Observer` factory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a source-aware registration error for invalid, duplicate, or
-    /// over-limit metadata.
-    pub fn observer_factory(
-        &mut self,
-        metadata: RegistrationMetadata,
-        factory: Arc<dyn ComponentFactory<dyn Observer>>,
-    ) -> Result<(), RegistrationError> {
-        self.insert(metadata, ComponentKind::Observer, |descriptor| {
-            RegisteredEntry::Observer(TypedRegistration {
-                descriptor,
-                slot: RegistrationSlot::Factory(factory),
             })
         })
     }

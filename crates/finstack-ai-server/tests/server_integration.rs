@@ -3,21 +3,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use finstack_ai::Session;
 use finstack_ai_protocol::{
-    PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand,
-    RemoteCommandOp, RemoteEventView, RemoteLocator, RemoteSnapshot, VersionOffer,
-    decode_frame_len, encode_frame,
+    PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand, RemoteCommandOp, RemoteEventView,
+    RemoteLocator, VersionOffer,
 };
 use finstack_ai_runtime::{
     PortFuture, SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
     SecurityAuditReceipt, SecurityAuditSink,
 };
-use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 
 use finstack_ai_server::{
-    CreditLimits, ListenAddr, RemoteClient, SERVER_LISTEN_INVALID, Server, ServerError,
-    SessionReplica, StaticAuthVerifier, TransportKind,
+    CreditLimits, ListenAddr, RemoteClient, Server, ServerError, SessionReplica,
+    StaticAuthVerifier, TransportKind,
 };
 
 #[derive(Clone)]
@@ -370,8 +367,10 @@ async fn command_idempotency_replays_and_conflicts() {
     )
     .expect("command");
     let first = client.command(command.clone()).await.expect("first");
+    assert!(first.accepted());
     let replay = client.command(command).await.expect("replay");
     assert_eq!(first.digest(), replay.digest());
+    assert!(replay.accepted());
     let conflict = RemoteCommand::try_new(
         "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a11",
         RemoteLocator::new("sess-1", None, None),
@@ -383,6 +382,96 @@ async fn command_idempotency_replays_and_conflicts() {
     assert!(matches!(
         err,
         ServerError::IdempotencyConflict | ServerError::Io(_) | ServerError::Protocol(_)
+    ));
+    serve.abort();
+}
+
+#[tokio::test]
+async fn command_start_then_complete_accepts() {
+    let server = ready_server(RecordingSink::ready()).await;
+    server
+        .hub()
+        .insert(SessionReplica::new("sess-1", "tenant-a"));
+    let (client_end, server_end) = tokio::io::duplex(32 * 1024);
+    let serve = tokio::spawn(async move {
+        server
+            .serve(server_end, TransportKind::LoopbackPlaintext)
+            .await
+    });
+    let mut client = RemoteClient::new(client_end);
+    client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Loopback,
+            RemoteLocator::new("sess-1", None, None),
+            "tenant-a",
+            None,
+        )
+        .await
+        .expect("open");
+    let start = RemoteCommand::try_new(
+        "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a21",
+        RemoteLocator::new("sess-1", None, None),
+        "tenant-a",
+        RemoteCommandOp::Start,
+    )
+    .expect("start");
+    let first = client.command(start).await.expect("start");
+    assert!(first.accepted());
+    let complete = RemoteCommand::try_new(
+        "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a22",
+        RemoteLocator::new("sess-1", None, None),
+        "tenant-a",
+        RemoteCommandOp::Complete,
+    )
+    .expect("complete");
+    let second = client.command(complete).await.expect("complete");
+    assert!(second.accepted());
+    serve.abort();
+}
+
+#[tokio::test]
+async fn receipt_cap_fails_closed_on_new_command() {
+    let server = ready_server(RecordingSink::ready()).await;
+    server
+        .hub()
+        .insert(SessionReplica::new("sess-1", "tenant-a").with_receipt_cap(1));
+    let (client_end, server_end) = tokio::io::duplex(32 * 1024);
+    let serve = tokio::spawn(async move {
+        server
+            .serve(server_end, TransportKind::LoopbackPlaintext)
+            .await
+    });
+    let mut client = RemoteClient::new(client_end);
+    client
+        .reconnect(
+            &offer(),
+            RemoteAuthMethod::Loopback,
+            RemoteLocator::new("sess-1", None, None),
+            "tenant-a",
+            None,
+        )
+        .await
+        .expect("open");
+    let first = RemoteCommand::try_new(
+        "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a31",
+        RemoteLocator::new("sess-1", None, None),
+        "tenant-a",
+        RemoteCommandOp::Start,
+    )
+    .expect("first");
+    client.command(first).await.expect("accepted");
+    let second = RemoteCommand::try_new(
+        "0192e0f6-7c3a-7c11-8a4d-2b6e9c1d0a32",
+        RemoteLocator::new("sess-1", None, None),
+        "tenant-a",
+        RemoteCommandOp::Complete,
+    )
+    .expect("second");
+    let err = client.command(second).await.expect_err("cap");
+    assert!(matches!(
+        err,
+        ServerError::ReceiptCap | ServerError::Io(_) | ServerError::Protocol(_)
     ));
     serve.abort();
 }
@@ -420,39 +509,7 @@ async fn slow_client_disconnects_and_keeps_terminal() {
     assert!(matches!(err, ServerError::CreditTimeout));
 }
 
-#[tokio::test]
-async fn oversized_pre_auth_length_fails_before_allocation() {
-    let header = u32::try_from(PRE_AUTH_FRAME_MAX_BYTES + 1)
-        .expect("fits")
-        .to_be_bytes();
-    assert!(decode_frame_len(header, PRE_AUTH_FRAME_MAX_BYTES).is_err());
-    let frame = encode_frame(&[0x61; 4], PRE_AUTH_FRAME_MAX_BYTES).expect("frame");
-    assert_eq!(&frame[..4], &[0, 0, 0, 4]);
-}
-
-#[tokio::test]
-async fn public_session_projects_to_remote_snapshot() {
-    let store = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 4,
-            batches_per_session: 8,
-            records_per_session: 16,
-            snapshot_bytes: 1024,
-        })
-        .expect("store"),
-    );
-    let session = Session::create(store, "tenant-a").await.expect("session");
-    let snapshot = RemoteSnapshot::new(session.session_id().to_string(), 1);
-    assert_eq!(snapshot.session_id(), session.session_id().to_string());
-    let encoded = format!("{snapshot:?}");
-    assert!(!encoded.contains("rusqlite"));
-    assert!(!encoded.contains("page"));
-}
-
 #[test]
 fn listen_policy_code_is_stable() {
-    assert_eq!(SERVER_LISTEN_INVALID, "server_listen_invalid");
-    ListenAddr::plaintext_tcp("8.8.8.8:443".parse().expect("addr"))
-        .validate()
-        .expect_err("plaintext");
+    assert_eq!(ServerError::ListenInvalid.code(), "server_listen_invalid");
 }

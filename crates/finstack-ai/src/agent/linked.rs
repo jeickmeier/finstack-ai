@@ -7,17 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "native-tokio")]
-use finstack_ai_kernel::{AgentId, BundleId, ComponentId, Version};
-use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
-#[cfg(feature = "native-tokio")]
-use finstack_ai_runtime::Model;
+use finstack_ai_kernel::ComponentId;
+use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::{
-    ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
+    ContextProvider, JournalStore, Middleware, Model, ModelName, ModelSettings, Observer, Toolset,
 };
 
-#[cfg(feature = "native-tokio")]
-use crate::RunPolicy;
-use crate::{CapabilitySpec, ChildRunPolicy};
+use crate::{CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::handle::Agent;
 #[cfg(feature = "native-tokio")]
@@ -42,12 +38,6 @@ const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 #[cfg(feature = "native-tokio")]
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
-#[cfg(feature = "native-tokio")]
-const PREVIEW_VERSION: Version = Version {
-    major: 0,
-    minor: 0,
-    patch: 1,
-};
 
 /// Already-resolved port handles supplied by a language binding.
 #[derive(Default)]
@@ -76,26 +66,64 @@ pub struct LinkedAgent {
     pub default_timeout: Duration,
 }
 
-/// Arguments for [`Agent::openai`].
-pub struct OpenAiAgentSpec {
-    /// Responses model name.
-    pub model: String,
-    /// Explicit Bearer credential. Never read from the environment.
-    pub api_key: String,
+/// Host-agnostic fields shared by every linked-provider constructor.
+#[derive(Default)]
+pub struct LinkedCommon {
     /// Optional system instruction.
     pub instruction: Option<String>,
     /// Declarative catalog entries.
     pub capabilities: Vec<CapabilitySpec>,
     /// Application activations selected at construct time.
     pub active_capabilities: Vec<CapabilityId>,
-    /// Optional Responses reasoning effort.
-    pub reasoning_effort: Option<String>,
-    /// Optional Responses reasoning summary.
-    pub reasoning_summary: Option<String>,
     /// Binding-resolved ports.
     pub ports: LinkedAgentPorts,
     /// Child-run policy. Bindings default this to Deny.
     pub child_runs: ChildRunPolicy,
+}
+
+/// Shared live-handle composition input for linked factories and language bindings.
+///
+/// Provider constructors only add credentials and a model. Host-handle factories
+/// supply an already-built model and store. Both call [`Agent::compose`].
+pub struct ComposeAgentSpec {
+    /// Stable agent identity recorded in the bundle spec and lock.
+    pub agent_id: AgentId,
+    /// Bundle identity that owns this agent.
+    pub bundle_id: BundleId,
+    /// Exact-version model component plus a ready handle.
+    pub model: (ComponentRef, Arc<dyn Model>),
+    /// Exact-version journal store component plus a ready handle.
+    pub store: (ComponentRef, Arc<dyn JournalStore>),
+    /// Provider model name selected at construct time.
+    pub model_name: ModelName,
+    /// Optional system instruction.
+    pub instruction: Option<String>,
+    /// Declarative catalog entries.
+    pub capabilities: Vec<CapabilitySpec>,
+    /// Application activations selected at construct time.
+    pub active_capabilities: Vec<CapabilityId>,
+    /// Binding-resolved ports.
+    pub ports: LinkedAgentPorts,
+    /// Child-run policy.
+    pub child_runs: ChildRunPolicy,
+    /// Canonical provider settings.
+    pub settings: ModelSettings,
+    /// Default operational timeout for subsequent runs.
+    pub default_timeout: Duration,
+}
+
+/// Arguments for [`Agent::openai`].
+pub struct OpenAiAgentSpec {
+    /// Responses model name.
+    pub model: String,
+    /// Explicit Bearer credential. Never read from the environment.
+    pub api_key: String,
+    /// Optional Responses reasoning effort.
+    pub reasoning_effort: Option<String>,
+    /// Optional Responses reasoning summary.
+    pub reasoning_summary: Option<String>,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
 }
 
 /// Arguments for [`Agent::anthropic`].
@@ -106,16 +134,8 @@ pub struct AnthropicAgentSpec {
     pub model: String,
     /// Optional API key. HTTPS is required when set.
     pub api_key: Option<String>,
-    /// Optional system instruction.
-    pub instruction: Option<String>,
-    /// Declarative catalog entries.
-    pub capabilities: Vec<CapabilitySpec>,
-    /// Application activations selected at construct time.
-    pub active_capabilities: Vec<CapabilityId>,
-    /// Binding-resolved ports.
-    pub ports: LinkedAgentPorts,
-    /// Child-run policy. Bindings default this to Deny.
-    pub child_runs: ChildRunPolicy,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
 }
 
 /// Arguments for [`Agent::ollama`].
@@ -124,16 +144,8 @@ pub struct OllamaAgentSpec {
     pub base_url: String,
     /// Model name.
     pub model: String,
-    /// Optional system instruction.
-    pub instruction: Option<String>,
-    /// Declarative catalog entries.
-    pub capabilities: Vec<CapabilitySpec>,
-    /// Application activations selected at construct time.
-    pub active_capabilities: Vec<CapabilityId>,
-    /// Binding-resolved ports.
-    pub ports: LinkedAgentPorts,
-    /// Child-run policy. Bindings default this to Deny.
-    pub child_runs: ChildRunPolicy,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
 }
 
 /// Arguments for [`Agent::gateway`].
@@ -153,16 +165,8 @@ pub struct GatewayAgentSpec {
     pub auth_kind: Option<String>,
     /// Explicit credential. Never read from the environment.
     pub api_key: Option<String>,
-    /// Optional system instruction.
-    pub instruction: Option<String>,
-    /// Declarative catalog entries.
-    pub capabilities: Vec<CapabilitySpec>,
-    /// Application activations selected at construct time.
-    pub active_capabilities: Vec<CapabilityId>,
-    /// Binding-resolved ports.
-    pub ports: LinkedAgentPorts,
-    /// Child-run policy. Bindings default this to Deny.
-    pub child_runs: ChildRunPolicy,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
 }
 
 /// Arguments for [`Agent::e2b_sandbox`].
@@ -175,19 +179,24 @@ pub struct E2bSandboxAgentSpec {
     pub endpoint: Option<String>,
     /// Optional sandbox template. Defaults to `base`.
     pub template: Option<String>,
-    /// Optional system instruction.
-    pub instruction: Option<String>,
-    /// Declarative catalog entries.
-    pub capabilities: Vec<CapabilitySpec>,
-    /// Application activations selected at construct time.
-    pub active_capabilities: Vec<CapabilityId>,
-    /// Binding-resolved ports.
-    pub ports: LinkedAgentPorts,
-    /// Child-run policy. Bindings default this to Deny.
-    pub child_runs: ChildRunPolicy,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
 }
 
 impl Agent {
+    /// Compose one live agent from ready handles.
+    ///
+    /// This is the single finish path for linked-provider constructors and
+    /// host-handle factories. It does not read environment variables.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when composition,
+    /// lock, or output-schema compilation fails.
+    pub async fn compose(spec: ComposeAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+        compose_agent(spec).await
+    }
+
     /// Construct an official `OpenAI` Responses agent.
     ///
     /// Always targets `https://api.openai.com`. Does not read environment
@@ -290,17 +299,15 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OpenAiProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    finish_linked_agent(
-        "python.agent.openai",
-        "python.bundle.openai",
-        "python.model.openai",
+    compose_provider(
+        (
+            "python.agent.openai",
+            "python.bundle.openai",
+            "python.model.openai",
+        ),
         provider,
         model_name,
-        spec.instruction,
-        spec.capabilities,
-        spec.active_capabilities,
-        spec.ports,
-        spec.child_runs,
+        spec.common,
         settings,
         OPENAI_TIMEOUT,
     )
@@ -334,17 +341,15 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         AnthropicProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    finish_linked_agent(
-        "python.agent.anthropic",
-        "python.bundle.anthropic",
-        "python.model.anthropic",
+    compose_provider(
+        (
+            "python.agent.anthropic",
+            "python.bundle.anthropic",
+            "python.model.anthropic",
+        ),
         provider,
         model_name,
-        spec.instruction,
-        spec.capabilities,
-        spec.active_capabilities,
-        spec.ports,
-        spec.child_runs,
+        spec.common,
         empty_model_settings()?,
         DEFAULT_TIMEOUT,
     )
@@ -371,17 +376,15 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OllamaProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    finish_linked_agent(
-        "python.agent.ollama",
-        "python.bundle.ollama",
-        "python.model.ollama",
+    compose_provider(
+        (
+            "python.agent.ollama",
+            "python.bundle.ollama",
+            "python.model.ollama",
+        ),
         provider,
         model_name,
-        spec.instruction,
-        spec.capabilities,
-        spec.active_capabilities,
-        spec.ports,
-        spec.child_runs,
+        spec.common,
         empty_model_settings()?,
         DEFAULT_TIMEOUT,
     )
@@ -449,17 +452,15 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
         store,
         reference,
     )?;
-    finish_linked_agent(
-        "python.agent.gateway",
-        "python.bundle.gateway",
-        "python.model.gateway",
+    compose_provider(
+        (
+            "python.agent.gateway",
+            "python.bundle.gateway",
+            "python.model.gateway",
+        ),
         provider,
         model_name,
-        spec.instruction,
-        spec.capabilities,
-        spec.active_capabilities,
-        spec.ports,
-        spec.child_runs,
+        spec.common,
         empty_model_settings()?,
         OPENAI_TIMEOUT,
     )
@@ -584,24 +585,19 @@ async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, Age
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, reason)
         }
     })?;
-    let mut ports = spec.ports;
-    ports
+    let mut common = spec.common;
+    common
+        .ports
         .toolsets
         .push((component("python.toolset.e2b")?, Arc::new(toolset)));
     let provider: Arc<dyn Model> = Arc::new(E2bCatalogModel {
         name: model_name.clone(),
     });
-    finish_linked_agent(
-        "python.agent.e2b",
-        "python.bundle.e2b",
-        "python.model.e2b",
+    compose_provider(
+        ("python.agent.e2b", "python.bundle.e2b", "python.model.e2b"),
         provider,
         model_name,
-        spec.instruction,
-        spec.capabilities,
-        spec.active_capabilities,
-        ports,
-        spec.child_runs,
+        common,
         empty_model_settings()?,
         DEFAULT_TIMEOUT,
     )
@@ -661,48 +657,22 @@ fn unsupported(name: &str) -> Result<LinkedAgent, AgentRunError> {
     ))
 }
 
-#[cfg(feature = "native-tokio")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "finish keeps identity, ports, and run defaults contiguous"
-)]
-async fn finish_linked_agent(
-    agent_id: &str,
-    bundle_id: &str,
-    model_id: &str,
-    provider: Arc<dyn Model>,
-    model_name: ModelName,
-    instruction: Option<String>,
-    capabilities: Vec<CapabilitySpec>,
-    active_capabilities: Vec<CapabilityId>,
-    ports: LinkedAgentPorts,
-    child_runs: ChildRunPolicy,
-    settings: ModelSettings,
-    default_timeout: Duration,
-) -> Result<LinkedAgent, AgentRunError> {
-    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-
-    let store = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 64,
-            batches_per_session: 256,
-            records_per_session: 4_096,
-            snapshot_bytes: 64 * 1_024,
-        })
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-    );
-    let mut builder = Agent::builder(
-        AgentId::parse(agent_id).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-        BundleId::parse(bundle_id).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-        (component(model_id)?, provider),
-        (component("python.store.memory")?, store),
-    );
+async fn compose_agent(spec: ComposeAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    let ComposeAgentSpec {
+        agent_id,
+        bundle_id,
+        model,
+        store,
+        model_name,
+        instruction,
+        capabilities,
+        active_capabilities,
+        ports,
+        child_runs,
+        settings,
+        default_timeout,
+    } = spec;
+    let mut builder = Agent::builder(agent_id, bundle_id, model, store);
     for (component, toolset) in ports.toolsets {
         builder = builder.toolset(component, toolset);
     }
@@ -743,12 +713,67 @@ async fn finish_linked_agent(
 }
 
 #[cfg(feature = "native-tokio")]
+async fn compose_provider(
+    (agent_id, bundle_id, model_id): (&str, &str, &str),
+    provider: Arc<dyn Model>,
+    model_name: ModelName,
+    common: LinkedCommon,
+    settings: ModelSettings,
+    default_timeout: Duration,
+) -> Result<LinkedAgent, AgentRunError> {
+    let LinkedCommon {
+        instruction,
+        capabilities,
+        active_capabilities,
+        ports,
+        child_runs,
+    } = common;
+    Agent::compose(ComposeAgentSpec {
+        agent_id: AgentId::parse(agent_id).map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?,
+        bundle_id: BundleId::parse(bundle_id).map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?,
+        model: (component(model_id)?, provider),
+        store: memory_store()?,
+        model_name,
+        instruction,
+        capabilities,
+        active_capabilities,
+        ports,
+        child_runs,
+        settings,
+        default_timeout,
+    })
+    .await
+}
+
+#[cfg(feature = "native-tokio")]
+fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError> {
+    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+
+    let store = Arc::new(
+        MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 64,
+            batches_per_session: 256,
+            records_per_session: 4_096,
+            snapshot_bytes: 64 * 1_024,
+        })
+        .map_err(|error| {
+            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+        })?,
+    );
+    Ok((component("python.store.memory")?, store))
+}
+
+#[cfg(feature = "native-tokio")]
 fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
         })?,
-        Some(PREVIEW_VERSION),
+        Some(super::PREVIEW_ENGINE_VERSION),
     ))
 }
 
@@ -978,18 +1003,21 @@ impl Model for E2bCatalogModel {
 mod tests {
     use super::*;
 
+    fn common() -> LinkedCommon {
+        LinkedCommon::default()
+    }
+
     #[tokio::test]
     async fn openai_constructs_without_a_network_request() {
         let built = Agent::openai(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
-            instruction: Some("Answer concisely.".into()),
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
             reasoning_effort: None,
             reasoning_summary: None,
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: LinkedCommon {
+                instruction: Some("Answer concisely.".into()),
+                ..common()
+            },
         })
         .await
         .expect("openai construct");
@@ -1004,13 +1032,9 @@ mod tests {
         let error = Agent::openai(OpenAiAgentSpec {
             model: "fixture-model".into(),
             api_key: "sk-openai-secret-canary-056".into(),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
             reasoning_effort: Some("turbo".into()),
             reasoning_summary: None,
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         })
         .await
         .err()
@@ -1025,13 +1049,9 @@ mod tests {
         let error = Agent::openai(OpenAiAgentSpec {
             model: String::new(),
             api_key: canary.into(),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
             reasoning_effort: None,
             reasoning_summary: None,
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         })
         .await
         .err()
@@ -1047,11 +1067,7 @@ mod tests {
             base_url: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         })
         .await
         .err()
@@ -1065,11 +1081,7 @@ mod tests {
         let built = Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         })
         .await
         .expect("ollama construct");
@@ -1085,11 +1097,7 @@ mod tests {
             hard_input_bytes: Some(1_000_000),
             auth_kind: Some("bearer".into()),
             api_key: Some("sk-gateway-secret-canary-045".into()),
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         }
     }
 
@@ -1155,11 +1163,7 @@ mod tests {
             api_key: "e2b-secret-canary-045".into(),
             endpoint: Some("https://api.e2b.dev".into()),
             template: None,
-            instruction: None,
-            capabilities: Vec::new(),
-            active_capabilities: Vec::new(),
-            ports: LinkedAgentPorts::default(),
-            child_runs: ChildRunPolicy::Deny,
+            common: common(),
         }
     }
 
