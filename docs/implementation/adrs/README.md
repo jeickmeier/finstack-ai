@@ -1,10 +1,10 @@
 # ADR record directory
 
 This is the canonical location for standalone ADR records. Accepted ADR-001
-through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-048
+through ADR-038, Proposed ADR-039, and Accepted ADR-040 through ADR-049
 are indexed in the [ADR database](../adr-register.md). ADR-001 through
 ADR-037 were materialized here as versioned standalone records under
-logical PR-004; ADR-038 through ADR-048 are later implementation records.
+logical PR-004; ADR-038 through ADR-049 are later implementation records.
 ADR-040 supersedes ADR-023. ADR-047 amends ADR-040.
 
 Files use `ADR-NNN-short-topic.md`. The ADR database must link each file before
@@ -67,3 +67,4 @@ chain and receive the next approved ADR number.
 | ADR-046 | [ADR-046-mcp-nested-sampling-and-catalog.md](ADR-046-mcp-nested-sampling-and-catalog.md) |
 | ADR-047 | [ADR-047-retire-multi-protocol-gateway.md](ADR-047-retire-multi-protocol-gateway.md) |
 | ADR-048 | [ADR-048-shared-authority-and-provider-secret.md](ADR-048-shared-authority-and-provider-secret.md) |
+| ADR-049 | [ADR-049-media-resolver.md](ADR-049-media-resolver.md) |

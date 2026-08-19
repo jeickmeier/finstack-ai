@@ -25,7 +25,7 @@ and `InputCapabilities` carries `images`/`audio`/`files` flags
 `BlobRef`, and `BlobRef` is labels-only: an id, a media type, a declared
 length, an optional digest, an optional name — no bytes, no URL. Its
 doc comment is explicit: "The kernel does not fetch the bytes"
-(`crates/finstack-ai-kernel/src/content/blob.rs:37`).
+(`crates/finstack-ai-kernel/src/content/blob.rs:54`).
 
 No runtime machinery exists to turn a `BlobRef` into bytes or a URL a
 provider can put on the wire. Every in-tree provider currently rejects
@@ -62,15 +62,14 @@ provider must be wired through the port registry to reach.
   }
 
   pub struct MediaResolveError {
-      pub kind: MediaResolveErrorKind,
-      pub message: Arc<str>,
+      pub kind: MediaResolveKind,
+      pub message: &'static str,
   }
 
-  pub enum MediaResolveErrorKind {
+  pub enum MediaResolveKind {
       NotFound,
-      Unreadable,
-      TooLarge,
-      Unsupported,
+      Unavailable,
+      Limit,
   }
   ```
 
@@ -148,7 +147,7 @@ semantics is future work, not required for the initial contract.
 ## Compatibility and schema-change classification
 
 Additive: new `MediaResolver`, `ResolvedMedia`, `MediaResolveError`,
-`MediaResolveErrorKind` types in `ports/model/provider_util/`, plus a
+`MediaResolveKind` types in `ports/model/provider_util/`, plus a
 new `with_media_resolver`-shaped config method on providers that adopt
 them. No kernel type changes, no journal `RecordBody` change, no WIT
 world change, no remote-protocol meaning change. Pre-1.0 extensions may
