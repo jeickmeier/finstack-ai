@@ -62,6 +62,10 @@ unpublished.
 - Restored `finstack-ai-workflow-local` as the in-process `WorkflowSession`
   driver, with adapter-owned durable cron (run-once catch-up against
   `ExternalClock`, tenant-scoped table in the journal sqlite file).
+- Add `finstack-ai-tools-document`: `document_parse` and `pdf_classify` tools converting pdf/docx/xlsx/pptx/odf/rtf/epub/csv to Markdown (anydoc + pdf-inspector, no OCR).
+- Add `finstack-ai-middleware-document-ingest`: fail-soft `BeforeModel` middleware replacing attached-document `File` blocks with extracted Markdown in the model-visible request.
+- Add `AgentRunRequest.attachments` (`AttachmentInput`, max 8 pre-staged artifacts) with Python (`Attachment`) and WASM (`attachments` run option) parity.
+- The checked-in `fixtures/documents/` corpus omits a table-heavy PDF (the spec's fixture list calls for one); anydoc's own upstream test corpus already covers table-heavy PDF extraction.
 
 ### Changed
 
