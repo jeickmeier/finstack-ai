@@ -5,6 +5,8 @@
 mod config;
 mod error;
 mod request;
+mod sse;
+mod stream;
 
 pub use config::{OpenRouterConfig, OpenRouterModelConfig, SecretHeader};
 pub use finstack_ai_runtime::{
