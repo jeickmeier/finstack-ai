@@ -36,6 +36,10 @@ backend; they hold opaque refs.
 - No titles, overlays, subtitles, or Ken Burns effects in the v1
   composition spec (versioned for later addition).
 - No moviepy or Remotion integration; composition is ffmpeg-only, native.
+- No transcription-derived captions in v1: caption cues are plan-authored
+  by the text model. Aligning generated audio to word-level timestamps is
+  an agent-level flow over the existing `openrouter_transcribe_audio`
+  tool, not pipeline machinery.
 - No kernel or protocol changes. The kernel's six-port model is untouched;
   everything here is a runtime service contract plus opt-in leaves (G-01
   holds: the default graph depends on none of this).
@@ -214,6 +218,8 @@ never inject flags or paths.
     "clips": [{"media_ref": "...", "trim": {"start_s": 0, "end_s": 5}}],
     "transitions": [{"type": "cut|crossfade|fade_to_black", "duration_s": 0.5}],
     "audio": {"media_ref": "...", "mode": "replace|mix", "gain_db": -6},
+    "subtitles": {"media_ref": "...", "mode": "burn_in|mux",
+                  "style": {"font_size": 42, "margin_v": 80}},
     "output": {"container": "mp4", "resolution": "1920x1080", "fps": 24}
   }
   ```
@@ -259,12 +265,15 @@ prompt assets share one contract:
     "reference_images": [{"media_ref": "…"}],
     "duration_s": 8,
     "seed": 42,
+    "captions": [{"text": "Harbors wake up slowly.",
+                  "start_s": 0.0, "end_s": 3.5}],
     "overrides": {"video_model": "…", "resolution": "…"}
   }],
   "transitions": [{"after": "scene-01", "type": "crossfade",
                    "duration_s": 0.5}],
   "audio": {"media_ref": "…", "mode": "replace"},
-  "output": {"container": "mp4", "fps": 24}
+  "output": {"container": "mp4", "fps": 24,
+             "captions": "none|sidecar|burn_in"}
 }
 ```
 
@@ -339,6 +348,34 @@ Frozen error codes: `media_pipeline_config_invalid`,
 `media_pipeline_invalid_arguments`, `media_pipeline_plan_invalid`,
 `media_pipeline_budget_exceeded`, `media_pipeline_store_failure`,
 `media_pipeline_stage_failed`, `media_pipeline_not_found`.
+
+### 7.4 Captions and transcripts (plan-authored)
+
+Short-form video is routinely played muted, so the pipeline treats
+captions as a first-class deliverable — authored by the same text model
+that writes the plan, never derived from audio in v1.
+
+- **Authoring**: each scene may carry `captions` — up to 32 cues of
+  `{text (1–200 chars), start_s, end_s}` timed relative to the scene's
+  own start, validated as ordered, non-overlapping, and inside the scene
+  duration. `output.captions` selects delivery: `none` (default),
+  `sidecar`, or `burn_in`.
+- **Transcript assembly** (pipeline driver, before compose): scene-local
+  cues are flattened onto the movie timeline — scene offset = cumulative
+  planned durations minus crossfade/fade overlaps, mirroring the
+  filtergraph's xfade offset math over planned durations (actual clip
+  drift is an accepted v1 tolerance). Whenever any scene has cues, the
+  driver renders `transcript.srt` and `transcript.vtt`, stores both via
+  `MediaStore`, and records `transcript_srt_ref`/`transcript_vtt_ref` in
+  the render state and every tool result — the standalone upload
+  deliverable for platforms that accept subtitle files.
+- **Delivery**: `burn_in` passes the SRT to `compose_video`'s
+  `subtitles: {media_ref, mode: burn_in, style?: {font_size, margin_v}}`
+  (ffmpeg `subtitles=` filter, clamped declarative style — recommended
+  for muted autoplay); `sidecar` on mp4 muxes a `mov_text` track
+  (`mode: mux`); `sidecar` on webm ships the refs alone. Plans using
+  captions require a configured `MediaStore`; the driver rejects them at
+  submit otherwise.
 
 ## 8. Composition and bindings
 

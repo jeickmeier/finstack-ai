@@ -1546,7 +1546,7 @@ git commit -m "Add video job polling and store-backed download and image tools"
 
 **Interfaces:**
 - Consumes: Task 1 runtime media exports.
-- Produces (spec.rs, all `pub(crate)` except where noted): `pub struct CompositionSpec { pub version: u32, pub clips: Vec<ClipSpec>, pub transitions: Option<Vec<TransitionSpec>>, pub audio: Option<AudioSpec>, pub output: OutputSpec }`, `pub struct ClipSpec { pub media_ref: MediaRef, pub trim: Option<TrimSpec> }`, `pub struct TrimSpec { pub start_s: f64, pub end_s: f64 }`, `pub enum TransitionKind { Cut, Crossfade, FadeToBlack }`, `pub struct TransitionSpec { pub kind: TransitionKind, pub duration_s: Option<f64> }`, `pub struct AudioSpec { pub media_ref: MediaRef, pub mode: AudioMode, pub gain_db: Option<f64> }`, `pub enum AudioMode { Replace, Mix }`, `pub struct OutputSpec { pub container: Container, pub resolution: Option<String>, pub fps: Option<u32> }`, `pub enum Container { Mp4, Webm }`, and `pub fn validate_spec(&CompositionSpec) -> Result<(), &'static str>` (message is the bounded diagnostic). Serde: `deny_unknown_fields` everywhere, enums `#[serde(rename_all = "snake_case")]`, `TransitionSpec.kind` serialized as field name `type` via `#[serde(rename = "type")]`.
+- Produces (spec.rs, all `pub(crate)` except where noted): `pub struct CompositionSpec { pub version: u32, pub clips: Vec<ClipSpec>, pub transitions: Option<Vec<TransitionSpec>>, pub audio: Option<AudioSpec>, pub subtitles: Option<SubtitlesSpec>, pub output: OutputSpec }`, `pub struct SubtitlesSpec { pub media_ref: MediaRef, pub mode: SubtitleMode, pub style: Option<SubtitleStyle> }`, `pub enum SubtitleMode { BurnIn, Mux }`, `pub struct SubtitleStyle { pub font_size: Option<u32>, pub margin_v: Option<u32> }`, `pub struct ClipSpec { pub media_ref: MediaRef, pub trim: Option<TrimSpec> }`, `pub struct TrimSpec { pub start_s: f64, pub end_s: f64 }`, `pub enum TransitionKind { Cut, Crossfade, FadeToBlack }`, `pub struct TransitionSpec { pub kind: TransitionKind, pub duration_s: Option<f64> }`, `pub struct AudioSpec { pub media_ref: MediaRef, pub mode: AudioMode, pub gain_db: Option<f64> }`, `pub enum AudioMode { Replace, Mix }`, `pub struct OutputSpec { pub container: Container, pub resolution: Option<String>, pub fps: Option<u32> }`, `pub enum Container { Mp4, Webm }`, and `pub fn validate_spec(&CompositionSpec) -> Result<(), &'static str>` (message is the bounded diagnostic). Serde: `deny_unknown_fields` everywhere, enums `#[serde(rename_all = "snake_case")]`, `TransitionSpec.kind` serialized as field name `type` via `#[serde(rename = "type")]`.
 - Produces (lib.rs): the seven `VIDEO_COMPOSE_*` error-code constants (Global Constraints), `pub struct VideoComposeConfig { pub ffmpeg_path: PathBuf, pub ffprobe_path: PathBuf, pub media_store: Arc<dyn MediaStore>, pub media_sensitivity: Sensitivity, pub scratch_dir: PathBuf, pub render_timeout: Duration }`, `pub enum VideoComposeError { ConfigInvalid { reason: &'static str } }`, `pub struct VideoComposeToolset` with `try_new(VideoComposeConfig) -> Result<Self, VideoComposeError>` publishing two `ToolSpec`s (`compose_video`, `probe_media`). `Toolset::call` arrives in Task 8.
 
 - [ ] **Step 1: Scaffolding**
@@ -1571,6 +1571,7 @@ In `src/spec.rs`'s test module:
                 .collect(),
             transitions,
             audio: None,
+            subtitles: None,
             output: OutputSpec { container: Container::Mp4, resolution: None, fps: None },
         }
     }
@@ -1631,6 +1632,21 @@ In `src/spec.rs`'s test module:
         let mut bad_fps = minimal(1, None);
         bad_fps.output.fps = Some(500);
         assert!(validate_spec(&bad_fps).is_err(), "fps in [1, 120]");
+        let mut bad_style = minimal(1, None);
+        bad_style.subtitles = Some(SubtitlesSpec {
+            media_ref: media_ref(),
+            mode: SubtitleMode::BurnIn,
+            style: Some(SubtitleStyle { font_size: Some(4), margin_v: None }),
+        });
+        assert!(validate_spec(&bad_style).is_err(), "font_size in [8, 96]");
+        let mut bad_mux = minimal(1, None);
+        bad_mux.output.container = Container::Webm;
+        bad_mux.subtitles = Some(SubtitlesSpec {
+            media_ref: media_ref(),
+            mode: SubtitleMode::Mux,
+            style: None,
+        });
+        assert!(validate_spec(&bad_mux).is_err(), "mux is mp4-only");
     }
 ```
 
@@ -1679,6 +1695,18 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
             }
         }
     }
+    if let Some(subtitles) = &spec.subtitles {
+        if matches!(subtitles.mode, SubtitleMode::Mux) && !matches!(spec.output.container, Container::Mp4) {
+            return Err("muxed subtitles require the mp4 container");
+        }
+        if let Some(style) = &subtitles.style {
+            if style.font_size.is_some_and(|v| !(8..=96).contains(&v))
+                || style.margin_v.is_some_and(|v| v > 400)
+            {
+                return Err("subtitle style values are out of bounds");
+            }
+        }
+    }
     if let Some(resolution) = &spec.output.resolution {
         let valid = resolution.split_once('x').is_some_and(|(w, h)| {
             w.parse::<u32>().is_ok_and(|w| (16..=7_680).contains(&w))
@@ -1701,7 +1729,7 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
 
 Module doc: `//! T1 declarative ffmpeg composition Toolset. Agents submit a bounded spec; the toolset owns every ffmpeg argument.` Then the seven code constants, `VideoComposeConfig` (plain `Debug` derive — nothing secret), `VideoComposeError::ConfigInvalid { reason: &'static str }` with `#[error("{VIDEO_COMPOSE_CONFIG_INVALID}: {reason}")]`, and `VideoComposeToolset::try_new` which validates: `ffmpeg_path`/`ffprobe_path` are absolute (`path.is_absolute()`, else `ConfigInvalid { reason: "binary paths must be absolute" }`), `render_timeout` in `(0, 1 hour]`, creates `scratch_dir` (`create_dir_all`, failure → `ConfigInvalid { reason: "scratch directory is unavailable" }`), and builds the two `ToolSpec`s:
 
-`compose_video` — description `"Merge stored clips into one movie with declarative transitions and audio."`; `Sequential`, `NonIdempotentWrite`, `AtMostOnce`, approval `Policy` reason `"local media rendering"`, `max_result_bytes: 262_144`, `deferral: Never`. Input schema is the composition spec (write the JSON schema mirroring the serde types: required `version`, `clips`, `output`; `clips` items require `media_ref`; transitions items require `type` with `enum ["cut","crossfade","fade_to_black"]`; audio requires `media_ref` and `mode` with `enum ["replace","mix"]`; output requires `container` with `enum ["mp4","webm"]`; `additionalProperties: false` at every level; inline the same `media_ref` object schema used in Task 4). Output schema:
+`compose_video` — description `"Merge stored clips into one movie with declarative transitions and audio."`; `Sequential`, `NonIdempotentWrite`, `AtMostOnce`, approval `Policy` reason `"local media rendering"`, `max_result_bytes: 262_144`, `deferral: Never`. Input schema is the composition spec (write the JSON schema mirroring the serde types: required `version`, `clips`, `output`; `clips` items require `media_ref`; transitions items require `type` with `enum ["cut","crossfade","fade_to_black"]`; audio requires `media_ref` and `mode` with `enum ["replace","mix"]`; subtitles requires `media_ref` and `mode` with `enum ["burn_in","mux"]` plus optional `style` (`font_size`, `margin_v` integers); output requires `container` with `enum ["mp4","webm"]`; `additionalProperties: false` at every level; inline the same `media_ref` object schema used in Task 4). Output schema:
 
 ```rust
 br#"{"additionalProperties":false,"properties":{"duration_s":{"type":"number"},"length":{"type":"integer"},"media_ref":{"additionalProperties":false,"properties":{"digest":{"type":"string"},"id":{"type":"string"},"length":{"type":"integer"},"media_type":{"type":"string"},"scope_digest":{"type":"string"}},"required":["id","digest","length","media_type","scope_digest"],"type":"object"}},"required":["media_ref","duration_s","length"],"type":"object"}"#
@@ -1735,7 +1763,7 @@ git commit -m "Scaffold the video compose toolset with a validated composition s
 
 **Interfaces:**
 - Consumes: Task 6's spec types.
-- Produces: `pub(crate) struct ClipInput { pub path: PathBuf, pub duration_s: f64 }` and `pub(crate) fn build_ffmpeg_args(spec: &CompositionSpec, clips: &[ClipInput], audio: Option<&Path>, output: &Path) -> Result<Vec<std::ffi::OsString>, &'static str>`. Pure — no I/O, fully unit-testable. Task 8 supplies real durations from ffprobe.
+- Produces: `pub(crate) struct ClipInput { pub path: PathBuf, pub duration_s: f64 }` and `pub(crate) fn build_ffmpeg_args(spec: &CompositionSpec, clips: &[ClipInput], audio: Option<&Path>, subtitles: Option<&Path>, output: &Path) -> Result<Vec<std::ffi::OsString>, &'static str>`. Pure — no I/O, fully unit-testable. Task 8 supplies real durations from ffprobe.
 
 - [ ] **Step 1: Failing tests**
 
@@ -1751,7 +1779,7 @@ git commit -m "Scaffold the video compose toolset with a validated composition s
     fn cut_only_composition_uses_concat() {
         let spec = minimal(2, None);
         let clips = [clip("/in/a.mp4", 4.0), clip("/in/b.mp4", 6.0)];
-        let args = build_ffmpeg_args(&spec, &clips, None, Path::new("/out/movie.mp4"))
+        let args = build_ffmpeg_args(&spec, &clips, None, None, Path::new("/out/movie.mp4"))
             .expect("args");
         let text = rendered(&args).join(" ");
         assert!(text.starts_with("-nostdin -y"));
@@ -1776,7 +1804,7 @@ git commit -m "Scaffold the video compose toolset with a validated composition s
             clip("/in/b.mp4", 6.0),
             clip("/in/c.mp4", 5.0),
         ];
-        let args = build_ffmpeg_args(&spec, &clips, None, Path::new("/out/movie.mp4"))
+        let args = build_ffmpeg_args(&spec, &clips, None, None, Path::new("/out/movie.mp4"))
             .expect("args");
         let text = rendered(&args).join(" ");
         // first xfade offset = 4.0 - 1.0; second = (4.0 + 6.0 - 1.0) - 0.5
@@ -1801,6 +1829,7 @@ git commit -m "Scaffold the video compose toolset with a validated composition s
             &spec,
             &clips,
             Some(Path::new("/in/music.mp3")),
+            None,
             Path::new("/out/movie.mp4"),
         )
         .expect("args");
@@ -1814,9 +1843,53 @@ git commit -m "Scaffold the video compose toolset with a validated composition s
     }
 
     #[test]
+    fn burned_in_subtitles_apply_the_clamped_style() {
+        let mut spec = minimal(1, None);
+        spec.subtitles = Some(SubtitlesSpec {
+            media_ref: media_ref(),
+            mode: SubtitleMode::BurnIn,
+            style: Some(SubtitleStyle { font_size: Some(42), margin_v: Some(80) }),
+        });
+        let clips = [clip("/in/a.mp4", 4.0)];
+        let args = build_ffmpeg_args(
+            &spec,
+            &clips,
+            None,
+            Some(Path::new("/scratch/subs.srt")),
+            Path::new("/out/movie.mp4"),
+        )
+        .expect("args");
+        let text = rendered(&args).join(" ");
+        assert!(text.contains("subtitles=/scratch/subs.srt:force_style='FontSize=42,MarginV=80'"));
+    }
+
+    #[test]
+    fn muxed_subtitles_add_an_input_and_the_mov_text_codec() {
+        let mut spec = minimal(1, None);
+        spec.subtitles = Some(SubtitlesSpec {
+            media_ref: media_ref(),
+            mode: SubtitleMode::Mux,
+            style: None,
+        });
+        let clips = [clip("/in/a.mp4", 4.0)];
+        let args = build_ffmpeg_args(
+            &spec,
+            &clips,
+            None,
+            Some(Path::new("/scratch/subs.srt")),
+            Path::new("/out/movie.mp4"),
+        )
+        .expect("args");
+        let text = rendered(&args).join(" ");
+        assert!(text.contains("-i /scratch/subs.srt"));
+        assert!(text.contains("-c:s mov_text"));
+        assert!(!text.contains("subtitles="));
+    }
+
+    #[test]
     fn clip_count_and_duration_mismatch_is_rejected() {
         let spec = minimal(2, None);
-        assert!(build_ffmpeg_args(&spec, &[clip("/in/a.mp4", 4.0)], None, Path::new("/o.mp4")).is_err());
+        assert!(build_ffmpeg_args(&spec, &[clip("/in/a.mp4", 4.0)], None, None, Path::new("/o.mp4")).is_err());
     }
 ```
 
@@ -1836,6 +1909,7 @@ Build order (all args as `OsString`; numeric formatting via a `fn fmt_f64(v: f64
    - No transitions or all `cut`: `[v0][a0][v1][a1]...concat=n=N:v=1:a=1[vc][ac]`.
    - Any non-cut transition: fold pairwise. Maintain `offset = duration(0)`; for join `k` (clips `k` and `k+1`, transition `t_k`): `crossfade` → `xfade=transition=fade:duration=D:offset={offset - D}` and `acrossfade=d=D`; `fade_to_black` → `xfade=transition=fadeblack:duration=D:offset={offset - D}` and `acrossfade=d=D`; `cut` mixed in → treat as `xfade` with `duration=0.01` (documented v1 simplification, keeps the fold uniform); after each join `offset += duration(k+1) - D`. Label intermediates `[vx{k}]`/`[ax{k}]`, final `[vc]`/`[ac]`.
    - Audio `replace`: map `[N:a]` (optionally `volume=GdB`) as `[music]`, output maps `-map "[vc]" -map "[music]"` plus `-shortest`. Audio `mix`: `[ac][music]amix=inputs=2:duration=first[am]`, map `[am]`. No audio spec: map `[ac]`.
+   - Subtitles: when `spec.subtitles` is `Some` and `subtitles` (the path) is `None`, return `Err("subtitles path is required by the spec")`. `BurnIn`: append `[vc]subtitles={path}:force_style='FontSize={fs},MarginV={mv}'[vs]` to the filtergraph (style clause only when a style is set; escape `'` and `:` in the path with a backslash) and map `[vs]` instead of `[vc]`. `Mux`: no filter — add `-i {path}` as the last input and `-c:s mov_text` to the output flags (validation already pinned mp4).
 4. Output flags: mp4 → `-c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart`; webm → `-c:v libvpx-vp9 -c:a libopus`. Then the output path.
 
 Return `Err("clip inputs must match the spec")` when `clips.len() != spec.clips.len()` or any duration is not finite/positive.
@@ -1905,10 +1979,10 @@ Both arms start with `verify_authority(&ctx)?` and the identity check (as E2B). 
 
 `compose_video` arm:
 1. Parse `CompositionSpec`; `validate_spec` failure → `VIDEO_COMPOSE_SPEC_INVALID` with the returned reason.
-2. Materialize every clip and the audio ref (hold the `MaterializedMedia` values in a `Vec` so guards stay alive through the render).
+2. Materialize every clip, the audio ref, and the subtitles ref when present (hold the `MaterializedMedia` values in a `Vec` so guards stay alive through the render).
 3. `probe` each clip for duration → `ClipInput { path, duration_s }`.
 4. Output path: `scratch_dir.join(format!("render-{}.{}", ctx.tool_call_id-derived hex or effect id hex, ext))` where ext matches the container. Derive the unique component from `ctx.run.effect_id` (`Debug`/hex form) — never from wall time.
-5. `build_ffmpeg_args` (error → `VIDEO_COMPOSE_SPEC_INVALID`); `run_bounded(ffmpeg, ...)`.
+5. `build_ffmpeg_args` with the materialized subtitles path (error → `VIDEO_COMPOSE_SPEC_INVALID`); `run_bounded(ffmpeg, ...)`.
 6. `probe` the output for its real duration; `put_file` the output into the store (media type `video/mp4` or `video/webm`); best-effort `std::fs::remove_file` the scratch output; result `{"media_ref", "duration_s", "length": media.length()}`.
 
 - [ ] **Step 3: Tests (unix-only stub binaries)**
@@ -1934,7 +2008,8 @@ Tests:
 2. `ffmpeg_failure_surfaces_bounded_stderr` — ffmpeg stub: `echo "boom: filter parse error" >&2; exit 1` → error code `video_compose_ffmpeg_failed`; the error's message/metadata contains `filter parse error` and is shorter than 2 KiB.
 3. `render_timeout_kills_the_child` — ffmpeg stub `sleep 30`; config `render_timeout: Duration::from_millis(200)` → `video_compose_timeout` in well under 30 s.
 4. `probe_media_maps_ffprobe_json` — assert `duration_s == 4.0`, `width == 640`, `fps == 24.0`, `has_audio == true`.
-5. `invalid_spec_is_rejected_before_any_process_runs` — 3 clips + 1 transition; ffmpeg stub writes a marker file when invoked; assert `video_compose_spec_invalid` and no marker file.
+5. `burned_in_subtitles_reach_ffmpeg` — store a small SRT file in the fake store; spec with `subtitles: {media_ref, mode: burn_in}`; assert `ffmpeg-args.txt` contains `subtitles=` and the materialized SRT path.
+6. `invalid_spec_is_rejected_before_any_process_runs` — 3 clips + 1 transition; ffmpeg stub writes a marker file when invoked; assert `video_compose_spec_invalid` and no marker file.
 
 - [ ] **Step 4: Run and commit**
 
@@ -1965,7 +2040,7 @@ git commit -m "Execute bounded ffmpeg renders and probes behind the compose tool
 - Create: `fixtures/compatibility/movie-plan/invalid-ambiguous-frame.json`
 
 **Interfaces:**
-- Produces (plan.rs): `pub struct MoviePlan { pub version: u32, pub title: Option<String>, pub defaults: PlanDefaults, pub scenes: Vec<SceneSpec>, pub transitions: Option<Vec<PlanTransition>>, pub audio: Option<PlanAudio>, pub output: PlanOutput }`, `pub struct PlanDefaults { pub image_model: String, pub video_model: String, pub resolution: Option<String>, pub aspect_ratio: Option<String>, pub scene_duration_s: u32 }`, `pub struct SceneSpec { pub id: String, pub video_prompt: String, pub start_frame: FrameSource, pub end_frame: Option<FrameSource>, pub reference_images: Option<Vec<FrameSource>>, pub duration_s: Option<u32>, pub seed: Option<i64>, pub overrides: Option<SceneOverrides> }`, `pub struct SceneOverrides { pub image_model: Option<String>, pub video_model: Option<String>, pub resolution: Option<String> }`, `pub enum FrameSource { Prompt { prompt: String }, MediaRef { media_ref: MediaRef }, Url { url: String } }` (serde untagged, each variant a single-key object, `deny_unknown_fields` on inner structs), `pub struct PlanTransition { pub after: String, pub kind: TransitionKindName, pub duration_s: Option<f64> }` (`kind` renamed `type`, values `cut`/`crossfade`/`fade_to_black`), `pub struct PlanAudio { pub media_ref: MediaRef, pub mode: String }`, `pub struct PlanOutput { pub container: String, pub fps: Option<u32> }`.
+- Produces (plan.rs): `pub struct MoviePlan { pub version: u32, pub title: Option<String>, pub defaults: PlanDefaults, pub scenes: Vec<SceneSpec>, pub transitions: Option<Vec<PlanTransition>>, pub audio: Option<PlanAudio>, pub output: PlanOutput }`, `pub struct PlanDefaults { pub image_model: String, pub video_model: String, pub resolution: Option<String>, pub aspect_ratio: Option<String>, pub scene_duration_s: u32 }`, `pub struct SceneSpec { pub id: String, pub video_prompt: String, pub start_frame: FrameSource, pub end_frame: Option<FrameSource>, pub reference_images: Option<Vec<FrameSource>>, pub duration_s: Option<u32>, pub seed: Option<i64>, pub captions: Option<Vec<CaptionCue>>, pub overrides: Option<SceneOverrides> }`, `pub struct CaptionCue { pub text: String, pub start_s: f64, pub end_s: f64 }`, `pub struct SceneOverrides { pub image_model: Option<String>, pub video_model: Option<String>, pub resolution: Option<String> }`, `pub enum FrameSource { Prompt { prompt: String }, MediaRef { media_ref: MediaRef }, Url { url: String } }` (serde untagged, each variant a single-key object, `deny_unknown_fields` on inner structs), `pub struct PlanTransition { pub after: String, pub kind: TransitionKindName, pub duration_s: Option<f64> }` (`kind` renamed `type`, values `cut`/`crossfade`/`fade_to_black`), `pub struct PlanAudio { pub media_ref: MediaRef, pub mode: String }`, `pub struct PlanOutput { pub container: String, pub fps: Option<u32>, pub captions: Option<CaptionsMode> }`, `pub enum CaptionsMode { None, Sidecar, BurnIn }` (serde `snake_case`).
 - Produces: `pub struct PlanLimits { pub max_scenes: usize, pub max_total_video_s: u64, pub max_concurrent_jobs: usize }` and `pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget, &'static str>` where `pub struct PlanBudget { pub scene_count: usize, pub total_video_s: u64 }`. Scene ids must be unique, non-empty, `[a-z0-9-]{1,64}`; every `transitions[].after` names an existing non-final scene; `version == 1`; per-scene duration = `duration_s.unwrap_or(defaults.scene_duration_s)`, all within `1..=60`; totals within limits.
 
 - [ ] **Step 1: Schema family registration and JSON schema**
@@ -1984,7 +2059,7 @@ fixture_root = "fixtures/compatibility/movie-plan/"
 status = "active"
 ```
 
-Write `schemas/movie-plan/movie-plan.v1.json` as a JSON Schema 2020-12 document mirroring the Rust types above exactly: `$id: "https://finstack.ai/schemas/movie-plan/v1"`, top-level required `["version","defaults","scenes","output"]`, `version` `const: 1`, `scenes` `minItems: 1`, `additionalProperties: false` at every object level, `frame_source` in `$defs` as a `oneOf` of the three single-required-key objects, `media_ref` in `$defs` (id/digest/length/media_type/scope_digest as in Task 4), scene `id` with `pattern: "^[a-z0-9-]{1,64}$"`, transition `type` enum, audio `mode` enum `["replace","mix"]`, output `container` enum `["mp4","webm"]`.
+Write `schemas/movie-plan/movie-plan.v1.json` as a JSON Schema 2020-12 document mirroring the Rust types above exactly: `$id: "https://finstack.ai/schemas/movie-plan/v1"`, top-level required `["version","defaults","scenes","output"]`, `version` `const: 1`, `scenes` `minItems: 1`, `additionalProperties: false` at every object level, `frame_source` in `$defs` as a `oneOf` of the three single-required-key objects, `media_ref` in `$defs` (id/digest/length/media_type/scope_digest as in Task 4), scene `id` with `pattern: "^[a-z0-9-]{1,64}$"`, transition `type` enum, audio `mode` enum `["replace","mix"]`, output `container` enum `["mp4","webm"]`, output `captions` enum `["none","sidecar","burn_in"]`, scene `captions` as an array (`maxItems: 32`) of required `{text, start_s, end_s}` with `text` `maxLength: 200`.
 
 - [ ] **Step 2: Crate scaffolding**
 
@@ -2010,12 +2085,12 @@ futures-util = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-test = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
@@ -2078,6 +2153,21 @@ In `src/plan.rs` tests:
         assert!(validate_plan(&plan, &tight).is_err(), "scene ceiling");
         let tight = PlanLimits { max_total_video_s: 5, ..limits() };
         assert!(validate_plan(&plan, &tight).is_err(), "seconds ceiling");
+
+        let mut plan = two_scene_plan();
+        plan.scenes[0].captions = Some(vec![CaptionCue {
+            text: "x".repeat(300),
+            start_s: 0.0,
+            end_s: 2.0,
+        }]);
+        assert!(validate_plan(&plan, &limits()).is_err(), "caption text bound");
+
+        let mut plan = two_scene_plan();
+        plan.scenes[0].captions = Some(vec![
+            CaptionCue { text: "one".into(), start_s: 0.0, end_s: 4.0 },
+            CaptionCue { text: "two".into(), start_s: 3.0, end_s: 6.0 },
+        ]);
+        assert!(validate_plan(&plan, &limits()).is_err(), "overlapping cues");
     }
 ```
 
@@ -2100,7 +2190,11 @@ In `src/plan.rs` tests:
       "start_frame": { "prompt": "wide shot of a harbor at dawn, golden light" },
       "end_frame": { "prompt": "close-up of a moored fishing boat" },
       "duration_s": 8,
-      "seed": 42
+      "seed": 42,
+      "captions": [
+        { "text": "Harbors wake up slowly.", "start_s": 0.0, "end_s": 3.5 },
+        { "text": "Then all at once.", "start_s": 3.5, "end_s": 7.5 }
+      ]
     },
     {
       "id": "scene-02",
@@ -2111,7 +2205,7 @@ In `src/plan.rs` tests:
   "transitions": [
     { "after": "scene-01", "type": "crossfade", "duration_s": 0.5 }
   ],
-  "output": { "container": "mp4", "fps": 24 }
+  "output": { "container": "mp4", "fps": 24, "captions": "burn_in" }
 }
 ```
 
@@ -2150,6 +2244,26 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
         let duration = u64::from(scene.duration_s.unwrap_or(plan.defaults.scene_duration_s));
         if !(1..=60).contains(&duration) {
             return Err("scene duration must be between 1 and 60 seconds");
+        }
+        if let Some(cues) = &scene.captions {
+            if cues.len() > 32 {
+                return Err("scene has more than 32 caption cues");
+            }
+            let mut previous_end = 0.0_f64;
+            for cue in cues {
+                if cue.text.is_empty() || cue.text.chars().count() > 200 {
+                    return Err("caption text must be 1 to 200 characters");
+                }
+                let in_order = cue.start_s.is_finite()
+                    && cue.end_s.is_finite()
+                    && cue.start_s >= previous_end
+                    && cue.end_s > cue.start_s
+                    && cue.end_s <= duration as f64;
+                if !in_order {
+                    return Err("caption cues must be ordered and inside the scene duration");
+                }
+                previous_end = cue.end_s;
+            }
         }
         total_video_s = total_video_s.saturating_add(duration);
     }
@@ -2216,6 +2330,8 @@ pub struct RenderState {
     pub status: RenderStatus,
     pub scenes: Vec<SceneState>,
     pub final_ref: Option<MediaRef>,
+    pub transcript_srt_ref: Option<MediaRef>,
+    pub transcript_vtt_ref: Option<MediaRef>,
     pub revision: u64,                       // optimistic-concurrency counter
 }
 pub trait RenderStateStore: Send + Sync {
@@ -2301,6 +2417,79 @@ git commit -m "Persist render state with optimistic concurrency in adapter-owned
 
 ---
 
+### Task 10b: Caption timeline and SRT/VTT serialization
+
+**Files:**
+- Create: `extensions/workflow/finstack-ai-workflow-media-pipeline/src/subtitles.rs`
+- Modify: `extensions/workflow/finstack-ai-workflow-media-pipeline/src/lib.rs` (`mod subtitles;`)
+
+**Interfaces:**
+- Consumes: Task 9's plan types.
+- Produces (all `pub(crate)`): `struct TimedCue { text: String, start_s: f64, end_s: f64 }` (absolute movie-timeline seconds), `fn cue_timeline(plan: &MoviePlan) -> Vec<TimedCue>`, `fn to_srt(cues: &[TimedCue]) -> String`, `fn to_vtt(cues: &[TimedCue]) -> String`.
+
+- [ ] **Step 1: Failing tests**
+
+```rust
+    #[test]
+    fn timeline_offsets_scene_cues_and_subtracts_crossfade_overlap() {
+        // two_scene_plan(): scene-01 8s with two cues, scene-02 6s (default),
+        // crossfade 0.5s after scene-01. Give scene-02 one cue 0..2s.
+        let mut plan = two_scene_plan();
+        plan.scenes[1].captions = Some(vec![CaptionCue {
+            text: "Gulls, incoming.".into(),
+            start_s: 0.0,
+            end_s: 2.0,
+        }]);
+        let cues = cue_timeline(&plan);
+        assert_eq!(cues.len(), 3);
+        assert_eq!(cues[0].start_s, 0.0);
+        assert_eq!(cues[1].end_s, 7.5);
+        // scene-02 offset = 8.0 - 0.5 crossfade overlap
+        assert_eq!(cues[2].start_s, 7.5);
+        assert_eq!(cues[2].end_s, 9.5);
+    }
+
+    #[test]
+    fn srt_and_vtt_render_known_answers() {
+        let cues = vec![
+            TimedCue { text: "Harbors wake up slowly.".into(), start_s: 0.0, end_s: 3.5 },
+            TimedCue { text: "Then all at once.".into(), start_s: 3.5, end_s: 7.5 },
+        ];
+        assert_eq!(
+            to_srt(&cues),
+            "1\n00:00:00,000 --> 00:00:03,500\nHarbors wake up slowly.\n\n2\n00:00:03,500 --> 00:00:07,500\nThen all at once.\n\n"
+        );
+        assert_eq!(
+            to_vtt(&cues),
+            "WEBVTT\n\n00:00:00.000 --> 00:00:03.500\nHarbors wake up slowly.\n\n00:00:03.500 --> 00:00:07.500\nThen all at once.\n\n"
+        );
+    }
+
+    #[test]
+    fn hour_rollover_formats_correctly() {
+        let cues = vec![TimedCue { text: "late".into(), start_s: 3_661.25, end_s: 3_662.0 }];
+        assert!(to_srt(&cues).contains("01:01:01,250 --> 01:01:02,000"));
+    }
+```
+
+(`two_scene_plan()` is a local copy of the plan.rs test helper — test-module duplication is fine. Write the expected strings with real newlines in the test file — the `\n` above marks them for this plan document.)
+
+- [ ] **Step 2: Implement**
+
+`cue_timeline`: walk scenes in order, `offset` starts at 0.0; per scene, emit each cue at `offset + start_s` / `offset + end_s`; after scene k, `offset += effective_duration(k) - overlap(k)` where `effective_duration` is `duration_s.unwrap_or(defaults.scene_duration_s)` as f64 and `overlap(k)` is the plan transition after scene k's `duration_s.unwrap_or(0.5)` for `crossfade`/`fade_to_black` and `0.0` for `cut`/absent. This mirrors the compose filtergraph's xfade offset math over *planned* durations; actual generated clips may drift slightly — documented v1 tolerance. Timestamp formatting: `fn stamp(seconds: f64, decimal: char) -> String` producing `HH:MM:SS{sep}mmm` from `(seconds * 1000.0).round() as u64`.
+
+- [ ] **Step 3: Run and commit**
+
+Run: `cargo test -p finstack-ai-workflow-media-pipeline subtitles`
+Expected: PASS.
+
+```bash
+git add extensions/workflow/finstack-ai-workflow-media-pipeline
+git commit -m "Flatten plan-authored caption cues onto the movie timeline as SRT and VTT"
+```
+
+---
+
 ### Task 11: `MediaPipelineDriver` — submit and tick
 
 **Files:**
@@ -2316,6 +2505,7 @@ pub struct MediaPipelineConfig {
     pub media_tools: Arc<dyn Toolset>,     // finstack-ai-tools-openrouter-media
     pub compose_tools: Arc<dyn Toolset>,   // finstack-ai-tools-video-compose
     pub state: Arc<dyn RenderStateStore>,
+    pub media_store: Option<Arc<dyn MediaStore>>, // required by plans that use captions
     pub limits: PlanLimits,
 }
 pub struct MediaPipelineDriver { /* fields above */ }
@@ -2370,7 +2560,7 @@ let mut stream = toolset.call(ctx.clone(), call).await?;
 
 - [ ] **Step 2: Implement `submit_plan`**
 
-1. Parse `MoviePlan` (parse failure → `MEDIA_PIPELINE_PLAN_INVALID`), `validate_plan` against `limits` (violation → `MEDIA_PIPELINE_BUDGET_EXCEEDED` for the two ceiling messages, `MEDIA_PIPELINE_PLAN_INVALID` otherwise — match on the message constants).
+1. Parse `MoviePlan` (parse failure → `MEDIA_PIPELINE_PLAN_INVALID`); when any scene has caption cues or `output.captions` is `sidecar`/`burn_in`, require `config.media_store` (absent → `MEDIA_PIPELINE_PLAN_INVALID`, message `"captions require a media store"`); `validate_plan` against `limits` (violation → `MEDIA_PIPELINE_BUDGET_EXCEEDED` for the two ceiling messages, `MEDIA_PIPELINE_PLAN_INVALID` otherwise — match on the message constants).
 2. `plan_digest = Digest::raw_json(plan_json)`; `render_id = format!("render-{}", &plan_digest.to_hex()[..24])` (via `.get(..24)`); tenant from `ctx.run.locator`.
 3. Build initial `SceneState` per scene: pinned `FrameSource::MediaRef`/`Url` prefill `*_frame_ref`/`*_frame_url`; stage starts at `PendingStartFrame` when `start_frame` is a prompt, else `PendingEndFrame` when `end_frame` is a prompt, else `PendingSubmit`.
 4. `state.insert(...)`; an existing render with the same id (same plan bytes) is **not** an error — return the loaded state instead (idempotent resubmission = resume).
@@ -2388,7 +2578,7 @@ Load state (missing → `MEDIA_PIPELINE_NOT_FOUND`); a terminal state returns as
 A per-scene tool error marks that scene `Failed` (bounded `failure` message = the tool error's code) instead of aborting the tick; other scenes proceed. After the pass:
 
 - any scene `Failed` and none in-flight → `RenderStatus::Failed`;
-- all `Done` → build the `compose_video` spec from the plan (clips in scene order via `clip_ref`, plan transitions mapped positionally — a plan transition `after: scene-k` becomes the spec's transition at index k; gaps filled with `cut`; audio/output copied), `invoke_tool(compose_tools, ...)`, store `final_ref`, → `Completed` (compose failure → `Failed`);
+- all `Done` → **first**, when any scene has caption cues: build `cue_timeline(&plan)`, render `to_srt`/`to_vtt`, write each to a `tempfile::NamedTempFile`, `put_file` both into `media_store` (media types `application/x-subrip` and `text/vtt`), and record `transcript_srt_ref`/`transcript_vtt_ref` (persist this via `state.update` before composing, so a crash between transcript and compose resumes without regenerating). **Then** build the `compose_video` spec from the plan (clips in scene order via `clip_ref`, plan transitions mapped positionally — a plan transition `after: scene-k` becomes the spec's transition at index k; gaps filled with `cut`; audio/output copied; when `output.captions` is `burn_in` set `subtitles: {media_ref: transcript_srt_ref, mode: burn_in}`, when `sidecar` on mp4 set `mode: mux`, when `sidecar` on webm attach nothing — the refs alone are the deliverable), `invoke_tool(compose_tools, ...)`, store `final_ref`, → `Completed` (compose failure → `Failed`);
 - otherwise `Running`.
 
 Persist via `state.update(...)`; a lost CAS (`false`) → reload and return the newer state without retrying the tick (`MEDIA_PIPELINE_STORE_FAILURE` only on store errors). Honor `ctx.run.cancellation` between scenes (cancelled → persist progress so far, return current state).
@@ -2399,11 +2589,12 @@ Persist via `state.update(...)`; a lost CAS (`false`) → reload and return the 
 
 Use `finstack_ai_test::ScriptedToolset` if its plan/action vocabulary can express "return this JSON result for the next call" — read `crates/finstack-ai-test/src/scripted/toolset.rs` first; if it cannot, write a local `QueueToolset` test double (a `Toolset` whose `tools()` returns hand-built specs for the five tool names and whose `call` pops `(expected_tool_name, result_json)` from a `Mutex<VecDeque>`, panicking on mismatch — ~60 lines, test-module only). Tests (all `#[tokio::test]`, `tool_context()` copied from the E2B test module):
 
-1. `happy_path_two_scene_render_reaches_completed` — queue: image gen (scene-01 start), image gen (scene-01 end), submit (scene-01), image-gen-free scene-02 (pinned URL start frame) submit, poll×2 pending, poll×2 completed, download×2, compose. Drive `submit_plan` + repeated `advance` until `Completed`; assert stage progression, `final_ref` present, and the compose call's spec JSON carried 2 clips and 1 crossfade.
+1. `happy_path_two_scene_render_reaches_completed` — queue: image gen (scene-01 start), image gen (scene-01 end), submit (scene-01), image-gen-free scene-02 (pinned URL start frame) submit, poll×2 pending, poll×2 completed, download×2, compose. Drive `submit_plan` + repeated `advance` until `Completed`; assert stage progression, `final_ref` present, `transcript_srt_ref`/`transcript_vtt_ref` present (the fixture plan has cues and `captions: "burn_in"`), the stored SRT bytes match the Task 10b known answer for the plan's cues, and the compose call's spec JSON carried 2 clips, 1 crossfade, and `subtitles.mode == "burn_in"` referencing the SRT ref.
 2. `concurrency_cap_holds_back_submissions` — 3-scene plan, `max_concurrent_jobs: 1`; after two ticks assert exactly one scene has a `job_id`.
 3. `failed_job_is_resubmitted_once_then_fails_the_scene` — poll returns `failed` twice around a resubmit; assert `resubmitted == true`, final scene stage `Failed`, render `Failed`.
 4. `budget_violation_rejects_before_any_tool_call` — 2-scene plan against `max_scenes: 1`; assert error code `media_pipeline_budget_exceeded` and the queue untouched.
 5. `resubmitting_the_same_plan_resumes_instead_of_duplicating` — `submit_plan` twice with identical bytes; assert one state row and the second call returns the persisted state.
+6. `caption_plan_without_a_store_is_rejected_at_submit` — driver built with `media_store: None`; the fixture plan (which has cues) → `media_pipeline_plan_invalid`; queue untouched.
 
 - [ ] **Step 5: Run and commit**
 
@@ -2428,7 +2619,7 @@ git commit -m "Drive MoviePlan renders through media tools with bounded resumabl
 - Produces: `pub struct MediaPipelineToolset` (`try_new(driver: Arc<MediaPipelineDriver>) -> Result<Self, PipelineError>`, `impl Toolset`, descriptor name `finstack-media-pipeline`). Result JSON for all three tools:
 
 ```json
-{"render_id":"...","status":"running","per_scene":[{"id":"scene-01","stage":"polling","job_id":"vid-1","clip_ref":{...}}],"final_media_ref":{...}}
+{"render_id":"...","status":"running","per_scene":[{"id":"scene-01","stage":"polling","job_id":"vid-1","clip_ref":{...}}],"final_media_ref":{...},"transcript_srt_ref":{...},"transcript_vtt_ref":{...}}
 ```
 
 - [ ] **Step 1: Tool specs**
@@ -2439,7 +2630,7 @@ git commit -m "Drive MoviePlan renders through media tools with bounded resumabl
 Shared output schema:
 
 ```rust
-br#"{"additionalProperties":false,"properties":{"final_media_ref":{"type":"object"},"per_scene":{"items":{"additionalProperties":false,"properties":{"clip_ref":{"type":"object"},"failure":{"type":"string"},"id":{"type":"string"},"job_id":{"type":"string"},"stage":{"type":"string"}},"required":["id","stage"],"type":"object"},"type":"array"},"render_id":{"type":"string"},"status":{"type":"string"}},"required":["render_id","status","per_scene"],"type":"object"}"#
+br#"{"additionalProperties":false,"properties":{"final_media_ref":{"type":"object"},"transcript_srt_ref":{"type":"object"},"transcript_vtt_ref":{"type":"object"},"per_scene":{"items":{"additionalProperties":false,"properties":{"clip_ref":{"type":"object"},"failure":{"type":"string"},"id":{"type":"string"},"job_id":{"type":"string"},"stage":{"type":"string"}},"required":["id","stage"],"type":"object"},"type":"array"},"render_id":{"type":"string"},"status":{"type":"string"}},"required":["render_id","status","per_scene"],"type":"object"}"#
 ```
 
 - [ ] **Step 2: Dispatch**
@@ -2449,7 +2640,7 @@ br#"{"additionalProperties":false,"properties":{"final_media_ref":{"type":"objec
 - [ ] **Step 3: Tests**
 
 1. `render_movie_submits_and_ticks_once` — queued toolsets from Task 11's tests; call `render_movie` with the valid fixture plan inline; assert result `status == "running"` and `per_scene[0].stage` reflects one tick of progress.
-2. `advance_render_progresses_to_completion` — loop `advance_render` until `status == "completed"`; assert `final_media_ref` present.
+2. `advance_render_progresses_to_completion` — loop `advance_render` until `status == "completed"`; assert `final_media_ref`, `transcript_srt_ref`, and `transcript_vtt_ref` present.
 3. `get_render_status_is_read_only` — after completion, call it twice; assert the queue is untouched and results are identical.
 4. `unknown_render_id_maps_to_not_found` — `advance_render` on `"render-missing"` → error code `media_pipeline_not_found`.
 
@@ -2700,7 +2891,7 @@ git commit -m "Implement the SigV4-signed S3 MediaStore backend with streaming t
 - Modify: `scripts/wasm_package/check.py` (add the three new native crates to `FORBIDDEN_WASM`, next to the E2B entry)
 - Modify: `bindings/finstack-ai-python/src/agent.rs` + `bindings/finstack-ai-python/python/finstack_ai/_finstack_ai.pyi` (kwargs mirroring the new spec structs on the same factories the OpenRouter plan touched)
 - Modify: `bindings/finstack-ai-wasm/src/agent/agent.rs` (stubs reject the new fields with the existing stable "native only" error, mirroring the E2B handling)
-- Modify: `docs/site/README.md` (add a "Media pipeline" pointer) and create `docs/site/media-pipeline.md` (usage guide: construct store → toolsets → pipeline; a full Rust snippet composing `LocalMediaStore` + `OpenRouterMediaToolset` + `VideoComposeToolset` + `MediaPipelineToolset`; the MoviePlan authoring contract with a link to `schemas/movie-plan/movie-plan.v1.json`; the scene-prompt authoring guidance — one section instructing text models how to write start/end-frame image prompts and motion prompts: concrete nouns, camera language, consistent style tokens across a scene's two frames, motion described relative to the start frame)
+- Modify: `docs/site/README.md` (add a "Media pipeline" pointer) and create `docs/site/media-pipeline.md` (usage guide: construct store → toolsets → pipeline; a full Rust snippet composing `LocalMediaStore` + `OpenRouterMediaToolset` + `VideoComposeToolset` + `MediaPipelineToolset`; the MoviePlan authoring contract with a link to `schemas/movie-plan/movie-plan.v1.json`; the scene-prompt authoring guidance — one section instructing text models how to write start/end-frame image prompts and motion prompts: concrete nouns, camera language, consistent style tokens across a scene's two frames, motion described relative to the start frame; and caption authoring guidance: short cues of at most ~7 words for short-form video, cue timing aligned to the scene beats, `output.captions: "burn_in"` recommended for muted autoplay platforms)
 - Modify: `CHANGELOG.md` (one entry per crate under Unreleased/1.x per the file's convention)
 
 **Interfaces:**
