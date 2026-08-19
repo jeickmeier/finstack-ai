@@ -26,6 +26,7 @@ FORBIDDEN_WASM = frozenset(
         "hyper",
         "native-tls",
         "finstack-ai-provider-openai",
+        "finstack-ai-provider-openrouter",
         "finstack-ai-provider-ollama",
         "finstack-ai-provider-anthropic",
         "finstack-ai-tools-mcp",
