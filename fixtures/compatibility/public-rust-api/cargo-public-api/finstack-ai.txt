@@ -1119,6 +1119,7 @@ impl core::fmt::Debug for finstack_ai::AgentRunOutput
 pub fn finstack_ai::AgentRunOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::AgentRunOutput
 pub struct finstack_ai::AgentRunRequest
+pub finstack_ai::AgentRunRequest::attachments: alloc::sync::Arc<[finstack_ai::AttachmentInput]>
 pub finstack_ai::AgentRunRequest::capability: core::option::Option<finstack_ai_kernel::primitives::ids::CapabilityId>
 pub finstack_ai::AgentRunRequest::input: alloc::sync::Arc<str>
 pub finstack_ai::AgentRunRequest::max_cycles: u64
@@ -1170,6 +1171,12 @@ pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string
 pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
 pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
+pub struct finstack_ai::AttachmentInput
+pub finstack_ai::AttachmentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+impl core::clone::Clone for finstack_ai::AttachmentInput
+pub fn finstack_ai::AttachmentInput::clone(&self) -> finstack_ai::AttachmentInput
+impl core::fmt::Debug for finstack_ai::AttachmentInput
+pub fn finstack_ai::AttachmentInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct finstack_ai::BundleCatalog
 impl finstack_ai::BundleCatalog
 pub fn finstack_ai::BundleCatalog::bundle(&self, &finstack_ai_kernel::primitives::ids::BundleId) -> core::option::Option<alloc::sync::Arc<finstack_ai::BundleSpec>>
@@ -1791,6 +1798,7 @@ pub const finstack_ai::CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE: &str
 pub const finstack_ai::MAX_COMPONENT_ALIASES: usize
 pub const finstack_ai::MAX_CONCURRENT_CAPABILITY_ACTIVATIONS: u16
 pub const finstack_ai::MAX_REGISTERED_COMPONENTS: usize
+pub const finstack_ai::MAX_RUN_ATTACHMENTS: usize
 pub const finstack_ai::MAX_SELECTED_COMPONENTS: usize
 pub const finstack_ai::RESULT_DECODE_INVALID_VALUE: &str
 pub const finstack_ai::RESULT_DECODE_SCHEMA_MISMATCH: &str

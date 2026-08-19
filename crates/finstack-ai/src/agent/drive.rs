@@ -128,7 +128,12 @@ impl Agent {
                 ));
             }
             let extra = self.extra_capability_instructions(&state.active_capabilities);
-            let messages = self.context_messages(&request.input, &state.messages, &extra)?;
+            let messages = self.context_messages(
+                &request.input,
+                &request.attachments,
+                &state.messages,
+                &extra,
+            )?;
             submit_stage(
                 handle,
                 state.cycle,

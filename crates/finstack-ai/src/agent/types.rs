@@ -3,12 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ActiveCapability, CapabilityId, ContentBlock, Message, OperationLocator, RawJson,
+    ActiveCapability, ArtifactRef, CapabilityId, ContentBlock, Message, OperationLocator, RawJson,
     RunSecurityContext,
 };
-use finstack_ai_runtime::{
-    IdGenerationError, ModelError, ModelName, ModelSettings, RunHandleError,
-};
+use finstack_ai_runtime::{IdGenerationError, ModelError, ModelName, ModelSettings, RunHandleError};
 use thiserror::Error;
 
 /// Invalid public run configuration.
@@ -31,6 +29,21 @@ pub(super) const DEFAULT_EVENT_BATCH_COUNT: usize = 32;
 pub(super) const DEFAULT_EVENT_BATCH_BYTES: usize = 64 * 1_024;
 pub(super) const DEFAULT_EVENT_BATCH_INTERVAL: Duration = Duration::from_millis(10);
 pub(super) const MAX_COMPACT_CATALOG_BYTES: usize = 8 * 1_024;
+/// Maximum attachments accepted per run.
+pub const MAX_RUN_ATTACHMENTS: usize = 8;
+
+/// One pre-staged run attachment.
+///
+/// The artifact must already be durably staged in the run's `ArtifactStore`
+/// scope; the run API never accepts raw bytes. Media type, length, digest,
+/// and display name live on `artifact.blob()` — there is no separate
+/// `media_type` field here, avoiding a second source of truth.
+#[derive(Debug, Clone)]
+pub struct AttachmentInput {
+    /// Staged artifact whose blob carries media type, length, digest, name.
+    pub artifact: ArtifactRef,
+}
+
 /// One compact model-visible capability catalog entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityCatalogEntry {
@@ -80,6 +93,8 @@ pub struct AgentRunRequest {
     /// `None` keeps the `Agent` that was called. `Some` must name a
     /// model-activation catalog entry or the start fails closed.
     pub capability: Option<CapabilityId>,
+    /// Pre-staged input attachments mapped to `File` blocks on the user message.
+    pub attachments: Arc<[AttachmentInput]>,
 }
 
 impl AgentRunRequest {
@@ -115,6 +130,7 @@ impl AgentRunRequest {
             max_cycles: DEFAULT_MAX_CYCLES,
             max_output_retries: DEFAULT_MAX_OUTPUT_RETRIES,
             capability: None,
+            attachments: Arc::from([]),
         };
         request.validate()?;
         Ok(request)
@@ -131,6 +147,12 @@ impl AgentRunRequest {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
                 "input, timeout, or max_cycles is invalid",
+            ));
+        }
+        if self.attachments.len() > MAX_RUN_ATTACHMENTS {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "run attachments exceed MAX_RUN_ATTACHMENTS",
             ));
         }
         Ok(())
