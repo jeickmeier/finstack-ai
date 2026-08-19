@@ -105,3 +105,20 @@ fn classify_rejects_non_pdf() {
         Err(DocumentParseError::UnsupportedFormat)
     ));
 }
+
+use crate::DocumentToolset;
+use finstack_ai_runtime::Toolset as _;
+
+#[test]
+fn toolset_exposes_two_validated_tools() {
+    let toolset = DocumentToolset::try_new().expect("toolset");
+    let tools = toolset.tools();
+    assert_eq!(tools.len(), 2);
+    let names: Vec<&str> = tools.iter().map(|spec| spec.model_name.as_ref()).collect();
+    assert_eq!(names, ["document_parse", "pdf_classify"]);
+    for spec in tools.iter() {
+        spec.validate().expect("spec validates");
+        assert_eq!(spec.id.as_str(), "finstack.tools.document");
+    }
+    assert_eq!(toolset.descriptor().name.as_ref(), "finstack-document");
+}
