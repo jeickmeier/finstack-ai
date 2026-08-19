@@ -10,34 +10,38 @@ execute in parallel after document Task 2.
 ## Goal
 
 Give the library a customizable, extensible pipeline that turns ingested documents into
-searchable knowledge — vector embeddings for semantic search/RAG and an entity/relation
-graph for knowledge-graph queries — plus the query surfaces agents use to consume them.
+searchable knowledge — vector embeddings for semantic search/RAG, keyword/hybrid search,
+and an entity/relation graph with community summaries for knowledge-graph queries — plus
+the query surfaces agents use to consume them.
 
 Three layers:
 
-- **Ports (runtime)**: `EmbeddingModel`, `VectorIndex`, and `GraphStore` port traits in
-  `finstack-ai-runtime`, following the `JournalStore` precedent (trait in runtime ports,
-  implementations in `extensions/`), with `PortObject`/`PortFuture` bounds for native+wasm
-  portability.
-- **Pipeline (engine)**: new crate `extensions/ingest/finstack-ai-ingest` — a fixed-stage,
-  pluggable-implementation pipeline: parse → chunk → [embed ∥ graph-extract] → index. Host
-  apps drive it directly; a thin middleware feeds run attachments into it.
+- **Ports (runtime)**: `EmbeddingModel`, `ChunkIndex`, `GraphStore`, `SourceCatalog`, and
+  `Reranker` port traits in `finstack-ai-runtime`, following the `JournalStore` precedent
+  (trait in runtime ports, implementations in `extensions/`), with
+  `PortObject`/`PortFuture` bounds for native+wasm portability.
+- **Engine**: new crate `extensions/ingest/finstack-ai-ingest` — a fixed-stage,
+  pluggable-implementation pipeline (parse → chunk → [embed ∥ graph-extract] → index)
+  plus the model-backed knowledge components that share its `ModelDriver`-wrapping
+  machinery: `ModelGraphExtractor`, `ModelReranker`, and the community-summary builder.
+  Host apps drive it directly; a thin middleware feeds run attachments into it.
 - **Query surfaces**: a `finstack-ai-tools-knowledge` toolset (`semantic_search`,
-  `graph_query`) and a `finstack-ai-context-knowledge` `ContextProvider` for automatic
-  top-k retrieval into run context.
+  `graph_query`, `list_sources`, `knowledge_overview`) and a
+  `finstack-ai-context-knowledge` `ContextProvider` for automatic top-k retrieval into
+  run context.
 
 ## Crate layout
 
 ```
 crates/finstack-ai-runtime/src/ports/
   embedding/     — EmbeddingModel port trait + types
-  knowledge/     — VectorIndex + GraphStore port traits + shared types
+  knowledge/     — ChunkIndex, GraphStore, SourceCatalog, Reranker traits + shared types
 
 extensions/
-  ingest/finstack-ai-ingest                        — pipeline engine (new category dir)
-  stores/finstack-ai-knowledge-memory              — in-memory VectorIndex + GraphStore (wasm-clean)
-  stores/finstack-ai-knowledge-sqlite              — SQLite VectorIndex + GraphStore (native-only)
-  toolsets/finstack-ai-tools-knowledge             — semantic_search / graph_query tools
+  ingest/finstack-ai-ingest                        — pipeline engine + model-backed components (new category dir)
+  stores/finstack-ai-knowledge-memory              — in-memory ChunkIndex + GraphStore + SourceCatalog (wasm-clean)
+  stores/finstack-ai-knowledge-sqlite              — SQLite ChunkIndex + GraphStore + SourceCatalog (native-only)
+  toolsets/finstack-ai-tools-knowledge             — search / graph / catalog / overview tools
   context/finstack-ai-context-knowledge            — ContextProvider for automatic retrieval
   middleware/finstack-ai-middleware-knowledge-ingest — run-attachment feeder
 ```
@@ -69,99 +73,173 @@ does not (no embeddings API).
    hint (`Document | Query`) for models with asymmetric encodings. `EmbeddingOutput` is one
    `Vec<f32>` per input in order, plus optional usage counts. `EmbeddingCallContext` mirrors
    other port call contexts: run locator where available, deadline, cancellation.
-2. **`VectorIndex` and `GraphStore` are runtime ports** in a new `ports/knowledge` module:
+2. **`ChunkIndex`, `GraphStore`, and `SourceCatalog` are runtime ports** in a new
+   `ports/knowledge` module. `ChunkIndex` (not "vector index" — it owns chunk text as well
+   as vectors, and serves keyword and hybrid search over the same records):
 
    ```rust
-   pub trait VectorIndex: PortObject {
-       fn upsert(&self, records: Arc<[VectorRecord]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
-       fn search(&self, query: VectorQuery) -> PortFuture<Result<Vec<VectorHit>, KnowledgeStoreError>>;
-       fn delete_by_source(&self, source: SourceId) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+   pub trait ChunkIndex: PortObject {
+       fn upsert(&self, records: Arc<[ChunkRecord]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
+       fn search(&self, query: ChunkQuery) -> PortFuture<Result<Vec<ChunkHit>, KnowledgeStoreError>>;
+       fn get_chunks(&self, source: SourceId, range: ChunkRange) -> PortFuture<Result<Vec<ChunkRecord>, KnowledgeStoreError>>;
+       fn delete_chunks(&self, chunks: Arc<[ChunkId]>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+       fn delete_by_source(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+       fn export(&self, collection: CollectionId) -> PortFuture<Result<PortStream<Result<ChunkRecord, KnowledgeStoreError>>, KnowledgeStoreError>>;
+       fn import(&self, records: PortStream<ChunkRecord>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
    }
 
    pub trait GraphStore: PortObject {
        fn upsert(&self, fragment: GraphFragment) -> PortFuture<Result<(), KnowledgeStoreError>>;
        fn query(&self, query: GraphQuery) -> PortFuture<Result<GraphResult, KnowledgeStoreError>>;
-       fn delete_by_source(&self, source: SourceId) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+       fn replace_communities(&self, collection: CollectionId, communities: Arc<[Community]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
+       fn communities(&self, query: CommunityQuery) -> PortFuture<Result<Vec<Community>, KnowledgeStoreError>>;
+       fn delete_by_source(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+       fn export(&self, collection: CollectionId) -> PortFuture<Result<PortStream<Result<GraphExportRecord, KnowledgeStoreError>>, KnowledgeStoreError>>;
+       fn import(&self, records: PortStream<GraphExportRecord>) -> PortFuture<Result<u64, KnowledgeStoreError>>;
+   }
+
+   pub trait SourceCatalog: PortObject {
+       fn put(&self, record: SourceRecord) -> PortFuture<Result<(), KnowledgeStoreError>>;
+       fn get(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<Option<SourceRecord>, KnowledgeStoreError>>;
+       fn list(&self, query: SourceListQuery) -> PortFuture<Result<Vec<SourceRecord>, KnowledgeStoreError>>;
+       fn delete(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<bool, KnowledgeStoreError>>;
    }
    ```
-3. **Shared types** (in `ports/knowledge`):
+3. **Collections partition everything.** `CollectionId(Arc<str>)`, validated as a bounded
+   slug; the default collection is `"default"` so simple hosts never see the concept.
+   Every stored record (`ChunkRecord`, `Entity`, `Relation`, `Community`, `SourceRecord`)
+   and every query carries a `CollectionId`; deletes and export/import are
+   collection-scoped. Cross-collection queries do not exist in v1 — hosts issue one query
+   per collection. Retrofitting partitioning later would be a breaking schema/data
+   migration in every backend, which is why it is in v1's types.
+4. **Shared types** (in `ports/knowledge`):
    - `SourceId(Digest)` — the ingested document's content digest. For staged attachments
      this is the artifact digest verbatim, i.e. the same digest the document plan's
      BlobRef↔ArtifactRef convention (document spec decision 19) already verifies. For raw
      byte ingestion the pipeline computes the same digest algorithm over the input bytes.
    - `ChunkId { source: SourceId, index: u32 }` — stable across re-ingestion of identical
-     bytes.
-   - `VectorRecord { chunk_id: ChunkId, vector: Arc<[f32]>, text: Arc<str>, metadata: Metadata }`
-     — metadata carries document name, format, page/heading provenance.
-   - `VectorQuery { vector: Arc<[f32]>, top_k: u32, filter: Metadata }` — filter is exact
-     key/value match in v1. `VectorHit { record fields, score: f32 }`, cosine similarity,
-     descending.
-   - `GraphFragment { source: SourceId, entities: Vec<Entity>, relations: Vec<Relation> }`.
-     `Entity { name: Arc<str>, entity_type: Arc<str>, description: Arc<str>, source_chunks: Vec<ChunkId> }`.
-     `Relation { from: Arc<str>, to: Arc<str>, relation_type: Arc<str>, description: Arc<str>, source_chunks: Vec<ChunkId> }`
-     — endpoints reference entities by name; stores resolve/merge by
-     case-insensitive name + type.
-   - `GraphQuery` v1 is deliberately modest: entity lookup by name/type prefix,
-     neighborhood expansion to `depth: u8` (max 3), relation-type filtering, result
-     ceilings. Not a Cypher engine. `GraphResult` is a bounded subgraph
-     (entities + relations + provenance).
-4. **Idempotent re-ingestion**: ingesting a source is `delete_by_source` + insert in both
-   stores. Re-running ingestion for identical bytes converges to the same state. There is
-   no chunk-level incremental update in v1.
-5. **`KnowledgeStoreError`** follows existing port-error shape: stable non-secret variants
-   (`Unavailable`, `InvalidQuery`, `DimensionMismatch { expected, got }`, `Internal`), no
-   provider/store internals leaked. A `VectorIndex` implementation must reject vectors
-   whose dimension differs from the first-inserted dimension with `DimensionMismatch`.
+     bytes. `ChunkRange { start: u32, end: u32 }` (inclusive, clamped to the source's
+     chunk count) for neighborhood fetch.
+   - `ChunkRecord { collection: CollectionId, chunk_id: ChunkId, chunk_digest: Digest,
+     vector: Option<Arc<[f32]>>, text: Arc<str>, metadata: Metadata }` — metadata carries
+     document name, format, page/heading provenance. `chunk_digest` (digest of the chunk
+     text) drives incremental re-ingest (decision 15). `vector` is optional so keyword-only
+     collections work without an embedder.
+   - `ChunkQuery { collection: CollectionId, mode: SearchMode, top_k: u32, filter: Metadata }`
+     with `SearchMode::Semantic { vector: Arc<[f32]> } | Keyword { text: Arc<str> } |
+     Hybrid { vector: Arc<[f32]>, text: Arc<str> }`. Filter is exact key/value match in
+     v1. `ChunkHit { record fields, score: f32 }`, descending. Semantic scoring is cosine
+     similarity; keyword scoring is BM25 over chunk text; hybrid fuses both rankings with
+     reciprocal rank fusion (RRF, k=60) — RRF over weighted-sum because it needs no score
+     normalization across backends.
+   - `SourceRecord { collection: CollectionId, source: SourceId, name: Option<Arc<str>>,
+     format: Arc<str>, page_count: Option<u32>, ingested_at: Timestamp, chunk_count: u32,
+     chunk_digests: Arc<[Digest]>, graph_template: Option<(Arc<str>, u32)>,
+     status: SourceStatus, metadata: Metadata }` with
+     `SourceStatus::Indexed | MetadataOnly { reason } | PartialFailure`. The catalog is
+     the answer to "what is in this knowledge base" for agents, hosts, and the future UI.
+     `SourceListQuery` filters by collection (required), name substring, format, status,
+     with a result ceiling.
+   - `GraphFragment { collection: CollectionId, source: SourceId, entities: Vec<Entity>, relations: Vec<Relation> }`.
+     `Entity { name: Arc<str>, entity_type: Arc<str>, description: Arc<str>,
+     embedding: Option<Arc<[f32]>>, source_chunks: Vec<ChunkId>, metadata: Metadata }`.
+     `Relation { from: Arc<str>, to: Arc<str>, relation_type: Arc<str>, description: Arc<str>,
+     source_chunks: Vec<ChunkId>, metadata: Metadata }` — endpoints reference entities by
+     name; stores resolve/merge by case-insensitive name + type. Entity `embedding` is the
+     embedded description (decision 13); optional so graph-only pipelines work.
+   - `GraphQuery { collection, lookup: EntityLookup, depth: u8 (max 3), relation_types: Vec<Arc<str>>, ceilings }`
+     with `EntityLookup::Name { name, entity_type: Option } | Semantic { vector, top_k }`.
+     Semantic lookup ranks entities by cosine over stored entity embeddings, then expands
+     the neighborhood exactly like name lookup. Not a Cypher engine. `GraphResult` is a
+     bounded subgraph (entities + relations + provenance).
+   - `Community { collection: CollectionId, id: Arc<str>, level: u8, title: Arc<str>,
+     summary: Arc<str>, entity_names: Vec<Arc<str>>, embedding: Option<Arc<[f32]>>,
+     metadata: Metadata }` and `CommunityQuery { collection, lookup: Name-prefix |
+     Semantic { vector, top_k }, level: Option<u8>, ceiling }`. `GraphExportRecord` is an
+     enum over `Entity`/`Relation`/`Community` rows with their source attribution.
+5. **`Reranker` is a runtime port**:
+
+   ```rust
+   pub trait Reranker: PortObject {
+       fn rerank(
+           &self,
+           ctx: RerankCallContext,
+           query: Arc<str>,
+           candidates: Arc<[Arc<str>]>,
+       ) -> PortFuture<Result<Vec<RerankEntry>, RerankError>>;
+   }
+   ```
+
+   `RerankEntry { index: u32, score: f32 }`, best first; implementations may return fewer
+   entries than candidates (dropped candidates are treated as rejected). Query surfaces
+   use it as an optional post-search stage (decision 22).
+6. **Idempotent re-ingestion**: ingesting a source converges to the same stored state for
+   identical bytes. The embedding branch is incremental at chunk level (decision 15); the
+   graph branch and catalog entry are whole-source replace (`delete_by_source` + insert).
+7. **`KnowledgeStoreError`** follows existing port-error shape: stable non-secret variants
+   (`Unavailable`, `InvalidQuery`, `DimensionMismatch { expected, got }`,
+   `UnknownCollection`, `Internal`), no provider/store internals leaked. A `ChunkIndex`
+   implementation must reject vectors whose dimension differs from the collection's
+   first-inserted dimension with `DimensionMismatch`. Import validates records against
+   the same rules as upsert.
 
 ### Pipeline (`extensions/ingest/finstack-ai-ingest`)
 
-6. **Fixed stages, pluggable implementations**, builder-configured:
+8. **Fixed stages, pluggable implementations**, builder-configured:
 
    ```rust
    let pipeline = IngestPipeline::builder()
-       .limits(DocumentLimits::default())            // parse ceilings (document spec)
+       .collection(CollectionId::parse("deals-2026")?)   // default: "default"
+       .limits(DocumentLimits::default())                // parse ceilings (document spec)
        .chunker(Arc::new(MarkdownChunker::default()))
-       .embedding(embedder, vector_index)            // Arc<dyn EmbeddingModel>, Arc<dyn VectorIndex>
-       .graph(extractor, graph_store)                // Arc<dyn GraphExtractor>, Arc<dyn GraphStore>
-       .build()?;                                    // error if neither branch configured
+       .catalog(source_catalog)                          // Arc<dyn SourceCatalog>, required
+       .embedding(embedder, chunk_index)                 // Arc<dyn EmbeddingModel>, Arc<dyn ChunkIndex>
+       .keyword_only(chunk_index)                        // alternative: chunk indexing without vectors
+       .graph(extractor, graph_store)                    // Arc<dyn GraphExtractor>, Arc<dyn GraphStore>
+       .build()?;                                        // error if no indexing branch configured
 
    let report: IngestReport = pipeline.ingest(source).await?;
    ```
 
    Parse uses `finstack_ai_tools_document::parser::parse` (free functions — the document
    plan's churn boundary; no anydoc types appear here). The embedding and graph branches
-   run in parallel over the same chunks; each is independently optional. A pipeline with
-   neither branch is a build error.
-7. **`IngestSource`** mirrors the document toolset's source union: `Bytes { bytes, media_type_hint, name }`
+   run in parallel over the same chunks; each is independently optional
+   (`.embedding(..)` and `.keyword_only(..)` are mutually exclusive ways to configure the
+   chunk branch). The catalog is mandatory: every ingest writes a `SourceRecord`, and
+   incremental re-ingest depends on it. The engine crate also hosts the model-backed
+   query/maintenance components (`ModelGraphExtractor`, `ModelReranker`,
+   `CommunityBuilder`) because they share its `ModelDriver`-wrapping machinery; hosts
+   construct them here and hand them to query surfaces as trait objects.
+9. **`IngestSource`** mirrors the document toolset's source union: `Bytes { bytes, media_type_hint, name }`
    or `Artifact { store: Arc<dyn ArtifactStore>, scope, artifact }` (resolved and
    digest-verified exactly as the document middleware does). Markdown that is already
    parsed can be submitted as `Markdown { text, source_id, name }` to skip the parse stage
    (e.g. when a host has the document-ingest middleware's output in hand).
-8. **`Chunker` is a local trait in the ingest crate** (pure computation, not a runtime
-   port): `fn chunk(&self, doc: &ChunkInput) -> Result<Vec<Chunk>, ChunkError>`. The
-   default `MarkdownChunker` is heading-aware (splits at heading boundaries, then packs to
-   a target size in bytes with configurable overlap; tables kept atomic; hard ceiling per
-   chunk). `Chunk { id: ChunkId, text: Arc<str>, heading_path: Vec<Arc<str>>, metadata }`.
-9. **`GraphExtractor` is a local trait in the ingest crate**:
+10. **`Chunker` is a local trait in the ingest crate** (pure computation, not a runtime
+    port): `fn chunk(&self, doc: &ChunkInput) -> Result<Vec<Chunk>, ChunkError>`. The
+    default `MarkdownChunker` is heading-aware (splits at heading boundaries, then packs to
+    a target size in bytes with configurable overlap; tables kept atomic; hard ceiling per
+    chunk). `Chunk { id: ChunkId, text: Arc<str>, heading_path: Vec<Arc<str>>, metadata }`.
+11. **`GraphExtractor` is a local trait in the ingest crate**:
 
-   ```rust
-   pub trait GraphExtractor: PortObject {
-       fn extract(
-           &self,
-           ctx: ExtractContext,
-           chunks: Arc<[Chunk]>,
-       ) -> PortFuture<Result<GraphFragment, ExtractError>>;
-   }
-   ```
+    ```rust
+    pub trait GraphExtractor: PortObject {
+        fn extract(
+            &self,
+            ctx: ExtractContext,
+            chunks: Arc<[Chunk]>,
+        ) -> PortFuture<Result<GraphFragment, ExtractError>>;
+    }
+    ```
 
-   The shipped default `ModelGraphExtractor` wraps an existing `Arc<dyn ModelDriver>`
-   handle: structured-output entity/relation extraction per chunk batch (JSON-schema
-   constrained), followed by an in-memory dedup/merge pass (case-insensitive name + type).
-   What to extract and how is not hard-coded — it comes from a **graph extraction
-   template** (decision 9a). Hosts can still supply their own extractor implementation
-   for rule-based/NER approaches.
+    The shipped default `ModelGraphExtractor` wraps an existing `Arc<dyn ModelDriver>`
+    handle: structured-output entity/relation extraction per chunk batch (JSON-schema
+    constrained), followed by an in-memory dedup/merge pass (case-insensitive name + type).
+    What to extract and how is not hard-coded — it comes from a **graph extraction
+    template** (decision 11a). Hosts can still supply their own extractor implementation
+    for rule-based/NER approaches.
 
-9a. **Graph extraction templates are data, not code.** A template is a JSON document
+11a. **Graph extraction templates are data, not code.** A template is a JSON document
     (serde round-trip, `deny_unknown_fields`, easily hand-editable now and
     UI-maintainable later):
 
@@ -185,7 +263,7 @@ does not (no embeddings API).
     chosen over TOML/YAML because the workspace already standardizes on serde JSON
     (`RawJson`, tool schemas) and it maps 1:1 onto a future editing UI's payloads.
 
-9b. **Templates are registered on the pipeline and selected per ingestion.**
+11b. **Templates are registered on the pipeline and selected per ingestion.**
     `ModelGraphExtractor` is constructed with one or more templates plus a default id;
     `pipeline.ingest_with(source, IngestOptions { graph_template: Some("finance-core"), .. })`
     selects one for that run (plain `ingest(source)` uses the default). Selecting an
@@ -196,92 +274,141 @@ does not (no embeddings API).
     the same file a future UI would edit. Hosts load additional templates from JSON at
     runtime.
 
-9c. **Template provenance**: every extracted `GraphFragment`'s entities/relations carry
+11c. **Template provenance**: every extracted `GraphFragment`'s entities/relations carry
     `template_id` + `template_version` in their metadata, so stores can answer "what
     produced this edge" and re-ingesting a source with a different template (which
-    replaces the source's graph wholesale, per decision 4) is observable.
-10. **`requires_ocr` documents ingest as metadata-only**: the source is registered (so
-    idempotency and delete-by-source work) but produces zero chunks, and the report says
-    why. Consistent with "a scanned PDF is a success" (document spec decision 9). Empty
-    markdown from any source behaves the same.
-11. **Bounded everything**: `IngestLimits { max_chunks_per_document (default 2048),
+    replaces the source's graph wholesale, per decision 6) is observable.
+12. **`requires_ocr` documents ingest as metadata-only**: the source is registered in the
+    catalog with `SourceStatus::MetadataOnly { reason }` but produces zero chunks, and the
+    report says why. Consistent with "a scanned PDF is a success" (document spec decision
+    9). Empty markdown from any source behaves the same.
+13. **Entity-description embeddings**: when both the embedding and graph branches are
+    configured, the pipeline embeds each merged entity's `"{name}: {description}"` (and
+    each community's summary, decision 16) with the `Document` input kind and stores the
+    vector on the entity. This enables `EntityLookup::Semantic` (GraphRAG-style local
+    search entry points). Skipped when no embedder is configured;
+    `IngestOptions { embed_entities: bool }` (default true) can disable it to save cost.
+14. **Incremental re-ingest (chunk level, embedding branch)**: before indexing, the
+    pipeline reads the catalog's existing `SourceRecord`. If the source digest is
+    unchanged, the whole ingest short-circuits to a no-op (reported as `skipped_unchanged`
+    unless `IngestOptions { force: true }`). If the content changed, chunk digests are
+    diffed: unchanged chunks keep their stored vectors (no re-embedding — embeddings are
+    the expensive artifact), new/changed chunks are embedded and upserted, removed chunks
+    are deleted via `delete_chunks`. The graph branch does not diff: it re-extracts and
+    replaces the source's fragment wholesale (LLM extraction is not chunk-separable after
+    the merge pass). The catalog record is rewritten last, making it the commit point.
+15. **Bounded everything**: `IngestLimits { max_chunks_per_document (default 2048),
     max_concurrent_embed_batches (4), max_concurrent_extract_calls (2), per_call_deadline }`
     plus the parse-stage `DocumentLimits`. Same defensive posture as the document spec.
-12. **Failure policy**: parse failure is fatal (`IngestError`). Per-chunk embed/extract
+16. **Community summaries are a host-driven batch step**, not part of per-document
+    ingest: `CommunityBuilder::build(collection, graph_store, options)` in the engine
+    crate. It runs label-propagation community detection over the collection's graph
+    (pure Rust, deterministic given a seed, single level in v1 with the `level` field
+    reserved for future hierarchies), then generates one bounded summary per community
+    via `ModelDriver` (structured output: title + summary), embeds summaries when an
+    embedder is supplied, and calls `replace_communities` — wholesale replace per
+    collection, idempotent. Communities are derived data: any ingest invalidates them
+    only in the sense that the host re-runs the builder when it chooses (the report and
+    observer events make staleness visible). Ceilings: max communities, max entities
+    summarized per community, per-call deadline.
+17. **Failure policy**: parse failure is fatal (`IngestError`). Per-chunk embed/extract
     failures are collected into the report, not fatal; a branch whose store `upsert` fails
-    marks the whole branch failed in the report. `IngestReport` records per-stage counts,
-    collected failures, extractor token usage where the driver reports it, and elapsed
-    time. The pipeline never panics on malformed model output — unparseable extraction
-    responses count as per-chunk failures.
-13. **The pipeline does no journaling and holds no run state.** It is host-driven and
+    marks the whole branch failed in the report and the catalog record
+    `SourceStatus::PartialFailure`. `IngestReport` records per-stage counts (including
+    chunks skipped/reused by incremental re-ingest), collected failures, extractor token
+    usage where the driver reports it, and elapsed time. The pipeline never panics on
+    malformed model output — unparseable extraction responses count as per-chunk failures.
+18. **The pipeline does no journaling and holds no run state.** It is host-driven and
     side-band to the agent runtime; determinism guarantees of runs are unaffected because
     nothing the pipeline does enters the journaled conversation.
 
 ### Run-path feeder
 
-14. **New crate `extensions/middleware/finstack-ai-middleware-knowledge-ingest`**,
+19. **New crate `extensions/middleware/finstack-ai-middleware-knowledge-ingest`**,
     component id `finstack.middleware.knowledge-ingest`, stage `BeforeModel`, tier
     `ContextMutation`, ordered after `finstack.middleware.document-ingest`. It **always
     returns `StageOutcome::Continue`** — it never rewrites the draft (the document-ingest
     middleware owns that; per its plan's refinement of spec decision 14, middleware cannot
     append to canonical messages, and this crate does not need to touch the model-visible
     request at all).
-15. **Feeder behavior**: scan user messages for `ContentBlock::File` blocks whose media
+20. **Feeder behavior**: scan user messages for `ContentBlock::File` blocks whose media
     type is a supported document format, resolve bytes from the `ArtifactStore` using the
     BlobRef↔ArtifactRef convention, and submit `IngestSource::Bytes` to a configured
-    `Arc<IngestPipeline>`. Ingestion runs detached from the turn (spawned; the middleware
-    future resolves immediately) with completion/failure reported through observer-visible
-    events. Fail-soft: no feeder error ever affects the run.
-16. **Per-source dedup in the feeder**: because `BeforeModel` fires every turn, the feeder
+    `Arc<IngestPipeline>` (into the pipeline's configured collection). Ingestion runs
+    detached from the turn (spawned; the middleware future resolves immediately) with
+    completion/failure reported through observer-visible events. Fail-soft: no feeder
+    error ever affects the run.
+21. **Per-source dedup in the feeder**: because `BeforeModel` fires every turn, the feeder
     keeps an in-memory set of `SourceId`s it has submitted and skips repeats. Replay
-    re-submission is harmless anyway — ingestion is idempotent (decision 4) — the dedup
-    only avoids wasted work.
-17. **Duplicate parse relative to document-ingest is accepted.** Both crates call
-    `parser::parse` independently (median < 5 ms); neither middleware crate depends on the
-    other.
+    re-submission is harmless anyway — ingestion is idempotent (decision 6) and unchanged
+    sources short-circuit (decision 14) — the dedup only avoids wasted work. Duplicate
+    parse relative to document-ingest is accepted: both crates call `parser::parse`
+    independently (median < 5 ms); neither middleware crate depends on the other.
 
 ### Query surfaces
 
-18. **Toolset `finstack-ai-tools-knowledge`**, toolset id `finstack.tools.knowledge`,
+22. **Toolset `finstack-ai-tools-knowledge`**, toolset id `finstack.tools.knowledge`,
     following the calculator/document toolset pattern (`try_new`, eager validated
     `ToolSpec`s, `Arc<[ToolSpec]>`, `deny_unknown_fields` args, single
-    `ToolStreamItem::Completed`). Constructed with `Arc<dyn EmbeddingModel>` +
-    `Arc<dyn VectorIndex>` and/or `Arc<dyn GraphStore>`; only the tools whose dependencies
-    are present appear in `tools()`.
-    - `semantic_search { query: String, top_k?: u32 (default 8, max 32), filter?: object }`
-      → embeds the query (`Query` input kind), searches, returns ranked chunks with text,
-      score, and source provenance (document name, heading path).
-    - `graph_query { entity: String, entity_type?: String, depth?: u8 (default 1, max 3),
-      relation_types?: [String] }` → bounded subgraph as structured JSON.
+    `ToolStreamItem::Completed`). Constructed with a `CollectionId`, an
+    `Arc<dyn SourceCatalog>`, and optionally `Arc<dyn EmbeddingModel>` +
+    `Arc<dyn ChunkIndex>`, `Arc<dyn GraphStore>`, and `Arc<dyn Reranker>`; only the tools
+    whose dependencies are present appear in `tools()`.
+    - `semantic_search { query: String, top_k?: u32 (default 8, max 32), mode?: "semantic" | "keyword" | "hybrid" (default hybrid when both available), expand?: u8 (default 0, max 2), filter?: object }`
+      → embeds the query (`Query` input kind) as needed by mode, searches, optionally
+      reranks (when a `Reranker` is configured, over 4× top_k candidates, returning
+      top_k), then expands each hit by `expand` neighboring chunks per side via
+      `get_chunks` (merged, deduplicated). Returns ranked excerpts with text, score, and
+      source provenance (document name, heading path).
+    - `graph_query { entity?: String, entity_type?: String, semantic_query?: String,
+      depth?: u8 (default 1, max 3), relation_types?: [String] }` — exactly one of
+      `entity` / `semantic_query`; the latter embeds and uses `EntityLookup::Semantic` →
+      bounded subgraph as structured JSON.
+    - `list_sources { name_contains?: String, format?: String, status?: String }` →
+      catalog listing so the model knows what it can search.
+    - `knowledge_overview { query?: String, top_k?: u32 (default 5, max 16) }` →
+      community titles+summaries, semantically ranked when `query` is given (embedded
+      against community-summary embeddings), otherwise listed. GraphRAG-style global
+      questions start here.
     - Tool metadata: read-only, parallel, safe to retry, no approval — same values as the
       document toolset.
-19. **Stable error codes** (lower snake_case values in `pub const` SCREAMING_SNAKE names,
+23. **Stable error codes** (lower snake_case values in `pub const` SCREAMING_SNAKE names,
     matching the `document_*` precedent): `KNOWLEDGE_INVALID_ARGUMENTS`,
-    `KNOWLEDGE_STORE_UNAVAILABLE`, `KNOWLEDGE_EMBEDDING_FAILED`, `KNOWLEDGE_QUERY_FAILED`.
-20. **Context provider `finstack-ai-context-knowledge`** implements `ContextProvider`:
-    embeds the run's latest user text via the `EmbeddingModel`, retrieves top-k within the
-    request's budget ceilings, and contributes one bounded block formatted as cited
-    excerpts (source name + heading path per excerpt). Retrieved content is data:
+    `KNOWLEDGE_STORE_UNAVAILABLE`, `KNOWLEDGE_EMBEDDING_FAILED`, `KNOWLEDGE_QUERY_FAILED`,
+    `KNOWLEDGE_RERANK_FAILED`. Rerank failure is fail-soft inside `semantic_search`
+    (results returned un-reranked, failure noted in the payload); the code exists for the
+    hard failure paths (e.g. invalid reranker output).
+24. **Context provider `finstack-ai-context-knowledge`** implements `ContextProvider`:
+    embeds the run's latest user text via the `EmbeddingModel`, retrieves top-k for its
+    configured collection (hybrid mode when available, optional `Reranker` applied)
+    within the request's budget ceilings, and contributes one bounded block formatted as
+    cited excerpts (source name + heading path per excerpt). Retrieved content is data:
     `trusted_application_instructions: false`. If embedding or search fails, it
     contributes nothing (empty contribution) — fail-soft, observable via events. Graph
     context injection is out of scope for v1 (the toolset covers graph access).
+25. **`ModelReranker`** (in the engine crate) is the shipped `Reranker`: listwise
+    reranking via `ModelDriver` structured output (query + numbered candidates → ranked
+    indices with scores), bounded candidate count and per-call deadline. Hosts with a
+    dedicated rerank API (Cohere, Voyage) implement the port themselves in v1.
 
 ### Storage backends
 
-21. **`finstack-ai-knowledge-memory`**: `Vec`-backed brute-force cosine `VectorIndex` and
-    adjacency-map `GraphStore` in one crate. Wasm-clean; the backend used by all tests and
-    the wasm binding.
-22. **`finstack-ai-knowledge-sqlite`**: follows the store-sqlite worker/schema pattern.
-    Vectors as BLOBs with brute-force scan in v1 — fine at library scale; an
-    sqlite-vec/ANN upgrade later is a non-breaking internal change. Graph as
-    entity/relation tables with indexed name/type lookups. Native-only; not in the wasm
-    build.
-23. **External backends (Qdrant, LanceDB, pgvector, Neo4j) are future extension crates**
+26. **`finstack-ai-knowledge-memory`**: one crate implementing all three stores —
+    `Vec`-backed brute-force cosine search, an in-memory inverted index with BM25 for
+    keyword/hybrid, adjacency-map graph with communities, and a `HashMap` catalog.
+    Wasm-clean; the backend used by all tests and the wasm binding.
+27. **`finstack-ai-knowledge-sqlite`**: follows the store-sqlite worker/schema pattern.
+    Vectors as BLOBs with brute-force scan in v1; keyword search via SQLite FTS5 (bundled
+    in the workspace's existing SQLite dependency) with BM25 ranking; hybrid = RRF over
+    the two queries. Graph as entity/relation/community tables with indexed name/type
+    lookups; catalog as a sources table. An sqlite-vec/ANN upgrade later is a
+    non-breaking internal change. Native-only; not in the wasm build.
+28. **External backends (Qdrant, LanceDB, pgvector, Neo4j) are future extension crates**
     behind the same ports; out of scope for v1.
 
 ### Provider embeddings
 
-24. **`finstack-ai-provider-openai` and `finstack-ai-provider-ollama` implement
+29. **`finstack-ai-provider-openai` and `finstack-ai-provider-ollama` implement
     `EmbeddingModel`** against their embeddings endpoints, exposed as a separate
     constructor from the chat driver (e.g. `OpenAiEmbeddings::try_new(config)`), reusing
     each crate's existing transport/auth/config machinery. Batch limits and dimensions
@@ -290,42 +417,59 @@ does not (no embeddings API).
 
 ### Bindings and portability
 
-25. **Native + wasm, all bindings in v1.** All three ports use `PortObject` bounds. The
-    memory backend, ingest pipeline, toolset, and context provider compile for wasm32; the
-    sqlite backend and provider embedding impls follow each crate's existing target
-    policy. No additions to `FORBIDDEN_WASM` in `scripts/wasm_package/check.py`.
-26. **Python binding**: construct pipelines from built-ins (memory/sqlite stores, provider
-    embedders, `ModelGraphExtractor` with templates supplied as JSON strings/dicts),
-    pass a host-implemented `EmbeddingModel` as a Python callable, run `ingest` (with
-    per-call template selection), and register the toolset/context provider/middleware
-    like existing extensions.
-27. **WASM binding**: same surface with memory stores only; host `EmbeddingModel` as a JS
+30. **Native + wasm, all bindings in v1.** All new ports use `PortObject` bounds. The
+    memory backend, ingest pipeline, community builder, toolset, and context provider
+    compile for wasm32; the sqlite backend and provider embedding impls follow each
+    crate's existing target policy. No additions to `FORBIDDEN_WASM` in
+    `scripts/wasm_package/check.py`.
+31. **Python binding**: construct pipelines from built-ins (memory/sqlite stores, provider
+    embedders, `ModelGraphExtractor` with templates supplied as JSON strings/dicts,
+    `ModelReranker`, `CommunityBuilder`), pass a host-implemented `EmbeddingModel` or
+    `Reranker` as a Python callable, run `ingest` (with per-call template selection,
+    force flag) and community builds, use export/import and catalog listing, and register
+    the toolset/context provider/middleware like existing extensions.
+32. **WASM binding**: same surface with memory stores only; host `EmbeddingModel` as a JS
     async callback returning `Float32Array`s.
 
 ### Testing
 
-28. **Deterministic test doubles** in the existing test-support location:
-    `FakeEmbeddingModel` (seeded hash → unit vector, fixed dimensions) and
-    `ScriptedGraphExtractor` (canned fragments per chunk). No test calls a real provider.
-29. **Test tiers**: unit tests per crate (chunker boundary cases on heading-heavy/table
-    Markdown; dimension-mismatch rejection; graph merge/dedup; idempotent re-ingest;
-    toolset arg validation and error codes; template JSON load/validation, including
-    rejection of malformed and oversized templates, unregistered-id selection errors,
-    and template provenance on extracted fragments); a `finstack-ai-test` lane running the
-    document fixture corpus end-to-end: ingest → `semantic_search` returns the staged
-    content → context provider injects it into a scripted run; binding smoke tests in
-    Python and wasm.
-30. **Compatibility**: new runtime ports and types update
+33. **Deterministic test doubles** in the existing test-support location:
+    `FakeEmbeddingModel` (seeded hash → unit vector, fixed dimensions),
+    `ScriptedGraphExtractor` (canned fragments per chunk), and `ScriptedReranker`. No
+    test calls a real provider or model.
+34. **Test tiers**: unit tests per crate — chunker boundary cases on heading-heavy/table
+    Markdown; dimension-mismatch and unknown-collection rejection; collection isolation
+    (records in one collection never surface in another's queries); BM25/hybrid ranking
+    sanity and RRF fusion; `get_chunks` range clamping and `expand` merging; graph
+    merge/dedup and semantic entity lookup; community detection determinism and
+    wholesale replace; catalog round-trip and list filters; idempotent re-ingest,
+    unchanged-source short-circuit, and chunk-level diff (reused vs re-embedded vs
+    deleted counts); export/import round-trip across memory↔sqlite; toolset arg
+    validation and error codes; rerank fail-soft; template JSON load/validation,
+    including rejection of malformed and oversized templates, unregistered-id selection
+    errors, and template provenance on extracted fragments. Plus a `finstack-ai-test`
+    lane running the document fixture corpus end-to-end: ingest → `semantic_search`
+    (each mode) returns the staged content → `knowledge_overview` after a community
+    build → context provider injects excerpts into a scripted run; binding smoke tests
+    in Python and wasm.
+35. **Compatibility**: new runtime ports and types update
     `fixtures/compatibility/public-rust-api/cargo-public-api/finstack-ai.txt` (additive);
     the workspace lint/version/edition inheritance and per-task commit discipline of the
     document plan apply unchanged.
 
 ## Non-goals
 
-- Reranking, hybrid/BM25 search, ANN indexes (memory/sqlite are brute-force in v1).
-- Graph community detection/summarization (GraphRAG-style global queries).
-- Chunk-level incremental updates — idempotency is whole-source only.
-- External vector/graph database backends.
+- ANN index structures (memory/sqlite are brute-force/FTS5 in v1; internal upgrades are
+  non-breaking).
+- External vector/graph database backends and dedicated rerank-API integrations
+  (Cohere/Voyage rerank) — future extension crates behind the existing ports.
+- Hierarchical (multi-level) community summaries — the `level` field is reserved; v1
+  builds one level.
+- Chunk-level incremental updates for the **graph** branch — graph re-extraction is
+  whole-source; only the embedding branch diffs chunks.
+- Cross-collection queries — one collection per query in v1.
+- TTL/retention policies — hosts (e.g. the future UI app) drive deletion off the
+  catalog's `ingested_at`; policy does not belong in the library.
 - OCR'd sources (inherits the document spec's OCR non-goal; scanned PDFs ingest as
   metadata-only).
 - Embeddings via `finstack-ai-provider-anthropic` (no such API).
