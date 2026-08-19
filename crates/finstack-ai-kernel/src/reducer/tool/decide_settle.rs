@@ -39,7 +39,10 @@ pub(crate) fn decide_tool_settled(
 }
 
 pub(crate) fn is_known_tool_effect(state: &KernelState, effect_id: crate::EffectId) -> bool {
-    tool_batch_id_for_effect(state, effect_id).is_some()
+    state
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(|batch| batch.call_index(effect_id).is_some())
         || state
             .tool_calls
             .values()
@@ -71,14 +74,13 @@ pub(crate) fn decide_external_tool(
     state: &KernelState,
     env: &TransitionEnv,
     input: ExternalEffectCompletedInput,
-    settlement_digest: Option<crate::Digest>,
+    digest: crate::Digest,
 ) -> Result<Decision, KernelError> {
     let tool_batch_id = tool_batch_id_for_effect(state, input.completion.effect_id).ok_or(
         KernelError::EffectNotPending {
             effect_id: input.completion.effect_id,
         },
     )?;
-    let digest = settlement_digest.ok_or(KernelError::InvariantViolation)?;
     if input.assistant_message.is_some() {
         return Err(KernelError::AssistantMessagePresenceMismatch);
     }

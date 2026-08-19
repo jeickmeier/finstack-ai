@@ -77,7 +77,12 @@ pub(super) fn decide(
             digest.ok_or(KernelError::InvariantViolation)?;
             decide_model(state, env, &input)
         }
-        KernelInput::ExternalEffectCompleted(input) => decide_external(state, env, input, digest),
+        KernelInput::ExternalEffectCompleted(input) => decide_external(
+            state,
+            env,
+            input,
+            digest.ok_or(KernelError::InvariantViolation)?,
+        ),
         KernelInput::ToolBatchSettled(input) => super::tool::decide_tool_settled(
             state,
             env,

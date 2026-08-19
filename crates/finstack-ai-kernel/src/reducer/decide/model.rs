@@ -152,13 +152,12 @@ pub(super) fn decide_external(
     state: &KernelState,
     env: &TransitionEnv,
     input: ExternalEffectCompletedInput,
-    settlement_digest: Option<Digest>,
+    settlement_digest: Digest,
 ) -> Result<Decision, KernelError> {
     validate_external_completion_input(&input)?;
     if super::super::tool::is_known_tool_effect(state, input.completion.effect_id) {
         return super::super::tool::decide_external_tool(state, env, input, settlement_digest);
     }
-    settlement_digest.ok_or(KernelError::InvariantViolation)?;
     if state.phase != Some(RunPhase::AwaitingExternal) {
         reject_terminal(state)?;
         return Err(KernelError::InvalidPhaseInput {

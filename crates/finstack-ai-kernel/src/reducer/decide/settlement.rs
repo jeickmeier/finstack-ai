@@ -100,9 +100,8 @@ fn review_external(
         return Err(KernelError::ConflictingCompletionId);
     }
     if is_known_tool_effect(state, effect_id) {
-        let Some(tool_batch_id) = tool_batch_id_for_effect(state, effect_id) else {
-            return Ok(SettlementReview::Fresh { digest: None });
-        };
+        let tool_batch_id = tool_batch_id_for_effect(state, effect_id)
+            .ok_or(KernelError::EffectNotPending { effect_id })?;
         let digest = external_tool_digest(tool_batch_id, input)?;
         return review_completion_or_map(
             state,

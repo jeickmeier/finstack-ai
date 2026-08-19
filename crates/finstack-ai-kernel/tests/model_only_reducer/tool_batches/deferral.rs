@@ -438,6 +438,190 @@ fn decided_tool_settlement_counts_apply_and_replay() {
     );
 }
 
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "two-batch lifecycle is required to pin prior-batch digest lookup"
+)]
+fn prior_batch_external_redelivery_uses_the_original_batch_while_a_newer_batch_is_active() {
+    const BATCH_TWO: u64 = 500;
+    let first = call(CALL_A, "alpha");
+    let second = call(CALL_B, "beta");
+    let mut harness = model_with_calls(std::slice::from_ref(&first));
+    settle_after_model_for_tools(&mut harness);
+    harness.apply_input(
+        tool_env(
+            1_600,
+            &[6_000, 6_001, 6_002],
+            &[6_000],
+            &[TOOL_EFFECT_A],
+            &[],
+            &[BATCH],
+            &[],
+        ),
+        stage_input(
+            0,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([execute(
+                    &first,
+                    ToolExecutionMode::Sequential,
+                    ToolFailurePolicy::ReturnToModel,
+                )]),
+                continuation: ToolBatchContinuation::ContinueModel,
+            },
+        ),
+    );
+    harness.apply_input(
+        tool_env(1_700, &[6_010], &[6_010], &[], &[], &[], &[]),
+        KernelInput::ToolBatchSettled(ToolBatchSettled {
+            tool_batch_id: id::<ToolBatchTag>(BATCH),
+            outcome: ToolSettlement::Deferred(deferred_tool(
+                TOOL_EFFECT_A,
+                "external-prior-batch",
+            )),
+        }),
+    );
+    let output = tool_result_output(&first, "prior batch result");
+    let external = KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
+        completion: ExternalEffectCompletion::try_new(
+            id::<finstack_ai_kernel::EffectTag>(TOOL_EFFECT_A),
+            "prior-batch-completion",
+            ExternalEffectOutcome::Completed {
+                output,
+                usage: None,
+                artifacts: Arc::from([]),
+            },
+        )
+        .expect("external completion"),
+        assistant_message: None,
+    });
+    harness.apply_input(
+        tool_env(
+            1_800,
+            &[6_020, 6_021, 6_022],
+            &[6_020, 6_021, 6_022],
+            &[],
+            &[6_100],
+            &[],
+            &[],
+        ),
+        external.clone(),
+    );
+    assert_eq!(harness.kernel.state().phase, Some(RunPhase::AfterToolBatch));
+
+    harness.apply_input(
+        transition_env(2_000, &[6_030], &[], &[], &[], &[], &[]),
+        stage_input(0, Stage::AfterToolBatch, ReducerStageOutcome::Continue),
+    );
+    prepare_context(&mut harness, 1, true);
+    request_model(&mut harness, 1, true);
+    let message = Message::try_new(
+        id::<finstack_ai_kernel::MessageTag>(FINAL_MESSAGE_TWO),
+        MessageRole::Assistant,
+        vec![
+            ContentBlock::Text(TextBlock::try_new("calling more tools").expect("text")),
+            ContentBlock::ToolCall(second.clone()),
+        ],
+        timestamp(2_300),
+        None,
+        provider_ids(),
+        Metadata::empty(),
+    )
+    .expect("second-cycle tool calls");
+    harness.apply_input(
+        tool_env(
+            2_300,
+            &[17, 18],
+            &[7, 8],
+            &[],
+            &[FINAL_MESSAGE_TWO],
+            &[],
+            &[CALL_B],
+        ),
+        KernelInput::ModelSettled(ModelSettled {
+            turn_id: id::<finstack_ai_kernel::TurnTag>(TURN_TWO),
+            model_request_id: id::<finstack_ai_kernel::ModelRequestTag>(MODEL_REQUEST_TWO),
+            outcome: ModelSettlement::Completed {
+                completion: completed_effect(EFFECT_TWO, "model-tools-two", "calling more tools"),
+                assistant_message: message,
+            },
+        }),
+    );
+    settle_after_model(&mut harness, 1, true);
+    harness.apply_input(
+        tool_env(
+            2_500,
+            &[6_040, 6_041, 6_042],
+            &[6_040],
+            &[TOOL_EFFECT_B],
+            &[],
+            &[BATCH_TWO],
+            &[],
+        ),
+        stage_input(
+            1,
+            Stage::BeforeToolBatch,
+            ReducerStageOutcome::ToolBatchPrepared {
+                calls: Arc::from([execute(
+                    &second,
+                    ToolExecutionMode::Sequential,
+                    ToolFailurePolicy::ReturnToModel,
+                )]),
+                continuation: ToolBatchContinuation::Finalize,
+            },
+        ),
+    );
+    let state = harness.kernel.state();
+    assert_eq!(
+        state
+            .active_tool_batch
+            .as_ref()
+            .expect("newer batch")
+            .opened
+            .tool_batch_id,
+        id::<ToolBatchTag>(BATCH_TWO)
+    );
+    assert_eq!(
+        state
+            .tool_calls
+            .get(&id::<finstack_ai_kernel::ToolCallTag>(CALL_A))
+            .expect("prior call")
+            .tool_batch_id,
+        Some(id::<ToolBatchTag>(BATCH))
+    );
+
+    let duplicate = harness
+        .kernel
+        .decide(&empty_env(2_600), external)
+        .expect("equal prior-batch redelivery");
+    assert!(duplicate.records.is_empty());
+    assert!(
+        duplicate
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == "duplicate_settlement")
+    );
+
+    let conflict = KernelInput::ExternalEffectCompleted(ExternalEffectCompletedInput {
+        completion: ExternalEffectCompletion::try_new(
+            id::<finstack_ai_kernel::EffectTag>(TOOL_EFFECT_A),
+            "prior-batch-conflict",
+            ExternalEffectOutcome::Completed {
+                output: tool_result_output(&first, "changed"),
+                usage: None,
+                artifacts: Arc::from([]),
+            },
+        )
+        .expect("conflicting completion"),
+        assistant_message: None,
+    });
+    assert_eq!(
+        harness.kernel.decide(&empty_env(2_601), conflict),
+        Err(KernelError::ConflictingSettlement)
+    );
+}
+
 fn deferred_tool(effect_ordinal: u64, handle: &str) -> EffectDeferred {
     EffectDeferred {
         effect_id: id::<finstack_ai_kernel::EffectTag>(effect_ordinal),
