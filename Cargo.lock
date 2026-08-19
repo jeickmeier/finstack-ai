@@ -1168,6 +1168,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-document-ingest"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-tools-document",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-middleware-verify"
 version = "1.0.0"
 dependencies = [
@@ -1479,6 +1491,7 @@ name = "finstack-ai-tools-document"
 version = "1.0.0"
 dependencies = [
  "anydoc",
+ "finstack-ai-kernel",
  "finstack-ai-runtime",
  "futures-util",
  "pdf-inspector",
