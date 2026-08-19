@@ -133,6 +133,11 @@ impl Toolset for DocumentToolset {
             validate_call_context(&ctx, &call, &toolset.tool_id)?;
             let name = call.call.tool_name();
             let args = parse_call_arguments(name, call.call.arguments().as_bytes())?;
+            if let Some((start, end)) = args.page_range
+                && (start == 0 || end < start)
+            {
+                return Err(invalid_arguments("page_range is reversed or zero-based"));
+            }
             let resolved = crate::source::resolve(
                 &args.source,
                 &ctx,
@@ -277,15 +282,10 @@ async fn build_parse_result(
     if let Some(requested) = max_output_bytes {
         limits.max_output_bytes = limits.max_output_bytes.min(requested);
     }
-    if let Some((start, end)) = page_range {
-        if start == 0 || end < start {
-            return Err(invalid_arguments("page_range is reversed or zero-based"));
-        }
-        if !bytes.starts_with(b"%PDF-") {
-            return Err(invalid_arguments(
-                "page_range is only valid for PDF documents",
-            ));
-        }
+    if page_range.is_some() && !bytes.starts_with(b"%PDF-") {
+        return Err(invalid_arguments(
+            "page_range is only valid for PDF documents",
+        ));
     }
     let parsed = match page_range {
         Some(range) => crate::parser::parse_pages(bytes, range, &limits)
@@ -387,7 +387,6 @@ async fn build_parse_output(
         )
     })?;
     let scope = crate::source::call_scope(ctx);
-    let markdown_len = u64::try_from(parsed.markdown.len()).unwrap_or(u64::MAX);
     let artifact = stage_required_artifact(
         store.as_ref(),
         scope,
@@ -395,7 +394,7 @@ async fn build_parse_output(
         ArtifactMetadata {
             kind: Arc::from("tool-output"),
             media_type: Arc::from("text/markdown"),
-            name: None,
+            name: Some(Arc::from("document.md")),
             attributes: Metadata::empty(),
         },
     )
@@ -407,9 +406,6 @@ async fn build_parse_output(
             "document artifact staging failed",
         )
     })?;
-    let overhead = size.saturating_sub(markdown_len);
-    let budget = max_result_bytes.saturating_sub(overhead);
-    let (truncated_markdown, _) = crate::parser::truncate_utf8(parsed.markdown, budget);
     let spilled_artifact = serde_json::to_value(&artifact).map_err(|_| {
         tool_error(
             crate::DOCUMENT_PARSE_FAILED,
@@ -417,15 +413,58 @@ async fn build_parse_output(
             "spilled artifact reference serialization failed",
         )
     })?;
-    Ok(serde_json::json!({
-        "markdown": truncated_markdown,
-        "format": parsed.format,
-        "page_count": parsed.page_count,
-        "classification": parsed.classification,
-        "requires_ocr": parsed.requires_ocr,
-        "truncated": true,
-        "spilled_artifact": spilled_artifact,
-    }))
+    Ok(spilled_parse_output(&parsed, &spilled_artifact, max_result_bytes))
+}
+
+/// Build the final spilled `document_parse` JSON with inline `markdown`
+/// truncated so the *whole* serialized result (including the real,
+/// already-staged `spilled_artifact`) fits `max_result_bytes`.
+///
+/// The naive approach — compute a truncation budget from `max_result_bytes`
+/// minus the pre-spill skeleton's size (`spilled_artifact: null`) — under
+/// counts the overhead once the real `ArtifactRef` JSON (hundreds of bytes)
+/// replaces the `null`, so the truncated result can still exceed
+/// `max_result_bytes`. Instead, measure overhead from a skeleton that
+/// already carries the real `spilled_artifact`, then shrink the markdown
+/// budget and re-measure until the actual serialized size fits (JSON string
+/// escaping can also inflate a byte-accurate `str` truncation, so a single
+/// pass is not guaranteed to converge on the first try).
+const SPILL_TRUNCATION_ATTEMPTS: u8 = 16;
+
+fn spilled_parse_output(
+    parsed: &crate::parser::ParsedDocument,
+    spilled_artifact: &serde_json::Value,
+    max_result_bytes: u64,
+) -> serde_json::Value {
+    let build = |markdown: &str| {
+        serde_json::json!({
+            "markdown": markdown,
+            "format": parsed.format,
+            "page_count": parsed.page_count,
+            "classification": parsed.classification,
+            "requires_ocr": parsed.requires_ocr,
+            "truncated": true,
+            "spilled_artifact": spilled_artifact,
+        })
+    };
+    let overhead = serde_json::to_vec(&build("")).map_or(u64::MAX, |bytes| bytes.len() as u64);
+    let mut budget = max_result_bytes.saturating_sub(overhead);
+    for _ in 0..SPILL_TRUNCATION_ATTEMPTS {
+        let (candidate_markdown, _) =
+            crate::parser::truncate_utf8(parsed.markdown.clone(), budget);
+        let candidate = build(&candidate_markdown);
+        let candidate_size =
+            serde_json::to_vec(&candidate).map_or(u64::MAX, |bytes| bytes.len() as u64);
+        if candidate_size <= max_result_bytes || budget == 0 {
+            return candidate;
+        }
+        // JSON escaping (or the char-boundary rounding in truncate_utf8)
+        // left the candidate over budget; shrink by the exact overshoot
+        // (or at least one byte) and re-measure.
+        let overshoot = candidate_size - max_result_bytes;
+        budget = budget.saturating_sub(overshoot.max(1));
+    }
+    build("")
 }
 
 fn completed_stream(output: &serde_json::Value) -> Result<ToolEventStream, ToolError> {

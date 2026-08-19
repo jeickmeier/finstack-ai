@@ -134,7 +134,8 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AuthorizationContext, Bytes,
-    CancellationSignal, PortFuture, RunCallContext, ToolCallContext, ToolError, ToolStreamItem,
+    CancellationSignal, PortFuture, RunCallContext, ToolCallContext, ToolError, ToolSpec,
+    ToolStreamItem,
 };
 use futures_util::StreamExt;
 
@@ -222,7 +223,7 @@ fn validated_call(
     }
 }
 
-fn stage(store: &CaptureArtifactStore, bytes: &[u8], media: &str, name: &str) -> ArtifactRef {
+fn stage(store: &dyn ArtifactStore, bytes: &[u8], media: &str, name: &str) -> ArtifactRef {
     block_on(finstack_ai_runtime::stage_required_artifact(
         store,
         test_scope(),
@@ -235,6 +236,25 @@ fn stage(store: &CaptureArtifactStore, bytes: &[u8], media: &str, name: &str) ->
         },
     ))
     .expect("staged")
+}
+
+/// Test-only: override one tool spec's `max_result_bytes` so the spill
+/// branch can be exercised without an oversized fixture. `tools` is
+/// `pub(crate)`, so this mutation is only reachable from within the crate.
+fn with_max_result_bytes(mut toolset: DocumentToolset, name: &str, max_result_bytes: u64) -> DocumentToolset {
+    let tools: Vec<ToolSpec> = toolset
+        .tools
+        .iter()
+        .cloned()
+        .map(|mut spec| {
+            if spec.model_name.as_ref() == name {
+                spec.max_result_bytes = max_result_bytes;
+            }
+            spec
+        })
+        .collect();
+    toolset.tools = Arc::from(tools);
+    toolset
 }
 
 fn call_tool(toolset: &DocumentToolset, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
@@ -438,4 +458,65 @@ fn page_range_extracts_a_pdf_page() {
     let output = call_tool(&toolset, "document_parse", &arguments);
     assert_eq!(output["format"], "pdf");
     assert_eq!(output["page_count"], 1);
+}
+
+// Force the spill branch without an oversized fixture: below the real
+// (multi-KB) full output for `document_parse_spills_oversized_output_to_artifact`'s
+// synthetic CSV, but well above the staged-artifact-reference JSON overhead
+// alone, so a truncated-but-nonempty inline markdown is achievable.
+const SPILL_TEST_MAX_RESULT_BYTES: u64 = 800;
+
+#[test]
+fn document_parse_spills_oversized_output_to_artifact() {
+    // A small fixture's full output is smaller than the ~540-byte JSON
+    // overhead of a real staged `spilled_artifact` reference, so no
+    // `max_result_bytes` value could exercise the spill branch and still
+    // succeed. Synthesize a CSV large enough that its full markdown table
+    // output exceeds that overhead by a comfortable margin, in memory (no
+    // new fixture file).
+    use std::fmt::Write as _;
+    let mut big_csv = String::from("quarter,revenue\n");
+    for i in 0..200 {
+        let _ = writeln!(big_csv, "Q{i},{}", i * 1000);
+    }
+    let big_csv = big_csv.into_bytes();
+
+    let store: Arc<dyn ArtifactStore> = Arc::new(CaptureArtifactStore::default());
+    let artifact = stage(store.as_ref(), &big_csv, "text/csv", "big.csv");
+    let toolset = DocumentToolset::try_new()
+        .expect("toolset")
+        .with_artifact_store(Arc::clone(&store));
+    let toolset =
+        with_max_result_bytes(toolset, "document_parse", SPILL_TEST_MAX_RESULT_BYTES);
+    let arguments =
+        serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    let output = call_tool(&toolset, "document_parse", &arguments);
+
+    // (c) truncated flag semantics are coherent: spill always truncates the
+    // inline copy, even when the underlying parse itself was not truncated.
+    assert_eq!(output["truncated"], true);
+
+    // (b) the inline JSON total size fits the configured ceiling — this is
+    // the exact bug being regression-tested: a budget computed from the
+    // pre-spill (`spilled_artifact: null`) skeleton undercounts the real,
+    // hundreds-of-bytes `ArtifactRef` JSON and can overshoot the ceiling.
+    let total_size = serde_json::to_vec(&output).expect("serialize output").len();
+    assert!(
+        u64::try_from(total_size).expect("size fits u64") <= SPILL_TEST_MAX_RESULT_BYTES,
+        "inline result must respect max_result_bytes={SPILL_TEST_MAX_RESULT_BYTES}, got {total_size} bytes: {output}"
+    );
+
+    // (a) spilled_artifact is a valid ArtifactRef whose stored bytes carry
+    // the FULL (untruncated) markdown.
+    let spilled = output["spilled_artifact"].clone();
+    assert!(!spilled.is_null(), "expected a spilled_artifact reference");
+    let artifact_ref: ArtifactRef = serde_json::from_value(spilled).expect("artifact ref");
+    let stored = block_on(store.get(test_scope(), artifact_ref)).expect("stored bytes");
+    let full_markdown = String::from_utf8_lossy(&stored);
+    assert!(full_markdown.contains("Q1"));
+    let inline_markdown = output["markdown"].as_str().expect("inline markdown");
+    assert!(
+        full_markdown.len() > inline_markdown.len(),
+        "the spilled artifact must carry more content than the truncated inline copy"
+    );
 }
