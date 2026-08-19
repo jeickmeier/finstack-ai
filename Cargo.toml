@@ -16,6 +16,7 @@ members = [
     "extensions/providers/finstack-ai-provider-anthropic",
     "extensions/providers/finstack-ai-provider-openrouter",
     "extensions/toolsets/finstack-ai-sandbox-e2b",
+    "extensions/toolsets/finstack-ai-tools-openrouter-media",
     "extensions/toolsets/finstack-ai-tools-calculator",
     "extensions/toolsets/finstack-ai-tools-document",
     "extensions/toolsets/finstack-ai-tools-filesystem",
@@ -115,6 +116,7 @@ finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provide
 finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "1.0.0" }
 finstack-ai-provider-openrouter = { path = "extensions/providers/finstack-ai-provider-openrouter", version = "1.0.0" }
 finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b", version = "1.0.0" }
+finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
 finstack-ai-tools-document = { path = "extensions/toolsets/finstack-ai-tools-document", version = "1.0.0" }
 anydoc = "0.1"
