@@ -156,11 +156,50 @@ does not (no embeddings API).
 
    The shipped default `ModelGraphExtractor` wraps an existing `Arc<dyn ModelDriver>`
    handle: structured-output entity/relation extraction per chunk batch (JSON-schema
-   constrained), followed by an in-memory dedup/merge pass (case-insensitive name + type),
-   with a configurable entity-type vocabulary. The default vocabulary is finance-tuned:
-   `company, person, instrument, metric, event, date, jurisdiction, sector, currency`.
-   Extraction prompts live in the crate as `const` strings; hosts can supply their own
-   extractor implementation for rule-based/NER approaches.
+   constrained), followed by an in-memory dedup/merge pass (case-insensitive name + type).
+   What to extract and how is not hard-coded — it comes from a **graph extraction
+   template** (decision 9a). Hosts can still supply their own extractor implementation
+   for rule-based/NER approaches.
+
+9a. **Graph extraction templates are data, not code.** A template is a JSON document
+    (serde round-trip, `deny_unknown_fields`, easily hand-editable now and
+    UI-maintainable later):
+
+    ```rust
+    pub struct GraphExtractionTemplate {
+        pub id: Arc<str>,             // stable slug, e.g. "finance-core"
+        pub version: u32,
+        pub name: Arc<str>,
+        pub description: Arc<str>,
+        pub entity_types: Vec<TypeDef>,     // { name, description }
+        pub relation_types: Vec<TypeDef>,   // { name, description }
+        pub instructions: Arc<str>,         // domain guidance injected into the prompt
+        pub examples: Vec<ExtractionExample>, // optional few-shot: { input, entities, relations }
+    }
+    ```
+
+    `GraphExtractionTemplate::from_json(&[u8])` validates on load: non-empty id/name, at
+    least one entity type, unique type names, bounded sizes (instructions/examples byte
+    ceilings). The prompt scaffolding (role text, output JSON schema, chunk framing)
+    stays `const` in the crate; the template supplies only the domain content. JSON is
+    chosen over TOML/YAML because the workspace already standardizes on serde JSON
+    (`RawJson`, tool schemas) and it maps 1:1 onto a future editing UI's payloads.
+
+9b. **Templates are registered on the pipeline and selected per ingestion.**
+    `ModelGraphExtractor` is constructed with one or more templates plus a default id;
+    `pipeline.ingest_with(source, IngestOptions { graph_template: Some("finance-core"), .. })`
+    selects one for that run (plain `ingest(source)` uses the default). Selecting an
+    unregistered id is an `IngestError` before any work starts. The crate ships one
+    built-in template, `finance-core` v1 (entity types `company, person, instrument,
+    metric, event, date, jurisdiction, sector, currency`), as a checked-in JSON asset
+    under `extensions/ingest/finstack-ai-ingest/templates/` loaded via `include_bytes!` —
+    the same file a future UI would edit. Hosts load additional templates from JSON at
+    runtime.
+
+9c. **Template provenance**: every extracted `GraphFragment`'s entities/relations carry
+    `template_id` + `template_version` in their metadata, so stores can answer "what
+    produced this edge" and re-ingesting a source with a different template (which
+    replaces the source's graph wholesale, per decision 4) is observable.
 10. **`requires_ocr` documents ingest as metadata-only**: the source is registered (so
     idempotency and delete-by-source work) but produces zero chunks, and the report says
     why. Consistent with "a scanned PDF is a success" (document spec decision 9). Empty
@@ -254,10 +293,11 @@ does not (no embeddings API).
 25. **Native + wasm, all bindings in v1.** All three ports use `PortObject` bounds. The
     memory backend, ingest pipeline, toolset, and context provider compile for wasm32; the
     sqlite backend and provider embedding impls follow each crate's existing target
-    policy. No additions to `FORBIDDEN_WASM` in `tools/wasm_package/check.py`.
+    policy. No additions to `FORBIDDEN_WASM` in `scripts/wasm_package/check.py`.
 26. **Python binding**: construct pipelines from built-ins (memory/sqlite stores, provider
-    embedders, `ModelGraphExtractor`), pass a host-implemented `EmbeddingModel` as a
-    Python callable, run `ingest`, and register the toolset/context provider/middleware
+    embedders, `ModelGraphExtractor` with templates supplied as JSON strings/dicts),
+    pass a host-implemented `EmbeddingModel` as a Python callable, run `ingest` (with
+    per-call template selection), and register the toolset/context provider/middleware
     like existing extensions.
 27. **WASM binding**: same surface with memory stores only; host `EmbeddingModel` as a JS
     async callback returning `Float32Array`s.
@@ -269,7 +309,9 @@ does not (no embeddings API).
     `ScriptedGraphExtractor` (canned fragments per chunk). No test calls a real provider.
 29. **Test tiers**: unit tests per crate (chunker boundary cases on heading-heavy/table
     Markdown; dimension-mismatch rejection; graph merge/dedup; idempotent re-ingest;
-    toolset arg validation and error codes); a `finstack-ai-test` lane running the
+    toolset arg validation and error codes; template JSON load/validation, including
+    rejection of malformed and oversized templates, unregistered-id selection errors,
+    and template provenance on extracted fragments); a `finstack-ai-test` lane running the
     document fixture corpus end-to-end: ingest → `semantic_search` returns the staged
     content → context provider injects it into a scripted run; binding smoke tests in
     Python and wasm.
