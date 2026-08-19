@@ -35,12 +35,12 @@ Three layers:
 ```
 crates/finstack-ai-runtime/src/ports/
   embedding/     — EmbeddingModel port trait + types
-  knowledge/     — ChunkIndex, GraphStore, SourceCatalog, Reranker, FusionStrategy traits + shared types
+  knowledge/     — ChunkIndex, GraphStore, SourceCatalog, SourceStore, Reranker, FusionStrategy traits + shared types
 
 extensions/
   ingest/finstack-ai-ingest                        — pipeline engine + model-backed components (new category dir)
-  stores/finstack-ai-knowledge-memory              — in-memory ChunkIndex + GraphStore + SourceCatalog (wasm-clean)
-  stores/finstack-ai-knowledge-sqlite              — SQLite ChunkIndex + GraphStore + SourceCatalog (native-only)
+  stores/finstack-ai-knowledge-memory              — in-memory ChunkIndex + GraphStore + SourceCatalog + SourceStore (wasm-clean)
+  stores/finstack-ai-knowledge-sqlite              — SQLite ChunkIndex + GraphStore + SourceCatalog + SourceStore (native-only)
   toolsets/finstack-ai-tools-knowledge             — search / graph / catalog / overview tools
   context/finstack-ai-context-knowledge            — ContextProvider for automatic retrieval
   middleware/finstack-ai-middleware-knowledge-ingest — run-attachment feeder
@@ -106,7 +106,26 @@ does not (no embeddings API).
        fn list(&self, query: SourceListQuery) -> PortFuture<Result<Vec<SourceRecord>, KnowledgeStoreError>>;
        fn delete(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<bool, KnowledgeStoreError>>;
    }
+
+   pub trait SourceStore: PortObject {
+       fn put(&self, collection: CollectionId, source: SourceId, media_type: Arc<str>, bytes: Arc<[u8]>) -> PortFuture<Result<(), KnowledgeStoreError>>;
+       fn get(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<Option<StoredSource>, KnowledgeStoreError>>;
+       fn exists(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<bool, KnowledgeStoreError>>;
+       fn delete(&self, collection: CollectionId, source: SourceId) -> PortFuture<Result<bool, KnowledgeStoreError>>;
+   }
    ```
+
+2a. **`SourceStore` is the content-addressed raw-source archive.** It keeps the
+    pre-parsed original bytes keyed by `(CollectionId, SourceId)` — and since
+    `SourceId` IS the content digest, storage is content-addressed: `put` verifies the
+    bytes hash to the given `SourceId` (mismatch is `InvalidQuery`), duplicates are
+    free no-ops, and `get` returns bytes whose integrity is verifiable by re-hashing.
+    `StoredSource { media_type: Arc<str>, bytes: Arc<[u8]> }`. This is what makes
+    re-parsing after a parser/chunker/template upgrade possible (decision 14a), lets
+    the future UI show the original document, and preserves evidence even when a parse
+    fails. It is deliberately distinct from the run-scoped `ArtifactStore`, which is a
+    staging area with run/session lifecycle, not an archive. S3/object storage is the
+    designated future backend (see Non-goals).
 3. **Collections partition everything.** `CollectionId(Arc<str>)`, validated as a bounded
    slug; the default collection is `"default"` so simple hosts never see the concept.
    Every stored record (`ChunkRecord`, `Entity`, `Relation`, `Community`, `SourceRecord`)
@@ -144,7 +163,8 @@ does not (no embeddings API).
    - `SourceRecord { collection: CollectionId, source: SourceId, name: Option<Arc<str>>,
      format: Arc<str>, page_count: Option<u32>, ingested_at: Timestamp, chunk_count: u32,
      chunk_digests: Arc<[Digest]>, graph_template: Option<(Arc<str>, u32)>,
-     status: SourceStatus, metadata: Metadata }` with
+     raw_stored: bool, status: SourceStatus, metadata: Metadata }` (`raw_stored`: the
+     original bytes are retrievable from the configured `SourceStore`) with
      `SourceStatus::Indexed | MetadataOnly { reason } | PartialFailure`. The catalog is
      the answer to "what is in this knowledge base" for agents, hosts, and the future UI.
      `SourceListQuery` filters by collection (required), name substring, format, status,
@@ -237,6 +257,7 @@ does not (no embeddings API).
        .limits(DocumentLimits::default())                // parse ceilings (document spec)
        .chunker(Arc::new(MarkdownChunker::default()))
        .catalog(source_catalog)                          // Arc<dyn SourceCatalog>, required
+       .source_store(source_store)                       // Arc<dyn SourceStore>, optional raw archive
        .embedding(embedder, chunk_index)                 // Arc<dyn EmbeddingModel>, Arc<dyn ChunkIndex>
        // — or, mutually exclusive with .embedding(..):
        // .keyword_only(chunk_index)                     // chunk indexing without vectors
@@ -362,6 +383,20 @@ does not (no embeddings API).
     rewritten last, making it the commit point: a crash mid-ingest leaves the old
     catalog record, and the next ingest's diff re-converges the index (upserts and
     deletes are idempotent).
+14a. **Raw-source archiving and re-processing.** When a `SourceStore` is configured, the
+    pipeline archives the raw bytes (with their media type) **before parsing** — a parse
+    failure still preserves the evidence — and sets `raw_stored: true` on the catalog
+    record. `Markdown` sources archive the markdown text as `text/markdown`.
+    `delete`/supersede paths that remove a source from the index and catalog also delete
+    its archived bytes. `pipeline.reingest(source_id, options) ->
+    PortFuture<Result<IngestReport, IngestError>>` fetches the archived bytes and runs a
+    normal ingest over them — with `force`, this is the "parser or template upgraded,
+    re-process the corpus" path, driven off the catalog listing. Because `SourceId` is
+    the content digest, re-processing unchanged bytes keeps every `SourceId` stable, so
+    all chunk/entity/relation references — direct or reached through graph merges —
+    survive re-processing; only derived records change. Without a configured
+    `SourceStore`, `reingest` returns `IngestError::RawUnavailable` and `raw_stored`
+    stays `false`.
 15. **Bounded everything**: `IngestLimits { max_chunks_per_document (default 2048),
     max_concurrent_embed_batches (4), max_concurrent_extract_calls (2), per_call_deadline }`
     plus the parse-stage `DocumentLimits`. Same defensive posture as the document spec.
@@ -464,7 +499,8 @@ does not (no embeddings API).
 
 ### Storage backends
 
-26. **`finstack-ai-knowledge-memory`**: one crate implementing all three stores —
+26. **`finstack-ai-knowledge-memory`**: one crate implementing all four stores —
+    `HashMap` raw-source archive,
     `Vec`-backed brute-force cosine search, an in-memory inverted index with BM25 for
     keyword search, internal RRF for hybrid (reports all three modes native),
     adjacency-map graph with communities, and a `HashMap` catalog. These algorithm
@@ -475,7 +511,8 @@ does not (no embeddings API).
     (bundled in the workspace's existing SQLite dependency) with BM25 ranking; hybrid
     via internal RRF (reports all three modes native). Graph as
     entity/relation/community tables with indexed name/type lookups; catalog as a
-    sources table. All of this is private implementation behind the ports — swapping in
+    sources table; raw-source archive as a blobs table (documents are ≤ 4 MiB per the
+    document spec's input ceiling, well within SQLite BLOB comfort). All of this is private implementation behind the ports — swapping in
     sqlite-vec/ANN, a different tokenizer, or a different fusion later is a non-breaking
     internal change. Native-only; not in the wasm build.
 28. **External backends (Qdrant, LanceDB, pgvector, Neo4j) are future extension crates**
@@ -501,7 +538,8 @@ does not (no embeddings API).
     embedders, `ModelGraphExtractor` with templates supplied as JSON strings/dicts,
     `ModelReranker`, `CommunityBuilder`), pass a host-implemented `EmbeddingModel` or
     `Reranker` as a Python callable, run `ingest` (with per-call template selection,
-    force flag) and community builds, use export/import and catalog listing, and register
+    force flag), `reingest`, and community builds, use export/import, catalog listing,
+    and raw-source retrieval, and register
     the toolset/context provider/middleware like existing extensions.
 32. **WASM binding**: same surface with memory stores only; host `EmbeddingModel` as a JS
     async callback returning `Float32Array`s.
@@ -522,7 +560,10 @@ does not (no embeddings API).
     merge/dedup and semantic entity lookup; community detection determinism and
     wholesale replace; catalog round-trip and list filters; idempotent re-ingest,
     unchanged-source short-circuit, and chunk-level diff (reused vs re-embedded vs
-    deleted counts); export/import round-trip across memory↔sqlite; toolset arg
+    deleted counts); raw-source archive round-trip (put verifies digest, get returns
+    identical bytes, archive-before-parse preserved on parse failure) and `reingest`
+    after a chunker-config change converging the index while keeping `SourceId`s
+    stable; export/import round-trip across memory↔sqlite; toolset arg
     validation and error codes; rerank fail-soft; template JSON load/validation,
     including rejection of malformed and oversized templates, unregistered-id selection
     errors, and template provenance on extracted fragments. Plus a `finstack-ai-test`
@@ -539,6 +580,11 @@ does not (no embeddings API).
 
 - ANN index structures (memory/sqlite are brute-force/FTS5 in v1; internal upgrades are
   non-breaking).
+- S3/object storage for raw sources — designated future backend (evaluated 2026-08-19,
+  not part of this plan): a `finstack-ai-knowledge-s3` extension implementing
+  `SourceStore` (and plausibly `ChunkIndex` export targets), native-only, using the
+  content-addressed `(collection, source_id)` key as the object key. v1 ships memory
+  and SQLite archives behind the same port.
 - External vector/graph database backends and dedicated rerank-API integrations
   (Cohere/Voyage rerank) — future extension crates behind the existing ports. Designated
   future keyword/hybrid backend (evaluated 2026-08-19, not part of this plan): Tantivy

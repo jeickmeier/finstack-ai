@@ -242,6 +242,8 @@ git commit -m "feat: add EmbeddingModel runtime port"
   - `SourceStatus::{Indexed, MetadataOnly { reason: Arc<str> }, PartialFailure}`
   - `SourceRecord::new(collection, source, format: Arc<str>, ingested_at: Timestamp, status: SourceStatus)`, `.with_name(Arc<str>)`, `.with_page_count(u32)`, `.with_chunks(chunk_count: u32, chunk_digests: Arc<[Digest]>)`, `.with_graph_template(id: Arc<str>, version: u32)`, `.with_metadata(Metadata)`; getters for every field; serde both ways
   - `SourceListQuery::new(collection)`, `.with_name_contains(Arc<str>)`, `.with_format(Arc<str>)`, `.with_status(SourceStatus)`, `.with_limit(u32)` (default 100, max 1024); getters
+  - `SourceRecord` additionally: `.with_raw_stored(bool)` (default false) + `raw_stored()` getter — serialized like every other field
+  - `StoredSource::new(media_type: Arc<str>, bytes: Arc<[u8]>)`; getters `media_type()`, `bytes()`
   - `Entity::new(name, entity_type, description: Arc<str>)`, `.with_embedding(Arc<[f32]>)`, `.with_source_chunks(Vec<ChunkId>)`, `.with_metadata(Metadata)`; getters
   - `Relation::new(from, to, relation_type, description: Arc<str>)`, `.with_source_chunks(Vec<ChunkId>)`, `.with_metadata(Metadata)`; getters
   - `GraphFragment::new(collection, source)`, `.with_entities(Vec<Entity>)`, `.with_relations(Vec<Relation>)`; getters
@@ -370,6 +372,7 @@ git commit -m "feat: add knowledge port shared types and errors"
   - `trait ChunkIndex: PortObject` — exactly the eight methods from spec decision 2 (signatures verbatim, including `collection: CollectionId` on `get_chunks` and `delete_chunks`)
   - `trait GraphStore: PortObject` — the seven methods from spec decision 2
   - `trait SourceCatalog: PortObject` — `put`, `get`, `list`, `delete` from spec decision 2
+  - `trait SourceStore: PortObject` — `put(collection, source, media_type: Arc<str>, bytes: Arc<[u8]>)`, `get(collection, source) -> …Option<StoredSource>…`, `exists(collection, source) -> …bool…`, `delete(collection, source) -> …bool…` (spec decisions 2/2a). Trait doc states the content-addressing contract: `put` MUST verify `bytes` hash to `source`'s digest and reject mismatches with `InvalidQuery { reason: "source_digest_mismatch" }`; duplicate `put` of identical content is a no-op `Ok`.
   - `trait Reranker: PortObject { fn rerank(&self, ctx: RerankCallContext, query: Arc<str>, candidates: Arc<[Arc<str>]>) -> PortFuture<Result<Vec<RerankEntry>, RerankError>>; }` with `RerankEntry::new(index: u32, score: f32)` and `RerankError` (`Provider`, `Deadline`, `Cancelled`, `InvalidOutput { reason: &'static str }`, `Unsupported`, all non_exhaustive); `RerankCallContext::detached(deadline: Option<Timestamp>)`
   - `trait FusionStrategy: PortObject { fn fuse(&self, rankings: &[&[ChunkHit]], top_k: u32) -> Vec<ChunkHit>; }` (synchronous)
   - `RrfFusion::new()` / `RrfFusion::with_k(u32)` (default k=60)
@@ -449,7 +452,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement `port.rs` and `fusion.rs`**
 
-`port.rs`: the four traits with signatures copied verbatim from spec decision 2 (see Interfaces). Each trait gets a doc comment stating its contract lines: dimension-mismatch rejection (ChunkIndex), per-source attribution semantics (GraphStore — "when several sources attest the same entity or relation, delete_by_source removes only that source's contribution"), catalog-as-commit-point (SourceCatalog). No default methods in v1 — the policy line goes in the module doc: "future methods must ship default implementations returning `Unsupported`".
+`port.rs`: the five traits with signatures copied verbatim from spec decision 2 (see Interfaces). Each trait gets a doc comment stating its contract lines: dimension-mismatch rejection (ChunkIndex), per-source attribution semantics (GraphStore — "when several sources attest the same entity or relation, delete_by_source removes only that source's contribution"), catalog-as-commit-point (SourceCatalog). No default methods in v1 — the policy line goes in the module doc: "future methods must ship default implementations returning `Unsupported`".
 
 `fusion.rs`:
 
@@ -857,11 +860,12 @@ git commit -m "feat: add in-memory ChunkIndex backend"
 **Files:**
 - Create: `extensions/stores/finstack-ai-knowledge-memory/src/graph_store.rs`
 - Create: `extensions/stores/finstack-ai-knowledge-memory/src/catalog.rs`
+- Create: `extensions/stores/finstack-ai-knowledge-memory/src/source_store.rs`
 - Modify: `extensions/stores/finstack-ai-knowledge-memory/src/lib.rs`, `src/chunk_index.rs` (add facet fields), `src/tests.rs`
 
 **Interfaces:**
 - Consumes: `GraphStore`, `SourceCatalog` traits and graph/community/source types (Tasks 2–3).
-- Produces: `MemoryKnowledgeStore` additionally implements `GraphStore` and `SourceCatalog`. Merge key for entities: `(lowercase(name), lowercase(entity_type))`. Per-source attribution: the store keeps each source's fragment verbatim and materializes the merged view on query/export.
+- Produces: `MemoryKnowledgeStore` additionally implements `GraphStore`, `SourceCatalog`, and `SourceStore` (`Mutex<HashMap<(CollectionId, SourceId), StoredSource>>`; `put` re-hashes the bytes with the kernel digest and compares to the `SourceId` — mismatch → `InvalidQuery`). Merge key for entities: `(lowercase(name), lowercase(entity_type))`. Per-source attribution: the store keeps each source's fragment verbatim and materializes the merged view on query/export.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -1048,7 +1052,7 @@ fn catalog_round_trip_list_and_delete() {
 
 `test_timestamp()`: construct a fixed `Timestamp` — read `crates/finstack-ai-kernel/src/primitives/time.rs` for the constructor (it wraps `i64`) and use a constant value.
 
-Also add: graph `export`/`import` round-trip preserving per-source attribution (upsert two sources → export → import into fresh store → `delete_by_source` of one still keeps the shared entity).
+Also add: graph `export`/`import` round-trip preserving per-source attribution (upsert two sources → export → import into fresh store → `delete_by_source` of one still keeps the shared entity); and `SourceStore` tests — `put`+`get` round-trip returns identical bytes and media type, `put` with bytes that do NOT hash to the `SourceId` → `InvalidQuery`, duplicate `put` is `Ok`, `exists`/`delete` behave, collections isolated.
 
 **Method-resolution note:** `ChunkIndex` and `GraphStore` both define `upsert` and `delete_by_source`. Once both traits are in scope for one store value, bare `store.upsert(…)` is ambiguous — write the graph calls as `GraphStore::upsert(&store, …)` / `GraphStore::delete_by_source(&store, …)` and the chunk calls as `ChunkIndex::upsert(&store, …)` etc. throughout these tests (adjust the Task 4 tests when this task lands).
 
@@ -1634,13 +1638,14 @@ git commit -m "feat: add ModelReranker and CommunityBuilder"
 **Interfaces:**
 - Consumes: everything from Tasks 1–8; `finstack_ai_tools_document::parser::{parse, DocumentLimits}`.
 - Produces (used by the feeder, e2e lane, bindings):
-  - `IngestPipeline::builder() -> IngestPipelineBuilder` with `.collection(CollectionId)` (default `default_collection()`), `.limits(DocumentLimits)`, `.ingest_limits(IngestLimits)`, `.chunker(Arc<dyn Chunker>)` (default `MarkdownChunker::default()`), `.catalog(Arc<dyn SourceCatalog>)` (required), `.embedding(Arc<dyn EmbeddingModel>, Arc<dyn ChunkIndex>)`, `.keyword_only(Arc<dyn ChunkIndex>)`, `.graph(Arc<dyn GraphExtractor>, Arc<dyn GraphStore>, templates: Vec<Arc<GraphExtractionTemplate>>, default_template: &str)`, `.clock(Arc<dyn Fn() -> Timestamp + Send + Sync>)` (default: wall clock via the kernel `Timestamp` now-constructor; tests inject a fixed clock), `.build() -> Result<Arc<IngestPipeline>, IngestError>`
+  - `IngestPipeline::builder() -> IngestPipelineBuilder` with `.collection(CollectionId)` (default `default_collection()`), `.limits(DocumentLimits)`, `.ingest_limits(IngestLimits)`, `.chunker(Arc<dyn Chunker>)` (default `MarkdownChunker::default()`), `.catalog(Arc<dyn SourceCatalog>)` (required), `.source_store(Arc<dyn SourceStore>)` (optional raw archive), `.embedding(Arc<dyn EmbeddingModel>, Arc<dyn ChunkIndex>)`, `.keyword_only(Arc<dyn ChunkIndex>)`, `.graph(Arc<dyn GraphExtractor>, Arc<dyn GraphStore>, templates: Vec<Arc<GraphExtractionTemplate>>, default_template: &str)`, `.clock(Arc<dyn Fn() -> Timestamp + Send + Sync>)` (default: wall clock via the kernel `Timestamp` now-constructor; tests inject a fixed clock), `.build() -> Result<Arc<IngestPipeline>, IngestError>`
   - `IngestLimits { max_chunks_per_document: u32 (2048), max_concurrent_embed_batches: u32 (4), max_concurrent_extract_calls: u32 (2), per_call_deadline: Option<Timestamp-delta — use whatever duration type EmbeddingCallContext's deadline uses> }` + `Default`
   - `IngestSource::{Bytes { bytes: Vec<u8>, media_type_hint: Option<String>, name: Option<Arc<str>> }, Markdown { text: Arc<str>, source_id: SourceId, name: Option<Arc<str>> }}` — the `Artifact` variant is added in Task 14 with the feeder (it needs `ArtifactStore` resolution; keep this task store-free)
   - `IngestOptions::default()` with `.with_graph_template(&str)`, `.with_force(bool)`, `.with_embed_entities(bool)` (default true), `.with_options(Metadata)`
   - `pipeline.ingest(source) -> PortFuture<Result<IngestReport, IngestError>>` and `pipeline.ingest_with(source, options)`
+  - `pipeline.reingest(source_id: SourceId, options: IngestOptions) -> PortFuture<Result<IngestReport, IngestError>>` — fetches archived bytes from the configured `SourceStore` and runs a normal ingest over them; `IngestError::RawUnavailable` when no store is configured or the source is not archived
   - `IngestReport` getters: `source_id()`, `status()` (`SourceStatus`), `skipped_unchanged()`, `chunks_total()`, `chunks_embedded()`, `chunks_reused()`, `chunks_deleted()`, `entities_extracted()`, `relations_extracted()`, `failures()` (`&[IngestFailure]` — `{ stage: Arc<str>, reason: Arc<str> }`), `elapsed_ms()`
-  - `IngestError::{Build { reason: &'static str }, Parse { message: String }, UnknownTemplate { id: Arc<str> }, Catalog(KnowledgeStoreError)}` (non_exhaustive)
+  - `IngestError::{Build { reason: &'static str }, Parse { message: String }, UnknownTemplate { id: Arc<str> }, RawUnavailable, Catalog(KnowledgeStoreError)}` (non_exhaustive)
 
 - [ ] **Step 1: Write failing pipeline tests**
 
@@ -1725,7 +1730,7 @@ fn changed_source_diffs_chunks_reusing_unchanged_ones() {
 
 **STOP — design note the implementer must follow (spec decision 14 refinement discovered while planning):** `SourceId` is the content digest, so a *changed* document gets a *new* `SourceId`. The chunk-diff therefore keys off the **previous catalog record found by document name** (`SourceListQuery` name match within the collection): if a prior record with the same `name` and a different `source` exists, diff against its `chunk_digests`, reuse matching chunks' vectors via `get_chunks` on the OLD source (positional: same digest at same index), write new records under the NEW `SourceId`, then `delete_by_source` the old source in both stores and `delete` its catalog row. If no named prior record exists (or the source has no name), every chunk is new. The `unchanged_source_short_circuits` case is the same-SourceId catalog hit. Write `changed_source_diffs_chunks_reusing_unchanged_ones` to assert: embedder call count for v2 counts only changed/new chunks; old source's records are gone; new source's records searchable; report `chunks_reused()` matches.
 
-Also add tests for: `requires_ocr` markdown-empty path via `IngestSource::Bytes` with the scanned-PDF fixture (`include_bytes!("../../../fixtures/documents/scanned.pdf")` — status `MetadataOnly`, zero chunks); parse failure fatal (`corrupt.bin` → `IngestError::Parse`); unknown template id → `IngestError::UnknownTemplate` before any work (extractor call count stays 0); entity embeddings stamped when both branches configured (entities in store have embeddings; `with_embed_entities(false)` disables); per-chunk embed failure collected not fatal (make `FakeEmbeddingModel::fail_on(text_substring)`); build error when no branch configured; build error when both `.embedding` and `.keyword_only` set.
+Also add tests for: raw archiving — with `.source_store(Arc::new(store.clone()))` configured, a successful ingest archives the exact input bytes (`SourceStore::get` returns them; catalog `raw_stored() == true`) and a PARSE FAILURE still archives them (ingest returns `IngestError::Parse` but `exists` is true); `reingest` — after ingesting with store configured, change the pipeline's chunker config (build a second pipeline over the same stores), `reingest(source_id, default)` re-chunks from archived bytes keeping the same `SourceId`, and `reingest` without a source store (or for an unarchived id) → `IngestError::RawUnavailable`; `requires_ocr` markdown-empty path via `IngestSource::Bytes` with the scanned-PDF fixture (`include_bytes!("../../../fixtures/documents/scanned.pdf")` — status `MetadataOnly`, zero chunks); parse failure fatal (`corrupt.bin` → `IngestError::Parse`); unknown template id → `IngestError::UnknownTemplate` before any work (extractor call count stays 0); entity embeddings stamped when both branches configured (entities in store have embeddings; `with_embed_entities(false)` disables); per-chunk embed failure collected not fatal (make `FakeEmbeddingModel::fail_on(text_substring)`); build error when no branch configured; build error when both `.embedding` and `.keyword_only` set.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1738,14 +1743,14 @@ Expected: FAIL.
 
 `pipeline.rs` flow (single async fn, stages in order):
 1. Resolve template selection (error before any work).
-2. Resolve source → `ResolvedInput`.
+2. Resolve source → `ResolvedInput`. For `Bytes`/`Artifact` sources with a configured `SourceStore`: archive the raw bytes + media type BEFORE calling the parser (digest already computed); for `Markdown`, archive the text as `text/markdown`. Archive errors are collected as failures, not fatal. On parse failure AFTER archiving, still return `IngestError::Parse` (the archive is the point — evidence survives).
 3. Catalog lookup: same `SourceId` present and `!force` → return `skipped_unchanged` report. Else find prior record by name (the Step 1 design note).
 4. `requires_ocr` or empty markdown → write `MetadataOnly` catalog record, return.
 5. Chunk (`ChunkError` → failures + `PartialFailure` status if zero chunks emerge from non-empty markdown; `max_chunks_per_document` truncates with a recorded failure entry).
 6. Chunk branch and graph branch run concurrently (`futures_util::future::join`):
    - **Chunk branch**: diff against prior record; batch changed chunks by the embedder's `max_batch`; up to `max_concurrent_embed_batches` in flight via `futures_util::stream::iter(batches).map(embed_one).buffer_unordered(n)`; build `ChunkRecord`s (stamp `META_EMBEDDING_MODEL`, `META_DOC_NAME`, `META_DOC_FORMAT`, `META_HEADING_PATH` metadata); reuse unchanged chunks' records (rewritten under the new SourceId with old vectors); one `upsert`; `delete_chunks`/`delete_by_source` for removals/old source. `keyword_only` skips embedding, records have no vectors.
    - **Graph branch**: split chunks into extractor calls (extractor batches internally; pipeline enforces `max_concurrent_extract_calls` if it fans out — v1 calls `extract` once with all chunks and lets the extractor batch); on success, optionally embed entity descriptions (batched through the same embedder), `delete_by_source`(old + new) then `upsert` the fragment.
-7. Write the catalog record LAST (chunk digests, counts, template id/version, status: `Indexed`, or `PartialFailure` when `failures` is non-empty), delete the superseded named record.
+7. Write the catalog record LAST (chunk digests, counts, template id/version, `raw_stored` = whether Step 2's archive succeeded, status: `Indexed`, or `PartialFailure` when `failures` is non-empty), delete the superseded named record — and delete the superseded source's archived bytes from the `SourceStore` (it is retired everywhere: index, graph, catalog, archive). `reingest` = `SourceStore::get` → synthesize `IngestSource::Bytes` from the stored media type/bytes (or `Markdown` for `text/markdown`) → run the normal flow with `force` semantics for the same-`SourceId` short-circuit.
 8. Fill `IngestReport`. `elapsed_ms` from the injected clock (start/end delta).
 
 `lib.rs` final module list: `chunker`, `template`, `model_call` (pub(crate)), `extractor`, `reranker`, `community`, `pipeline`, `source`, re-exporting the public names from the Interfaces blocks.
@@ -1778,6 +1783,7 @@ git commit -m "feat: add IngestPipeline with incremental re-ingest"
 - Create: `extensions/stores/finstack-ai-knowledge-sqlite/src/chunk_index.rs`
 - Create: `extensions/stores/finstack-ai-knowledge-sqlite/src/graph_store.rs`
 - Create: `extensions/stores/finstack-ai-knowledge-sqlite/src/catalog.rs`
+- Create: `extensions/stores/finstack-ai-knowledge-sqlite/src/source_store.rs` (SourceStore over `source_blobs`; same digest-verification contract as the memory backend)
 - Create: `extensions/stores/finstack-ai-knowledge-sqlite/src/tests.rs`
 - Modify: root `Cargo.toml` (workspace member)
 
@@ -1827,12 +1833,18 @@ CREATE TABLE IF NOT EXISTS graph_communities (
   embedding BLOB, metadata TEXT NOT NULL,
   PRIMARY KEY (collection, id)
 );
+CREATE TABLE IF NOT EXISTS source_blobs (
+  collection TEXT NOT NULL, source_id BLOB NOT NULL,
+  media_type TEXT NOT NULL, bytes BLOB NOT NULL,
+  PRIMARY KEY (collection, source_id)
+);
 CREATE TABLE IF NOT EXISTS sources (
   collection TEXT NOT NULL, source_id BLOB NOT NULL,
   name TEXT, format TEXT NOT NULL, page_count INTEGER,
   ingested_at INTEGER NOT NULL, chunk_count INTEGER NOT NULL,
   chunk_digests BLOB NOT NULL,     -- concatenated digests
   template_id TEXT, template_version INTEGER,
+  raw_stored INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,            -- serde_json of SourceStatus
   metadata TEXT NOT NULL,
   PRIMARY KEY (collection, source_id)
@@ -2119,6 +2131,7 @@ git commit -m "test: add knowledge ingestion end-to-end lane"
   - `PyEmbeddingModel` adapter: any Python object with `def embed(self, texts: list[str], kind: str) -> list[list[float]]` plus `dimensions`/`max_batch` attributes; same shape for `Reranker` (`def rerank(self, query, candidates) -> list[tuple[int, float]]`)
   - `KnowledgeToolset(collection, catalog, …)` and `KnowledgeContextProvider(…)` registrable exactly like existing toolsets/providers; `KnowledgeIngestMiddleware(pipeline, store)` likewise
   - Export/import: `store.export_chunks(collection) -> list[bytes]` (serde-JSON rows) and `store.import_chunks(rows)`; same pair for graph rows
+  - Raw sources: `pipeline.reingest(source_id_hex, force=False)`; `store.get_source(collection, source_id_hex) -> (media_type, bytes) | None`
 - Tests (pytest, following the binding's existing style): construct memory store + fake Python embedder → ingest markdown → toolset registered on an agent whose model is the binding's scripted/fake model → `knowledge_search` returns the content; template JSON round-trip from Python; sqlite store smoke on a tmp path.
 
 - [ ] **Step 1: Write failing Python tests → Step 2: implement `knowledge.rs` → Step 3: run**
