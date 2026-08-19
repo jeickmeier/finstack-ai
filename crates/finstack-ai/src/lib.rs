@@ -56,7 +56,8 @@ pub use agent::{
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
     E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
-    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
+    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{

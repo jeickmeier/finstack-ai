@@ -100,6 +100,25 @@ pub struct OpenAiAgentSpec {
     pub common: LinkedCommon,
 }
 
+/// Arguments for [`Agent::openrouter`].
+pub struct OpenRouterAgentSpec {
+    /// `OpenRouter` model identifier (e.g. `openai/gpt-5`; `:nitro` and
+    /// `:floor` routing suffixes are allowed).
+    pub model: String,
+    /// Explicit Bearer credential. Never read from the environment.
+    pub api_key: String,
+    /// Optional non-secret `HTTP-Referer` attribution header.
+    pub referer: Option<String>,
+    /// Optional non-secret `X-Title` attribution header.
+    pub title: Option<String>,
+    /// Optional Responses reasoning effort.
+    pub reasoning_effort: Option<String>,
+    /// Optional Responses reasoning summary.
+    pub reasoning_summary: Option<String>,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
+}
+
 /// Arguments for [`Agent::anthropic`].
 pub struct AnthropicAgentSpec {
     /// Messages API base URL.
@@ -236,6 +255,20 @@ impl Agent {
         openai_inner(spec).await
     }
 
+    /// Construct an `OpenRouter` Responses agent.
+    ///
+    /// Always targets `https://openrouter.ai/api/v1/responses`. Does not read
+    /// environment variables.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
+    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when credentials, model,
+    /// attribution, or reasoning settings are invalid.
+    pub async fn openrouter(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+        openrouter_inner(spec).await
+    }
+
     /// Construct an Anthropic Messages agent.
     ///
     /// Does not read environment variables. HTTPS is required when `api_key`
@@ -329,6 +362,53 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
             "python.agent.openai",
             "python.bundle.openai",
             "python.model.openai",
+        ),
+        provider,
+        model_name,
+        spec.common,
+        settings,
+        OPENAI_TIMEOUT,
+    )
+    .await
+}
+
+#[cfg(feature = "native-tokio")]
+async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    use finstack_ai_provider_openrouter::{
+        Authentication, OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider, SecretString,
+    };
+
+    let settings = reasoning_settings(
+        spec.reasoning_effort.as_deref(),
+        spec.reasoning_summary.as_deref(),
+    )?;
+    let config = OpenRouterConfig::try_new("https://openrouter.ai")
+        .map_err(|error| model_configuration_error(&error))?
+        .with_authentication(Authentication::Bearer(
+            SecretString::try_new(spec.api_key).map_err(|_| secret_configuration_error())?,
+        ))
+        .with_attribution(spec.referer.as_deref(), spec.title.as_deref())
+        .map_err(|error| model_configuration_error(&error))?;
+    let model_config = OpenRouterModelConfig::try_new(
+        &spec.model,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_RESERVED_OUTPUT_TOKENS,
+        LINKED_RESERVED_OUTPUT_TOKENS,
+        LINKED_PROVIDER_OVERHEAD_TOKENS,
+    )
+    .map_err(|error| model_configuration_error(&error))?
+    .with_reasoning(true);
+    let model_name = model_config.name.clone();
+    let provider: Arc<dyn Model> = Arc::new(
+        OpenRouterProvider::try_new(config, vec![model_config])
+            .map_err(|error| model_configuration_error(&error))?,
+    );
+    build_linked_provider(
+        (
+            "python.agent.openrouter",
+            "python.bundle.openrouter",
+            "python.model.openrouter",
         ),
         provider,
         model_name,
@@ -632,6 +712,11 @@ async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, Age
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "openai").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "openrouter").await
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -1001,6 +1086,63 @@ mod tests {
         .expect("empty model");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
+    async fn openrouter_constructs_without_a_network_request() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: Some("https://example.app".into()),
+            title: Some("Example App".into()),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            common: LinkedCommon {
+                instruction: Some("Answer concisely.".into()),
+                ..common()
+            },
+        })
+        .await
+        .expect("openrouter construct");
+        assert!(built.agent.capability_catalog().is_empty());
+        assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn openrouter_invalid_attribution_does_not_leak_the_api_key() {
+        let canary = "sk-or-secret-canary-101";
+        let error = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: canary.into(),
+            referer: Some("bad\nreferer".into()),
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("invalid attribution");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
+    async fn openrouter_rejects_unknown_reasoning_effort() {
+        let error = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: Some("turbo".into()),
+            reasoning_summary: None,
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("unknown effort");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("reasoning_effort"));
     }
 
     #[tokio::test]

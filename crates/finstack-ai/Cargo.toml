@@ -19,6 +19,7 @@ default = ["native-tokio"]
 native-tokio = [
     "finstack-ai-runtime/native-tokio",
     "dep:finstack-ai-provider-openai",
+    "dep:finstack-ai-provider-openrouter",
     "dep:finstack-ai-provider-anthropic",
     "dep:finstack-ai-provider-ollama",
     "dep:finstack-ai-remote-child",
@@ -31,6 +32,7 @@ wasm-host = ["finstack-ai-runtime/wasm-host"]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
 finstack-ai-provider-openai = { workspace = true, optional = true, features = ["vendored-tls"] }
+finstack-ai-provider-openrouter = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-anthropic = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-provider-ollama = { workspace = true, optional = true, features = ["vendored-tls"] }
 finstack-ai-remote-child = { workspace = true, optional = true }
