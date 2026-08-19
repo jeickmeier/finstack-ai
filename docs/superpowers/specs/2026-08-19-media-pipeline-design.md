@@ -290,16 +290,19 @@ sessions, owns adapter state, never owns a kernel DAG.
   (frame stages skipped when pinned). Scenes fan out under a configurable
   concurrency cap (default 2 in-flight video jobs). One global stage
   follows: `compose → final MediaRef`.
-- **Single execution path.** Every stage executes by invoking the same
-  Layer 2/3 tools an agent would call, through the normal journaled
-  commit-before-effect path. The driver adds ordering, fan-out, polling
-  cadence, and resume — it does not re-implement any media operation.
+- **Single execution path, tick-based.** Every stage executes by invoking
+  the same Layer 2/3 tools an agent would call, via `Toolset::call`
+  composed in-process. The kernel-journaled effects are the wrapping
+  `render_movie`/`advance_render` tool calls; per-stage durability is the
+  adapter state store. Each `advance` is one bounded tick (at most one
+  tool call per scene) driven by the caller — an agent loop or a host
+  loop — so there is no background task and no internal polling cadence
+  to schedule.
 - **Adapter-owned state.** Driver state (plan digest, per-scene stage →
-  produced `MediaRef` / job id / status) lives in an adapter table
-  (`finstack_workflow_media_pipeline`) in the same `JournalStore` sqlite
-  file, scoped by tenant — exactly the workflow-local cron-table
-  precedent. Polling cadence uses the session's `ExternalClock`, never
-  wall time.
+  produced `MediaRef` / job id / status, optimistic revision counter)
+  lives in an adapter table (`finstack_workflow_media_pipeline`) in the
+  same `JournalStore` sqlite file, scoped by tenant — exactly the
+  workflow-local cron-table precedent.
 - **Resume.** On re-attach: stages with recorded outputs verify their
   `MediaRef` digests via `materialize` and are skipped; verification
   failure re-runs the stage; an in-flight video job resumes at `poll`
@@ -317,15 +320,25 @@ sessions, owns adapter state, never owns a kernel DAG.
 
 ### 7.3 Tool wrapper
 
-The same crate exposes a two-tool toolset:
+The same crate exposes a three-tool toolset (shared result shape:
+`{render_id, status, per_scene: [{id, stage, job_id?, clip_ref?,
+failure?}], final_media_ref?}`):
 
-- **`render_movie`** — input: a MoviePlan (schema-validated), output:
-  `{render_id, status, per_scene: [{id, status, media_ref?, job_id?}],
-  final_media_ref?}`. Approval `Policy`
-  ("paid multi-scene media generation"). Long renders return early with
-  `render_id` once the plan is accepted and journaled.
-- **`get_render_status`** — `{render_id}` → same shape. Idempotent, no
-  approval; how an agent supervises a long render without blocking.
+- **`render_movie`** — input: a MoviePlan (validated against the plan
+  contract), submits the render and runs one tick. Approval `Policy`
+  ("paid multi-scene media generation"). Resubmitting identical plan
+  bytes resumes the existing render instead of duplicating it.
+- **`advance_render`** — `{render_id}`; runs one bounded tick (submit due
+  jobs, poll in-flight jobs once, download completed clips, compose when
+  all scenes are done). Same paid approval metadata; this is how an agent
+  or host loop drives a long render to completion without blocking.
+- **`get_render_status`** — `{render_id}` → same shape, read-only.
+  Idempotent, no approval.
+
+Frozen error codes: `media_pipeline_config_invalid`,
+`media_pipeline_invalid_arguments`, `media_pipeline_plan_invalid`,
+`media_pipeline_budget_exceeded`, `media_pipeline_store_failure`,
+`media_pipeline_stage_failed`, `media_pipeline_not_found`.
 
 ## 8. Composition and bindings
 
