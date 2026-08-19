@@ -388,14 +388,20 @@ impl core::marker::StructuralPartialEq for finstack_ai::RegisteredComponentDescr
 pub struct finstack_ai::registry::Registrar
 impl finstack_ai::Registrar
 pub fn finstack_ai::Registrar::context_provider(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::context_provider_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::into_registry(self) -> finstack_ai::Registry
 pub fn finstack_ai::Registrar::middleware(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::middleware_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::model(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::model::port::Model>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::model::port::Model>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub const fn finstack_ai::Registrar::new() -> Self
 pub fn finstack_ai::Registrar::observer(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::observer::Observer>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::observer_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::observer::Observer>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::register_extension(&mut self, &dyn finstack_ai::Extension) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::store(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::journal::JournalStore>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::toolset(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::tool::port::Toolset>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 impl core::default::Default for finstack_ai::Registrar
 pub fn finstack_ai::Registrar::default() -> finstack_ai::Registrar
 pub struct finstack_ai::registry::RegistrationEvent
@@ -514,6 +520,9 @@ pub fn finstack_ai::registry::ComponentLifecycle::shutdown(&self, finstack_ai::A
 pub trait finstack_ai::registry::Extension: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai::registry::Extension::descriptor(&self) -> finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::registry::Extension::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub enum finstack_ai::ActivationHostError
 pub finstack_ai::ActivationHostError::Bound
 pub finstack_ai::ActivationHostError::Failed
@@ -1021,7 +1030,6 @@ pub fn finstack_ai::Agent::resolved(&self) -> &alloc::sync::Arc<finstack_ai::Res
 pub async fn finstack_ai::Agent::run(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::start_on_lane(&self, &finstack_ai::Lane, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
-pub fn finstack_ai::Agent::try_from_resolved(alloc::sync::Arc<finstack_ai::ResolvedAgent>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
 impl core::clone::Clone for finstack_ai::Agent
 pub fn finstack_ai::Agent::clone(&self) -> finstack_ai::Agent
@@ -1226,6 +1234,8 @@ impl core::cmp::Eq for finstack_ai::CapabilityCatalogEntry
 impl core::cmp::PartialEq for finstack_ai::CapabilityCatalogEntry
 pub fn finstack_ai::CapabilityCatalogEntry::eq(&self, &finstack_ai::CapabilityCatalogEntry) -> bool
 impl core::fmt::Debug for finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::CapabilityCatalogEntry
 pub fn finstack_ai::CapabilityCatalogEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai::CapabilityCatalogEntry
 pub struct finstack_ai::CapabilityRef
@@ -1484,6 +1494,9 @@ impl finstack_ai::NativeAgentBuilder
 pub async fn finstack_ai::NativeAgentBuilder::build_linked(self, finstack_ai::LinkedCommon, finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::request::ModelSettings, core::time::Duration) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 impl core::clone::Clone for finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::clone(&self) -> finstack_ai::NativeAgentBuilder
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub struct finstack_ai::NativeCapabilityHost
 impl finstack_ai::NativeCapabilityHost
 pub fn finstack_ai::NativeCapabilityHost::active(&self, finstack_ai_kernel::primitives::ids::RunId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>, finstack_ai::ActivationHostError>
@@ -1533,14 +1546,20 @@ impl core::marker::StructuralPartialEq for finstack_ai::RegisteredComponentDescr
 pub struct finstack_ai::Registrar
 impl finstack_ai::Registrar
 pub fn finstack_ai::Registrar::context_provider(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::context_provider_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::into_registry(self) -> finstack_ai::Registry
 pub fn finstack_ai::Registrar::middleware(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::middleware_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::model(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::model::port::Model>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::model::port::Model>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub const fn finstack_ai::Registrar::new() -> Self
 pub fn finstack_ai::Registrar::observer(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::observer::Observer>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::observer_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::observer::Observer>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::register_extension(&mut self, &dyn finstack_ai::Extension) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::store(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::journal::JournalStore>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::Registrar::toolset(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::tool::port::Toolset>>) -> core::result::Result<(), finstack_ai::RegistrationError>
 impl core::default::Default for finstack_ai::Registrar
 pub fn finstack_ai::Registrar::default() -> finstack_ai::Registrar
 pub struct finstack_ai::RegistrationEvent
@@ -1784,4 +1803,7 @@ pub fn finstack_ai::DeferredChildPlanner::plan(&self, &finstack_ai::ChildPlanCon
 pub trait finstack_ai::Extension: finstack_ai_runtime::ports::PortObject
 pub fn finstack_ai::Extension::descriptor(&self) -> finstack_ai::ExtensionDescriptor
 pub fn finstack_ai::Extension::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
 pub fn finstack_ai::outstanding_deferrals(&finstack_ai_kernel::state::KernelState) -> alloc::vec::Vec<finstack_ai::OutstandingDeferral>

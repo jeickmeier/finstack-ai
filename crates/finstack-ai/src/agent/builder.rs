@@ -7,7 +7,9 @@ use crate::{
     CompatibilityRequirements, Extension, ExtensionDescriptor, InstructionSpec, ReadyComponent,
     Registrar, RegistrationError, RegistrationMetadata, Registry, RunPolicy, RuntimeServices,
 };
-use finstack_ai_kernel::{AgentId, BundleId, CapabilityId, ComponentRef, MiddlewareRef};
+use finstack_ai_kernel::{
+    AgentId, BundleId, CapabilityId, ComponentId, ComponentRef, MiddlewareRef,
+};
 use finstack_ai_runtime::{ContextProvider, Middleware, Model, Observer, Toolset};
 
 use super::PREVIEW_ENGINE_VERSION;
@@ -16,6 +18,46 @@ use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, CapabilityCatalogEntry,
     MAX_COMPACT_CATALOG_BYTES,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PortScope {
+    Base,
+    CapabilityOnly,
+}
+
+struct PortHandle<T: ?Sized> {
+    component: ComponentRef,
+    handle: Arc<T>,
+    scope: PortScope,
+}
+
+impl<T: ?Sized> Clone for PortHandle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            component: self.component.clone(),
+            handle: Arc::clone(&self.handle),
+            scope: self.scope,
+        }
+    }
+}
+
+impl<T: ?Sized> PortHandle<T> {
+    fn base(component: ComponentRef, handle: Arc<T>) -> Self {
+        Self {
+            component,
+            handle,
+            scope: PortScope::Base,
+        }
+    }
+
+    fn capability_only(component: ComponentRef, handle: Arc<T>) -> Self {
+        Self {
+            component,
+            handle,
+            scope: PortScope::CapabilityOnly,
+        }
+    }
+}
 
 /// Ergonomic native composition builder over direct ready handles.
 ///
@@ -27,13 +69,10 @@ pub struct NativeAgentBuilder {
     bundle_id: BundleId,
     model: (ComponentRef, Arc<dyn Model>),
     store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
-    toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-    context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
-    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
+    toolsets: Vec<PortHandle<dyn Toolset>>,
+    context_providers: Vec<PortHandle<dyn ContextProvider>>,
+    middleware: Vec<PortHandle<dyn Middleware>>,
     observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
-    installed_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-    installed_context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
-    installed_middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     instructions: Vec<InstructionSpec>,
     capabilities: Vec<CapabilitySpec>,
     active_application: BTreeSet<CapabilityId>,
@@ -57,9 +96,6 @@ impl NativeAgentBuilder {
             context_providers: Vec::new(),
             middleware: Vec::new(),
             observers: Vec::new(),
-            installed_toolsets: Vec::new(),
-            installed_context_providers: Vec::new(),
-            installed_middleware: Vec::new(),
             instructions: Vec::new(),
             capabilities: Vec::new(),
             active_application: BTreeSet::new(),
@@ -91,7 +127,7 @@ impl NativeAgentBuilder {
     /// * `toolset` - Ready in-process Toolset implementation.
     #[must_use]
     pub fn toolset(mut self, component: ComponentRef, toolset: Arc<dyn Toolset>) -> Self {
-        self.toolsets.push((component, toolset));
+        self.toolsets.push(PortHandle::base(component, toolset));
         self
     }
 
@@ -107,7 +143,8 @@ impl NativeAgentBuilder {
         component: ComponentRef,
         provider: Arc<dyn ContextProvider>,
     ) -> Self {
-        self.context_providers.push((component, provider));
+        self.context_providers
+            .push(PortHandle::base(component, provider));
         self
     }
 
@@ -121,7 +158,8 @@ impl NativeAgentBuilder {
         component: ComponentRef,
         toolset: Arc<dyn Toolset>,
     ) -> Self {
-        self.installed_toolsets.push((component, toolset));
+        self.toolsets
+            .push(PortHandle::capability_only(component, toolset));
         self
     }
 
@@ -132,7 +170,8 @@ impl NativeAgentBuilder {
         component: ComponentRef,
         provider: Arc<dyn ContextProvider>,
     ) -> Self {
-        self.installed_context_providers.push((component, provider));
+        self.context_providers
+            .push(PortHandle::capability_only(component, provider));
         self
     }
 
@@ -143,7 +182,8 @@ impl NativeAgentBuilder {
         component: ComponentRef,
         middleware: Arc<dyn Middleware>,
     ) -> Self {
-        self.installed_middleware.push((component, middleware));
+        self.middleware
+            .push(PortHandle::capability_only(component, middleware));
         self
     }
 
@@ -165,7 +205,8 @@ impl NativeAgentBuilder {
     /// * `middleware` - Ready in-process middleware component.
     #[must_use]
     pub fn middleware(mut self, component: ComponentRef, middleware: Arc<dyn Middleware>) -> Self {
-        self.middleware.push((component, middleware));
+        self.middleware
+            .push(PortHandle::base(component, middleware));
         self
     }
 
@@ -186,7 +227,7 @@ impl NativeAgentBuilder {
     /// # Arguments
     ///
     /// * `capability` - Catalog entry. `model` activation is selected later via
-    ///   [`AgentRunRequest::capability`], not by user-input overlap.
+    ///   [`crate::AgentRunRequest::capability`], not by user-input overlap.
     #[must_use]
     pub fn capability(mut self, capability: CapabilitySpec) -> Self {
         self.capabilities.push(capability);
@@ -224,27 +265,10 @@ impl NativeAgentBuilder {
     /// Fails closed on non-exact or duplicate components and all ordinary
     /// registry, bundle, warmup, and tool-catalog failures.
     pub async fn build(self) -> Result<Agent, AgentRunError> {
-        let recompose = Arc::new(self.clone());
         validate_builder_components(&self)?;
-        let mut registered_toolsets = self.toolsets.clone();
-        registered_toolsets.extend(self.installed_toolsets.iter().cloned());
-        let mut registered_providers = self.context_providers.clone();
-        registered_providers.extend(self.installed_context_providers.iter().cloned());
-        let mut registered_middleware = self.middleware.clone();
-        registered_middleware.extend(self.installed_middleware.iter().cloned());
-        let extension = NativeBuilderExtension {
-            source: finstack_ai_kernel::ComponentId::parse("finstack.sdk.native-builder")
-                .map_err(invalid_config)?,
-            model: self.model.clone(),
-            store: self.store.clone(),
-            toolsets: registered_toolsets,
-            context_providers: registered_providers,
-            middleware: registered_middleware,
-            observers: self.observers.clone(),
-        };
         let mut registrar = Registrar::new();
         registrar
-            .register_extension(&extension)
+            .register_extension(&self)
             .map_err(invalid_config)?;
         let mut registry = registrar.into_registry();
         let spec = builder_spec(&self)?;
@@ -269,7 +293,7 @@ impl NativeAgentBuilder {
             std::collections::BTreeSet::new(),
             RuntimeServices::default(),
         );
-        let composed_agent = bundle_resolver
+        let resolved_agent = bundle_resolver
             .resolve_agent(
                 &mut registry,
                 &self.bundle_id,
@@ -279,70 +303,68 @@ impl NativeAgentBuilder {
             )
             .await
             .map_err(invalid_config)?;
-        let composed_agent = if self.active_application.is_empty() {
-            composed_agent
+        let resolved_agent = if self.active_application.is_empty() {
+            resolved_agent
         } else {
             bundle_resolver
                 .activate_application(
                     &mut registry,
-                    &composed_agent,
-                    self.active_application,
+                    &resolved_agent,
+                    self.active_application.clone(),
                     AgentConstructionContext::new(),
                 )
                 .await
                 .map_err(invalid_config)?
         };
-        let mut agent = Agent::try_from_resolved(Arc::new(composed_agent))?;
-        agent.recompose = Some(recompose);
+        let mut agent = Agent::try_from_resolved(Arc::new(resolved_agent))?;
         let contributions =
             super::mask::CapabilityContributionIndex::from_specs(&self.capabilities);
         agent.attach_capability_surface(
             Arc::from(self.capabilities.clone()),
-            contributions.clone(),
+            contributions,
             self.activation_host.clone(),
         )?;
-        let variants =
+        agent.model_capabilities =
             resolve_model_variants(&self.capabilities, &bundle_resolver, &mut registry, &agent)
-                .await?;
-        agent.model_capabilities = variants.into();
-        for variant in Arc::make_mut(&mut agent.model_capabilities) {
-            variant.agent.attach_capability_surface(
-                Arc::from(self.capabilities.clone()),
-                contributions.clone(),
-                self.activation_host.clone(),
-            )?;
-        }
+                .await?
+                .into();
+        agent.rebuild = Some(Arc::new(self));
         Ok(agent)
     }
 
     pub(super) async fn rebuild_from_live_catalogs(mut self) -> Result<Agent, AgentRunError> {
         self.toolsets = reconstruct_toolsets(self.toolsets).await?;
-        self.installed_toolsets = reconstruct_toolsets(self.installed_toolsets).await?;
         self.context_providers = reconstruct_providers(self.context_providers).await?;
-        self.installed_context_providers =
-            reconstruct_providers(self.installed_context_providers).await?;
         self.build().await
     }
 }
 
 async fn reconstruct_toolsets(
-    entries: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-) -> Result<Vec<(ComponentRef, Arc<dyn Toolset>)>, AgentRunError> {
+    entries: Vec<PortHandle<dyn Toolset>>,
+) -> Result<Vec<PortHandle<dyn Toolset>>, AgentRunError> {
     let mut rebuilt = Vec::with_capacity(entries.len());
-    for (component, toolset) in entries {
-        let next = toolset.reconstruct().await.map_err(invalid_config)?;
-        rebuilt.push((component, next.unwrap_or(toolset)));
+    for entry in entries {
+        let next = entry.handle.reconstruct().await.map_err(invalid_config)?;
+        rebuilt.push(PortHandle {
+            component: entry.component,
+            handle: next.unwrap_or(entry.handle),
+            scope: entry.scope,
+        });
     }
     Ok(rebuilt)
 }
 
 async fn reconstruct_providers(
-    entries: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
-) -> Result<Vec<(ComponentRef, Arc<dyn ContextProvider>)>, AgentRunError> {
+    entries: Vec<PortHandle<dyn ContextProvider>>,
+) -> Result<Vec<PortHandle<dyn ContextProvider>>, AgentRunError> {
     let mut rebuilt = Vec::with_capacity(entries.len());
-    for (component, provider) in entries {
-        let next = provider.reconstruct().await.map_err(invalid_config)?;
-        rebuilt.push((component, next.unwrap_or(provider)));
+    for entry in entries {
+        let next = entry.handle.reconstruct().await.map_err(invalid_config)?;
+        rebuilt.push(PortHandle {
+            component: entry.component,
+            handle: next.unwrap_or(entry.handle),
+            scope: entry.scope,
+        });
     }
     Ok(rebuilt)
 }
@@ -368,8 +390,9 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
     let middleware = builder
         .middleware
         .iter()
-        .map(|(component, _)| {
-            MiddlewareRef::try_new(component.clone(), None::<&str>).map_err(invalid_config)
+        .filter(|port| port.scope == PortScope::Base)
+        .map(|port| {
+            MiddlewareRef::try_new(port.component.clone(), None::<&str>).map_err(invalid_config)
         })
         .collect::<Result<Vec<_>, _>>()?;
     AgentBuilder::new(
@@ -382,14 +405,16 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
         builder
             .toolsets
             .iter()
-            .map(|(component, _)| component.clone())
+            .filter(|port| port.scope == PortScope::Base)
+            .map(|port| port.component.clone())
             .collect::<Vec<_>>(),
     )
     .context_providers(
         builder
             .context_providers
             .iter()
-            .map(|(component, _)| component.clone())
+            .filter(|port| port.scope == PortScope::Base)
+            .map(|port| port.component.clone())
             .collect::<Vec<_>>(),
     )
     .middleware(middleware)
@@ -409,25 +434,16 @@ fn builder_spec(builder: &NativeAgentBuilder) -> Result<crate::AgentSpec, AgentR
 fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), AgentRunError> {
     validate_exact_component(&builder.model.0)?;
     validate_exact_component(&builder.store.0)?;
-    for (component, _) in &builder.toolsets {
-        validate_exact_component(component)?;
+    for port in &builder.toolsets {
+        validate_exact_component(&port.component)?;
     }
-    for (component, _) in &builder.context_providers {
-        validate_exact_component(component)?;
+    for port in &builder.context_providers {
+        validate_exact_component(&port.component)?;
     }
-    for (component, _) in &builder.middleware {
-        validate_exact_component(component)?;
+    for port in &builder.middleware {
+        validate_exact_component(&port.component)?;
     }
     for (component, _) in &builder.observers {
-        validate_exact_component(component)?;
-    }
-    for (component, _) in &builder.installed_toolsets {
-        validate_exact_component(component)?;
-    }
-    for (component, _) in &builder.installed_context_providers {
-        validate_exact_component(component)?;
-    }
-    for (component, _) in &builder.installed_middleware {
         validate_exact_component(component)?;
     }
     Ok(())
@@ -458,7 +474,7 @@ async fn resolve_model_variants(
                 id: capability.id.clone(),
                 description: Arc::clone(&capability.description),
             },
-            agent: Agent::try_from_resolved(Arc::new(resolved))?,
+            resolved: Arc::new(resolved),
         });
     }
     Ok(variants)
@@ -499,19 +515,9 @@ pub(super) fn validate_compact_catalog(
     Ok(())
 }
 
-struct NativeBuilderExtension {
-    source: finstack_ai_kernel::ComponentId,
-    model: (ComponentRef, Arc<dyn Model>),
-    store: (ComponentRef, Arc<dyn finstack_ai_runtime::JournalStore>),
-    toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
-    context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
-    middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
-    observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
-}
-
-impl Extension for NativeBuilderExtension {
+impl Extension for NativeAgentBuilder {
     fn descriptor(&self) -> ExtensionDescriptor {
-        ExtensionDescriptor::trusted_in_process(self.source.clone(), PREVIEW_ENGINE_VERSION)
+        ExtensionDescriptor::trusted_in_process(native_builder_source(), PREVIEW_ENGINE_VERSION)
     }
 
     fn register(&self, registrar: &mut Registrar) -> Result<(), RegistrationError> {
@@ -519,22 +525,22 @@ impl Extension for NativeBuilderExtension {
             registration_metadata(&self.model.0),
             ReadyComponent::new(Arc::clone(&self.model.1)),
         )?;
-        for (component, toolset) in &self.toolsets {
+        for port in &self.toolsets {
             registrar.toolset(
-                registration_metadata(component),
-                ReadyComponent::new(Arc::clone(toolset)),
+                registration_metadata(&port.component),
+                ReadyComponent::new(Arc::clone(&port.handle)),
             )?;
         }
-        for (component, provider) in &self.context_providers {
+        for port in &self.context_providers {
             registrar.context_provider(
-                registration_metadata(component),
-                ReadyComponent::new(Arc::clone(provider)),
+                registration_metadata(&port.component),
+                ReadyComponent::new(Arc::clone(&port.handle)),
             )?;
         }
-        for (component, middleware) in &self.middleware {
+        for port in &self.middleware {
             registrar.middleware(
-                registration_metadata(component),
-                ReadyComponent::new(Arc::clone(middleware)),
+                registration_metadata(&port.component),
+                ReadyComponent::new(Arc::clone(&port.handle)),
             )?;
         }
         for (component, observer) in &self.observers {
@@ -548,6 +554,12 @@ impl Extension for NativeBuilderExtension {
             ReadyComponent::new(Arc::clone(&self.store.1)),
         )
     }
+}
+
+fn native_builder_source() -> ComponentId {
+    ComponentId::parse("finstack.sdk.native-builder").unwrap_or_else(|error| {
+        unreachable!("native builder source id is a compile-time constant: {error}")
+    })
 }
 
 fn registration_metadata(component: &ComponentRef) -> RegistrationMetadata {

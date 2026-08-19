@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,6 +49,12 @@ impl CapabilityCatalogEntry {
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
+    }
+}
+
+impl fmt::Display for CapabilityCatalogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.id, self.description)
     }
 }
 

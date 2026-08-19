@@ -30,7 +30,7 @@ use finstack_ai_runtime::native_driver as driver;
 #[derive(Clone)]
 pub(super) struct ModelCapabilityVariant {
     pub(super) entry: CapabilityCatalogEntry,
-    pub(super) agent: Agent,
+    pub(super) resolved: Arc<ResolvedAgent>,
 }
 
 /// Immutable native facade over one fully resolved agent.
@@ -47,7 +47,7 @@ pub struct Agent {
     pub(super) capability_specs: Arc<[CapabilitySpec]>,
     pub(super) capability_index: CapabilityContributionIndex,
     pub(super) activation_host: Option<Arc<NativeCapabilityHost>>,
-    pub(super) recompose: Option<Arc<NativeAgentBuilder>>,
+    pub(super) rebuild: Option<Arc<NativeAgentBuilder>>,
 }
 
 #[derive(Clone)]
@@ -94,16 +94,7 @@ impl Agent {
     ///
     /// Supports direct model, Toolset, context-provider, middleware, and
     /// observer handles. Observer failures are isolated from run semantics.
-    ///
-    /// # Arguments
-    ///
-    /// * `resolved` - Agent produced by a bundle resolver with a spec and lock.
-    ///
-    /// # Errors
-    ///
-    /// Returns a stable configuration error when the agent did not come from a
-    /// bundle resolver, contains a deferred stage, or has an invalid tool catalog.
-    pub fn try_from_resolved(resolved: Arc<ResolvedAgent>) -> Result<Self, AgentRunError> {
+    pub(crate) fn try_from_resolved(resolved: Arc<ResolvedAgent>) -> Result<Self, AgentRunError> {
         if resolved.spec().is_none() || resolved.lock().is_none() {
             return Err(AgentRunError::configuration(
                 AGENT_RUN_INVALID_CONFIGURATION,
@@ -177,11 +168,11 @@ impl Agent {
             capability_specs: Arc::from([]),
             capability_index: CapabilityContributionIndex::default(),
             activation_host: None,
-            recompose: None,
+            rebuild: None,
         })
     }
 
-    /// Compose a new agent from reconstructed catalogs.
+    /// Build a new agent from reconstructed catalogs.
     ///
     /// MCP `list_changed` never mutates this lock. The returned agent has a
     /// new lock. In-flight runs keep the previous composition.
@@ -189,16 +180,16 @@ impl Agent {
     /// # Errors
     ///
     /// Returns [`AGENT_RUN_INVALID_CONFIGURATION`] when the agent was not
-    /// composed through [`NativeAgentBuilder`], or when a catalog
+    /// built through [`NativeAgentBuilder`], or when a catalog
     /// reconstruction fails.
     pub async fn re_resolve(&self) -> Result<Self, AgentRunError> {
         let builder = self
-            .recompose
+            .rebuild
             .as_ref()
             .ok_or_else(|| {
                 AgentRunError::configuration(
                     AGENT_RUN_INVALID_CONFIGURATION,
-                    "re_resolve requires a builder-composed agent",
+                    "re_resolve requires a builder-built agent",
                 )
             })?
             .as_ref()
@@ -323,12 +314,6 @@ impl Agent {
             schema_ref,
             validator,
         });
-        let output = self.structured_output.clone();
-        let mut model_capabilities = self.model_capabilities.to_vec();
-        for variant in &mut model_capabilities {
-            variant.agent.structured_output.clone_from(&output);
-        }
-        self.model_capabilities = model_capabilities.into();
         Ok(self)
     }
 
@@ -352,7 +337,7 @@ impl Agent {
     pub fn compact_capability_catalog(&self) -> String {
         self.model_capabilities
             .iter()
-            .map(|variant| format!("{}: {}", variant.entry.id, variant.entry.description))
+            .map(|variant| variant.entry.to_string())
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -385,9 +370,9 @@ impl Agent {
     /// # }
     /// ```
     pub fn start(&self, request: AgentRunRequest) -> Result<AgentRun, AgentRunError> {
-        let selected = self.select_for_request(&request)?.clone();
+        let selected = self.select_for_request(&request)?;
         let prepared = selected.prepare(request)?;
-        Self::spawn_prepared(selected.clone(), prepared)
+        Self::spawn_prepared(selected, prepared)
     }
 
     /// Start a new root run on an existing idle lane.
@@ -405,9 +390,9 @@ impl Agent {
         lane: &crate::Lane,
         request: AgentRunRequest,
     ) -> Result<AgentRun, AgentRunError> {
-        let selected = self.select_for_request(&request)?.clone();
+        let selected = self.select_for_request(&request)?;
         let prepared = selected.prepare_on(request, lane)?;
-        Self::spawn_prepared(selected.clone(), prepared)
+        Self::spawn_prepared(selected, prepared)
     }
 
     /// Start one run on a frozen locator and already-validated acceptance.
@@ -425,9 +410,9 @@ impl Agent {
         accepted: finstack_ai_kernel::RunAccepted,
         session: crate::Session,
     ) -> Result<AgentRun, AgentRunError> {
-        let selected = self.select_for_request(&request)?.clone();
+        let selected = self.select_for_request(&request)?;
         let prepared = selected.prepare_accepted(request, locator, accepted, session)?;
-        Self::spawn_prepared(selected.clone(), prepared)
+        Self::spawn_prepared(selected, prepared)
     }
 
     fn spawn_prepared(
@@ -474,20 +459,28 @@ impl Agent {
         Arc::clone(self.resolved.run_plan().store().handle())
     }
 
-    fn select_for_request(&self, request: &AgentRunRequest) -> Result<&Self, AgentRunError> {
+    fn select_for_request(&self, request: &AgentRunRequest) -> Result<Self, AgentRunError> {
         let Some(capability) = request.capability.as_ref() else {
-            return Ok(self);
+            return Ok(self.clone());
         };
-        self.model_capabilities
+        let variant = self
+            .model_capabilities
             .iter()
             .find(|variant| variant.entry.id == *capability)
-            .map(|variant| &variant.agent)
             .ok_or_else(|| {
                 AgentRunError::configuration(
                     AGENT_RUN_INVALID_CONFIGURATION,
                     format!("unknown model capability {capability}"),
                 )
-            })
+            })?;
+        let mut agent = Self::try_from_resolved(Arc::clone(&variant.resolved))?;
+        agent.attach_capability_surface(
+            Arc::clone(&self.capability_specs),
+            self.capability_index.clone(),
+            self.activation_host.clone(),
+        )?;
+        agent.structured_output.clone_from(&self.structured_output);
+        Ok(agent)
     }
 
     /// Execute one bounded native run through the commit-before-effect runtime.

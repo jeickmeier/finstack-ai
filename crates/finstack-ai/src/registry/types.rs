@@ -409,6 +409,10 @@ impl ConstructionError {
 }
 
 /// Target-correct typed factory for one primary port trait object.
+///
+/// Register through [`crate::Registrar::model_factory`] and the matching
+/// `*_factory` methods. [`crate::Registry::resolve`] constructs the handle
+/// once and caches it as a ready slot.
 pub trait ComponentFactory<T: ?Sized>: PortObject {
     /// Construct one ready direct handle.
     fn construct(

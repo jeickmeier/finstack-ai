@@ -10,7 +10,7 @@ use crate::{
     ResolveRequest, ResolvedAgent,
 };
 
-use super::compose::{build_lock, effective_config, expand_spec, required_services, selection};
+use super::expand::{build_lock, effective_config, expand_spec, required_services, selection};
 use super::secret::ensure_secret_free_config;
 use super::{
     BundleCatalog, BundleConflict, BundleRequirement, BundleResolutionError, BundleSpec,

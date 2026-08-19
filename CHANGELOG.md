@@ -62,13 +62,18 @@ unpublished.
 - `finstack-ai` linked construction finishes on
   `NativeAgentBuilder::build_linked` with shared `LinkedCommon`.
   `ComposeAgentSpec` / `Agent::compose` are gone. Registry factory and
-  lifecycle types live at `finstack_ai::registry`. Lane suspend/resume
-  state is session-scoped, not process-global. `finstack-ai-runtime` no
-  longer re-exports kernel types at the crate root.
-  `AgentRun::start_child` / `prepare_child` take an optional remote route
-  (the `_routed` twins are gone). `complete_external_at`, unused
-  registrar factories, and `AgentRun::child_invoker_starts` are no longer
-  public. Capability-contributed ports use `capability_*` instead of
+  lifecycle types live at `finstack_ai::registry`.
+  `Registrar::{model,toolset,context_provider,middleware,store,observer}_factory`
+  are public production APIs; `Registry::resolve` constructs once and
+  caches the ready handle. `NativeAgentBuilder` registers itself as the
+  native-builder extension. `Agent::try_from_resolved` is crate-private.
+  `CapabilityCatalogEntry` implements `Display` as `id: description`.
+  Lane suspend/resume state is session-scoped, not process-global.
+  `finstack-ai-runtime` no longer re-exports kernel types at the crate
+  root. `AgentRun::start_child` / `prepare_child` take an optional remote
+  route (the `_routed` twins are gone). `complete_external_at` and
+  `AgentRun::child_invoker_starts` are no longer public.
+  Capability-contributed ports use `capability_*` instead of
   `install_*`. `Session::pending` is crate-private. Browser WASM no
   longer exposes fail-closed linked factories; use `Agent.create`.
 - `finstack-ai-server` crate-root surface is `Server`, `ListenAddr`,

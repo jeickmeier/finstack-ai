@@ -324,7 +324,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OpenAiProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    compose_provider(
+    build_linked_provider(
         (
             "python.agent.openai",
             "python.bundle.openai",
@@ -366,7 +366,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         AnthropicProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    compose_provider(
+    build_linked_provider(
         (
             "python.agent.anthropic",
             "python.bundle.anthropic",
@@ -401,7 +401,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OllamaProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
-    compose_provider(
+    build_linked_provider(
         (
             "python.agent.ollama",
             "python.bundle.ollama",
@@ -477,7 +477,7 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
         store,
         reference,
     )?;
-    compose_provider(
+    build_linked_provider(
         (
             "python.agent.gateway",
             "python.bundle.gateway",
@@ -618,7 +618,7 @@ async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, Age
     let provider: Arc<dyn Model> = Arc::new(E2bCatalogModel {
         name: model_name.clone(),
     });
-    compose_provider(
+    build_linked_provider(
         ("python.agent.e2b", "python.bundle.e2b", "python.model.e2b"),
         provider,
         model_name,
@@ -630,12 +630,28 @@ async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, Age
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-#[expect(
-    clippy::unused_async,
-    reason = "wasm-host keeps the same async signature as native-tokio"
-)]
-async fn openai_inner(_spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported("openai")
+async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "openai").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "anthropic").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "ollama").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "gateway").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn e2b_sandbox_inner(spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "e2b_sandbox").await
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
@@ -643,39 +659,10 @@ async fn openai_inner(_spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErr
     clippy::unused_async,
     reason = "wasm-host keeps the same async signature as native-tokio"
 )]
-async fn anthropic_inner(_spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported("anthropic")
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-#[expect(
-    clippy::unused_async,
-    reason = "wasm-host keeps the same async signature as native-tokio"
-)]
-async fn ollama_inner(_spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported("ollama")
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-#[expect(
-    clippy::unused_async,
-    reason = "wasm-host keeps the same async signature as native-tokio"
-)]
-async fn gateway_inner(_spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported("gateway")
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-#[expect(
-    clippy::unused_async,
-    reason = "wasm-host keeps the same async signature as native-tokio"
-)]
-async fn e2b_sandbox_inner(_spec: E2bSandboxAgentSpec) -> Result<LinkedAgent, AgentRunError> {
-    unsupported("e2b_sandbox")
-}
-
-#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
-fn unsupported(name: &str) -> Result<LinkedAgent, AgentRunError> {
+async fn unsupported_provider<T>(
+    _spec: T,
+    name: &'static str,
+) -> Result<LinkedAgent, AgentRunError> {
     Err(AgentRunError::configuration(
         AGENT_RUN_UNSUPPORTED_PLAN,
         format!("Agent::{name} is not supported on wasm-host"),
@@ -683,7 +670,7 @@ fn unsupported(name: &str) -> Result<LinkedAgent, AgentRunError> {
 }
 
 #[cfg(feature = "native-tokio")]
-async fn compose_provider(
+async fn build_linked_provider(
     (agent_id, bundle_id, model_id): (&str, &str, &str),
     provider: Arc<dyn Model>,
     model_name: ModelName,

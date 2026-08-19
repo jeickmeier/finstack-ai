@@ -14,8 +14,9 @@
 //! - `agent` — live `Agent` / [`NativeAgentBuilder`] / `AgentRun` (start at [`Agent::builder`])
 //! - `session` — journaled `Session` / `Lane` handles
 //! - `bundle` — catalog, exact lock, resolver
-//! - `registry` — registration and one-time resolution
+//! - `registry` — registration, factories, and one-time resolution
 //! - `result` — typed decode of a committed structured result
+//! - `runtime` — alias for `finstack-ai-runtime` port and driver types
 
 #![warn(missing_docs)]
 
@@ -57,6 +58,11 @@ pub use finstack_ai_kernel::{
     ActiveCapability, CapabilityActivationSource, InteractionRequest, InteractionResolution,
     OperationLocator, PrincipalRef, RunSecurityContext, SessionId,
 };
+/// Runtime port contracts and drivers (`finstack-ai-runtime`).
+///
+/// This crate re-exports the runtime crate so SDK consumers can name port
+/// types without a second direct dependency. Kernel types stay on
+/// `finstack-ai-kernel`.
 pub use finstack_ai_runtime as runtime;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use finstack_ai_runtime::{

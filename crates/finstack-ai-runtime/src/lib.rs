@@ -20,7 +20,7 @@
 #![warn(missing_docs)]
 
 pub use bytes::Bytes;
-#[expect(
+#[allow(
     unused_imports,
     reason = "feature-gated modules consume different kernel names"
 )]
@@ -48,7 +48,7 @@ pub(crate) use finstack_ai_kernel::{
     ToolCallPlan, ToolExecutionMode, ToolFailurePolicy, ToolId, ToolProgress, ToolResultBlock,
     TurnId, Usage, ValidatedToolCall, ValidationIssue, ValidationOutcome, Version,
 };
-#[expect(
+#[allow(
     unused_imports,
     reason = "feature-gated modules consume different kernel names"
 )]

@@ -1,8 +1,8 @@
 //! Finite bundle/catalog resolution and credential-free exact locks.
 
 mod catalog;
-mod compose;
 mod error;
+mod expand;
 mod lock;
 mod resolver;
 mod secret;
