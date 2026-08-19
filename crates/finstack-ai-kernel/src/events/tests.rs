@@ -43,6 +43,15 @@ fn run_event_kind_name_matches_section_20_2_1() {
 }
 
 #[test]
+fn run_event_class_name_matches_section_20_wire_name() {
+    assert_eq!(
+        RunEventClass::DurableDerived.class_name(),
+        "durable_derived"
+    );
+    assert_eq!(RunEventClass::Transient.class_name(), "transient");
+}
+
+#[test]
 fn durable_and_transient_constructors_are_class_safe() {
     let event_id = EventId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("e");
     let session = SessionId::parse("01234567-89ab-7cde-89ab-0123456789ac").expect("s");

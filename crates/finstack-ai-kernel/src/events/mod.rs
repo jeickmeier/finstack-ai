@@ -67,6 +67,17 @@ pub enum RunEventKind {
     ProviderHeartbeat,
 }
 
+impl RunEventClass {
+    /// Section 20 class string (`snake_case` wire name).
+    #[must_use]
+    pub const fn class_name(self) -> &'static str {
+        match self {
+            Self::DurableDerived => "durable_derived",
+            Self::Transient => "transient",
+        }
+    }
+}
+
 impl RunEventKind {
     /// Section 20.2.1 kind string (`snake_case` wire name).
     #[must_use]

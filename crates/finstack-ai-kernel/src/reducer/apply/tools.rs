@@ -9,7 +9,7 @@ use crate::records::tools::{
     ActiveToolBatch, ActiveToolCall, ActiveToolCallStatus, ToolBatchOutcome, ToolCallPlan,
     ToolSettlementFingerprint, ToolSettlementKind,
 };
-use crate::state::{CompletionIdentity, KernelState, RunPhase, TerminalCandidate};
+use crate::state::{KernelState, RunPhase, TerminalCandidate};
 
 use super::super::decision::KernelError;
 use super::super::fingerprint::{
@@ -458,21 +458,7 @@ pub(super) fn insert_tool_identity(
     state
         .tool_settlements
         .insert(effect_id, ToolSettlementFingerprint { kind, digest });
-    if let Some(completion_id) = completion_id {
-        if let Some(existing) = state.completion_identities.get(completion_id)
-            && (existing.effect_id != effect_id || existing.settlement_digest != digest)
-        {
-            return Err(KernelError::ConflictingCompletionId);
-        }
-        state.completion_identities.insert(
-            Arc::from(completion_id),
-            CompletionIdentity {
-                effect_id,
-                settlement_digest: digest,
-            },
-        );
-    }
-    Ok(())
+    super::insert_completion_identity(state, effect_id, digest, completion_id)
 }
 
 pub(super) fn tool_wait_phase(batch: &ActiveToolBatch) -> RunPhase {

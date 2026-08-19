@@ -7,8 +7,8 @@ use crate::records::RecordBody;
 use crate::records::lifecycle::EntryAppended;
 use crate::records::tools::{ActiveToolCallStatus, ToolCallIdentity};
 use crate::state::{
-    CompletionIdentity, KernelState, ModelSettlementFingerprint, ModelSettlementKind,
-    PendingModelEffect, RunPhase, TerminalCandidate,
+    KernelState, ModelSettlementFingerprint, ModelSettlementKind, PendingModelEffect, RunPhase,
+    TerminalCandidate,
 };
 
 use super::super::decision::KernelError;
@@ -446,19 +446,5 @@ pub(super) fn insert_model_identity(
     state
         .model_settlements
         .insert(effect_id, ModelSettlementFingerprint { kind, digest });
-    if let Some(completion_id) = completion_id {
-        if let Some(existing) = state.completion_identities.get(completion_id)
-            && (existing.effect_id != effect_id || existing.settlement_digest != digest)
-        {
-            return Err(KernelError::ConflictingCompletionId);
-        }
-        state.completion_identities.insert(
-            Arc::from(completion_id),
-            CompletionIdentity {
-                effect_id,
-                settlement_digest: digest,
-            },
-        );
-    }
-    Ok(())
+    super::insert_completion_identity(state, effect_id, digest, completion_id)
 }

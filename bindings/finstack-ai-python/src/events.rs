@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::{RunEvent, RunEventClass};
+use finstack_ai::runtime::RunEvent;
 use pyo3::exceptions::{PyException, PyStopAsyncIteration};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -61,10 +61,7 @@ impl PyEvent {
 
     #[getter]
     fn event_class(&self) -> &'static str {
-        match self.inner.class() {
-            RunEventClass::DurableDerived => "durable_derived",
-            RunEventClass::Transient => "transient",
-        }
+        self.inner.class().class_name()
     }
 
     #[getter]

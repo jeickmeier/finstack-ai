@@ -17,8 +17,9 @@ use std::sync::Arc;
 use super::capacity;
 use super::decision::{CommittedBatch, KernelError};
 use crate::events::{EventCorrelations, RunEvent};
+use crate::primitives::{Digest, EffectId};
 use crate::records::{RecordBody, RecordEnvelope};
-use crate::state::{KernelState, RunPhase};
+use crate::state::{CompletionIdentity, KernelState, RunPhase};
 
 use record::apply_record;
 use shapes::{foreign_run_shape, validate_batch_shape};
@@ -177,4 +178,27 @@ fn event_correlations_for(state: &KernelState, body: &RecordBody) -> EventCorrel
         tool_batch: tool.map(|value| value.1),
         tool_call: tool.map(|value| value.2),
     }
+}
+
+fn insert_completion_identity(
+    state: &mut KernelState,
+    effect_id: EffectId,
+    digest: Digest,
+    completion_id: Option<&str>,
+) -> Result<(), KernelError> {
+    if let Some(completion_id) = completion_id {
+        if let Some(existing) = state.completion_identities.get(completion_id)
+            && (existing.effect_id != effect_id || existing.settlement_digest != digest)
+        {
+            return Err(KernelError::ConflictingCompletionId);
+        }
+        state.completion_identities.insert(
+            Arc::from(completion_id),
+            CompletionIdentity {
+                effect_id,
+                settlement_digest: digest,
+            },
+        );
+    }
+    Ok(())
 }

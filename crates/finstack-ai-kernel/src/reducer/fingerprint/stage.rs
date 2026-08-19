@@ -13,7 +13,7 @@ use super::types::{
     ModelRequestPreparedFingerprintV1, StageFailFingerprintV1, StageSettlementFingerprintV1,
 };
 
-pub fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
+pub(in crate::reducer) fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
     let fingerprint = match &input.outcome {
         ReducerStageOutcome::Continue => StageSettlementFingerprintV1::Continue {
             cursor: input.cursor,
@@ -70,7 +70,7 @@ pub fn stage_digest(input: &StageSettled) -> Result<Digest, KernelError> {
     super::super::canonical_digest("stage-settlement", &fingerprint)
 }
 
-pub fn stage_record_digest(
+pub(in crate::reducer) fn stage_record_digest(
     outcome: &StageOutcomeRecorded,
     sibling: Option<&crate::RecordEnvelope>,
 ) -> Result<Digest, KernelError> {

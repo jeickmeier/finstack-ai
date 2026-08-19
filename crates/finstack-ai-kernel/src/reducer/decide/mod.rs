@@ -57,57 +57,60 @@ pub(super) fn decide(
         ),
         _ => None,
     };
-    let digest = match review_settlement(state, &input)? {
+    let review = match review_settlement(state, &input)? {
         SettlementReview::Duplicate => return duplicate_decision(state),
-        SettlementReview::Fresh { digest } => digest,
+        review => review,
     };
     if let Some(decision) = decide_limit(state, env, &input, context_canonical)? {
         return Ok(decision);
     }
-    match input {
-        KernelInput::AcceptRun(input) => decide_accept(state, env, &input),
-        KernelInput::StageSettled(input) => decide_stage(
-            state,
-            env,
-            &input,
-            context_canonical,
-            digest.ok_or(KernelError::InvariantViolation)?,
-        ),
-        KernelInput::ModelSettled(input) => {
-            digest.ok_or(KernelError::InvariantViolation)?;
+    match (input, review) {
+        (KernelInput::AcceptRun(input), SettlementReview::Unreviewed) => {
+            decide_accept(state, env, &input)
+        }
+        (KernelInput::StageSettled(input), SettlementReview::Fresh(digest)) => {
+            decide_stage(state, env, &input, context_canonical, digest)
+        }
+        (KernelInput::ModelSettled(input), SettlementReview::Fresh(_)) => {
             decide_model(state, env, &input)
         }
-        KernelInput::ExternalEffectCompleted(input) => decide_external(
-            state,
-            env,
-            input,
-            digest.ok_or(KernelError::InvariantViolation)?,
-        ),
-        KernelInput::ToolBatchSettled(input) => super::tool::decide_tool_settled(
-            state,
-            env,
-            &input,
-            digest.ok_or(KernelError::InvariantViolation)?,
-        ),
-        KernelInput::CancelRequested(input) => decide_cancel(state, env, &input),
-        KernelInput::CancellationReconciled(input) => decide_reconciliation(state, env, &input),
-        KernelInput::TimerFired(input) => decide_timer_fired(state, env, &input),
-        KernelInput::ConfigureOutput(input) => decide_configure_output(state, env, input),
-        KernelInput::CapabilitiesActivated(input) => {
+        (KernelInput::ExternalEffectCompleted(input), SettlementReview::Fresh(digest)) => {
+            decide_external(state, env, input, digest)
+        }
+        (KernelInput::ToolBatchSettled(input), SettlementReview::Fresh(digest)) => {
+            super::tool::decide_tool_settled(state, env, &input, digest)
+        }
+        (KernelInput::CancelRequested(input), SettlementReview::Unreviewed) => {
+            decide_cancel(state, env, &input)
+        }
+        (KernelInput::CancellationReconciled(input), SettlementReview::Unreviewed) => {
+            decide_reconciliation(state, env, &input)
+        }
+        (KernelInput::TimerFired(input), SettlementReview::Unreviewed) => {
+            decide_timer_fired(state, env, &input)
+        }
+        (KernelInput::ConfigureOutput(input), SettlementReview::Unreviewed) => {
+            decide_configure_output(state, env, input)
+        }
+        (KernelInput::CapabilitiesActivated(input), SettlementReview::Unreviewed) => {
             decide_capabilities_activated(state, env, input)
         }
-        KernelInput::OutputValidated(input) => decide_output_validated(state, env, input),
-        KernelInput::RecordExternalCommandRejected(_) => {
+        (KernelInput::OutputValidated(input), SettlementReview::Unreviewed) => {
+            decide_output_validated(state, env, input)
+        }
+        (KernelInput::RecordExternalCommandRejected(_), _) => {
             unreachable!("external rejection returns before limit processing")
         }
-        KernelInput::RequestInteraction(input) => {
+        (KernelInput::RequestInteraction(input), SettlementReview::Unreviewed) => {
             super::interaction::decide_request(state, env, &input)
         }
-        KernelInput::InteractionSettled(input) => {
-            super::interaction::decide_settled(state, env, &input)
-        }
-        KernelInput::RequestCompactionModel(input) => {
+        (
+            KernelInput::InteractionSettled(input),
+            SettlementReview::Fresh(_) | SettlementReview::Unreviewed,
+        ) => super::interaction::decide_settled(state, env, &input),
+        (KernelInput::RequestCompactionModel(input), SettlementReview::Unreviewed) => {
             decide_request_compaction_model(state, env, &input)
         }
+        _ => Err(KernelError::InvariantViolation),
     }
 }

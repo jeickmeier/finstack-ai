@@ -19,7 +19,7 @@ use super::types::{
     ExternalModelFailedFingerprintV1, ModelSettlementFingerprintV1,
 };
 
-pub fn direct_digest(input: &ModelSettled) -> Result<Digest, KernelError> {
+pub(in crate::reducer) fn direct_digest(input: &ModelSettled) -> Result<Digest, KernelError> {
     let fingerprint = match &input.outcome {
         ModelSettlement::Completed {
             completion,
@@ -48,7 +48,9 @@ pub fn direct_digest(input: &ModelSettled) -> Result<Digest, KernelError> {
     digest(&fingerprint)
 }
 
-pub fn external_digest(input: &ExternalEffectCompletedInput) -> Result<Digest, KernelError> {
+pub(in crate::reducer) fn external_digest(
+    input: &ExternalEffectCompletedInput,
+) -> Result<Digest, KernelError> {
     // Failed outcomes always project ExternalFailed so completion-identity
     // classification (TDD §11.3.3 steps 3–4) can run before assistant-presence
     // checks (step 6). Completed outcomes require the assistant in the projection.
@@ -82,7 +84,7 @@ pub fn external_digest(input: &ExternalEffectCompletedInput) -> Result<Digest, K
     digest(&fingerprint)
 }
 
-pub fn completed_compaction_digest(
+pub(in crate::reducer) fn completed_compaction_digest(
     pending: &PendingModelEffect,
     completed: &EffectCompleted,
 ) -> Result<Digest, KernelError> {
@@ -96,7 +98,7 @@ pub fn completed_compaction_digest(
     )
 }
 
-pub fn completed_record_digest(
+pub(in crate::reducer) fn completed_record_digest(
     pending: &PendingModelEffect,
     completed: &EffectCompleted,
     assistant_message: &Message,
@@ -127,7 +129,7 @@ pub fn completed_record_digest(
     digest(&fingerprint)
 }
 
-pub fn failed_record_digest(
+pub(in crate::reducer) fn failed_record_digest(
     pending: &PendingModelEffect,
     failed: &EffectFailed,
 ) -> Result<Digest, KernelError> {

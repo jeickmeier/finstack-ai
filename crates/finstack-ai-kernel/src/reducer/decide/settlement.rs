@@ -13,15 +13,16 @@ use super::super::tool::{is_known_tool_effect, tool_batch_id_for_effect};
 use crate::primitives::Digest;
 use crate::state::KernelState;
 
-/// Equal committed redelivery, or a fresh incoming digest for later decide_*.
+/// Equal committed redelivery, a fresh incoming digest, or a non-settlement.
 pub(super) enum SettlementReview {
     Duplicate,
-    Fresh { digest: Option<Digest> },
+    Fresh(Digest),
+    Unreviewed,
 }
 
 /// Classify a settlement input as an equal redelivery, a fresh digest, or a
-/// conflict. Non-settlement inputs stay `Fresh` with no digest so they skip
-/// the same way both prior layers did.
+/// conflict. Non-settlement inputs stay `Unreviewed` so later decide_* arms
+/// do not invent a digest.
 pub(super) fn review_settlement(
     state: &KernelState,
     input: &KernelInput,
@@ -41,7 +42,7 @@ pub(super) fn review_settlement(
                 .map(|existing| existing.settlement_digest),
             resolution_digest(resolution)?,
         ),
-        _ => Ok(SettlementReview::Fresh { digest: None }),
+        _ => Ok(SettlementReview::Unreviewed),
     }
 }
 
@@ -212,7 +213,5 @@ fn review_tool_deferred(
 }
 
 fn fresh(digest: Digest) -> SettlementReview {
-    SettlementReview::Fresh {
-        digest: Some(digest),
-    }
+    SettlementReview::Fresh(digest)
 }

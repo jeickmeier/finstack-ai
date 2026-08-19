@@ -18,7 +18,7 @@ use super::types::{
     ToolBatchCloseFingerprintV1, ToolBatchPlanFingerprintV1, ToolSettlementFingerprintV1,
 };
 
-pub fn tool_batch_plan_digest(
+pub(in crate::reducer) fn tool_batch_plan_digest(
     cycle: u64,
     turn_id: TurnId,
     tool_batch_id: ToolBatchId,
@@ -39,7 +39,9 @@ pub fn tool_batch_plan_digest(
     )
 }
 
-pub fn opened_tool_batch_plan_digest(opened: &ToolBatchOpened) -> Result<Digest, KernelError> {
+pub(in crate::reducer) fn opened_tool_batch_plan_digest(
+    opened: &ToolBatchOpened,
+) -> Result<Digest, KernelError> {
     tool_batch_plan_digest(
         opened.cycle,
         opened.turn_id,
@@ -50,7 +52,7 @@ pub fn opened_tool_batch_plan_digest(opened: &ToolBatchOpened) -> Result<Digest,
     )
 }
 
-pub fn direct_tool_digest(
+pub(in crate::reducer) fn direct_tool_digest(
     tool_batch_id: ToolBatchId,
     outcome: &ToolSettlement,
 ) -> Result<Digest, KernelError> {
@@ -71,7 +73,7 @@ pub fn direct_tool_digest(
     super::super::canonical_digest("tool-settlement", &fingerprint)
 }
 
-pub fn external_tool_digest(
+pub(in crate::reducer) fn external_tool_digest(
     tool_batch_id: ToolBatchId,
     input: &ExternalEffectCompletedInput,
 ) -> Result<Digest, KernelError> {
@@ -98,7 +100,7 @@ pub fn external_tool_digest(
     super::super::canonical_digest("tool-settlement", &fingerprint)
 }
 
-pub fn synthetic_tool_digest(
+pub(in crate::reducer) fn synthetic_tool_digest(
     tool_batch_id: ToolBatchId,
     tool_call_id: ToolCallId,
     effect_id: EffectId,
@@ -117,7 +119,7 @@ pub fn synthetic_tool_digest(
     )
 }
 
-pub fn completed_tool_record_digest(
+pub(in crate::reducer) fn completed_tool_record_digest(
     tool_batch_id: ToolBatchId,
     external: bool,
     completed: &EffectCompleted,
@@ -142,7 +144,7 @@ pub fn completed_tool_record_digest(
     super::super::canonical_digest("tool-settlement", &fingerprint)
 }
 
-pub fn failed_tool_record_digest(
+pub(in crate::reducer) fn failed_tool_record_digest(
     tool_batch_id: ToolBatchId,
     external: bool,
     failed: &EffectFailed,
@@ -165,7 +167,7 @@ pub fn failed_tool_record_digest(
     super::super::canonical_digest("tool-settlement", &fingerprint)
 }
 
-pub fn tool_batch_close_digest(
+pub(in crate::reducer) fn tool_batch_close_digest(
     cycle: u64,
     turn_id: TurnId,
     tool_batch_id: ToolBatchId,

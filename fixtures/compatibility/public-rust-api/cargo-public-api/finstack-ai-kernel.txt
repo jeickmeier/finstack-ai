@@ -1684,6 +1684,8 @@ pub fn finstack_ai_kernel::RunEventBody::deserialize<D>(D) -> core::result::Resu
 pub enum finstack_ai_kernel::RunEventClass
 pub finstack_ai_kernel::RunEventClass::DurableDerived
 pub finstack_ai_kernel::RunEventClass::Transient
+impl finstack_ai_kernel::RunEventClass
+pub const fn finstack_ai_kernel::RunEventClass::class_name(self) -> &'static str
 impl core::clone::Clone for finstack_ai_kernel::RunEventClass
 pub fn finstack_ai_kernel::RunEventClass::clone(&self) -> finstack_ai_kernel::RunEventClass
 impl core::cmp::Eq for finstack_ai_kernel::RunEventClass

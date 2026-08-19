@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
-use finstack_ai::runtime::{EventBatch as RuntimeEventBatch, RunEventClass};
+use finstack_ai::runtime::EventBatch as RuntimeEventBatch;
 use finstack_ai_kernel::RunEvent;
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
@@ -22,10 +22,7 @@ impl Event {
     /// Durable or transient class.
     #[wasm_bindgen(getter, js_name = eventClass)]
     pub fn event_class(&self) -> String {
-        match self.inner.class() {
-            RunEventClass::DurableDerived => "durable_derived".to_owned(),
-            RunEventClass::Transient => "transient".to_owned(),
-        }
+        self.inner.class().class_name().to_owned()
     }
 
     /// Transient sequence.
