@@ -81,19 +81,26 @@ pub fn model_configs_from_catalog_json(
                 .as_ref()
                 .is_some_and(|arch| arch.input_modalities.iter().any(|m| m == name))
         };
-        let config = OpenRouterModelConfig::try_new(
+        let Ok(config) = OpenRouterModelConfig::try_new(
             &model.id,
             hard_input_bytes,
             context_window_tokens,
             max_output_tokens,
             reserved_output_tokens,
             PROVIDER_OVERHEAD_TOKENS,
-        )?
-        .with_parallel_tool_calls(supports("tools"))
-        .with_reasoning(supports("reasoning") || supports("include_reasoning"))
-        .with_input_images(modality("image"))
-        .with_input_audio(modality("audio"))
-        .with_input_files(modality("file"));
+        ) else {
+            // A malformed model id (or other per-entry construction failure)
+            // only invalidates that one catalog entry; skip it rather than
+            // aborting the whole parse. The empty-result check below still
+            // fails closed if every entry turns out unusable.
+            continue;
+        };
+        let config = config
+            .with_parallel_tool_calls(supports("tools"))
+            .with_reasoning(supports("reasoning") || supports("include_reasoning"))
+            .with_input_images(modality("image"))
+            .with_input_audio(modality("audio"))
+            .with_input_files(modality("file"));
         configs.push(config);
     }
     if configs.is_empty() {
@@ -127,6 +134,10 @@ mod tests {
           "id": "mistral/basic",
           "context_length": 32768,
           "supported_parameters": ["temperature"]
+        },
+        {
+          "id": "",
+          "context_length": 32768
         }
       ]
     }"#;
@@ -134,7 +145,11 @@ mod tests {
     #[test]
     fn maps_catalog_entries_onto_conservative_configs() {
         let configs = model_configs_from_catalog_json(CATALOG, 1_000_000).expect("configs");
-        assert_eq!(configs.len(), 2);
+        assert_eq!(
+            configs.len(),
+            2,
+            "the malformed (empty-id) entry must be skipped, not abort the parse"
+        );
         assert_eq!(configs[0].name.as_str(), "openai/gpt-5");
         assert_eq!(configs[0].context_window_tokens, 400_000);
         assert_eq!(configs[0].max_output_tokens, 128_000);

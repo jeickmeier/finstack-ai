@@ -26,8 +26,6 @@ use crate::request::{MessagesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::{AnthropicConfig, AnthropicModelConfig};
 
-const MAX_INLINE_MEDIA_BYTES: usize = 8 * 1_048_576;
-
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
 /// Reusable native Anthropic Messages provider.
@@ -151,11 +149,17 @@ impl AnthropicProvider {
     }
 }
 
+/// Resolve every distinct media block in `draft`, bounding both each
+/// resolved payload and the running aggregate across the draft by
+/// `max_stream_bytes` (ADR-049) so a caller cannot smuggle an oversized
+/// request past per-blob checks by splitting it across many blobs.
 async fn resolve_draft_media(
     resolver: Option<&Arc<dyn MediaResolver>>,
     draft: &ModelRequestDraft,
+    max_stream_bytes: usize,
 ) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
     let mut resolved_media = BTreeMap::new();
+    let mut aggregate_bytes: usize = 0;
     for message in draft.messages.iter() {
         for block in message.content() {
             let (ContentBlock::Image(media) | ContentBlock::File(media)) = block else {
@@ -171,10 +175,14 @@ async fn resolve_draft_media(
                 ));
             };
             let payload = resolver.resolve(media.blob()).await.map_err(map_resolve)?;
-            if let ResolvedMedia::Bytes { bytes, .. } = &payload
-                && bytes.len() > MAX_INLINE_MEDIA_BYTES
-            {
-                return Err(crate::error::stream_limit_error());
+            if let ResolvedMedia::Bytes { bytes, .. } = &payload {
+                if bytes.len() > max_stream_bytes {
+                    return Err(crate::error::stream_limit_error());
+                }
+                aggregate_bytes = aggregate_bytes.saturating_add(bytes.len());
+                if aggregate_bytes > max_stream_bytes {
+                    return Err(crate::error::stream_limit_error());
+                }
             }
             resolved_media.insert(id, payload);
         }
@@ -300,7 +308,8 @@ impl Model for AnthropicProvider {
         let resolver = self.config.media_resolver();
         Box::pin(async move {
             let model = model?;
-            let resolved = resolve_draft_media(resolver.as_ref(), &request.draft).await?;
+            let resolved =
+                resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes).await?;
             let wire = MessagesRequest::try_from_draft(&request.draft, &model, &resolved)?;
             let payload = serialize_request(&wire)?;
             let request_id = request.call.request_id.to_string();
@@ -676,6 +685,10 @@ mod tests {
     }
 
     fn fixture_request(media: ContentBlock) -> ModelRequest {
+        fixture_request_with(vec![media])
+    }
+
+    fn fixture_request_with(media: Vec<ContentBlock>) -> ModelRequest {
         let selected = ModelName::try_new("claude-test").expect("name");
         ModelRequest {
             call: ModelCallContext {
@@ -713,7 +726,7 @@ mod tests {
                 messages: Arc::from([Message::try_new(
                     MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message"),
                     MessageRole::User,
-                    vec![media],
+                    media,
                     Timestamp::from_unix_ms(1).expect("ts"),
                     None,
                     ProviderIds::empty(),
@@ -739,6 +752,8 @@ mod tests {
     async fn oversized_resolved_media_fails_closed() {
         let config = AnthropicConfig::try_new("http://127.0.0.1:9")
             .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
             .with_media_resolver(Arc::new(OversizedResolver));
         let model =
             AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
@@ -750,6 +765,57 @@ mod tests {
 
         let Err(error) = provider.request(request).await else {
             panic!("oversized media must fail closed");
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
+    }
+
+    #[derive(Debug)]
+    struct SizedResolver {
+        first_bytes: usize,
+        second_bytes: usize,
+    }
+
+    impl MediaResolver for SizedResolver {
+        fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            let size = if blob.id() == "blob-1" {
+                self.first_bytes
+            } else {
+                self.second_bytes
+            };
+            Box::pin(async move {
+                Ok(ResolvedMedia::Bytes {
+                    media_type: Arc::from("image/png"),
+                    bytes: Arc::from(vec![0_u8; size]),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn aggregate_resolved_media_over_the_stream_cap_fails_closed_even_when_each_blob_is_under()
+     {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
+            .with_media_resolver(Arc::new(SizedResolver {
+                first_bytes: 3 * 1_048_576,
+                second_bytes: 3 * 1_048_576,
+            }));
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+
+        let blob_a = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let blob_b = BlobRef::try_new("blob-2", "image/png", 4, None, None::<&str>).expect("blob");
+        let request = fixture_request_with(vec![
+            ContentBlock::Image(MediaRef::new(blob_a)),
+            ContentBlock::Image(MediaRef::new(blob_b)),
+        ]);
+
+        let Err(error) = provider.request(request).await else {
+            panic!("aggregate-oversized media must fail closed");
         };
         assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
     }

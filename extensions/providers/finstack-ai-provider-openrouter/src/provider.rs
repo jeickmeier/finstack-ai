@@ -164,12 +164,15 @@ impl OpenRouterProvider {
                 "OpenRouter models endpoint returned an unsuccessful status",
             ));
         }
-        let body = response
-            .bytes()
-            .await
-            .map_err(|source| transport_error(&source))?;
-        if body.len() > self.config.max_stream_bytes() {
-            return Err(crate::error::stream_limit_error());
+        let cap = self.config.max_stream_bytes();
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|source| transport_error(&source))?;
+            if body.len().saturating_add(chunk.len()) > cap {
+                return Err(crate::error::stream_limit_error());
+            }
+            body.extend_from_slice(&chunk);
         }
         crate::catalog::model_configs_from_catalog_json(&body, hard_input_bytes)
     }
@@ -286,7 +289,8 @@ impl Model for OpenRouterProvider {
         Box::pin(async move {
             let model = model?;
             let resolved_media =
-                resolve_draft_media(media_resolver.as_ref(), &request.draft).await?;
+                resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes)
+                    .await?;
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -427,11 +431,17 @@ async fn drive_response(
     }
 }
 
+/// Resolve every distinct media block in `draft`, bounding both each
+/// resolved payload and the running aggregate across the draft by
+/// `max_stream_bytes` (ADR-049) so a caller cannot smuggle an oversized
+/// request past per-blob checks by splitting it across many blobs.
 async fn resolve_draft_media(
     media_resolver: Option<&Arc<dyn MediaResolver>>,
     draft: &ModelRequestDraft,
+    max_stream_bytes: usize,
 ) -> Result<BTreeMap<Arc<str>, ResolvedMedia>, ModelError> {
     let mut resolved_media = BTreeMap::new();
+    let mut aggregate_bytes: usize = 0;
     for message in draft.messages.iter() {
         for block in message.content() {
             let (ContentBlock::Image(media)
@@ -453,18 +463,20 @@ async fn resolve_draft_media(
                 .resolve(media.blob())
                 .await
                 .map_err(map_resolve)?;
-            if let ResolvedMedia::Bytes { bytes, .. } = &payload
-                && bytes.len() > MAX_INLINE_MEDIA_BYTES
-            {
-                return Err(crate::error::stream_limit_error());
+            if let ResolvedMedia::Bytes { bytes, .. } = &payload {
+                if bytes.len() > max_stream_bytes {
+                    return Err(crate::error::stream_limit_error());
+                }
+                aggregate_bytes = aggregate_bytes.saturating_add(bytes.len());
+                if aggregate_bytes > max_stream_bytes {
+                    return Err(crate::error::stream_limit_error());
+                }
             }
             resolved_media.insert(id, payload);
         }
     }
     Ok(resolved_media)
 }
-
-const MAX_INLINE_MEDIA_BYTES: usize = 8 * 1_048_576;
 
 fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
     use finstack_ai_runtime::MediaResolveKind;
@@ -600,6 +612,8 @@ mod tests {
     async fn oversized_resolved_media_fails_closed() {
         let config = OpenRouterConfig::try_new("http://127.0.0.1:9")
             .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
             .with_media_resolver(Arc::new(OversizedResolver));
         let model = OpenRouterModelConfig::try_new(
             "openai/gpt-test",
@@ -615,6 +629,79 @@ mod tests {
         let result = provider.request(media_request(name)).await;
         let Err(error) = result else {
             panic!("oversized media must fail closed")
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
+    }
+
+    #[derive(Debug)]
+    struct SizedResolver {
+        first_bytes: usize,
+        second_bytes: usize,
+    }
+
+    impl MediaResolver for SizedResolver {
+        fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            let size = if blob.id() == "blob-1" {
+                self.first_bytes
+            } else {
+                self.second_bytes
+            };
+            Box::pin(async move {
+                Ok(ResolvedMedia::Bytes {
+                    media_type: Arc::from("image/png"),
+                    bytes: Arc::from(vec![0_u8; size]),
+                })
+            })
+        }
+    }
+
+    fn two_blob_media_request(model: ModelName) -> ModelRequest {
+        let blob_a = BlobRef::try_new("blob-1", "image/png", 3 * 1_048_576, None, None::<&str>)
+            .expect("blob");
+        let blob_b = BlobRef::try_new("blob-2", "image/png", 3 * 1_048_576, None, None::<&str>)
+            .expect("blob");
+        let mut request = media_request(model);
+        request.draft.messages = Arc::from([Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message"),
+            finstack_ai_kernel::MessageRole::User,
+            vec![
+                ContentBlock::Image(MediaRef::new(blob_a)),
+                ContentBlock::Image(MediaRef::new(blob_b)),
+            ],
+            Timestamp::from_unix_ms(1).expect("ts"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message")]);
+        request
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn aggregate_resolved_media_over_the_stream_cap_fails_closed_even_when_each_blob_is_under()
+     {
+        let config = OpenRouterConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
+            .with_media_resolver(Arc::new(SizedResolver {
+                first_bytes: 3 * 1_048_576,
+                second_bytes: 3 * 1_048_576,
+            }));
+        let model = OpenRouterModelConfig::try_new(
+            "openai/gpt-test",
+            1_000_000,
+            128_000,
+            4_096,
+            4_096,
+            256,
+        )
+        .expect("model");
+        let name = model.name.clone();
+        let provider = OpenRouterProvider::try_new(config, vec![model]).expect("provider");
+        let result = provider.request(two_blob_media_request(name)).await;
+        let Err(error) = result else {
+            panic!("aggregate-oversized media must fail closed")
         };
         assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
     }
