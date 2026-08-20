@@ -371,15 +371,27 @@ async fn oversize_body_is_a_limit_error() {
 
 #[tokio::test]
 async fn invalid_utf8_body_without_store_is_an_error() {
-    // Task 9 semantics: a body that fails `String::from_utf8` is routed as
-    // binary rather than force-decoded with `String::from_utf8_lossy` (that
-    // lossy path is now `mode: "text"` only). With no artifact store
-    // attached, binary content is refused rather than staged. 60 raw bytes
-    // of 0xFF fit the byte cap but are not valid UTF-8.
+    // Task 9 semantics: within an inline-text essence (`text/plain` here),
+    // a body that fails `String::from_utf8` falls through to the binary
+    // path rather than being force-decoded with `String::from_utf8_lossy`
+    // (that lossy path is now `mode: "text"` only). This exercises the
+    // `Err` arm of `deliver_auto_or_markdown`'s `String::from_utf8` match
+    // (deliver.rs), which only fires when the essence is in the
+    // inline-text set to begin with — hence the explicit Content-Type,
+    // distinct from an untyped/empty-essence body (already covered by
+    // `binary_body_without_store_is_a_limit_error`). With no artifact
+    // store attached, binary content is refused rather than staged. 60 raw
+    // bytes of 0xFF fit the byte cap but are not valid UTF-8.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let body = vec![0xFF_u8; 60];
-    tokio::spawn(serve_once(listener, None, 200, String::new(), body));
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        body,
+    ));
 
     let config = HttpFetchConfig {
         max_response_bytes: 64,
@@ -392,6 +404,38 @@ async fn invalid_utf8_body_without_store_is_an_error() {
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
     assert!(error.to_string().contains("binary"), "{error}");
+}
+
+#[tokio::test]
+async fn invalid_utf8_body_under_text_essence_with_store_is_staged() {
+    // Other arm of the same `Err` branch covered above: with a store
+    // attached, the same invalid-UTF-8-under-`text/plain` body is staged
+    // as an artifact instead of erroring.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0xFF_u8; 60];
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: text/plain\r\n".to_owned(),
+        body,
+    ));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 64,
+        ..loopback_config(&["docs.rs"])
+    };
+    let store = Arc::new(InProcessArtifactStore::default());
+    let toolset = HttpFetchToolset::try_new(config)
+        .unwrap()
+        .with_artifact_store(Arc::clone(&store) as Arc<dyn ArtifactStore>);
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(&spec, format!(r#"{{"url":"{url}"}}"#).as_bytes());
+    let output = drive_to_success(&toolset, tool_context(), call).await;
+    assert!(output.get("artifact").is_some(), "{output}");
+    assert!(output.get("content").is_none(), "{output}");
 }
 
 // --- Task 9: mode handling and artifact staging -------------------------
@@ -548,6 +592,40 @@ async fn text_mode_on_binary_body_inlines_lossy_text() {
     let content = output["content"].as_str().expect("content string");
     assert!(content.contains('\u{FFFD}'), "{content}");
     assert!(output.get("artifact").is_none(), "{output}");
+}
+
+#[tokio::test]
+async fn text_mode_lossy_expansion_past_the_inline_budget_is_a_limit_error() {
+    // `mode: "text"` always inlines via `String::from_utf8_lossy`, which
+    // expands each invalid byte to a 3-byte U+FFFD replacement. 60 raw
+    // bytes of 0xFF pass the raw-read cap (`effective_cap = min(config,
+    // max_bytes) = 64`) but expand to 180 bytes of lossy text, which must
+    // be rejected against that same cap as the inline-result budget
+    // (`deliver::inline_within_budget`'s error branch).
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = vec![0xFF_u8; 60];
+    tokio::spawn(serve_once(
+        listener,
+        None,
+        200,
+        "Content-Type: application/octet-stream\r\n".to_owned(),
+        body,
+    ));
+
+    let config = HttpFetchConfig {
+        max_response_bytes: 1_048_576,
+        ..loopback_config(&["docs.rs"])
+    };
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let url = format!("http://127.0.0.1:{}/x", addr.port());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"text","max_bytes":64}}"#).as_bytes(),
+    );
+    let error = drive_to_error(&toolset, call).await;
+    assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
 }
 
 #[tokio::test]
