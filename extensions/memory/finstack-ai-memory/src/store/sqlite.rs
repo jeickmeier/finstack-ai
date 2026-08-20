@@ -350,6 +350,23 @@ fn fetch_record(
         .map_err(|_| sqlite_unavailable())
 }
 
+/// Report whether any row already occupies `id`.
+///
+/// Deliberately scope-blind: `id` is the table's primary key, so a
+/// collision with another tenant's row is still a conflict, and the caller
+/// learns only that the identifier is taken.
+fn record_exists(transaction: &Transaction<'_>, id: &MemoryId) -> Result<bool, MemoryStoreError> {
+    let found: Option<i64> = transaction
+        .query_row(
+            "SELECT 1 FROM memory_records WHERE id = ?1",
+            params![id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| sqlite_unavailable())?;
+    Ok(found.is_some())
+}
+
 /// Claim `idempotency_key` inside `transaction`. Returns `true` when newly
 /// claimed, `false` when the key was already applied.
 fn claim_key(
@@ -523,6 +540,12 @@ impl MemoryStore for SqliteMemoryStore {
                 transaction.commit().map_err(|_| sqlite_unavailable())?;
                 return Ok(PutOutcome::AlreadyApplied);
             }
+            if record_exists(&transaction, &record.id)? {
+                // Returning without committing rolls the transaction back,
+                // releasing the key claim above so a later legitimate write
+                // under the same effect id is not treated as already applied.
+                return Err(MemoryStoreError::IdConflict);
+            }
             write_record(&transaction, &record)?;
             transaction.commit().map_err(|_| sqlite_unavailable())?;
             Ok(PutOutcome::Inserted)
@@ -621,6 +644,13 @@ impl MemoryStore for SqliteMemoryStore {
                 .map_err(|_| MemoryStoreError::InvalidRecord {
                     reason: "memory_record_invalid",
                 })?;
+            // A record that supersedes itself would be hidden from search and
+            // recall forever, with no surviving replacement to find.
+            if replacement.id == old {
+                return Err(MemoryStoreError::InvalidRecord {
+                    reason: "memory_self_supersession",
+                });
+            }
             let mut connection = self.connection.lock().map_err(|_| lock_error())?;
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)

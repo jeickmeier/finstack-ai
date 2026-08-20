@@ -109,6 +109,16 @@ pub enum MemoryStoreError {
         /// Stable non-secret reason.
         reason: &'static str,
     },
+    /// A record already exists under the identifier being written, and this
+    /// write is not an idempotent replay of the write that created it.
+    ///
+    /// Raised by [`MemoryStore::put`] instead of silently replacing the
+    /// existing record. The check is deliberately scope-blind: a colliding
+    /// identifier in another tenant's scope is still a conflict, and the
+    /// error carries no information about the record it collided with.
+    /// Supersede an existing record with [`MemoryStore::correct`] instead.
+    #[error("memory_id_conflict")]
+    IdConflict,
 }
 
 /// Durable memory storage: write, point-read, search, tombstone, supersede,
@@ -123,10 +133,17 @@ pub trait MemoryStore: PortObject {
     /// is a no-op that reports [`PutOutcome::AlreadyApplied`] rather than
     /// erroring or double-writing.
     ///
+    /// `put` never replaces an existing record: a write whose identifier is
+    /// already taken (by any scope) and whose idempotency key is new fails
+    /// with [`MemoryStoreError::IdConflict`]. Replacing the content of a
+    /// remembered record goes through [`MemoryStore::correct`], which
+    /// records the supersession link.
+    ///
     /// # Errors
     ///
     /// Returns [`MemoryStoreError::InvalidRecord`] when `record` fails
-    /// validation, or [`MemoryStoreError::Unavailable`] on a backend
+    /// validation, [`MemoryStoreError::IdConflict`] when `record.id` is
+    /// already taken, or [`MemoryStoreError::Unavailable`] on a backend
     /// failure.
     fn put(
         &self,
@@ -181,12 +198,16 @@ pub trait MemoryStore: PortObject {
     /// `idempotency_key`: `replacement` is linked as superseding `old`, and
     /// `old` is linked as superseded by `replacement`.
     ///
+    /// `replacement.id` must differ from `old`: a record that supersedes
+    /// itself would be permanently invisible to search and recall.
+    ///
     /// # Errors
     ///
     /// Returns [`MemoryStoreError::NotFound`] when `old` is not visible to
     /// `scope`, [`MemoryStoreError::InvalidRecord`] when `replacement`
-    /// fails validation, or [`MemoryStoreError::Unavailable`] on a backend
-    /// failure.
+    /// fails validation or `replacement.id` equals `old` (reason
+    /// `memory_self_supersession`), or [`MemoryStoreError::Unavailable`] on
+    /// a backend failure.
     fn correct(
         &self,
         idempotency_key: Arc<str>,

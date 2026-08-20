@@ -28,7 +28,10 @@ use crate::record::{
 use crate::store::{MatchEvidence, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome};
 
 /// Inline-vs-blob threshold for a memory record body, in bytes.
-pub const INLINE_BODY_MAX_BYTES: usize = 4096;
+///
+/// Re-exported from [`crate::record`], which owns the single definition
+/// shared with the observer's capture path.
+pub use crate::record::INLINE_BODY_MAX_BYTES;
 
 /// Bounded number of characters kept in a staged blob's preview.
 const PREVIEW_CHAR_LIMIT: usize = 256;
@@ -52,6 +55,13 @@ pub const MEMORY_TOOL_UNAVAILABLE: &str = "memory_tool_unavailable";
 /// Stable not-found payload code (carried inside an `is_error` result, never
 /// a [`ToolError`]).
 pub const MEMORY_TOOL_NOT_FOUND: &str = "memory_not_found";
+/// Stable id-conflict code, raised when `remember` names an identifier that
+/// is already taken. Carried inside an `is_error` result so the model can
+/// recover by calling `correct_memory` instead.
+pub const MEMORY_TOOL_ID_CONFLICT: &str = "memory_id_conflict";
+/// Stable self-supersession code, raised when `correct_memory`'s replacement
+/// body would derive the identifier it is meant to supersede.
+pub const MEMORY_TOOL_SELF_SUPERSESSION: &str = "memory_self_supersession";
 
 const REMEMBER_INPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"keywords":{"type":"array","items":{"type":"string"}},"body":{"type":"string"},"sensitivity":{"type":"string"}},"required":["keywords","body"]}"#;
 const REMEMBER_OUTPUT_SCHEMA: &[u8] = br#"{"type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"outcome":{"type":"string","enum":["inserted","already_applied"]}},"required":["id","outcome"]}"#;
@@ -273,7 +283,7 @@ impl Toolset for MemoryToolset {
                 .find(|spec| spec.model_name.as_ref() == name)
                 .map(|spec| spec.id.clone())
                 .ok_or_else(|| invalid_arguments("unknown memory tool name"))?;
-            validate_call_context(&ctx, &call, &expected_id)?;
+            toolset.validate_call_context(&ctx, &call, &expected_id)?;
             let arguments = call.call.arguments().as_bytes().to_vec();
             let result = toolset.dispatch(&ctx.run, &name, &arguments).await?;
             Ok(Box::pin(stream::once(async move {
@@ -293,6 +303,11 @@ impl Toolset for MemoryToolset {
             if !matches!(name.as_str(), REMEMBER_NAME | FORGET_NAME | CORRECT_NAME) {
                 return Ok(ToolReconcileResult::Unknown);
             }
+            // Reconciliation replays a committed effect, so the configured
+            // tenant is re-checked against the committed context here exactly
+            // as `call` does; a toolset bound to another tenant must never
+            // finish someone else's write.
+            toolset.validate_tenant(&ctx.run)?;
             let arguments = effect.call.call.arguments().as_bytes().to_vec();
             let result = toolset.dispatch(&ctx.run, &name, &arguments).await?;
             Ok(ToolReconcileResult::Completed(result))
@@ -379,11 +394,14 @@ impl MemoryToolset {
             retention: RetentionPolicy::KeepUntilDeleted,
             tombstoned: false,
         };
-        let outcome = self
-            .store
-            .put(Self::idempotency_key(run), record)
-            .await
-            .map_err(|error| map_store_error(&error))?;
+        let outcome = match self.store.put(Self::idempotency_key(run), record).await {
+            Ok(outcome) => outcome,
+            // Surfaced to the model as a recoverable result rather than a
+            // tool failure: the fix is a `correct_memory` call, which records
+            // the supersession instead of destroying the existing record.
+            Err(MemoryStoreError::IdConflict) => return id_conflict_result(),
+            Err(error) => return Err(map_store_error(&error)),
+        };
         let outcome_str = match outcome {
             PutOutcome::Inserted => "inserted",
             PutOutcome::AlreadyApplied => "already_applied",
@@ -566,6 +584,13 @@ impl MemoryToolset {
         let new_id_str = derive_id(&args.body);
         let new_id =
             MemoryId::parse(&new_id_str).map_err(|_| invalid_arguments("memory id is invalid"))?;
+        // The replacement id is derived from the replacement body, so an
+        // unchanged body derives the id being corrected. Writing that record
+        // would make it supersede itself and vanish from recall, so reject it
+        // here with a payload the model can act on.
+        if new_id == old_id {
+            return self_supersession_result();
+        }
         let (body, preview) = self
             .build_body(run, &new_id, &args.body, sensitivity)
             .await?;
@@ -666,7 +691,30 @@ fn ok_result(value: &serde_json::Value) -> Result<ToolResult, ToolError> {
 }
 
 fn not_found_result() -> Result<ToolResult, ToolError> {
-    ok_result(&serde_json::json!({ "code": MEMORY_TOOL_NOT_FOUND })).map(|mut result| {
+    error_payload(&serde_json::json!({ "code": MEMORY_TOOL_NOT_FOUND }))
+}
+
+fn id_conflict_result() -> Result<ToolResult, ToolError> {
+    error_payload(&serde_json::json!({
+        "code": MEMORY_TOOL_ID_CONFLICT,
+        "message": "a memory record already exists under this id; \
+                    use correct_memory to supersede it, or omit id to \
+                    store a new record",
+    }))
+}
+
+fn self_supersession_result() -> Result<ToolResult, ToolError> {
+    error_payload(&serde_json::json!({
+        "code": MEMORY_TOOL_SELF_SUPERSESSION,
+        "message": "the corrected body is identical to the record being \
+                    corrected; change the body or leave the record as is",
+    }))
+}
+
+/// Wrap `value` as a model-visible error result (`is_error`), not a
+/// [`ToolError`]: these outcomes are recoverable by the model.
+fn error_payload(value: &serde_json::Value) -> Result<ToolResult, ToolError> {
+    ok_result(value).map(|mut result| {
         result.is_error = true;
         result
     })
@@ -681,6 +729,10 @@ fn map_store_error(error: &MemoryStoreError) -> ToolError {
             "memory store is unavailable",
         ),
         MemoryStoreError::InvalidRecord { .. } => invalid_arguments("memory record is invalid"),
+        MemoryStoreError::IdConflict => invalid_arguments_code(
+            MEMORY_TOOL_ID_CONFLICT,
+            "a memory record already exists under this id",
+        ),
         MemoryStoreError::NotFound | MemoryStoreError::ScopeMismatch => tool_error(
             MEMORY_TOOL_NOT_FOUND,
             ErrorCategory::Tool,
@@ -690,27 +742,47 @@ fn map_store_error(error: &MemoryStoreError) -> ToolError {
     }
 }
 
-fn validate_call_context(
-    ctx: &ToolCallContext,
-    call: &ValidatedToolCall,
-    expected_id: &ToolId,
-) -> Result<(), ToolError> {
-    if call.tool_id != *expected_id {
-        return Err(invalid_arguments("memory call identity is invalid"));
+impl MemoryToolset {
+    /// Check the committed call context before any store work: the call must
+    /// name the tool it claims to, the authorizing principal must agree with
+    /// the committed locator, and the locator's tenant must be the tenant
+    /// this toolset was constructed for.
+    fn validate_call_context(
+        &self,
+        ctx: &ToolCallContext,
+        call: &ValidatedToolCall,
+        expected_id: &ToolId,
+    ) -> Result<(), ToolError> {
+        if call.tool_id != *expected_id {
+            return Err(invalid_arguments("memory call identity is invalid"));
+        }
+        let locator_scope = ctx.run.locator.tenant_scope.as_ref();
+        if ctx
+            .run
+            .authorization
+            .principal
+            .tenant_scope()
+            .is_some_and(|scope| scope != locator_scope)
+        {
+            return Err(invalid_arguments(
+                "memory principal scope does not match the committed effect",
+            ));
+        }
+        self.validate_tenant(&ctx.run)
     }
-    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != locator_scope)
-    {
-        return Err(invalid_arguments(
-            "memory principal scope does not match the committed effect",
-        ));
+
+    /// Re-check the tenant this toolset is bound to against the committed
+    /// call context. Scope is bound at construction and never taken from
+    /// arguments, so a divergence here means the toolset is being driven on
+    /// behalf of a tenant it was not built for.
+    fn validate_tenant(&self, run: &RunCallContext) -> Result<(), ToolError> {
+        if run.locator.tenant_scope.as_ref() != self.scope.tenant() {
+            return Err(invalid_arguments(
+                "memory tenant scope does not match the committed effect",
+            ));
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {

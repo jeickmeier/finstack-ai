@@ -134,6 +134,43 @@ async fn observer_capture_is_idempotent_on_redelivery() {
     );
 }
 
+/// The observer stores bodies inline and has no `ArtifactStore` to stage a
+/// large one into, so an oversized marker line is dropped while a normal one
+/// in the same batch is still captured.
+#[tokio::test]
+async fn observer_skips_candidates_over_the_inline_body_cap() {
+    let store = Arc::new(InProcessMemoryStore::new());
+    let scope = MemoryScope::try_new("t1").expect("scope");
+    let extractor: Arc<dyn MemoryExtractor> = Arc::new(RuleBasedExtractor::default());
+    let observer = MemoryObserver::try_new(
+        store.clone() as Arc<dyn MemoryStore>,
+        scope.clone(),
+        extractor,
+        system_clock(),
+    )
+    .expect("observer");
+
+    let oversized = "x".repeat(crate::record::INLINE_BODY_MAX_BYTES + 1);
+    let batch: Arc<[RunEvent]> = Arc::from([
+        text_event_with(20, 1, &format!("[[remember]] {oversized}\n")),
+        text_event_with(21, 2, "[[remember]] a normal sized memory\n"),
+    ]);
+    observer.observe(batch).await.expect("observe");
+
+    let listing = store
+        .list(
+            scope,
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.total, 1);
+    assert_eq!(listing.records[0].preview.as_ref(), "a normal sized memory");
+}
+
 struct FailingStore;
 
 impl MemoryStore for FailingStore {

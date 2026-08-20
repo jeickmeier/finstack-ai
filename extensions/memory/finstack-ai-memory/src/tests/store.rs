@@ -13,6 +13,108 @@ async fn put_is_idempotent_by_key() {
 }
 
 #[tokio::test]
+async fn put_rejects_cross_tenant_id_clobber() {
+    let store = InProcessMemoryStore::new();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+
+    let intruder = store
+        .put(Arc::from("k2"), crate::tests::sample_record("m1", "t2"))
+        .await;
+    assert_eq!(intruder, Err(MemoryStoreError::IdConflict));
+
+    // Tenant 1's record is untouched.
+    let survivor = store
+        .get(
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(survivor.scope.tenant(), "t1");
+}
+
+#[tokio::test]
+async fn put_rejects_same_scope_overwrite_under_a_new_key() {
+    let store = InProcessMemoryStore::new();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+
+    let mut replacement = crate::tests::sample_record("m1", "t1");
+    replacement.preview = Arc::from("clobbered");
+    replacement.body = MemoryBody::Inline(Arc::from("clobbered"));
+    let conflict = store.put(Arc::from("k2"), replacement).await;
+    assert_eq!(conflict, Err(MemoryStoreError::IdConflict));
+
+    let survivor = store
+        .get(
+            MemoryScope::try_new("t1").unwrap(),
+            MemoryId::parse("m1").unwrap(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(survivor.preview.as_ref(), "body text");
+
+    // The rejected write must not burn its idempotency key: the same key is
+    // still usable for a record that does not collide.
+    store
+        .put(Arc::from("k2"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn put_replay_under_the_same_key_is_already_applied_not_a_conflict() {
+    let store = InProcessMemoryStore::new();
+    let record = crate::tests::sample_record("m1", "t1");
+    store.put(Arc::from("k1"), record.clone()).await.unwrap();
+    let replay = store.put(Arc::from("k1"), record).await.unwrap();
+    assert_eq!(replay, PutOutcome::AlreadyApplied);
+}
+
+#[tokio::test]
+async fn correct_rejects_self_supersession() {
+    let store = InProcessMemoryStore::new();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+
+    let result = store
+        .correct(
+            Arc::from("k2"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            crate::tests::sample_record("m1", "t1"),
+        )
+        .await;
+    assert_eq!(
+        result,
+        Err(MemoryStoreError::InvalidRecord {
+            reason: "memory_self_supersession",
+        })
+    );
+
+    // The record stays visible rather than superseding itself into oblivion.
+    let hits = store
+        .search(
+            scope,
+            MemoryQuery::ExactId(MemoryId::parse("m1").unwrap()),
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+}
+
+#[tokio::test]
 async fn search_excludes_tombstoned_and_superseded() {
     let store = InProcessMemoryStore::new();
     let scope = MemoryScope::try_new("t1").unwrap();

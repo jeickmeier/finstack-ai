@@ -136,6 +136,15 @@ impl InProcessMemoryStore {
         let mut keys = self.applied_keys.lock().map_err(|_| lock_error())?;
         Ok(keys.insert(Arc::clone(idempotency_key)))
     }
+
+    /// Report whether `idempotency_key` has already been applied, without
+    /// claiming it. Used to distinguish an idempotent replay from a genuine
+    /// conflict before any state is mutated, so a rejected write never burns
+    /// the key.
+    fn key_applied(&self, idempotency_key: &Arc<str>) -> Result<bool, MemoryStoreError> {
+        let keys = self.applied_keys.lock().map_err(|_| lock_error())?;
+        Ok(keys.contains(idempotency_key))
+    }
 }
 
 impl MemoryStore for InProcessMemoryStore {
@@ -153,10 +162,21 @@ impl MemoryStore for InProcessMemoryStore {
             // Lock ordering: `records` before `applied_keys`, consistently
             // across every method that needs both, to avoid deadlock.
             let mut records = self.records.lock().map_err(|_| lock_error())?;
-            let newly_applied = self.claim_key(&idempotency_key)?;
-            if !newly_applied {
+            // Replay of the write that created the record: report
+            // already-applied before the conflict check, so an at-least-once
+            // caller retrying the same effect never sees a conflict.
+            if self.key_applied(&idempotency_key)? {
                 return Ok(PutOutcome::AlreadyApplied);
             }
+            // Scope-blind on purpose: `id` is a global key here, so a
+            // collision with another tenant's record is still a conflict.
+            // Nothing about the existing record is revealed.
+            if records.contains_key(&record.id) {
+                return Err(MemoryStoreError::IdConflict);
+            }
+            // Peeked above under the `records` lock, which every key-claiming
+            // method holds first, so this claim always succeeds.
+            let _newly_applied = self.claim_key(&idempotency_key)?;
             records.insert(record.id.clone(), record);
             Ok(PutOutcome::Inserted)
         })();
@@ -241,6 +261,13 @@ impl MemoryStore for InProcessMemoryStore {
                 .map_err(|_| MemoryStoreError::InvalidRecord {
                     reason: "memory_record_invalid",
                 })?;
+            // A record that supersedes itself would be hidden from search and
+            // recall forever, with no surviving replacement to find.
+            if replacement.id == old {
+                return Err(MemoryStoreError::InvalidRecord {
+                    reason: "memory_self_supersession",
+                });
+            }
             let mut records = self.records.lock().map_err(|_| lock_error())?;
             {
                 let old_record = records.get(&old).ok_or(MemoryStoreError::NotFound)?;

@@ -40,22 +40,35 @@ fn context(effect_id: EffectId) -> ToolCallContext {
     }
 }
 
+/// A call context whose committed locator (and principal) belong to
+/// `tenant`, for exercising the toolset's tenant re-check.
+fn context_for_tenant(effect_id: EffectId, tenant: &str) -> ToolCallContext {
+    ToolCallContext {
+        run: run_context_for_tenant(effect_id, tenant),
+        tool_batch_id: ToolBatchId::from_bytes([5; 16]),
+        tool_call_id: ToolCallId::from_bytes([6; 16]),
+    }
+}
+
 fn run_context(effect_id: EffectId) -> RunCallContext {
+    run_context_for_tenant(effect_id, "tenant-a")
+}
+
+fn run_context_for_tenant(effect_id: EffectId, tenant: &str) -> RunCallContext {
     RunCallContext {
         locator: OperationLocator::try_new(
-            "tenant-a",
+            tenant,
             SessionId::from_bytes([1; 16]),
             LaneId::from_bytes([2; 16]),
             RunId::from_bytes([3; 16]),
         )
         .expect("locator"),
         authorization: AuthorizationContext {
-            principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
-                .expect("principal"),
+            principal: PrincipalRef::try_new("issuer", "subject", Some(tenant)).expect("principal"),
             authentication_method: Arc::from("test"),
             assurance_level: Arc::from("test"),
             roles: Arc::from([]),
-            permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+            permitted_scopes: Arc::from([Arc::from(tenant)]),
             safe_claims: finstack_ai_kernel::Metadata::empty(),
             policy_version: Arc::from("policy-v1"),
             decision_id: Arc::from("decision-v1"),
@@ -498,6 +511,191 @@ async fn correct_memory_stages_large_replacement_bodies_as_blobs() {
         .expect("new record present");
     assert!(matches!(new_record.body, crate::MemoryBody::Blob(_)));
     assert_eq!(new_record.preview.chars().count(), 256);
+}
+
+#[tokio::test]
+async fn call_rejects_a_locator_tenant_other_than_the_configured_one() {
+    // The toolset is bound to `tenant-a`; the committed effect belongs to
+    // `tenant-b`, so the call must be refused before any store work.
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let args = br#"{"id":"mem-x","keywords":["alpha"],"body":"body text"}"#;
+    let Err(error) = toolset
+        .call(
+            context_for_tenant(EffectId::from_bytes([30; 16]), "tenant-b"),
+            validated_call(&toolset, "remember", args),
+        )
+        .await
+    else {
+        panic!("a foreign tenant scope must be rejected");
+    };
+    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+
+    let listing = store
+        .list(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.total, 0);
+}
+
+#[tokio::test]
+async fn reconcile_rejects_a_locator_tenant_other_than_the_configured_one() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let args = br#"{"id":"mem-x","keywords":["alpha"],"body":"body text"}"#;
+    let effect = finstack_ai_runtime::PendingToolEffect {
+        call: validated_call(&toolset, "remember", args),
+    };
+    let ctx = finstack_ai_runtime::ReconcileContext {
+        run: run_context_for_tenant(EffectId::from_bytes([31; 16]), "tenant-b"),
+        original_input_digest: Digest::raw_json(b"{}"),
+    };
+    let Err(error) = toolset.reconcile(ctx, effect).await else {
+        panic!("a foreign tenant scope must be rejected on reconcile");
+    };
+    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+
+    let listing = store
+        .list(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.total, 0);
+}
+
+#[tokio::test]
+async fn reconcile_replays_a_matching_tenant_call() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let args = br#"{"id":"mem-reconciled","keywords":["alpha"],"body":"body text"}"#;
+    let effect = finstack_ai_runtime::PendingToolEffect {
+        call: validated_call(&toolset, "remember", args),
+    };
+    let ctx = finstack_ai_runtime::ReconcileContext {
+        run: run_context(EffectId::from_bytes([32; 16])),
+        original_input_digest: Digest::raw_json(b"{}"),
+    };
+    let result = toolset.reconcile(ctx, effect).await.expect("reconcile");
+    assert!(matches!(
+        result,
+        finstack_ai_runtime::ToolReconcileResult::Completed(_)
+    ));
+
+    let record = store
+        .get(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse("mem-reconciled").expect("id"),
+        )
+        .await
+        .expect("get");
+    assert!(record.is_some());
+}
+
+#[tokio::test]
+async fn remember_reports_an_id_conflict_instead_of_clobbering() {
+    // A write-only policy has no `correct_memory`; naming an existing id must
+    // not become a back door to destroying that record.
+    let (toolset, store) = toolset_with_policy(MemoryPolicy {
+        read: false,
+        write: true,
+        manage: false,
+        consolidate: false,
+        profile: false,
+    });
+    let first = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([33; 16])),
+        "remember",
+        br#"{"id":"mem-taken","keywords":["alpha"],"body":"original body"}"#,
+    )
+    .await;
+    assert!(!first.is_error);
+
+    let second = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([34; 16])),
+        "remember",
+        br#"{"id":"mem-taken","keywords":["beta"],"body":"clobbering body"}"#,
+    )
+    .await;
+    assert!(second.is_error);
+    let value: serde_json::Value = serde_json::from_str(second.output.as_str()).expect("json");
+    assert_eq!(value["code"].as_str(), Some(crate::MEMORY_TOOL_ID_CONFLICT));
+
+    let record = store
+        .get(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse("mem-taken").expect("id"),
+        )
+        .await
+        .expect("get")
+        .expect("record present");
+    assert_eq!(record.preview.as_ref(), "original body");
+}
+
+#[tokio::test]
+async fn correct_memory_rejects_an_unchanged_body() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy {
+        read: true,
+        write: true,
+        manage: true,
+        consolidate: false,
+        profile: false,
+    });
+    let body = "unchanged body text";
+    let old_id = expected_derived_id(body);
+    let remember_args = serde_json::json!({
+        "id": old_id.clone(),
+        "keywords": ["alpha"],
+        "body": body,
+    });
+    let remembered = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([35; 16])),
+        "remember",
+        serde_json::to_vec(&remember_args).expect("json").as_slice(),
+    )
+    .await;
+    assert!(!remembered.is_error);
+
+    // The replacement id derives from the body, so an unchanged body would
+    // derive `old_id` and make the record supersede itself.
+    let correct_args = serde_json::json!({
+        "old_id": old_id.clone(),
+        "keywords": ["beta"],
+        "body": body,
+    });
+    let result = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([36; 16])),
+        "correct_memory",
+        serde_json::to_vec(&correct_args).expect("json").as_slice(),
+    )
+    .await;
+    assert!(result.is_error);
+    let value: serde_json::Value = serde_json::from_str(result.output.as_str()).expect("json");
+    assert_eq!(
+        value["code"].as_str(),
+        Some(crate::MEMORY_TOOL_SELF_SUPERSESSION)
+    );
+
+    let record = store
+        .get(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse(&old_id).expect("id"),
+        )
+        .await
+        .expect("get")
+        .expect("record present");
+    assert!(record.superseded_by.is_none());
 }
 
 #[tokio::test]

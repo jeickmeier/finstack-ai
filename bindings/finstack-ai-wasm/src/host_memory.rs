@@ -378,6 +378,7 @@ fn error_from_wire(error: ErrorWire) -> MemoryStoreError {
     match error.code.as_str() {
         "memory_not_found" => MemoryStoreError::NotFound,
         "memory_scope_mismatch" => MemoryStoreError::ScopeMismatch,
+        "memory_id_conflict" => MemoryStoreError::IdConflict,
         _ => MemoryStoreError::Unavailable {
             message: Arc::from(error.message),
         },
@@ -622,6 +623,11 @@ mod tests {
                     if state.applied_keys.contains(&idempotency_key) {
                         return Ok(ok_envelope(&serde_json::json!("already_applied")));
                     }
+                    // Mirrors the real stores: a put never replaces an
+                    // existing record, whatever scope owns it.
+                    if state.records.contains_key(record.id.as_str()) {
+                        return Ok(error_envelope("memory_id_conflict", "id already taken"));
+                    }
                     state.applied_keys.insert(idempotency_key);
                     state.records.insert(record.id.as_str().to_owned(), record);
                     Ok(ok_envelope(&serde_json::json!("inserted")))
@@ -851,6 +857,16 @@ mod tests {
             MemoryId::parse("m1").expect("id"),
         ));
         assert_eq!(mismatched, Err(MemoryStoreError::ScopeMismatch));
+    }
+
+    #[test]
+    fn native_host_memory_store_maps_id_conflict() {
+        let store = ScriptedHost::default().store();
+        block_on_ready(store.put(Arc::from("k1"), record("m1", scope("tenant-a")))).expect("put");
+        // A different tenant naming the same id under a new key must not
+        // clobber the existing record.
+        let conflict = block_on_ready(store.put(Arc::from("k2"), record("m1", scope("tenant-b"))));
+        assert_eq!(conflict, Err(MemoryStoreError::IdConflict));
     }
 
     #[test]

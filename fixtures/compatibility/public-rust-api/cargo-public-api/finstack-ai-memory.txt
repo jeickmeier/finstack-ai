@@ -221,6 +221,7 @@ pub fn finstack_ai_memory::record::MemoryScope::serialize<__S>(&self, __S) -> co
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_memory::record::MemoryScope
 pub fn finstack_ai_memory::record::MemoryScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub const finstack_ai_memory::record::CONFIDENCE_MAX: u8
+pub const finstack_ai_memory::record::INLINE_BODY_MAX_BYTES: usize
 pub const finstack_ai_memory::record::KEYWORDS_MAX_COUNT: usize
 pub const finstack_ai_memory::record::KEYWORD_MAX_BYTES: usize
 pub const finstack_ai_memory::record::MEMORY_ID_MAX_BYTES: usize
@@ -253,6 +254,7 @@ impl core::fmt::Debug for finstack_ai_memory::store::MemoryQuery
 pub fn finstack_ai_memory::store::MemoryQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryQuery
 pub enum finstack_ai_memory::store::MemoryStoreError
+pub finstack_ai_memory::store::MemoryStoreError::IdConflict
 pub finstack_ai_memory::store::MemoryStoreError::InvalidRecord
 pub finstack_ai_memory::store::MemoryStoreError::InvalidRecord::reason: &'static str
 pub finstack_ai_memory::store::MemoryStoreError::NotFound
@@ -387,8 +389,10 @@ pub fn finstack_ai_memory::toolset::MemoryToolset::descriptor(&self) -> finstack
 pub fn finstack_ai_memory::toolset::MemoryToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
 pub fn finstack_ai_memory::toolset::MemoryToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
 pub const finstack_ai_memory::toolset::INLINE_BODY_MAX_BYTES: usize
+pub const finstack_ai_memory::toolset::MEMORY_TOOL_ID_CONFLICT: &str
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_INVALID_ARGUMENTS: &str
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_NOT_FOUND: &str
+pub const finstack_ai_memory::toolset::MEMORY_TOOL_SELF_SUPERSESSION: &str
 pub const finstack_ai_memory::toolset::MEMORY_TOOL_UNAVAILABLE: &str
 pub enum finstack_ai_memory::ExtractionMethod
 pub finstack_ai_memory::ExtractionMethod::Explicit
@@ -466,6 +470,7 @@ impl core::fmt::Debug for finstack_ai_memory::store::MemoryQuery
 pub fn finstack_ai_memory::store::MemoryQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_memory::store::MemoryQuery
 pub enum finstack_ai_memory::MemoryStoreError
+pub finstack_ai_memory::MemoryStoreError::IdConflict
 pub finstack_ai_memory::MemoryStoreError::InvalidRecord
 pub finstack_ai_memory::MemoryStoreError::InvalidRecord::reason: &'static str
 pub finstack_ai_memory::MemoryStoreError::NotFound
@@ -747,8 +752,10 @@ impl finstack_ai_memory::extract::MemoryExtractor for finstack_ai_memory::extrac
 pub fn finstack_ai_memory::extract::RuleBasedExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>
 pub const finstack_ai_memory::DEFAULT_MARKER: &str
 pub const finstack_ai_memory::INLINE_BODY_MAX_BYTES: usize
+pub const finstack_ai_memory::MEMORY_TOOL_ID_CONFLICT: &str
 pub const finstack_ai_memory::MEMORY_TOOL_INVALID_ARGUMENTS: &str
 pub const finstack_ai_memory::MEMORY_TOOL_NOT_FOUND: &str
+pub const finstack_ai_memory::MEMORY_TOOL_SELF_SUPERSESSION: &str
 pub const finstack_ai_memory::MEMORY_TOOL_UNAVAILABLE: &str
 pub trait finstack_ai_memory::MemoryExtractor: core::marker::Send + core::marker::Sync
 pub fn finstack_ai_memory::MemoryExtractor::extract(&self, &[finstack_ai_kernel::events::envelope::RunEvent]) -> alloc::vec::Vec<finstack_ai_memory::extract::CandidateMemory>

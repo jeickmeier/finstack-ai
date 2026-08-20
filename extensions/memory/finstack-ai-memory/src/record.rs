@@ -22,6 +22,13 @@ pub const KEYWORD_MAX_BYTES: usize = 128;
 pub const KEYWORDS_MAX_COUNT: usize = 64;
 /// Maximum accepted provenance confidence value.
 pub const CONFIDENCE_MAX: u8 = 100;
+/// Inline-vs-blob threshold for a [`MemoryBody`], in bytes.
+///
+/// A body at or under this size is stored as [`MemoryBody::Inline`]; a
+/// larger one belongs in blob storage as [`MemoryBody::Blob`]. Defined here
+/// rather than on a single writer so every capture path — the tool surface
+/// and the observer alike — enforces the same ceiling.
+pub const INLINE_BODY_MAX_BYTES: usize = 4096;
 
 /// Errors raised while constructing or validating memory types.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

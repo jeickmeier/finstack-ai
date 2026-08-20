@@ -46,8 +46,9 @@ pub use store::{
     MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
 };
 pub use toolset::{
-    INLINE_BODY_MAX_BYTES, MEMORY_TOOL_INVALID_ARGUMENTS, MEMORY_TOOL_NOT_FOUND,
-    MEMORY_TOOL_UNAVAILABLE, MemoryPolicy, MemoryToolset,
+    INLINE_BODY_MAX_BYTES, MEMORY_TOOL_ID_CONFLICT, MEMORY_TOOL_INVALID_ARGUMENTS,
+    MEMORY_TOOL_NOT_FOUND, MEMORY_TOOL_SELF_SUPERSESSION, MEMORY_TOOL_UNAVAILABLE, MemoryPolicy,
+    MemoryToolset,
 };
 
 #[cfg(test)]

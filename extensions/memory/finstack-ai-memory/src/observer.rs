@@ -6,6 +6,9 @@
 //! losing an opportunistic memory capture must never look like run impact.
 //! Only misconfiguration at construction time — an invalid component id —
 //! fails [`MemoryObserver::try_new`].
+//!
+//! Captured bodies are always inline, so a candidate whose body exceeds
+//! [`INLINE_BODY_MAX_BYTES`] is skipped rather than stored unbounded.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,8 +20,8 @@ use finstack_ai_runtime::{
 
 use crate::extract::MemoryExtractor;
 use crate::record::{
-    ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryProvenance, MemoryRecord,
-    MemoryScope, PREVIEW_MAX_BYTES, RetentionPolicy,
+    ExtractionMethod, INLINE_BODY_MAX_BYTES, MemoryBody, MemoryClock, MemoryError,
+    MemoryProvenance, MemoryRecord, MemoryScope, PREVIEW_MAX_BYTES, RetentionPolicy,
 };
 use crate::store::MemoryStore;
 
@@ -128,6 +131,17 @@ impl Observer for MemoryObserver {
                     .or_insert(0);
                 let index = *slot;
                 *slot += 1;
+
+                // Oversized candidates are dropped rather than stored inline.
+                // A body over the inline ceiling belongs in blob storage, and
+                // this observer holds no `ArtifactStore` to stage one into;
+                // skipping is the conservative default, and losing an
+                // opportunistic capture is never run impact. The index is
+                // allocated above first, so the surviving candidates'
+                // idempotency keys do not depend on the cap.
+                if candidate.body.len() > INLINE_BODY_MAX_BYTES {
+                    continue;
+                }
 
                 let id = if let Some(id) = candidate.id.clone() {
                     id
