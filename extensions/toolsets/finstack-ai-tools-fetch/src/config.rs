@@ -74,6 +74,12 @@ impl HostPattern {
         }))
     }
 
+    /// Whether this pattern is an exact host (not a `*.suffix` wildcard).
+    #[must_use]
+    pub(crate) fn is_exact(&self) -> bool {
+        matches!(self.0, PatternKind::Exact(_))
+    }
+
     /// Case-insensitively test whether `host` matches this pattern.
     #[must_use]
     pub fn matches(&self, host: &str) -> bool {
@@ -186,9 +192,11 @@ impl HttpFetchToolset {
     ///
     /// Returns [`HttpFetchError::Configuration`] when the allowlist is
     /// empty, any allowlist or per-host-header-key entry fails
-    /// [`HostPattern::parse`], any numeric limit is zero or exceeds its hard
-    /// ceiling, or any per-host header name/value is not a valid HTTP
-    /// header.
+    /// [`HostPattern::parse`], a per-host-header key is a wildcard pattern
+    /// rather than an exact host, any numeric limit is zero or exceeds its
+    /// hard ceiling, or any per-host header name/value is not a valid HTTP
+    /// header. Accepted per-host-header keys are normalized to ASCII
+    /// lowercase before storage.
     pub fn try_new(config: HttpFetchConfig) -> Result<Self, HttpFetchError> {
         if config.allowlist.is_empty() {
             return Err(HttpFetchError::Configuration {
@@ -218,8 +226,14 @@ impl HttpFetchToolset {
             });
         }
 
+        let mut per_host_headers = BTreeMap::new();
         for (host, headers) in &config.per_host_headers {
-            HostPattern::parse(host)?;
+            let pattern = HostPattern::parse(host)?;
+            if !pattern.is_exact() {
+                return Err(HttpFetchError::Configuration {
+                    reason: "per_host_header_key_not_exact_host",
+                });
+            }
             for (name, value) in headers {
                 HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
                     HttpFetchError::Configuration {
@@ -230,7 +244,13 @@ impl HttpFetchToolset {
                     reason: "invalid_per_host_header_value",
                 })?;
             }
+            per_host_headers.insert(host.to_ascii_lowercase(), headers.clone());
         }
+
+        let config = HttpFetchConfig {
+            per_host_headers,
+            ..config
+        };
 
         Ok(Self { config, patterns })
     }

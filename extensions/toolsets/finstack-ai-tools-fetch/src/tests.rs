@@ -56,3 +56,26 @@ fn debug_redacts_per_host_headers() {
     let toolset = HttpFetchToolset::try_new(config).unwrap();
     assert!(!format!("{toolset:?}").contains(HEADER_CANARY));
 }
+
+#[test]
+fn wildcard_per_host_header_key_is_a_construction_error() {
+    let mut config = config_with(&["docs.rs", "*.wikipedia.org"]);
+    config.per_host_headers.insert(
+        "*.wikipedia.org".to_owned(),
+        vec![("Cookie".to_owned(), HEADER_CANARY.to_owned())],
+    );
+    HttpFetchToolset::try_new(config).expect_err("wildcard keys are not exact hosts");
+}
+
+#[test]
+fn per_host_header_keys_are_normalized_to_lowercase() {
+    let mut config = config_with(&["docs.rs"]);
+    config.per_host_headers.insert(
+        "Docs.RS".to_owned(),
+        vec![("X-Test".to_owned(), "value".to_owned())],
+    );
+    let toolset = HttpFetchToolset::try_new(config).unwrap();
+    let debug = format!("{toolset:?}");
+    assert!(debug.contains("docs.rs"));
+    assert!(!debug.contains("Docs.RS"));
+}
