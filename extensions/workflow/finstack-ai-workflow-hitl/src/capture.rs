@@ -38,19 +38,18 @@ fn kind_token(kind: &InteractionKind) -> Arc<str> {
 /// `Open` with `requested_at == updated_at == now`, and re-capturing the
 /// same interaction upserts the same key.
 ///
-/// Re-capture is status-preserving: if a row already exists and is no longer
-/// `Open`, its status and `resolved_by` are carried over. A worker restart
-/// re-parks an unresolved session on the same interaction, and that must not
-/// revive a row that was already delivered, expired, or closed.
-///
-/// That carry-forward rests on an ordering invariant: the interaction's wake
-/// row must already be indexed when `capture` runs. [`park`] is the safe
-/// entry point, because it delegates to
-/// [`finstack_ai_workflow_worker::park`] first. A caller invoking `capture`
-/// directly must upsert the wake row before doing so — otherwise a
-/// [`crate::HitlRouter::sweep`] racing the park reconciles the wake-less row
-/// to `Closed`, and the status-preserving re-capture then keeps it `Closed`
-/// forever, so the interaction never returns to the pending view.
+/// Re-capture preserves a still-meaningful settlement: an existing
+/// `Delivered` or `Expired` row keeps its status and `resolved_by`, because
+/// a worker restart re-parks an unresolved session on the same interaction
+/// and must not revive a row whose decision is already buffered. A `Closed`
+/// row is **not** preserved: `capture` only runs for an interaction the
+/// journal still holds pending, so a `Closed` row here is stale by
+/// definition — the usual cause is a [`crate::HitlRouter::sweep`] that
+/// reconciled the row before its wake row was indexed — and it is reset to
+/// `Open` instead of being pinned closed forever. [`park`] remains the
+/// recommended entry point: it indexes the wake row (via
+/// [`finstack_ai_workflow_worker::park`]) before capturing, which keeps a
+/// racing sweep from closing the row in the first place.
 ///
 /// # Errors
 ///
@@ -72,7 +71,12 @@ pub fn capture(
     let interaction_id: Arc<str> = Arc::from(request.interaction_id().to_canonical_string());
     let settled = store
         .load(checkpoint.tenant_scope.as_ref(), interaction_id.as_ref())?
-        .filter(|existing| existing.status != InteractionStatus::Open);
+        .filter(|existing| {
+            matches!(
+                existing.status,
+                InteractionStatus::Delivered | InteractionStatus::Expired
+            )
+        });
     let (status, resolved_by) = settled.map_or((InteractionStatus::Open, None), |existing| {
         (existing.status, existing.resolved_by)
     });

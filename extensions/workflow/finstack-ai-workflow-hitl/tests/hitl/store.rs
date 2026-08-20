@@ -130,6 +130,17 @@ pub(crate) fn exercise_hitl_inbox(store: &dyn HitlInboxStore) {
 
     assert_load_open_breaks_ties_by_interaction_id(store);
     assert_expired_and_closed_rows_absent_from_load_active(store);
+
+    let summaries = store.load_active_summaries().expect("summaries");
+    let active = store.load_active().expect("active");
+    assert_eq!(summaries.len(), active.len());
+    for (summary, row) in summaries.iter().zip(&active) {
+        assert_eq!(summary.tenant_scope, row.tenant_scope);
+        assert_eq!(summary.interaction_id, row.interaction_id);
+        assert_eq!(summary.status, row.status);
+        assert_eq!(summary.resolved_by, row.resolved_by);
+        assert_eq!(summary.expires_at, row.expires_at);
+    }
 }
 
 /// Coverage gap (a): two rows with identical `requested_at` and different

@@ -276,6 +276,44 @@ fn recapture_preserves_a_settled_row() {
     );
 }
 
+#[test]
+fn recapture_resets_a_stale_closed_row_to_open() {
+    let interaction_id: Id<InteractionTag> = id(60);
+    let wait = WorkflowWait::Interaction {
+        interaction_id,
+        request: approval_request(interaction_id, id(61), None),
+    };
+    let inbox = MemoryHitlStore::new();
+    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(2_000)).expect("first"));
+    inbox
+        .set_status(
+            "tenant-a",
+            &interaction_id.to_canonical_string(),
+            InteractionStatus::Closed,
+            None,
+            timestamp(3_000),
+        )
+        .expect("close");
+
+    assert!(capture(&inbox, &checkpoint(), &wait, timestamp(4_000)).expect("recapture"));
+
+    let row = inbox
+        .load("tenant-a", &interaction_id.to_canonical_string())
+        .expect("load")
+        .expect("row");
+    assert_eq!(
+        row.status,
+        InteractionStatus::Open,
+        "capture only runs for a pending interaction, so a Closed row is stale and self-heals"
+    );
+    assert!(row.resolved_by.is_none());
+    assert_eq!(
+        inbox.load_open("tenant-a").expect("open").len(),
+        1,
+        "the interaction returns to the pending view"
+    );
+}
+
 /// Commit an interaction request directly onto a freshly accepted run,
 /// bypassing the model/tool-batch pipeline. Copied from
 /// `finstack-ai-workflow-worker`'s `tests/worker/helpers/mod.rs`

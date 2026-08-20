@@ -13,7 +13,7 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::{JournalStore, WorkflowWait};
 use finstack_ai_workflow_hitl::{
     HitlError, HitlInboxStore, HitlRouter, InteractionRow, InteractionStatus, MemoryHitlStore,
-    ResolveAuthorizer, capture,
+    ResolutionInput, ResolveAuthorizer, capture,
 };
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
@@ -92,11 +92,13 @@ fn resolve_delivers_to_the_worker_and_marks_the_row_delivered() {
         .resolve(
             "tenant-a",
             &harness.interaction_id,
-            "resolution-1",
-            principal("tenant-a"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-a"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect("resolve");
@@ -136,11 +138,13 @@ fn resolve_refuses_a_principal_from_another_tenant() {
         .resolve(
             "tenant-a",
             &harness.interaction_id,
-            "resolution-1",
-            principal("tenant-b"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-b"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect_err("tenant mismatch");
@@ -189,11 +193,13 @@ fn a_custom_authorizer_replaces_the_tenant_default() {
         .resolve(
             "tenant-a",
             &harness.interaction_id,
-            "resolution-1",
-            principal("tenant-a"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-a"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect_err("denied");
@@ -217,11 +223,13 @@ fn resolve_rejects_an_unknown_interaction() {
         .resolve(
             "tenant-a",
             &id::<InteractionTag>(99).to_canonical_string(),
-            "resolution-1",
-            principal("tenant-a"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-a"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect_err("unknown");
@@ -244,11 +252,13 @@ fn resolve_is_not_repeatable_once_delivered() {
         .resolve(
             "tenant-a",
             &harness.interaction_id,
-            "resolution-1",
-            principal("tenant-a"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: principal("tenant-a"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect("first resolve");
@@ -258,11 +268,13 @@ fn resolve_is_not_repeatable_once_delivered() {
         .resolve(
             "tenant-a",
             &harness.interaction_id,
-            "resolution-2",
-            principal("tenant-a"),
-            evidence(),
-            payload(),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-2"),
+                principal: principal("tenant-a"),
+                evidence: evidence(),
+                payload: payload(),
+                note: None,
+            },
             timestamp(4_000),
         )
         .expect_err("second resolve");

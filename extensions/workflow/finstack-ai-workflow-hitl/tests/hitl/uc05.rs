@@ -59,7 +59,7 @@ use finstack_ai_test::{
 };
 use finstack_ai_workflow_hitl::{
     ExpiryPolicy, ExpiryResolution, HitlError, HitlInboxStore, HitlRouter, InteractionRow,
-    InteractionStatus, SqliteHitlStore, park,
+    InteractionStatus, ResolutionInput, SqliteHitlStore, park,
 };
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
@@ -942,11 +942,15 @@ async fn uc05_resolve_end_to_end() {
         .resolve(
             TENANT,
             &interaction_id,
-            "resolution-1",
-            PrincipalRef::try_new("issuer", "subject", Some(TENANT)).expect("principal"),
-            AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("evidence"),
-            RawJson::parse(r#"{"approved":true}"#).expect("payload"),
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from("resolution-1"),
+                principal: PrincipalRef::try_new("issuer", "subject", Some(TENANT))
+                    .expect("principal"),
+                evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1")
+                    .expect("evidence"),
+                payload: RawJson::parse(r#"{"approved":true}"#).expect("payload"),
+                note: None,
+            },
             timestamp(3_000),
         )
         .expect("resolve");

@@ -73,11 +73,13 @@ pub struct TickReport {
     /// Parked interactions whose committed deadline had passed and which this
     /// tick drove the kernel into expiring.
     ///
-    /// Counted for the *expiry itself*, which the runtime commits while the
-    /// session attaches — so a session is counted here even when the drive
-    /// that follows cannot reach a new wait within the budget and is also
-    /// counted in [`TickReport::failures`]. A later tick over the same row
-    /// finds nothing pending to expire and does not count it again.
+    /// Counted only when the expiring resume completes. The runtime commits
+    /// the expiry while the session attaches, so a resume that fails *after*
+    /// that commit (a drive timeout, a store error while re-parking) reports
+    /// only [`TickReport::failures`] for the tick — never an expiry and a
+    /// failure for the same row at once. The retry re-parks the row without
+    /// re-expiring, so such an expiry stays uncounted rather than
+    /// double-signaled; the journal, not this counter, is the authority.
     ///
     /// A buffered response that arrives for an interaction whose deadline has
     /// already passed does *not* avoid this counter. The interaction ingress is
@@ -549,10 +551,10 @@ impl WorkflowWorker {
             }
             let mut expired = false;
             let outcome = Box::pin(self.resume_row(&row, entry, claim_now, &mut expired)).await;
-            if expired {
-                report.sessions_expired += 1;
-            }
             if let Ok(terminal) = outcome {
+                if expired {
+                    report.sessions_expired += 1;
+                }
                 report.sessions_resumed += 1;
                 if !terminal {
                     report.sessions_reparked += 1;

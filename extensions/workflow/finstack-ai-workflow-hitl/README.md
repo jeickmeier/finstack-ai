@@ -37,13 +37,13 @@ particular `Expired` means "a policy authored an expiry for this row", not
 "the run received that policy's payload" — see
 [`ExpiryPolicy`](#expirypolicy--a-row-disposition-hook-not-a-run-outcome-hook).
 
-- **`park`** — the safe entry point. It composes
+- **`park`** — the recommended entry point. It composes
   `finstack_ai_workflow_worker::park` with [`capture`], so the wake row is
-  indexed before the inbox row, preserving the invariant `capture`'s own
-  documentation depends on: a `sweep` racing a bare `capture` (skipping
-  `park`) would find no wake row yet and reconcile the interaction to
-  `Closed` before it was ever delivered. Call `capture` directly only if
-  you have already upserted the wake row yourself.
+  indexed before the inbox row and a racing `sweep` never sees a wake-less
+  row to reconcile. `capture` itself is self-healing on this point: it only
+  runs for an interaction the journal still holds pending, so it resets a
+  stale `Closed` row back to `Open` instead of carrying it forward (while
+  still preserving `Delivered`/`Expired` settlements).
 - **`pending`** — `HitlRouter::pending(tenant_scope)` lists a tenant's
   `Open` rows, oldest first, for a host's inbox view.
 - **`resolve`** — `HitlRouter::resolve(...)` authorizes the calling

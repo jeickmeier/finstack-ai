@@ -80,3 +80,19 @@ pub struct InteractionRow {
     /// When the row was last updated.
     pub updated_at: Timestamp,
 }
+
+/// Identity-and-lifecycle projection of an [`InteractionRow`], without the
+/// serialized request payload — everything a sweep's reconcile pass needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractionSummary {
+    /// Tenant that owns the interaction.
+    pub tenant_scope: Arc<str>,
+    /// Canonical `InteractionId` string; equals the wake row's `pending_id`.
+    pub interaction_id: Arc<str>,
+    /// Current row lifecycle state.
+    pub status: InteractionStatus,
+    /// Subject of the resolving principal, once delivered or expired.
+    pub resolved_by: Option<Arc<str>>,
+    /// Committed request deadline, when the request carries one.
+    pub expires_at: Option<Timestamp>,
+}

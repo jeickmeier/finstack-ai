@@ -90,7 +90,7 @@ impl SqliteWorkerStore {
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_worker_busy_timeout",
             })?;
-        if !is_memory_path(&path) {
+        if !is_memory_sqlite_path(&path) {
             conn.pragma_update(None, "journal_mode", "WAL")
                 .map_err(|_| WorkerError::StoreUnavailable {
                     code: "sqlite_worker_wal",
@@ -102,12 +102,21 @@ impl SqliteWorkerStore {
             })?;
         // `CREATE TABLE IF NOT EXISTS` leaves a file written by an older
         // binary without the newer nullable columns, so each one is added
-        // here and its "duplicate column name" failure ignored. Additive and
-        // nullable, per the schema policy above: an old binary keeps reading
-        // the file, and a new binary reads a missing value as `NULL`.
+        // here and only its "duplicate column name" failure ignored — any
+        // other failure (read-only file, full disk, a lock held past the
+        // busy timeout) is a schema problem the caller must see at open
+        // time, not as an opaque row error later. Additive and nullable,
+        // per the schema policy above: an old binary keeps reading the
+        // file, and a new binary reads a missing value as `NULL`.
         for column in WAKE_ADDED_COLUMNS {
             let sql = format!("ALTER TABLE finstack_workflow_worker_wake ADD COLUMN {column}");
-            drop(conn.execute_batch(&sql));
+            if let Err(error) = conn.execute_batch(&sql)
+                && !error.to_string().contains("duplicate column name")
+            {
+                return Err(WorkerError::StoreUnavailable {
+                    code: "sqlite_worker_schema",
+                });
+            }
         }
         Ok(Self {
             path,
@@ -718,7 +727,14 @@ impl InboxStore for SqliteWorkerStore {
     }
 }
 
-fn is_memory_path(path: &Path) -> bool {
+/// True when `path` names an in-memory sqlite database (`:memory:` or a
+/// `mode=memory` URI), which must not receive the WAL pragma.
+///
+/// Public so sibling adapter stores that share a database file (for example
+/// the HITL inbox) apply the same detection rule instead of keeping their
+/// own copy of it.
+#[must_use]
+pub fn is_memory_sqlite_path(path: &Path) -> bool {
     let text = path.to_string_lossy();
     text == ":memory:" || text.contains("mode=memory")
 }

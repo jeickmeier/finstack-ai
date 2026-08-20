@@ -12,8 +12,28 @@ use finstack_ai_workflow_worker::{WakeIndexStore, WakeReason, WorkflowWorker};
 use crate::authorize::{ResolveAuthorizer, TenantAuthorizer};
 use crate::error::HitlError;
 use crate::expiry::{ApprovalExpiry, ExpiryPolicy, SweepReport};
-use crate::row::{InteractionRow, InteractionStatus};
+use crate::row::{InteractionRow, InteractionStatus, InteractionSummary};
 use crate::store::HitlInboxStore;
+
+/// One authorized decision for [`HitlRouter::resolve`]: everything the
+/// resolution carries besides the row key, which the router looks up itself.
+///
+/// Grouping these ends the run of same-typed positional parameters a caller
+/// could silently transpose; the fields travel unchanged from `resolve`
+/// through delivery into the kernel's `InteractionResolution`.
+#[derive(Debug, Clone)]
+pub struct ResolutionInput {
+    /// Idempotent resolution identity.
+    pub resolution_id: Arc<str>,
+    /// Resolving principal; must equal the run's accepted principal.
+    pub principal: PrincipalRef,
+    /// Authorization evidence; must equal the run's accepted evidence.
+    pub evidence: AuthorizationEvidence,
+    /// Response payload conforming to the request's schema.
+    pub payload: RawJson,
+    /// Optional operator note.
+    pub note: Option<Arc<str>>,
+}
 
 /// Reads the HITL inbox and turns an operator's decision into a durable
 /// interaction resolution delivered to the worker.
@@ -149,16 +169,11 @@ impl HitlRouter {
     /// [`HitlError::Unauthorized`], [`HitlError::InvalidResolution`] with
     /// code `"hitl_resolution"` when the kernel rejects the resolution
     /// inputs, and [`HitlError::Worker`] when delivery fails.
-    #[allow(clippy::too_many_arguments)]
     pub fn resolve(
         &self,
         tenant_scope: &str,
         interaction_id: &str,
-        resolution_id: &str,
-        principal: PrincipalRef,
-        evidence: AuthorizationEvidence,
-        payload: RawJson,
-        note: Option<&str>,
+        input: ResolutionInput,
         now: Timestamp,
     ) -> Result<(), HitlError> {
         let row = self
@@ -174,18 +189,10 @@ impl HitlRouter {
                     code: "hitl_request_decode",
                 }
             })?;
-        self.authorizer.authorize(&row, &request, &principal)?;
+        self.authorizer
+            .authorize(&row, &request, &input.principal)?;
 
-        let subject = self.deliver(
-            &row,
-            &request,
-            resolution_id,
-            principal,
-            evidence,
-            payload,
-            note,
-            now,
-        )?;
+        let subject = self.deliver(&row, &request, input, now)?;
         self.store.set_status(
             tenant_scope,
             interaction_id,
@@ -242,7 +249,7 @@ impl HitlRouter {
         let mut report = SweepReport::default();
         let mut wake_ids: BTreeMap<Arc<str>, BTreeSet<Arc<str>>> = BTreeMap::new();
 
-        for row in self.store.load_active()? {
+        for row in self.store.load_active_summaries()? {
             if !wake_ids.contains_key(row.tenant_scope.as_ref()) {
                 let pending = self
                     .wake
@@ -284,44 +291,50 @@ impl HitlRouter {
     /// mark it `Expired`. Returns `false` when the policy declines or when
     /// the row is no longer expirable.
     ///
-    /// The row arrives from [`HitlInboxStore::load_active`]'s snapshot, so it
-    /// is re-loaded immediately before delivery: a `resolve` that landed since
-    /// the snapshot must not have its command overwritten in the worker inbox
-    /// by an expiry refusal. Anything that is no longer `Open` past its
-    /// deadline is left exactly as found.
-    fn expire_row(&self, row: &InteractionRow, now: Timestamp) -> Result<bool, HitlError> {
+    /// The summary arrives from [`HitlInboxStore::load_active_summaries`]'s
+    /// snapshot, so the full row — request payload included — is loaded
+    /// fresh here, once, immediately before the policy is consulted and the
+    /// delivery happens: a `resolve` that landed since the snapshot must not
+    /// have its command overwritten in the worker inbox by an expiry
+    /// refusal. Anything that is no longer `Open` past its deadline is left
+    /// exactly as found.
+    fn expire_row(&self, summary: &InteractionSummary, now: Timestamp) -> Result<bool, HitlError> {
+        let Some(fresh) = self.store.load(
+            summary.tenant_scope.as_ref(),
+            summary.interaction_id.as_ref(),
+        )?
+        else {
+            return Ok(false);
+        };
+        if fresh.status != InteractionStatus::Open
+            || fresh.expires_at.is_none_or(|deadline| deadline > now)
+        {
+            return Ok(false);
+        }
         let request: InteractionRequest =
-            serde_json::from_slice(row.request.as_ref()).map_err(|_| {
+            serde_json::from_slice(fresh.request.as_ref()).map_err(|_| {
                 HitlError::StoreIntegrity {
                     code: "hitl_request_decode",
                 }
             })?;
-        let Some(resolution) = self.expiry.expire(row, &request)? else {
+        let Some(resolution) = self.expiry.expire(&fresh, &request)? else {
             return Ok(false);
         };
-        let still_expirable = self
-            .store
-            .load(row.tenant_scope.as_ref(), row.interaction_id.as_ref())?
-            .is_some_and(|fresh| {
-                fresh.status == InteractionStatus::Open
-                    && fresh.expires_at.is_some_and(|deadline| deadline <= now)
-            });
-        if !still_expirable {
-            return Ok(false);
-        }
         let subject = self.deliver(
-            row,
+            &fresh,
             &request,
-            &format!("hitl-expiry-{}", row.interaction_id),
-            resolution.principal,
-            resolution.evidence,
-            resolution.payload,
-            None,
+            ResolutionInput {
+                resolution_id: Arc::from(format!("hitl-expiry-{}", fresh.interaction_id)),
+                principal: resolution.principal,
+                evidence: resolution.evidence,
+                payload: resolution.payload,
+                note: None,
+            },
             now,
         )?;
         self.store.set_status(
-            row.tenant_scope.as_ref(),
-            row.interaction_id.as_ref(),
+            fresh.tenant_scope.as_ref(),
+            fresh.interaction_id.as_ref(),
             InteractionStatus::Expired,
             Some(subject.as_ref()),
             now,
@@ -332,16 +345,11 @@ impl HitlRouter {
     /// Build the resolution command for `row` and buffer it in the worker
     /// inbox. Returns the resolving principal's subject, for the caller's
     /// status transition.
-    #[allow(clippy::too_many_arguments)]
     fn deliver(
         &self,
         row: &InteractionRow,
         request: &InteractionRequest,
-        resolution_id: &str,
-        principal: PrincipalRef,
-        evidence: AuthorizationEvidence,
-        payload: RawJson,
-        note: Option<&str>,
+        input: ResolutionInput,
         now: Timestamp,
     ) -> Result<Arc<str>, HitlError> {
         let locator = OperationLocator::try_new(
@@ -353,14 +361,14 @@ impl HitlRouter {
         .map_err(|_| HitlError::StoreIntegrity {
             code: "hitl_locator",
         })?;
-        let subject: Arc<str> = Arc::from(principal.subject());
+        let subject: Arc<str> = Arc::from(input.principal.subject());
         let resolution = InteractionResolution::try_new(
             request.interaction_id(),
-            resolution_id,
-            principal,
-            evidence,
-            payload,
-            note,
+            input.resolution_id.as_ref(),
+            input.principal,
+            input.evidence,
+            input.payload,
+            input.note.as_deref(),
         )
         .map_err(|_| HitlError::InvalidResolution {
             code: "hitl_resolution",

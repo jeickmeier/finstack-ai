@@ -59,7 +59,9 @@ use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
 };
-use finstack_ai_workflow_hitl::{HitlInboxStore, HitlRouter, SqliteHitlStore, park};
+use finstack_ai_workflow_hitl::{
+    HitlInboxStore, HitlRouter, ResolutionInput, SqliteHitlStore, park,
+};
 use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
     FireStore, InboxStore, PortsFactory, SqliteWorkerStore, WakeIndexStore, WorkerBuilder,
@@ -757,11 +759,13 @@ async fn main() -> Result<(), BoxError> {
     router.resolve(
         TENANT,
         &interaction_id.to_canonical_string(),
-        "resolution-1",
-        PrincipalRef::try_new("issuer", "subject", Some(TENANT))?,
-        AuthorizationEvidence::try_new("policy-v1", "decision-v1")?,
-        RawJson::parse(r#"{"approved":true}"#)?,
-        None,
+        ResolutionInput {
+            resolution_id: Arc::from("resolution-1"),
+            principal: PrincipalRef::try_new("issuer", "subject", Some(TENANT))?,
+            evidence: AuthorizationEvidence::try_new("policy-v1", "decision-v1")?,
+            payload: RawJson::parse(r#"{"approved":true}"#)?,
+            note: None,
+        },
         timestamp(3_000),
     )?;
 

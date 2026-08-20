@@ -269,6 +269,7 @@ pub fn finstack_ai_workflow_worker::SqliteWorkerStore::renew(&self, &str, finsta
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::idempotency_key(&finstack_ai_workflow_worker::FireRow) -> alloc::string::String
+pub fn finstack_ai_workflow_worker::is_memory_sqlite_path(&std::path::Path) -> bool
 pub fn finstack_ai_workflow_worker::lease_deadline(finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<finstack_ai_kernel::primitives::time::Timestamp, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::lease_open(&finstack_ai_workflow_worker::WakeRow, finstack_ai_kernel::primitives::time::Timestamp) -> bool
 pub fn finstack_ai_workflow_worker::park(&mut finstack_ai_runtime::driver::workflow::WorkflowSession, &dyn finstack_ai_workflow_worker::WakeIndexStore, &str) -> core::result::Result<finstack_ai_runtime::driver::workflow::WorkflowCheckpoint, finstack_ai_workflow_worker::WorkerError>

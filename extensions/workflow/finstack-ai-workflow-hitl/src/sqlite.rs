@@ -21,10 +21,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{Id, LaneId, RunId, SessionId, Timestamp};
+use finstack_ai_workflow_worker::is_memory_sqlite_path;
 use rusqlite::{Connection, params};
 
 use crate::error::HitlError;
-use crate::row::{InteractionRow, InteractionStatus};
+use crate::row::{InteractionRow, InteractionStatus, InteractionSummary};
 use crate::store::HitlInboxStore;
 
 const HITL_DDL: &str = "
@@ -43,6 +44,8 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_hitl_inbox (
     updated_at_unix_ms INTEGER NOT NULL,
     PRIMARY KEY (tenant_scope, interaction_id)
 );
+CREATE INDEX IF NOT EXISTS finstack_workflow_hitl_inbox_active
+ON finstack_workflow_hitl_inbox (status, requested_at_unix_ms);
 ";
 
 /// SQLite-backed inbox. May share a database file with `SqliteWorkerStore`;
@@ -73,7 +76,7 @@ impl SqliteHitlStore {
             .map_err(|_| HitlError::StoreUnavailable {
                 code: "sqlite_hitl_busy_timeout",
             })?;
-        if !is_memory_path(&path) {
+        if !is_memory_sqlite_path(&path) {
             conn.pragma_update(None, "journal_mode", "WAL")
                 .map_err(|_| HitlError::StoreUnavailable {
                     code: "sqlite_hitl_wal",
@@ -150,7 +153,9 @@ fn decode_row(raw: RawInteractionRow) -> Result<InteractionRow, HitlError> {
         Timestamp::from_unix_ms(raw.updated_at_unix_ms).map_err(|_| HitlError::StoreIntegrity {
             code: "sqlite_hitl_time",
         })?;
-    let status = InteractionStatus::parse(&raw.status)?;
+    let status = InteractionStatus::parse(&raw.status).map_err(|_| HitlError::StoreIntegrity {
+        code: "sqlite_hitl_status",
+    })?;
     Ok(InteractionRow {
         tenant_scope: raw.tenant_scope.into(),
         session_id,
@@ -301,6 +306,59 @@ impl HitlInboxStore for SqliteHitlStore {
         })
     }
 
+    fn load_active_summaries(&self) -> Result<Vec<InteractionSummary>, HitlError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT tenant_scope, interaction_id, status, resolved_by, expires_at_unix_ms
+                     FROM finstack_workflow_hitl_inbox
+                     WHERE status IN ('open', 'delivered')
+                     ORDER BY requested_at_unix_ms, interaction_id",
+                )
+                .map_err(|_| HitlError::StoreUnavailable {
+                    code: "sqlite_hitl_row",
+                })?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                })
+                .map_err(|_| HitlError::StoreUnavailable {
+                    code: "sqlite_hitl_row",
+                })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (tenant_scope, interaction_id, status, resolved_by, expires_at_unix_ms) =
+                    row.map_err(|_| HitlError::StoreIntegrity {
+                        code: "sqlite_hitl_row",
+                    })?;
+                let status =
+                    InteractionStatus::parse(&status).map_err(|_| HitlError::StoreIntegrity {
+                        code: "sqlite_hitl_status",
+                    })?;
+                let expires_at = expires_at_unix_ms
+                    .map(Timestamp::from_unix_ms)
+                    .transpose()
+                    .map_err(|_| HitlError::StoreIntegrity {
+                        code: "sqlite_hitl_time",
+                    })?;
+                out.push(InteractionSummary {
+                    tenant_scope: tenant_scope.into(),
+                    interaction_id: interaction_id.into(),
+                    status,
+                    resolved_by: resolved_by.map(Into::into),
+                    expires_at,
+                });
+            }
+            Ok(out)
+        })
+    }
+
     fn set_status(
         &self,
         tenant_scope: &str,
@@ -332,9 +390,4 @@ impl HitlInboxStore for SqliteHitlStore {
             Ok(())
         })
     }
-}
-
-fn is_memory_path(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    text == ":memory:" || text.contains("mode=memory")
 }
