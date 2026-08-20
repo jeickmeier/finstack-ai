@@ -10,12 +10,12 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use htmd::HtmlToMarkdown;
 use html5ever::interface::tree_builder::{
     ElemName, ElementFlags, NodeOrText, QuirksMode, TreeSink,
 };
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::{Attribute, LocalName, Namespace, ParseOpts, QualName, parse_document};
-use htmd::HtmlToMarkdown;
 
 /// Maximum tolerated element-nesting depth of the **real** DOM `html5ever`
 /// builds for a document.
@@ -143,7 +143,7 @@ impl DepthTree {
             Some(node) => {
                 node.depth = depth;
                 node.name.is_some()
-            },
+            }
             None => return,
         };
         if is_element && depth > MAX_SCAN_DEPTH {
@@ -256,7 +256,9 @@ impl TreeSink for DepthSink {
         _attrs: Vec<Attribute>,
         flags: ElementFlags,
     ) -> NodeId {
-        let id = self.tree.push_node(Some(name), flags.mathml_annotation_xml_integration_point);
+        let id = self
+            .tree
+            .push_node(Some(name), flags.mathml_annotation_xml_integration_point);
         if flags.template {
             // `RcDom` keeps template contents *outside* the child list, so
             // its own depth walk (and `htmd`'s markdown walk) never
@@ -290,7 +292,12 @@ impl TreeSink for DepthSink {
         let NodeOrText::AppendNode(node) = new_node else {
             return;
         };
-        let parent = self.tree.nodes.borrow().get(*sibling).and_then(|n| n.parent);
+        let parent = self
+            .tree
+            .nodes
+            .borrow()
+            .get(*sibling)
+            .and_then(|n| n.parent);
         let Some(parent) = parent else {
             // `RcDom` panics here; this crate must not. This is not a
             // conservative (over-trip) fallback: leaving `node` (and every
@@ -353,7 +360,8 @@ impl TreeSink for DepthSink {
     fn get_template_contents(&self, target: &NodeId) -> NodeId {
         // The contents node is the template element's first (and, at
         // creation time, only) child; see `create_element`.
-        self.tree.nodes
+        self.tree
+            .nodes
             .borrow()
             .get(*target)
             .and_then(|node| node.children.first().copied())
@@ -394,7 +402,8 @@ impl TreeSink for DepthSink {
     }
 
     fn is_mathml_annotation_xml_integration_point(&self, target: &NodeId) -> bool {
-        self.tree.nodes
+        self.tree
+            .nodes
             .borrow()
             .get(*target)
             .is_some_and(|node| node.mathml_annotation_xml_integration_point)
@@ -1078,9 +1087,18 @@ mod tests {
                 "comment_wrapped_close_padding",
                 "<div><!--</div>-->".repeat(N),
             ),
-            ("cdata_wrapped_close_padding", "<div><![CDATA[</div>]]>".repeat(N)),
-            ("processing_instruction_close_padding", "<div><?</div>></div>".repeat(N)),
-            ("bogus_comment_close_padding", "<div><!</div>></div>".repeat(N)),
+            (
+                "cdata_wrapped_close_padding",
+                "<div><![CDATA[</div>]]>".repeat(N),
+            ),
+            (
+                "processing_instruction_close_padding",
+                "<div><?</div>></div>".repeat(N),
+            ),
+            (
+                "bogus_comment_close_padding",
+                "<div><!</div>></div>".repeat(N),
+            ),
             (
                 "doctype_wrapped_close_padding",
                 "<div><!DOCTYPE </div>></div>".repeat(N),
@@ -1172,7 +1190,8 @@ mod tests {
     }
 
     const FUZZ_VOID_NAMES: &[&str] = &["br", "img", "input", "hr", "area", "meta"];
-    const FUZZ_NON_VOID_NAMES: &[&str] = &["div", "span", "p", "section", "article", "b", "i", "li"];
+    const FUZZ_NON_VOID_NAMES: &[&str] =
+        &["div", "span", "p", "section", "article", "b", "i", "li"];
     const FUZZ_RAWTEXT_NAMES: &[&str] = &["script", "style", "textarea", "title", "xmp"];
     /// Names that stay open inside foreign content (SVG/MathML) because
     /// they are not on the breakout list -- the shape of bypass 6a.
@@ -1202,7 +1221,7 @@ mod tests {
                     doc.push_str(" title=\"a>b\"");
                 }
                 doc.push('>');
-            },
+            }
             // Non-void open with an odd trailing byte before `>`: must
             // still count as an open (bypass 3/5 shape), never as the void
             // element it superficially resembles.
@@ -1213,21 +1232,21 @@ mod tests {
                 doc.push_str(name);
                 doc.push_str(suffix);
                 doc.push('>');
-            },
+            }
             // Genuine void open: must never hold the stack open.
             13 => {
                 let name = rng.choose(FUZZ_VOID_NAMES);
                 doc.push('<');
                 doc.push_str(name);
                 doc.push('>');
-            },
+            }
             // Matching close.
             14 => {
                 let name = rng.choose(FUZZ_NON_VOID_NAMES);
                 doc.push_str("</");
                 doc.push_str(name);
                 doc.push('>');
-            },
+            }
             // Mismatching / truncated / NUL-padded close: must never pop an
             // unrelated genuinely open element.
             15 => {
@@ -1237,7 +1256,7 @@ mod tests {
                 doc.push_str(name);
                 doc.push_str(suffix);
                 doc.push('>');
-            },
+            }
             // Comment wrapping a fake close (bypass 4 shape).
             16 => doc.push_str("<div><!--</div>-->"),
             // CDATA / processing instruction / doctype wrapping a fake
@@ -1256,7 +1275,7 @@ mod tests {
                 doc.push_str("><div></div></");
                 doc.push_str(name);
                 doc.push('>');
-            },
+            }
             // Rawtext element whose body opens an unterminated comment
             // (bypass 6b): the tree builder is in RCDATA/rawtext state, so
             // `<!--` is text and the element closes normally -- everything
@@ -1268,14 +1287,14 @@ mod tests {
                 doc.push_str("><!--</");
                 doc.push_str(name);
                 doc.push('>');
-            },
+            }
             // Unbalanced rawtext open, with no close at all.
             20 => {
                 let name = rng.choose(FUZZ_RAWTEXT_NAMES);
                 doc.push('<');
                 doc.push_str(name);
                 doc.push('>');
-            },
+            }
             // Balanced foreign-content block whose children stay open
             // (bypass 6a shape) -- HTML void status does not apply in the
             // SVG/MathML namespace.
@@ -1293,7 +1312,7 @@ mod tests {
                 doc.push_str("</");
                 doc.push_str(wrapper);
                 doc.push('>');
-            },
+            }
             // Bare, never-closed foreign-content opener: everything after
             // it is parsed in the foreign namespace.
             22 => {
@@ -1301,7 +1320,7 @@ mod tests {
                 doc.push('<');
                 doc.push_str(wrapper);
                 doc.push('>');
-            },
+            }
             // Foreign content using breakout names and a self-closing
             // slash, both of which *do* terminate the element there -- the
             // negative control for the two cases above.
@@ -1310,7 +1329,7 @@ mod tests {
                 doc.push('<');
                 doc.push_str(rng.choose(FUZZ_FOREIGN_BREAKOUT));
                 doc.push_str("></svg>");
-            },
+            }
             // Table insertion mode: a `<div>` appearing directly inside
             // `<table>` (before any row/cell) is *foster parented* --
             // relocated to just before the table in the table's own
@@ -1425,8 +1444,11 @@ mod tests {
             // 25 .. 8_980 tokens: a linear ramp, so real depth sweeps the
             // whole interesting range instead of clustering above it.
             let token_count = 25 + i * 45;
-            let seed = SEED_BASE
-                .wrapping_add(u64::try_from(i).unwrap_or(0).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let seed = SEED_BASE.wrapping_add(
+                u64::try_from(i)
+                    .unwrap_or(0)
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            );
             let html = generate_fuzz_doc(seed, token_count);
             let real_depth = real_dom_max_depth(&html);
             if real_depth > super::MAX_SCAN_DEPTH {
@@ -1456,6 +1478,4 @@ mod tests {
              -- the size distribution has drifted away from the boundary again"
         );
     }
-
 }
-

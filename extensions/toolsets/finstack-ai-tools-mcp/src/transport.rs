@@ -1042,7 +1042,12 @@ mod tests {
 
     /// Write one raw HTTP/1.1 response to the first connection accepted on
     /// `listener`, then close it.
-    async fn serve_once(listener: tokio::net::TcpListener, status: u16, headers: String, body: Vec<u8>) {
+    async fn serve_once(
+        listener: tokio::net::TcpListener,
+        status: u16,
+        headers: String,
+        body: Vec<u8>,
+    ) {
         let (mut stream, _) = listener.accept().await.expect("accept");
         let mut buf = vec![0_u8; 8_192];
         let _ = stream.read(&mut buf).await.expect("read request");

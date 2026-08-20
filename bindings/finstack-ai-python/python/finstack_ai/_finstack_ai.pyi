@@ -1167,7 +1167,8 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | HttpFetchToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | HttpFetchToolset]
+        | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,

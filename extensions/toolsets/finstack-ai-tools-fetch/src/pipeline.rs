@@ -66,7 +66,11 @@ impl FetchState {
     }
 }
 
-fn tool_error(code: &'static str, category: ErrorCategory, message: impl Into<String>) -> ToolError {
+fn tool_error(
+    code: &'static str,
+    category: ErrorCategory,
+    message: impl Into<String>,
+) -> ToolError {
     ToolError::try_new(code, category, false, message.into(), Metadata::empty())
         .unwrap_or_else(Into::into)
 }
@@ -259,7 +263,8 @@ async fn send_hop(
     let addr = resolve_and_pin(current, state.resolver.as_ref())
         .await
         .map_err(|e| map_vet_error(&e))?;
-    let client = pinned_client(current, addr, state.config.request_timeout).map_err(|e| map_vet_error(&e))?;
+    let client = pinned_client(current, addr, state.config.request_timeout)
+        .map_err(|e| map_vet_error(&e))?;
 
     let mut request = client
         .get(current.url.as_str())
@@ -300,12 +305,22 @@ async fn send_hop(
 /// (`url::Url::join`, so relative Locations work) and re-vet it as a
 /// brand-new destination — spec §4.4 step 7's "re-enter the entire pipeline
 /// from the allowlist/vet step".
-fn next_hop(response: &reqwest::Response, current: &VettedUrl, policy: UrlPolicy) -> Result<VettedUrl, ToolError> {
+fn next_hop(
+    response: &reqwest::Response,
+    current: &VettedUrl,
+    policy: UrlPolicy,
+) -> Result<VettedUrl, ToolError> {
     let location = response
         .headers()
         .get(reqwest::header::LOCATION)
         .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| tool_error(FETCH_TRANSPORT_FAILED, ErrorCategory::Tool, "redirect location invalid"))?;
+        .ok_or_else(|| {
+            tool_error(
+                FETCH_TRANSPORT_FAILED,
+                ErrorCategory::Tool,
+                "redirect location invalid",
+            )
+        })?;
     let mut next_url = current.url.join(location).map_err(|_| {
         tool_error(
             FETCH_TRANSPORT_FAILED,

@@ -9,7 +9,7 @@
 Finish memory as a **composition**, not another recall crate. Today `extensions/context/finstack-ai-context-memory` implements only the recall half of the section-7.2 composition: a keyword/exact-id `ContextProvider` over an in-process index, with a programmatic `stage()` write. This design replaces it with one cohesive extension crate that implements the full composition:
 
 ```text
-finstack-ai-memory (extensions/memory/finstack-ai-memory)
+finstack-ai-memory (extensions/context/finstack-ai-memory)
   MemoryStore (trait) ── InProcessMemoryStore, SqliteMemoryStore (feature "sqlite")
   MemoryContextProvider  — automatic budgeted recall (ContextProvider port)
   MemoryToolset          — remember, search_memory, forget, correct, inspect (Toolset port)
@@ -40,10 +40,10 @@ finstack-ai-memory (extensions/memory/finstack-ai-memory)
 
 ## 4. Crate layout and packaging
 
-New directory kind: `extensions/memory/`.
+Memory stays grouped with the other context-providing batteries under `extensions/context/`.
 
 ```text
-extensions/memory/finstack-ai-memory/
+extensions/context/finstack-ai-memory/
   Cargo.toml            # features: default = [], "sqlite"
   README.md
   src/

@@ -3,12 +3,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_kernel::{
     Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata, OperationLocator,
     PrincipalRef, RawJson, RunId, SessionId, Timestamp, ToolBatchId, ToolCallBlock, ToolCallId,
     ToolFailurePolicy, ValidatedToolCall,
 };
+use finstack_ai_memory::InProcessArtifactStore;
 use finstack_ai_net_guard::{HostResolver, UrlPolicy, parse_and_vet_url};
 use finstack_ai_runtime::{
     ArtifactStore, AuthorizationContext, CancellationSignal, RunCallContext, ToolError, Toolset,
@@ -18,7 +18,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-use super::{HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchError, HttpFetchToolset};
+use super::{
+    HostPattern, HttpFetchConfig, HttpFetchConfigSnapshot, HttpFetchError, HttpFetchToolset,
+};
 
 const HEADER_CANARY: &str = "fetch-secret-canary-091";
 
@@ -1383,7 +1385,10 @@ async fn inline_result_over_the_kernel_raw_json_ceiling_is_a_limit_error() {
     let body_len = 1_200_000_usize; // ~1.2 MiB, past the 1 MiB kernel ceiling
     let body = vec![b'a'; body_len];
     assert!(body_len > finstack_ai_kernel::RAW_JSON_MAX_BYTES);
-    assert!(body_len < 2 * 1_048_576, "must clear the 2 MiB configured cap");
+    assert!(
+        body_len < 2 * 1_048_576,
+        "must clear the 2 MiB configured cap"
+    );
     tokio::spawn(serve_once(
         listener,
         None,
@@ -1399,7 +1404,10 @@ async fn inline_result_over_the_kernel_raw_json_ceiling_is_a_limit_error() {
     let toolset = HttpFetchToolset::try_new(config).unwrap();
     let spec = toolset.tools()[0].clone();
     let url = format!("http://127.0.0.1:{}/x", addr.port());
-    let call = call_for(&spec, format!(r#"{{"url":"{url}","mode":"auto"}}"#).as_bytes());
+    let call = call_for(
+        &spec,
+        format!(r#"{{"url":"{url}","mode":"auto"}}"#).as_bytes(),
+    );
     let error = drive_to_error(&toolset, call).await;
     assert_eq!(error.code(), super::FETCH_LIMIT_EXCEEDED);
 }

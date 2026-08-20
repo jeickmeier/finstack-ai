@@ -4,7 +4,7 @@
 
 **Goal:** Replace the recall-only `finstack-ai-context-memory` crate with one cohesive `finstack-ai-memory` extension implementing the full memory composition: store trait (+ in-process and SQLite/FTS5 impls), recall provider, capability-gated toolset, observer capture, plus Python and WASM exposure.
 
-**Architecture:** One crate at `extensions/memory/finstack-ai-memory` built around an object-safe `MemoryStore` trait whose every mutation takes an idempotency key. Recall (`MemoryContextProvider`), tools (`MemoryToolset`), and capture (`MemoryObserver` + `MemoryExtractor`) are thin components over the store. No kernel/runtime changes. Capture middleware is explicitly deferred (runtime middleware must be pure).
+**Architecture:** One crate at `extensions/context/finstack-ai-memory` built around an object-safe `MemoryStore` trait whose every mutation takes an idempotency key. Recall (`MemoryContextProvider`), tools (`MemoryToolset`), and capture (`MemoryObserver` + `MemoryExtractor`) are thin components over the store. No kernel/runtime changes. Capture middleware is explicitly deferred (runtime middleware must be pure).
 
 **Tech Stack:** Rust (workspace conventions), rusqlite + FTS5 (feature `sqlite`), pyo3 (existing `bindings/finstack-ai-python`), wasm-bindgen host-callback pattern (existing `bindings/finstack-ai-wasm`).
 
@@ -26,12 +26,12 @@
 ### Task 1: Crate scaffold + record model (`record.rs`)
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/Cargo.toml`
-- Create: `extensions/memory/finstack-ai-memory/README.md`
-- Create: `extensions/memory/finstack-ai-memory/src/lib.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/record.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/mod.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/record.rs`
+- Create: `extensions/context/finstack-ai-memory/Cargo.toml`
+- Create: `extensions/context/finstack-ai-memory/README.md`
+- Create: `extensions/context/finstack-ai-memory/src/lib.rs`
+- Create: `extensions/context/finstack-ai-memory/src/record.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/mod.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/record.rs`
 - Modify: `Cargo.toml` (workspace root — members list near line 30, dependencies table near line 112)
 
 **Interfaces:**
@@ -51,18 +51,18 @@
 In root `Cargo.toml` add to `[workspace] members`:
 
 ```toml
-    "extensions/memory/finstack-ai-memory",
+    "extensions/context/finstack-ai-memory",
 ```
 
 and to `[workspace.dependencies]` (alongside the existing extension entries near line 112):
 
 ```toml
-finstack-ai-memory = { path = "extensions/memory/finstack-ai-memory", version = "1.0.0" }
+finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "1.0.0" }
 ```
 
 - [ ] **Step 2: Create crate manifest**
 
-`extensions/memory/finstack-ai-memory/Cargo.toml` (mirror `extensions/stores/finstack-ai-store-sqlite/Cargo.toml` header fields):
+`extensions/context/finstack-ai-memory/Cargo.toml` (mirror `extensions/stores/finstack-ai-store-sqlite/Cargo.toml` header fields):
 
 ```toml
 [package]
@@ -242,7 +242,7 @@ Run: `cargo test -p finstack-ai-memory` — expected: all record tests PASS. The
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock extensions/memory/
+git add Cargo.toml Cargo.lock extensions/context/finstack-ai-memory/
 git commit -m "feat(memory): scaffold finstack-ai-memory crate with record model"
 ```
 
@@ -251,11 +251,11 @@ git commit -m "feat(memory): scaffold finstack-ai-memory crate with record model
 ### Task 2: `MemoryStore` trait + `InProcessMemoryStore`
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/src/store/mod.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/store/in_process.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/store.rs`
-- Modify: `extensions/memory/finstack-ai-memory/src/lib.rs` (add `pub mod store;` + re-exports)
-- Modify: `extensions/memory/finstack-ai-memory/src/tests/mod.rs` (add `mod store;`)
+- Create: `extensions/context/finstack-ai-memory/src/store/mod.rs`
+- Create: `extensions/context/finstack-ai-memory/src/store/in_process.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/store.rs`
+- Modify: `extensions/context/finstack-ai-memory/src/lib.rs` (add `pub mod store;` + re-exports)
+- Modify: `extensions/context/finstack-ai-memory/src/tests/mod.rs` (add `mod store;`)
 
 **Interfaces:**
 - Consumes: everything from Task 1.
@@ -385,7 +385,7 @@ Run: `cargo test -p finstack-ai-memory` and `cargo clippy -p finstack-ai-memory 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add extensions/memory/
+git add extensions/context/finstack-ai-memory/
 git commit -m "feat(memory): MemoryStore trait and in-process implementation"
 ```
 
@@ -394,10 +394,10 @@ git commit -m "feat(memory): MemoryStore trait and in-process implementation"
 ### Task 3: `SqliteMemoryStore` (feature `sqlite`)
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/src/store/sqlite.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/sqlite.rs`
-- Modify: `extensions/memory/finstack-ai-memory/src/store/mod.rs` (`#[cfg(feature = "sqlite")] pub mod sqlite;` + re-export)
-- Modify: `extensions/memory/finstack-ai-memory/src/tests/mod.rs` (`#[cfg(feature = "sqlite")] mod sqlite;`)
+- Create: `extensions/context/finstack-ai-memory/src/store/sqlite.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/sqlite.rs`
+- Modify: `extensions/context/finstack-ai-memory/src/store/mod.rs` (`#[cfg(feature = "sqlite")] pub mod sqlite;` + re-export)
+- Modify: `extensions/context/finstack-ai-memory/src/tests/mod.rs` (`#[cfg(feature = "sqlite")] mod sqlite;`)
 
 **Interfaces:**
 - Consumes: `MemoryStore` trait + all Task 1/2 types.
@@ -505,7 +505,7 @@ Run: `cargo test -p finstack-ai-memory --features sqlite` and `cargo clippy -p f
 - [ ] **Step 6: Commit**
 
 ```bash
-git add extensions/memory/ Cargo.toml Cargo.lock
+git add extensions/context/finstack-ai-memory/ Cargo.toml Cargo.lock
 git commit -m "feat(memory): SQLite FTS5 MemoryStore implementation behind sqlite feature"
 ```
 
@@ -514,9 +514,9 @@ git commit -m "feat(memory): SQLite FTS5 MemoryStore implementation behind sqlit
 ### Task 4: `MemoryContextProvider` (recall)
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/src/provider.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/provider.rs`
-- Modify: `extensions/memory/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
+- Create: `extensions/context/finstack-ai-memory/src/provider.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/provider.rs`
+- Modify: `extensions/context/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
 
 **Interfaces:**
 - Consumes: `MemoryStore` (Task 2), record types (Task 1).
@@ -580,7 +580,7 @@ Run: `cargo test -p finstack-ai-memory` — expected: compile failure (no `provi
 Run: `cargo test -p finstack-ai-memory` + clippy. Expected: PASS.
 
 ```bash
-git add extensions/memory/
+git add extensions/context/finstack-ai-memory/
 git commit -m "feat(memory): store-backed recall provider with cache-stable ordering"
 ```
 
@@ -589,9 +589,9 @@ git commit -m "feat(memory): store-backed recall provider with cache-stable orde
 ### Task 5: `MemoryToolset` + `MemoryPolicy`
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/src/toolset.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/toolset.rs`
-- Modify: `extensions/memory/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
+- Create: `extensions/context/finstack-ai-memory/src/toolset.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/toolset.rs`
+- Modify: `extensions/context/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
 
 **Interfaces:**
 - Consumes: `MemoryStore`, record types, `MemoryClock`.
@@ -678,7 +678,7 @@ Errors: `MEMORY_TOOL_INVALID_ARGUMENTS = "memory_tool_invalid_arguments"` (Valid
 - [ ] **Step 5: Run tests, clippy, commit**
 
 ```bash
-git add extensions/memory/
+git add extensions/context/finstack-ai-memory/
 git commit -m "feat(memory): capability-gated MemoryToolset with idempotent mutations"
 ```
 
@@ -687,10 +687,10 @@ git commit -m "feat(memory): capability-gated MemoryToolset with idempotent muta
 ### Task 6: `MemoryExtractor` + `MemoryObserver`
 
 **Files:**
-- Create: `extensions/memory/finstack-ai-memory/src/extract.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/observer.rs`
-- Create: `extensions/memory/finstack-ai-memory/src/tests/observer.rs`
-- Modify: `extensions/memory/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
+- Create: `extensions/context/finstack-ai-memory/src/extract.rs`
+- Create: `extensions/context/finstack-ai-memory/src/observer.rs`
+- Create: `extensions/context/finstack-ai-memory/src/tests/observer.rs`
+- Modify: `extensions/context/finstack-ai-memory/src/lib.rs`, `src/tests/mod.rs`
 
 **Interfaces:**
 - Consumes: `MemoryStore`, record types, `MemoryClock`.
@@ -746,7 +746,7 @@ Descriptor: `ComponentId::parse("finstack.observer.memory")`, `Version { major: 
 - [ ] **Step 5: Run tests, clippy, commit**
 
 ```bash
-git add extensions/memory/
+git add extensions/context/finstack-ai-memory/
 git commit -m "feat(memory): observer capture with rule-based extractor"
 ```
 
@@ -758,7 +758,7 @@ git commit -m "feat(memory): observer capture with rule-based extractor"
 - Delete: `extensions/context/finstack-ai-context-memory/` (entire directory)
 - Modify: `Cargo.toml` (root: remove member + workspace-dependency lines for the old crate)
 - Modify: `bindings/finstack-ai-python/Cargo.toml` + `bindings/finstack-ai-python/src/agent.rs:14` (and any other importer)
-- Create: `extensions/memory/finstack-ai-memory/README.md` content (finalize)
+- Create: `extensions/context/finstack-ai-memory/README.md` content (finalize)
 
 **Interfaces:**
 - Consumes: crate-root re-exports `InProcessArtifactStore`, `MemoryContextProvider` from `finstack-ai-memory`.
@@ -782,7 +782,7 @@ Remove the member line and the `[workspace.dependencies]` line for it in root `C
 
 - [ ] **Step 4: Write the README**
 
-`extensions/memory/finstack-ai-memory/README.md`: what the crate is (the §7.2 composition), the five components, feature flags (`sqlite`), a short construction example (in-process store + provider + toolset), the §7.4 note that capture middleware is deferred, and the vector-retrieval future-work note. Keep the tone/length of the old crate's README.
+`extensions/context/finstack-ai-memory/README.md`: what the crate is (the §7.2 composition), the five components, feature flags (`sqlite`), a short construction example (in-process store + provider + toolset), the §7.4 note that capture middleware is deferred, and the vector-retrieval future-work note. Keep the tone/length of the old crate's README.
 
 - [ ] **Step 5: Full workspace verification**
 

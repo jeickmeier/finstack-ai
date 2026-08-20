@@ -30,8 +30,13 @@ pub(crate) enum DeliveredContent {
     Artifact(serde_json::Value),
 }
 
-fn tool_error(code: &'static str, category: ErrorCategory, message: impl Into<String>) -> ToolError {
-    ToolError::try_new(code, category, false, message.into(), Metadata::empty()).unwrap_or_else(Into::into)
+fn tool_error(
+    code: &'static str,
+    category: ErrorCategory,
+    message: impl Into<String>,
+) -> ToolError {
+    ToolError::try_new(code, category, false, message.into(), Metadata::empty())
+        .unwrap_or_else(Into::into)
 }
 
 fn binary_without_store_error() -> ToolError {
@@ -196,7 +201,10 @@ async fn stage_artifact(
 }
 
 /// Inline `text` unless it exceeds `max_result_budget`.
-fn inline_within_budget(text: String, max_result_budget: usize) -> Result<DeliveredContent, ToolError> {
+fn inline_within_budget(
+    text: String,
+    max_result_budget: usize,
+) -> Result<DeliveredContent, ToolError> {
     if text.len() > max_result_budget {
         return Err(tool_error(
             FETCH_LIMIT_EXCEEDED,

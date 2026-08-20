@@ -71,7 +71,9 @@ impl HostPattern {
         };
         let valid = !host.is_empty()
             && !host.contains(['*', '/', ':', '?', '#', '@'])
-            && !host.chars().any(|c| c.is_ascii_control() || c.is_whitespace())
+            && !host
+                .chars()
+                .any(|c| c.is_ascii_control() || c.is_whitespace())
             && host.split('.').all(|label| !label.is_empty());
         if !valid {
             return Err(HttpFetchError::Configuration {
