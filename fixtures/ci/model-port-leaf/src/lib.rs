@@ -196,6 +196,7 @@ mod tests {
                     deadline: None,
                     budget_scope_id: None,
                     cancellation: CancellationSignal::new(),
+                    relation_depth: 0,
                 },
                 request_id: ModelRequestId::parse("00000000-0000-7000-8000-000000000005")
                     .expect("request"),

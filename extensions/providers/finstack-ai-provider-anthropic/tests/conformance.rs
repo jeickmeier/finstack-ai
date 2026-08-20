@@ -60,6 +60,7 @@ fn request() -> ModelRequest {
                 deadline: None,
                 budget_scope_id: None,
                 cancellation: CancellationSignal::new(),
+                relation_depth: 0,
             },
             request_id: ModelRequestId::parse(REQUEST_ID).expect("request id"),
         },

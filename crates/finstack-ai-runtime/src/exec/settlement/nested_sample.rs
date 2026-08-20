@@ -141,6 +141,7 @@ async fn complete_parent_tool(
             deadline: driver_result.seed.requested.deadline(),
             budget_scope_id: driver_result.seed.budget_scope_id,
             cancellation: ports.cancellation.child(),
+            relation_depth: 0, // no accepted run in scope
         },
         tool_batch_id: driver_result.seed.tool_batch_id,
         tool_call_id: driver_result.seed.tool_call_id,
@@ -195,6 +196,7 @@ async fn execute_nested_model<C: Clock, R: RandomSource>(
         deadline: pending.requested.deadline(),
         budget_scope_id: driver_result.seed.budget_scope_id,
         cancellation: cancellation.child(),
+        relation_depth: coordinator.accepted_relation_depth(),
     };
     let stream = model
         .request(ModelRequest {

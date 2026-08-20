@@ -611,6 +611,7 @@ fn tool_ctx(principal_tenant: Option<&str>, locator_tenant: &str) -> ToolCallCon
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         tool_batch_id: id(5),
         tool_call_id: id(6),

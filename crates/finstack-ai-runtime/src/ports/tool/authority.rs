@@ -47,6 +47,7 @@ use super::types::ToolCallContext;
 ///         deadline: None,
 ///         budget_scope_id: None,
 ///         cancellation: CancellationSignal::new(),
+///         relation_depth: 0,
 ///     },
 ///     tool_batch_id: ToolBatchId::parse("01234567-89ab-7cde-89ab-0123456789af").expect("batch"),
 ///     tool_call_id: ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789b0").expect("call"),

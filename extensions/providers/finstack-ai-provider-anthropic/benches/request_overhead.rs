@@ -72,6 +72,7 @@ fn benchmark_request() -> ModelRequest {
                 deadline: None,
                 budget_scope_id: None,
                 cancellation: CancellationSignal::new(),
+                relation_depth: 0,
             },
             request_id: ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789b5")
                 .expect("request"),

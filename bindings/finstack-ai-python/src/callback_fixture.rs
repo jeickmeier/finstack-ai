@@ -62,6 +62,7 @@ fn run_context(effect_ordinal: u64) -> PyResult<RunCallContext> {
         deadline: None,
         budget_scope_id: None,
         cancellation: CancellationSignal::new(),
+        relation_depth: 0,
     })
 }
 

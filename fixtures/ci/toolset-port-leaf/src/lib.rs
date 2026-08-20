@@ -180,6 +180,7 @@ mod tests {
                 deadline: None,
                 budget_scope_id: None,
                 cancellation: CancellationSignal::new(),
+                relation_depth: 0,
             },
             tool_batch_id: tool_batch_id(5),
             tool_call_id: call_id,

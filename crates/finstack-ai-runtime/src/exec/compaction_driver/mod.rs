@@ -204,6 +204,7 @@ async fn execute_and_settle<C: Clock, R: RandomSource>(
         deadline: pending.requested.deadline(),
         budget_scope_id: Some(request.budget_scope_id),
         cancellation: cancellation.child(),
+        relation_depth: seed.relation_depth,
     };
     let model_request = ModelRequest {
         call: ModelCallContext {

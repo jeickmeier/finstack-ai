@@ -54,6 +54,7 @@ pub fn run_call_context(cancellation: CancellationSignal) -> Result<RunCallConte
         deadline: None,
         budget_scope_id: None,
         cancellation,
+        relation_depth: 0,
     })
 }
 

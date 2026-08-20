@@ -10,8 +10,8 @@ use finstack_ai_kernel::{
     ErrorCategory, ErrorDescriptor, Id, IdTag, KernelInput, LaneTag, Message, MessageRole,
     Metadata, PrincipalPropagation, PrincipalRef, ProviderIds, RawJson, RecordEnvelope,
     ReducerStageOutcome, RunAccepted, RunLimits, RunPhase, RunPropagationPolicy, RunRelation,
-    RunSecurityContext, Sensitivity, SessionTag, Stage, StageCursor, StageSettled, TextBlock,
-    Timestamp, ToolId, TransitionEnv, Version,
+    RunRelationKind, RunSecurityContext, Sensitivity, SessionTag, Stage, StageCursor, StageSettled,
+    TextBlock, Timestamp, ToolId, TransitionEnv, Version,
 };
 
 use super::apply::{apply_context_prepared, apply_fold, apply_model_draft};
@@ -47,5 +47,6 @@ include!("compaction.rs");
 include!("context_providers.rs");
 include!("prepare_context.rs");
 include!("recovery.rs");
+include!("relation_depth.rs");
 include!("stage_input.rs");
 include!("terminal_fold.rs");

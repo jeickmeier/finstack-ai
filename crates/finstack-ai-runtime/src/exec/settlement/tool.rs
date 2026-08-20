@@ -145,6 +145,7 @@ pub(crate) async fn continue_parked_tool<C: Clock, R: RandomSource>(
             deadline: seed.requested.deadline(),
             budget_scope_id: seed.budget_scope_id,
             cancellation: CancellationSignal::new(),
+            relation_depth: coordinator.accepted_relation_depth(),
         },
         tool_batch_id: seed.tool_batch_id,
         tool_call_id: seed.tool_call_id,
@@ -538,6 +539,7 @@ pub(crate) async fn resume_pending_tool_effects<C: Clock, R: RandomSource>(
                 deadline: seed.requested.deadline(),
                 budget_scope_id: seed.budget_scope_id,
                 cancellation: cancellation.child(),
+                relation_depth: coordinator.accepted_relation_depth(),
             },
             original_input_digest: seed.requested.input_digest(),
         };

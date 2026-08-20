@@ -43,6 +43,7 @@ fn context() -> ContextCallContext {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         provider_index: 0,
         chain_digest: Digest::raw_json(b"chain"),

@@ -161,6 +161,10 @@ pub struct RunCallContext {
     pub budget_scope_id: Option<BudgetScopeId>,
     /// Effect-local cancellation signal.
     pub cancellation: CancellationSignal,
+    /// Relation depth of the owning run (0 for a root run), from the
+    /// accepted run record. Capped by
+    /// `finstack_ai_kernel::MAX_RUN_RELATION_DEPTH`.
+    pub relation_depth: u16,
 }
 
 /// Model-specific call context.

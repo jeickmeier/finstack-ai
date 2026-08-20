@@ -344,6 +344,7 @@ fn prepare_context_driver_matches_direct_port_conformance_contribution() {
             deadline: None,
             budget_scope_id: None,
             cancellation: CancellationSignal::new(),
+            relation_depth: 0,
         },
         provider_index: 0,
         chain_digest: Digest::raw_json(b"context-chain"),

@@ -96,7 +96,21 @@ impl CommitCoordinator {
             budget_scope_id,
             attempt: state.retry.attempts.checked_add(1)?,
             deadline: state.accepted.as_ref()?.effective_deadline(),
+            relation_depth: state.accepted.as_ref()?.relation().depth(),
         })
+    }
+
+    /// The accepted run's relation depth, or `0` before a run is accepted.
+    ///
+    /// Shared one-line lookup for call sites that build a [`RunCallContext`]
+    /// (`crate::RunCallContext`) outside the stage-boundary seed path.
+    #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
+    pub(crate) fn accepted_relation_depth(&self) -> u16 {
+        self.kernel
+            .state()
+            .accepted
+            .as_ref()
+            .map_or(0, |accepted| accepted.relation().depth())
     }
 }
 
@@ -231,6 +245,7 @@ pub(crate) struct StageDispatchSeed {
     pub(crate) budget_scope_id: Option<finstack_ai_kernel::BudgetScopeId>,
     pub(crate) attempt: u32,
     pub(crate) deadline: Option<Timestamp>,
+    pub(crate) relation_depth: u16,
 }
 
 #[derive(Debug, Clone)]

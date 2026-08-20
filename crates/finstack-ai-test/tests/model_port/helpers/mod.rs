@@ -105,6 +105,7 @@ pub(crate) fn request(cancellation: CancellationSignal) -> ModelRequest {
                 deadline: None,
                 budget_scope_id: None,
                 cancellation,
+                relation_depth: 0,
             },
             request_id: id(5),
         },
