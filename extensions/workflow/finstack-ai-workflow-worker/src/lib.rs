@@ -6,8 +6,12 @@
 
 mod error;
 mod memory;
+mod park;
+mod sqlite;
 mod wake;
 
 pub use error::WorkerError;
 pub use memory::MemoryWorkerStore;
+pub use park::park;
+pub use sqlite::SqliteWorkerStore;
 pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
