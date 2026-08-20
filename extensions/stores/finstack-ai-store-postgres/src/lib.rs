@@ -7,9 +7,10 @@
 //! ordering. Applications inject this crate explicitly. It is not the Agent,
 //! Python, or WASM default (no WASM support: native-tokio only).
 //!
-//! This module currently provides the crate scaffold: configuration and
-//! error mapping. Schema management, the connection pool, and the
-//! `JournalStore` implementation land in subsequent changes.
+//! This crate currently provides configuration, error mapping, schema
+//! management, the connection pool, and an open path with `health()`.
+//! `append`/`load`/`write_snapshot` land in subsequent changes (see
+//! `src/journal_store.rs`).
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -34,17 +35,21 @@
 
 mod config;
 mod error;
+mod journal_store;
+mod pool;
+mod schema;
+mod store;
 
-// `schema` is temporarily `pub` (rather than a private `mod` with selective
-// `pub(crate)` re-exports) purely so the integration tests in `tests/` —
-// which compile as a separate crate — can drive `ensure_schema` directly
-// against a real server ahead of the connection pool landing in a later
-// task. See the module doc comment in `src/schema.rs` for the full
-// rationale; this should narrow back down once that pool exists.
-#[doc(hidden)]
-pub mod schema;
+// Task 2 temporarily widened `schema` to `#[doc(hidden)] pub mod schema;` so
+// its integration tests (a separate crate) could drive `ensure_schema`
+// directly ahead of `PostgresJournalStore` existing. Now that
+// `PostgresJournalStore::try_open` calls `ensure_schema` itself, `schema` is
+// back to a private `mod` (`pub(crate)` within, per the brief) and its
+// former integration tests moved to in-crate unit tests in `src/schema.rs`,
+// which can see `pub(crate)` items.
 
 pub use config::{
     DEFAULT_CONNECT_TIMEOUT, DEFAULT_POOL_SIZE, DEFAULT_SCHEMA, PostgresDurability,
     PostgresStoreConfig, SchemaPolicy,
 };
+pub use store::PostgresJournalStore;

@@ -6,8 +6,12 @@
 //! live Postgres reachable.
 
 use std::env;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use finstack_ai_runtime::StoreLimits;
+use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 
 /// Environment variable naming a live Postgres server for the integration
 /// suites, e.g. `postgres://postgres:postgres@localhost:5432/postgres`.
@@ -116,6 +120,38 @@ impl SchemaGuard {
             .expect("drop disposable test schema");
         self.cleaned_up = true;
     }
+}
+
+/// Open a disposable [`PostgresJournalStore`] against a fresh schema, for
+/// tests that exercise the store through its public API (`try_open`,
+/// `health()`, and — once landed — `append`/`load`/`write_snapshot`) rather
+/// than driving `ensure_schema` directly.
+///
+/// Uses generous [`StoreLimits`] since these tests care about the store's
+/// wiring, not its admission-limit behavior. `config.schema` is overridden
+/// to a fresh, disposable name so concurrent test runs never collide.
+///
+/// # Panics
+///
+/// Panics (via `expect`) if `try_open` fails. Callers should check
+/// [`pg_test_url`] themselves first and skip-with-notice when it is unset,
+/// matching the crate's other env-gated suites — this helper assumes the
+/// caller already confirmed a server is configured.
+pub async fn disposable_store(url: &str) -> (PostgresJournalStore, SchemaGuard) {
+    let schema = fresh_schema_name();
+    let limits = StoreLimits {
+        sessions: 1_000,
+        batches_per_session: 1_000,
+        records_per_session: 1_000,
+        snapshot_bytes: 1_000_000,
+    };
+    let mut config = PostgresStoreConfig::new(url, limits);
+    config.schema = Arc::from(schema.as_str());
+
+    let store = PostgresJournalStore::try_open(config)
+        .await
+        .expect("try_open disposable store");
+    (store, SchemaGuard::new(schema))
 }
 
 impl Drop for SchemaGuard {

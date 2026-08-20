@@ -18,6 +18,7 @@ finstack-ai-store-common = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tokio-postgres = { workspace = true }
 tokio-postgres-rustls = { workspace = true }
 

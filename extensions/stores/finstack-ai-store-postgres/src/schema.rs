@@ -5,15 +5,13 @@
 //! `format_version`/`kind_version`, same PK/unique/index set) plus the
 //! multi-writer bookkeeping columns/tables documented in spec D3/D8.
 //!
-//! Spec D3/D8 describe [`ensure_schema`] and [`SCHEMA_VERSION`] as
-//! `pub(crate)`: production code only ever reaches them through the
-//! connection pool / `JournalStore` impl added in a later task. That impl
-//! does not exist yet, so this module is temporarily `pub` (see
-//! `#[doc(hidden)] pub mod schema;` in `lib.rs`) purely so the integration
-//! tests in `tests/schema.rs` — which must run as a separate crate — can
-//! drive migrations directly against a real server. A later task should
-//! narrow this back to `pub(crate)` once the pool wires it in and the
-//! integration tests move to exercising it through the public store API.
+//! [`ensure_schema`] and [`SCHEMA_VERSION`] are `pub(crate)` per spec
+//! D3/D8: the only production caller is
+//! [`crate::store::PostgresJournalStore::try_open`]. Task 2 temporarily
+//! widened this module to `pub` so its tests (then a separate `tests/`
+//! crate) could reach `ensure_schema` before `try_open` existed; now that it
+//! does, those tests live in this module's own `#[cfg(test)]` block below,
+//! which can see `pub(crate)` items directly.
 
 use crate::config::SchemaPolicy;
 use crate::error::map_postgres_error;
@@ -22,7 +20,7 @@ use finstack_ai_runtime::StoreError;
 /// Schema version written to `fa_schema_version` once v1 DDL has been
 /// applied. Any other stored version is treated as unsupported and fails
 /// closed rather than being read forward.
-pub const SCHEMA_VERSION: i32 = 1;
+pub(crate) const SCHEMA_VERSION: i32 = 1;
 
 /// Render the v1 DDL for the given (already-validated) schema name.
 ///
@@ -124,7 +122,7 @@ CREATE TABLE {schema}.fa_schema_version (
 ///
 /// Returns a mapped [`StoreError`] for any connection/protocol failure, or
 /// the fail-closed errors described above.
-pub async fn ensure_schema(
+pub(crate) async fn ensure_schema(
     client: &tokio_postgres::Client,
     schema: &str,
     policy: SchemaPolicy,
@@ -227,4 +225,262 @@ async fn ensure_schema_in_transaction(
     }
 
     Ok(())
+}
+
+/// Server-gated unit tests for `ensure_schema` (spec D3/D8), moved from the
+/// `tests/schema.rs` integration crate once `ensure_schema` became
+/// `pub(crate)` (see the module doc comment). Skips with a notice (rather
+/// than failing) when `FINSTACK_PG_TEST_URL` is unset, matching the crate's
+/// other env-gated suites in `tests/`.
+#[cfg(test)]
+mod tests {
+    use std::env;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    /// Read the server-gated test URL. `None` when unset.
+    fn pg_test_url() -> Option<String> {
+        env::var("FINSTACK_PG_TEST_URL").ok()
+    }
+
+    /// Connect to `url` and spawn its connection-driving task.
+    ///
+    /// # Panics
+    ///
+    /// Panics (via `expect`) if the connection cannot be established.
+    /// Test-only code — the crate's `unwrap`/`expect` deny attributes are
+    /// inner attributes scoped to non-test code (see `lib.rs`).
+    async fn connect(url: &str) -> tokio_postgres::Client {
+        let (client, connection) = tokio_postgres::connect(url, tokio_postgres::NoTls)
+            .await
+            .expect("connect to FINSTACK_PG_TEST_URL");
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        client
+    }
+
+    /// Generate a disposable schema name, unique within this process.
+    fn fresh_schema_name() -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or_default();
+        format!("fa_test_{pid:x}_{nanos:x}_{counter:x}")
+    }
+
+    /// Best-effort disposable-schema cleanup. Unlike
+    /// `tests/helpers::SchemaGuard`, this has no `Drop` warning — these are
+    /// unit tests, not a shared, reusable test-support crate, so a leaked
+    /// schema on assertion failure is an acceptable, low-ceremony trade-off
+    /// local to this module.
+    async fn drop_schema(client: &tokio_postgres::Client, schema: &str) {
+        let _ = client
+            .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .await;
+    }
+
+    /// A fresh schema: `ensure_schema` under `Manage` creates every v1 table
+    /// and writes schema version 1.
+    #[tokio::test]
+    async fn manage_creates_schema_and_writes_version() {
+        let Some(url) = pg_test_url() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let client = connect(&url).await;
+        let schema = fresh_schema_name();
+
+        ensure_schema(&client, &schema, SchemaPolicy::Manage)
+            .await
+            .expect("ensure_schema should create the schema");
+
+        for table in [
+            "sessions",
+            "batches",
+            "records",
+            "snapshots",
+            "store_totals",
+            "fa_schema_version",
+        ] {
+            let exists: bool = client
+                .query_one(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.tables \
+                     WHERE table_schema = $1 AND table_name = $2)",
+                    &[&schema.as_str(), &table],
+                )
+                .await
+                .expect("check table existence")
+                .get(0);
+            assert!(exists, "table {table} should exist after ensure_schema");
+        }
+
+        let version: i32 = client
+            .query_one(
+                &format!("SELECT version FROM {schema}.fa_schema_version"),
+                &[],
+            )
+            .await
+            .expect("read fa_schema_version")
+            .get(0);
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let session_count: i64 = client
+            .query_one(
+                &format!("SELECT session_count FROM {schema}.store_totals"),
+                &[],
+            )
+            .await
+            .expect("read store_totals")
+            .get(0);
+        assert_eq!(session_count, 0);
+
+        drop_schema(&client, &schema).await;
+    }
+
+    /// A second `ensure_schema` call against an already-migrated schema is a
+    /// no-op: it succeeds without re-applying DDL.
+    #[tokio::test]
+    async fn second_call_is_idempotent() {
+        let Some(url) = pg_test_url() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let client = connect(&url).await;
+        let schema = fresh_schema_name();
+
+        ensure_schema(&client, &schema, SchemaPolicy::Manage)
+            .await
+            .expect("first ensure_schema should succeed");
+        ensure_schema(&client, &schema, SchemaPolicy::Manage)
+            .await
+            .expect("second ensure_schema should be a no-op success");
+
+        let version: i32 = client
+            .query_one(
+                &format!("SELECT version FROM {schema}.fa_schema_version"),
+                &[],
+            )
+            .await
+            .expect("read fa_schema_version")
+            .get(0);
+        assert_eq!(version, SCHEMA_VERSION);
+
+        drop_schema(&client, &schema).await;
+    }
+
+    /// A schema whose `fa_schema_version` row was hand-set to an unsupported
+    /// version fails closed rather than being read forward.
+    #[tokio::test]
+    async fn unsupported_version_fails_closed() {
+        let Some(url) = pg_test_url() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let client = connect(&url).await;
+        let schema = fresh_schema_name();
+
+        ensure_schema(&client, &schema, SchemaPolicy::Manage)
+            .await
+            .expect("initial ensure_schema should succeed");
+
+        client
+            .execute(
+                &format!("UPDATE {schema}.fa_schema_version SET version = 2"),
+                &[],
+            )
+            .await
+            .expect("hand-set schema version to 2");
+
+        let error = ensure_schema(&client, &schema, SchemaPolicy::Manage)
+            .await
+            .expect_err("unsupported version should fail closed");
+        assert!(
+            matches!(
+                error,
+                StoreError::Integrity {
+                    reason_code: "postgres_schema_unsupported"
+                }
+            ),
+            "unexpected error: {error:?}"
+        );
+
+        drop_schema(&client, &schema).await;
+    }
+
+    /// `SchemaPolicy::Require` on an empty (unmigrated) schema fails closed
+    /// without issuing any DDL.
+    #[tokio::test]
+    async fn require_policy_fails_on_missing_schema() {
+        let Some(url) = pg_test_url() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let client = connect(&url).await;
+        let schema = fresh_schema_name();
+
+        let error = ensure_schema(&client, &schema, SchemaPolicy::Require)
+            .await
+            .expect_err("Require policy should fail on a missing schema");
+        assert!(
+            matches!(
+                error,
+                StoreError::Unavailable {
+                    reason_code: "postgres_schema_missing"
+                }
+            ),
+            "unexpected error: {error:?}"
+        );
+
+        let exists: bool = client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)",
+                &[&schema.as_str()],
+            )
+            .await
+            .expect("check schema existence")
+            .get(0);
+        assert!(!exists, "Require policy must not create the schema");
+
+        drop_schema(&client, &schema).await;
+    }
+
+    /// Two concurrent `ensure_schema` calls against the same schema, over two
+    /// independent connections, both succeed: the advisory
+    /// `pg_advisory_xact_lock` serializes the DDL rather than racing it.
+    #[tokio::test]
+    async fn concurrent_ensure_schema_calls_both_succeed() {
+        let Some(url) = pg_test_url() else {
+            eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+            return;
+        };
+        let client_a = connect(&url).await;
+        let client_b = connect(&url).await;
+        let cleanup_client = connect(&url).await;
+        let schema = fresh_schema_name();
+
+        let (result_a, result_b) = tokio::join!(
+            ensure_schema(&client_a, &schema, SchemaPolicy::Manage),
+            ensure_schema(&client_b, &schema, SchemaPolicy::Manage),
+        );
+        result_a.expect("first concurrent ensure_schema should succeed");
+        result_b.expect("second concurrent ensure_schema should succeed");
+
+        let version: i32 = cleanup_client
+            .query_one(
+                &format!("SELECT version FROM {schema}.fa_schema_version"),
+                &[],
+            )
+            .await
+            .expect("read fa_schema_version")
+            .get(0);
+        assert_eq!(version, SCHEMA_VERSION);
+
+        drop_schema(&cleanup_client, &schema).await;
+    }
 }
