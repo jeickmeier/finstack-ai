@@ -72,11 +72,19 @@ stage settlement cannot also emit. `Replace` outside the two
 context-bearing stages, and `Retry` outside `before_finalize`, have no
 settlement that can carry them.
 
+A `Retry` landing at `before_finalize` normally reuses the retryable
+error already on a `Failed` candidate. The one exception: a `Retry`
+whose classification is `RetryClassification::Verification` is also
+admitted over a `Completed` candidate — the kernel synthesizes a
+`candidate_rejected` (retryable, `Validation`) prior error, since a
+verifier bouncing an otherwise-successful candidate has no middleware
+error of its own to reuse.
+
 ## Shipping leaves
 
 | Leaf | Status |
 | --- | --- |
-| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | In-repo fixture. Works in its `Accept` and `Fail` modes. Its `RequestInteraction` mode fails the run instead of prompting. |
+| [`finstack-ai-middleware-verify`](../../extensions/middleware/finstack-ai-middleware-verify/README.md) | Battery. A pluggable `EvidenceVerifier` judges the terminal candidate; `Accept` lands it, `Bounce` retries (`RetryClassification::Verification`), `Reject` fails it. `RequestInteraction` has been removed from the API — see [What can be applied, and where](#what-can-be-applied-and-where) above for why a middleware outcome can't carry a pause for human approval. |
 | [`finstack-ai-middleware-compaction`](../../extensions/middleware/finstack-ai-middleware-compaction/README.md) | Sliding-window and large-tool-output `CompactContext` land. Summarize completes via the runtime-owned compaction phase (ADR-042). |
 
 ### How summarize compaction completes

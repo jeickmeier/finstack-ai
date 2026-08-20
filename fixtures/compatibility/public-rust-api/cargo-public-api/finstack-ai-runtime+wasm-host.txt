@@ -999,6 +999,7 @@ pub finstack_ai_runtime::StageInput::AfterToolBatch
 pub finstack_ai_runtime::StageInput::AfterToolBatch::value: finstack_ai_kernel::primitives::raw_json::RawJson
 pub finstack_ai_runtime::StageInput::BeforeFinalize
 pub finstack_ai_runtime::StageInput::BeforeFinalize::candidate: finstack_ai_kernel::primitives::raw_json::RawJson
+pub finstack_ai_runtime::StageInput::BeforeFinalize::result_message: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
 pub finstack_ai_runtime::StageInput::BeforeModel(alloc::boxed::Box<finstack_ai_runtime::BeforeModelInput>)
 pub finstack_ai_runtime::StageInput::BeforeRun
 pub finstack_ai_runtime::StageInput::BeforeRun::value: finstack_ai_kernel::primitives::raw_json::RawJson

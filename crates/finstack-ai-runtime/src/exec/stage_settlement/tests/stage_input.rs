@@ -152,7 +152,7 @@ fn before_finalize_stage_input_carries_the_completed_result_message() {
         turn_id: id(20),
         model_request_id: id(21),
         effect_id: id(22),
-        message_id: message.id().clone(),
+        message_id: *message.id(),
         result_digest: Digest::raw_json(b"{}"),
     };
     let state = finstack_ai_kernel::KernelState {

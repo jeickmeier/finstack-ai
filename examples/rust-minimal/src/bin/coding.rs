@@ -44,7 +44,7 @@ use finstack_ai_tools_shell::{ShellPolicy, ShellToolset};
 struct AlwaysAcceptVerifier;
 
 impl EvidenceVerifier for AlwaysAcceptVerifier {
-    fn verifier_id(&self) -> &str {
+    fn verifier_id(&self) -> &'static str {
         "example.always-accept"
     }
 
