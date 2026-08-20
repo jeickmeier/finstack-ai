@@ -7,11 +7,12 @@ use finstack_ai_kernel::{
     QueueDepthWarning, RUN_EVENT_KIND_VERSION, RUN_EVENT_SCHEMA_VERSION, RawJson, RunEvent,
     RunEventBody, RunEventClass, RunTag, Sensitivity, SessionTag, TextBlock, Timestamp, Version,
 };
-use finstack_ai_runtime::{Observer, ObserverBackpressure, ObserverPayloadMode};
+use finstack_ai_runtime::{Observer, ObserverBackpressure, ObserverPayloadMode, SecretString};
 use finstack_ai_test::check_observer_conformance;
 
 use super::{
-    AssigneeLabel, DeliveryPolicy, InteractionEventKind, NotificationDetail, NotifyObserver,
+    AssigneeLabel, DeliveryPolicy, InteractionEventKind, NotificationDetail, NotificationSink,
+    NotifyObserver,
 };
 
 const CANARY: &str = "CANARY_SECRET_VALUE";
@@ -207,12 +208,59 @@ fn custom_kind_label_and_principal_assignee_project_safely() {
 }
 
 mod tests_support {
+    use std::net::SocketAddr;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
     use finstack_ai_runtime::PortFuture;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use crate::{InteractionNotification, NotificationSink, SinkError};
+
+    /// One-shot loopback HTTP server: accepts a single request, captures its
+    /// body, answers with the given status and an empty body.
+    pub(crate) async fn spawn_loopback_http(
+        status: u16,
+    ) -> (SocketAddr, Arc<Mutex<Option<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("addr");
+        let slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let captured = Arc::clone(&slot);
+        tokio::spawn(async move {
+            let (mut stream, _peer) = listener.accept().await.expect("accept");
+            let mut buffer = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            let body = loop {
+                let read = stream.read(&mut chunk).await.expect("read");
+                buffer.extend_from_slice(&chunk[..read]);
+                let Some(split) = buffer.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&buffer[..split]).to_ascii_lowercase();
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .unwrap_or(0);
+                let body_start = split + 4;
+                while buffer.len() < body_start + length {
+                    let read = stream.read(&mut chunk).await.expect("read body");
+                    buffer.extend_from_slice(&chunk[..read]);
+                }
+                break String::from_utf8_lossy(&buffer[body_start..body_start + length])
+                    .into_owned();
+            };
+            *captured.lock().expect("lock") = Some(body);
+            let response = format!(
+                "HTTP/1.1 {status} NA\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await.expect("write");
+            stream.flush().await.expect("flush");
+        });
+        (address, slot)
+    }
 
     pub(crate) struct FailingSink {
         attempts: AtomicU64,
@@ -368,6 +416,70 @@ fn delivery_policy_clamps_are_enforced() {
     assert!(DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_secs(11)).is_err());
     assert!(
         DeliveryPolicy::try_new(Duration::from_secs(5), 3, Duration::from_millis(500)).is_ok()
+    );
+}
+
+#[test]
+fn webhook_sink_debug_never_leaks_the_url() {
+    let sink = super::WebhookSink::try_new(
+        SecretString::try_new("https://hooks.example.com/T000/SECRETPART").expect("url"),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("sink");
+    let rendered = format!("{sink:?}");
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(!rendered.contains("SECRETPART"));
+    assert!(!rendered.contains("hooks.example.com"));
+}
+
+#[test]
+fn webhook_sink_rejects_non_http_urls() {
+    for bad in ["ftp://x.example/hook", "not a url", "file:///etc/passwd"] {
+        assert!(
+            super::WebhookSink::try_new(
+                SecretString::try_new(bad).expect("secret"),
+                std::time::Duration::from_secs(5),
+            )
+            .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn webhook_sink_posts_notification_json_to_loopback() {
+    let (address, received) = tests_support::spawn_loopback_http(200).await;
+    let sink = super::WebhookSink::try_new(
+        SecretString::try_new(format!("http://{address}/hook")).expect("url"),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("sink");
+    let notification = super::project(&event(requested_body())).expect("projected");
+    sink.deliver(notification).await.expect("delivered");
+    let body = received
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("request captured");
+    assert!(body.contains("\"event\":\"requested\""));
+    assert!(body.contains("\"kind\":\"approval\""));
+    assert!(!body.contains(CANARY));
+}
+
+#[tokio::test]
+async fn webhook_sink_maps_server_errors_to_unavailable() {
+    let (address, _received) = tests_support::spawn_loopback_http(500).await;
+    let sink = super::WebhookSink::try_new(
+        SecretString::try_new(format!("http://{address}/hook")).expect("url"),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("sink");
+    let notification = super::project(&event(requested_body())).expect("projected");
+    let error = sink.deliver(notification).await.expect_err("must fail");
+    assert_eq!(
+        error,
+        super::SinkError::Unavailable {
+            reason: "http_status_error"
+        }
     );
 }
 

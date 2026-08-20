@@ -379,9 +379,12 @@ impl Observer for NotifyObserver {
     }
 }
 
+mod http;
 mod project;
+mod webhook;
 
 pub use project::project;
+pub use webhook::WebhookSink;
 
 #[cfg(test)]
 mod tests;
