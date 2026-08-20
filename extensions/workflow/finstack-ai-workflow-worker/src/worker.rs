@@ -87,17 +87,25 @@ const BACKOFF_MAX_SHIFT: u32 = 6;
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Whether `wait` is still the wait recorded on `row`.
-fn is_recorded_wait(wait: Option<&WorkflowWait>, row: &WakeRow) -> bool {
+fn is_recorded_wait(wait: &WorkflowWait, row: &WakeRow) -> bool {
     let pending = match wait {
-        Some(WorkflowWait::Interaction { interaction_id, .. }) => {
-            interaction_id.to_canonical_string()
+        WorkflowWait::Interaction { interaction_id, .. } => interaction_id.to_canonical_string(),
+        WorkflowWait::Timer { effect_id, .. } | WorkflowWait::DeferredEffect { effect_id, .. } => {
+            effect_id.to_canonical_string()
         }
-        Some(
-            WorkflowWait::Timer { effect_id, .. } | WorkflowWait::DeferredEffect { effect_id, .. },
-        ) => effect_id.to_canonical_string(),
-        Some(WorkflowWait::Terminal { .. }) | None => return false,
+        WorkflowWait::Terminal { .. } => return false,
     };
     pending == row.pending_id.as_ref()
+}
+
+/// Whether the journal's own timer for `wait` is still in the future.
+///
+/// The wake index is a hint: a row can be due before the committed timer is.
+/// Re-parking on the authoritative wait is then both correct and cheap,
+/// instead of polling out the whole drive budget for a timer that cannot
+/// fire yet.
+fn timer_is_early(wait: &WorkflowWait, now: Timestamp) -> bool {
+    matches!(wait, WorkflowWait::Timer { due_at, .. } if *due_at > now)
 }
 
 /// Builder for [`WorkflowWorker`].
@@ -349,9 +357,9 @@ impl WorkflowWorker {
             if !won {
                 continue;
             }
-            if let Ok(cleared) = Box::pin(self.resume_row(&row, entry, now)).await {
+            if let Ok(terminal) = Box::pin(self.resume_row(&row, entry, now)).await {
                 report.sessions_resumed += 1;
-                if !cleared {
+                if !terminal {
                     report.sessions_reparked += 1;
                 }
             } else {
@@ -364,9 +372,8 @@ impl WorkflowWorker {
         Ok(())
     }
 
-    /// Resume one claimed row. Returns `true` when the row was cleared —
-    /// either the run reached a terminal state or it left the recorded wait
-    /// without parking on a new one, which hands it back to the run loop.
+    /// Resume one claimed row. Returns `true` when the run reached a terminal
+    /// state, which deletes its wake row.
     ///
     /// The recorded wait is journal-authoritative:
     /// [`WorkflowSession::drive_until_wait`] would classify it and return
@@ -405,34 +412,38 @@ impl WorkflowWorker {
             Box::pin(self.submit_response(&session, entry, now)).await?;
         }
         session.respawn_owner().await?;
-        if let Some(wait) = self.drive_past_wait(&mut session, row).await? {
-            let terminal = matches!(wait, WorkflowWait::Terminal { .. });
-            park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
-            return Ok(terminal);
-        }
-        // The recorded wait resolved and the run is back inside the
-        // model/tool loop, where its owner — not this worker — drives it.
-        // The row is stale; drop it rather than re-firing it.
-        self.wake
-            .delete(row.tenant_scope.as_ref(), row.session_id)?;
-        session.abort_owner();
-        Ok(true)
+        let wait = self.drive_past_wait(&mut session, row, now).await?;
+        let terminal = matches!(wait, WorkflowWait::Terminal { .. });
+        park(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
+        Ok(terminal)
     }
 
-    /// Poll until the state leaves the wait recorded on `row`.
+    /// Poll until the state parks on a wait other than the one recorded on
+    /// `row`, and return it.
     ///
-    /// Returns the next classified wait, or `None` when the run left its
-    /// wait and is mid-flight in the model/tool loop.
+    /// A run that has left its recorded wait but classifies no new one is
+    /// mid-flight in the model/tool loop, where only its owner can drive it.
+    /// The worker cannot park that, and dropping the row would orphan the
+    /// run, so the budget simply runs out: the resulting
+    /// [`WorkflowDriverError::DriveTimeout`] routes through the caller's
+    /// backoff, which keeps the row for a later tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkflowDriverError::DriveTimeout`] when no new wait is
+    /// classified within the drive budget, plus recover/spawn failures.
     async fn drive_past_wait(
         &self,
         session: &mut WorkflowSession,
         row: &WakeRow,
-    ) -> Result<Option<WorkflowWait>, WorkerError> {
+        now: Timestamp,
+    ) -> Result<WorkflowWait, WorkerError> {
         tokio::time::timeout(self.drive_timeout, async {
             loop {
                 session.ensure_owner().await?;
-                let wait = classify_wait(session.last_state());
-                if !is_recorded_wait(wait.as_ref(), row) {
+                if let Some(wait) = classify_wait(session.last_state())
+                    && (!is_recorded_wait(&wait, row) || timer_is_early(&wait, now))
+                {
                     return Ok(wait);
                 }
                 tokio::time::sleep(POLL_INTERVAL).await;

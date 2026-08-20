@@ -1,8 +1,10 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use finstack_ai_runtime::{ExternalClock, Model};
+use finstack_ai_kernel::RunPhase;
+use finstack_ai_runtime::{CommitCoordinator, ExternalClock, JournalStore, Model};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
 use finstack_ai_workflow_local::{
     CronFire, CronSchedule, CronScheduleStore, IntervalSchedule, MemoryCronStore,
@@ -13,7 +15,7 @@ use finstack_ai_workflow_worker::{
 };
 
 use crate::helpers::{
-    completed_plan, memory_store, park_on_retry_timer, profile, retryable_failure, timestamp,
+    completed_plan, id, memory_store, park_on_retry_timer, profile, retryable_failure, timestamp,
 };
 
 struct BindPorts {
@@ -91,8 +93,11 @@ async fn tick_fires_due_cron_and_starts_runs_exactly_once() {
     assert_eq!(starter.calls.load(Ordering::Acquire), 1);
 }
 
+/// A due timer row is claimed, its committed timer is fired, and — because
+/// the run then re-enters the facade-driven stage loop, which no worker can
+/// advance — the row is preserved for a later tick instead of being dropped.
 #[tokio::test]
-async fn tick_resumes_a_due_timer_and_clears_its_wake_row() {
+async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
     let journal = memory_store();
     // Model: first request fails retryably (parks a retry timer), the
     // retried request completes.
@@ -111,6 +116,7 @@ async fn tick_resumes_a_due_timer_and_clears_its_wake_row() {
     park(&mut session, store.as_ref(), "research").expect("park");
     drop(session);
 
+    let recover_from = Arc::clone(&journal) as Arc<dyn JournalStore>;
     let worker = WorkerBuilder::new(
         journal,
         Arc::new(MemoryCronStore::new()),
@@ -119,17 +125,100 @@ async fn tick_resumes_a_due_timer_and_clears_its_wake_row() {
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
+    .drive_timeout(Duration::from_millis(500))
     .register_ports("research", Arc::new(BindPorts { model }))
     .build();
 
     let before_due = Box::pin(worker.tick()).await.expect("before due");
     assert_eq!(before_due.sessions_resumed, 0);
+    assert_eq!(before_due.failures, 0);
+    let asleep = CommitCoordinator::recover(Arc::clone(&recover_from), id(1))
+        .await
+        .expect("recover");
+    assert_eq!(
+        asleep.state().phase,
+        Some(RunPhase::Sleeping),
+        "an undue timer is left alone"
+    );
+
     clock.jump(60_000).expect("past due");
     let resumed = Box::pin(worker.tick()).await.expect("resume");
-    assert_eq!(resumed.sessions_resumed, 1);
-    assert_eq!(resumed.failures, 0);
+
+    // The worker respawned the owner, which fired the committed timer: the
+    // run is awake and its retry is settled.
+    let awake = CommitCoordinator::recover(recover_from, id(1))
+        .await
+        .expect("recover");
     assert!(
-        store.load_tenant("tenant-a").expect("rows").is_empty(),
-        "a resumed run leaves no stale wake row"
+        awake.state().retry.pending.is_none(),
+        "the due timer fired and cleared the pending retry"
     );
+    assert_ne!(awake.state().phase, Some(RunPhase::Sleeping));
+
+    // The woken run is mid-flight in the stage loop with no classifiable
+    // wait, so this worker cannot park it. The row must survive, unleased
+    // and backed off, rather than leaving an orphaned run behind.
+    assert_eq!(resumed.sessions_resumed, 0);
+    assert_eq!(resumed.failures, 1);
+    let rows = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows.len(), 1, "a run the worker cannot park keeps its row");
+    assert_eq!(rows[0].attempts, 1);
+    assert_eq!(rows[0].leased_by, None);
+    assert_eq!(rows[0].wake_at, Some(timestamp(63_000)), "1s backoff");
+}
+
+/// A wake row that is due before the committed timer is takes the fast path:
+/// the worker re-parks on the journal's own due time instead of spending the
+/// drive budget on a timer that cannot fire yet.
+#[tokio::test]
+async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
+    let journal = memory_store();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![ScriptedModelPlan {
+            actions: vec![ScriptedModelAction::Emit(Err(retryable_failure()))],
+        }],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    let mut session = Box::pin(park_on_retry_timer(&journal, &model, &clock, 800)).await;
+    let store = Arc::new(MemoryWorkerStore::new());
+    park(&mut session, store.as_ref(), "research").expect("park");
+    drop(session);
+
+    // The committed retry timer is due at 2_310. Rewrite the hint row as if
+    // it had been indexed early, then tick between the two instants.
+    let mut early = store.load_tenant("tenant-a").expect("rows").remove(0);
+    assert_eq!(early.wake_at, Some(timestamp(2_310)));
+    early.wake_at = Some(timestamp(2_100));
+    store.upsert(&early).expect("early row");
+    clock.set(timestamp(2_200));
+
+    let worker = WorkerBuilder::new(
+        journal,
+        Arc::new(MemoryCronStore::new()),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .clock(clock.clone())
+    .drive_timeout(Duration::from_secs(30))
+    .register_ports("research", Arc::new(BindPorts { model }))
+    .build();
+
+    let reparked = tokio::time::timeout(Duration::from_secs(5), Box::pin(worker.tick()))
+        .await
+        .expect("the fast path does not spend the drive budget")
+        .expect("tick");
+    assert_eq!(reparked.sessions_resumed, 1);
+    assert_eq!(reparked.sessions_reparked, 1);
+    assert_eq!(reparked.failures, 0);
+    let rows = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].wake_at,
+        Some(timestamp(2_310)),
+        "the row is corrected to the journal's due time"
+    );
+    assert_eq!(rows[0].attempts, 0);
+    assert_eq!(rows[0].leased_by, None);
 }
