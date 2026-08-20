@@ -124,25 +124,7 @@ fn deferred(job: &str) -> ScriptedModelPlan {
 }
 
 fn completed(text: &str) -> ScriptedModelPlan {
-    ScriptedModelPlan {
-        actions: vec![
-            ScriptedModelAction::Emit(Ok(ModelStreamItem::TextDelta(
-                finstack_ai_runtime::TextDelta {
-                    text: Arc::from(text),
-                },
-            ))),
-            ScriptedModelAction::Emit(Ok(ModelStreamItem::Completed(ModelResponse {
-                assistant_content: Arc::from([ContentBlock::Text(
-                    TextBlock::try_new(text).expect("assistant text"),
-                )]),
-                tool_calls: Arc::from([]),
-                usage: Usage::empty(),
-                provider_ids: ProviderIds::empty(),
-                completion_id: Arc::from("preview-completion"),
-                continuation_state: None,
-            }))),
-        ],
-    }
+    completed_with_id(text, "preview-completion")
 }
 
 fn completed_with_id(text: &str, completion_id: &str) -> ScriptedModelPlan {

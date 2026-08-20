@@ -242,7 +242,7 @@ async fn before_model_bounce_adds_feedback_context() {
                 panic!("expected text block");
             };
             let text = block.text();
-            assert!(text.contains("Evidence verification rejected the previous answer"));
+            assert!(text.contains("Evidence verification found issues with the previous assistant answer"));
             assert!(text.contains("[citation]"));
             assert!(text.contains("missing citation"));
         }

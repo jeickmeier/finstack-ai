@@ -38,7 +38,6 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::fmt;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
@@ -319,9 +318,18 @@ fn assistant_message_raw_json(message: &Message) -> Result<RawJson, MiddlewareEr
 
 /// Render bounce/reject findings as one trusted-application feedback
 /// context item.
+///
+/// The wording deliberately claims no rejection event: the trailing
+/// assistant message of a draft can also be one the facade bounced for a
+/// structured-output validation failure (which never passes through this
+/// middleware), so the item states the verifier's current findings about
+/// the answer being retried rather than asserting that evidence
+/// verification caused the retry.
 fn feedback_item(findings: &[EvidenceFinding]) -> Result<ContextItem, MiddlewareError> {
-    let lines = findings_lines(findings);
-    let text = format!("Evidence verification rejected the previous answer:\n{lines}");
+    let text = verdict_message(
+        "Evidence verification found issues with the previous assistant answer",
+        findings,
+    );
     let bounded = truncate_to_bytes(&text, TEXT_MAX_BYTES);
     let block = TextBlock::try_new(bounded).map_err(|_| {
         stable_error(
@@ -354,11 +362,18 @@ fn feedback_item(findings: &[EvidenceFinding]) -> Result<ContextItem, Middleware
 
 /// Bounded failure message for a `Reject` verdict.
 fn reject_message(findings: &[EvidenceFinding]) -> String {
+    verdict_message("evidence verification rejected the candidate", findings)
+}
+
+/// Shared verdict renderer: `intro` alone when there are no findings,
+/// otherwise `intro:` followed by one finding line each, bounded to the
+/// kernel text limit.
+fn verdict_message(intro: &str, findings: &[EvidenceFinding]) -> String {
     let lines = findings_lines(findings);
     let message = if lines.is_empty() {
-        "evidence verification rejected the candidate".to_owned()
+        intro.to_owned()
     } else {
-        format!("evidence verification rejected the candidate:\n{lines}")
+        format!("{intro}:\n{lines}")
     };
     truncate_to_bytes(&message, TEXT_MAX_BYTES).to_owned()
 }
@@ -384,25 +399,6 @@ fn truncate_to_bytes(text: &str, max_bytes: usize) -> &str {
     &text[..end]
 }
 
-/// Append `value` to `out` as an escaped JSON string body (no surrounding
-/// quotes).
-fn escape_json_into(value: &str, out: &mut String) {
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let code = c as u32;
-                let _ = write!(out, "\\u{code:04x}");
-            }
-            c => out.push(c),
-        }
-    }
-}
-
 /// Bounded, non-empty label check shared by the verifier id and policy
 /// version.
 fn validate_label(value: &str, reason: &'static str) -> Result<(), VerifyError> {
@@ -412,21 +408,32 @@ fn validate_label(value: &str, reason: &'static str) -> Result<(), VerifyError> 
     Ok(())
 }
 
+/// Serialized shape of the configuration identity behind
+/// [`configuration_digest`]. Field names are the digest's JSON keys.
+#[derive(serde::Serialize)]
+struct VerifyConfiguration<'a> {
+    backoff_ms: u64,
+    policy_version: &'a str,
+    verifier_id: &'a str,
+}
+
 /// Canonical-JSON digest over `{verifier_id, policy_version, backoff_ms}`.
 fn configuration_digest(
     verifier_id: &str,
     policy_version: &str,
     backoff_ms: u64,
 ) -> Result<Digest, VerifyError> {
-    let mut json = String::with_capacity(48 + verifier_id.len() + policy_version.len());
-    json.push_str(r#"{"backoff_ms":"#);
-    json.push_str(&backoff_ms.to_string());
-    json.push_str(r#","policy_version":""#);
-    escape_json_into(policy_version, &mut json);
-    json.push_str(r#"","verifier_id":""#);
-    escape_json_into(verifier_id, &mut json);
-    json.push_str(r#""}"#);
-    let raw = RawJson::parse(json.as_bytes()).map_err(|_| VerifyError::Configuration {
+    let configuration = VerifyConfiguration {
+        backoff_ms,
+        policy_version,
+        verifier_id,
+    };
+    let bytes = serde_json_canonicalizer::to_vec(&configuration).map_err(|_| {
+        VerifyError::Configuration {
+            reason: "invalid_configuration_encoding",
+        }
+    })?;
+    let raw = RawJson::parse(&bytes).map_err(|_| VerifyError::Configuration {
         reason: "invalid_configuration_encoding",
     })?;
     Ok(raw.digest())
