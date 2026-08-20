@@ -1,5 +1,6 @@
 pub mod finstack_ai
 pub use finstack_ai::ActiveCapability
+pub use finstack_ai::ApprovalGrantMode
 pub use finstack_ai::CapabilityActivationSource
 pub use finstack_ai::ExternalIdentityKey
 pub use finstack_ai::ExternalIdentityMap
@@ -873,6 +874,7 @@ pub finstack_ai::HostFeature::ArtifactStore
 pub finstack_ai::HostFeature::BudgetLedger
 pub finstack_ai::HostFeature::Custom
 pub finstack_ai::HostFeature::Custom::id: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::HostFeature::ObjectStore
 impl core::clone::Clone for finstack_ai::HostFeature
 pub fn finstack_ai::HostFeature::clone(&self) -> finstack_ai::HostFeature
 impl core::cmp::Eq for finstack_ai::HostFeature
@@ -1020,6 +1022,7 @@ pub async fn finstack_ai::Agent::e2b_sandbox(finstack_ai::E2bSandboxAgentSpec) -
 pub async fn finstack_ai::Agent::gateway(finstack_ai::GatewayAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::ollama(finstack_ai::OllamaAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 pub async fn finstack_ai::Agent::openai(finstack_ai::OpenAiAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+pub async fn finstack_ai::Agent::openrouter(finstack_ai::OpenRouterAgentSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 impl finstack_ai::Agent
 pub fn finstack_ai::Agent::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::ids::BundleId, (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>), (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)) -> finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::Agent::capability_catalog(&self) -> alloc::vec::Vec<finstack_ai::CapabilityCatalogEntry>
@@ -1171,6 +1174,7 @@ pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string
 pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
 pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
+pub finstack_ai::AnthropicAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::AttachmentInput
 pub finstack_ai::AttachmentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
 impl core::clone::Clone for finstack_ai::AttachmentInput
@@ -1417,6 +1421,7 @@ pub finstack_ai::LinkedAgent::default_timeout: core::time::Duration
 pub finstack_ai::LinkedAgent::model: finstack_ai_runtime::ports::model::identity::ModelName
 pub finstack_ai::LinkedAgent::settings: finstack_ai_runtime::ports::model::request::ModelSettings
 pub struct finstack_ai::LinkedAgentPorts
+pub finstack_ai::LinkedAgentPorts::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
 pub finstack_ai::LinkedAgentPorts::context_providers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>)>
 pub finstack_ai::LinkedAgentPorts::middleware: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>)>
 pub finstack_ai::LinkedAgentPorts::observers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>)>
@@ -1426,6 +1431,7 @@ impl core::default::Default for finstack_ai::LinkedAgentPorts
 pub fn finstack_ai::LinkedAgentPorts::default() -> finstack_ai::LinkedAgentPorts
 pub struct finstack_ai::LinkedCommon
 pub finstack_ai::LinkedCommon::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
 pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai::CapabilitySpec>
 pub finstack_ai::LinkedCommon::child_runs: finstack_ai::ChildRunPolicy
 pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
@@ -1520,12 +1526,28 @@ pub struct finstack_ai::OllamaAgentSpec
 pub finstack_ai::OllamaAgentSpec::base_url: alloc::string::String
 pub finstack_ai::OllamaAgentSpec::common: finstack_ai::LinkedCommon
 pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
+pub finstack_ai::OllamaAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub struct finstack_ai::OpenAiAgentSpec
 pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
 pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenAiAgentSpec::media_tools: bool
 pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenAiAgentSpec::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
 pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OpenRouterAgentSpec
+pub finstack_ai::OpenRouterAgentSpec::api_key: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenRouterAgentSpec::media_tools: bool
+pub finstack_ai::OpenRouterAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::referer: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::title: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OpenRouterMediaToolsSpec
+pub finstack_ai::OpenRouterMediaToolsSpec::api_key: alloc::string::String
+pub finstack_ai::OpenRouterMediaToolsSpec::referer: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterMediaToolsSpec::title: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OutstandingDeferral
 pub finstack_ai::OutstandingDeferral::deferred: finstack_ai_kernel::effects::lifecycle::EffectDeferred
 impl core::clone::Clone for finstack_ai::OutstandingDeferral
@@ -1610,6 +1632,7 @@ pub struct finstack_ai::RequiredServices
 pub finstack_ai::RequiredServices::agent_invoker: bool
 pub finstack_ai::RequiredServices::artifact_store: bool
 pub finstack_ai::RequiredServices::budget_ledger: bool
+pub finstack_ai::RequiredServices::object_store: bool
 impl core::clone::Clone for finstack_ai::RequiredServices
 pub fn finstack_ai::RequiredServices::clone(&self) -> finstack_ai::RequiredServices
 impl core::cmp::Eq for finstack_ai::RequiredServices
@@ -1716,6 +1739,7 @@ pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedC
 impl core::clone::Clone for finstack_ai::ResolvedRunPlan
 pub fn finstack_ai::ResolvedRunPlan::clone(&self) -> finstack_ai::ResolvedRunPlan
 pub struct finstack_ai::RunPolicy
+pub finstack_ai::RunPolicy::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
 pub finstack_ai::RunPolicy::child_runs: finstack_ai::ChildRunPolicy
 pub finstack_ai::RunPolicy::run_override_allowlist: alloc::collections::btree::set::BTreeSet<finstack_ai_kernel::primitives::ids::ComponentId>
 impl core::clone::Clone for finstack_ai::RunPolicy
@@ -1751,6 +1775,7 @@ pub struct finstack_ai::RuntimeServices
 pub finstack_ai::RuntimeServices::agent_invoker: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>>
 pub finstack_ai::RuntimeServices::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
 pub finstack_ai::RuntimeServices::budget_ledger: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::budget::BudgetLedger>>
+pub finstack_ai::RuntimeServices::object_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::object::ObjectStore>>
 impl core::clone::Clone for finstack_ai::RuntimeServices
 pub fn finstack_ai::RuntimeServices::clone(&self) -> finstack_ai::RuntimeServices
 impl core::default::Default for finstack_ai::RuntimeServices

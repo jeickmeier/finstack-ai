@@ -894,6 +894,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+ "subtle",
 ]
 
 [[package]]
@@ -1070,17 +1071,34 @@ dependencies = [
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-provider-openrouter",
  "finstack-ai-remote-child",
  "finstack-ai-runtime",
  "finstack-ai-sandbox-e2b",
  "finstack-ai-store-memory",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
+ "finstack-ai-tools-openai-media",
+ "finstack-ai-tools-openrouter-media",
  "finstack-ai-tools-skills",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
  "serde_path_to_error",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-codex-child"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
@@ -1172,9 +1190,23 @@ name = "finstack-ai-middleware-document-ingest"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "finstack-ai-context-memory",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+]
+
+[[package]]
+name = "finstack-ai-middleware-redaction"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "regex",
+ "serde",
  "serde_json",
  "serde_json_canonicalizer",
  "thiserror",
@@ -1247,6 +1279,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-observer-notify"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-observer-otel"
 version = "1.0.0"
 dependencies = [
@@ -1302,6 +1348,7 @@ dependencies = [
 name = "finstack-ai-provider-anthropic"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "criterion",
  "finstack-ai",
  "finstack-ai-kernel",
@@ -1321,6 +1368,7 @@ dependencies = [
 name = "finstack-ai-provider-ollama"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1335,6 +1383,23 @@ dependencies = [
 name = "finstack-ai-provider-openai"
 version = "1.0.0"
 dependencies = [
+ "base64",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-provider-openrouter"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "criterion",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1357,10 +1422,12 @@ dependencies = [
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
+ "finstack-ai-provider-openrouter",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "finstack-ai-tools-document",
+ "finstack-ai-tools-elicitation",
  "futures-util",
  "pyo3",
  "pyo3-async-runtimes",
@@ -1428,12 +1495,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-store-artifact-object"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-store-common"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-protocol",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+]
+
+[[package]]
 name = "finstack-ai-store-memory"
 version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
+ "finstack-ai-test",
+]
+
+[[package]]
+name = "finstack-ai-store-object-local"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-store-object-s3"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "futures-util",
+ "hmac",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1444,6 +1566,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
  "finstack-ai-test",
  "rusqlite",
  "serde",
@@ -1463,6 +1586,7 @@ dependencies = [
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-artifact-object",
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",
@@ -1509,6 +1633,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-tools-elicitation"
+version = "1.0.0"
+dependencies = [
+ "criterion",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-tools-filesystem"
 version = "1.0.0"
 dependencies = [
@@ -1538,6 +1677,38 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-tools-openai-media"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "finstack-ai-context-memory",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-tools-openrouter-media"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "finstack-ai-context-memory",
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -1982,6 +2153,15 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "http"
@@ -2548,6 +2728,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
 dependencies = [
  "rustix",
+]
+
+[[package]]
+name = "mime"
+version = "0.3.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
 ]
 
 [[package]]
@@ -3286,6 +3482,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -3973,6 +4170,12 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-bidi"

@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
-    ModelContextProfile, ModelError, ModelName, SecretString, StructuredOutputCapability,
-    TokenEstimatorRef, TokenEstimatorSource,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
+    ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -74,6 +74,7 @@ pub struct AnthropicConfig {
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
 impl fmt::Debug for AnthropicConfig {
@@ -89,6 +90,13 @@ impl fmt::Debug for AnthropicConfig {
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
+            .field(
+                "media_resolver",
+                &self
+                    .media_resolver
+                    .as_ref()
+                    .map_or("None", |_| "[resolver]"),
+            )
             .finish()
     }
 }
@@ -121,6 +129,7 @@ impl AnthropicConfig {
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
             max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
+            media_resolver: None,
         })
     }
 
@@ -220,6 +229,17 @@ impl AnthropicConfig {
         Ok(self)
     }
 
+    /// Attach a host-supplied media resolver enabling image/document input.
+    #[must_use]
+    pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
+        self.media_resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
+    }
+
     fn resolved_authentication(&self) -> Result<Authentication, ModelError> {
         let Some(reference) = &self.credential else {
             return Ok(Authentication::None);
@@ -303,6 +323,10 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
 }
 
 /// Provider facts for one configured Anthropic model name.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag toggles an independent, orthogonal capability advertised to the host"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnthropicModelConfig {
     /// Provider model name.
@@ -325,6 +349,10 @@ pub struct AnthropicModelConfig {
     pub thinking_budget_tokens: u64,
     /// Whether cache breakpoints may attach to the last stable system block.
     pub cache_breakpoints: bool,
+    /// Whether image input is accepted for this model.
+    pub input_images: bool,
+    /// Whether document (file) input is accepted for this model.
+    pub input_files: bool,
 }
 
 impl AnthropicModelConfig {
@@ -382,6 +410,8 @@ impl AnthropicModelConfig {
             thinking: false,
             thinking_budget_tokens: 1_024,
             cache_breakpoints: false,
+            input_images: false,
+            input_files: false,
         })
     }
 
@@ -415,14 +445,28 @@ impl AnthropicModelConfig {
         self
     }
 
+    /// Set whether image input is accepted for this model.
+    #[must_use]
+    pub const fn with_input_images(mut self, enabled: bool) -> Self {
+        self.input_images = enabled;
+        self
+    }
+
+    /// Set whether document (file) input is accepted for this model.
+    #[must_use]
+    pub const fn with_input_files(mut self, enabled: bool) -> Self {
+        self.input_files = enabled;
+        self
+    }
+
     pub(crate) fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: InputCapabilities {
                 text: true,
                 json: true,
-                images: false,
+                images: self.input_images,
                 audio: false,
-                files: false,
+                files: self.input_files,
             },
             context_profile: ModelContextProfile {
                 provider: Arc::from("anthropic"),
@@ -457,6 +501,8 @@ impl AnthropicModelConfig {
         self.reserved_output_tokens = update.context_profile.reserved_output_tokens;
         self.provider_overhead_tokens = update.context_profile.provider_overhead_tokens;
         self.parallel_tool_calls = update.parallel_tool_calls;
+        self.input_images = update.input.images;
+        self.input_files = update.input.files;
     }
 }
 
@@ -509,6 +555,37 @@ mod tests {
                 crate::error::CONFIG_INVALID
             );
         }
+    }
+
+    #[derive(Debug)]
+    struct FixtureResolver;
+
+    impl finstack_ai_runtime::MediaResolver for FixtureResolver {
+        fn resolve(
+            &self,
+            _blob: &finstack_ai_kernel::BlobRef,
+        ) -> finstack_ai_runtime::PortFuture<
+            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        > {
+            Box::pin(async {
+                Ok(finstack_ai_runtime::ResolvedMedia::Url(Arc::from(
+                    "https://example.test/a.png",
+                )))
+            })
+        }
+    }
+
+    #[test]
+    fn debug_with_a_media_resolver_attached_still_redacts_and_hides_resolver_internals() {
+        let secret = SecretString::try_new(CANARY).expect("secret");
+        let config = AnthropicConfig::try_new("https://api.anthropic.test")
+            .expect("config")
+            .with_authentication(Authentication::ApiKey(secret))
+            .with_media_resolver(Arc::new(FixtureResolver));
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains(CANARY));
+        assert!(rendered.contains("[resolver]"));
+        assert!(!rendered.contains("FixtureResolver"));
     }
 
     #[test]

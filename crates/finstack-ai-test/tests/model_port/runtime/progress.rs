@@ -38,6 +38,7 @@ async fn runtime_publishes_validated_progress_before_terminal_settlement() {
                 max_subscribers: 2,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

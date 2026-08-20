@@ -18,17 +18,20 @@ See [docs/site/python.md](../../docs/site/python.md). Callbacks are
 [T2](../../docs/site/security-trust-levels.md) and are not isolated.
 
 The curated wheel links the Rust-backed OpenAI Responses, Anthropic Messages,
-and native Ollama paths into the same extension module.
-`linked_providers()` reports `("openai", "anthropic", "ollama")`.
-`Agent.openai()`, `Agent.anthropic()`, and `Agent.ollama()` construct
-those T1 clients explicitly and accept the same keyword-only T2 ports as
-`Agent.from_python` (`toolsets`, `context_providers`, `middleware`,
-`observers`, `output_type`). `openai` takes required keyword-only `api_key`
-as Bearer auth and optional `reasoning_effort`; it always targets official
-OpenAI Responses. Output is capped at 128,000 tokens for `openai` and
-64,000 tokens for `anthropic`, the current Claude ceiling, while the linked
-context window remains 1,050,000 tokens. `ollama` stays keyless and uses
-`/api/chat`.
+OpenRouter Responses, and native Ollama paths into the same extension module.
+`linked_providers()` reports `("openai", "anthropic", "ollama", "openrouter")`.
+`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`, and
+`Agent.openrouter()` construct those T1 clients explicitly and accept the
+same keyword-only T2 ports as `Agent.from_python` (`toolsets`,
+`context_providers`, `middleware`, `observers`, `output_type`). `openai` and
+`openrouter` take required keyword-only `api_key` as Bearer auth and
+optional `reasoning_effort`; `openrouter` also accepts optional `referer`
+and `title` attribution headers and always targets
+`https://openrouter.ai/api/v1/responses`, while `openai` always targets
+official OpenAI Responses. Output is capped at 128,000 tokens for `openai`
+and `openrouter` and 64,000 tokens for `anthropic`, the current Claude
+ceiling, while the linked context window remains 1,050,000 tokens. `ollama`
+stays keyless and uses `/api/chat`.
 The factories do not read environment variables. Importing `finstack_ai` still
 does not create a provider client, initialize Tokio, read credentials, or open
 network resources.

@@ -115,7 +115,7 @@ pub use services::agent_invoker::{
 };
 pub use services::artifact::{
     ARTIFACT_INTEGRITY_FAILURE, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
-    MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
+    ArtifactStoreLimits, MAX_ARTIFACT_BYTES, stage_required_artifact, validate_staged_artifact,
 };
 pub use services::audit::{
     SecurityAuditCategory, SecurityAuditError, SecurityAuditEvent, SecurityAuditHealth,
@@ -128,6 +128,13 @@ pub use services::composition::{
 };
 pub use services::identity_map::{
     ExternalIdentityKey, ExternalIdentityMap, IdentityMapError, MemoryExternalIdentityMap,
+};
+pub use services::object::{
+    MAX_OBJECT_KEY_BYTES, OBJECT_INTEGRITY_FAILURE, OBJECT_INVALID_KEY, OBJECT_INVALID_METADATA,
+    OBJECT_IO_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, OBJECT_TOO_LARGE,
+    OBJECT_UNAVAILABLE, OBJECT_UNSUPPORTED, ObjectEntry, ObjectError, ObjectKey, ObjectMetadata,
+    ObjectPage, ObjectRef, ObjectScope, ObjectStore, ObjectStoreLimits, PageToken, PresignedUrl,
+    PutPayload, physical_object_key, validate_object_metadata,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use services::process_confinement::{
@@ -173,25 +180,27 @@ pub use middleware::{
     validate_compaction_result, validate_stage_outcome,
 };
 pub use model::{
-    AnthropicMessagesAssembly, ApprovalMetadata, ApprovalRequirement, AssembledModelStream,
-    Authentication, AuthorizationContext, CancellationSignal, CredentialReference,
-    CredentialRejected, CredentialStore, InputCapabilities, LockedModelContextProfile,
-    MODEL_RECONCILIATION_UNSUPPORTED, MODEL_REQUEST_INVALID, MODEL_RESPONSE_MISMATCH,
-    MODEL_STREAM_DUPLICATE_COMPLETION, MODEL_STREAM_ERROR_AFTER_COMPLETION,
-    MODEL_STREAM_ITEM_AFTER_COMPLETION, MODEL_STREAM_LIMIT_EXCEEDED,
-    MODEL_STREAM_MISSING_COMPLETION, MODEL_TOOL_CALL_ARGUMENTS_INVALID,
-    MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE, MODEL_USAGE_INVALID, Model,
+    AnthropicMessagesAssembly, ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement,
+    AssembledModelStream, Authentication, AuthorizationContext, CancellationSignal,
+    CredentialReference, CredentialRejected, CredentialStore, InputCapabilities,
+    LockedModelContextProfile, MODEL_RECONCILIATION_UNSUPPORTED, MODEL_REQUEST_INVALID,
+    MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
+    MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
+    MODEL_STREAM_LIMIT_EXCEEDED, MODEL_STREAM_MISSING_COMPLETION,
+    MODEL_TOOL_CALL_ARGUMENTS_INVALID, MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE,
+    MODEL_USAGE_INVALID, MediaResolveError, MediaResolveKind, MediaResolver, Model,
     ModelCallContext, ModelCapabilities, ModelContextProfile, ModelContextProfileOverride,
     ModelDeferral, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelProgress,
     ModelReconcileResult, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelResponse,
     ModelResumeAction, ModelSettings, ModelStreamAssembler, ModelStreamItem, ModelStreamLimits,
     ModelTerminal, ModelTokenEstimate, ModelToolCall, ModelWarmupContext, NdjsonError,
     NdjsonParser, OllamaChatAssembly, OllamaReplayEntry, OpaqueProviderEvent,
-    OpenAiResponsesAssembly, ReasoningDelta, ReconcileContext, RunCallContext, SECRET_MAX_BYTES,
-    SecretRejected, SecretString, SideEffectClass, SseEvent, SseEventParser, SseParseError,
-    StreamNormError, StreamNormKind, StructuredOutputCapability, TextDelta, TokenEstimatorRef,
-    TokenEstimatorSource, ToolCallDelta, ToolDeferralSupport, ToolSpec, UsageDelta,
-    model_resume_action, resolve_model_context_profile, secret_is_valid,
+    OpenAiResponsesAssembly, ReasoningDelta, ReconcileContext, ResolveDraftMediaError,
+    ResolvedMedia, RunCallContext, SECRET_MAX_BYTES, SecretRejected, SecretString, SideEffectClass,
+    SseEvent, SseEventParser, SseParseError, StreamNormError, StreamNormKind,
+    StructuredOutputCapability, TextDelta, TokenEstimatorRef, TokenEstimatorSource, ToolCallDelta,
+    ToolDeferralSupport, ToolSpec, UsageDelta, model_resume_action, resolve_draft_media,
+    resolve_model_context_profile, secret_is_valid,
 };
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub(crate) use model::{MODEL_PROFILE_INVALID, map_model_reconcile_result, model_retry_allowed};
@@ -208,9 +217,9 @@ pub use observer::{
 };
 pub use ports::{PortFuture, PortObject, PortStream};
 pub use tool::{
-    AssembledToolStream, JsonSchemaToolValidatorCompiler, MCP_SAMPLING_REQUIRED, NestedSample,
-    PendingToolEffect, ResolvedTool, ResolvedToolCatalog, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED,
-    TOOL_DEFERRAL_EXPIRED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
+    ApprovalState, AssembledToolStream, JsonSchemaToolValidatorCompiler, MCP_SAMPLING_REQUIRED,
+    NestedSample, PendingToolEffect, ResolvedTool, ResolvedToolCatalog, TOOL_CANCELLED,
+    TOOL_DEADLINE_EXCEEDED, TOOL_DEFERRAL_EXPIRED, TOOL_INTERACTION_REQUIRED, TOOL_OUTPUT_INVALID,
     TOOL_RECONCILIATION_UNSUPPORTED, ToolCallContext, ToolCatalogPlan, ToolDeferral, ToolError,
     ToolEventStream, ToolExecutionPolicy, ToolPolicyDecision, ToolReconcileResult, ToolResult,
     ToolResumeAction, ToolStreamAssembler, ToolStreamItem, ToolStreamLimits, ToolTerminal,

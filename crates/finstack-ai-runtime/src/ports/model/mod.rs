@@ -64,14 +64,15 @@ pub use profile::{
 };
 pub use provider_util::{
     AnthropicMessagesAssembly, Authentication, CredentialReference, CredentialRejected,
-    CredentialStore, NdjsonError, NdjsonParser, OllamaChatAssembly, OllamaReplayEntry,
-    OpenAiResponsesAssembly, SECRET_MAX_BYTES, SecretRejected, SecretString, SseEvent,
-    SseEventParser, SseParseError, StreamNormError, StreamNormKind, secret_is_valid,
+    CredentialStore, MediaResolveError, MediaResolveKind, MediaResolver, NdjsonError, NdjsonParser,
+    OllamaChatAssembly, OllamaReplayEntry, OpenAiResponsesAssembly, ResolveDraftMediaError,
+    ResolvedMedia, SECRET_MAX_BYTES, SecretRejected, SecretString, SseEvent, SseEventParser,
+    SseParseError, StreamNormError, StreamNormKind, resolve_draft_media, secret_is_valid,
 };
 pub use request::{
-    ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft, ModelRequestLimits,
-    ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall, SideEffectClass,
-    ToolDeferralSupport, ToolSpec,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, ModelDeferral, ModelRequestDraft,
+    ModelRequestLimits, ModelResponse, ModelSettings, ModelTokenEstimate, ModelToolCall,
+    SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 pub use stream::{
     AssembledModelStream, ModelEventStream, ModelProgress, ModelStreamAssembler, ModelStreamItem,

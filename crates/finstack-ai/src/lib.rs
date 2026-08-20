@@ -56,7 +56,8 @@ pub use agent::{
     CAPABILITY_ACTIVATION_BOUND, CAPABILITY_ACTIVATION_FAILED, CapabilityCatalogEntry,
     E2bSandboxAgentSpec, GatewayAgentSpec, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_RUN_ATTACHMENTS, NativeAgentBuilder,
-    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, RemoteChildRouteSpec,
+    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
+    OpenRouterMediaToolsSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{
@@ -106,6 +107,7 @@ pub use result::{
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 pub use session::{Lane, Session};
 pub use spec::{
-    AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, CapabilityActivation,
-    CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec, RunPolicy,
+    AGENT_SPEC_SCHEMA_VERSION, AgentBuilder, AgentSpec, AgentSpecError, ApprovalGrantMode,
+    CapabilityActivation, CapabilityRef, CapabilitySpec, ChildRunPolicy, InstructionSpec,
+    RunPolicy,
 };

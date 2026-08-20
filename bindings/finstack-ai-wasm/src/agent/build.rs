@@ -98,6 +98,7 @@ pub(super) async fn build_agent(
     store: Option<Arc<dyn JournalStore>>,
     capabilities: Vec<CapabilitySpec>,
     active_capabilities: Vec<CapabilityId>,
+    approval_grant: finstack_ai::ApprovalGrantMode,
 ) -> Result<Agent, JsValue> {
     let document_ingest = document_ingest_ports()?;
     toolsets.push(document_ingest.toolset);
@@ -140,9 +141,11 @@ pub(super) async fn build_agent(
                 context_providers,
                 middleware,
                 observers,
+                artifact_store: Some(Arc::clone(&document_ingest.artifact_store)),
                 output_schema: None,
             },
             child_runs: ChildRunPolicy::Deny,
+            approval_grant,
         },
         model_name.clone(),
         settings,
@@ -156,6 +159,23 @@ pub(super) async fn build_agent(
         artifact_store: document_ingest.artifact_store,
         attachment_index: document_ingest.attachment_index,
     })
+}
+
+/// Parse the optional JS factory string. Omitted or `per_call` is the
+/// default. Unknown values fail closed so hosts cannot invent a mode.
+pub(super) fn parse_approval_grant(
+    value: Option<&str>,
+) -> Result<finstack_ai::ApprovalGrantMode, JsValue> {
+    match value {
+        None | Some("") | Some("per_call") => Ok(finstack_ai::ApprovalGrantMode::PerCall),
+        Some("informed_batch") => Ok(finstack_ai::ApprovalGrantMode::InformedBatch),
+        Some(other) => Err(agent_error(
+            &configuration_error(format!(
+                "approval_grant must be per_call or informed_batch: {other}"
+            )),
+            None,
+        )),
+    }
 }
 
 pub(super) async fn inspect_session_inner(

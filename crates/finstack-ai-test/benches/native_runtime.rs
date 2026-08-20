@@ -19,7 +19,8 @@ use finstack_ai::runtime::{
 use finstack_ai::{Agent, AgentRunRequest, PrincipalRef, RunSecurityContext};
 use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Version};
 use finstack_ai_runtime::{
-    CommitCoordinator, EventHubConfig, RunTaskConfig, RunTaskOwner, ShutdownOutcome,
+    ApprovalGrantMode, CommitCoordinator, EventHubConfig, RunTaskConfig, RunTaskOwner,
+    ShutdownOutcome,
 };
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
@@ -153,6 +154,7 @@ fn run_config() -> RunTaskConfig {
             max_subscribers: 1,
         },
         shutdown_deadline: Duration::from_secs(1),
+        approval_grant: ApprovalGrantMode::PerCall,
     }
 }
 

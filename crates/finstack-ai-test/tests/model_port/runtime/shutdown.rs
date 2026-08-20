@@ -28,6 +28,7 @@ async fn shutdown_aborts_an_uncooperative_model_only_after_its_grace_deadline() 
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(10),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

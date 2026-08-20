@@ -88,9 +88,11 @@ async fn prefix_c1_through_c5() {
         metadata.attributes.clone(),
     )
     .expect("artifact");
-    validate_staged_artifact(&scope, content, &metadata, &artifact).expect("C3 valid artifact");
-    let err =
-        validate_staged_artifact(&scope, b"corrupt", &metadata, &artifact).expect_err("C4 corrupt");
+    let limits = ArtifactStoreLimits::default();
+    validate_staged_artifact(&scope, content, &metadata, &artifact, &limits)
+        .expect("C3 valid artifact");
+    let err = validate_staged_artifact(&scope, b"corrupt", &metadata, &artifact, &limits)
+        .expect_err("C4 corrupt");
     assert_eq!(
         match err {
             finstack_ai_runtime::ArtifactError::Integrity { .. } => err.code(),

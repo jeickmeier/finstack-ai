@@ -1,6 +1,7 @@
 ActiveCapability
 Agent
 AgentOptions
+ApprovalGrantMode
 Capability
 CapabilityActivation
 CapabilityCatalogItem

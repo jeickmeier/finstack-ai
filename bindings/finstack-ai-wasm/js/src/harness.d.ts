@@ -1,5 +1,6 @@
 import type {
   Agent,
+  ApprovalGrantMode,
   BuildMetadata,
   FinstackError,
   HostArtifactStore,
@@ -60,6 +61,7 @@ declare global {
       health: () => string;
       buildMetadata: () => BuildMetadata;
       Agent: typeof Agent;
+      ApprovalGrantMode: typeof ApprovalGrantMode;
       FinstackError: typeof FinstackError;
       compilePortProxies: () => void;
       runNoopTrace: () => string;

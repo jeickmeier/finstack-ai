@@ -106,9 +106,9 @@ impl Default for FileSystemLimits {
 }
 
 impl FileSystemLimits {
-    fn validate(self) -> Result<Self, FileSystemError> {
+    fn validate(self, max_artifact_bytes: usize) -> Result<Self, FileSystemError> {
         if self.file_bytes == 0
-            || self.file_bytes > finstack_ai_runtime::MAX_ARTIFACT_BYTES
+            || self.file_bytes > max_artifact_bytes
             || self.visited_entries == 0
             || self.visited_entries > 1_000_000
             || self.search_matches == 0
@@ -149,6 +149,7 @@ pub struct FileSystemToolset {
     tools: Arc<[ToolSpec]>,
     tool_ids: Arc<[ToolId]>,
     limits: FileSystemLimits,
+    max_artifact_bytes: usize,
     protected: ProtectedPaths,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     sensitivity: Sensitivity,
@@ -190,6 +191,7 @@ impl FileSystemToolset {
             tools,
             tool_ids,
             limits: FileSystemLimits::default(),
+            max_artifact_bytes: finstack_ai_runtime::MAX_ARTIFACT_BYTES,
             protected: ProtectedPaths::defaults(),
             artifact_store: None,
             sensitivity: Sensitivity::Internal,
@@ -215,7 +217,7 @@ impl FileSystemToolset {
     ///
     /// Rejects zero or excessive bounds.
     pub fn try_with_limits(mut self, limits: FileSystemLimits) -> Result<Self, FileSystemError> {
-        self.limits = limits.validate()?;
+        self.limits = limits.validate(self.max_artifact_bytes)?;
         Ok(self)
     }
 
@@ -237,16 +239,23 @@ impl FileSystemToolset {
         Ok(self)
     }
 
-    /// Attach the scoped store required for results above the inline ceiling.
-    #[must_use]
+    /// Attach the scoped store required for results above the inline
+    /// ceiling, and follow its artifact byte ceiling for `file_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects when the previously configured `file_bytes` no longer fits
+    /// under the store's ceiling.
     pub fn with_artifact_store(
         mut self,
         store: Arc<dyn ArtifactStore>,
         sensitivity: Sensitivity,
-    ) -> Self {
+    ) -> Result<Self, FileSystemError> {
+        self.max_artifact_bytes = store.limits().max_artifact_bytes;
+        self.limits = self.limits.validate(self.max_artifact_bytes)?;
         self.artifact_store = Some(store);
         self.sensitivity = sensitivity;
-        self
+        Ok(self)
     }
 }
 
@@ -280,6 +289,10 @@ impl Toolset for FileSystemToolset {
         {
             let tool_ids = Arc::clone(&self.tool_ids);
             let limits = self.limits;
+            let ceilings = crate::operation::FileSystemCeilings {
+                limits,
+                max_artifact_bytes: self.max_artifact_bytes,
+            };
             let protected = self.protected.clone();
             let artifact_store = self.artifact_store.clone();
             let sensitivity = self.sensitivity;
@@ -289,7 +302,7 @@ impl Toolset for FileSystemToolset {
                 let operation = decode_operation(&call, &tool_ids, &protected, limits)?;
                 let cancellation = ctx.run.cancellation.clone();
                 let output = tokio::task::spawn_blocking(move || {
-                    operation.execute(&root, limits, &protected, &cancellation)
+                    operation.execute(&root, ceilings, &protected, &cancellation)
                 })
                 .await
                 .map_err(|_| {

@@ -996,7 +996,7 @@ fn build_tools() -> Result<(Arc<[ToolSpec]>, ToolId), ShellError> {
             "Execute one allowlisted argv vector under an empty host environment.",
         ),
         input_schema: RawJson::parse(
-            br#"{"additionalProperties":false,"properties":{"argv":{"items":{"type":"string"},"maxItems":64,"minItems":1,"type":"array"},"cwd":{"type":"string"}},"required":["argv"],"type":"object"}"#,
+            br#"{"additionalProperties":false,"properties":{"argv":{"items":{"type":"string"},"maxItems":64,"minItems":1,"type":"array"},"cwd":{"type":["string","null"]}},"required":["argv","cwd"],"type":"object"}"#,
         )
         .map_err(|_| ShellError::Configuration {
             reason: "invalid_input_schema",

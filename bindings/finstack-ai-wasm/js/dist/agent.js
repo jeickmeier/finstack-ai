@@ -3,6 +3,54 @@ import { requireWasm, wasmContextProviderHandle, wasmJournalStoreHandle, wasmMid
 import { FinstackError } from "./errors.js";
 export { FinstackError } from "./errors.js";
 /**
+ * How a run parks and releases paid-tool approvals.
+ *
+ * Maps onto Rust `RunPolicy.approval_grant`. Defaults to
+ * {@link ApprovalGrantMode.perCall}: one park per unpaid Policy or
+ * Required tool call. {@link ApprovalGrantMode.informedBatch} parks once
+ * listing every unpaid paid tool. Neither mode relaxes the `Policy`
+ * catalog floor.
+ */
+export class ApprovalGrantMode {
+    #name;
+    constructor(name) {
+        this.#name = name;
+    }
+    /**
+     * Park once per unpaid paid tool call.
+     *
+     * @returns A per-call grant mode consumed by {@link Agent.create}.
+     */
+    static perCall() {
+        return new ApprovalGrantMode("per_call");
+    }
+    /**
+     * Park once listing every unpaid paid tool call.
+     *
+     * @returns An informed-batch grant mode consumed by {@link Agent.create}.
+     */
+    static informedBatch() {
+        return new ApprovalGrantMode("informed_batch");
+    }
+    /**
+     * Wire token consumed by the WASM factory.
+     *
+     * @returns `per_call` or `informed_batch`.
+     */
+    toWire() {
+        return this.#name;
+    }
+}
+function approvalGrantWire(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value instanceof ApprovalGrantMode) {
+        return value.toWire();
+    }
+    return value;
+}
+/**
  * Rust-owned resolved agent handle.
  */
 export class Agent {
@@ -21,7 +69,8 @@ export class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, instruction, store, and capabilities.
+     * @param options - Model, optional toolsets, instruction, store, capabilities,
+     * and approval grant.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -38,6 +87,7 @@ export class Agent {
      *     instructions: ["Always instruction."],
      *     activation: "always",
      *   }],
+     *   approvalGrant: ApprovalGrantMode.perCall(),
      * });
      * const result = await agent.run("hello");
      * ```
@@ -51,7 +101,7 @@ export class Agent {
                 ? undefined
                 : JSON.stringify(options.capabilities), options.activeCapabilities === undefined
                 ? undefined
-                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)));
+                : JSON.stringify(options.activeCapabilities), (options.contextProviders ?? []).map((provider) => wasmContextProviderHandle(provider)), (options.middleware ?? []).map((middleware) => wasmMiddlewareHandle(middleware)), (options.observers ?? []).map((observer) => wasmObserverHandle(observer)), approvalGrantWire(options.approvalGrant));
             return new Agent(handle);
         }
         catch (error) {

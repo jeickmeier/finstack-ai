@@ -12,12 +12,12 @@ use finstack_ai_kernel::ComponentId;
 use finstack_ai_kernel::{AgentId, BundleId};
 use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::{
-    ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
+    ArtifactStore, ContextProvider, Middleware, ModelName, ModelSettings, Observer, Toolset,
 };
 #[cfg(feature = "native-tokio")]
 use finstack_ai_runtime::{JournalStore, Model};
 
-use crate::{CapabilitySpec, ChildRunPolicy, RunPolicy};
+use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
 
 use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
@@ -40,6 +40,8 @@ const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
 #[cfg(feature = "native-tokio")]
 const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
 #[cfg(feature = "native-tokio")]
+const LINKED_MEDIA_MAX_RESULT_BYTES: usize = 262_144;
+#[cfg(feature = "native-tokio")]
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 #[cfg(feature = "native-tokio")]
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
@@ -55,6 +57,9 @@ pub struct LinkedAgentPorts {
     pub middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
     /// Observer registrations.
     pub observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
+    /// Store for toolsets that stage bytes instead of inlining them. Without
+    /// it, generated audio and images travel as base64 the model cannot use.
+    pub artifact_store: Option<Arc<dyn ArtifactStore>>,
     /// Optional compiled output schema. Bindings convert host schema types.
     pub output_schema: Option<RawJson>,
 }
@@ -84,6 +89,21 @@ pub struct LinkedCommon {
     pub ports: LinkedAgentPorts,
     /// Child-run policy. Bindings default this to Deny.
     pub child_runs: ChildRunPolicy,
+    /// Paid-tool approval grant mode. Bindings default this to `PerCall`.
+    pub approval_grant: ApprovalGrantMode,
+}
+
+/// `OpenRouter` media-toolset registration for any linked constructor.
+///
+/// The toolset always authenticates against `OpenRouter`, so it carries its
+/// own API key even when the chat model is served by another provider.
+pub struct OpenRouterMediaToolsSpec {
+    /// Explicit `OpenRouter` API key for the media endpoints.
+    pub api_key: String,
+    /// Optional non-secret `HTTP-Referer` attribution header.
+    pub referer: Option<String>,
+    /// Optional non-secret `X-Title` attribution header.
+    pub title: Option<String>,
 }
 
 /// Arguments for [`Agent::openai`].
@@ -96,6 +116,31 @@ pub struct OpenAiAgentSpec {
     pub reasoning_effort: Option<String>,
     /// Optional Responses reasoning summary.
     pub reasoning_summary: Option<String>,
+    /// Register the native `OpenAI` media toolset alongside the model.
+    pub media_tools: bool,
+    /// Optional `OpenRouter` media-toolset registration.
+    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
+    /// Shared instruction, ports, and child-run policy.
+    pub common: LinkedCommon,
+}
+
+/// Arguments for [`Agent::openrouter`].
+pub struct OpenRouterAgentSpec {
+    /// `OpenRouter` model identifier (e.g. `openai/gpt-5`; `:nitro` and
+    /// `:floor` routing suffixes are allowed).
+    pub model: String,
+    /// Explicit Bearer credential. Never read from the environment.
+    pub api_key: String,
+    /// Optional non-secret `HTTP-Referer` attribution header.
+    pub referer: Option<String>,
+    /// Optional non-secret `X-Title` attribution header.
+    pub title: Option<String>,
+    /// Optional Responses reasoning effort.
+    pub reasoning_effort: Option<String>,
+    /// Optional Responses reasoning summary.
+    pub reasoning_summary: Option<String>,
+    /// Register the `OpenRouter` media-generation toolset alongside the model.
+    pub media_tools: bool,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -108,6 +153,8 @@ pub struct AnthropicAgentSpec {
     pub model: String,
     /// Optional API key. HTTPS is required when set.
     pub api_key: Option<String>,
+    /// Optional `OpenRouter` media-toolset registration.
+    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -118,6 +165,8 @@ pub struct OllamaAgentSpec {
     pub base_url: String,
     /// Model name.
     pub model: String,
+    /// Optional `OpenRouter` media-toolset registration.
+    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -180,6 +229,7 @@ impl NativeAgentBuilder {
             active_capabilities,
             ports,
             child_runs,
+            approval_grant,
         } = common;
         for (component, toolset) in ports.toolsets {
             self = self.toolset(component, toolset);
@@ -204,6 +254,7 @@ impl NativeAgentBuilder {
         }
         self = self.policy(RunPolicy {
             child_runs,
+            approval_grant,
             ..RunPolicy::default()
         });
         let agent = self.build().await?;
@@ -234,6 +285,31 @@ impl Agent {
     /// reasoning settings are invalid.
     pub async fn openai(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
         openai_inner(spec).await
+    }
+
+    /// Construct an `OpenRouter` Responses agent.
+    ///
+    /// Always targets `https://openrouter.ai/api/v1/responses`. Does not read
+    /// environment variables.
+    ///
+    /// Does not attach a [`finstack_ai_runtime::MediaResolver`]. Vision, file,
+    /// and audio input require a host-built provider with
+    /// `with_media_resolver`. ADR-049 rejected FFI resolvers on linked
+    /// constructors. `spec.media_tools` registers outbound media-generation
+    /// tools only.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec` - Model name, Bearer credential, optional attribution and
+    ///   reasoning fields, media-generation flag, and shared linked ports.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host`. Returns
+    /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when credentials, model,
+    /// attribution, or reasoning settings are invalid.
+    pub async fn openrouter(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+        openrouter_inner(spec).await
     }
 
     /// Construct an Anthropic Messages agent.
@@ -304,6 +380,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         spec.reasoning_effort.as_deref(),
         spec.reasoning_summary.as_deref(),
     )?;
+    let api_key_for_tools = spec.media_tools.then(|| spec.api_key.clone());
     let config = OpenAiConfig::try_new("https://api.openai.com")
         .map_err(|error| model_configuration_error(&error))?
         .with_authentication(Authentication::Bearer(
@@ -324,6 +401,13 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OpenAiProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
+    let mut common = spec.common;
+    if let Some(api_key_for_tools) = api_key_for_tools {
+        register_openai_media(&mut common.ports, api_key_for_tools)?;
+    }
+    if let Some(media) = spec.openrouter_media {
+        register_openrouter_media(&mut common.ports, media)?;
+    }
     build_linked_provider(
         (
             "python.agent.openai",
@@ -332,7 +416,67 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         ),
         provider,
         model_name,
-        spec.common,
+        common,
+        settings,
+        OPENAI_TIMEOUT,
+    )
+    .await
+}
+
+#[cfg(feature = "native-tokio")]
+async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    use finstack_ai_provider_openrouter::{
+        Authentication, OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider, SecretString,
+    };
+
+    let settings = reasoning_settings(
+        spec.reasoning_effort.as_deref(),
+        spec.reasoning_summary.as_deref(),
+    )?;
+    let api_key_for_tools = spec.media_tools.then(|| spec.api_key.clone());
+    let config = OpenRouterConfig::try_new("https://openrouter.ai")
+        .map_err(|error| model_configuration_error(&error))?
+        .with_authentication(Authentication::Bearer(
+            SecretString::try_new(spec.api_key).map_err(|_| secret_configuration_error())?,
+        ))
+        .map_err(|error| model_configuration_error(&error))?
+        .with_attribution(spec.referer.as_deref(), spec.title.as_deref())
+        .map_err(|error| model_configuration_error(&error))?;
+    let model_config = OpenRouterModelConfig::try_new(
+        &spec.model,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_CONTEXT_WINDOW_TOKENS,
+        LINKED_RESERVED_OUTPUT_TOKENS,
+        LINKED_RESERVED_OUTPUT_TOKENS,
+        LINKED_PROVIDER_OVERHEAD_TOKENS,
+    )
+    .map_err(|error| model_configuration_error(&error))?
+    .with_reasoning(true);
+    let model_name = model_config.name().clone();
+    let provider: Arc<dyn Model> = Arc::new(
+        OpenRouterProvider::try_new(config, vec![model_config])
+            .map_err(|error| model_configuration_error(&error))?,
+    );
+    let mut common = spec.common;
+    if let Some(api_key_for_tools) = api_key_for_tools {
+        register_openrouter_media(
+            &mut common.ports,
+            OpenRouterMediaToolsSpec {
+                api_key: api_key_for_tools,
+                referer: spec.referer.clone(),
+                title: spec.title.clone(),
+            },
+        )?;
+    }
+    build_linked_provider(
+        (
+            "python.agent.openrouter",
+            "python.bundle.openrouter",
+            "python.model.openrouter",
+        ),
+        provider,
+        model_name,
+        common,
         settings,
         OPENAI_TIMEOUT,
     )
@@ -366,6 +510,10 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         AnthropicProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
+    let mut common = spec.common;
+    if let Some(media) = spec.openrouter_media {
+        register_openrouter_media(&mut common.ports, media)?;
+    }
     build_linked_provider(
         (
             "python.agent.anthropic",
@@ -374,7 +522,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
         ),
         provider,
         model_name,
-        spec.common,
+        common,
         empty_model_settings()?,
         DEFAULT_TIMEOUT,
     )
@@ -401,6 +549,10 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
         OllamaProvider::try_new(config, vec![model_config])
             .map_err(|error| model_configuration_error(&error))?,
     );
+    let mut common = spec.common;
+    if let Some(media) = spec.openrouter_media {
+        register_openrouter_media(&mut common.ports, media)?;
+    }
     build_linked_provider(
         (
             "python.agent.ollama",
@@ -409,7 +561,7 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
         ),
         provider,
         model_name,
-        spec.common,
+        common,
         empty_model_settings()?,
         DEFAULT_TIMEOUT,
     )
@@ -635,6 +787,11 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
 }
 
 #[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
+async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
+    unsupported_provider(spec, "openrouter").await
+}
+
+#[cfg(all(feature = "wasm-host", not(feature = "native-tokio")))]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "anthropic").await
 }
@@ -718,6 +875,62 @@ fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
         })?,
         Some(super::PREVIEW_ENGINE_VERSION),
     ))
+}
+
+/// Register the `OpenAI` media toolset, attaching the host artifact store
+/// when the linked ports already have one.
+#[cfg(feature = "native-tokio")]
+fn register_openai_media(
+    ports: &mut LinkedAgentPorts,
+    api_key: String,
+) -> Result<(), AgentRunError> {
+    use finstack_ai_tools_openai_media::{OpenAiMediaConfig, OpenAiMediaToolset};
+
+    let toolset = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
+        api_key,
+        endpoint: String::new(),
+        max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let toolset = match ports.artifact_store.clone() {
+        Some(store) => toolset.with_artifact_store(store),
+        None => toolset,
+    };
+    ports
+        .toolsets
+        .push((component("python.toolset.openai_media")?, Arc::new(toolset)));
+    Ok(())
+}
+
+/// Register the `OpenRouter` media toolset on any linked constructor.
+#[cfg(feature = "native-tokio")]
+fn register_openrouter_media(
+    ports: &mut LinkedAgentPorts,
+    spec: OpenRouterMediaToolsSpec,
+) -> Result<(), AgentRunError> {
+    use finstack_ai_tools_openrouter_media::{OpenRouterMediaConfig, OpenRouterMediaToolset};
+
+    let toolset = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
+        api_key: spec.api_key,
+        endpoint: String::new(),
+        referer: spec.referer,
+        title: spec.title,
+        max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
+    })
+    .map_err(|error| {
+        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
+    })?;
+    let toolset = match ports.artifact_store.clone() {
+        Some(store) => toolset.with_artifact_store(store),
+        None => toolset,
+    };
+    ports.toolsets.push((
+        component("python.toolset.openrouter_media")?,
+        Arc::new(toolset),
+    ));
+    Ok(())
 }
 
 #[cfg(feature = "native-tokio")]
@@ -957,6 +1170,8 @@ mod tests {
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
             reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: None,
             common: LinkedCommon {
                 instruction: Some("Answer concisely.".into()),
                 ..common()
@@ -977,6 +1192,8 @@ mod tests {
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: Some("turbo".into()),
             reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: None,
             common: common(),
         })
         .await
@@ -994,6 +1211,8 @@ mod tests {
             api_key: canary.into(),
             reasoning_effort: None,
             reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: None,
             common: common(),
         })
         .await
@@ -1004,12 +1223,151 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn openai_media_tools_register_the_toolset() {
+        let built = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: true,
+            openrouter_media: Some(OpenRouterMediaToolsSpec {
+                api_key: "sk-or-media-canary".into(),
+                referer: None,
+                title: None,
+            }),
+            common: common(),
+        })
+        .await
+        .expect("openai + media construct");
+        assert!(built.agent.capability_catalog().is_empty());
+    }
+
+    #[tokio::test]
+    async fn openai_agent_registers_the_openrouter_media_toolset() {
+        let built = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: Some(OpenRouterMediaToolsSpec {
+                api_key: "sk-or-media-canary".into(),
+                referer: None,
+                title: None,
+            }),
+            common: common(),
+        })
+        .await
+        .expect("openai + openrouter media construct");
+        assert!(built.agent.capability_catalog().is_empty());
+    }
+
+    #[tokio::test]
+    async fn openai_agent_rejects_an_empty_media_api_key() {
+        let error = Agent::openai(OpenAiAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-openai-secret-canary-056".into(),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: Some(OpenRouterMediaToolsSpec {
+                api_key: String::new(),
+                referer: None,
+                title: None,
+            }),
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("empty media api key");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+    }
+
+    #[tokio::test]
+    async fn openrouter_constructs_without_a_network_request() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: Some("https://example.app".into()),
+            title: Some("Example App".into()),
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon {
+                instruction: Some("Answer concisely.".into()),
+                ..common()
+            },
+        })
+        .await
+        .expect("openrouter construct");
+        assert!(built.agent.capability_catalog().is_empty());
+        assert_eq!(built.default_timeout, OPENAI_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn openrouter_media_tools_register_the_toolset() {
+        let built = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: true,
+            common: common(),
+        })
+        .await
+        .expect("openrouter + media construct");
+        assert!(built.agent.capability_catalog().is_empty());
+    }
+
+    #[tokio::test]
+    async fn openrouter_invalid_attribution_does_not_leak_the_api_key() {
+        let canary = "sk-or-secret-canary-101";
+        let error = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: canary.into(),
+            referer: Some("bad\nreferer".into()),
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("invalid attribution");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(!error.to_string().contains(canary));
+    }
+
+    #[tokio::test]
+    async fn openrouter_rejects_unknown_reasoning_effort() {
+        let error = Agent::openrouter(OpenRouterAgentSpec {
+            model: "openai/gpt-5".into(),
+            api_key: "sk-or-secret-canary-101".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: Some("turbo".into()),
+            reasoning_summary: None,
+            media_tools: false,
+            common: common(),
+        })
+        .await
+        .err()
+        .expect("unknown effort");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("reasoning_effort"));
+    }
+
+    #[tokio::test]
     async fn anthropic_http_credentials_fail_closed_without_leaking_the_canary() {
         let canary = "sk-ant-secret-canary-055";
         let error = Agent::anthropic(AnthropicAgentSpec {
             base_url: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
+            openrouter_media: None,
             common: common(),
         })
         .await
@@ -1024,6 +1382,7 @@ mod tests {
         let built = Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
+            openrouter_media: None,
             common: common(),
         })
         .await

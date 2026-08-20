@@ -114,6 +114,22 @@ fn capability_serialization_is_declarative_only() {
 }
 
 #[test]
+fn run_policy_approval_grant_defaults_to_per_call_and_omits_from_json() {
+    let policy = RunPolicy::default();
+    assert_eq!(policy.approval_grant, ApprovalGrantMode::PerCall);
+    let encoded = serde_json::to_value(&policy).expect("json");
+    assert!(encoded.get("approval_grant").is_none());
+    let decoded: RunPolicy = serde_json::from_value(serde_json::json!({})).expect("default");
+    assert_eq!(decoded.approval_grant, ApprovalGrantMode::PerCall);
+    let batched = RunPolicy {
+        approval_grant: ApprovalGrantMode::InformedBatch,
+        ..RunPolicy::default()
+    };
+    let encoded = serde_json::to_value(&batched).expect("json");
+    assert_eq!(encoded["approval_grant"], "informed_batch");
+}
+
+#[test]
 fn compatibility_vectors_enforce_strict_spec_ingress() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/compatibility/agent-spec/v1/agent-spec");

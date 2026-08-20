@@ -1,11 +1,13 @@
 //! Private Ollama `/api/chat` request translation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use base64::Engine as _;
 use finstack_ai_kernel::{
     ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft};
+use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -56,6 +58,8 @@ struct WireMessage {
     tool_calls: Vec<WireToolCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    images: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,13 +107,14 @@ impl ChatRequest {
         draft: &ModelRequestDraft,
         model: &OllamaModelConfig,
         continuation: Option<&RawJson>,
+        resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<PreparedChat, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
         let matched_replay = resolve_replay(&draft.messages, continuation);
-        let messages = map_messages(&draft.messages, matched_replay.as_deref())?;
+        let messages = map_messages(&draft.messages, matched_replay.as_deref(), resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -209,6 +214,8 @@ fn resolve_replay(
 fn map_messages(
     messages: &[Message],
     replay: Option<&[ReplayEntry]>,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OllamaModelConfig,
 ) -> Result<Vec<WireMessage>, ModelError> {
     let mut mapped = Vec::new();
     let mut assistant_index = 0_usize;
@@ -228,7 +235,9 @@ fn map_messages(
         } else {
             None
         };
-        mapped.push(map_conversation_message(message, thinking)?);
+        mapped.push(map_conversation_message(
+            message, thinking, resolved, model,
+        )?);
     }
     Ok(mapped)
 }
@@ -236,6 +245,8 @@ fn map_messages(
 fn map_conversation_message(
     message: &Message,
     thinking: Option<String>,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &OllamaModelConfig,
 ) -> Result<WireMessage, ModelError> {
     let role = match message.role() {
         MessageRole::System | MessageRole::Developer => "system",
@@ -249,6 +260,7 @@ fn map_conversation_message(
     };
     let mut text = String::new();
     let mut tool_calls = Vec::new();
+    let mut images = Vec::new();
     for block in message.content() {
         match block {
             ContentBlock::Text(value) => text.push_str(value.text()),
@@ -260,6 +272,12 @@ fn map_conversation_message(
                         arguments: raw_value(call.arguments())?,
                     },
                 });
+            }
+            ContentBlock::Image(media) if message.role() == MessageRole::User => {
+                if !model.input_images {
+                    return Err(request_error("model is not configured for image input"));
+                }
+                images.push(resolved_image(media, resolved)?);
             }
             ContentBlock::Opaque(_) => {}
             _ => {
@@ -275,7 +293,25 @@ fn map_conversation_message(
         thinking,
         tool_calls,
         tool_name: None,
+        images,
     })
+}
+
+fn resolved_image(
+    media: &finstack_ai_kernel::MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<String, ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Bytes { bytes, .. }) => {
+            Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+        Some(ResolvedMedia::Url(_)) => Err(request_error(
+            "ollama image input requires resolved bytes, not a URL",
+        )),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
+        )),
+    }
 }
 
 fn map_tool_results(
@@ -292,6 +328,7 @@ fn map_tool_results(
                 thinking: None,
                 tool_calls: Vec::new(),
                 tool_name: Some(tool_name_for(messages, result.tool_call_id())?),
+                images: Vec::new(),
             }),
             _ => Err(request_error("tool messages contain unsupported content")),
         })
@@ -427,9 +464,14 @@ mod tests {
             OutputSpec::PlainText,
             vec![tool("lookup", br#"{"type":"object"}"#)],
         );
-        let request = ChatRequest::try_from_draft(&draft, &model().with_reasoning(true), None)
-            .expect("request")
-            .request;
+        let request = ChatRequest::try_from_draft(
+            &draft,
+            &model().with_reasoning(true),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect("request")
+        .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][0]["role"], "system");
         assert_eq!(value["messages"][0]["content"], "Stay concise.");
@@ -461,7 +503,7 @@ mod tests {
             },
             vec![tool(SUBMIT_FINAL_OUTPUT_TOOL, schema.as_bytes())],
         );
-        let request = ChatRequest::try_from_draft(&draft, &model(), None)
+        let request = ChatRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect("request")
             .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
@@ -516,7 +558,7 @@ mod tests {
             OutputSpec::PlainText,
             Vec::new(),
         );
-        let request = ChatRequest::try_from_draft(&draft, &model(), None)
+        let request = ChatRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect("request")
             .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
@@ -554,9 +596,10 @@ mod tests {
             .as_slice(),
         )
         .expect("continuation");
-        let request = ChatRequest::try_from_draft(&draft, &model(), Some(&matched))
-            .expect("request")
-            .request;
+        let request =
+            ChatRequest::try_from_draft(&draft, &model(), Some(&matched), &BTreeMap::new())
+                .expect("request")
+                .request;
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][1]["thinking"], "consider");
 
@@ -570,7 +613,7 @@ mod tests {
             .as_slice(),
         )
         .expect("stale");
-        let rebuilt = ChatRequest::try_from_draft(&draft, &model(), Some(&stale))
+        let rebuilt = ChatRequest::try_from_draft(&draft, &model(), Some(&stale), &BTreeMap::new())
             .expect("rebuild")
             .request;
         let value: Value = serde_json::from_slice(&serialize_request(&rebuilt).unwrap()).unwrap();
@@ -589,9 +632,10 @@ mod tests {
             .as_slice(),
         )
         .expect("compacted");
-        let rebuilt = ChatRequest::try_from_draft(&draft, &model(), Some(&compacted))
-            .expect("compaction rebuild")
-            .request;
+        let rebuilt =
+            ChatRequest::try_from_draft(&draft, &model(), Some(&compacted), &BTreeMap::new())
+                .expect("compaction rebuild")
+                .request;
         let value: Value = serde_json::from_slice(&serialize_request(&rebuilt).unwrap()).unwrap();
         assert!(value["messages"][1].get("thinking").is_none());
     }
@@ -604,9 +648,130 @@ mod tests {
             OutputSpec::PlainText,
             Vec::new(),
         );
-        let error = ChatRequest::try_from_draft(&draft, &model(), None)
+        let error = ChatRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect_err("reserved setting must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn image_bytes_map_to_the_images_array() {
+        let draft = draft_with(
+            vec![media_message(ContentBlock::Image(media_ref("blob-1")))],
+            b"{}",
+            OutputSpec::PlainText,
+            Vec::new(),
+        );
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("image/png"),
+                bytes: Arc::from(b"pngbytes".as_slice()),
+            },
+        );
+        let request =
+            ChatRequest::try_from_draft(&draft, &model().with_input_images(true), None, &resolved)
+                .expect("request")
+                .request;
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let expected = base64::engine::general_purpose::STANDARD.encode(b"pngbytes");
+        assert_eq!(value["messages"][0]["images"][0], expected);
+    }
+
+    #[test]
+    fn image_url_resolution_is_rejected() {
+        let draft = draft_with(
+            vec![media_message(ContentBlock::Image(media_ref("blob-1")))],
+            b"{}",
+            OutputSpec::PlainText,
+            Vec::new(),
+        );
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let error =
+            ChatRequest::try_from_draft(&draft, &model().with_input_images(true), None, &resolved)
+                .expect_err("url resolution must be rejected");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn image_input_is_rejected_when_the_model_flag_is_off() {
+        let draft = draft_with(
+            vec![media_message(ContentBlock::Image(media_ref("blob-1")))],
+            b"{}",
+            OutputSpec::PlainText,
+            Vec::new(),
+        );
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("image/png"),
+                bytes: Arc::from(b"pngbytes".as_slice()),
+            },
+        );
+        let error = ChatRequest::try_from_draft(&draft, &model(), None, &resolved)
+            .expect_err("image input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn file_and_audio_blocks_stay_rejected() {
+        for block in [
+            ContentBlock::File(media_ref("blob-1")),
+            ContentBlock::Audio(media_ref("blob-1")),
+        ] {
+            let draft = draft_with(
+                vec![media_message(block)],
+                b"{}",
+                OutputSpec::PlainText,
+                Vec::new(),
+            );
+            let error = ChatRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+                .expect_err("file/audio blocks must be rejected");
+            assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+        }
+    }
+
+    #[test]
+    fn media_without_resolver_fails_closed() {
+        let draft = draft_with(
+            vec![media_message(ContentBlock::Image(media_ref("blob-1")))],
+            b"{}",
+            OutputSpec::PlainText,
+            Vec::new(),
+        );
+        let error = ChatRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect_err("missing resolution must fail");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    fn media_ref(id: &str) -> finstack_ai_kernel::MediaRef {
+        finstack_ai_kernel::MediaRef::new(
+            finstack_ai_kernel::BlobRef::try_new(id, "image/png", 4, None, None::<&str>)
+                .expect("blob"),
+        )
+    }
+
+    fn media_message(block: ContentBlock) -> Message {
+        Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            vec![block],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message")
     }
 
     fn model() -> OllamaModelConfig {

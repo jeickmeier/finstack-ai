@@ -21,6 +21,7 @@ def test_import_finstack_ai() -> None:
         "openai",
         "anthropic",
         "ollama",
+        "openrouter",
     )
     assert finstack_ai.SqliteDurability.Durable != finstack_ai.SqliteDurability.Relaxed
     assert str(finstack_ai.SqliteDurability.Durable) == "Durable"

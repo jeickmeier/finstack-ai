@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use finstack_ai_runtime::{
-    Authentication, CredentialReference, CredentialStore, InputCapabilities, ModelCapabilities,
-    ModelContextProfile, ModelError, ModelName, SecretString, StructuredOutputCapability,
-    TokenEstimatorRef, TokenEstimatorSource,
+    Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
+    ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
+    StructuredOutputCapability, TokenEstimatorRef, TokenEstimatorSource,
 };
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -73,6 +73,7 @@ pub struct OpenAiConfig {
     request_timeout: Duration,
     max_event_bytes: usize,
     max_stream_bytes: usize,
+    media_resolver: Option<Arc<dyn MediaResolver>>,
 }
 
 impl fmt::Debug for OpenAiConfig {
@@ -87,6 +88,10 @@ impl fmt::Debug for OpenAiConfig {
             .field("request_timeout", &self.request_timeout)
             .field("max_event_bytes", &self.max_event_bytes)
             .field("max_stream_bytes", &self.max_stream_bytes)
+            .field(
+                "media_resolver",
+                &self.media_resolver.as_ref().map(|_| "[resolver]"),
+            )
             .finish()
     }
 }
@@ -120,7 +125,19 @@ impl OpenAiConfig {
             request_timeout: DEFAULT_TIMEOUT,
             max_event_bytes: DEFAULT_MAX_EVENT_BYTES,
             max_stream_bytes: DEFAULT_MAX_STREAM_BYTES,
+            media_resolver: None,
         })
+    }
+
+    /// Attach a host-supplied media resolver enabling image/audio/file input.
+    #[must_use]
+    pub fn with_media_resolver(mut self, resolver: Arc<dyn MediaResolver>) -> Self {
+        self.media_resolver = Some(resolver);
+        self
+    }
+
+    pub(crate) fn media_resolver(&self) -> Option<Arc<dyn MediaResolver>> {
+        self.media_resolver.clone()
     }
 
     /// Insert one named credential entry and select it.
@@ -275,6 +292,10 @@ fn validate_base_url(value: &str) -> Result<(), ModelError> {
 
 /// Provider facts for one configured official `OpenAI` model name.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent, host-toggled capability advertisement"
+)]
 pub struct OpenAiModelConfig {
     /// Provider model name.
     pub name: ModelName,
@@ -292,6 +313,12 @@ pub struct OpenAiModelConfig {
     pub parallel_tool_calls: bool,
     /// Whether the configured model advertises reasoning content.
     pub reasoning: bool,
+    /// Whether the configured model accepts image input.
+    pub input_images: bool,
+    /// Whether the configured model accepts audio input.
+    pub input_audio: bool,
+    /// Whether the configured model accepts file input.
+    pub input_files: bool,
 }
 
 impl OpenAiModelConfig {
@@ -346,6 +373,9 @@ impl OpenAiModelConfig {
             provider_overhead_tokens,
             parallel_tool_calls: true,
             reasoning: false,
+            input_images: false,
+            input_audio: false,
+            input_files: false,
         })
     }
 
@@ -363,14 +393,35 @@ impl OpenAiModelConfig {
         self
     }
 
+    /// Advertise image input support for this model only.
+    #[must_use]
+    pub const fn with_input_images(mut self, enabled: bool) -> Self {
+        self.input_images = enabled;
+        self
+    }
+
+    /// Advertise audio input support for this model only.
+    #[must_use]
+    pub const fn with_input_audio(mut self, enabled: bool) -> Self {
+        self.input_audio = enabled;
+        self
+    }
+
+    /// Advertise file input support for this model only.
+    #[must_use]
+    pub const fn with_input_files(mut self, enabled: bool) -> Self {
+        self.input_files = enabled;
+        self
+    }
+
     pub(crate) fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: InputCapabilities {
                 text: true,
                 json: true,
-                images: false,
-                audio: false,
-                files: false,
+                images: self.input_images,
+                audio: self.input_audio,
+                files: self.input_files,
             },
             context_profile: ModelContextProfile {
                 provider: Arc::from("openai"),
@@ -401,6 +452,9 @@ impl OpenAiModelConfig {
         self.reserved_output_tokens = update.context_profile.reserved_output_tokens;
         self.provider_overhead_tokens = update.context_profile.provider_overhead_tokens;
         self.parallel_tool_calls = update.parallel_tool_calls;
+        self.input_images = update.input.images;
+        self.input_audio = update.input.audio;
+        self.input_files = update.input.files;
     }
 }
 
@@ -425,7 +479,8 @@ mod tests {
         let config = OpenAiConfig::try_new("https://api.openai.test")
             .expect("config")
             .with_authentication(Authentication::Bearer(secret.clone()))
-            .with_headers(vec![header.clone()]);
+            .with_headers(vec![header.clone()])
+            .with_media_resolver(std::sync::Arc::new(CanaryResolver));
 
         for rendered in [
             format!("{secret:?}"),
@@ -436,6 +491,27 @@ mod tests {
             assert!(!rendered.contains(CANARY));
         }
         assert!(format!("{header:?}").contains("REDACTED"));
+        assert!(format!("{config:?}").contains("media_resolver"));
+        assert!(!format!("{config:?}").contains("CanaryResolver"));
+    }
+
+    #[derive(Debug)]
+    struct CanaryResolver;
+
+    impl MediaResolver for CanaryResolver {
+        fn resolve(
+            &self,
+            _blob: &finstack_ai_kernel::BlobRef,
+        ) -> finstack_ai_runtime::PortFuture<
+            Result<finstack_ai_runtime::ResolvedMedia, finstack_ai_runtime::MediaResolveError>,
+        > {
+            Box::pin(async {
+                Err(finstack_ai_runtime::MediaResolveError {
+                    kind: finstack_ai_runtime::MediaResolveKind::NotFound,
+                    message: "canary resolver never resolves",
+                })
+            })
+        }
     }
 
     #[test]

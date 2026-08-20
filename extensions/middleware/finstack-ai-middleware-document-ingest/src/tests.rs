@@ -13,6 +13,8 @@ use finstack_ai_runtime::{
     ModelRequestLimits, ModelSettings, PortFuture, RunCallContext, StageInput, StageOutcome,
 };
 
+use finstack_ai_context_memory::InProcessArtifactStore;
+
 use crate::{AttachmentIndex, DocumentIngestMiddleware};
 
 const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
@@ -502,6 +504,15 @@ fn parse_memo_keys_on_declared_name() {
         assert!(all.contains(expected_name), "note must carry its own name");
         assert!(!all.contains(absent_name), "cached note must not leak");
     }
+}
+
+#[test]
+fn ingest_limit_follows_the_store_ceiling() {
+    let store: Arc<dyn ArtifactStore> =
+        Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(64 * 1024 * 1024));
+    let index = Arc::new(AttachmentIndex::default());
+    let middleware = DocumentIngestMiddleware::try_new(store, index).expect("middleware");
+    assert_eq!(middleware.limits().max_input_bytes, 64 * 1024 * 1024);
 }
 
 #[test]

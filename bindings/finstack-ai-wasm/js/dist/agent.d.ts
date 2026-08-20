@@ -42,6 +42,37 @@ export interface ActiveCapability {
     source: "always" | "application" | "model";
 }
 /**
+ * How a run parks and releases paid-tool approvals.
+ *
+ * Maps onto Rust `RunPolicy.approval_grant`. Defaults to
+ * {@link ApprovalGrantMode.perCall}: one park per unpaid Policy or
+ * Required tool call. {@link ApprovalGrantMode.informedBatch} parks once
+ * listing every unpaid paid tool. Neither mode relaxes the `Policy`
+ * catalog floor.
+ */
+export declare class ApprovalGrantMode {
+    #private;
+    private constructor();
+    /**
+     * Park once per unpaid paid tool call.
+     *
+     * @returns A per-call grant mode consumed by {@link Agent.create}.
+     */
+    static perCall(): ApprovalGrantMode;
+    /**
+     * Park once listing every unpaid paid tool call.
+     *
+     * @returns An informed-batch grant mode consumed by {@link Agent.create}.
+     */
+    static informedBatch(): ApprovalGrantMode;
+    /**
+     * Wire token consumed by the WASM factory.
+     *
+     * @returns `per_call` or `informed_batch`.
+     */
+    toWire(): "per_call" | "informed_batch";
+}
+/**
  * Options for {@link Agent.create}.
  *
  * Host objects inherit page authority and are not a sandbox.
@@ -74,6 +105,11 @@ export interface AgentOptions {
     middleware?: JsMiddleware[];
     /** Optional trusted observer wrappers. */
     observers?: JsObserver[];
+    /**
+     * Optional paid-tool approval grant mode. Defaults to
+     * {@link ApprovalGrantMode.perCall}.
+     */
+    approvalGrant?: ApprovalGrantMode | "per_call" | "informed_batch";
 }
 /**
  * Provisional inspect phase for a stored session.
@@ -112,7 +148,8 @@ export declare class Agent {
      * to opt into a host journal. State remains in WASM until an explicit snapshot
      * or inspect. Reload restore is inspect, not continue-the-run.
      *
-     * @param options - Model, optional toolsets, instruction, store, and capabilities.
+     * @param options - Model, optional toolsets, instruction, store, capabilities,
+     * and approval grant.
      * @returns A resolved Agent handle.
      * @throws {FinstackError} When configuration is invalid.
      * @example
@@ -129,6 +166,7 @@ export declare class Agent {
      *     instructions: ["Always instruction."],
      *     activation: "always",
      *   }],
+     *   approvalGrant: ApprovalGrantMode.perCall(),
      * });
      * const result = await agent.run("hello");
      * ```

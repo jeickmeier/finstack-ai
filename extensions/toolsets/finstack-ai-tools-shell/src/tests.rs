@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -7,9 +8,11 @@ use finstack_ai_kernel::{
     ToolCallBlock, ToolCallId, ToolFailurePolicy,
 };
 use finstack_ai_runtime::{
-    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, AssembledToolStream,
-    AuthorizationContext, Bytes, CancellationSignal, PortFuture, RunCallContext, ToolStreamItem,
-    ToolStreamLimits, ToolTerminal, Toolset,
+    ApprovalState, ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
+    AssembledToolStream, AuthorizationContext, Bytes, CancellationSignal,
+    JsonSchemaToolValidatorCompiler, PortFuture, ResolvedToolCatalog, RunCallContext,
+    ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision, ToolStreamItem, ToolStreamLimits,
+    ToolTerminal, Toolset, ToolsetRegistration,
 };
 use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
 use futures_util::StreamExt;
@@ -94,6 +97,33 @@ fn echo_policy() -> ShellPolicy {
     ShellPolicy::try_new(["/bin/echo", "/bin/sleep", "/bin/cat", "/usr/bin/env"])
         .expect("policy")
         .with_locale_env()
+}
+
+fn host_allow_catalog(toolset: Arc<dyn Toolset>) -> ResolvedToolCatalog {
+    let policies = toolset
+        .tools()
+        .iter()
+        .map(|spec| {
+            (
+                spec.id.clone(),
+                ToolExecutionPolicy {
+                    failure_policy: ToolFailurePolicy::ReturnToModel,
+                    approval: ToolPolicyDecision::Allow,
+                    max_concurrency: 1,
+                },
+            )
+        })
+        .collect();
+    ResolvedToolCatalog::try_new(
+        [ToolsetRegistration {
+            toolset,
+            policies,
+            components: BTreeMap::new(),
+        }],
+        &BTreeMap::new(),
+        &JsonSchemaToolValidatorCompiler,
+    )
+    .expect("catalog")
 }
 
 #[cfg(unix)]
@@ -255,6 +285,26 @@ fn unconfined_process_runner_is_labeled() {
     assert_eq!(
         ProcessCommandSandbox::unconfined().kind(),
         ProcessSandboxKind::UnconfinedStdProcess
+    );
+}
+
+#[test]
+fn policy_floor_requires_approval_under_host_allow() {
+    let toolset = Arc::new(ShellToolset::try_new(echo_policy(), None).expect("shell"));
+    let catalog = host_allow_catalog(toolset);
+    assert_eq!(
+        catalog.decide_plan(
+            ToolCallBlock::try_new(
+                ToolCallId::from_bytes([9; 16]),
+                "shell_exec",
+                RawJson::parse(br#"{"argv":["/bin/echo"],"cwd":null}"#).expect("args"),
+            )
+            .expect("call"),
+            None,
+            None,
+            ApprovalState::Unpaid,
+        ),
+        ToolCatalogPlan::RequireApproval
     );
 }
 

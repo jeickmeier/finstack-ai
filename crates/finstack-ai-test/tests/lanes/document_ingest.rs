@@ -36,11 +36,18 @@ fn staging_scope() -> ArtifactScope {
     }
 }
 
-async fn document_ingest_agent() -> (
+/// Shared scaffolding for every document-ingest lane test: builds a fresh
+/// journal store, scripted model, attachment index, and an `Agent` wired
+/// with `DocumentIngestMiddleware` + `DocumentToolset` over the caller's
+/// `artifact_store`. `label` disambiguates component/agent ids across tests
+/// that call this more than once in the same binary.
+async fn document_ingest_agent_with_store(
+    label: &str,
+    artifact_store: Arc<dyn ArtifactStore>,
+) -> (
     Agent,
     Arc<dyn finstack_ai_runtime::JournalStore>,
     Arc<ScriptedModel>,
-    Arc<InProcessArtifactStore>,
     Arc<AttachmentIndex>,
 ) {
     use finstack_ai_kernel::{AgentId, BundleId};
@@ -58,12 +65,11 @@ async fn document_ingest_agent() -> (
         scripted_profile(),
         vec![completed_plan("acknowledged")],
     ));
-    let artifact_store = Arc::new(InProcessArtifactStore::default());
     let attachment_index = Arc::new(AttachmentIndex::default());
 
     let middleware = Arc::new(
         DocumentIngestMiddleware::try_new(
-            Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>,
+            Arc::clone(&artifact_store),
             Arc::clone(&attachment_index),
         )
         .expect("document ingest middleware"),
@@ -71,22 +77,24 @@ async fn document_ingest_agent() -> (
     let toolset = Arc::new(
         DocumentToolset::try_new()
             .expect("document toolset")
-            .with_artifact_store(Arc::clone(&artifact_store) as Arc<dyn ArtifactStore>),
+            .with_artifact_store(Arc::clone(&artifact_store)),
     );
 
     let agent = Agent::builder(
-        AgentId::parse("test.agent.document-ingest").expect("agent id"),
-        BundleId::parse("test.bundle.document-ingest").expect("bundle id"),
+        AgentId::parse(format!("test.agent.document-ingest-{label}")).expect("agent id"),
+        BundleId::parse(format!("test.bundle.document-ingest-{label}")).expect("bundle id"),
         (
             ComponentRef::new(
-                ComponentId::parse("test.model.document-ingest").expect("model id"),
+                ComponentId::parse(format!("test.model.document-ingest-{label}"))
+                    .expect("model id"),
                 Some(COMPONENT_VERSION),
             ),
             Arc::clone(&model) as Arc<dyn Model>,
         ),
         (
             ComponentRef::new(
-                ComponentId::parse("test.store.document-ingest").expect("store id"),
+                ComponentId::parse(format!("test.store.document-ingest-{label}"))
+                    .expect("store id"),
                 Some(COMPONENT_VERSION),
             ),
             Arc::clone(&store),
@@ -111,6 +119,19 @@ async fn document_ingest_agent() -> (
     .await
     .expect("agent");
 
+    (agent, store, model, attachment_index)
+}
+
+async fn document_ingest_agent() -> (
+    Agent,
+    Arc<dyn finstack_ai_runtime::JournalStore>,
+    Arc<ScriptedModel>,
+    Arc<dyn ArtifactStore>,
+    Arc<AttachmentIndex>,
+) {
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(InProcessArtifactStore::default());
+    let (agent, store, model, attachment_index) =
+        document_ingest_agent_with_store("csv", Arc::clone(&artifact_store)).await;
     (agent, store, model, artifact_store, attachment_index)
 }
 
@@ -207,4 +228,57 @@ async fn document_ingest_lane_delivers_markdown_to_model_and_keeps_journaled_fil
         journaled_file_blocks, 1,
         "journaled user message must still carry the original File block"
     );
+}
+
+/// A >4 MiB attachment must stage and flow through the full lane when the
+/// artifact store is backed by [`ObjectArtifactStore`] (default 64 MiB
+/// ceiling), not the small in-process default. This is the regression the
+/// object-store integration lane exists to catch: any consumer path still
+/// pinning the old 4 MiB assumption would reject this attachment outright.
+#[tokio::test]
+async fn large_attachment_stages_through_the_object_backed_artifact_store() {
+    use finstack_ai_store_artifact_object::ObjectArtifactStore;
+    use finstack_ai_test::object_store::FakeObjectStore;
+
+    const SIX_MIB: usize = 6 * 1024 * 1024;
+
+    let object_store = Arc::new(FakeObjectStore::default());
+    let artifact_store: Arc<dyn ArtifactStore> =
+        Arc::new(ObjectArtifactStore::new(object_store));
+
+    let (agent, _store, _model, attachment_index) =
+        document_ingest_agent_with_store("large", Arc::clone(&artifact_store)).await;
+
+    let artifact = artifact_store
+        .stage_put(
+            staging_scope(),
+            Bytes::from(vec![0x25_u8; SIX_MIB]),
+            ArtifactMetadata {
+                kind: Arc::from("attachment"),
+                media_type: Arc::from("application/pdf"),
+                name: Some(Arc::from("large.pdf")),
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("staged artifact");
+    assert_eq!(
+        artifact.blob().length(),
+        6_291_456,
+        "staged ArtifactRef length must be exactly 6 MiB"
+    );
+    attachment_index.insert(artifact.clone());
+
+    let mut request = AgentRunRequest::try_new(
+        finstack_ai_runtime::ModelName::try_new("lanes-1").expect("model name"),
+        "Please summarize the attached document",
+        security("decision-v1"),
+    )
+    .expect("request");
+    request.attachments = Arc::from([AttachmentInput {
+        artifact: artifact.clone(),
+    }]);
+
+    let output = agent.run(request).await.expect("run completes");
+    assert_eq!(output.text(), "acknowledged");
 }

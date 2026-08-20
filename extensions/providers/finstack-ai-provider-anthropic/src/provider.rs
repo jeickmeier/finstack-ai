@@ -8,9 +8,10 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec, PendingModelEffect};
 use finstack_ai_runtime::{
-    AnthropicMessagesAssembly, Model, ModelCapabilities, ModelDescriptor, ModelError,
-    ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
-    ModelTokenEstimate, ReconcileContext, StreamNormError, StreamNormKind,
+    AnthropicMessagesAssembly, MediaResolveKind, Model, ModelCapabilities, ModelDescriptor,
+    ModelError, ModelEventStream, ModelName, ModelReconcileResult, ModelRequest, ModelStreamItem,
+    ModelTokenEstimate, ReconcileContext, ResolveDraftMediaError, StreamNormError, StreamNormKind,
+    resolve_draft_media,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
@@ -148,6 +149,29 @@ impl AnthropicProvider {
     }
 }
 
+fn map_draft_media(error: ResolveDraftMediaError) -> ModelError {
+    match error {
+        ResolveDraftMediaError::MissingResolver => {
+            crate::error::request_error("media content requires a configured media resolver")
+        }
+        ResolveDraftMediaError::Resolve(inner) => map_resolve(inner),
+        ResolveDraftMediaError::Limit => crate::error::stream_limit_error(),
+    }
+}
+
+fn map_resolve(error: finstack_ai_runtime::MediaResolveError) -> ModelError {
+    match error.kind {
+        MediaResolveKind::NotFound => crate::error::request_error(error.message),
+        MediaResolveKind::Unavailable => crate::error::error(
+            TRANSPORT_ERROR,
+            ErrorCategory::Model,
+            true,
+            "Anthropic media resolution is unavailable",
+        ),
+        MediaResolveKind::Limit => crate::error::stream_limit_error(),
+    }
+}
+
 fn catalog_from_models(
     models: Vec<AnthropicModelConfig>,
 ) -> Result<BTreeMap<ModelName, AnthropicModelConfig>, ModelError> {
@@ -236,6 +260,10 @@ impl Model for AnthropicProvider {
         })
     }
 
+    #[expect(
+        clippy::similar_names,
+        reason = "`resolver` (host port) and `resolved` (its output map) are the clearest names"
+    )]
     fn request(
         &self,
         request: ModelRequest,
@@ -246,9 +274,13 @@ impl Model for AnthropicProvider {
         let timeout = self.config.request_timeout();
         let max_event_bytes = self.config.max_event_bytes();
         let max_stream_bytes = self.config.max_stream_bytes();
+        let resolver = self.config.media_resolver();
         Box::pin(async move {
             let model = model?;
-            let wire = MessagesRequest::try_from_draft(&request.draft, &model)?;
+            let resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes)
+                .await
+                .map_err(map_draft_media)?;
+            let wire = MessagesRequest::try_from_draft(&request.draft, &model, &resolved)?;
             let payload = serialize_request(&wire)?;
             let request_id = request.call.request_id.to_string();
             let cancellation = request.call.run.cancellation;
@@ -422,8 +454,18 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 
 #[cfg(test)]
 mod tests {
+    use finstack_ai_kernel::{
+        BlobRef, ContentBlock, EffectId, LaneId, LimitKey, MediaRef, Message, MessageId,
+        MessageRole, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds,
+        RawJson, RunId, SessionId, Timestamp,
+    };
+    use finstack_ai_runtime::{
+        AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
+        ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
+        PortFuture, ResolvedMedia, RunCallContext,
+    };
+
     use super::*;
-    use finstack_ai_kernel::{ContentBlock, LimitKey};
 
     #[test]
     #[expect(
@@ -575,5 +617,177 @@ mod tests {
             capabilities.structured_output,
             finstack_ai_runtime::StructuredOutputCapability::Prompted
         );
+    }
+
+    #[test]
+    fn refresh_model_metadata_round_trips_the_input_capability_flags() {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9").expect("config");
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+        let name = ModelName::try_new("claude-test").expect("name");
+        assert!(!provider.capabilities(&name).input.images);
+        assert!(!provider.capabilities(&name).input.files);
+
+        let mut update = provider.capabilities(&name);
+        update.input.images = true;
+        update.input.files = true;
+        provider
+            .refresh_model_metadata(&name, update)
+            .expect("refresh");
+
+        assert!(provider.capabilities(&name).input.images);
+        assert!(provider.capabilities(&name).input.files);
+    }
+
+    #[derive(Debug)]
+    struct OversizedResolver;
+
+    impl MediaResolver for OversizedResolver {
+        fn resolve(&self, _blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            Box::pin(async {
+                Ok(ResolvedMedia::Bytes {
+                    media_type: Arc::from("image/png"),
+                    bytes: Arc::from(vec![0_u8; 9 * 1_048_576]),
+                })
+            })
+        }
+    }
+
+    fn fixture_request(media: ContentBlock) -> ModelRequest {
+        fixture_request_with(vec![media])
+    }
+
+    fn fixture_request_with(media: Vec<ContentBlock>) -> ModelRequest {
+        let selected = ModelName::try_new("claude-test").expect("name");
+        ModelRequest {
+            call: ModelCallContext {
+                run: RunCallContext {
+                    locator: OperationLocator::try_new(
+                        "tenant-a",
+                        SessionId::parse("01234567-89ab-7cde-89ab-0123456789a1").expect("session"),
+                        LaneId::parse("01234567-89ab-7cde-89ab-0123456789a2").expect("lane"),
+                        RunId::parse("01234567-89ab-7cde-89ab-0123456789a3").expect("run"),
+                    )
+                    .expect("locator"),
+                    authorization: AuthorizationContext {
+                        principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                            .expect("principal"),
+                        authentication_method: Arc::from("fixture"),
+                        assurance_level: Arc::from("test"),
+                        roles: Arc::from([]),
+                        permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+                        safe_claims: Metadata::empty(),
+                        policy_version: Arc::from("policy-v1"),
+                        decision_id: Arc::from("decision-v1"),
+                    },
+                    effect_id: EffectId::parse("01234567-89ab-7cde-89ab-0123456789a4")
+                        .expect("effect"),
+                    attempt: 1,
+                    deadline: None,
+                    budget_scope_id: None,
+                    cancellation: CancellationSignal::new(),
+                },
+                request_id: ModelRequestId::parse("01234567-89ab-7cde-89ab-0123456789a5")
+                    .expect("request id"),
+            },
+            draft: ModelRequestDraft {
+                model: selected,
+                messages: Arc::from([Message::try_new(
+                    MessageId::parse("01234567-89ab-7cde-89ab-0123456789a6").expect("message"),
+                    MessageRole::User,
+                    media,
+                    Timestamp::from_unix_ms(1).expect("ts"),
+                    None,
+                    ProviderIds::empty(),
+                    Metadata::empty(),
+                )
+                .expect("message")]),
+                tools: Arc::from([]),
+                output: OutputSpec::PlainText,
+                settings: ModelSettings {
+                    values: RawJson::parse(b"{}").expect("settings"),
+                },
+                limits: ModelRequestLimits {
+                    max_input_bytes: 1_024,
+                    max_input_tokens: 1_024,
+                    max_output_tokens: 128,
+                },
+            },
+            continuation_state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn oversized_resolved_media_fails_closed() {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
+            .with_media_resolver(Arc::new(OversizedResolver));
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+
+        let blob = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let request = fixture_request(ContentBlock::Image(MediaRef::new(blob)));
+
+        let Err(error) = provider.request(request).await else {
+            panic!("oversized media must fail closed");
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
+    }
+
+    #[derive(Debug)]
+    struct SizedResolver {
+        first_bytes: usize,
+        second_bytes: usize,
+    }
+
+    impl MediaResolver for SizedResolver {
+        fn resolve(&self, blob: &BlobRef) -> PortFuture<Result<ResolvedMedia, MediaResolveError>> {
+            let size = if blob.id() == "blob-1" {
+                self.first_bytes
+            } else {
+                self.second_bytes
+            };
+            Box::pin(async move {
+                Ok(ResolvedMedia::Bytes {
+                    media_type: Arc::from("image/png"),
+                    bytes: Arc::from(vec![0_u8; size]),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn aggregate_resolved_media_over_the_stream_cap_fails_closed_even_when_each_blob_is_under()
+     {
+        let config = AnthropicConfig::try_new("http://127.0.0.1:9")
+            .expect("config")
+            .with_stream_limits(1_048_576, 4 * 1_048_576)
+            .expect("stream limits")
+            .with_media_resolver(Arc::new(SizedResolver {
+                first_bytes: 3 * 1_048_576,
+                second_bytes: 3 * 1_048_576,
+            }));
+        let model =
+            AnthropicModelConfig::try_new("claude-test", 1_000_000, 128_000, 4_096, 4_096, 256)
+                .expect("model");
+        let provider = AnthropicProvider::try_new(config, vec![model]).expect("provider");
+
+        let blob_a = BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>).expect("blob");
+        let blob_b = BlobRef::try_new("blob-2", "image/png", 4, None, None::<&str>).expect("blob");
+        let request = fixture_request_with(vec![
+            ContentBlock::Image(MediaRef::new(blob_a)),
+            ContentBlock::Image(MediaRef::new(blob_b)),
+        ]);
+
+        let Err(error) = provider.request(request).await else {
+            panic!("aggregate-oversized media must fail closed");
+        };
+        assert_eq!(error.code(), crate::error::STREAM_LIMIT_EXCEEDED);
     }
 }

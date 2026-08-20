@@ -14,6 +14,7 @@
 //! - `scripted` — scripted model, toolset, and extension doubles
 //! - `fixtures` — golden traces, public-API subjects, and journal corpus
 //! - `conformance` — target-neutral runner, port checks, compaction, reducer
+//! - `object_store` — `FakeObjectStore` and the shared `ObjectStore` contract suite
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -40,6 +41,7 @@ mod conformance;
 mod crash_prefix;
 mod fakes;
 mod fixtures;
+pub mod object_store;
 mod paths;
 mod scripted;
 
@@ -72,6 +74,7 @@ pub use fixtures::golden_scenarios::{
 };
 pub use fixtures::journal::bodies::{all_activated_record_bodies, draft_for_body};
 pub use fixtures::journal::generate::write_journal_v1_fixtures;
+pub use fixtures::store as store_fixtures;
 pub use fixtures::journal::runner::{
     JournalExpect, JournalFixture, JournalFixtureError, JournalRecipe,
     discover_journal_v1_fixtures, known_answer_for_body, known_answer_for_envelope,

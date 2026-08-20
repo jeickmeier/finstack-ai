@@ -156,6 +156,26 @@ class PythonModel:
     @property
     def model(self) -> str: ...
 
+class ElicitationToolset:
+    """Human-in-the-loop elicitation toolset backed by the Rust implementation.
+
+    ``ask_user=True`` exposes the free-form ``ask_user`` tool; ``tools``
+    registers typed per-workflow elicitation tools whose response schemas are
+    fixed at registration. Calls park the run as a pending interaction; the
+    resolution response becomes the tool result.
+    """
+
+    def __init__(
+        self,
+        *,
+        ask_user: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None: ...
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
 class PythonToolset:
     """Trusted coarse Python implementation of the Rust Toolset port.
 
@@ -499,6 +519,41 @@ class ChildRunPolicy:
             An allow policy consumed by the agent factories.
         """
 
+class ApprovalGrantMode:
+    """How a run parks and releases paid-tool approvals.
+
+    Maps onto Rust ``RunPolicy.approval_grant``. The default for every
+    factory is :meth:`per_call`: one park per unpaid Policy or Required
+    tool call. :meth:`informed_batch` parks once listing every unpaid
+    paid tool. Neither mode relaxes the ``Policy`` approval floor on
+    the catalog.
+
+    Examples:
+        >>> from finstack_ai import ApprovalGrantMode
+        >>> ApprovalGrantMode.per_call() is not None
+        True
+        >>> ApprovalGrantMode.informed_batch() is not None
+        True
+    """
+
+    @staticmethod
+    def per_call() -> ApprovalGrantMode:
+        """Park once per unpaid paid tool call.
+
+        Returns:
+            A per-call grant mode consumed by the agent factories as
+            ``RunPolicy.approval_grant``.
+        """
+
+    @staticmethod
+    def informed_batch() -> ApprovalGrantMode:
+        """Park once listing every unpaid paid tool call.
+
+        Returns:
+            An informed-batch grant mode consumed by the agent factories
+            as ``RunPolicy.approval_grant``.
+        """
+
 class MemoryExternalIdentityMap:
     """In-process external identity map."""
 
@@ -760,12 +815,17 @@ class Agent:
         api_key: str,
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        media_tools: bool = False,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -789,6 +849,20 @@ class Agent:
                 ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
                 provider default.
             reasoning_summary: Optional Responses ``reasoning.summary``.
+            media_tools: Register the native OpenAI media toolset
+                (``openai_generate_image``, ``openai_generate_speech``,
+                ``openai_transcribe_audio``) alongside the model, reusing
+                ``api_key``.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key, independent of ``api_key``.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -797,6 +871,83 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
+
+        Returns:
+            An immutable Rust-owned agent handle.
+
+        Raises:
+            ConfigurationError: The credential, model, capability set, or
+                port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
+        """
+    @staticmethod
+    async def openrouter(
+        model: str,
+        instruction: str | None = None,
+        capabilities: list[Capability] | None = None,
+        active_capabilities: list[str] | None = None,
+        *,
+        api_key: str,
+        referer: str | None = None,
+        title: str | None = None,
+        reasoning_effort: str | None = None,
+        reasoning_summary: str | None = None,
+        media_tools: bool = False,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
+        context_providers: list[PythonContextProvider] | None = None,
+        middleware: list[PythonMiddleware] | None = None,
+        observers: list[PythonObserver] | None = None,
+        output_type: Any | None = None,
+        child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
+    ) -> Agent:
+        """Build a Rust-backed OpenRouter Responses agent.
+
+        The native client posts to
+        ``https://openrouter.ai/api/v1/responses`` and omits ``store``
+        entirely (the request is stateless; ``store`` is a reserved
+        provider-settings field). Keyword-only ``toolsets``,
+        ``context_providers``, ``middleware``,
+        ``observers``, and ``output_type`` register the same trusted T2
+        Python ports as :meth:`Agent.from_python`. This factory does not
+        read environment variables and does not accept a generic
+        ``base_url``. Output is capped at 128,000 tokens while the linked
+        context window is 1,050,000 tokens. This factory does not attach
+        a ``MediaResolver``. Vision, file, and audio input require a
+        host-built Rust provider with ``with_media_resolver``. ADR-049
+        rejected FFI resolvers on linked constructors. ``media_tools``
+        registers outbound media-generation tools only.
+
+        Args:
+            model: OpenRouter model name.
+            instruction: Optional stable instruction prefix.
+            capabilities: Optional declarative capability catalog.
+            active_capabilities: Application capability ids to activate.
+            api_key: Required Bearer credential. HTTPS is required.
+            referer: Optional non-secret ``HTTP-Referer`` attribution header.
+            title: Optional non-secret ``X-Title`` attribution header.
+            reasoning_effort: Optional Responses ``reasoning.effort``.
+                Allowed values are ``none``, ``minimal``, ``low``,
+                ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
+                provider default.
+            reasoning_summary: Optional Responses ``reasoning.summary``.
+            media_tools: Register the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) alongside
+                the model, reusing ``api_key``, ``referer``, and ``title``.
+            toolsets: Optional trusted Python toolset callbacks.
+            context_providers: Optional trusted context-provider callbacks.
+            middleware: Optional trusted middleware callbacks.
+            observers: Optional trusted observer callbacks.
+            output_type: Optional Pydantic output type. Lazily requires the
+                Pydantic extra.
+            child_runs: Optional child-run admission policy. Defaults to
+                :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -814,12 +965,16 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
-        toolsets: list[PythonToolset] | None = None,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -840,6 +995,16 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -848,6 +1013,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -855,6 +1022,9 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, credential, model, capability
                 set, or port registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def ollama(
@@ -864,12 +1034,16 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
-        toolsets: list[PythonToolset] | None = None,
+        openrouter_media_api_key: str | None = None,
+        openrouter_media_referer: str | None = None,
+        openrouter_media_title: str | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -883,6 +1057,16 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
+            openrouter_media_api_key: Optional explicit OpenRouter API key.
+                When set, registers the OpenRouter media-generation toolset
+                (image, speech, video, and transcription tools) billed to
+                this key.
+            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
+            openrouter_media_title: Optional non-secret ``X-Title``
+                attribution header for the OpenRouter media toolset.
+                Requires ``openrouter_media_api_key``.
             toolsets: Optional trusted Python toolset callbacks.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
@@ -891,6 +1075,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -898,6 +1084,9 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, model, capability set, or port
                 registration is invalid.
+            ValueError: ``openrouter_media_referer`` or
+                ``openrouter_media_title`` is set without
+                ``openrouter_media_api_key``.
         """
     @staticmethod
     async def gateway(
@@ -912,12 +1101,13 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed agent that dispatches to a dedicated provider.
 
@@ -948,6 +1138,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -967,12 +1159,13 @@ class Agent:
         api_key: str,
         endpoint: str | None = None,
         template: str | None = None,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
         output_type: Any | None = None,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
     ) -> Agent:
         """Build a Rust-backed T4 E2B sandbox agent.
 
@@ -997,6 +1190,8 @@ class Agent:
                 Pydantic extra.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
 
         Returns:
             An immutable Rust-owned agent handle.
@@ -1008,7 +1203,7 @@ class Agent:
     @staticmethod
     async def from_python(
         model: PythonModel,
-        toolsets: list[PythonToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,
         capabilities: list[Capability] | None = None,
@@ -1018,6 +1213,7 @@ class Agent:
         observers: list[PythonObserver] | None = None,
         *,
         child_runs: ChildRunPolicy | None = None,
+        approval_grant: ApprovalGrantMode | None = None,
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
     ) -> Agent:
@@ -1035,6 +1231,8 @@ class Agent:
             observers: Optional trusted observer callbacks.
             child_runs: Optional child-run admission policy. Defaults to
                 :meth:`ChildRunPolicy.deny`.
+            approval_grant: Optional paid-tool approval grant mode. Defaults
+                to :meth:`ApprovalGrantMode.per_call`.
             sqlite_path: Optional SQLite file path. ``None`` keeps the
                 in-memory journal. ``:memory:`` requires
                 :attr:`SqliteDurability.Relaxed`.
@@ -1060,6 +1258,24 @@ class Agent:
 
         Returns:
             ``id: description`` lines under the 8 KiB registration ceiling.
+        """
+    def read_artifact(self, artifact: dict[str, Any]) -> bytes:
+        """Read back the bytes behind an artifact reference a tool returned.
+
+        Toolsets that produce binary output stage it and return a reference
+        instead of inlining base64 the model cannot read, so a generated
+        image or audio clip arrives as the ``artifact`` field of a tool
+        result rather than as data. Pass that value here to get the bytes.
+
+        Args:
+            artifact: The ``artifact`` object from a tool result.
+
+        Returns:
+            The staged bytes.
+
+        Raises:
+            ValueError: If ``artifact`` is not a valid reference, or the
+                bytes are no longer present in this agent's store.
         """
     async def re_resolve(self) -> Agent:
         """Compose a new agent from reconstructed catalogs.
@@ -1203,11 +1419,11 @@ def build_metadata() -> dict[str, str | bool | int]:
         Version, engine, and feature flags. No secrets.
     """
 
-def linked_providers() -> tuple[str, ...]:
+def linked_providers() -> tuple[str, str, str, str]:
     """Return curated Rust-backed providers linked into this extension.
 
     Returns:
-        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\")``.
+        A tuple such as ``(\"openai\", \"anthropic\", \"ollama\", \"openrouter\")``.
     """
 
 def journal_known_answer(kind: str, value: dict[str, object]) -> dict[str, object]:

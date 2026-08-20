@@ -15,7 +15,7 @@ from nbclient import NotebookClient
 from nbformat import read
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NOTEBOOKS = REPO_ROOT / "examples" / "python-minimal" / "notebooks"
+NOTEBOOKS = REPO_ROOT / "examples" / "python-notebooks"
 SUPPORT = NOTEBOOKS / "_support.py"
 EXPECTED = (
     "01_orientation.ipynb",
@@ -25,6 +25,9 @@ EXPECTED = (
     "05_ollama_and_harness.ipynb",
     "06_openai.ipynb",
     "07_anthropic.ipynb",
+    "08_document_ingestion.ipynb",
+    "09_openrouter.ipynb",
+    "10_elicitation.ipynb",
 )
 SECRET_MARKERS = (
     "sk-",
@@ -32,6 +35,7 @@ SECRET_MARKERS = (
     "x-api-key",
     "OPENAI_API_KEY=",
     "ANTHROPIC_API_KEY=",
+    "OPENROUTER_API_KEY=",
 )
 
 
@@ -98,6 +102,7 @@ def _check_committed(path: Path) -> None:
             (
                 "https://api.openai.com" in source
                 or "https://api.anthropic.com" in source
+                or "https://openrouter.ai" in source
             )
             and "live(" not in source
             and "live_value(" not in source

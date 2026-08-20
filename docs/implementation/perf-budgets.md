@@ -86,8 +86,8 @@ CI fails on exceed via `uv run --no-project python scripts/perf/check_size_budge
 | Artifact | Budget | Source | Slack |
 | --- | --- | --- | --- |
 | Python wheel | 10 MiB (10,485,760 bytes) | PR-027–PR-032; do not raise | none |
-| WASM `*_bg.wasm` raw | 10,223,616 bytes | checked-in tree 9,449,844 (`0.1.0` was 8,186,356; PR-038 historical 5,950,310) | ~8.2% |
-| WASM `*_bg.wasm` gzip | 3,014,656 bytes | checked-in tree 2,790,984 (`0.1.0` was 2,464,652; PR-038 historical 1,811,048) | ~8.0% |
+| WASM `*_bg.wasm` raw | 16,945,884 bytes | checked-in tree 15,661,630 (document ingest + prior history) | ~8.2% |
+| WASM `*_bg.wasm` gzip | 5,860,073 bytes | checked-in tree 5,425,993 (document ingest + prior history) | ~8.0% |
 | Minimal native CLI | 9,437,184 bytes (9 MiB) | measured `target/release/minimal` 8,730,288 | ~8.1% |
 
 `scripts/wasm_package/check.py size` remains a measurement writer. It is

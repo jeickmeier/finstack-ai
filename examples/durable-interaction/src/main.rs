@@ -39,9 +39,9 @@ use finstack_ai_kernel::{
     Timestamp, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, ExternalClock,
-    IdGenerationError, JsonSchemaToolValidatorCompiler, LockedModelContextProfile, Model,
-    ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
+    ExternalClock, IdGenerationError, JsonSchemaToolValidatorCompiler, LockedModelContextProfile,
+    Model, ModelContextProfile, ModelName, ModelRequestDraft, ModelRequestLimits, ModelResponse,
     ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig, ModelToolCall,
     RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig, RunTaskOwner,
     SameIdentityRetryPolicy, SideEffectClass, TokenEstimatorRef, TokenEstimatorSource,
@@ -312,6 +312,7 @@ async fn spawn_owner(
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,

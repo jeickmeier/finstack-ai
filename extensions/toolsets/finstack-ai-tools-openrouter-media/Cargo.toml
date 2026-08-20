@@ -1,0 +1,32 @@
+[package]
+name = "finstack-ai-tools-openrouter-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "OpenRouter media-generation toolset for finstack-ai"
+
+[features]
+default = []
+vendored-tls = ["reqwest/native-tls-vendored"]
+
+[dependencies]
+base64 = { workspace = true }
+finstack-ai-kernel = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "time"] }
+
+[dev-dependencies]
+finstack-ai-context-memory = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync"] }
+
+[lints]
+workspace = true

@@ -24,6 +24,7 @@ async fn repeated_model_runs_settle_and_shutdown_without_stream_or_task_leaks() 
                     max_subscribers: 2,
                 },
                 shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
             },
             ModelTaskConfig {
                 job_capacity: 1,

@@ -11,6 +11,7 @@ pub fn finstack_ai_provider_openai::OpenAiConfig::try_new(impl core::convert::As
 pub fn finstack_ai_provider_openai::OpenAiConfig::with_authentication(self, finstack_ai_runtime::ports::model::provider_util::credentials::Authentication) -> Self
 pub fn finstack_ai_provider_openai::OpenAiConfig::with_credential_store(self, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialStore, finstack_ai_runtime::ports::model::provider_util::credentials::CredentialReference) -> Self
 pub fn finstack_ai_provider_openai::OpenAiConfig::with_headers(self, alloc::vec::Vec<finstack_ai_provider_openai::SecretHeader>) -> Self
+pub fn finstack_ai_provider_openai::OpenAiConfig::with_media_resolver(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::provider_util::media::MediaResolver>) -> Self
 pub fn finstack_ai_provider_openai::OpenAiConfig::with_request_timeout(self, core::time::Duration) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 pub fn finstack_ai_provider_openai::OpenAiConfig::with_stream_limits(self, usize, usize) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
 impl core::clone::Clone for finstack_ai_provider_openai::OpenAiConfig
@@ -20,6 +21,9 @@ pub fn finstack_ai_provider_openai::OpenAiConfig::fmt(&self, &mut core::fmt::For
 pub struct finstack_ai_provider_openai::OpenAiModelConfig
 pub finstack_ai_provider_openai::OpenAiModelConfig::context_window_tokens: u64
 pub finstack_ai_provider_openai::OpenAiModelConfig::hard_input_bytes: u64
+pub finstack_ai_provider_openai::OpenAiModelConfig::input_audio: bool
+pub finstack_ai_provider_openai::OpenAiModelConfig::input_files: bool
+pub finstack_ai_provider_openai::OpenAiModelConfig::input_images: bool
 pub finstack_ai_provider_openai::OpenAiModelConfig::max_output_tokens: u64
 pub finstack_ai_provider_openai::OpenAiModelConfig::name: finstack_ai_runtime::ports::model::identity::ModelName
 pub finstack_ai_provider_openai::OpenAiModelConfig::parallel_tool_calls: bool
@@ -28,6 +32,9 @@ pub finstack_ai_provider_openai::OpenAiModelConfig::reasoning: bool
 pub finstack_ai_provider_openai::OpenAiModelConfig::reserved_output_tokens: u64
 impl finstack_ai_provider_openai::OpenAiModelConfig
 pub fn finstack_ai_provider_openai::OpenAiModelConfig::try_new(impl core::convert::AsRef<str>, u64, u64, u64, u64, u64) -> core::result::Result<Self, finstack_ai_runtime::ports::model::error::ModelError>
+pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_input_audio(self, bool) -> Self
+pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_input_files(self, bool) -> Self
+pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_input_images(self, bool) -> Self
 pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_parallel_tool_calls(self, bool) -> Self
 pub const fn finstack_ai_provider_openai::OpenAiModelConfig::with_reasoning(self, bool) -> Self
 impl core::clone::Clone for finstack_ai_provider_openai::OpenAiModelConfig

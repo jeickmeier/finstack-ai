@@ -14,10 +14,10 @@ use finstack_ai_kernel::{
     Stage, TextBlock, TransitionEnv, Usage,
 };
 use finstack_ai_runtime::{
-    CancellationSignal, CommitCoordinator, CommitCoordinatorError, EventBatchConfig, EventFilter,
-    EventHubConfig, EventLagPolicy, EventSubscriptionCloseReason, EventSubscriptionConfig,
-    ExternalClock, JournalStore, LoadRequest, MODEL_RECONCILIATION_UNSUPPORTED,
-    MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
+    ApprovalGrantMode, CancellationSignal, CommitCoordinator, CommitCoordinatorError,
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionCloseReason,
+    EventSubscriptionConfig, ExternalClock, JournalStore, LoadRequest,
+    MODEL_RECONCILIATION_UNSUPPORTED, MODEL_RESPONSE_MISMATCH, MODEL_STREAM_DUPLICATE_COMPLETION,
     MODEL_STREAM_ERROR_AFTER_COMPLETION, MODEL_STREAM_ITEM_AFTER_COMPLETION,
     MODEL_STREAM_MISSING_COMPLETION, MODEL_TOOL_CALL_ARGUMENTS_INVALID,
     MODEL_TOOL_CALL_DELTA_INVALID, MODEL_TOOL_CALL_INCOMPLETE, MODEL_USAGE_INVALID, Model,

@@ -11,6 +11,8 @@ use crate::{
     SecurityAuditGate, SystemClock, UuidV7Generator,
 };
 
+use crate::interaction::validate_interaction_response;
+
 use super::shared::{
     EXTERNAL_COMMAND_DIGEST_DOMAIN, OPERATION_LOCATOR_DIGEST_DOMAIN, allocate_transition_env,
     audit_event, authorization_matches, interaction_settled_input, known_interaction,
@@ -51,10 +53,17 @@ impl InteractionRouter {
 
     /// Route one fully authenticated interaction resolution.
     ///
+    /// A matching outstanding request is validated against
+    /// [`finstack_ai_kernel::InteractionRequest::response_schema`] with
+    /// [`crate::JsonSchemaToolValidatorCompiler`] before any
+    /// [`KernelInput::InteractionSettled`] is built. Invalid payloads return
+    /// [`ExternalRouteError::InvalidNormalizedCommand`] and do not commit.
+    ///
     /// # Errors
     ///
     /// Returns one non-existence-revealing rejection after required audit for locator
-    /// or authorization failures, and fail-closed runtime errors otherwise.
+    /// or authorization failures, a typed command error when the response fails
+    /// the parked schema, and fail-closed runtime errors otherwise.
     #[expect(
         clippy::too_many_lines,
         reason = "the security-sensitive route keeps locator, authorization, expiry, and durable rejection order explicit"
@@ -137,6 +146,19 @@ impl InteractionRouter {
                     submitted_at,
                 )
                 .await;
+        }
+        if let Some(pending) = coordinator.state().pending_interaction.as_ref()
+            && pending.request.interaction_id() == interaction_id
+            && pending
+                .request
+                .expires_at()
+                .is_none_or(|deadline| submitted_at < deadline)
+        {
+            validate_interaction_response(
+                pending.request.response_schema(),
+                command.resolution.response(),
+            )
+            .map_err(|_| ExternalRouteError::InvalidNormalizedCommand)?;
         }
 
         let accepted_digest = coordinator

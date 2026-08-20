@@ -335,3 +335,66 @@ test("double cancel is idempotent and drop does not cancel", async ({ page }) =>
   expect(result.pending).toBe(0);
   expect(result.keptText).toBe("not cancelled");
 });
+
+test("accepts per_call and informed_batch approval grants", async ({ page }) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          text: "granted",
+          completion_id: "js-approval-grant-1",
+        }),
+      },
+      modelOptions,
+    );
+    const perCall = await window.finstackTest.Agent.create({
+      model,
+      approvalGrant: window.finstackTest.ApprovalGrantMode.perCall(),
+    });
+    const informed = await window.finstackTest.Agent.create({
+      model,
+      approvalGrant: window.finstackTest.ApprovalGrantMode.informedBatch(),
+    });
+    const omitted = await window.finstackTest.Agent.create({ model });
+    const texts = [
+      (await perCall.run("hello")).text,
+      (await informed.run("hello")).text,
+      (await omitted.run("hello")).text,
+    ];
+    return { texts };
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.texts).toEqual(["granted", "granted", "granted"]);
+});
+
+test("rejects an unknown approval grant mode", async ({ page }) => {
+  const result = await page.evaluate(async ({ modelOptions }) => {
+    const model = new window.finstackTest.JsModel(
+      {
+        request: async () => ({
+          text: "unused",
+          completion_id: "unused",
+        }),
+      },
+      modelOptions,
+    );
+    try {
+      await window.finstackTest.Agent.create({
+        model,
+        approvalGrant: "not_a_mode" as "per_call",
+      });
+      return { ok: true, code: "", message: "" };
+    } catch (error) {
+      const typed = error as { code?: string; message?: string };
+      return {
+        ok: false,
+        code: typed.code ?? "",
+        message: typed.message ?? String(error),
+      };
+    }
+  }, { modelOptions: MODEL_OPTIONS });
+
+  expect(result.ok).toBe(false);
+  expect(result.code).toBe("agent_run_invalid_configuration");
+  expect(result.message).toContain("approval_grant must be per_call or informed_batch");
+});

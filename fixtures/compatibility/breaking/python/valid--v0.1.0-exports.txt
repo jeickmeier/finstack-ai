@@ -1,4 +1,5 @@
 Agent
+ApprovalGrantMode
 Attachment
 BuildMetadata
 CallbackContext
@@ -6,6 +7,7 @@ CancelledError
 Capability
 ChildRunPolicy
 ConfigurationError
+ElicitationToolset
 Event
 EventBatch
 EventBatchIterator

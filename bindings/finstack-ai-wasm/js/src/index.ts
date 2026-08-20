@@ -12,6 +12,7 @@ import type { PrebetaKind } from "./host.js";
 
 export {
   Agent,
+  ApprovalGrantMode,
   Event,
   EventBatch,
   FinstackError,

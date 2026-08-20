@@ -721,7 +721,7 @@ mod tests {
 
     use finstack_ai::{
         AGENT_RUN_UNSUPPORTED_PLAN, Agent, AnthropicAgentSpec, E2bSandboxAgentSpec,
-        GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec,
+        GatewayAgentSpec, LinkedCommon, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
     };
 
     use super::{health, parse_document_markdown};
@@ -749,14 +749,29 @@ mod tests {
             api_key: "sk-unused".into(),
             reasoning_effort: None,
             reasoning_summary: None,
+            media_tools: false,
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()
         .expect("openai");
+        let openrouter = ready(Agent::openrouter(OpenRouterAgentSpec {
+            model: "fixture-model".into(),
+            api_key: "sk-unused".into(),
+            referer: None,
+            title: None,
+            reasoning_effort: None,
+            reasoning_summary: None,
+            media_tools: false,
+            common: LinkedCommon::default(),
+        }))
+        .err()
+        .expect("openrouter");
         let anthropic = ready(Agent::anthropic(AnthropicAgentSpec {
             base_url: "https://api.anthropic.com".into(),
             model: "fixture-model".into(),
             api_key: None,
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()
@@ -764,6 +779,7 @@ mod tests {
         let ollama = ready(Agent::ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
+            openrouter_media: None,
             common: LinkedCommon::default(),
         }))
         .err()
@@ -790,6 +806,7 @@ mod tests {
         .err()
         .expect("e2b");
         assert_eq!(openai.code(), AGENT_RUN_UNSUPPORTED_PLAN);
+        assert_eq!(openrouter.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(anthropic.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(ollama.code(), AGENT_RUN_UNSUPPORTED_PLAN);
         assert_eq!(gateway.code(), AGENT_RUN_UNSUPPORTED_PLAN);

@@ -1,5 +1,5 @@
-use finstack_ai_protocol::ProtocolError;
 use finstack_ai_runtime::StoreError;
+pub(crate) use finstack_ai_store_common::protocol_error;
 
 pub(crate) fn i64_from_u64(value: u64, reason_code: &'static str) -> Result<i64, StoreError> {
     i64::try_from(value).map_err(|_| StoreError::Integrity { reason_code })
@@ -44,23 +44,5 @@ pub(crate) fn map_sqlite_error(error: rusqlite::Error) -> StoreError {
     }
     StoreError::Unavailable {
         reason_code: "sqlite_error",
-    }
-}
-
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "protocol map_err adapter takes the owned error"
-)]
-pub(crate) fn protocol_error(error: ProtocolError) -> StoreError {
-    match error {
-        ProtocolError::LimitExceeded { resource, limit } => {
-            StoreError::LimitExceeded { resource, limit }
-        }
-        ProtocolError::Integrity { reason_code } | ProtocolError::InvalidCbor { reason_code } => {
-            StoreError::Integrity { reason_code }
-        }
-        ProtocolError::Codec { .. } => StoreError::Integrity {
-            reason_code: "canonical_codec",
-        },
     }
 }

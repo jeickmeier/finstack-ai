@@ -2,6 +2,7 @@
 
 mod anthropic_messages;
 mod credentials;
+mod media;
 mod ndjson;
 mod ollama_chat;
 mod openai_responses;
@@ -10,6 +11,10 @@ mod sse;
 
 pub use anthropic_messages::AnthropicMessagesAssembly;
 pub use credentials::{Authentication, CredentialReference, CredentialRejected, CredentialStore};
+pub use media::{
+    MediaResolveError, MediaResolveKind, MediaResolver, ResolveDraftMediaError, ResolvedMedia,
+    resolve_draft_media,
+};
 pub use ndjson::{NdjsonError, NdjsonParser};
 pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
 pub use openai_responses::OpenAiResponsesAssembly;

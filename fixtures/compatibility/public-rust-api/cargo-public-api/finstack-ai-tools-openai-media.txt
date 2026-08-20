@@ -1,0 +1,40 @@
+pub mod finstack_ai_tools_openai_media
+pub enum finstack_ai_tools_openai_media::OpenAiMediaError
+pub finstack_ai_tools_openai_media::OpenAiMediaError::CredentialRequired
+pub finstack_ai_tools_openai_media::OpenAiMediaError::EndpointInvalid
+pub finstack_ai_tools_openai_media::OpenAiMediaError::EndpointInvalid::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_openai_media::OpenAiMediaError
+pub fn finstack_ai_tools_openai_media::OpenAiMediaError::clone(&self) -> finstack_ai_tools_openai_media::OpenAiMediaError
+impl core::cmp::Eq for finstack_ai_tools_openai_media::OpenAiMediaError
+impl core::cmp::PartialEq for finstack_ai_tools_openai_media::OpenAiMediaError
+pub fn finstack_ai_tools_openai_media::OpenAiMediaError::eq(&self, &finstack_ai_tools_openai_media::OpenAiMediaError) -> bool
+impl core::error::Error for finstack_ai_tools_openai_media::OpenAiMediaError
+impl core::fmt::Debug for finstack_ai_tools_openai_media::OpenAiMediaError
+pub fn finstack_ai_tools_openai_media::OpenAiMediaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_openai_media::OpenAiMediaError
+pub fn finstack_ai_tools_openai_media::OpenAiMediaError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_openai_media::OpenAiMediaError
+pub struct finstack_ai_tools_openai_media::OpenAiMediaConfig
+pub finstack_ai_tools_openai_media::OpenAiMediaConfig::api_key: alloc::string::String
+pub finstack_ai_tools_openai_media::OpenAiMediaConfig::endpoint: alloc::string::String
+pub finstack_ai_tools_openai_media::OpenAiMediaConfig::max_result_bytes: usize
+impl core::clone::Clone for finstack_ai_tools_openai_media::OpenAiMediaConfig
+pub fn finstack_ai_tools_openai_media::OpenAiMediaConfig::clone(&self) -> finstack_ai_tools_openai_media::OpenAiMediaConfig
+impl core::fmt::Debug for finstack_ai_tools_openai_media::OpenAiMediaConfig
+pub fn finstack_ai_tools_openai_media::OpenAiMediaConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_openai_media::OpenAiMediaToolset
+impl finstack_ai_tools_openai_media::OpenAiMediaToolset
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::try_new(finstack_ai_tools_openai_media::OpenAiMediaConfig) -> core::result::Result<Self, finstack_ai_tools_openai_media::OpenAiMediaError>
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
+impl core::fmt::Debug for finstack_ai_tools_openai_media::OpenAiMediaToolset
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_openai_media::OpenAiMediaToolset
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_openai_media::OpenAiMediaToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_CREDENTIAL_REQUIRED: &str
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_ENDPOINT_INVALID: &str
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_TIMEOUT: &str
+pub const finstack_ai_tools_openai_media::OPENAI_MEDIA_TRANSPORT_FAILED: &str

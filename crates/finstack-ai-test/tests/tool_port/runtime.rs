@@ -180,6 +180,7 @@ async fn failed_tool_batch_append_never_executes_a_tool() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,

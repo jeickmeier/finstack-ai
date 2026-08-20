@@ -68,6 +68,41 @@ unpublished.
 - The checked-in `fixtures/documents/` corpus omits a table-heavy PDF (the spec's fixture list calls for one); anydoc's own upstream test corpus already covers table-heavy PDF extraction.
 - Debug parse-to-markdown helpers over `finstack-ai-tools-document`'s parser, without an `Agent` or `Run`: Python `parse_document_markdown` / `parse_document`, WASM `parseDocumentMarkdown` / `parseDocument`.
 - `examples/python-notebooks/08_document_ingestion.ipynb`: an offline, scripted-model walkthrough of PDF and `.docx` document ingestion — debug parsing, scanned-PDF classification, and an `Agent.run` attachment showing the model-visible Markdown the ingest middleware injects.
+- Added `finstack-ai-provider-openrouter`: OpenRouter Responses provider with
+  attribution headers, provider-routing passthrough, and a model-catalog
+  fetch helper; new `Agent::openrouter` constructor with Python and WASM
+  binding parity.
+- Added `finstack-ai-tools-openrouter-media` (five tools: image, speech,
+  transcription, video generation, and video-status polling with an inline
+  `wait_seconds` budget) and `finstack-ai-tools-openai-media` (three tools:
+  image, speech, transcription) as native, opt-in T1 toolsets. Registrable
+  from every linked constructor: `Agent::openrouter` gains `media_tools:
+  bool` (reusing its own key and attribution); `Agent::openai`,
+  `Agent::anthropic`, and `Agent::ollama` gain `openrouter_media:
+  Option<OpenRouterMediaToolsSpec>`; `Agent::openai` additionally gains its
+  own `media_tools: bool` for the native OpenAI toolset, and both may be
+  active together. OpenRouter media tool calls are always billed to the
+  configured OpenRouter API key. Python factories gain the matching
+  `media_tools` / `openrouter_media_api_key` / `openrouter_media_referer`
+  / `openrouter_media_title` keyword arguments; both crates stay off the
+  wasm-host dependency graph.
+- Added a host-supplied `MediaResolver` port-object contract (ADR-049,
+  following the ADR-048 `CredentialStore` precedent) resolving a kernel
+  `BlobRef` to bytes or a URL. `with_media_resolver` is available on all
+  four provider configs (`OpenRouterConfig`, `OpenAIConfig`,
+  `AnthropicConfig`, `OllamaConfig`); each also gains per-model
+  `with_input_images` / `with_input_audio` / `with_input_files` toggles.
+  Without a configured resolver, media-bearing user messages fail closed.
+  Modality support differs by provider: OpenRouter and OpenAI accept
+  images, files, and audio; Anthropic accepts images and documents but
+  not audio; Ollama accepts base64 images only.
+- Add `finstack-ai-store-common`: shared journal-store semantics (append
+  admission, snapshot/prune admission, chain and window verification, scan
+  validation) now used by both the memory and sqlite stores.
+- Fix the sqlite store to reject tail-window loads that start mid-batch
+  (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
+  reconstructed batch that splits a committed one; unify the memory store's
+  hole-at-start code to the `gap` reason codes.
 
 ### Changed
 

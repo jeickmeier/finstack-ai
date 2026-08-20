@@ -19,12 +19,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock, ExternalCompletionRouter,
-    ExternalRouteError, ExternalRouteOutcome, IdGenerationError, InteractionRouter, JournalStore,
-    LockedModelContextProfile, Model, ModelCapabilities, ModelTaskConfig, RandomSource,
-    ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig, RunTaskOwner,
-    SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits, ToolTaskConfig,
-    model_retry_allowed, tool_retry_allowed,
+    ApprovalGrantMode, CommitCoordinator, ContextProvider, EventHubConfig, ExternalClock,
+    ExternalCompletionRouter, ExternalRouteError, ExternalRouteOutcome, IdGenerationError,
+    InteractionRouter, JournalStore, LockedModelContextProfile, Model, ModelCapabilities,
+    ModelTaskConfig, RandomSource, ResolvedMiddlewareChain, ResolvedToolCatalog, RunTaskConfig,
+    RunTaskOwner, SameIdentityRetryPolicy, SecurityAuditGate, ToolSpec, ToolStreamLimits,
+    ToolTaskConfig, model_retry_allowed, tool_retry_allowed,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -376,6 +376,7 @@ pub struct WorkflowSession {
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
     profile: Option<LockedModelContextProfile>,
+    approval_grant: ApprovalGrantMode,
     owner: Option<RunTaskOwner>,
     last_state: KernelState,
     drive_timeout: Duration,
@@ -426,6 +427,7 @@ impl WorkflowSession {
             middleware_chain: None,
             context_providers: None,
             profile: None,
+            approval_grant: ApprovalGrantMode::PerCall,
             owner: None,
             last_state: coordinator.state().clone(),
             drive_timeout: Duration::from_secs(2),
@@ -461,6 +463,13 @@ impl WorkflowSession {
         self.model = Some(model);
         self.profile = Some(profile);
         self.catalog = catalog;
+        self
+    }
+
+    /// Bind the paid-tool approval grant mode used when the driver respawns.
+    #[must_use]
+    pub fn with_approval_grant(mut self, mode: ApprovalGrantMode) -> Self {
+        self.approval_grant = mode;
         self
     }
 
@@ -764,6 +773,7 @@ impl WorkflowSession {
                 max_subscribers: 8,
             },
             shutdown_deadline: Duration::from_millis(500),
+            approval_grant: self.approval_grant,
         };
         let model_config = ModelTaskConfig {
             job_capacity: 2,

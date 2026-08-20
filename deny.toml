@@ -18,7 +18,11 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # Transitive via lopdf 0.42 / pdf-inspector / anydoc (document toolset).
+    # Informational; no patched ttf-parser and no workspace-safe lopdf bump.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained; document stack has no drop-in upgrade" },
+]
 
 [licenses]
 version = 2

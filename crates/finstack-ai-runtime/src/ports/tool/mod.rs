@@ -14,8 +14,8 @@ mod tests;
 
 pub use authority::verify_authority;
 pub use catalog::{
-    ResolvedTool, ResolvedToolCatalog, ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision,
-    ToolsetRegistration,
+    ApprovalState, ResolvedTool, ResolvedToolCatalog, ToolCatalogPlan, ToolExecutionPolicy,
+    ToolPolicyDecision, ToolsetRegistration,
 };
 pub use error::{
     MCP_SAMPLING_REQUIRED, MCP_SAMPLING_UNAVAILABLE, TOOL_CANCELLED, TOOL_DEADLINE_EXCEEDED,

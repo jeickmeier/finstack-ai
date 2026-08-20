@@ -85,9 +85,9 @@ def test_run_with_csv_attachment() -> None:
 
     # (b) no File/media block remains in the model-visible content: the
     # middleware always replaces a supported `File` block with `Text`.
-    assert not any(
-        block["kind"] == "file" for block in user_blocks
-    ), f"model must never see a File block: {user_blocks!r}"
+    assert not any(block["kind"] == "file" for block in user_blocks), (
+        f"model must never see a File block: {user_blocks!r}"
+    )
 
     # (a) the model-visible text carries the parsed CSV, converted to
     # Markdown by the document toolset's parser.
@@ -135,7 +135,9 @@ def test_attachment_from_path_over_4mib_is_rejected(tmp_path: Any) -> None:
     oversized_path.write_bytes(b"a" * (4 * 1024 * 1024 + 1))
 
     try:
-        finstack_ai.Attachment(media_type="application/octet-stream", path=str(oversized_path))
+        finstack_ai.Attachment(
+            media_type="application/octet-stream", path=str(oversized_path)
+        )
     except ValueError as error:
         assert "4 mib" in str(error).lower()
     else:
@@ -153,7 +155,9 @@ def test_attachment_from_path_defaults_name_to_basename(tmp_path: Any) -> None:
     # under test (name defaulting is exercised again via the run below).
     async def exercise() -> None:
         agent = await finstack_ai.Agent.from_python(_acknowledging_model())
-        result = await agent.run("Summarize the attached file.", attachments=[attachment])
+        result = await agent.run(
+            "Summarize the attached file.", attachments=[attachment]
+        )
         assert result.text == "acknowledged"
 
     asyncio.run(exercise())

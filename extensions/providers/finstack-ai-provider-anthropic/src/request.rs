@@ -1,11 +1,13 @@
 //! Private Anthropic Messages request translation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use base64::Engine;
 use finstack_ai_kernel::{
-    ContentBlock, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
+    ContentBlock, MediaRef, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
 };
-use finstack_ai_runtime::{ModelError, ModelRequestDraft};
+use finstack_ai_runtime::{ModelError, ModelRequestDraft, ResolvedMedia};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -77,6 +79,10 @@ enum WireContent {
         tool_use_id: String,
         content: String,
     },
+    #[serde(rename = "image")]
+    Image { source: Value },
+    #[serde(rename = "document")]
+    Document { source: Value },
 }
 
 #[derive(Debug, Serialize)]
@@ -90,20 +96,22 @@ impl MessagesRequest {
     pub(crate) fn try_from_draft(
         draft: &ModelRequestDraft,
         model: &AnthropicModelConfig,
+        resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
-        Self::try_from_draft_with_cache(draft, model, model.cache_breakpoints)
+        Self::try_from_draft_with_cache(draft, model, model.cache_breakpoints, resolved)
     }
 
     pub(crate) fn try_from_draft_with_cache(
         draft: &ModelRequestDraft,
         model: &AnthropicModelConfig,
         cache_breakpoints: bool,
+        resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (system, messages) = map_messages(&draft.messages, cache_breakpoints)?;
+        let (system, messages) = map_messages(&draft.messages, cache_breakpoints, resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -205,6 +213,8 @@ fn raw_value(value: &finstack_ai_kernel::RawJson) -> Result<Value, ModelError> {
 fn map_messages(
     messages: &[Message],
     cache_breakpoints: bool,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &AnthropicModelConfig,
 ) -> Result<(Vec<SystemBlock>, Vec<WireMessage>), ModelError> {
     let prefix_len = messages
         .iter()
@@ -233,18 +243,20 @@ fn map_messages(
     }
     let mut mapped = Vec::new();
     for message in &messages[prefix_len..] {
-        mapped.extend(map_conversation_message(message)?);
+        mapped.extend(map_conversation_message(message, resolved, model)?);
     }
     Ok((system, mapped))
 }
 
-fn map_conversation_message(message: &Message) -> Result<Vec<WireMessage>, ModelError> {
+fn map_conversation_message(
+    message: &Message,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &AnthropicModelConfig,
+) -> Result<Vec<WireMessage>, ModelError> {
     match message.role() {
         MessageRole::User => Ok(vec![WireMessage {
             role: "user",
-            content: vec![WireContent::Text {
-                text: render_text(message.content())?,
-            }],
+            content: map_user_content(message.content(), resolved, model)?,
         }]),
         MessageRole::Assistant => Ok(vec![WireMessage {
             role: "assistant",
@@ -256,6 +268,70 @@ fn map_conversation_message(message: &Message) -> Result<Vec<WireMessage>, Model
         }]),
         MessageRole::System | MessageRole::Developer => Err(request_error(
             "system instructions must remain a stable leading prefix",
+        )),
+    }
+}
+
+fn map_user_content(
+    content: &[ContentBlock],
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+    model: &AnthropicModelConfig,
+) -> Result<Vec<WireContent>, ModelError> {
+    let mut wire = Vec::new();
+    let mut text = String::new();
+    let flush = |wire: &mut Vec<WireContent>, text: &mut String| {
+        if !text.is_empty() {
+            wire.push(WireContent::Text {
+                text: std::mem::take(text),
+            });
+        }
+    };
+    for block in content {
+        match block {
+            ContentBlock::Text(value) => text.push_str(value.text()),
+            ContentBlock::Json(value) => text.push_str(value.value().as_str()),
+            ContentBlock::Image(media) => {
+                if !model.input_images {
+                    return Err(request_error("model is not configured for image input"));
+                }
+                flush(&mut wire, &mut text);
+                wire.push(WireContent::Image {
+                    source: media_source(media, resolved)?,
+                });
+            }
+            ContentBlock::File(media) => {
+                if !model.input_files {
+                    return Err(request_error("model is not configured for file input"));
+                }
+                flush(&mut wire, &mut text);
+                wire.push(WireContent::Document {
+                    source: media_source(media, resolved)?,
+                });
+            }
+            _ => {
+                return Err(request_error(
+                    "message contains unsupported provider content",
+                ));
+            }
+        }
+    }
+    flush(&mut wire, &mut text);
+    Ok(wire)
+}
+
+fn media_source(
+    media: &MediaRef,
+    resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
+) -> Result<Value, ModelError> {
+    match resolved.get(media.blob().id()) {
+        Some(ResolvedMedia::Url(url)) => Ok(json!({ "type": "url", "url": url.as_ref() })),
+        Some(ResolvedMedia::Bytes { media_type, bytes }) => Ok(json!({
+            "type": "base64",
+            "media_type": media_type.as_ref(),
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes)
+        })),
+        None => Err(request_error(
+            "media content requires a configured media resolver",
         )),
     }
 }
@@ -333,13 +409,14 @@ mod tests {
     #[test]
     fn rejects_reserved_settings_and_keeps_system_prefix_stable() {
         let mut draft = draft(br#"{"model":"shadow"}"#);
-        let error = MessagesRequest::try_from_draft(&draft, &model())
+        let error = MessagesRequest::try_from_draft(&draft, &model(), &BTreeMap::new())
             .expect_err("reserved setting must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
 
         draft.settings.values =
             finstack_ai_kernel::RawJson::parse(br#"{"temperature":0}"#).expect("settings");
-        let request = MessagesRequest::try_from_draft(&draft, &model()).expect("request");
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model(), &BTreeMap::new()).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][0]["role"], "user");
         assert_eq!(value["messages"][0]["content"][0]["text"], "hello");
@@ -368,7 +445,8 @@ mod tests {
             },
         };
         let model = model().with_cache_breakpoints(true);
-        let request = MessagesRequest::try_from_draft(&draft, &model).expect("request");
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model, &BTreeMap::new()).expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["system"][0]["text"], "Stable prefix.");
         assert!(value["system"][0].get("cache_control").is_none());
@@ -397,13 +475,222 @@ mod tests {
         };
         let model = model().with_cache_breakpoints(true);
         let cached =
-            MessagesRequest::try_from_draft_with_cache(&draft, &model, true).expect("cached");
+            MessagesRequest::try_from_draft_with_cache(&draft, &model, true, &BTreeMap::new())
+                .expect("cached");
         let busted =
-            MessagesRequest::try_from_draft_with_cache(&draft, &model, false).expect("busted");
+            MessagesRequest::try_from_draft_with_cache(&draft, &model, false, &BTreeMap::new())
+                .expect("busted");
         let cached: Value = serde_json::from_slice(&serialize_request(&cached).unwrap()).unwrap();
         let busted: Value = serde_json::from_slice(&serialize_request(&busted).unwrap()).unwrap();
         assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");
         assert!(busted["system"][0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn image_url_resolution_maps_to_an_image_block_with_a_url_source() {
+        let draft = media_draft(ContentBlock::Image(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(
+            content.len(),
+            1,
+            "media-only message must omit an empty text block"
+        );
+        let block = &content[0];
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["source"]["type"], "url");
+        assert_eq!(block["source"]["url"], "https://cdn.example/a.png");
+    }
+
+    #[test]
+    fn image_bytes_resolution_maps_to_a_base64_source() {
+        let draft = media_draft(ContentBlock::Image(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Bytes {
+                media_type: Arc::from("image/png"),
+                bytes: Arc::from(&b"pngdata"[..]),
+            },
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let block = &value["messages"][0]["content"][0];
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["source"]["type"], "base64");
+        assert_eq!(block["source"]["media_type"], "image/png");
+        assert_eq!(
+            block["source"]["data"],
+            base64::engine::general_purpose::STANDARD.encode(b"pngdata")
+        );
+    }
+
+    #[test]
+    fn file_blocks_map_to_document_blocks() {
+        let draft = media_draft(ContentBlock::File(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.pdf")),
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model().with_input_files(true), &resolved)
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let block = &value["messages"][0]["content"][0];
+        assert_eq!(block["type"], "document");
+        assert_eq!(block["source"]["type"], "url");
+    }
+
+    #[test]
+    fn caption_text_precedes_the_image_block_and_no_extra_blocks_are_added() {
+        let draft = text_and_media_draft("describe this", ContentBlock::Image(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "describe this");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "url");
+    }
+
+    #[test]
+    fn text_image_text_interleaving_is_preserved_not_coalesced() {
+        let draft = content_draft(vec![
+            ContentBlock::Text(TextBlock::try_new("before").expect("text")),
+            ContentBlock::Image(media_ref()),
+            ContentBlock::Text(TextBlock::try_new("after").expect("text")),
+        ]);
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let request =
+            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let content = value["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 3, "text must not be coalesced across media");
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "before");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[2]["type"], "text");
+        assert_eq!(content[2]["text"], "after");
+    }
+
+    #[test]
+    fn image_input_is_rejected_when_the_model_flag_is_off() {
+        let draft = media_draft(ContentBlock::Image(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
+        );
+        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+            .expect_err("image input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn file_input_is_rejected_when_the_model_flag_is_off() {
+        let draft = media_draft(ContentBlock::File(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.pdf")),
+        );
+        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+            .expect_err("file input must be rejected when the flag is off");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn media_without_resolver_fails_closed() {
+        let draft = media_draft(ContentBlock::Image(media_ref()));
+        let error = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            &BTreeMap::new(),
+        )
+        .expect_err("unresolved media must fail");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn audio_blocks_stay_rejected() {
+        let draft = media_draft(ContentBlock::Audio(media_ref()));
+        let mut resolved = BTreeMap::new();
+        resolved.insert(
+            Arc::from("blob-1"),
+            ResolvedMedia::Url(Arc::from("https://cdn.example/a.mp3")),
+        );
+        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+            .expect_err("audio input must stay rejected");
+        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    fn media_ref() -> finstack_ai_kernel::MediaRef {
+        finstack_ai_kernel::MediaRef::new(
+            finstack_ai_kernel::BlobRef::try_new("blob-1", "image/png", 4, None, None::<&str>)
+                .expect("blob"),
+        )
+    }
+
+    fn media_draft(block: ContentBlock) -> ModelRequestDraft {
+        content_draft(vec![block])
+    }
+
+    fn text_and_media_draft(text: &str, block: ContentBlock) -> ModelRequestDraft {
+        content_draft(vec![
+            ContentBlock::Text(TextBlock::try_new(text).expect("text")),
+            block,
+        ])
+    }
+
+    fn content_draft(content: Vec<ContentBlock>) -> ModelRequestDraft {
+        let message = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ab").expect("message id"),
+            MessageRole::User,
+            content,
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("model"),
+            messages: Arc::from([message]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: finstack_ai_kernel::RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 100_000,
+                max_output_tokens: 1_024,
+            },
+        }
     }
 
     fn model() -> AnthropicModelConfig {

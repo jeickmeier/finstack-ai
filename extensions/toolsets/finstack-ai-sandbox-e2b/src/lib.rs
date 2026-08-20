@@ -467,6 +467,7 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use finstack_ai_kernel::{
@@ -474,7 +475,11 @@ mod tests {
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_runtime::{AuthorizationContext, CancellationSignal, RunCallContext, Toolset};
+    use finstack_ai_runtime::{
+        ApprovalState, AuthorizationContext, CancellationSignal, JsonSchemaToolValidatorCompiler,
+        ResolvedToolCatalog, RunCallContext, ToolCatalogPlan, ToolExecutionPolicy,
+        ToolPolicyDecision, Toolset, ToolsetRegistration,
+    };
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -543,6 +548,60 @@ mod tests {
             template: None,
         })
         .expect("ipv6 loopback");
+    }
+
+    fn host_allow_catalog(toolset: Arc<dyn Toolset>) -> ResolvedToolCatalog {
+        let policies = toolset
+            .tools()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.id.clone(),
+                    ToolExecutionPolicy {
+                        failure_policy: ToolFailurePolicy::ReturnToModel,
+                        approval: ToolPolicyDecision::Allow,
+                        max_concurrency: 1,
+                    },
+                )
+            })
+            .collect();
+        ResolvedToolCatalog::try_new(
+            [ToolsetRegistration {
+                toolset,
+                policies,
+                components: BTreeMap::new(),
+            }],
+            &BTreeMap::new(),
+            &JsonSchemaToolValidatorCompiler,
+        )
+        .expect("catalog")
+    }
+
+    #[test]
+    fn policy_floor_requires_approval_under_host_allow() {
+        let toolset = Arc::new(
+            E2bSandboxToolset::try_new(E2bSandboxConfig {
+                api_key: CANARY.into(),
+                endpoint: "https://api.e2b.dev".into(),
+                template: None,
+            })
+            .expect("tools"),
+        );
+        let catalog = host_allow_catalog(toolset);
+        assert_eq!(
+            catalog.decide_plan(
+                ToolCallBlock::try_new(
+                    ToolCallId::from_bytes([9; 16]),
+                    TOOL_NAME,
+                    RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+                )
+                .expect("call"),
+                None,
+                None,
+                ApprovalState::Unpaid,
+            ),
+            ToolCatalogPlan::RequireApproval
+        );
     }
 
     #[tokio::test]

@@ -30,6 +30,7 @@ async fn runtime_routes_cancel_effect_to_only_the_active_model_task() {
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(250),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 1,

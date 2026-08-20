@@ -18,6 +18,7 @@ use finstack_ai_runtime::{
     SCAN_PAGE_MAX_RECORDS, ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError,
     WriteMetadataRequest,
 };
+use finstack_ai_test::store_fixtures::{draft, id, request};
 use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};
 use rusqlite::{Connection, params};
 use tempfile::TempDir;
@@ -33,14 +34,6 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
             Poll::Pending => thread::yield_now(),
         }
     }
-}
-
-fn id<T: IdTag>(ordinal: u64) -> Id<T> {
-    let mut bytes = [0_u8; 16];
-    bytes[6] = 0x70;
-    bytes[8..].copy_from_slice(&ordinal.to_be_bytes());
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Id::from_bytes(bytes)
 }
 
 fn limits() -> SqliteStoreLimits {
@@ -148,52 +141,6 @@ fn file_store(dir: &TempDir, durability: SqliteDurability) -> SqliteJournalStore
         busy_timeout: DEFAULT_BUSY_TIMEOUT,
     })
     .expect("file store")
-}
-
-fn draft(record_ordinal: u64, session_ordinal: u64) -> RecordDraft {
-    let principal =
-        PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
-    let authorization =
-        AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("authorization");
-    let rejection = ExternalCommandRejected::try_new(
-        ExternalCommandKind::EffectCompletion,
-        format!("completion-{record_ordinal}"),
-        ExternalCommandTarget::Effect(id(record_ordinal + 1000)),
-        principal,
-        authorization,
-        "conflicting_completion",
-        Digest::raw_json(b"{}"),
-        None,
-    )
-    .expect("rejection");
-    RecordDraft::try_new(
-        RECORD_FORMAT_VERSION,
-        RECORD_KIND_VERSION,
-        id::<RecordTag>(record_ordinal),
-        id::<SessionTag>(session_ordinal),
-        id::<LaneTag>(session_ordinal + 100),
-        Some(id::<RunTag>(session_ordinal + 200)),
-        Timestamp::from_unix_ms(i64::try_from(record_ordinal).expect("timestamp"))
-            .expect("timestamp"),
-        Vec::new(),
-        RecordBody::ExternalCommandRejected(rejection),
-    )
-    .expect("draft")
-}
-
-fn request(
-    batch_ordinal: u64,
-    session_ordinal: u64,
-    expected_sequence: u64,
-    drafts: Vec<RecordDraft>,
-) -> AppendRequest {
-    AppendRequest::try_new(
-        id(batch_ordinal),
-        id::<SessionTag>(session_ordinal),
-        expected_sequence,
-        drafts,
-    )
-    .expect("append request")
 }
 
 #[test]
@@ -608,6 +555,26 @@ fn conformance_and_ambiguous_ack_use_the_sqlite_store() {
 }
 
 #[test]
+fn tail_window_rejects_mid_batch_starts() {
+    let store = memory_store();
+    let first =
+        block_on(store.append(request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]))).expect("append");
+    block_on(store.append(request(2, 1, 3, vec![draft(3, 1)]))).expect("append");
+    assert!(matches!(
+        block_on(store.load_from(LoadFromRequest {
+            session_id: id::<SessionTag>(1),
+            window: LoadWindow::FromSequence {
+                from_sequence: 2,
+                prior_checksum: first.records[0].checksum(),
+            },
+        })),
+        Err(StoreError::Integrity {
+            reason_code: "load_from_splits_batch"
+        })
+    ));
+}
+
+#[test]
 fn discarding_sqlite_snapshots_still_recovers_from_the_journal() {
     let store = snapshot_capable_store();
     accept_root_run(&store);
@@ -726,4 +693,19 @@ fn v1_schema_applies_from_user_version_zero() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("version");
     assert_eq!(version, SCHEMA_USER_VERSION);
+}
+
+#[test]
+fn append_identity_encoding_is_stable() {
+    // Pins the persisted `batches.request_cbor` encoding. If this test fails,
+    // existing databases will mis-detect batch-id replays as
+    // `append_batch_id_reuse`. Do not update the constant without a schema
+    // migration story.
+    let frozen = request(7, 3, 1, vec![draft(70, 3), draft(71, 3)]);
+    let bytes = crate::append::request_cbor(&frozen).expect("encode identity");
+    let digest = finstack_ai_kernel::Digest::raw_json(&bytes);
+    assert_eq!(
+        digest.to_hex(),
+        "c7aceba03fb3311d46d5be1e5647be58e9161b52c803c04bc82d13cfd64a1290"
+    );
 }

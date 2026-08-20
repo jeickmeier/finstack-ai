@@ -88,6 +88,62 @@ export interface ActiveCapability {
 }
 
 /**
+ * How a run parks and releases paid-tool approvals.
+ *
+ * Maps onto Rust `RunPolicy.approval_grant`. Defaults to
+ * {@link ApprovalGrantMode.perCall}: one park per unpaid Policy or
+ * Required tool call. {@link ApprovalGrantMode.informedBatch} parks once
+ * listing every unpaid paid tool. Neither mode relaxes the `Policy`
+ * catalog floor.
+ */
+export class ApprovalGrantMode {
+  readonly #name: "per_call" | "informed_batch";
+
+  private constructor(name: "per_call" | "informed_batch") {
+    this.#name = name;
+  }
+
+  /**
+   * Park once per unpaid paid tool call.
+   *
+   * @returns A per-call grant mode consumed by {@link Agent.create}.
+   */
+  static perCall(): ApprovalGrantMode {
+    return new ApprovalGrantMode("per_call");
+  }
+
+  /**
+   * Park once listing every unpaid paid tool call.
+   *
+   * @returns An informed-batch grant mode consumed by {@link Agent.create}.
+   */
+  static informedBatch(): ApprovalGrantMode {
+    return new ApprovalGrantMode("informed_batch");
+  }
+
+  /**
+   * Wire token consumed by the WASM factory.
+   *
+   * @returns `per_call` or `informed_batch`.
+   */
+  toWire(): "per_call" | "informed_batch" {
+    return this.#name;
+  }
+}
+
+function approvalGrantWire(
+  value: ApprovalGrantMode | "per_call" | "informed_batch" | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value instanceof ApprovalGrantMode) {
+    return value.toWire();
+  }
+  return value;
+}
+
+/**
  * Options for {@link Agent.create}.
  *
  * Host objects inherit page authority and are not a sandbox.
@@ -120,6 +176,11 @@ export interface AgentOptions {
   middleware?: JsMiddleware[];
   /** Optional trusted observer wrappers. */
   observers?: JsObserver[];
+  /**
+   * Optional paid-tool approval grant mode. Defaults to
+   * {@link ApprovalGrantMode.perCall}.
+   */
+  approvalGrant?: ApprovalGrantMode | "per_call" | "informed_batch";
 }
 
 /**
@@ -173,7 +234,8 @@ export class Agent {
    * to opt into a host journal. State remains in WASM until an explicit snapshot
    * or inspect. Reload restore is inspect, not continue-the-run.
    *
-   * @param options - Model, optional toolsets, instruction, store, and capabilities.
+   * @param options - Model, optional toolsets, instruction, store, capabilities,
+   * and approval grant.
    * @returns A resolved Agent handle.
    * @throws {FinstackError} When configuration is invalid.
    * @example
@@ -190,6 +252,7 @@ export class Agent {
    *     instructions: ["Always instruction."],
    *     activation: "always",
    *   }],
+   *   approvalGrant: ApprovalGrantMode.perCall(),
    * });
    * const result = await agent.run("hello");
    * ```
@@ -217,6 +280,7 @@ export class Agent {
           wasmMiddlewareHandle(middleware),
         ),
         (options.observers ?? []).map((observer) => wasmObserverHandle(observer)),
+        approvalGrantWire(options.approvalGrant),
       );
       return new Agent(handle);
     } catch (error) {

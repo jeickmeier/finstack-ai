@@ -9,13 +9,21 @@ members = [
     "crates/finstack-ai-test",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
+    "extensions/stores/finstack-ai-store-common",
     "extensions/stores/finstack-ai-store-memory",
     "extensions/stores/finstack-ai-store-sqlite",
+    "extensions/stores/finstack-ai-store-object-s3",
+    "extensions/stores/finstack-ai-store-object-local",
+    "extensions/stores/finstack-ai-store-artifact-object",
     "extensions/providers/finstack-ai-provider-openai",
     "extensions/providers/finstack-ai-provider-ollama",
     "extensions/providers/finstack-ai-provider-anthropic",
+    "extensions/providers/finstack-ai-provider-openrouter",
     "extensions/toolsets/finstack-ai-sandbox-e2b",
+    "extensions/toolsets/finstack-ai-tools-openrouter-media",
+    "extensions/toolsets/finstack-ai-tools-openai-media",
     "extensions/toolsets/finstack-ai-tools-calculator",
+    "extensions/toolsets/finstack-ai-tools-elicitation",
     "extensions/toolsets/finstack-ai-tools-document",
     "extensions/toolsets/finstack-ai-tools-filesystem",
     "extensions/toolsets/finstack-ai-tools-mcp",
@@ -28,9 +36,12 @@ members = [
     "extensions/middleware/finstack-ai-middleware-compaction",
     "extensions/middleware/finstack-ai-middleware-verify",
     "extensions/middleware/finstack-ai-middleware-document-ingest",
+    "extensions/middleware/finstack-ai-middleware-redaction",
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
+    "extensions/observers/finstack-ai-observer-notify",
+    "extensions/interop/finstack-ai-codex-child",
     "extensions/interop/finstack-ai-remote-child",
     "extensions/workflow/finstack-ai-workflow-local",
     "extensions/workflow/finstack-ai-workflow-worker",
@@ -107,14 +118,22 @@ finstack-ai-server = { path = "crates/finstack-ai-server", version = "1.0.0" }
 rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "1.0.0" }
+finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "1.0.0" }
 finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "1.0.0" }
 finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
+finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "1.0.0" }
+finstack-ai-store-object-local = { path = "extensions/stores/finstack-ai-store-object-local", version = "1.0.0" }
+finstack-ai-store-artifact-object = { path = "extensions/stores/finstack-ai-store-artifact-object", version = "1.0.0" }
 rusqlite = { version = "0.37.0", default-features = false, features = ["bundled"] }
 finstack-ai-provider-openai = { path = "extensions/providers/finstack-ai-provider-openai", version = "1.0.0" }
 finstack-ai-provider-ollama = { path = "extensions/providers/finstack-ai-provider-ollama", version = "1.0.0" }
 finstack-ai-provider-anthropic = { path = "extensions/providers/finstack-ai-provider-anthropic", version = "1.0.0" }
+finstack-ai-provider-openrouter = { path = "extensions/providers/finstack-ai-provider-openrouter", version = "1.0.0" }
 finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b", version = "1.0.0" }
+finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
+finstack-ai-tools-openai-media = { path = "extensions/toolsets/finstack-ai-tools-openai-media", version = "1.0.0" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
+finstack-ai-tools-elicitation = { path = "extensions/toolsets/finstack-ai-tools-elicitation", version = "1.0.0" }
 finstack-ai-tools-document = { path = "extensions/toolsets/finstack-ai-tools-document", version = "1.0.0" }
 anydoc = "0.1"
 pdf-inspector = { version = "1.14", default-features = false }
@@ -130,9 +149,13 @@ finstack-ai-context-memory = { path = "extensions/context/finstack-ai-context-me
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
 finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
 finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "1.0.0" }
+finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
+# ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
+regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }
+finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observer-notify", version = "1.0.0" }
 finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }
@@ -157,10 +180,12 @@ serde_path_to_error = "0.1.20"
 # network resolvers (TDD §15.3 / PR-005 fixture harness).
 jsonschema = { version = "0.40.2", default-features = false }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+flamegraph = "0.6.13"
 # Kernel value-type dependencies (PR-006 / TDD §3.3). The kernel stores UUID
 # bytes without depending on `uuid` (keeps wasm-bindgen out of ARCH001). Runtime
 # owns UUIDv7 generation via injected clock/random and the `uuid` crate.
 bytes = "1.12.1"
+hmac = { version = "0.12", default-features = false }
 sha2 = "0.10.9"
 thiserror = "2.0.20"
 uuid = { version = "1.24.0", default-features = false, features = ["std"] }

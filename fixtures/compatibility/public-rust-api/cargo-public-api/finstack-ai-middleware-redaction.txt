@@ -1,0 +1,59 @@
+pub mod finstack_ai_middleware_redaction
+pub enum finstack_ai_middleware_redaction::OutputPolicy
+pub finstack_ai_middleware_redaction::OutputPolicy::Fail
+pub finstack_ai_middleware_redaction::OutputPolicy::Off
+impl core::clone::Clone for finstack_ai_middleware_redaction::OutputPolicy
+pub fn finstack_ai_middleware_redaction::OutputPolicy::clone(&self) -> finstack_ai_middleware_redaction::OutputPolicy
+impl core::cmp::Eq for finstack_ai_middleware_redaction::OutputPolicy
+impl core::cmp::PartialEq for finstack_ai_middleware_redaction::OutputPolicy
+pub fn finstack_ai_middleware_redaction::OutputPolicy::eq(&self, &finstack_ai_middleware_redaction::OutputPolicy) -> bool
+impl core::fmt::Debug for finstack_ai_middleware_redaction::OutputPolicy
+pub fn finstack_ai_middleware_redaction::OutputPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_middleware_redaction::OutputPolicy
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_redaction::OutputPolicy
+impl serde_core::ser::Serialize for finstack_ai_middleware_redaction::OutputPolicy
+pub fn finstack_ai_middleware_redaction::OutputPolicy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum finstack_ai_middleware_redaction::RedactionError
+pub finstack_ai_middleware_redaction::RedactionError::Configuration
+pub finstack_ai_middleware_redaction::RedactionError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_middleware_redaction::RedactionError
+pub fn finstack_ai_middleware_redaction::RedactionError::clone(&self) -> finstack_ai_middleware_redaction::RedactionError
+impl core::cmp::Eq for finstack_ai_middleware_redaction::RedactionError
+impl core::cmp::PartialEq for finstack_ai_middleware_redaction::RedactionError
+pub fn finstack_ai_middleware_redaction::RedactionError::eq(&self, &finstack_ai_middleware_redaction::RedactionError) -> bool
+impl core::error::Error for finstack_ai_middleware_redaction::RedactionError
+impl core::fmt::Debug for finstack_ai_middleware_redaction::RedactionError
+pub fn finstack_ai_middleware_redaction::RedactionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_middleware_redaction::RedactionError
+pub fn finstack_ai_middleware_redaction::RedactionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_redaction::RedactionError
+pub struct finstack_ai_middleware_redaction::RedactionConfig
+pub finstack_ai_middleware_redaction::RedactionConfig::detect_account_numbers: bool
+pub finstack_ai_middleware_redaction::RedactionConfig::detect_api_keys: bool
+pub finstack_ai_middleware_redaction::RedactionConfig::detect_emails: bool
+pub finstack_ai_middleware_redaction::RedactionConfig::output_policy: finstack_ai_middleware_redaction::OutputPolicy
+impl core::clone::Clone for finstack_ai_middleware_redaction::RedactionConfig
+pub fn finstack_ai_middleware_redaction::RedactionConfig::clone(&self) -> finstack_ai_middleware_redaction::RedactionConfig
+impl core::cmp::Eq for finstack_ai_middleware_redaction::RedactionConfig
+impl core::cmp::PartialEq for finstack_ai_middleware_redaction::RedactionConfig
+pub fn finstack_ai_middleware_redaction::RedactionConfig::eq(&self, &finstack_ai_middleware_redaction::RedactionConfig) -> bool
+impl core::default::Default for finstack_ai_middleware_redaction::RedactionConfig
+pub fn finstack_ai_middleware_redaction::RedactionConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_middleware_redaction::RedactionConfig
+pub fn finstack_ai_middleware_redaction::RedactionConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_middleware_redaction::RedactionConfig
+impl core::marker::StructuralPartialEq for finstack_ai_middleware_redaction::RedactionConfig
+impl serde_core::ser::Serialize for finstack_ai_middleware_redaction::RedactionConfig
+pub fn finstack_ai_middleware_redaction::RedactionConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct finstack_ai_middleware_redaction::RedactionMiddleware
+impl finstack_ai_middleware_redaction::RedactionMiddleware
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::try_new() -> core::result::Result<Self, finstack_ai_middleware_redaction::RedactionError>
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::try_with_config(finstack_ai_middleware_redaction::RedactionConfig) -> core::result::Result<Self, finstack_ai_middleware_redaction::RedactionError>
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::try_wrapping(alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>, finstack_ai_middleware_redaction::RedactionConfig) -> core::result::Result<Self, finstack_ai_middleware_redaction::RedactionError>
+impl core::clone::Clone for finstack_ai_middleware_redaction::RedactionMiddleware
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::clone(&self) -> finstack_ai_middleware_redaction::RedactionMiddleware
+impl core::fmt::Debug for finstack_ai_middleware_redaction::RedactionMiddleware
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_redaction::RedactionMiddleware
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
+pub fn finstack_ai_middleware_redaction::RedactionMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>

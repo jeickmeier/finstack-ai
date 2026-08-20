@@ -18,8 +18,8 @@ use finstack_ai_kernel::{
     ValidationIssue, ValidationOutcome,
 };
 use finstack_ai_runtime::{
-    ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig, IdGenerationError,
-    JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, LoadedSession,
+    ApprovalGrantMode, ApprovalMetadata, ApprovalRequirement, CommitCoordinator, EventHubConfig,
+    IdGenerationError, JournalStore, JsonSchemaToolValidatorCompiler, LoadRequest, LoadedSession,
     LockedModelContextProfile, Model, ModelContextProfile, ModelRequestDraft, ModelRequestLimits,
     ModelResponse, ModelSettings, ModelStreamItem, ModelStreamLimits, ModelTaskConfig,
     ModelToolCall, PortFuture, RandomSource, ResolvedToolCatalog, RunHandle, RunTaskConfig,
@@ -558,6 +558,7 @@ pub(crate) async fn setup_with_failure_policy(
                 max_subscribers: 8,
             },
             shutdown_deadline: StdDuration::from_millis(500),
+            approval_grant: ApprovalGrantMode::PerCall,
         },
         ModelTaskConfig {
             job_capacity: 2,

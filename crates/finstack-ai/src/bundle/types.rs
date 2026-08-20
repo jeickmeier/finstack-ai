@@ -69,6 +69,8 @@ pub enum HostFeature {
     BudgetLedger,
     /// Scoped artifact storage service.
     ArtifactStore,
+    /// Scoped object storage service.
+    ObjectStore,
     /// Application-defined non-secret host feature.
     Custom {
         /// Namespaced feature identity.
