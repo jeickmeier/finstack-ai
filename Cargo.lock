@@ -1176,6 +1176,7 @@ name = "finstack-ai-middleware-document-ingest"
 version = "1.0.0"
 dependencies = [
  "criterion",
+ "finstack-ai-context-memory",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-tools-document",
@@ -1459,6 +1460,19 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+]
+
+[[package]]
+name = "finstack-ai-store-object-local"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
