@@ -9,9 +9,9 @@
 //!
 //! This crate currently provides configuration, error mapping, schema
 //! management, the connection pool, an open path with `health()`, the
-//! multi-writer `append` protocol, and chain-verified `load`/`load_from`.
-//! `write_snapshot` lands in a subsequent change (see
-//! `src/journal_store.rs`).
+//! multi-writer `append` protocol, chain-verified `load`/`load_from`, and
+//! snapshot writes, `scan`, and the `write_metadata` CAS (see
+//! `src/snapshot.rs`).
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -41,6 +41,8 @@ mod journal_store;
 mod load;
 mod pool;
 mod schema;
+mod session;
+mod snapshot;
 mod store;
 
 // Task 2 temporarily widened `schema` to `#[doc(hidden)] pub mod schema;` so

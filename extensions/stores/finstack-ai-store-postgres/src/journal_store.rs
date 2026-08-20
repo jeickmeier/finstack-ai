@@ -2,12 +2,11 @@
 //!
 //! [`JournalStore::append`] (spec D4/D5, see [`crate::append`]),
 //! [`JournalStore::load`]/[`JournalStore::load_from`] (spec D9, see
-//! [`crate::load`]) and [`JournalStore::health`] are implemented.
-//! `write_snapshot` is a non-default method on the trait (the port has no
-//! default body for it), so it needs *some* implementation to compile; Task 6
-//! replaces that stub with the store-common snapshot wiring. Every other
-//! trait method (`scan`, `write_metadata`, `write_state_snapshot`, `prune`)
-//! keeps the port's own default implementation for now.
+//! [`crate::load`]), [`JournalStore::health`], and
+//! [`JournalStore::write_snapshot`]/[`JournalStore::write_state_snapshot`]/
+//! [`JournalStore::scan`]/[`JournalStore::write_metadata`] (see
+//! [`crate::snapshot`]) are implemented. Only [`JournalStore::prune`] keeps
+//! the port's own default implementation, pending a later task.
 //!
 //! ## The verified-head cache
 //!
@@ -27,13 +26,15 @@ use std::sync::Arc;
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
 use finstack_ai_runtime::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, PortFuture,
-    SnapshotReceipt, SnapshotRequest, StoreError, StoreHealth,
+    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt,
+    PortFuture, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
+    StoreError, StoreHealth, WriteMetadataRequest,
 };
 
 use crate::append::append;
 use crate::config::PostgresDurability;
 use crate::load::{VerifiedHead, load};
+use crate::snapshot;
 use crate::store::{
     DURABLE_DETAIL, PostgresJournalStore, RELAXED_DETAIL, VerifiedCache, cached_head,
     invalidate_head, remember_head,
@@ -73,15 +74,53 @@ impl JournalStore for PostgresJournalStore {
         self.verified_load(request.session_id, request.window)
     }
 
-    /// Stub pending Task 6 (snapshot writes).
+    /// Replace the disposable replay snapshot for one session, per
+    /// [`crate::snapshot::write_snapshot`].
     fn write_snapshot(
         &self,
-        _request: SnapshotRequest,
+        request: SnapshotRequest,
     ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
-        Box::pin(async {
-            Err(StoreError::Unavailable {
-                reason_code: "postgres_not_implemented",
-            })
+        let pool = self.pool.clone();
+        let limits = self.config.limits;
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            snapshot::write_snapshot(&mut client, &request, &limits).await
+        })
+    }
+
+    /// Encode and replace one session's disposable kernel-state snapshot,
+    /// per [`crate::snapshot::write_state_snapshot`].
+    fn write_state_snapshot(
+        &self,
+        request: StateSnapshotRequest,
+    ) -> PortFuture<Result<SnapshotReceipt, StoreError>> {
+        let pool = self.pool.clone();
+        let limits = self.config.limits;
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            snapshot::write_state_snapshot(&mut client, &request, &limits).await
+        })
+    }
+
+    /// Scan committed envelopes of one session, per [`crate::snapshot::scan`].
+    fn scan(&self, request: ScanRequest) -> PortFuture<Result<ScanPage, StoreError>> {
+        let pool = self.pool.clone();
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            snapshot::scan(&mut client, request).await
+        })
+    }
+
+    /// Compare-and-swap session metadata, per
+    /// [`crate::snapshot::write_metadata`].
+    fn write_metadata(
+        &self,
+        request: WriteMetadataRequest,
+    ) -> PortFuture<Result<MetadataReceipt, StoreError>> {
+        let pool = self.pool.clone();
+        Box::pin(async move {
+            let mut client = pool.get().await?;
+            snapshot::write_metadata(&mut client, &request).await
         })
     }
 

@@ -56,7 +56,7 @@ use crate::error::{Failure, i64_from_u64, u64_from_i64};
 use crate::pool::PooledClient;
 
 /// Record columns, in the order [`reconstruct_envelope`] reads them.
-const RECORD_COLUMNS: &str = "session_id, sequence, record_id, lane_id, run_id, kind, \
+pub(crate) const RECORD_COLUMNS: &str = "session_id, sequence, record_id, lane_id, run_id, kind, \
      format_version, kind_version, payload_cbor, timestamp, payload_digest, previous_checksum, \
      envelope_checksum, derived_event_ids";
 
@@ -625,7 +625,7 @@ pub(crate) async fn load_batch(
 /// Rebuild a [`RecordEnvelope`] from a stored row.
 ///
 /// Column order must match [`RECORD_COLUMNS`].
-fn reconstruct_envelope(row: &tokio_postgres::Row) -> Result<RecordEnvelope, StoreError> {
+pub(crate) fn reconstruct_envelope(row: &tokio_postgres::Row) -> Result<RecordEnvelope, StoreError> {
     let session_id: Vec<u8> = row.get(0);
     let sequence: i64 = row.get(1);
     let record_id: Vec<u8> = row.get(2);

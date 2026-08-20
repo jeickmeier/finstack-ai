@@ -66,7 +66,7 @@
 //! [`StoreError::AmbiguousAcknowledgement`] and always poisons.
 
 use finstack_ai_kernel::{
-    AppendBatchId, AppendRequest, CommittedBatch, Digest, Metadata, RecordEnvelope, SessionId,
+    AppendBatchId, AppendRequest, CommittedBatch, Metadata, RecordEnvelope, SessionId,
 };
 use finstack_ai_protocol::encode;
 use finstack_ai_runtime::{StoreError, StoreLimits};
@@ -76,9 +76,10 @@ use finstack_ai_store_common::{
 };
 use tokio_postgres::{Client, Transaction};
 
-use crate::error::{Failure, i64_from_u64, u64_from_i64};
-use crate::load::{digest_from_bytes, id_from_bytes, load_batch, usize_from_i64};
+use crate::error::{Failure, i64_from_u64};
+use crate::load::{id_from_bytes, load_batch, usize_from_i64};
 use crate::pool::PooledClient;
+use crate::session::lock_session;
 
 /// Append `request` on `client`, per spec D4.
 ///
@@ -241,50 +242,6 @@ async fn append_in_transaction(
         bump_session_count(transaction).await?;
     }
     Ok(committed)
-}
-
-/// The session row's committed footprint, read under `FOR UPDATE`.
-struct SessionRow {
-    /// Sequence of the journal head (0 for a session with no records).
-    current_sequence: u64,
-    /// Checksum of the head record, `None` before the first append.
-    head_checksum: Option<Digest>,
-    /// Committed batches in this session.
-    batch_count: usize,
-    /// Committed records in this session.
-    record_count: usize,
-}
-
-/// Take the per-session write lock, returning the row when it exists.
-///
-/// This is the serialization point for all writers of one session: two
-/// appends to the same session queue here, while appends to different
-/// sessions never contend.
-async fn lock_session(
-    transaction: &Transaction<'_>,
-    session_id: SessionId,
-) -> Result<Option<SessionRow>, Failure> {
-    let row = transaction
-        .query_opt(
-            "SELECT current_sequence, head_checksum, batch_count, record_count \
-             FROM sessions WHERE session_id = $1 FOR UPDATE",
-            &[&session_id.as_bytes().as_slice()],
-        )
-        .await
-        .map_err(|error| Failure::from_driver(&error))?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let head_checksum: Option<Vec<u8>> = row.get(1);
-    Ok(Some(SessionRow {
-        current_sequence: u64_from_i64(row.get(0), "current_sequence")?,
-        head_checksum: head_checksum
-            .as_deref()
-            .map(digest_from_bytes)
-            .transpose()?,
-        batch_count: usize_from_i64(row.get(2), "batch_count")?,
-        record_count: usize_from_i64(row.get(3), "record_count")?,
-    }))
 }
 
 /// Lock the store-wide counters row and return the current session count.
