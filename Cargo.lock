@@ -1133,6 +1133,9 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
+ "finstack-ai-workflow-hitl",
+ "finstack-ai-workflow-local",
+ "finstack-ai-workflow-worker",
  "tempfile",
  "tokio",
 ]
