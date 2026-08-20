@@ -141,3 +141,32 @@ fn version_ranges_and_required_services_are_finite() {
         .validate(RequiredServices::default())
         .expect("minimal agent needs no services");
 }
+
+#[test]
+fn missing_required_object_store_fails_resolution() {
+    let services = RuntimeServices::default();
+    let error = services
+        .validate(RequiredServices {
+            object_store: true,
+            ..RequiredServices::default()
+        })
+        .expect_err("missing object store must fail");
+    match error {
+        BundleResolutionError::Missing { item } => assert_eq!(&*item, "object_store"),
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
+fn present_object_store_satisfies_the_requirement() {
+    let services = RuntimeServices {
+        object_store: Some(Arc::new(finstack_ai_test::object_store::FakeObjectStore::default())),
+        ..RuntimeServices::default()
+    };
+    services
+        .validate(RequiredServices {
+            object_store: true,
+            ..RequiredServices::default()
+        })
+        .expect("present object store satisfies the requirement");
+}
