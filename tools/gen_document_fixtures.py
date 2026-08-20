@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate the checked-in document fixture corpus. Deterministic output."""
+
 from __future__ import annotations
 
 import io
@@ -42,14 +43,16 @@ def build_pdf(object_bodies: list[bytes], root_obj_num: int = 1) -> bytes:
 
 def _text_pdf() -> bytes:
     content = b"BT /F1 24 Tf 72 720 Td (Quarterly Revenue Report) Tj ET"
-    return build_pdf([
-        b"<</Type/Catalog/Pages 2 0 R>>",
-        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
-        b"/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
-        f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
-        b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
-    ])
+    return build_pdf(
+        [
+            b"<</Type/Catalog/Pages 2 0 R>>",
+            b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+            b"/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+            f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+            b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+        ]
+    )
 
 
 def _scanned_pdf() -> bytes:
@@ -57,17 +60,19 @@ def _scanned_pdf() -> bytes:
     # operators, so pdf-inspector classifies it as scanned/needs-OCR.
     content = b"q 612 0 0 792 0 0 cm /Im1 Do Q"
     image_data = b"\xff"
-    return build_pdf([
-        b"<</Type/Catalog/Pages 2 0 R>>",
-        b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
-        b"/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>",
-        f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
-        f"<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray"
-        f"/BitsPerComponent 8/Length {len(image_data)}>>\nstream\n".encode()
-        + image_data
-        + b"\nendstream",
-    ])
+    return build_pdf(
+        [
+            b"<</Type/Catalog/Pages 2 0 R>>",
+            b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+            b"/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>",
+            f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+            f"<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray"
+            f"/BitsPerComponent 8/Length {len(image_data)}>>\nstream\n".encode()
+            + image_data
+            + b"\nendstream",
+        ]
+    )
 
 
 TEXT_PDF = _text_pdf()
@@ -129,44 +134,56 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "text.pdf").write_bytes(TEXT_PDF)
     (OUT / "scanned.pdf").write_bytes(SCANNED_PDF)
-    (OUT / "sample.docx").write_bytes(zip_bytes({
-        "[Content_Types].xml": CONTENT_TYPES,
-        "_rels/.rels": ROOT_RELS,
-        "word/document.xml": DOCUMENT_XML,
-    }))
-    (OUT / "sample.xlsx").write_bytes(zip_bytes({
-        "[Content_Types].xml": XLSX_CONTENT_TYPES,
-        "_rels/.rels": XLSX_ROOT_RELS,
-        "xl/workbook.xml": WORKBOOK_XML,
-        "xl/_rels/workbook.xml.rels": WORKBOOK_RELS,
-        "xl/worksheets/sheet1.xml": SHEET_XML,
-    }))
-    (OUT / "sample.pptx").write_bytes(zip_bytes({
-        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    (OUT / "sample.docx").write_bytes(
+        zip_bytes(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "_rels/.rels": ROOT_RELS,
+                "word/document.xml": DOCUMENT_XML,
+            }
+        )
+    )
+    (OUT / "sample.xlsx").write_bytes(
+        zip_bytes(
+            {
+                "[Content_Types].xml": XLSX_CONTENT_TYPES,
+                "_rels/.rels": XLSX_ROOT_RELS,
+                "xl/workbook.xml": WORKBOOK_XML,
+                "xl/_rels/workbook.xml.rels": WORKBOOK_RELS,
+                "xl/worksheets/sheet1.xml": SHEET_XML,
+            }
+        )
+    )
+    (OUT / "sample.pptx").write_bytes(
+        zip_bytes(
+            {
+                "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
 <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
 </Types>""",
-        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                "_rels/.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
 </Relationships>""",
-        "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                "ppt/presentation.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>""",
-        "ppt/_rels/presentation.xml.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                "ppt/_rels/presentation.xml.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
 </Relationships>""",
-        "ppt/slides/slide1.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                "ppt/slides/slide1.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
 <p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/>
 <p:txBody><a:bodyPr/><a:p><a:r><a:t>Slide fixture title</a:t></a:r></a:p></p:txBody></p:sp>
 </p:spTree></p:cSld></p:sld>""",
-    }))
+            }
+        )
+    )
     (OUT / "sample.csv").write_bytes(b"quarter,revenue\nQ1,1250\nQ2,1310\n")
     (OUT / "corrupt.bin").write_bytes(b"\x00\x01corrupt-not-a-document\x02\x03")
     print(f"wrote fixtures to {OUT}")
