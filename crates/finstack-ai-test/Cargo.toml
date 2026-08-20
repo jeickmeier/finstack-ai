@@ -20,6 +20,7 @@ jsonschema = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_json_canonicalizer = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -34,7 +35,6 @@ finstack-ai-tools-document = { workspace = true }
 finstack-ai-tools-subagent = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 
