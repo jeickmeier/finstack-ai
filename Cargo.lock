@@ -1372,6 +1372,7 @@ dependencies = [
  "base64",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-test",
  "futures-util",
  "reqwest",
  "serde",
