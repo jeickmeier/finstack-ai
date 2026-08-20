@@ -338,9 +338,7 @@ async fn drive_response(
     max_stream_bytes: usize,
 ) {
     let mut body = response.bytes_stream();
-    // `GeminiSse` enforces only the per-event ceiling, so the cumulative
-    // response budget is tracked here across every received chunk.
-    let mut parser = GeminiSse::new(max_event_bytes);
+    let mut parser = GeminiSse::new(max_event_bytes, max_stream_bytes);
     let mut received: usize = 0;
     let mut assembly = GeminiGenerateContentAssembly::new(request_id, structured);
     loop {
@@ -370,6 +368,8 @@ async fn drive_response(
                 return;
             }
         };
+        // Belt-and-braces: the parser bounds the cumulative *framed* bytes, while
+        // this counter bounds the raw *pre-framing* bytes read off the socket.
         received = match received.checked_add(chunk.len()) {
             Some(total) if total <= max_stream_bytes => total,
             _ => {
@@ -480,7 +480,7 @@ mod tests {
     /// Drive recorded SSE bytes through the exact framing + assembly pipeline
     /// the provider's `drive_response` loop uses.
     fn drive_recorded(frames: &[&str], structured: bool) -> Vec<ModelStreamItem> {
-        let mut parser = GeminiSse::new(64 * 1024);
+        let mut parser = GeminiSse::new(64 * 1024, 1_048_576);
         let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), structured);
         let mut items = Vec::new();
         for frame in frames {

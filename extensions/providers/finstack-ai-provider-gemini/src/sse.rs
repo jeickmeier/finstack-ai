@@ -28,9 +28,13 @@ pub(crate) struct GeminiSse {
 }
 
 impl GeminiSse {
-    pub(crate) fn new(max_event_bytes: usize) -> Self {
+    /// Bound one stream by a per-event ceiling and a cumulative stream budget.
+    ///
+    /// The two are distinct: `max_event_bytes` caps any single frame, while
+    /// `max_stream_bytes` caps the running total of framed bytes.
+    pub(crate) fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         Self {
-            inner: SseEventParser::new(max_event_bytes, max_event_bytes),
+            inner: SseEventParser::new(max_event_bytes, max_stream_bytes),
         }
     }
 
@@ -75,7 +79,7 @@ mod tests {
 
     #[test]
     fn parses_fragmented_unnamed_events() {
-        let mut parser = GeminiSse::new(256);
+        let mut parser = GeminiSse::new(256, 4096);
         assert!(parser.push(b"data: {\"candidates\":").unwrap().is_empty());
         assert_eq!(
             parser
@@ -92,14 +96,14 @@ mod tests {
     #[test]
     fn enforces_event_and_total_limits() {
         assert_eq!(
-            GeminiSse::new(3).push(b"data: 12345"),
+            GeminiSse::new(3, 4096).push(b"data: 12345"),
             Err(stream_limit_error())
         );
     }
 
     #[test]
     fn unnamed_data_frame_is_accepted() {
-        let mut parser = GeminiSse::new(128);
+        let mut parser = GeminiSse::new(128, 4096);
         assert_eq!(
             parser.push(b"data: {\"id\":\"one\"}\n\n").unwrap(),
             vec!["{\"id\":\"one\"}".to_owned()]
@@ -108,7 +112,7 @@ mod tests {
 
     #[test]
     fn named_event_other_than_message_is_rejected() {
-        let mut parser = GeminiSse::new(128);
+        let mut parser = GeminiSse::new(128, 4096);
         assert_eq!(
             parser.push(b"event: ping\ndata: {}\n\n"),
             Err(stream_error("Gemini SSE event declared an unexpected name"))
@@ -117,7 +121,7 @@ mod tests {
 
     #[test]
     fn named_message_event_is_accepted() {
-        let mut parser = GeminiSse::new(128);
+        let mut parser = GeminiSse::new(128, 4096);
         assert_eq!(
             parser
                 .push(b"event: message\ndata: {\"id\":\"one\"}\n\n")
@@ -126,9 +130,45 @@ mod tests {
         );
     }
 
+    /// One well-formed ~815-byte frame, far below any per-event ceiling used here.
+    fn small_frame(index: usize) -> Vec<u8> {
+        format!("data: {{\"i\":{index},\"p\":\"{}\"}}\n\n", "x".repeat(800)).into_bytes()
+    }
+
+    #[test]
+    fn many_small_frames_below_the_stream_budget_all_parse() {
+        // 100 frames of ~815 bytes is ~81 KiB total: well past `max_event_bytes`
+        // cumulatively, but well within `max_stream_bytes`. The per-event ceiling
+        // must not be reused as the cumulative budget.
+        let mut parser = GeminiSse::new(64 * 1024, 1_048_576);
+        let mut parsed = 0_usize;
+        for index in 0..100_usize {
+            parsed += parser
+                .push(&small_frame(index))
+                .expect("frames below the stream budget must parse")
+                .len();
+        }
+        assert_eq!(parsed, 100);
+        parser.finish().expect("clean eof");
+    }
+
+    #[test]
+    fn cumulative_bytes_over_the_stream_budget_are_rejected() {
+        // Per-event ceiling stays roomy; the cumulative budget is what trips.
+        let mut parser = GeminiSse::new(64 * 1024, 4_096);
+        let mut result = Ok(Vec::new());
+        for index in 0..10_usize {
+            result = parser.push(&small_frame(index));
+            if result.is_err() {
+                break;
+            }
+        }
+        assert_eq!(result, Err(stream_limit_error()));
+    }
+
     #[test]
     fn empty_data_frames_are_no_ops() {
-        let mut parser = GeminiSse::new(128);
+        let mut parser = GeminiSse::new(128, 4096);
         assert!(parser.push(b": comment\n\n").unwrap().is_empty());
     }
 }
