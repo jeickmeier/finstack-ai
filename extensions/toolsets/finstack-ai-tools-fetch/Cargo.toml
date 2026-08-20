@@ -1,0 +1,34 @@
+[package]
+name = "finstack-ai-tools-fetch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Bounded, allowlisted HTTP fetch toolset for finstack-ai"
+readme = "README.md"
+
+[features]
+default = []
+vendored-tls = ["reqwest/native-tls-vendored"]
+
+[dependencies]
+finstack-ai-kernel = { workspace = true }
+finstack-ai-net-guard = { workspace = true }
+finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "time"] }
+url = { workspace = true }
+
+[dev-dependencies]
+finstack-ai-context-memory = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

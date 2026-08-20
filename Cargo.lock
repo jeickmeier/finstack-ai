@@ -1659,6 +1659,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-tools-fetch"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-context-memory",
+ "finstack-ai-kernel",
+ "finstack-ai-net-guard",
+ "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "finstack-ai-tools-filesystem"
 version = "1.0.0"
 dependencies = [
