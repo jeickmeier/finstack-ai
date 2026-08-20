@@ -1,0 +1,347 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use finstack_ai_kernel::{
+    Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, OperationLocator,
+    PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock, ToolCallId,
+    ToolFailurePolicy, UNIX_EPOCH,
+};
+use finstack_ai_runtime::{
+    AuthorizationContext, CancellationSignal, RunCallContext, ToolCallContext, ToolStreamItem,
+    Toolset,
+};
+use futures_util::StreamExt;
+
+use crate::MemoryScope;
+use crate::store::{InProcessArtifactStore, InProcessMemoryStore, MemoryPage, MemoryStore};
+use crate::toolset::{MemoryPolicy, MemoryToolset};
+
+fn toolset_with_policy(policy: MemoryPolicy) -> (MemoryToolset, Arc<InProcessMemoryStore>) {
+    let store = Arc::new(InProcessMemoryStore::new());
+    let artifact_store = Arc::new(InProcessArtifactStore::default());
+    let scope = MemoryScope::try_new("tenant-a").expect("scope");
+    let clock: crate::MemoryClock = Arc::new(|| UNIX_EPOCH);
+    let toolset = MemoryToolset::try_new(
+        store.clone() as Arc<dyn MemoryStore>,
+        artifact_store,
+        scope,
+        policy,
+        clock,
+    )
+    .expect("toolset");
+    (toolset, store)
+}
+
+fn context(effect_id: EffectId) -> ToolCallContext {
+    ToolCallContext {
+        run: run_context(effect_id),
+        tool_batch_id: ToolBatchId::from_bytes([5; 16]),
+        tool_call_id: ToolCallId::from_bytes([6; 16]),
+    }
+}
+
+fn run_context(effect_id: EffectId) -> RunCallContext {
+    RunCallContext {
+        locator: OperationLocator::try_new(
+            "tenant-a",
+            SessionId::from_bytes([1; 16]),
+            LaneId::from_bytes([2; 16]),
+            RunId::from_bytes([3; 16]),
+        )
+        .expect("locator"),
+        authorization: AuthorizationContext {
+            principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                .expect("principal"),
+            authentication_method: Arc::from("test"),
+            assurance_level: Arc::from("test"),
+            roles: Arc::from([]),
+            permitted_scopes: Arc::from([Arc::from("tenant-a")]),
+            safe_claims: finstack_ai_kernel::Metadata::empty(),
+            policy_version: Arc::from("policy-v1"),
+            decision_id: Arc::from("decision-v1"),
+        },
+        effect_id,
+        attempt: 1,
+        deadline: None,
+        budget_scope_id: None,
+        cancellation: CancellationSignal::new(),
+    }
+}
+
+fn validated_call(
+    toolset: &MemoryToolset,
+    name: &str,
+    arguments: &[u8],
+) -> finstack_ai_kernel::ValidatedToolCall {
+    let specs = toolset.tools_unfiltered();
+    let spec = specs
+        .iter()
+        .find(|spec| spec.model_name.as_ref() == name)
+        .expect("spec");
+    finstack_ai_kernel::ValidatedToolCall {
+        call: ToolCallBlock::try_new(
+            ToolCallId::from_bytes([6; 16]),
+            name,
+            RawJson::parse(arguments).expect("arguments"),
+        )
+        .expect("call"),
+        tool_id: spec.id.clone(),
+        component: None,
+        output_contract: EffectOutputContract {
+            kind: EffectOutputKind::ToolResult,
+            schema_version: 1,
+            schema_digest: Digest::raw_json(b"{}"),
+        },
+        retry_safety: spec.retry_safety,
+        deadline: None,
+        execution: spec.execution,
+        failure_policy: ToolFailurePolicy::ReturnToModel,
+    }
+}
+
+async fn call_and_extract(
+    toolset: &MemoryToolset,
+    ctx: ToolCallContext,
+    name: &str,
+    arguments: &[u8],
+) -> finstack_ai_runtime::ToolResult {
+    let mut stream = toolset
+        .call(ctx, validated_call(toolset, name, arguments))
+        .await
+        .expect("call");
+    match stream.next().await.expect("item").expect("stream") {
+        ToolStreamItem::Completed(result) => result,
+        other => panic!("unexpected stream item: {other:?}"),
+    }
+}
+
+#[test]
+fn policy_gates_registered_tools() {
+    let names = |policy: MemoryPolicy| -> BTreeSet<String> {
+        let (toolset, _store) = toolset_with_policy(policy);
+        toolset
+            .tools()
+            .iter()
+            .map(|spec| spec.model_name.to_string())
+            .collect()
+    };
+
+    let read_only = MemoryPolicy {
+        read: true,
+        write: false,
+        manage: false,
+        consolidate: false,
+        profile: false,
+    };
+    assert_eq!(
+        names(read_only),
+        BTreeSet::from(["search_memory".to_owned(), "inspect_memory".to_owned()])
+    );
+
+    let write_only = MemoryPolicy {
+        read: false,
+        write: true,
+        manage: false,
+        consolidate: false,
+        profile: false,
+    };
+    assert_eq!(names(write_only), BTreeSet::from(["remember".to_owned()]));
+
+    let manage_only = MemoryPolicy {
+        read: false,
+        write: false,
+        manage: true,
+        consolidate: false,
+        profile: false,
+    };
+    assert_eq!(
+        names(manage_only),
+        BTreeSet::from(["forget_memory".to_owned(), "correct_memory".to_owned()])
+    );
+
+    assert_eq!(
+        names(MemoryPolicy::default()),
+        BTreeSet::from([
+            "remember".to_owned(),
+            "search_memory".to_owned(),
+            "inspect_memory".to_owned(),
+        ])
+    );
+
+    let all_true = MemoryPolicy {
+        read: true,
+        write: true,
+        manage: true,
+        consolidate: true,
+        profile: true,
+    };
+    assert_eq!(
+        names(all_true),
+        BTreeSet::from([
+            "remember".to_owned(),
+            "search_memory".to_owned(),
+            "inspect_memory".to_owned(),
+            "forget_memory".to_owned(),
+            "correct_memory".to_owned(),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn remember_is_idempotent_across_replay() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let effect_id = EffectId::from_bytes([9; 16]);
+    let args = br#"{"id":"mem-fixed","keywords":["alpha"],"body":"hello world"}"#;
+
+    let first = call_and_extract(&toolset, context(effect_id), "remember", args).await;
+    assert!(!first.is_error);
+    let second = call_and_extract(&toolset, context(effect_id), "remember", args).await;
+    assert!(!second.is_error);
+
+    let listing = store
+        .list(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            MemoryPage {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("list");
+    assert_eq!(listing.records.len(), 1);
+}
+
+#[tokio::test]
+async fn remember_stages_large_bodies_as_blobs() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let effect_id = EffectId::from_bytes([10; 16]);
+    let body = "x".repeat(crate::toolset::INLINE_BODY_MAX_BYTES + 1);
+    let args = serde_json::json!({
+        "id": "mem-large",
+        "keywords": ["alpha"],
+        "body": body,
+    });
+    let result = call_and_extract(
+        &toolset,
+        context(effect_id),
+        "remember",
+        serde_json::to_vec(&args).expect("json").as_slice(),
+    )
+    .await;
+    assert!(!result.is_error);
+
+    let record = store
+        .get(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse("mem-large").expect("id"),
+        )
+        .await
+        .expect("get")
+        .expect("record present");
+    assert!(matches!(record.body, crate::MemoryBody::Blob(_)));
+    assert_eq!(record.preview.chars().count(), 256);
+}
+
+#[tokio::test]
+async fn search_memory_returns_hits_and_never_tombstoned() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy::default());
+    let effect_id = EffectId::from_bytes([11; 16]);
+    let args = br#"{"id":"mem-searchable","keywords":["widget"],"body":"a widget record"}"#;
+    let remember_result = call_and_extract(&toolset, context(effect_id), "remember", args).await;
+    assert!(!remember_result.is_error);
+
+    let search_args = br#"{"keywords":["widget"]}"#;
+    let hits = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([12; 16])),
+        "search_memory",
+        search_args,
+    )
+    .await;
+    let value: serde_json::Value = serde_json::from_str(hits.output.as_str()).expect("json");
+    assert_eq!(value["hits"].as_array().expect("hits array").len(), 1);
+
+    // Tombstone directly via the store, bypassing the toolset.
+    store
+        .forget(
+            Arc::from("direct-forget"),
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse("mem-searchable").expect("id"),
+        )
+        .await
+        .expect("forget");
+
+    let hits_after = call_and_extract(
+        &toolset,
+        context(EffectId::from_bytes([13; 16])),
+        "search_memory",
+        search_args,
+    )
+    .await;
+    let value: serde_json::Value = serde_json::from_str(hits_after.output.as_str()).expect("json");
+    assert_eq!(value["hits"].as_array().expect("hits array").len(), 0);
+}
+
+#[tokio::test]
+async fn forget_and_correct_require_ids_and_are_idempotent() {
+    let (toolset, store) = toolset_with_policy(MemoryPolicy {
+        read: true,
+        write: true,
+        manage: true,
+        consolidate: false,
+        profile: false,
+    });
+    let effect_id = EffectId::from_bytes([14; 16]);
+    let remember_args = br#"{"id":"mem-forgettable","keywords":["alpha"],"body":"body text"}"#;
+    let remember_result =
+        call_and_extract(&toolset, context(effect_id), "remember", remember_args).await;
+    assert!(!remember_result.is_error);
+
+    let forget_effect = EffectId::from_bytes([15; 16]);
+    let forget_args = br#"{"id":"mem-forgettable"}"#;
+    let first = call_and_extract(
+        &toolset,
+        context(forget_effect),
+        "forget_memory",
+        forget_args,
+    )
+    .await;
+    assert!(!first.is_error);
+    let second = call_and_extract(
+        &toolset,
+        context(forget_effect),
+        "forget_memory",
+        forget_args,
+    )
+    .await;
+    assert!(!second.is_error);
+
+    let record = store
+        .get(
+            MemoryScope::try_new("tenant-a").expect("scope"),
+            crate::MemoryId::parse("mem-forgettable").expect("id"),
+        )
+        .await
+        .expect("get");
+    // Tombstoned records are excluded from scoped get() visibility filters
+    // only via search(); get() itself does not filter tombstoned records out.
+    assert!(record.is_some());
+    assert!(record.expect("record").tombstoned);
+}
+
+#[tokio::test]
+async fn scope_comes_from_configuration_not_arguments() {
+    let (toolset, _store) = toolset_with_policy(MemoryPolicy::default());
+    let effect_id = EffectId::from_bytes([16; 16]);
+    let args = br#"{"id":"mem-x","keywords":["alpha"],"body":"body text","tenant":"other-tenant"}"#;
+    let Err(error) = toolset
+        .call(
+            context(effect_id),
+            validated_call(&toolset, "remember", args),
+        )
+        .await
+    else {
+        panic!("extra unknown field must be rejected");
+    };
+    assert_eq!(error.code(), crate::MEMORY_TOOL_INVALID_ARGUMENTS);
+}

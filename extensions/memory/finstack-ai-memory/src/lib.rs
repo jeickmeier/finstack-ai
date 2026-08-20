@@ -27,6 +27,7 @@
 
 pub mod record;
 pub mod store;
+pub mod toolset;
 
 pub use record::{
     ExtractionMethod, MemoryBody, MemoryClock, MemoryError, MemoryId, MemoryProvenance,
@@ -35,6 +36,10 @@ pub use record::{
 pub use store::{
     InProcessArtifactStore, InProcessMemoryStore, MatchEvidence, MemoryHit, MemoryListing,
     MemoryPage, MemoryQuery, MemoryStore, MemoryStoreError, PutOutcome,
+};
+pub use toolset::{
+    INLINE_BODY_MAX_BYTES, MEMORY_TOOL_INVALID_ARGUMENTS, MEMORY_TOOL_NOT_FOUND,
+    MEMORY_TOOL_UNAVAILABLE, MemoryPolicy, MemoryToolset,
 };
 
 #[cfg(test)]
