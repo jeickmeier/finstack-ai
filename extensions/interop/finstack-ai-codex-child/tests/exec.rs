@@ -191,3 +191,30 @@ async fn wrong_placement_is_rejected() {
         .expect_err("rejected");
     assert!(matches!(error, AgentInvokeError::InvalidRequest { .. }));
 }
+
+#[tokio::test]
+async fn cancel_kills_a_hanging_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("hang", dir.path());
+    let request = codex_request("never finish");
+    let run_id = request.locator.operation.run_id;
+    let handle = invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted");
+    invoker.cancel(&handle.locator).await.expect("cancelled");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn cancel_of_unknown_locator_fails_closed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("success", dir.path());
+    let request = codex_request("never started");
+    let error = invoker
+        .cancel(&request.locator)
+        .await
+        .expect_err("unaccepted");
+    assert!(matches!(error, AgentInvokeError::Unavailable { .. }));
+}

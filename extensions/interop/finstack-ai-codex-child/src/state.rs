@@ -62,10 +62,6 @@ impl RunState {
         self.exit_code = code;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "consumed by cancel in the following task")
-    )]
     pub(crate) fn mark_cancelled(&mut self) {
         self.cancelled = true;
     }

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
-use finstack_ai_kernel::{ChildPlacement, ContentBlock, RunId};
+use finstack_ai_kernel::{ChildPlacement, ChildRunLocator, ContentBlock, RunId};
 use finstack_ai_runtime::{
     AgentInvokeError, AgentInvoker, ChildRunContext, ChildRunHandle, ChildRunRequest, PortFuture,
     child_relation_digest,
@@ -27,9 +27,8 @@ pub(crate) struct CodexRun {
     request_digest: finstack_ai_kernel::Digest,
     handle: ChildRunHandle,
     state: Arc<Mutex<RunState>>,
-    // Read by `cancel` in the next task; held here so the child is reaped
-    // with the run table entry (`kill_on_drop`).
-    #[expect(dead_code, reason = "consumed by cancel in the following task")]
+    // Killed by `cancel`; also reaped with the run table entry via
+    // `kill_on_drop`.
     child: ChildSlot,
 }
 
@@ -236,6 +235,30 @@ impl AgentInvoker for CodexChildInvoker {
             }
             guard.insert(run_id, run);
             Ok(handle)
+        })
+    }
+
+    fn cancel(&self, locator: &ChildRunLocator) -> PortFuture<Result<(), AgentInvokeError>> {
+        let runs = Arc::clone(&self.runs);
+        let run_id = locator.operation.run_id;
+        Box::pin(async move {
+            let run = {
+                let guard = runs
+                    .lock()
+                    .map_err(|_| unavailable("codex run table is poisoned"))?;
+                guard.get(&run_id).cloned()
+            };
+            let Some(run) = run else {
+                return Err(unavailable("codex child locator was never accepted"));
+            };
+            if let Ok(mut state) = run.state.lock() {
+                state.mark_cancelled();
+            }
+            let mut slot = run.child.lock().await;
+            if let Some(child) = slot.as_mut() {
+                let _ = child.start_kill();
+            }
+            Ok(())
         })
     }
 }
