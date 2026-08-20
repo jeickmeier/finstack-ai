@@ -41,8 +41,8 @@
 //! delivered) is discarded rather than returned to the pool (spec D2).
 
 use finstack_ai_kernel::{
-    AppendBatchId, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody, RecordEnvelope,
-    SessionId, Timestamp,
+    AppendBatchId, CommittedBatch, Digest, EventId, Id, IdTag, Metadata, RecordBody,
+    RecordEnvelope, SessionId, Timestamp,
 };
 use finstack_ai_protocol::decode;
 use finstack_ai_runtime::{LoadWindow, LoadedSession, OpaqueSnapshot, StoreError};
@@ -77,12 +77,12 @@ struct StoredRecord {
     envelope: RecordEnvelope,
 }
 
-/// The session row as the load path needs it.
-struct SessionRow {
+/// The session row as the load path (and [`crate::snapshot::scan`]) needs it.
+pub(crate) struct SessionRow {
     /// Sequence of the journal head (0 for a session with no records).
-    current_sequence: u64,
+    pub(crate) current_sequence: u64,
     /// Checksum of the head record, `None` before the first append.
-    head_checksum: Option<Digest>,
+    pub(crate) head_checksum: Option<Digest>,
     /// Sequence covered by the stored snapshot, when one exists.
     snapshot_sequence: Option<u64>,
     /// Session metadata. Never grants authority.
@@ -213,7 +213,13 @@ async fn load_session(
     let records = envelopes(&stored);
     let head_checksum = verify_against_cache(&records, &session, cached)?;
     let snapshot = load_session_snapshot(transaction, session_id, &session, snapshot_bytes).await?;
-    Ok(loaded_session(session_id, &session, head_checksum, &stored, snapshot)?)
+    Ok(loaded_session(
+        session_id,
+        &session,
+        head_checksum,
+        &stored,
+        snapshot,
+    )?)
 }
 
 /// Verify only the records after a cached verified head, when there is one.
@@ -442,7 +448,7 @@ fn envelopes(stored: &[StoredRecord]) -> Vec<RecordEnvelope> {
 }
 
 /// Read the session row, or `None` when the session does not exist.
-async fn load_session_row(
+pub(crate) async fn load_session_row(
     transaction: &Transaction<'_>,
     session_id: SessionId,
 ) -> Result<Option<SessionRow>, Failure> {
@@ -473,6 +479,34 @@ async fn load_session_row(
             reason_code: "postgres_metadata",
         })?,
     }))
+}
+
+/// Read the envelope checksum stored for `sequence` in `session_id`, or
+/// `None` when no such record exists.
+///
+/// Used by [`crate::snapshot::scan`] to anchor a scan page against the
+/// record immediately before it, mirroring sqlite's
+/// `load_envelope_checksum`.
+pub(crate) async fn load_envelope_checksum(
+    transaction: &Transaction<'_>,
+    session_id: SessionId,
+    sequence: u64,
+) -> Result<Option<Digest>, Failure> {
+    let row = transaction
+        .query_opt(
+            "SELECT envelope_checksum FROM records WHERE session_id = $1 AND sequence = $2",
+            &[
+                &session_id.as_bytes().as_slice(),
+                &i64_from_u64(sequence, "sequence")?,
+            ],
+        )
+        .await
+        .map_err(|error| Failure::from_driver(&error))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let bytes: Vec<u8> = row.get(0);
+    Ok(Some(digest_from_bytes(&bytes)?))
 }
 
 /// Read every record of `session_id` at or after `from_sequence`, in sequence
@@ -599,9 +633,7 @@ pub(crate) async fn load_batch(
 
     let record_rows = transaction
         .query(
-            &format!(
-                "SELECT {RECORD_COLUMNS} FROM records WHERE batch_id = $1 ORDER BY sequence"
-            ),
+            &format!("SELECT {RECORD_COLUMNS} FROM records WHERE batch_id = $1 ORDER BY sequence"),
             &[&batch_id.as_bytes().as_slice()],
         )
         .await
@@ -625,7 +657,9 @@ pub(crate) async fn load_batch(
 /// Rebuild a [`RecordEnvelope`] from a stored row.
 ///
 /// Column order must match [`RECORD_COLUMNS`].
-pub(crate) fn reconstruct_envelope(row: &tokio_postgres::Row) -> Result<RecordEnvelope, StoreError> {
+pub(crate) fn reconstruct_envelope(
+    row: &tokio_postgres::Row,
+) -> Result<RecordEnvelope, StoreError> {
     let session_id: Vec<u8> = row.get(0);
     let sequence: i64 = row.get(1);
     let record_id: Vec<u8> = row.get(2);

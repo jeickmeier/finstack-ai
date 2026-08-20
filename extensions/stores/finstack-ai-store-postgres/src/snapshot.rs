@@ -26,9 +26,11 @@
 //! and an append to one session serialize against each other exactly as two
 //! appends do. `scan` takes no write lock: it is a read-only range read over
 //! `records`, run inside a `READ ONLY REPEATABLE READ` transaction so the
-//! page it returns reflects one consistent instant of the journal (mirroring
-//! [`crate::load::load`]'s isolation, though scan performs no chain
-//! verification — see the module-level note on `scan_in_transaction` below).
+//! page it returns — and every anchoring row `verify_scan_page` reads
+//! alongside it (the record before the page and the session row) — reflects
+//! one consistent instant of the journal, mirroring [`crate::load::load`]'s
+//! isolation. `scan` chain-verifies the page it returns with sqlite-exact
+//! semantics; see `verify_scan_page` below.
 //!
 //! ## Connection disposition
 //!
@@ -39,18 +41,24 @@
 //! ambiguous acknowledgement for `write_snapshot`/`write_metadata`, exactly
 //! as for append.
 
+use std::sync::Arc;
+
+use finstack_ai_kernel::{Digest, RecordEnvelope, SessionId};
+use finstack_ai_protocol::verify_chain_from;
 use finstack_ai_runtime::{
     MetadataReceipt, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
     StoreError, StoreLimits, WriteMetadataRequest,
 };
 use finstack_ai_store_common::{
-    admit_snapshot_sequence, check_snapshot_size, encode_state_request, scan_next_sequence,
-    scan_start, validate_scan_limit,
+    admit_snapshot_sequence, check_snapshot_size, encode_state_request, protocol_error,
+    scan_next_sequence, scan_start, validate_scan_limit,
 };
 use tokio_postgres::{Client, IsolationLevel, Transaction};
 
 use crate::error::{Failure, i64_from_u64};
-use crate::load::{RECORD_COLUMNS, reconstruct_envelope};
+use crate::load::{
+    RECORD_COLUMNS, SessionRow, load_envelope_checksum, load_session_row, reconstruct_envelope,
+};
 use crate::pool::PooledClient;
 use crate::session::lock_session;
 
@@ -154,11 +162,12 @@ async fn write_snapshot_in_transaction(
     transaction: &Transaction<'_>,
     request: &SnapshotRequest,
 ) -> Result<SnapshotReceipt, Failure> {
-    let session = lock_session(transaction, request.session_id)
-        .await?
-        .ok_or(StoreError::InvalidRequest {
-            reason_code: "snapshot_session_not_found",
-        })?;
+    let session =
+        lock_session(transaction, request.session_id)
+            .await?
+            .ok_or(StoreError::InvalidRequest {
+                reason_code: "snapshot_session_not_found",
+            })?;
     admit_snapshot_sequence(
         request.snapshot.sequence(),
         session.current_sequence,
@@ -202,20 +211,24 @@ async fn write_snapshot_in_transaction(
 /// (port contract: `from_sequence == 0` means the first committed record,
 /// `limit == 0` is invalid).
 ///
-/// A plain indexed range read over `records` (`(session_id, sequence)` is
-/// the table's primary key, so this is index-optimal): unlike sqlite's
-/// `scan_session`, this does not chain-verify the returned page against a
-/// stored checkpoint or the session head. A full [`crate::load::load`]
-/// already verifies the whole chain, and a `scan` caller that needs a
-/// verified window has [`crate::load::load`]'s `FromSequence`/
-/// `SnapshotPlusTail` windows for that; `scan` itself is a plain read over
-/// data this store's own writers produced under one row lock apiece.
+/// An indexed range read over `records` (`(session_id, sequence)` is the
+/// table's primary key, so this is index-optimal) plus the same page
+/// verification sqlite's `scan_session`/`verify_scan_page` perform
+/// (`extensions/stores/finstack-ai-store-sqlite/src/load.rs`): a page short
+/// of a live session's head is `scan_sequence_gap`, a page whose first
+/// record does not chain from the stored checkpoint before it is
+/// `scan_checkpoint_mismatch`, a broken internal chain is whatever
+/// [`finstack_ai_protocol::verify_chain_from`] reports, and a page that
+/// reaches the session head but computes a different checksum than the one
+/// stored there is `head_checksum_mismatch`.
 ///
 /// # Errors
 ///
 /// Returns [`StoreError::InvalidRequest`] (`scan_limit_zero` /
-/// `scan_limit_exceeded`) from [`validate_scan_limit`], and otherwise the
-/// mapped driver error.
+/// `scan_limit_exceeded`) from [`validate_scan_limit`],
+/// [`StoreError::Integrity`] (`scan_sequence_gap` / `scan_checkpoint_mismatch`
+/// / `head_checksum_mismatch`, or a protocol chain-verification code) when
+/// the returned page does not verify, and otherwise the mapped driver error.
 pub(crate) async fn scan(
     client: &mut PooledClient<Client>,
     request: ScanRequest,
@@ -264,13 +277,25 @@ async fn scan_on_connection(
 }
 
 /// Fetch one page of records at or after `scan_start(request.from_sequence)`,
-/// over-fetching by one row to determine `has_more` without a second
-/// round trip.
+/// over-fetching by one row to determine `has_more` without a second round
+/// trip, then verify it exactly as sqlite's `scan_session` does.
 async fn scan_in_transaction(
     transaction: &Transaction<'_>,
     request: ScanRequest,
 ) -> Result<ScanPage, Failure> {
     let start = scan_start(request.from_sequence);
+    // A session that does not exist scans as empty, per the port contract —
+    // sqlite's `scan_session` reaches the same outcome via an explicit
+    // `session_exists` check; one round trip suffices here because the
+    // whole scan runs inside one `READ ONLY REPEATABLE READ` transaction.
+    let Some(session) = load_session_row(transaction, request.session_id).await? else {
+        return Ok(ScanPage {
+            session_id: request.session_id,
+            records: Arc::from([]),
+            next_sequence: None,
+        });
+    };
+
     let fetch_limit = i64::from(request.limit.saturating_add(1));
     let rows = transaction
         .query(
@@ -287,6 +312,23 @@ async fn scan_in_transaction(
         .await
         .map_err(|error| Failure::from_driver(&error))?;
 
+    if rows.is_empty() {
+        // No record at or after `start`: legitimate only when `start` is
+        // past the session's current head. A `start` at or before the head
+        // with nothing there is a hole in the journal.
+        if start <= session.current_sequence {
+            return Err(StoreError::Integrity {
+                reason_code: "scan_sequence_gap",
+            }
+            .into());
+        }
+        return Ok(ScanPage {
+            session_id: request.session_id,
+            records: Arc::from([]),
+            next_sequence: None,
+        });
+    }
+
     let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
     let has_more = rows.len() > limit;
     let records = rows
@@ -294,12 +336,67 @@ async fn scan_in_transaction(
         .take(limit)
         .map(reconstruct_envelope)
         .collect::<Result<Vec<_>, _>>()?;
+    if records
+        .first()
+        .is_some_and(|record| record.sequence() < start)
+    {
+        return Err(StoreError::Integrity {
+            reason_code: "scan_sequence_gap",
+        }
+        .into());
+    }
+    verify_scan_page(transaction, request.session_id, &records, &session).await?;
     let next_sequence = scan_next_sequence(&records, has_more);
     Ok(ScanPage {
         session_id: request.session_id,
         records: records.into(),
         next_sequence,
     })
+}
+
+/// Chain-verify a scan page, mirroring sqlite's `verify_scan_page` exactly:
+/// anchor the page's first record against the stored checksum of the record
+/// immediately before it (when one exists), walk the chain across the page,
+/// and — only when the page reaches the session's current head — compare
+/// the resulting checksum against the stored head checksum.
+async fn verify_scan_page(
+    transaction: &Transaction<'_>,
+    session_id: SessionId,
+    records: &[RecordEnvelope],
+    session: &SessionRow,
+) -> Result<(), Failure> {
+    let Some(first) = records.first() else {
+        return Ok(());
+    };
+    let prior: Option<Digest> = if first.sequence() <= 1 {
+        None
+    } else {
+        let checkpoint = first.sequence().saturating_sub(1);
+        match load_envelope_checksum(transaction, session_id, checkpoint).await? {
+            Some(stored) => {
+                if first.previous_checksum() != Some(stored) {
+                    return Err(StoreError::Integrity {
+                        reason_code: "scan_checkpoint_mismatch",
+                    }
+                    .into());
+                }
+                Some(stored)
+            }
+            None => first.previous_checksum(),
+        }
+    };
+    let head = verify_chain_from(records, prior, Some(first.sequence())).map_err(protocol_error)?;
+    if records
+        .last()
+        .is_some_and(|record| record.sequence() == session.current_sequence)
+        && head != session.head_checksum
+    {
+        return Err(StoreError::Integrity {
+            reason_code: "head_checksum_mismatch",
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// Compare-and-swap session metadata against the expected head checksum.
@@ -367,11 +464,12 @@ async fn write_metadata_in_transaction(
     transaction: &Transaction<'_>,
     request: &WriteMetadataRequest,
 ) -> Result<MetadataReceipt, Failure> {
-    let session = lock_session(transaction, request.session_id)
-        .await?
-        .ok_or(StoreError::InvalidRequest {
-            reason_code: "metadata_session_not_found",
-        })?;
+    let session =
+        lock_session(transaction, request.session_id)
+            .await?
+            .ok_or(StoreError::InvalidRequest {
+                reason_code: "metadata_session_not_found",
+            })?;
     if session.head_checksum != request.expected_head_checksum {
         return Err(StoreError::InvalidRequest {
             reason_code: "metadata_cas_mismatch",

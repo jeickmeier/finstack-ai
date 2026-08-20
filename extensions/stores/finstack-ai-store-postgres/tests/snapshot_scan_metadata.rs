@@ -26,10 +26,10 @@ use finstack_ai_runtime::{
     CommitCoordinator, JournalStore, LoadRequest, OpaqueSnapshot, ScanRequest, SnapshotRequest,
     StateSnapshotRequest, StoreError, StoreLimits, WriteMetadataRequest,
 };
-use finstack_ai_store_postgres::PostgresJournalStore;
+use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
 use finstack_ai_test::store_fixtures::{draft, id, request};
 
-use helpers::{connect, disposable_store, pg_test_url};
+use helpers::{SchemaGuard, connect, disposable_store, fresh_schema_name, pg_test_url};
 
 /// Generous limits: most of these tests care about admission/CAS logic, not
 /// ceilings.
@@ -40,6 +40,23 @@ fn wide_limits() -> StoreLimits {
         records_per_session: 1_000,
         snapshot_bytes: 1_000_000,
     }
+}
+
+/// Open a store against an explicit schema name, so a test can also open a
+/// raw connection to the same schema (to corrupt a stored row directly).
+async fn open_store(url: &str, schema: &str) -> PostgresJournalStore {
+    let mut config = PostgresStoreConfig::new(url, wide_limits());
+    config.schema = Arc::from(schema);
+    PostgresJournalStore::try_open(config)
+        .await
+        .expect("try_open store")
+}
+
+/// One store over a fresh disposable schema, plus its schema name and guard.
+async fn store_over_fresh_schema(url: &str) -> (PostgresJournalStore, String, SchemaGuard) {
+    let schema = fresh_schema_name();
+    let store = open_store(url, &schema).await;
+    (store, schema.clone(), SchemaGuard::new(schema))
 }
 
 /// Append a real `AcceptRun` record to session 1, so [`CommitCoordinator`]
@@ -300,7 +317,13 @@ async fn scan_pages_walk_next_sequence_to_none() {
             1,
             1,
             1,
-            vec![draft(1, 1), draft(2, 1), draft(3, 1), draft(4, 1), draft(5, 1)],
+            vec![
+                draft(1, 1),
+                draft(2, 1),
+                draft(3, 1),
+                draft(4, 1),
+                draft(5, 1),
+            ],
         ))
         .await
         .expect("append five records");
@@ -438,4 +461,61 @@ async fn write_metadata_cas_succeeds_and_fails_on_stale_head() {
     assert_eq!(loaded.metadata, metadata);
 
     guard.cleanup(&connect(&url).await).await;
+}
+
+/// A scan page verifies against the stored chain: a record tampered
+/// directly in storage (not through this store's own writers) fails the
+/// scan that would otherwise return it, mirroring sqlite's
+/// `scan_verifies_page_from_stored_checkpoint` exactly (three single-record
+/// batches, corrupt the middle record's `envelope_checksum` via a raw
+/// connection, then scan a page starting at that record).
+#[tokio::test]
+async fn scan_verifies_page_from_stored_checkpoint() {
+    let Some(url) = pg_test_url() else {
+        eprintln!("skipped: FINSTACK_PG_TEST_URL unset");
+        return;
+    };
+    let (store, schema, guard) = store_over_fresh_schema(&url).await;
+    store
+        .append(request(1, 1, 1, vec![draft(1, 1)]))
+        .await
+        .expect("batch one");
+    store
+        .append(request(2, 1, 2, vec![draft(2, 1)]))
+        .await
+        .expect("batch two");
+    store
+        .append(request(3, 1, 3, vec![draft(3, 1)]))
+        .await
+        .expect("batch three");
+
+    let client = connect(&url).await;
+    client
+        .execute(
+            &format!(
+                "UPDATE {schema}.records SET envelope_checksum = $1 \
+                 WHERE session_id = $2 AND sequence = 2"
+            ),
+            &[
+                &vec![0_u8; 32],
+                &id::<SessionTag>(1).as_bytes().as_slice(),
+            ],
+        )
+        .await
+        .expect("corrupt sequence 2");
+
+    let error = store
+        .scan(ScanRequest {
+            session_id: id::<SessionTag>(1),
+            from_sequence: 2,
+            limit: 2,
+        })
+        .await
+        .expect_err("a corrupted record must fail the scan");
+    assert!(
+        matches!(error, StoreError::Integrity { .. }),
+        "unexpected error: {error:?}"
+    );
+
+    guard.cleanup(&client).await;
 }
