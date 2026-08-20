@@ -77,3 +77,28 @@ async fn conflicting_checkpoint_sequence_is_ignored() {
     );
     let _ = (store, clock, model);
 }
+
+#[tokio::test]
+async fn drive_timeout_is_configurable_and_defaults_to_two_seconds() {
+    let store = memory_store();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(
+        profile(),
+        vec![completed_plan("done")],
+    ));
+    let clock = ExternalClock::new(timestamp(2_000));
+    let owner = spawn_model_owner(
+        CommitCoordinator::new(store.clone()),
+        Arc::clone(&model),
+        clock.clone(),
+        900,
+    )
+    .await;
+    drive_to_active_model_request(&owner.handle()).await;
+    drop(owner);
+    let driver = attach_driver(store, model, clock, 900).await;
+    assert_eq!(driver.drive_timeout(), StdDuration::from_secs(2));
+    let session = driver
+        .into_session()
+        .with_drive_timeout(StdDuration::from_millis(250));
+    assert_eq!(session.drive_timeout(), StdDuration::from_millis(250));
+}
