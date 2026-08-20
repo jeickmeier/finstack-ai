@@ -1,0 +1,61 @@
+pub mod finstack_ai_net_guard
+pub enum finstack_ai_net_guard::NetGuardError
+pub finstack_ai_net_guard::NetGuardError::ClientBuildFailed
+pub finstack_ai_net_guard::NetGuardError::DestinationBlocked
+pub finstack_ai_net_guard::NetGuardError::DestinationBlocked::reason: &'static str
+pub finstack_ai_net_guard::NetGuardError::InvalidUrl
+pub finstack_ai_net_guard::NetGuardError::InvalidUrl::reason: &'static str
+pub finstack_ai_net_guard::NetGuardError::LimitExceeded
+pub finstack_ai_net_guard::NetGuardError::ResolutionFailed
+pub finstack_ai_net_guard::NetGuardError::TransportFailed
+impl core::clone::Clone for finstack_ai_net_guard::NetGuardError
+pub fn finstack_ai_net_guard::NetGuardError::clone(&self) -> finstack_ai_net_guard::NetGuardError
+impl core::cmp::Eq for finstack_ai_net_guard::NetGuardError
+impl core::cmp::PartialEq for finstack_ai_net_guard::NetGuardError
+pub fn finstack_ai_net_guard::NetGuardError::eq(&self, &finstack_ai_net_guard::NetGuardError) -> bool
+impl core::error::Error for finstack_ai_net_guard::NetGuardError
+impl core::fmt::Debug for finstack_ai_net_guard::NetGuardError
+pub fn finstack_ai_net_guard::NetGuardError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_net_guard::NetGuardError
+pub fn finstack_ai_net_guard::NetGuardError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_net_guard::NetGuardError
+pub struct finstack_ai_net_guard::SystemResolver
+impl core::clone::Clone for finstack_ai_net_guard::SystemResolver
+pub fn finstack_ai_net_guard::SystemResolver::clone(&self) -> finstack_ai_net_guard::SystemResolver
+impl core::default::Default for finstack_ai_net_guard::SystemResolver
+pub fn finstack_ai_net_guard::SystemResolver::default() -> finstack_ai_net_guard::SystemResolver
+impl core::fmt::Debug for finstack_ai_net_guard::SystemResolver
+pub fn finstack_ai_net_guard::SystemResolver::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_net_guard::SystemResolver
+impl finstack_ai_net_guard::HostResolver for finstack_ai_net_guard::SystemResolver
+pub fn finstack_ai_net_guard::SystemResolver::resolve(&self, &str, u16) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<core::net::socket_addr::SocketAddr>>> + core::marker::Send + '_)>>
+pub struct finstack_ai_net_guard::UrlPolicy
+pub finstack_ai_net_guard::UrlPolicy::allow_loopback_http: bool
+pub finstack_ai_net_guard::UrlPolicy::allow_nonstandard_https_port: bool
+impl core::clone::Clone for finstack_ai_net_guard::UrlPolicy
+pub fn finstack_ai_net_guard::UrlPolicy::clone(&self) -> finstack_ai_net_guard::UrlPolicy
+impl core::fmt::Debug for finstack_ai_net_guard::UrlPolicy
+pub fn finstack_ai_net_guard::UrlPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_net_guard::UrlPolicy
+pub struct finstack_ai_net_guard::VettedUrl
+pub finstack_ai_net_guard::VettedUrl::host: alloc::string::String
+pub finstack_ai_net_guard::VettedUrl::is_loopback: bool
+pub finstack_ai_net_guard::VettedUrl::port: u16
+pub finstack_ai_net_guard::VettedUrl::url: url::Url
+impl core::clone::Clone for finstack_ai_net_guard::VettedUrl
+pub fn finstack_ai_net_guard::VettedUrl::clone(&self) -> finstack_ai_net_guard::VettedUrl
+impl core::fmt::Debug for finstack_ai_net_guard::VettedUrl
+pub fn finstack_ai_net_guard::VettedUrl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const finstack_ai_net_guard::NET_GUARD_DESTINATION_BLOCKED: &str
+pub const finstack_ai_net_guard::NET_GUARD_INVALID_URL: &str
+pub trait finstack_ai_net_guard::HostResolver: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_net_guard::HostResolver::resolve(&self, &str, u16) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<core::net::socket_addr::SocketAddr>>> + core::marker::Send + '_)>>
+impl finstack_ai_net_guard::HostResolver for finstack_ai_net_guard::SystemResolver
+pub fn finstack_ai_net_guard::SystemResolver::resolve(&self, &str, u16) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<core::net::socket_addr::SocketAddr>>> + core::marker::Send + '_)>>
+pub fn finstack_ai_net_guard::is_forbidden_destination(core::net::ip_addr::IpAddr) -> bool
+pub fn finstack_ai_net_guard::is_loopback_host(&str) -> bool
+pub fn finstack_ai_net_guard::parse_and_vet_url(&str, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<finstack_ai_net_guard::VettedUrl, finstack_ai_net_guard::NetGuardError>
+pub fn finstack_ai_net_guard::pinned_client(&finstack_ai_net_guard::VettedUrl, core::net::socket_addr::SocketAddr, core::time::Duration) -> core::result::Result<reqwest::async_impl::client::Client, finstack_ai_net_guard::NetGuardError>
+pub async fn finstack_ai_net_guard::read_body_bounded(reqwest::async_impl::response::Response, usize) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_net_guard::NetGuardError>
+pub fn finstack_ai_net_guard::reject_literal_destination(&finstack_ai_net_guard::VettedUrl, &finstack_ai_net_guard::UrlPolicy) -> core::result::Result<(), finstack_ai_net_guard::NetGuardError>
+pub async fn finstack_ai_net_guard::resolve_and_pin(&finstack_ai_net_guard::VettedUrl, &dyn finstack_ai_net_guard::HostResolver) -> core::result::Result<core::net::socket_addr::SocketAddr, finstack_ai_net_guard::NetGuardError>

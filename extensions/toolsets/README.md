@@ -10,3 +10,4 @@
 | `finstack-ai-tools-skills` | `capability_list` / additions-only `capability_activate` |
 | `finstack-ai-tools-skill-import` | Composition-time `SKILL.md` importer; catalog default-off |
 | `finstack-ai-sandbox-e2b` | T4 remote sandbox; no compensating DELETE on cancel |
+| `finstack-ai-tools-fetch` | Deny-by-default HTTPS allowlist; resolve-and-pin; bounded reads |

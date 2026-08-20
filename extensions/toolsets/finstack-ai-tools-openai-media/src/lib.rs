@@ -37,6 +37,10 @@ use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, Timestamp, ToolExecutionMode,
     ToolId, ValidatedToolCall,
 };
+use finstack_ai_net_guard::{
+    NetGuardError, SystemResolver, UrlPolicy, parse_and_vet_url, pinned_client, read_body_bounded,
+    reject_literal_destination, resolve_and_pin,
+};
 use finstack_ai_runtime::{
     ApprovalMetadata, ApprovalRequirement, ArtifactMetadata, ArtifactScope, ArtifactStore, Bytes,
     PortFuture, SideEffectClass, ToolCallContext, ToolDeferralSupport, ToolError, ToolEventStream,
@@ -289,10 +293,14 @@ impl OpenAiMediaToolset {
                 reason: "invalid_tool_spec",
             })?;
 
-        // Downloads (e.g. transcription audio_url) must not follow redirects
-        // past the caller-supplied-URL validation performed before the
-        // request is sent — a redirect could otherwise smuggle the request
-        // to a host/scheme that validate_download_url never saw.
+        // This client serves the toolset's own OpenAI API calls (image and
+        // speech generation, plus the transcription POST after the audio
+        // is downloaded) — NOT the caller-supplied audio_url download,
+        // which builds its own address-pinned client per request via
+        // `finstack_ai_net_guard::pinned_client` (see `download_bytes`).
+        // Redirects stay disabled here too, defense in depth: the
+        // configured `endpoint` is not caller-supplied, but there is no
+        // reason for a same-provider API call to ever redirect either.
         let client = reqwest::Client::builder()
             .http1_only()
             .timeout(REQUEST_TIMEOUT)
@@ -673,8 +681,7 @@ async fn handle_transcribe(
         ));
     }
     validate_download_url(&arguments.audio_url)?;
-    let downloaded =
-        download_bytes(client, &arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
+    let downloaded = download_bytes(&arguments.audio_url, ctx, MAX_AUDIO_DOWNLOAD_BYTES).await?;
     // Presigned/signed download URLs commonly carry a query string (and
     // occasionally a fragment) after the real file name, e.g.
     // `https://bucket.example/a.mp3?X-Sig=...`; strip both before deriving
@@ -821,8 +828,18 @@ async fn send_bytes(
     Ok((bytes, content_type))
 }
 
+/// Address-pinned, vetted download of a caller-supplied `audio_url`.
+///
+/// Backed by `finstack-ai-net-guard`: `parse_and_vet_url` (scheme/component
+/// vetting) &rarr; `resolve_and_pin` (DNS resolve-and-pin, private/loopback
+/// deny) &rarr; `pinned_client` (address-pinned, redirect-disabled,
+/// proxy-disabled). Unlike the crate's former unpinned `client.get(url)`
+/// download (which reused the shared, unpinned `OpenAI` API client and
+/// performed no destination vetting at all beyond the URL-string checks in
+/// `validate_download_url`), this closes the DNS-rebinding/SSRF gap: a
+/// hostname that resolves to a private or loopback address is now rejected
+/// even when the URL string itself looked like a public HTTPS host.
 async fn download_bytes(
-    client: &reqwest::Client,
     url: &str,
     ctx: &ToolCallContext,
     cap: usize,
@@ -830,7 +847,14 @@ async fn download_bytes(
     if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
         return Err(timeout_error());
     }
-    let send = client.get(url).send();
+    let policy = download_url_policy();
+    let vetted = parse_and_vet_url(url, &policy).map_err(map_net_guard_error)?;
+    reject_literal_destination(&vetted, &policy).map_err(map_net_guard_error)?;
+    let addr = resolve_and_pin(&vetted, &SystemResolver)
+        .await
+        .map_err(map_net_guard_error)?;
+    let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
+    let send = client.get(vetted.url.as_str()).send();
     let response = tokio::select! {
         () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
         () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
@@ -850,7 +874,66 @@ async fn download_bytes(
             "openai media audio host rejected the request",
         ));
     }
-    fetch_bytes_bounded(response, cap).await
+    read_body_bounded(response, cap)
+        .await
+        .map_err(map_net_guard_error)
+}
+
+/// Loopback-http policy for caller-supplied download URLs: production is
+/// HTTPS-only with no loopback exception, and the loopback allowance for
+/// scripted `http://127.0.0.1` fixtures is compiled in only for
+/// `#[cfg(test)]` builds, so that branch does not exist in a release
+/// binary (same property the crate's former `validate_download_url` had).
+/// Loopback-http policy for caller-supplied download URLs: production is
+/// HTTPS-only with no loopback exception, and the loopback allowance for
+/// scripted `http://127.0.0.1` fixtures is compiled in only for
+/// `#[cfg(test)]` builds, so that branch does not exist in a release
+/// binary (same property the crate's former `validate_download_url` had).
+///
+/// `allow_nonstandard_https_port: true` restores the crate's prior
+/// any-port behavior: net-guard's own default is 443-only (right for a
+/// model-supplied URL), but this crate's `audio_url` is a
+/// caller-supplied, potentially presigned download URL, and a
+/// self-hosted/non-standard-port host is a normal shape those take.
+#[cfg(test)]
+fn download_url_policy() -> UrlPolicy {
+    UrlPolicy {
+        allow_loopback_http: true,
+        allow_nonstandard_https_port: true,
+    }
+}
+
+#[cfg(not(test))]
+fn download_url_policy() -> UrlPolicy {
+    UrlPolicy {
+        allow_loopback_http: false,
+        allow_nonstandard_https_port: true,
+    }
+}
+
+fn invalid_download_url() -> ToolError {
+    invalid_arguments("openai media audio_url is not allowed")
+}
+
+/// Map every other net-guard failure (client construction, transport,
+/// oversize body) onto the crate's existing transport/limit codes.
+#[allow(clippy::needless_pass_by_value)] // used as a `map_err` function pointer
+fn map_net_guard_error(error: NetGuardError) -> ToolError {
+    match error {
+        NetGuardError::InvalidUrl { .. }
+        | NetGuardError::DestinationBlocked { .. }
+        | NetGuardError::ResolutionFailed => invalid_download_url(),
+        NetGuardError::ClientBuildFailed | NetGuardError::TransportFailed => tool_error(
+            OPENAI_MEDIA_TRANSPORT_FAILED,
+            ErrorCategory::Tool,
+            "openai media audio download failed",
+        ),
+        NetGuardError::LimitExceeded => tool_error(
+            OPENAI_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "openai media response exceeds the configured byte limit",
+        ),
+    }
 }
 
 async fn fetch_bytes_bounded(
@@ -959,38 +1042,30 @@ fn validate_endpoint(value: &str) -> Result<(), OpenAiMediaError> {
 
 /// Validates the audio-download URL for `openai_transcribe_audio`.
 ///
-/// Production behavior is HTTPS-only, with no loopback exception — unlike
-/// the toolset's own configured `endpoint` (which may be loopback HTTP for
-/// scripted fixtures), the *download* target must always be HTTPS. The one
-/// exception is compiled in only for `#[cfg(test)]` builds, where scripted
-/// fixtures need to serve audio bytes over `http://127.0.0.1`; that branch
-/// does not exist in a release binary.
+/// Backed by `finstack-ai-net-guard`'s `parse_and_vet_url` plus its
+/// synchronous literal-destination check
+/// ([`reject_literal_destination`]). Production behavior is HTTPS-only,
+/// with no loopback exception — unlike the toolset's own configured
+/// `endpoint` (which may be loopback HTTP for scripted fixtures), the
+/// *download* target must always be HTTPS. The one exception is compiled
+/// in only for `#[cfg(test)]` builds (see [`download_url_policy`]), where
+/// scripted fixtures need to serve audio bytes over `http://127.0.0.1`;
+/// that branch does not exist in a release binary.
+///
+/// Net-guard tightening beyond the crate's former checks, both strictly
+/// narrowing and controller-ruled safe: literal or resolved unspecified
+/// (`0.0.0.0`), broadcast, and multicast addresses are denied (no
+/// legitimate media host is one of these), and a private/loopback literal
+/// destination is now rejected for `https` URLs too, not only `http` —
+/// the crate's former check permitted `https://127.0.0.1/...` unconditionally
+/// in every build, since it never inspected the host once the scheme was
+/// `https`. Non-standard `https` ports remain accepted
+/// (`allow_nonstandard_https_port: true` in [`download_url_policy`]),
+/// matching the crate's prior any-port behavior.
 fn validate_download_url(value: &str) -> Result<(), ToolError> {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return Err(invalid_arguments(
-            "openai media audio_url must be an https URL",
-        ));
-    };
-    // Query strings are allowed: signed download URLs (e.g. presigned S3 or
-    // GCS links) are a normal shape for caller-supplied audio_url values.
-    if rest.contains('@') || rest.contains('#') {
-        return Err(invalid_arguments(
-            "openai media audio_url contains forbidden components",
-        ));
-    }
-    #[cfg_attr(not(test), allow(unused_variables))]
-    let host = endpoint_host(rest)
-        .ok_or_else(|| invalid_arguments("openai media audio_url host is missing"))?;
-    if scheme.eq_ignore_ascii_case("https") {
-        return Ok(());
-    }
-    #[cfg(test)]
-    {
-        if scheme.eq_ignore_ascii_case("http") && is_loopback_host(host) {
-            return Ok(());
-        }
-    }
-    Err(invalid_arguments("openai media audio_url must be https"))
+    let policy = download_url_policy();
+    let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
+    reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())
 }
 
 fn endpoint_host(rest: &str) -> Option<&str> {
@@ -1551,6 +1626,17 @@ mod tests {
             "https://example-bucket.s3.amazonaws.com/a.mp3?X-Amz-Signature=abc123&X-Amz-Expires=900",
         )
         .expect("https download url with a query string is accepted");
+    }
+
+    #[test]
+    fn validate_download_url_accepts_a_nonstandard_https_port() {
+        // A presigned URL against a self-hosted/MinIO-style object store on
+        // a non-standard port is a normal shape for a caller-supplied
+        // audio_url; net-guard's own default is 443-only, but this crate's
+        // download policy opts back in to the crate's prior any-port
+        // behavior.
+        validate_download_url("https://media.example.com:8443/a.mp3")
+            .expect("https download url on a non-standard port is accepted");
     }
 
     #[tokio::test]

@@ -22,6 +22,7 @@ members = [
     "extensions/providers/finstack-ai-provider-gemini",
     "extensions/toolsets/finstack-ai-sandbox-e2b",
     "extensions/toolsets/finstack-ai-tools-openrouter-media",
+    "extensions/toolsets/finstack-ai-tools-fetch",
     "extensions/toolsets/finstack-ai-tools-openai-media",
     "extensions/toolsets/finstack-ai-tools-calculator",
     "extensions/toolsets/finstack-ai-tools-elicitation",
@@ -48,6 +49,7 @@ members = [
     "extensions/interop/finstack-ai-codex-child",
     "extensions/interop/finstack-ai-completion-ingress",
     "extensions/interop/finstack-ai-remote-child",
+    "extensions/net/finstack-ai-net-guard",
     "extensions/workflow/finstack-ai-workflow-hitl",
     "extensions/workflow/finstack-ai-workflow-local",
     "extensions/workflow/finstack-ai-workflow-worker",
@@ -138,6 +140,7 @@ finstack-ai-provider-openrouter = { path = "extensions/providers/finstack-ai-pro
 finstack-ai-provider-gemini = { path = "extensions/providers/finstack-ai-provider-gemini", version = "1.0.0" }
 finstack-ai-sandbox-e2b = { path = "extensions/toolsets/finstack-ai-sandbox-e2b", version = "1.0.0" }
 finstack-ai-tools-openrouter-media = { path = "extensions/toolsets/finstack-ai-tools-openrouter-media", version = "1.0.0" }
+finstack-ai-tools-fetch = { path = "extensions/toolsets/finstack-ai-tools-fetch", version = "1.0.0" }
 finstack-ai-tools-openai-media = { path = "extensions/toolsets/finstack-ai-tools-openai-media", version = "1.0.0" }
 finstack-ai-tools-calculator = { path = "extensions/toolsets/finstack-ai-tools-calculator", version = "1.0.0" }
 finstack-ai-tools-elicitation = { path = "extensions/toolsets/finstack-ai-tools-elicitation", version = "1.0.0" }
@@ -168,6 +171,7 @@ finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observe
 finstack-ai-observer-billing = { path = "extensions/observers/finstack-ai-observer-billing", version = "1.0.0" }
 finstack-ai-completion-ingress = { path = "extensions/interop/finstack-ai-completion-ingress", version = "1.0.0" }
 finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
+finstack-ai-net-guard = { path = "extensions/net/finstack-ai-net-guard", version = "1.0.0" }
 finstack-ai-workflow-hitl = { path = "extensions/workflow/finstack-ai-workflow-hitl", version = "1.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
 finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }
@@ -208,6 +212,22 @@ futures-core = "0.3.31"
 futures-util = "0.3.31"
 base64 = { version = "0.22.1", default-features = false, features = ["std", "alloc"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["http2", "json", "native-tls", "stream"] }
+url = "2"
+# HTML→markdown conversion for the fetch toolset (spec §4.5). License-gated
+# via `cargo deny check licenses` before use; fallback is a hand-rolled
+# `scraper` DOM walk if this ever fails the gate.
+htmd = "0.5"
+# The real parser/DOM behind `htmd`. `html5ever` is a real (non-dev)
+# dependency of finstack-ai-tools-fetch: its pre-parse nesting-depth guard
+# (F-4) runs html5ever's own `parse_document` against a counting `TreeSink`
+# (not a hand-rolled scanner or a bare tokenizer), so the depth it measures
+# is the depth htmd's tree builder actually produces.
+# `markup5ever_rcdom` stays dev-only, used by that crate's differential test
+# to build the real DOM and compare its depth against the guard. Both are
+# already in the dependency tree (and license-cleared) via `htmd` above;
+# these entries just expose the same locked versions directly.
+html5ever = "0.38"
+markup5ever_rcdom = "0.38"
 rustix = { version = "1.1.4", default-features = false, features = ["alloc", "fs", "std"] }
 tempfile = "3.27.0"
 tokio = { version = "=1.51.1", default-features = false, features = ["macros", "rt", "sync", "time"] }

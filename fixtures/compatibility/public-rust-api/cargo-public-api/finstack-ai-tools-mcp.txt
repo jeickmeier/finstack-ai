@@ -3,6 +3,7 @@ pub use finstack_ai_tools_mcp::MCP_SAMPLING_REQUIRED
 pub struct finstack_ai_tools_mcp::HttpConfig
 impl finstack_ai_tools_mcp::HttpConfig
 pub fn finstack_ai_tools_mcp::HttpConfig::try_new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
+pub fn finstack_ai_tools_mcp::HttpConfig::with_max_response_bytes(self, usize) -> core::result::Result<Self, finstack_ai_tools_mcp::McpError>
 impl core::clone::Clone for finstack_ai_tools_mcp::HttpConfig
 pub fn finstack_ai_tools_mcp::HttpConfig::clone(&self) -> finstack_ai_tools_mcp::HttpConfig
 impl core::cmp::Eq for finstack_ai_tools_mcp::HttpConfig

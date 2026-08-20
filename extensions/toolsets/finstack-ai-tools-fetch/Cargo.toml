@@ -1,5 +1,5 @@
 [package]
-name = "finstack-ai-tools-openrouter-media"
+name = "finstack-ai-tools-fetch"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,27 +7,36 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "OpenRouter media-generation toolset for finstack-ai"
+description = "Bounded, allowlisted HTTP fetch toolset for finstack-ai"
+readme = "README.md"
 
 [features]
 default = []
 vendored-tls = ["reqwest/native-tls-vendored"]
 
 [dependencies]
-base64 = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-net-guard = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 futures-util = { workspace = true }
+# Real (non-dev) dependency: the pre-parse nesting-depth guard in
+# `markdown.rs` (F-4) runs html5ever's own `parse_document` against a
+# counting `TreeSink`, so the depth it measures is the depth `htmd`'s
+# html5ever tree builder actually produces -- no approximation of the
+# parser is left to diverge from it.
+html5ever = { workspace = true }
+htmd = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "time"] }
+url = { workspace = true }
 
 [dev-dependencies]
 finstack-ai-memory = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync"] }
+markup5ever_rcdom = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true

@@ -31,6 +31,7 @@ use crate::callbacks::{
 use crate::capability::PyCapability;
 use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, session_py_error};
+use crate::fetch::PyHttpFetchToolset;
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::run::{
     PreparedPydanticOutput, PyAttachment, PyRun, collect_attachments, prepare_pydantic_output,
@@ -47,6 +48,8 @@ pub(crate) enum PyToolsetArg {
     Elicitation(Py<PyElicitationToolset>),
     /// Rust memory toolset handle from `MemoryExtension.toolset()`.
     Memory(Py<PyMemoryToolset>),
+    /// Rust bounded HTTP fetch toolset.
+    HttpFetch(Py<PyHttpFetchToolset>),
 }
 
 impl PyToolsetArg {
@@ -64,6 +67,7 @@ impl PyToolsetArg {
                 .bind(py)
                 .borrow()
                 .registration(py, Arc::clone(artifact_store)),
+            Self::HttpFetch(toolset) => Ok(toolset.bind(py).borrow().registration()),
         }
     }
 }

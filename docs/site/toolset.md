@@ -13,6 +13,7 @@ and policy surface is intended to stay under 100 lines (NFR-DX-002).
 | `finstack-ai-tools-subagent` | `subagent_start` / `subagent_status` / `subagent_cancel` over `AgentInvoker` |
 | `finstack-ai-tools-skills` | `capability_list` / additions-only `capability_activate` |
 | `finstack-ai-tools-skill-import` | Composition-time `SKILL.md` importer; catalog default-off |
+| `finstack-ai-tools-fetch` | `http_fetch` tool (`finstack-fetch` descriptor); deny-by-default HTTPS host allowlist, resolve-and-pin + redirect re-vetting, bounded reads, HTML→Markdown for inline delivery |
 
 MCP sampling is a nested committed model child of the open tool
 (ADR-046). `resources/subscribe` accepts only names already in the

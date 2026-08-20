@@ -1,0 +1,28 @@
+[package]
+name = "finstack-ai-net-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Vetted outbound HTTP primitives for finstack-ai: URL vetting, private-IP deny, DNS resolve-and-pin, bounded reads"
+readme = "README.md"
+
+[features]
+default = []
+vendored-tls = ["reqwest/native-tls-vendored"]
+
+[dependencies]
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

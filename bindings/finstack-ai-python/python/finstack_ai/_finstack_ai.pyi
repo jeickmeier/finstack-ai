@@ -261,6 +261,32 @@ class MemoryToolset:
     @property
     def tool_count(self) -> int: ...
 
+class HttpFetchToolset:
+    """Bounded, allowlisted HTTP fetch toolset backed by the Rust implementation.
+
+    Built from a JSON configuration document: ``allowlist`` (required,
+    non-empty), and optional ``max_response_bytes``, ``request_timeout_ms``,
+    ``max_redirects``, ``per_host_headers``, ``user_agent``. The JSON document
+    does NOT accept ``allow_loopback_http`` (an unknown-key error if it does)
+    — that privilege is intentionally not data-configurable. Fixtures that
+    need it pass the keyword-only ``insecure_allow_loopback_http=True``
+    instead; it is applied to the parsed config after the JSON is parsed,
+    never read from the JSON payload itself. **Fixtures only. Never enable in
+    production.**
+
+    This constructor never attaches an artifact store, so ``mode: "artifact"``
+    and any binary (or invalid-UTF-8) response body always fail with
+    ``fetch_limit_exceeded`` in v1 — there is no store to stage them to.
+    """
+
+    def __init__(
+        self, config_json: str, *, insecure_allow_loopback_http: bool = False
+    ) -> None: ...
+    @property
+    def component(self) -> str: ...
+    @property
+    def tool_count(self) -> int: ...
+
 class MemoryObserver:
     """Capture observer handle produced by :meth:`MemoryExtension.observer`."""
 
@@ -910,7 +936,9 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -990,7 +1018,9 @@ class Agent:
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
         media_tools: bool = False,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -1063,7 +1093,9 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -1135,7 +1167,7 @@ class Agent:
         openrouter_media_api_key: str | None = None,
         openrouter_media_referer: str | None = None,
         openrouter_media_title: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset] | None = None,
+        toolsets: list[PythonToolset | ElicitationToolset | HttpFetchToolset] | None = None,
         context_providers: list[PythonContextProvider] | None = None,
         middleware: list[PythonMiddleware] | None = None,
         observers: list[PythonObserver] | None = None,
@@ -1271,7 +1303,9 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -1331,7 +1365,9 @@ class Agent:
         api_key: str,
         endpoint: str | None = None,
         template: str | None = None,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         context_providers: list[PythonContextProvider | MemoryContextProvider]
         | None = None,
@@ -1377,7 +1413,9 @@ class Agent:
     @staticmethod
     async def from_python(
         model: PythonModel,
-        toolsets: list[PythonToolset | ElicitationToolset | MemoryToolset]
+        toolsets: list[
+            PythonToolset | ElicitationToolset | MemoryToolset | HttpFetchToolset
+        ]
         | None = None,
         instruction: str | None = None,
         output_type: Any | None = None,

@@ -1,0 +1,919 @@
+Bounded HTTP fetch TM-22 / TM-01 / TM-16 / TM-20 security review
+Date: 2026-08-20
+Candidate: 2870dc46e523bcbf67408a46409767d7000c255f
+Reviewer: me@jeickmeier.com
+Decision: Pass with one Important finding to route. The SSRF/rebinding
+control set is sound as written; one inherited reqwest default
+(environment/system proxy) can void the resolve-and-pin control in a
+proxied deployment. No threat-model rewrite beyond the new TM-22 row.
+No ADR trigger. Section 15 network-egress gate is satisfied
+fail-closed (empty allowlist refuses construction).
+
+Scope reviewed (full source, not a diff):
+  extensions/net/finstack-ai-net-guard/src/{lib,vet,resolve,client,tests}.rs
+  extensions/toolsets/finstack-ai-tools-fetch/src/{lib,config,pipeline,
+    deliver,markdown,toolset,tests}.rs
+  extensions/toolsets/finstack-ai-tools-fetch/fixtures/*
+  Cargo manifests for both crates and the workspace reqwest/htmd/url pins
+  docs/superpowers/specs/2026-08-20-bounded-http-fetch-design.md sections
+    4.1, 4.4, 4.5, 5
+
+Note on concurrent work: at review start the working tree carried
+uncommitted changes under bindings/ and a new
+HttpFetchConfigSnapshot in tools-fetch/src/config.rs from another
+agent. Those are NOT covered here. The committed config.rs at the
+candidate sha (274 lines, no snapshot type) is what was reviewed. The
+JSON snapshot constructor needs its own fail-closed check when it
+lands: it must route through config::validate and must not become a
+second, laxer door to allow_loopback_http.
+
+Triggered controls: Threat Model section 18 (privileged host
+capability: model-directed network egress; new parser surface:
+html5ever via htmd; secret-bearing adapter: per-host credential
+headers). Primary TM-22 (proposed, see tm-22-proposed-row.md). Also
+TM-01 (retrieved content as data), TM-16 (parser/size DoS), TM-20
+(artifact spill), SEC-INV-006/007/008.
+
+================================================================
+FINDINGS REQUIRING ROUTING
+================================================================
+
+FIXED (2026-08-20)  F-1  Environment/system HTTP proxy is inherited, and it
+                bypasses the address pin.
+  Fix: pinned_client (net-guard/src/client.rs) now calls .no_proxy() on
+  the reqwest::Client builder, with a comment explaining that env/system
+  proxies would receive the unpinned hostname, re-resolve it themselves,
+  and bypass the .resolve() pin below, reopening the DNS-rebinding
+  TOCTOU. The function's doc comment was updated to state proxies are
+  disabled. Verified by inspection (the change is a single builder call)
+  and by running the full existing suites for both crates
+  (`cargo test -p finstack-ai-net-guard`, `cargo test -p
+  finstack-ai-tools-fetch`) to confirm no regression. An automated test
+  asserting a set HTTPS_PROXY is ignored was not added: both crates are
+  #![forbid(unsafe_code)], and std::env::set_var is unsafe in this
+  toolchain, so an env-var-based proxy test is not possible in-crate.
+  Original finding text retained below for the record.
+
+  --- original finding ---
+  net-guard/src/client.rs:22-28 builds the client with
+  reqwest::Client::builder() and never calls .no_proxy(). In
+  reqwest 0.13.2 the builder default is auto_sys_proxy: true
+  (async_impl/client.rs:305, 410-414), so HTTP_PROXY / HTTPS_PROXY /
+  ALL_PROXY and platform proxy configuration are honored.
+
+  Consequence: when a proxy is configured in the host environment,
+  the connection target is the proxy, not the address returned by
+  resolve_and_pin. The .resolve() override only steers direct
+  connections, so:
+    - the destination-name resolution is performed a second time, by
+      the proxy, after net-guard vetted its own answer set. That is
+      exactly the DNS-rebinding TOCTOU the pin exists to close
+      (resolve.rs:79-105 docstring claims it is closed);
+    - the proxy endpoint itself is never vetted, so egress can leave
+      through a loopback or link-local address that
+      is_forbidden_destination would have denied.
+  TLS certificate validation still binds the far end to the
+  allowlisted hostname on https, so this is a destination-vetting and
+  egress-path bypass rather than a content-integrity break. Severity
+  is Important, not Critical, because it requires proxy configuration
+  in the host process environment (common in server deployments) and
+  does not by itself let an attacker choose the proxy.
+
+  Additionally, spec section 3 lists "proxy support" as an explicit
+  v1 non-goal; the current code silently ships it as inherited
+  default behaviour, so the shipped posture contradicts the spec.
+
+  Suggested disposition (controller routes; not fixed here): call
+  .no_proxy() in pinned_client, and add a test asserting the built
+  client ignores a set HTTPS_PROXY. If proxied egress is later
+  wanted, it must be an explicit config field whose proxy URL goes
+  through the same vetting.
+
+No Critical findings.
+
+================================================================
+AREA VERDICTS
+================================================================
+
+PASS  URL parse and component policy (TM-22, SEC-INV-007)
+      vet.rs:51-82. Parse via the url crate; scheme restricted to
+      https, or http only when policy.allow_loopback_http AND the
+      host is loopback (vet.rs:70); userinfo (username or password)
+      rejected (vet.rs:59); fragment rejected (vet.rs:63); missing
+      host and missing port rejected; https confined to port 443
+      (vet.rs:73). Non-http(s) schemes (file:, data:, gopher:, ftp:,
+      jar:) fall out at vet.rs:56. IPv6 forms are handled by
+      stripping the parser's brackets before IpAddr::parse
+      (vet.rs:38-41, resolve.rs:84), and to_canonical() collapses
+      IPv4-mapped ::ffff:127.0.0.1 shapes before the deny test
+      (resolve.rs:43, 63). IDNA: hosts arrive punycoded and
+      lowercased from the parser and allowlist entries are compared
+      in that form (tests.rs:57 unicode_hosts_normalize_to_punycode);
+      a Unicode allowlist entry therefore cannot match a punycode
+      host, which fails closed (see F-5).
+      Residual: none material. Note that the https-port-443-only rule
+      makes allowlisted hosts on non-standard TLS ports unusable;
+      that is a deliberate conservative choice, not a gap.
+
+PASS  Destination deny set (TM-22)
+      resolve.rs:42-60. Denied after canonicalization: IPv4 loopback,
+      private (RFC1918), link-local (169.254/16, which covers the
+      cloud metadata endpoint), unspecified (0.0.0.0), broadcast, and
+      multicast; IPv6 loopback, unique-local (fc00::/7),
+      unicast-link-local (fe80::/10), unspecified, and multicast.
+      This is a superset of the spec's draft list — unspecified,
+      broadcast, and multicast were added beyond spec section 5 text,
+      which is why the proposed TM-22 row names them.
+      Residual: IPv4 shared address space 100.64.0.0/10 (CGNAT) and
+      benchmarking 198.18.0.0/15 are not denied, and IPv6
+      documentation/ORCHID ranges are not denied. Reaching them still
+      requires an allowlisted hostname that resolves there, so the
+      allowlist remains the binding control. Accepted.
+
+PASS  DNS rebinding TOCTOU (TM-22, resolve-and-pin)
+      resolve.rs:79-105 vets EVERY address in the answer set and
+      returns DestinationBlocked if any one is forbidden
+      (resolve.rs:97-99), then pins the first address; client.rs:26
+      installs it as a DNS override so the socket connect cannot
+      re-resolve. Literal-IP hosts skip resolution but not the deny
+      check (resolve.rs:85-90). A fresh client is built per hop
+      (pipeline.rs:249), which is required for correctness and must
+      not be "optimized" into a shared client. Evidence:
+      net-guard tests one_private_address_rejects_the_whole_set
+      (tests.rs:94), first_public_address_is_pinned (tests.rs:109),
+      literal_hosts_skip_resolution_but_not_the_deny_check
+      (tests.rs:122), empty_resolution_fails (tests.rs:134); fetch
+      tests pinned_address_overrides_dns_for_hostnames
+      (tests.rs:1119).
+      Residual: voided by F-1 in a proxied environment. Also, the
+      pin is per-hostname and port-agnostic by design (reqwest
+      ignores the port in a resolve override and uses the URL's
+      port); since the URL port is itself vetted, this is safe.
+
+PASS  Redirect attack surface (TM-22)
+      pipeline.rs:344-369. Client-level redirect following is
+      disabled (client.rs:25) and the loop is manual. Only
+      301/302/303/307/308 are treated as redirects
+      (pipeline.rs:352); every other non-2xx becomes a terminal
+      transport error, so exotic 3xx (300, 304, 305 "use proxy",
+      306) cannot be followed. next_hop (pipeline.rs:290-304)
+      resolves Location with url::Url::join against the current URL,
+      so relative and protocol-relative ("//evil.example") Locations
+      are resolved rather than mis-parsed, and the result is then
+      re-vetted through the full parse_and_vet_url + allowlist +
+      resolve_and_pin path, i.e. spec section 4.4 step 7 is honoured.
+      Downgrade: an https origin redirected to http fails
+      plaintext_http_forbidden at vet.rs:70-72 because the hop is not
+      loopback. Loopback steering: origin_is_loopback is computed
+      once from hop 0 (pipeline.rs:330) and threaded into
+      host_allowed (pipeline.rs:159-169), so a compromised
+      allowlisted public host cannot 302 the chain into
+      http://127.0.0.1:<port>/. Hop cap enforced at
+      pipeline.rs:353 with max_redirects <= 5 by config ceiling
+      (config.rs:26, 228). Evidence: tests.rs:824, 850, 877, 902.
+
+      TEST GAP CLOSED (2026-08-20): the redirect tests above covered
+      cross-host-to-unlisted-host denial and same-host follows, but not
+      an allowlisted redirect target that resolves to a private
+      address — the case that specifically exercises the hop-N
+      resolve_and_pin re-vet rather than the allowlist check alone.
+      Added redirect_to_allowlisted_host_resolving_private_is_blocked
+      (tests.rs): a loopback origin fixture 302s to
+      https://internal.example/x, which IS on the allowlist; the
+      scripted resolver answers 10.0.0.1 for it; asserts
+      FETCH_DESTINATION_BLOCKED. Passes.
+
+PASS  Header and credential isolation (TM-04, TM-22)
+      Per-host headers are looked up by the current hop's exact host
+      (pipeline.rs:254) against keys that config::validate has
+      normalized to lowercase and required to be exact (non-wildcard)
+      hosts (config.rs:236-251). A credential configured for host A
+      is therefore never emitted on a hop to host B; a same-host
+      redirect keeps it, which is intended. Values are re-validated
+      as HTTP header values at construction and again per send.
+      HttpFetchConfig's Debug renders every header value as
+      "<redacted>" (config.rs:31, 140-163) and HttpFetchToolset's
+      Debug prints only the pattern count and store presence
+      (toolset.rs:163-171). No header value appears in any error
+      string. Evidence: tests.rs:204 debug_redacts_per_host_headers,
+      tests.rs:740, tests.rs:933 headers_do_not_cross_hosts_on_redirect.
+
+PASS  Response handling and bounds (SEC-INV-007, TM-16)
+      client.rs:38-52 streams the body and returns LimitExceeded the
+      moment the accumulated length would exceed the cap — an error,
+      never a silent truncation, and the overflow check uses
+      saturating_add. The effective cap is
+      min(config.max_response_bytes, args.max_bytes)
+      (pipeline.rs:377-380) and the same number bounds the inline
+      result after decoding/markdown conversion
+      (deliver.rs:193-202, markdown.rs:32), so a lossy-UTF-8
+      expansion cannot smuggle a larger string into the transcript
+      (tests.rs:662). Config ceilings are construction errors, not
+      clamps: 8 MiB bytes, 120 s timeout, 5 redirects
+      (config.rs:17-28, 218-232; tests.rs:152). reqwest is built with
+      default-features = false and no gzip/brotli/deflate feature, so
+      no automatic decompression happens and the cap is a wire-byte
+      cap — decompression bombs are not reachable through this path.
+
+PASS  Error surface (TM-04)
+      All net-guard error variants carry &'static str reasons only
+      (lib.rs:33-60), and the pipeline maps them to fixed strings
+      (pipeline.rs:111-144). No URL, header, body, or address value
+      is interpolated into an error message except the bounded
+      endpoint-rejection detail covered by F-2 below. Error codes are
+      the frozen FETCH_* vocabulary (lib.rs:41-53).
+
+PASS  Artifact staging and tenant scoping (TM-20, SEC-INV-008)
+      deliver.rs:153-190 stages through stage_required_artifact with
+      an ArtifactScope built from ctx.run.locator (tenant_scope,
+      session_id, run_id) and Sensitivity::Internal — the same call
+      shape as finstack-ai-tools-openrouter-media. No caller-supplied
+      field participates in the scope, so a model cannot address
+      another tenant's store. toolset.rs:237-250 additionally rejects
+      a call whose authenticated principal's tenant scope differs
+      from the committed effect's locator scope. With no store
+      attached, binary/oversize bodies fail closed with
+      fetch_limit_exceeded rather than being inlined
+      (deliver.rs:37-43, 143-145; tests.rs:535).
+
+PASS  Fail-closed configuration and default-graph posture
+      (SEC-INV-012, section 15 gate)
+      config::validate rejects an empty allowlist first
+      (config.rs:207-211); HostPattern::parse rejects entries
+      containing '*', '/', ':', '?', '#', '@', or whitespace after an
+      optional "*." prefix and rejects empty labels
+      (config.rs:56-75), so a bare "*" is rejected and scheme, port,
+      path, or userinfo cannot be smuggled into an allowlist entry.
+      Bare-TLD wildcards such as "*.com" are still accepted (see F-6). Wildcard matching
+      requires a non-empty proper subdomain label, so
+      "*.wikipedia.org" does not match "wikipedia.org" or
+      "notwikipedia.org" (config.rs:88-93; tests.rs:180). Both crates
+      are separate opt-in packages with default = [] features; no
+      default SDK feature pulls them in. Evidence: tests.rs:147
+      empty_allowlist_refuses_to_construct.
+
+PASS  Spec section 4.4 ordering
+      The implementation orders parse/vet (pipeline.rs:327) before
+      the allowlist match (pipeline.rs:238), where the spec lists
+      allowlist as step 2 and vetting as step 3. This inversion is
+      necessary — the allowlist matches on the parsed host — and is
+      security-neutral: both run before any socket connect, the
+      cancellation/deadline gate still precedes both
+      (pipeline.rs:346), and each redirect hop re-enters at the
+      allowlist check. Recommend the spec text be corrected rather
+      than the code.
+
+================================================================
+LOWER-SEVERITY FINDINGS AND RESIDUAL RISK
+================================================================
+
+PARTIALLY CLOSED (2026-08-20)  F-2  Untrusted response bytes reach the model
+                context with no provenance marking.
+  Partial fix: pipeline.rs's endpoint_rejected now prefixes the bounded,
+  remote-derived rejection detail with a fixed "remote endpoint said: "
+  delimiter (REMOTE_DETAIL_PREFIX), so channel (a) — the non-2xx error
+  message — makes the boundary between this crate's own text and
+  attacker-controlled prose explicit rather than splicing the two
+  together undelimited. The delimiter sits inside the same
+  ERROR_DETAIL_CHARS (300-char) bound as before; the fixed prefix is
+  additional, not counted against that budget. Test
+  non_success_status_reports_bounded_detail (tests.rs) now asserts the
+  message contains "remote endpoint said: " in addition to the existing
+  bounding/redaction assertions.
+  NOT closed: channel (b), the success-content "content" field
+  (pipeline.rs), remains unwrapped per the spec's content contract —
+  ordinary tool output, not error text, so wrapping it would violate the
+  documented success-path shape. This is recorded as a framework-level
+  follow-up: if/when ToolResult gains a provenance/sensitivity channel
+  (as the original finding recommended), this toolset should be an early
+  adopter for the success path. Original finding text retained below for
+  the record.
+
+  --- original finding ---
+  Untrusted response bytes reach the model context with no
+            provenance marking.
+  Two channels. (a) On a non-2xx terminal status, up to 4096 bytes of
+  the endpoint's body are read and up to 300 characters are
+  whitespace-collapsed into the ToolError message
+  (pipeline.rs:29-32, 172-208). (b) On success, the fetched body (or
+  its Markdown rendering) is placed in the result JSON's "content"
+  field (pipeline.rs:406-412) as ordinary tool output.
+  Both are bounded, which is what SEC-INV-007 requires, and TM-01's
+  "treat content as data" is a framework-level property of tool
+  results rather than something this toolset can assert. But note the
+  contrast with finstack-ai-context-repository, which marks retrieved
+  file content QuotedSource + Untrusted + external:true. Fetched web
+  pages are strictly more hostile than repository files and currently
+  carry no equivalent marking, and channel (a) puts attacker-chosen
+  prose into an *error* message, where a reader is least likely to
+  expect adversarial content. Recommendation (follow-up, not a
+  blocker): if ToolResult gains a provenance/sensitivity channel,
+  this toolset should be an early adopter; meanwhile consider
+  prefixing the rejection detail with an explicit "remote endpoint
+  said:" delimiter.
+
+MINOR  F-3  Time is bounded per hop, not per call.
+  request_timeout is a reqwest total timeout and does cover the body
+  stream (reqwest 0.13.2 async_impl/response.rs:39-45), so no hop can
+  hang. But the cap is applied per hop, so a chain of
+  max_redirects + 1 hops can consume up to 6 x 120 s of wall clock
+  when the run carries no deadline. Separately, the
+  cancellation/deadline select! wraps only request.send()
+  (pipeline.rs:274-283); the body read (client.rs:38) and the
+  rejection-detail read (pipeline.rs:172) are not raced against
+  ctx.run.cancellation, so a cancelled run keeps a trickling body
+  alive until the per-hop timeout fires. Both are bounded, so this is
+  a responsiveness/resource-fairness issue rather than an unbounded
+  one. Deployments that need a hard ceiling should set a run deadline
+  — which IS honoured between hops (pipeline.rs:346).
+
+FIXED (2026-08-20)  F-4  Adversarial HTML nesting depth is untested against
+                the htmd/html5ever conversion path.
+  Confirmed the concern first: a test generating a 100,000-level-deep
+  `<div>` document and calling html_to_markdown, run in isolation
+  (`cargo test -p finstack-ai-tools-fetch deeply_nested_html_does_not_crash
+  -- --nocapture`), reproduced the abort exactly as predicted — thread
+  overflowed its stack, SIGABRT, process aborted with exit signal 6
+  (not a returned error).
+  Fix: markdown.rs now runs exceeds_safe_nesting_depth, a single-pass
+  byte scan, before handing input to htmd/html5ever. It counts `<`
+  followed by an ASCII letter as depth += 1 and `</` as
+  depth.saturating_sub(1), with no tag-name tracking (so a run of
+  sibling void elements like consecutive <br> tags over-counts, which
+  can only make the guard reject more than strictly necessary, never
+  fewer). MAX_SCAN_DEPTH = 512, documented on the constant and in
+  html_to_markdown's doc comment. Over-cap returns None, same fallback
+  path already used for conversion failure and output-cap overflow, so
+  the caller falls back to its already-budget-checked inline-text path
+  rather than the whole fetch erroring.
+  Tests (markdown.rs): deeply_nested_html_does_not_crash (100,000
+  levels; asserts None — the guard trips) and
+  moderately_nested_html_still_converts (100 levels, well under the
+  512 cap; asserts Some and that the converted text is present), plus
+  the existing goldens/pathological-markup tests as regression
+  coverage. `cargo test -p finstack-ai-tools-fetch` (51 tests) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both pass
+  clean after the change.
+
+  UPDATE (2026-08-20, review pass): the initial guard above (a bare
+  integer counter, `depth += 1` on any `<tag`, `depth -= 1` on any
+  `</`) was found to be BYPASSABLE. html5ever ignores an end tag with
+  no matching open element on its stack of open elements, so it does
+  NOT treat a mismatched close as a decrement. A document built from
+  100,000 repetitions of `<div></span>` therefore kept the naive
+  counter near depth 0-1 (each `</span>` decremented it right back
+  down) while html5ever's real DOM nested 100,000 unclosed `<div>`s —
+  the stack-exhaustion abort this guard exists to prevent stayed fully
+  reachable. Reviewer compiled the guard directly and confirmed
+  `exceeds_safe_nesting_depth` returned `false` for that input.
+  Fix (this pass): replaced the bare counter with a bounded stack of
+  lowercased open tag names. A closing tag now pops the stack ONLY
+  when its name equals the top of the stack; a mismatched or stray
+  close is ignored (no pop), mirroring html5ever's ignore-unmatched
+  behavior in the conservative direction. Void elements (`br`, `img`,
+  `input`, etc.) and explicit self-closing tags (`<x/>`) are recognized
+  and never pushed. The cap trips the moment the stack itself would
+  exceed `MAX_SCAN_DEPTH` (512), so mismatched-close padding now GROWS
+  the tracked depth and trips the guard instead of masking it. The
+  "can only reject more documents than strictly necessary, never
+  fewer" claim in the doc comment now actually holds, with the
+  ignore-mismatched-closes rule stated as the reason, plus a
+  documented residual: implied-close patterns html5ever's
+  tree-construction algorithm handles specially (huge sibling `<li>`
+  runs, misnesting like `<b><i></b>`) are not modeled, so those could
+  in principle false-positive at extreme scale — accepted, since the
+  failure mode is a fallback to inline text, not an error or a crash.
+  New regression test `mismatched_close_padding_does_not_bypass_the_depth_guard`
+  (markdown.rs): 100,000 repetitions of `<div></span>` asserts `None`
+  (guard trips) and does not crash. All pre-existing depth-guard tests
+  (deeply_nested_html_does_not_crash, moderately_nested_html_still_converts)
+  and the full suite still pass; `cargo test -p finstack-ai-tools-fetch`
+  (54 tests at this point, other agents' work included) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 2 (2026-08-20, second review pass): the stack-based fix above
+  introduced its OWN critical bypass, also found and confirmed by the
+  reviewer with a real SIGABRT reproduction. The guard's opening-tag
+  handling treated any trailing `/` (`<div/>`) as self-closing and
+  skipped the push, on the assumption that a self-closed tag cannot
+  stay open. That assumption is wrong for ordinary HTML elements: per
+  the HTML5 tree-construction algorithm, a self-closing slash is only
+  honored on void elements and on foreign-content (SVG/MathML)
+  elements — on a plain element like `<div/>` it is IGNORED and the
+  element stays open exactly as `<div>` would. `"<div/>".repeat(100_000)`
+  therefore pushed nothing under the old rule (the guard reported "not
+  exceeded") while html5ever built a real DOM ~100,000 elements deep,
+  reproducing the same SIGABRT stack-overflow abort this guard exists
+  to prevent — and more easily than the first bypass, since it needs
+  only one repeated fragment rather than a padding trick. Reviewer
+  confirmed `real_dom_depth("<div/>" x 1000) == 1002` while the guard
+  returned `false`.
+  Fix (this pass): dropped `self_closing` from the push condition
+  entirely (and removed the now-dead variable/detection code). A tag
+  is now pushed onto the stack unless it is a [`VOID_ELEMENTS`] entry,
+  full stop — a trailing `/` no longer matters for non-void elements.
+  `<div/>` and friends now count as opens, matching html5ever. Accepted
+  new residual, added to the doc comment's list alongside the
+  implied-close/`<li>` case: genuine foreign-content self-closing
+  elements (SVG/MathML, e.g. `<path/>`, `<circle/>`), which html5ever
+  DOES honor as self-closing, are over-counted by this
+  namespace-unaware scan, so an SVG-heavy document with more than
+  `MAX_SCAN_DEPTH` (512) such elements will fall back to plain text
+  even though html5ever would have handled it fine. Fail-closed and
+  accepted, same as the other residual.
+  New regression test `self_closing_non_void_padding_does_not_bypass_the_depth_guard`
+  (markdown.rs): `"<div/>".repeat(100_000)` asserts `None` (guard
+  trips) and does not crash. All prior depth-guard tests
+  (deeply_nested_html_does_not_crash, moderately_nested_html_still_converts,
+  mismatched_close_padding_does_not_bypass_the_depth_guard) still pass.
+  `cargo test -p finstack-ai-tools-fetch` (57 tests at this point,
+  other agents' work included) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 3 (2026-08-20, third review pass): a THIRD independent bypass
+  was found in the same family, compiled and reproduced with a real
+  SIGABRT. `parse_tag_name` stopped consuming at the first byte outside
+  `[A-Za-z0-9\-:]`, but html5ever's real tag-name tokenizer state
+  appends essentially ANY other byte (`_`, `.`, `@`, non-ASCII, ...) to
+  the name rather than stopping. So a void element name padded with
+  such a byte truncated to a void match and was skipped, while
+  html5ever parsed a DIFFERENT, non-void element that stayed open and
+  nested. Reviewer verified `"<img_x>".repeat(1000)` -> guard `false`,
+  real DOM depth 1002; same shape confirmed for `<br.x>`, `<hr@x>`,
+  `<input.x>`, and a non-ASCII-suffixed void name; and
+  `htmd::HtmlToMarkdown::convert(&"<img_x>".repeat(100_000))` aborted
+  with SIGABRT (exit 134). The closing-tag side has the mirror bypass:
+  a padded close like `</div_x>` truncated to "div" and could wrongly
+  pop a genuinely open `<div>`, when html5ever treats `</div_x>` as an
+  unmatched end tag for an unrelated element and ignores it.
+  Fix (this pass, terminator rule, applied in both directions): after
+  parsing a name, inspect the byte immediately following it
+  (`is_tag_name_terminator`). A name is trusted only when that byte is
+  a real HTML tag-name terminator: ASCII whitespace, `/`, `>`, or NUL.
+  Otherwise the parsed name is a truncation of something else, and both
+  directions now fail closed on that: an opening tag with an untrusted
+  name does NOT get the void skip and is pushed unconditionally (using
+  a marker string, `UNTRUSTED_TAG_MARKER`, that `parse_tag_name` can
+  never itself produce, so it can never later be matched and popped by
+  an unrelated correctly-terminated close); a closing tag with an
+  untrusted name never pops. Only an exact-and-terminated name may
+  match `VOID_ELEMENTS` or pop the stack. Doc comment's residual list
+  updated: untrusted-name over-counting (a large run of oddly
+  punctuated tag-like fragments can trip the guard even if html5ever's
+  real tree stays shallow) now joins the implied-close/`<li>` and
+  SVG-self-closing residuals already on record.
+  Durable fix, not just another instance patch: three bypasses in this
+  guard have now each needed a reviewer to hand-compile a differential
+  harness against the real parser to catch. That harness is now in the
+  suite permanently as
+  `differential_guard_never_under_trips_against_the_real_parser`
+  (markdown.rs): `html5ever` and `markup5ever_rcdom` were added as
+  dev-dependencies of finstack-ai-tools-fetch (already in the
+  dependency tree, and license-cleared, via `htmd`; `cargo deny check
+  licenses` passes with them exposed directly) and a helper
+  (`real_dom_max_depth`) builds the real DOM with them and measures its
+  maximum depth via an iterative (non-recursive) walk. The test asserts
+  over an adversarial corpus (well-formed deep `<div>`s, mismatched-close
+  padding, self-closing non-void tags, truncated void names via `_`/`./`@`
+  suffixes and a non-ASCII suffix, the closing-tag-direction truncation,
+  a quoted `>` inside an attribute value, and comment-wrapped fake tags)
+  that whenever the real DOM's depth exceeds `MAX_SCAN_DEPTH`, the guard
+  trips; a companion test
+  (`differential_guard_does_not_falsely_trip_on_a_shallow_legitimate_document`)
+  checks the flip side for one concrete legitimate ~100-deep document.
+  Plus two direct regression tests for this bypass:
+  `truncated_void_name_padding_does_not_bypass_the_depth_guard`
+  (`"<img_x>".repeat(100_000)`) and
+  `truncated_close_padding_does_not_bypass_the_depth_guard` (the
+  closing-tag direction). All prior depth-guard tests still pass.
+  `cargo test -p finstack-ai-tools-fetch` (61 tests at this point) and
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` both clean.
+
+  UPDATE 4 (2026-08-20, fourth review pass — APPROACH CHANGED): the
+  terminator-rule fix above closed bypass 3 correctly in both
+  directions, and the new differential test was verified as genuinely
+  catching bypasses 1, 2 and 3. But the same review found TWO more
+  under-trip bypasses, each again reproduced as a real SIGABRT (exit
+  134) through `htmd::HtmlToMarkdown::convert`:
+    (4) The scanner had no notion of comment/CDATA/doctype regions, so
+        `"<div><!--</div>-->".repeat(100_000)` had its in-comment
+        `</div>` read as a genuine close that popped the real open
+        `<div>` — the tracked stack oscillated 0<->1 while html5ever,
+        which treats those bytes as comment DATA, nested 1002+.
+        Confirmed in the same family: `<![CDATA[</div>]]>`, `<?</div>>`,
+        `<!</div>>`, `<!DOCTYPE </div>>`.
+    (5) Introduced by UPDATE 3 itself: `is_tag_name_terminator` listed
+        NUL as a terminator, but html5ever's tag-name state REPLACES
+        NUL with U+FFFD inside the name — so `</div\0>` is an unmatched
+        end tag it ignores, while the guard trusted "div" and popped.
+        NUL is a name continuation byte, not a terminator.
+  Root cause, now explicit: four rounds of patching produced four new
+  bypasses, all of one kind — a hand-rolled byte scanner cannot be
+  patched into agreement with html5ever's tokenizer, because it has no
+  model of WHICH BYTES ARE TAG CONTEXT AT ALL. Every construct that
+  makes html5ever swallow `</div>` as data, or mangle a name, hands the
+  scanner a free pop.
+  Fix (this pass, approach change): the hand-rolled scan is DELETED.
+  `exceeds_safe_nesting_depth` now drives `html5ever::tokenizer::
+  Tokenizer` — the very tokenizer html5ever's own tree builder uses —
+  with a small `TokenSink` (`DepthCounter`) that pushes non-void start
+  tags, pops only on an exactly-matching end tag, ignores comment /
+  doctype / character tokens, and early-exits once the depth exceeds
+  `MAX_SCAN_DEPTH`. `html5ever` was promoted from a dev-dependency to a
+  real dependency of finstack-ai-tools-fetch for this (already in the
+  tree and license-cleared via `htmd`; `cargo deny check licenses`
+  passes). Comments, bogus comments, CDATA, doctypes, NUL-in-name,
+  attribute values containing `>` or `</div>`, character references and
+  case folding are now all resolved INSIDE the tokenizer, identically
+  to what the tree builder will see — the entire divergence class is
+  closed by construction rather than by another rule.
+  Remaining divergences are all in the fail-closed direction and are
+  documented on the function: a bare tokenizer does not enter rawtext
+  state for `<script>`/`<style>`/`<textarea>`/`<title>` (their contents
+  get tokenized as tags -> over-count), and it models neither implied
+  end tags nor the adoption agency algorithm (-> over-count). The false
+  claim carried by the previous doc comment ("can only reject more
+  documents than strictly necessary, never fewer") has been deleted and
+  replaced with this accurate statement plus the residual list.
+  Test net widened from a backward-looking regression list into a
+  discovery net: the vacuous corpus entry flagged by the reviewer
+  (`comment_wrapped_fake_tags`, whose real depth was 2 so its assertion
+  never ran) is fixed, the bypass-4 and bypass-5 shapes are added, and
+  the differential test gained a DETERMINISTIC generative component — a
+  seeded LCG assembles a few hundred documents from a token alphabet
+  (void and non-void opens, matching and mismatching closes, comments,
+  CDATA, bogus comments, doctypes, rawtext blocks, quoted attributes
+  containing `>` and `</div>`, odd trailing bytes and NUL) and asserts
+  for each that a real DOM depth over `MAX_SCAN_DEPTH` implies the
+  guard trips. Fixed seed, so CI stays stable. The ×100_000 crash
+  regressions for bypasses 1-5 are retained.
+  `cargo test -p finstack-ai-tools-fetch` (64 tests),
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
+  `cargo deny check licenses` all clean.
+
+  UPDATE 5 (2026-08-20, fifth review pass — APPROACH CHANGED AGAIN):
+  the tokenizer-based guard from UPDATE 4 closed bypasses 4 and 5 as
+  claimed, but the same review compiled TWO MORE under-trip bypasses,
+  both reproduced as real SIGABRTs (exit 134) through the production
+  convert path. Both exploit the gap between a BARE TOKENIZER and a
+  TREE BUILDER — precisely the residual UPDATE 4's doc comment had
+  waved away as "net effect: over-counting, not under-counting":
+    (6a) Foreign content. `"<svg>" + "<input>".repeat(100_000)`. In the
+         SVG/MathML namespace an ordinary start tag carrying no
+         self-closing flag is inserted and STAYS OPEN; only names on the
+         foreign-content breakout list (br, img, hr, embed, meta, ...)
+         escape. `DepthCounter` applied the HTML void-element set
+         unconditionally to a namespace-less tokenizer name, so `input`
+         was treated as void and never pushed. Confirmed for input,
+         area, col, link, base, param, source, track and wbr, under both
+         `<svg>` and `<math>`. `"<svg>" + "<input>".repeat(520)` already
+         bypassed.
+    (6b) Rawtext + unterminated comment.
+         `"<title><!--</title>" + "<div>".repeat(100_000)`. The bare
+         tokenizer is never put into RCDATA/rawtext state (the tree
+         builder normally drives that switch), so it read the `<!--` as
+         comment-start and swallowed the ENTIRE remainder of the
+         document as comment data. An 18-byte prefix disabled the guard
+         outright. Same for textarea, style, script and xmp.
+  The UPDATE 4 doc comment's claim that the rawtext and foreign-content
+  divergences could only over-count was therefore PROVABLY FALSE, and
+  bypass 6 is exactly what it licensed. That text has been deleted, not
+  softened.
+  Root cause across all six rounds, stated plainly: AN APPROXIMATION OF
+  THE PARSER IS NOT THE PARSER. Three rounds of byte scanner and one
+  round of bare tokenizer each closed one production rule and left the
+  next one open.
+  Fix (this pass, approach change): stop approximating. The
+  `DepthCounter` `TokenSink`, `VOID_ELEMENTS` and all terminator logic
+  are DELETED. `exceeds_safe_nesting_depth` now runs
+  `html5ever::parse_document` — the same entry point `htmd` uses, with
+  the same `ParseOpts` defaults (`TreeBuilderOpts::scripting_enabled =
+  true`) — against `DepthSink`, a minimal counting `TreeSink` that
+  records tree SHAPE only and builds no DOM. Namespace tracking and the
+  foreign-content breakout list, RCDATA/rawtext/script-data tokenizer
+  state, implied end tags, foster parenting and the adoption agency
+  algorithm are all executed BY HTML5EVER. There is no separate model of
+  HTML left in markdown.rs to diverge from html5ever, so there is no
+  residual divergence class of the kind that produced bypasses 1-6.
+  Why parsing here is safe when htmd's parse is not: the hazard is
+  htmd's `Rc`-linked `RcDom`, which is walked and dropped recursively.
+  `DepthSink`'s handles are `usize` indices into a flat
+  `Vec<NodeRec>`; each `NodeRec` holds `Option<usize>`, `Vec<usize>`, a
+  `usize` depth, an atom-based `QualName` and a `bool`. No node owns
+  another node, so dropping the arena is one flat `Vec` loop, the
+  max-depth computation walks an explicit `Vec` stack, and html5ever's
+  own `TreeBuilder` keeps its open-element stack in a `Vec<usize>`.
+  Nothing recursive is ever built or dropped, at any depth.
+  Early exit: the document is fed in 4 KiB chunks and each attachment
+  records `parent depth + 1`; the moment an element lands past
+  `MAX_SCAN_DEPTH` the parse is ABANDONED (the parser is dropped, not
+  finished) and `true` returned. The 4 KiB granularity is load-bearing:
+  html5ever's own tree construction is quadratic in nesting depth for
+  common tags (`<div>` runs "has a p element in button scope", scanning
+  the open-element stack), so at a 64 KiB chunk a 2 MiB `<div>` bomb
+  cost ~900 ms; at 4 KiB it costs ~3 ms. When the parse instead runs to
+  completion the trip decision comes from an EXACT recomputation over
+  the finished tree, so the early-exit bookkeeping can only add trips,
+  never remove one.
+  Off-by-two fixed in the same change: the old guard counted only
+  explicitly written elements while the real DOM adds the implied
+  html/head/body, so real depth ~= explicit + 2 and the asserted
+  invariant "real > 512 => guard trips" was literally false for real
+  depths 513-514. Guard depth is now REAL depth (Document = 0), the
+  convention is stated on `MAX_SCAN_DEPTH`, and
+  `depth_convention_is_the_real_dom_depth_and_the_cap_boundary_is_exact`
+  pins both sides of the boundary: 510 explicit divs measures exactly
+  512 and converts; 511 measures 513 and returns None.
+  Residuals, all documented on the function, none able to under-trip:
+  (i) `<template>` contents are attached as an ordinary child here while
+  `RcDom` keeps them off the child list — over-counts; (ii)
+  `reparent_children` (adoption agency) does not rewrite recorded
+  depths below the moved subtree, which can stale the EARLY-EXIT
+  estimate only — the authoritative number is the exact recomputation;
+  (iii) `append_before_sibling` for a parentless sibling, which `RcDom`
+  panics on and this sink ignores, is recorded in
+  `saw_unexpected_shape` and asserted never to fire across the whole
+  corpus.
+  Tests. Both bypass-6 families added as x100_000 crash regressions
+  (`foreign_content_open_padding_does_not_bypass_the_depth_guard`,
+  `rawtext_unterminated_comment_prefix_does_not_bypass_the_depth_guard`)
+  plus name-by-name variants at N=1000 under `<svg>` and `<math>`
+  (`foreign_content_variants_do_not_bypass_the_depth_guard`) and for
+  title/textarea/style/script/xmp
+  (`rawtext_variants_do_not_bypass_the_depth_guard`); each variant first
+  asserts the REAL depth exceeds the cap so it cannot pass vacuously.
+  All bypass 1-5 regressions retained and green.
+  The generative test, which the reviewer graded "a regression net
+  dressed as a fuzzer", was fixed on all three counts: (a) its alphabet
+  gained `<svg>`/`<math>` wrappers (balanced and never-closed),
+  foreign-content breakout/self-closing negative controls, unbalanced
+  rawtext openers, and rawtext bodies opening an unterminated comment;
+  (b) its LCG used `next_u64() % bound`, i.e. the LOW bits, so
+  `below(2)` was near-strict alternation — it now maps the HIGH 32 bits
+  by a widening multiply, and `lcg_high_bits_are_not_visibly_periodic`
+  fails if the sequence is periodic again or if the wider range has
+  holes; (c) all 300 documents used to land at real depth 837-992, so
+  the 512 boundary was never probed — document size now ramps linearly
+  (25..8_980 tokens over 200 documents), real depth sweeps ~20 to ~800,
+  and the test now FAILS unless the corpus straddles the cap AND lands
+  within 64 of it. The differential helper additionally asserts, for
+  every corpus item, that the measured depth never falls below the real
+  DOM's and that the parentless-sibling fallback never fires.
+  Timings on 2 MiB adversarial inputs (release): `<div>`x419k 3.2 ms;
+  `<svg>`+`<input>`x299k 0.1 ms; rawtext+comment prefix 2.6 ms;
+  `<div><!--</div>-->`x116k 1.9 ms; `<div></span>`x174k 3.4 ms. Two
+  non-tripping 2 MiB inputs cost more because html5ever itself does:
+  2 MiB of flat `<p>x</p>` 78 ms, and the adoption-agency bomb
+  `<b><p>`x349k 285 ms (htmd would pay the same again on such input).
+  `cargo test -p finstack-ai-tools-fetch` (70 tests),
+  `cargo clippy -p finstack-ai-tools-fetch --all-targets` and
+  `cargo deny check licenses` all clean.
+  Original finding text retained below for the record.
+
+  --- original finding ---
+  Adversarial HTML nesting depth is untested against the
+            htmd/html5ever conversion path.
+  markdown.rs:24-36 hands up to max_response_bytes (default 2 MiB,
+  ceiling 8 MiB) of attacker-controlled markup to htmd 0.5 /
+  html5ever. Memory safety is not the concern — the crates are safe
+  Rust and both this crate and net-guard are #![forbid(unsafe_code)]
+  — but a document of ~hundreds of thousands of nested elements can
+  drive a recursive tree walk (and recursive Drop of the resulting
+  tree) into stack exhaustion, which aborts the process rather than
+  returning an error. fixtures/pathological.html (127 bytes) covers
+  malformed/unclosed markup only, not depth; the README is explicit
+  that no fixture makes conversion fail. Not demonstrated here, and
+  the blast radius is availability of the host process for an
+  allowlisted-host fetch. Recommended follow-up: a generated
+  deep-nesting fixture (for example 100k nested <div>) exercised in
+  a test, and, if it does blow the stack, a pre-conversion depth or
+  tag-count guard.
+  Dependency surface note for the register: htmd 0.5 (MIT, cleared by
+  cargo deny check licenses per the crate README) pulls html5ever /
+  markup5ever / tendril, which do contain unsafe internally. This is
+  the feature's largest new untrusted-input parser and belongs on the
+  TM-18 / TM-16 radar for advisory watch.
+
+CLOSED (2026-08-20)  F-5-adjacent  HostPattern::parse rejected space but not
+                tab/other ASCII control characters in an allowlist entry.
+  Fix: config.rs's HostPattern::parse now rejects any entry containing a
+  char where c.is_ascii_control() or c.is_whitespace() is true (same
+  "invalid_allowlist_entry" reason as the other structural rejections),
+  replacing the narrower literal-space check. Test
+  host_patterns_reject_control_characters (tests.rs) covers tab,
+  newline, carriage return, and NUL. This does not change F-5 itself
+  (non-ASCII allowlist entries silently inert) — see below, still INFO
+  and unaddressed.
+
+CLOSED (2026-08-20)  F-5  Non-ASCII allowlist entries are silently inert.
+  Fix: HostPattern::parse (config.rs) now rejects any entry containing a
+  non-ASCII byte, before the to_ascii_lowercase/wildcard-strip logic runs,
+  with a distinct reason "allowlist_entry_not_ascii" (rather than being
+  lumped into the generic "invalid_allowlist_entry"). The spec
+  (docs/superpowers/specs/2026-08-20-bounded-http-fetch-design.md §4.3)
+  was corrected to say non-ASCII entries are rejected at construction —
+  punycode them yourself — rather than the previous "a Unicode entry
+  never matches" text, which described the old silent-inert behavior as
+  if it were the intended contract. Test host_patterns_reject_non_ascii_entries
+  (extensions/toolsets/finstack-ai-tools-fetch/src/tests.rs) covers
+  "bücher.example" and "*.bücher.example". `cargo test -p
+  finstack-ai-tools-fetch` passes. Original finding text retained below
+  for the record.
+
+  --- original finding ---
+  Non-ASCII allowlist entries are silently inert.
+  HostPattern::parse (config.rs:57) applies to_ascii_lowercase, which
+  is a no-op on non-ASCII, and does not reject non-ASCII bytes. A
+  configured entry such as "münchen.de" parses successfully and then
+  never matches, because the url crate delivers hosts punycoded
+  ("xn--mnchen-3ya.de"). The failure direction is closed (deny), and
+  the spec documents that allowlist entries must be punycode, but the
+  silence is a config footgun. Suggested: reject non-ASCII in
+  HostPattern::parse with a distinct reason, or punycode the entry
+  there.
+
+CLOSED (2026-08-20)  F-6  Allowlist patterns are not checked against a
+                public suffix list. "*.com" or "*.co.uk" are accepted and
+                would allow essentially the whole web.
+  Fix: this is documentation-only, matching the deliberate
+  no-PSL-dependency posture — no behavior changed. HttpFetchConfig's
+  `allowlist` field doc (config.rs) now states plainly that wildcard
+  entries are not checked against a public suffix list, that `*.com`
+  parses and matches every subdomain of that bare TLD, and that entries
+  should name a registrable domain (e.g. `*.example.com`) rather than a
+  bare public suffix. Original finding text retained below for the
+  record.
+
+  --- original finding ---
+  Allowlist patterns are not checked against a public
+  suffix list. "*.com" or "*.co.uk" are accepted and would allow
+  essentially the whole web. This matches the deliberate
+  no-PSL-dependency posture and is a deployment-configuration
+  concern, but the config documentation should say plainly that
+  wildcard entries must name a registrable domain.
+
+FIXED (2026-08-20)  F-7  Documentation of the fixtures-only loopback
+  posture is incomplete. The brief requires that the config doc state a
+  config with fixtures enabled must never reach production.
+  config.rs's allow_loopback_http doc comment now states plainly
+  "Fixtures only. Never enable in production." and repeats the
+  loopback-privilege rationale; README.md was rewritten to drop the
+  stale "task-5 slice ... configuration layer only" description in
+  favor of an accurate crate summary (deny-by-default allowlisted HTTPS
+  fetch, resolve-and-pin, bounded reads, HTML->markdown, artifact
+  staging) and now carries the same fixtures-only warning. Original
+  finding text retained below for the record.
+
+  --- original finding ---
+  Documentation of the fixtures-only loopback posture is
+  incomplete. The brief requires that the config doc state a config
+  with fixtures enabled must never reach production. config.rs:114-121
+  and pipeline.rs:146-158 explain the bypass and its origin-gating
+  well, but neither says "never enable in production", and
+  extensions/toolsets/finstack-ai-tools-fetch/README.md is stale — it
+  still describes the crate as "this task-5 slice ... configuration
+  layer only" and never mentions allow_loopback_http at all. Worth
+  correcting before release: with allow_loopback_http = true a
+  model-supplied URL can reach ANY loopback port with no allowlist
+  check whatsoever (host_allowed, pipeline.rs:165), which is the
+  single largest privilege in the feature and is exactly the shape a
+  prompt injection would aim for. The code posture is right; the
+  documentation does not warn loudly enough.
+
+Residual risk disposition
+- F-1 (FIXED 2026-08-20): pinned_client now calls .no_proxy(), so
+  env/system proxies no longer void resolve-and-pin. No further
+  deployment constraint on HTTP(S)_PROXY is needed.
+- Egress is only as tight as the deployer's allowlist; the framework
+  cannot judge whether an allowlisted host is itself hostile. A
+  compromised allowlisted host can serve prompt injection (F-2) and
+  can attempt redirect steering (blocked, see above).
+- No rate limiting or per-run call budget exists in this toolset; a
+  looping model can issue unbounded sequential fetches to
+  allowlisted hosts. Bounded elsewhere by run deadlines/budgets, but
+  not by this crate.
+- No cargo-deny advisories run, no gitleaks run, and no hosted
+  matrix is claimed by this review.
+
+No G7-D-*, hosted pull request, publication, or tag is recorded.
+
+================================================================
+ADDENDUM (2026-08-20) — code-review follow-up pass
+================================================================
+
+Four further findings from a code-review pass over the committed
+candidate were fixed in the same pass as F-5 above (see CLOSED F-5
+above; not repeated here):
+
+1. Loopback scope was the whole 127.0.0.0/8, not the exact address.
+   vet.rs's is_loopback_host and resolve.rs's blocked() both used
+   IpAddr::is_loopback(), which accepts every address in 127.0.0.0/8 for
+   IPv4. Under allow_loopback_http, that meant a hostname resolving to
+   e.g. 127.77.1.2 (never a real loopback binding, but still inside the
+   /8) would have been treated as loopback and let through the
+   allowlist bypass. Narrowed both call sites to the exact conventional
+   addresses only: `localhost`, `127.0.0.1`, and `::1` (accepting the
+   IPv4-mapped `::ffff:127.0.0.1` form via to_canonical() comparison
+   against Ipv4Addr::LOCALHOST/Ipv6Addr::LOCALHOST). Note this is scoped
+   to the ALLOW carve-out only — the DENY set (is_forbidden_destination)
+   deliberately still treats the whole 127.0.0.0/8 as loopback-and-thus-
+   forbidden by default; only the exception that lets fixtures through
+   was narrowed. New tests: net-guard's
+   loopback_scope_is_exact_not_whole_127_8 (vet.rs level) and
+   resolved_address_in_127_8_but_not_exact_loopback_is_still_blocked
+   (resolve_and_pin level, via a scripted resolver answering
+   127.77.1.2 for a "localhost" lookup). `cargo test -p
+   finstack-ai-net-guard -p finstack-ai-tools-fetch` passes (both
+   crates re-run per the note in the original F-4/loopback finding
+   that net-guard changes must be verified against both suites).
+
+2. allow_loopback_http was reachable from config data, not just code.
+   HttpFetchConfigSnapshot::from_json (config.rs) accepted an
+   "allow_loopback_http" JSON key and applied it directly, so the
+   single largest privilege this crate can grant (see the field's own
+   doc, F-7 above) could arrive embedded in a config file, database
+   row, or any other data path that eventually calls from_json — not
+   only from a reviewed call site. Removed the field from
+   HttpFetchConfigSnapshot entirely; with #[serde(deny_unknown_fields)]
+   already on the type, a JSON document that still carries the old key
+   now fails to parse rather than being silently honored or ignored.
+   HttpFetchConfig::allow_loopback_http itself is unchanged (still a
+   plain bool, still settable when a caller builds the struct directly
+   in Rust) — its doc now says explicitly it is not settable via the
+   JSON snapshot by design. The Python binding (which is the one
+   from_json caller that legitimately needs the fixture bypass) gained
+   a keyword-only constructor argument, insecure_allow_loopback_http:
+   bool = False, applied to the parsed config AFTER from_json returns —
+   i.e. in Rust code in fetch.rs, never read from the JSON payload. The
+   .pyi stub and class docstring were updated to match; the Python e2e
+   test that previously passed "allow_loopback_http": true in the JSON
+   now passes insecure_allow_loopback_http=True as the constructor
+   argument instead, and a new test asserts JSON still carrying the old
+   field is rejected. New Rust tests: snapshot_from_json_honors_every_field
+   was adjusted (no longer includes the field in its input JSON, asserts
+   the output is always the code default) and
+   snapshot_from_json_rejects_allow_loopback_http_field was added.
+
+3. ArtifactError::TooLarge was collapsed into the generic transport
+   failure. deliver.rs's stage_artifact mapped every ArtifactError
+   variant from stage_required_artifact through one blanket map_err to
+   FETCH_TRANSPORT_FAILED / ErrorCategory::Tool, so a body too large for
+   the attached artifact store's own byte ceiling was indistinguishable
+   from a genuine staging fault (I/O error, integrity failure, etc.) —
+   both surfaced identically. Replaced the blanket map with a match:
+   ArtifactError::TooLarge{..} now maps to FETCH_LIMIT_EXCEEDED /
+   ErrorCategory::Limit ("fetch content exceeds the artifact store's
+   byte limit"), a limit condition the caller can act on; every other
+   variant keeps the prior FETCH_TRANSPORT_FAILED / ErrorCategory::Tool
+   mapping. New test artifact_store_too_large_maps_to_fetch_limit_exceeded
+   (tests.rs) uses InProcessArtifactStore::default().with_max_artifact_bytes(2)
+   and a small binary body to force TooLarge, and asserts the mapped
+   code and message.
+
+4. The toolset's configurable result ceiling could exceed the kernel's
+   fixed RawJson ceiling. toolset.rs's result_ceiling computed
+   max_response_bytes + RESULT_ENVELOPE_BYTES with no upper bound, so a
+   deployment configuring max_response_bytes near its 8 MiB hard ceiling
+   would advertise (and enforce, in call()'s own over-ceiling check) a
+   max_result_bytes well above the 1 MiB that
+   finstack_ai_kernel::RAW_JSON_MAX_BYTES actually allows RawJson::parse
+   to accept. A serialized result between 1 MiB and the toolset's own
+   ceiling would therefore pass call()'s check only to fail inside
+   RawJson::parse immediately afterward, with a generic/internal error
+   instead of the crate's stable FETCH_LIMIT_EXCEEDED. Fixed by clamping
+   result_ceiling's output to min(max_response_bytes + 4096,
+   RAW_JSON_MAX_BYTES) (the kernel constant, which is publicly
+   re-exported from finstack_ai_kernel and imported directly rather than
+   duplicated). This makes the toolset's own over-ceiling check in
+   call() fire first, before RawJson::parse ever runs, for any
+   serialized output past 1 MiB — with the toolset's own error code, not
+   the kernel's. config.rs's max_response_bytes doc now states inline
+   results are additionally bounded by this 1 MiB ceiling regardless of
+   the configured value, and that bodies needing to exceed it require an
+   artifact store (unaffected, since staged artifact refs are tiny).
+   ToolSpec::validate() still passes (max_result_bytes is simply
+   smaller, never larger, than before). New test
+   inline_result_over_the_kernel_raw_json_ceiling_is_a_limit_error
+   (tests.rs): max_response_bytes configured to 2 MiB, a fixture serving
+   ~1.2 MiB of ASCII text, no artifact store, mode auto — asserts
+   FETCH_LIMIT_EXCEEDED (not FETCH_INVALID_ARGUMENTS).
+
+Also documentation-only: net-guard's client.rs (pinned_client doc) and
+README.md now carry an explicit "Redirect loops" note: because redirect
+following is disabled and the caller owns the hop loop, every hop —
+not just hop 0 — must re-run the full parse-and-vet → allowlist →
+resolve-and-pin sequence, and any loopback/fixture bypass must be
+decided once from the original (hop-0) URL and never recomputed per
+hop, referencing finstack-ai-tools-fetch's host_allowed/
+origin_is_loopback (pipeline.rs) as the reference implementation this
+crate's own consumer already follows correctly. No behavior changed;
+this closes a documentation gap on an invariant the code already
+upheld (see the "Redirect attack surface" area verdict above,
+Loopback steering paragraph).
+
+Verification for this addendum as a whole: `cargo test -p
+finstack-ai-net-guard -p finstack-ai-tools-fetch` (all tests
+passing, including the new ones listed per-item above); `cargo clippy
+-p finstack-ai-net-guard -p finstack-ai-tools-fetch -p finstack-ai-python
+--all-targets`; `uv run pytest
+bindings/finstack-ai-python/tests/test_fetch.py`.

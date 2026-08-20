@@ -10,21 +10,28 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
+use finstack_ai_net_guard::NetGuardError;
+
 use crate::{
     MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TRANSPORT_ERROR,
     McpError,
 };
 
 const MAX_LINE_BYTES: u64 = 1024 * 1024;
-const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 const MAX_NOTIFICATIONS_PER_ROUND_TRIP: usize = 32;
+/// Default HTTP response-body cap for an `HttpConfig` that does not set one
+/// explicitly.
+const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1_048_576;
+/// Upper bound accepted by `HttpConfig::with_max_response_bytes`. A caller
+/// wanting a larger cap has to opt in explicitly at construction; there is
+/// no runtime override.
+const MAX_RESPONSE_BYTES_CEILING: usize = 64 * 1_048_576;
 
 /// One MCP request/response round trip.
 ///
@@ -526,10 +533,14 @@ impl McpTransport for StdioTransport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpConfig {
     url: String,
+    max_response_bytes: usize,
 }
 
 impl HttpConfig {
     /// Construct a streamable-HTTP target.
+    ///
+    /// The response-body cap defaults to [`DEFAULT_MAX_RESPONSE_BYTES`]
+    /// (8 MiB); call [`Self::with_max_response_bytes`] to raise or lower it.
     ///
     /// # Errors
     ///
@@ -542,11 +553,41 @@ impl HttpConfig {
                 "http url is empty",
             ));
         }
-        Ok(Self { url })
+        Ok(Self {
+            url,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+        })
+    }
+
+    /// Override the HTTP response-body cap.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero (fail closed, never an unbounded read) and anything
+    /// above [`MAX_RESPONSE_BYTES_CEILING`] (64 MiB).
+    pub fn with_max_response_bytes(mut self, max_response_bytes: usize) -> Result<Self, McpError> {
+        if max_response_bytes == 0 {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "http max_response_bytes must not be zero",
+            ));
+        }
+        if max_response_bytes > MAX_RESPONSE_BYTES_CEILING {
+            return Err(McpError::stable(
+                MCP_PROTOCOL_VIOLATION,
+                "http max_response_bytes exceeds the 64 MiB ceiling",
+            ));
+        }
+        self.max_response_bytes = max_response_bytes;
+        Ok(self)
     }
 
     pub(crate) fn url(&self) -> &str {
         &self.url
+    }
+
+    pub(crate) fn max_response_bytes(&self) -> usize {
+        self.max_response_bytes
     }
 }
 
@@ -554,6 +595,7 @@ impl HttpConfig {
 pub(crate) struct HttpTransport {
     url: String,
     client: reqwest::Client,
+    max_response_bytes: usize,
     next_id: AtomicU64,
     notifications: Mutex<Vec<String>>,
 }
@@ -562,6 +604,22 @@ impl HttpTransport {
     pub(crate) fn try_new(config: &HttpConfig) -> Result<Self, McpError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
+            // MCP servers are exact-URL allowlisted (see `authorize_http`):
+            // silently following a redirect would let an allowlisted URL
+            // hand the request to a host/scheme the allowlist never vetted
+            // (the same credential-drift concern that motivated the
+            // no-redirect policy on the S3 object-store client). Unlike
+            // `finstack-ai-net-guard`'s pinned client this transport does
+            // NOT deny private/loopback destinations and does NOT disable
+            // env/system proxies: MCP servers are host-allowlisted by
+            // construction (not caller-supplied like a media `audio_url`),
+            // and legitimate deployments run MCP servers on localhost or
+            // a private network, or reach them only through a configured
+            // egress proxy. Adding a private-IP deny or `.no_proxy()` here
+            // would break those deployments for no SSRF benefit, since the
+            // destination was already vetted at allowlist time, not at
+            // request time.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("http client failed: {error}"))
@@ -569,6 +627,7 @@ impl HttpTransport {
         Ok(Self {
             url: config.url.clone(),
             client,
+            max_response_bytes: config.max_response_bytes(),
             next_id: AtomicU64::new(1),
             notifications: Mutex::new(Vec::new()),
         })
@@ -627,7 +686,7 @@ impl HttpTransport {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_owned();
-        let text = read_bounded_body(response).await?;
+        let text = read_bounded_body(response, self.max_response_bytes).await?;
         if content_type.starts_with("text/event-stream") {
             return parse_sse_jsonrpc(&text, &id, &self.notifications);
         }
@@ -802,23 +861,22 @@ fn sse_event_data(event: &str) -> Option<String> {
     if data.is_empty() { None } else { Some(data) }
 }
 
-async fn read_bounded_body(response: reqwest::Response) -> Result<String, McpError> {
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| {
-            McpError::stable(MCP_TRANSPORT_ERROR, format!("http body failed: {error}"))
-        })?;
-        if body.len().saturating_add(chunk.len()) > MAX_HTTP_BODY_BYTES {
-            return Err(McpError::stable(
-                MCP_LIMIT_EXCEEDED,
-                "http body exceeds the configured byte limit",
-            ));
-        }
-        body.extend_from_slice(&chunk);
-    }
+async fn read_bounded_body(response: reqwest::Response, cap: usize) -> Result<String, McpError> {
+    let body = finstack_ai_net_guard::read_body_bounded(response, cap)
+        .await
+        .map_err(map_net_guard_error)?;
     String::from_utf8(body)
         .map_err(|_| McpError::stable(MCP_PROTOCOL_VIOLATION, "http body is not valid utf-8"))
+}
+
+fn map_net_guard_error(error: NetGuardError) -> McpError {
+    match error {
+        NetGuardError::LimitExceeded => McpError::stable(
+            MCP_LIMIT_EXCEEDED,
+            "http body exceeds the configured byte limit",
+        ),
+        other => McpError::stable(MCP_TRANSPORT_ERROR, format!("http body failed: {other}")),
+    }
 }
 
 pub(crate) fn authorize_stdio(allowed: &[Arc<str>], program: &Path) -> Result<(), McpError> {
@@ -980,5 +1038,91 @@ mod tests {
             notifications.lock().expect("lock").as_slice(),
             ["notifications/tools/list_changed"]
         );
+    }
+
+    /// Write one raw HTTP/1.1 response to the first connection accepted on
+    /// `listener`, then close it.
+    async fn serve_once(listener: tokio::net::TcpListener, status: u16, headers: String, body: Vec<u8>) {
+        let (mut stream, _) = listener.accept().await.expect("accept");
+        let mut buf = vec![0_u8; 8_192];
+        let _ = stream.read(&mut buf).await.expect("read request");
+        let mut response = format!(
+            "HTTP/1.1 {status} X\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        stream.write_all(&response).await.expect("write response");
+        stream.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn over_cap_response_body_is_rejected() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let body = vec![b'a'; 64];
+        let server = tokio::spawn(serve_once(
+            listener,
+            200,
+            "Content-Type: application/json\r\n".to_owned(),
+            body,
+        ));
+
+        let config = HttpConfig::try_new(format!("http://{addr}"))
+            .expect("config")
+            .with_max_response_bytes(16)
+            .expect("cap is within range");
+        let transport = HttpTransport::try_new(&config).expect("transport");
+        let error = transport
+            .request("tools/list", serde_json::json!({}))
+            .await
+            .expect_err("body over the configured cap must be rejected, not truncated");
+        assert_eq!(error.code(), MCP_LIMIT_EXCEEDED);
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn redirect_response_is_not_followed() {
+        // A second listener plays the redirect target. If the transport
+        // transparently followed the 302, it would connect here.
+        let target_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind target");
+        let target_addr = target_listener.local_addr().expect("addr");
+        let (target_tx, mut target_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let target_server = tokio::spawn(async move {
+            if target_listener.accept().await.is_ok() {
+                let _ = target_tx.send(());
+            }
+        });
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let location = format!("http://{target_addr}/moved");
+        let server = tokio::spawn(serve_once(
+            listener,
+            302,
+            format!("Location: {location}\r\n"),
+            Vec::new(),
+        ));
+
+        let config = HttpConfig::try_new(format!("http://{addr}")).expect("config");
+        let transport = HttpTransport::try_new(&config).expect("transport");
+        transport
+            .request("tools/list", serde_json::json!({}))
+            .await
+            .expect_err("a 302 with an empty body is not a valid jsonrpc frame");
+        server.await.expect("server task");
+
+        let followed =
+            tokio::time::timeout(std::time::Duration::from_millis(200), target_rx.recv())
+                .await
+                .is_ok();
+        assert!(!followed, "the 302 redirect must not be followed");
+        target_server.abort();
     }
 }

@@ -19,6 +19,14 @@ unpublished.
 - `finstack-ai-completion-ingress`: new `extensions/interop` leaf that mints signed
   opaque callback tokens for deferred effects and delivers authenticated external
   completions through `ExternalCompletionRouter` (TM-10; the workflow webhook path).
+- `finstack-ai-net-guard` (vetted outbound HTTP primitives: URL vetting,
+  private-address deny, DNS resolve-and-pin, bounded body reads) and
+  `finstack-ai-tools-fetch` (the `http_fetch` tool, `finstack-fetch`
+  toolset descriptor): a bounded, deny-by-default HTTPS fetch toolset with
+  a host allowlist, redirect re-vetting on every hop, bounded response
+  reads, and HTML→Markdown conversion for inline delivery. Exported from
+  Python as `HttpFetchToolset` (`finstack_ai`). New workspace dependencies
+  `url` and `htmd`.
 - Kernel constructors for crate-owned literals: `ErrorCode::from_static`,
   `Key::from_static` (including `ComponentId` / `ToolId` / `LimitKey`),
   `Digest::from_fixed_domain`, and the `UNIX_EPOCH` timestamp constant.

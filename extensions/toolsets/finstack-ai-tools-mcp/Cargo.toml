@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 base64 = { workspace = true }
 finstack-ai-kernel = { workspace = true }
+finstack-ai-net-guard = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 futures-util = { workspace = true }
 reqwest = { workspace = true }
@@ -26,7 +27,7 @@ tokio = { workspace = true, features = ["io-util", "process"] }
 finstack-ai = { workspace = true, features = ["native-tokio"] }
 finstack-ai-store-memory = { workspace = true }
 finstack-ai-test = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 
 [lints]
 workspace = true

@@ -12,6 +12,7 @@ Event
 EventBatch
 EventBatchIterator
 FinstackError
+HttpFetchToolset
 Lane
 Locator
 MemoryContextProvider

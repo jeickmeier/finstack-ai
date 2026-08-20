@@ -1,0 +1,63 @@
+pub mod finstack_ai_tools_fetch
+pub enum finstack_ai_tools_fetch::HttpFetchError
+pub finstack_ai_tools_fetch::HttpFetchError::Configuration
+pub finstack_ai_tools_fetch::HttpFetchError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_tools_fetch::HttpFetchError
+pub fn finstack_ai_tools_fetch::HttpFetchError::clone(&self) -> finstack_ai_tools_fetch::HttpFetchError
+impl core::cmp::Eq for finstack_ai_tools_fetch::HttpFetchError
+impl core::cmp::PartialEq for finstack_ai_tools_fetch::HttpFetchError
+pub fn finstack_ai_tools_fetch::HttpFetchError::eq(&self, &finstack_ai_tools_fetch::HttpFetchError) -> bool
+impl core::error::Error for finstack_ai_tools_fetch::HttpFetchError
+impl core::fmt::Debug for finstack_ai_tools_fetch::HttpFetchError
+pub fn finstack_ai_tools_fetch::HttpFetchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_tools_fetch::HttpFetchError
+pub fn finstack_ai_tools_fetch::HttpFetchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_fetch::HttpFetchError
+pub struct finstack_ai_tools_fetch::HostPattern(_)
+impl finstack_ai_tools_fetch::HostPattern
+pub fn finstack_ai_tools_fetch::HostPattern::matches(&self, &str) -> bool
+pub fn finstack_ai_tools_fetch::HostPattern::parse(&str) -> core::result::Result<Self, finstack_ai_tools_fetch::HttpFetchError>
+impl core::clone::Clone for finstack_ai_tools_fetch::HostPattern
+pub fn finstack_ai_tools_fetch::HostPattern::clone(&self) -> finstack_ai_tools_fetch::HostPattern
+impl core::cmp::Eq for finstack_ai_tools_fetch::HostPattern
+impl core::cmp::PartialEq for finstack_ai_tools_fetch::HostPattern
+pub fn finstack_ai_tools_fetch::HostPattern::eq(&self, &finstack_ai_tools_fetch::HostPattern) -> bool
+impl core::fmt::Debug for finstack_ai_tools_fetch::HostPattern
+pub fn finstack_ai_tools_fetch::HostPattern::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_tools_fetch::HostPattern
+pub struct finstack_ai_tools_fetch::HttpFetchConfig
+pub finstack_ai_tools_fetch::HttpFetchConfig::allow_loopback_http: bool
+pub finstack_ai_tools_fetch::HttpFetchConfig::allowlist: alloc::vec::Vec<alloc::string::String>
+pub finstack_ai_tools_fetch::HttpFetchConfig::max_redirects: usize
+pub finstack_ai_tools_fetch::HttpFetchConfig::max_response_bytes: usize
+pub finstack_ai_tools_fetch::HttpFetchConfig::per_host_headers: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub finstack_ai_tools_fetch::HttpFetchConfig::request_timeout: core::time::Duration
+pub finstack_ai_tools_fetch::HttpFetchConfig::user_agent: core::option::Option<alloc::string::String>
+impl core::clone::Clone for finstack_ai_tools_fetch::HttpFetchConfig
+pub fn finstack_ai_tools_fetch::HttpFetchConfig::clone(&self) -> finstack_ai_tools_fetch::HttpFetchConfig
+impl core::default::Default for finstack_ai_tools_fetch::HttpFetchConfig
+pub fn finstack_ai_tools_fetch::HttpFetchConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_tools_fetch::HttpFetchConfig
+pub fn finstack_ai_tools_fetch::HttpFetchConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_tools_fetch::HttpFetchConfigSnapshot
+impl finstack_ai_tools_fetch::HttpFetchConfigSnapshot
+pub fn finstack_ai_tools_fetch::HttpFetchConfigSnapshot::from_json(&[u8]) -> core::result::Result<finstack_ai_tools_fetch::HttpFetchConfig, finstack_ai_tools_fetch::HttpFetchError>
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_tools_fetch::HttpFetchConfigSnapshot
+pub fn finstack_ai_tools_fetch::HttpFetchConfigSnapshot::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_tools_fetch::HttpFetchToolset
+impl finstack_ai_tools_fetch::HttpFetchToolset
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::try_new(finstack_ai_tools_fetch::HttpFetchConfig) -> core::result::Result<Self, finstack_ai_tools_fetch::HttpFetchError>
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::with_artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
+impl core::fmt::Debug for finstack_ai_tools_fetch::HttpFetchToolset
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_tools_fetch::HttpFetchToolset
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_tools_fetch::HttpFetchToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub const finstack_ai_tools_fetch::FETCH_DESTINATION_BLOCKED: &str
+pub const finstack_ai_tools_fetch::FETCH_HOST_NOT_ALLOWLISTED: &str
+pub const finstack_ai_tools_fetch::FETCH_INVALID_ARGUMENTS: &str
+pub const finstack_ai_tools_fetch::FETCH_LIMIT_EXCEEDED: &str
+pub const finstack_ai_tools_fetch::FETCH_REDIRECT_DENIED: &str
+pub const finstack_ai_tools_fetch::FETCH_TIMEOUT: &str
+pub const finstack_ai_tools_fetch::FETCH_TRANSPORT_FAILED: &str
