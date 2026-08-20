@@ -62,5 +62,8 @@ pub enum NetGuardError {
 mod vet;
 pub use vet::{UrlPolicy, VettedUrl, parse_and_vet_url, is_loopback_host};
 
+mod resolve;
+pub use resolve::{HostResolver, SystemResolver, is_forbidden_destination, resolve_and_pin};
+
 #[cfg(test)]
 mod tests;
