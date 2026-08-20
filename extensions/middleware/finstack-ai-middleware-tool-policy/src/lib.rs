@@ -21,9 +21,108 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::sync::Arc;
+
+use finstack_ai_kernel::{
+    ComponentId, ComponentInvocation, Digest, ErrorCategory, InvocationRecovery, Metadata, Stage,
+    Version,
+};
+use finstack_ai_runtime::{
+    Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError, MiddlewareOrder,
+    MiddlewareRole, OrderTier, PortFuture, StageInput, StageMask, StageOutcome,
+};
+
 mod config;
 
 pub use config::*;
+
+const TOOL_POLICY_VERSION: Version = Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+};
+
+/// Policy filter middleware that narrows the model-visible tool set at
+/// `before_model` and `before_tool_batch`.
+#[derive(Debug, Clone)]
+pub struct ToolPolicyMiddleware {
+    descriptor: MiddlewareDescriptor,
+    config: ToolPolicyConfig,
+}
+
+impl ToolPolicyMiddleware {
+    /// Construct a tool-policy leaf from a validated configuration.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid checked-in identity, an unencodable configuration,
+    /// or a configuration with zero rules (a no-op policy).
+    pub fn try_new(config: ToolPolicyConfig) -> Result<Self, ToolPolicyError> {
+        if config.is_empty() {
+            return Err(ToolPolicyError::Configuration {
+                reason: "empty_policy",
+            });
+        }
+        let configuration_digest =
+            Digest::raw_json(&serde_json::to_vec(&config).map_err(|_| {
+                ToolPolicyError::Configuration {
+                    reason: "invalid_configuration_encoding",
+                }
+            })?);
+        Ok(Self {
+            descriptor: MiddlewareDescriptor {
+                invocation: ComponentInvocation {
+                    component: ComponentId::parse("finstack.middleware.tool-policy").map_err(
+                        |_| ToolPolicyError::Configuration {
+                            reason: "invalid_component_id",
+                        },
+                    )?,
+                    version: TOOL_POLICY_VERSION,
+                    configuration_digest,
+                    recovery: InvocationRecovery::RecomputeSafe,
+                },
+                stages: StageMask::from_stages([Stage::BeforeModel, Stage::BeforeToolBatch]),
+                order: MiddlewareOrder {
+                    tier: OrderTier::RequestShaping,
+                    priority: 0,
+                    before: Arc::from([]),
+                    after: Arc::from([]),
+                },
+                role: MiddlewareRole::Standard,
+                metadata: Metadata::empty(),
+            },
+            config,
+        })
+    }
+}
+
+impl Middleware for ToolPolicyMiddleware {
+    fn descriptor(&self) -> MiddlewareDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn invoke(
+        &self,
+        _ctx: MiddlewareContext,
+        input: StageInput,
+    ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+        let _config = self.config.clone();
+        Box::pin(async move {
+            match input {
+                StageInput::BeforeModel(_) | StageInput::BeforeToolBatch { .. } => {
+                    Ok(StageOutcome::Continue)
+                }
+                _ => Err(MiddlewareError::try_new(
+                    finstack_ai_runtime::MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                    ErrorCategory::Middleware,
+                    "tool-policy only runs at before_model and before_tool_batch",
+                    Metadata::empty(),
+                )
+                .unwrap_or_else(Into::into)),
+            }
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests;

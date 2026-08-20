@@ -78,3 +78,62 @@ fn config_serialization_is_deterministic_for_digest() {
     let b = serde_json::to_vec(&build()).expect("serialize b");
     assert_eq!(a, b);
 }
+
+mod middleware_tests {
+    use finstack_ai_kernel::Stage;
+    use finstack_ai_runtime::{Middleware, MiddlewareRole, OrderTier};
+
+    use crate::ToolPolicyMiddleware;
+
+    fn any_config() -> crate::ToolPolicyConfig {
+        crate::ToolPolicyConfig::try_new()
+            .expect("empty config")
+            .with_write_budget(3)
+            .expect("budget")
+    }
+
+    #[test]
+    fn descriptor_declares_both_filter_stages_and_request_shaping_tier() {
+        let mw = ToolPolicyMiddleware::try_new(any_config()).expect("leaf");
+        let d = mw.descriptor();
+        assert!(d.stages.contains(Stage::BeforeModel));
+        assert!(d.stages.contains(Stage::BeforeToolBatch));
+        assert!(!d.stages.contains(Stage::BeforeFinalize));
+        assert!(matches!(d.order.tier, OrderTier::RequestShaping));
+        assert!(matches!(d.role, MiddlewareRole::Standard));
+        assert_eq!(
+            d.invocation.component.as_str(),
+            "finstack.middleware.tool-policy"
+        );
+    }
+
+    #[test]
+    fn empty_policy_is_rejected() {
+        let err = ToolPolicyMiddleware::try_new(
+            crate::ToolPolicyConfig::try_new().expect("empty config"),
+        )
+        .expect_err("a policy with zero rules is a no-op and must be rejected");
+        assert!(matches!(
+            err,
+            crate::ToolPolicyError::Configuration {
+                reason: "empty_policy"
+            }
+        ));
+    }
+
+    #[test]
+    fn distinct_configs_produce_distinct_digests() {
+        let a = ToolPolicyMiddleware::try_new(any_config()).expect("leaf a");
+        let b = ToolPolicyMiddleware::try_new(
+            crate::ToolPolicyConfig::try_new()
+                .expect("cfg")
+                .with_write_budget(4)
+                .expect("budget"),
+        )
+        .expect("leaf b");
+        assert_ne!(
+            a.descriptor().invocation.configuration_digest,
+            b.descriptor().invocation.configuration_digest
+        );
+    }
+}
