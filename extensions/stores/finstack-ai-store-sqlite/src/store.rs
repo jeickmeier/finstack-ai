@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use finstack_ai_kernel::{AppendRequest, CommittedBatch, SessionId};
 use finstack_ai_runtime::{
-    LoadFromRequest, LoadRequest, LoadedSession, MetadataReceipt, PruneReceipt, PruneRequest,
-    ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
-    WriteMetadataRequest,
+    LoadFromRequest, LoadRequest, LoadWindow, LoadedSession, MetadataReceipt, PruneReceipt,
+    PruneRequest, ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest,
+    StoreError, WriteMetadataRequest,
 };
 use finstack_ai_store_common::{admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size};
 use rusqlite::{Transaction, TransactionBehavior, params};
@@ -270,20 +270,27 @@ impl WorkerCtx {
         &mut self,
         request: LoadFromRequest,
     ) -> Result<LoadedSession, StoreError> {
+        let window = request.window;
         let loaded = load_session_window(
             &self.connection,
             request.session_id,
             self.limits.snapshot_bytes,
-            request.window,
+            window,
             self.cached(request.session_id),
         )?;
-        self.remember(
-            request.session_id,
-            VerifiedHead {
-                sequence: loaded.head_sequence,
-                checksum: loaded.head_checksum,
-            },
-        );
+        // Only a `Full` load proves the whole chain. A windowed load's tail
+        // is verified against a checksum the caller supplied, which says
+        // nothing about the prefix it omitted, so caching its head would let
+        // a later full load skip records this process never verified.
+        if matches!(window, LoadWindow::Full) {
+            self.remember(
+                request.session_id,
+                VerifiedHead {
+                    sequence: loaded.head_sequence,
+                    checksum: loaded.head_checksum,
+                },
+            );
+        }
         Ok(loaded)
     }
 
