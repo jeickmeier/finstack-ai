@@ -23,7 +23,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -94,7 +93,6 @@ pub struct MetricsObserver {
     descriptor: ObserverDescriptor,
     queue: ObserverQueue<()>,
     state: Mutex<MetricsState>,
-    dropped: AtomicU64,
     diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
@@ -131,15 +129,15 @@ impl MetricsObserver {
                 }
             })?,
             state: Mutex::new(MetricsState::default()),
-            dropped: AtomicU64::new(0),
             diagnostic: Mutex::new(None),
         })
     }
 
-    /// Cumulative adapter-queue drops.
+    /// Cumulative adapter-queue drops. The queue counts every drop, including
+    /// disconnected/poisoned pushes.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed) + self.queue.dropped()
+        self.queue.dropped()
     }
 
     /// Last overflow diagnostic.
@@ -261,22 +259,8 @@ impl MetricsObserver {
     }
 
     /// Record a drop already counted by `self.queue.dropped()`. Only the
-    /// diagnostic is latched here; counting it again would double the total
-    /// returned by [`Self::dropped`].
+    /// diagnostic is latched here; the queue counts every drop itself.
     fn record_overflow(&self) {
-        if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
-        }
-    }
-
-    /// Record a drop the queue does not count itself: [`ObserverQueue::push`]
-    /// only increments its own counter on [`ObserverQueuePush::Dropped`] and
-    /// on [`ObserverError::CapacityExceeded`] (the `Disconnect` policy); an
-    /// [`ObserverError::Unavailable`] push (already disconnected, or a
-    /// poisoned lock) never touches the queue's counter, so the adapter must
-    /// count it to keep `dropped()` accurate.
-    fn record_uncounted_drop(&self) {
-        self.dropped.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(OBSERVER_QUEUE_OVERFLOW);
         }
@@ -299,7 +283,7 @@ impl Observer for MetricsObserver {
                     return Box::pin(async move { Err(ObserverError::CapacityExceeded) });
                 }
                 Err(error) => {
-                    self.record_uncounted_drop();
+                    self.record_overflow();
                     return Box::pin(async move { Err(error) });
                 }
             }

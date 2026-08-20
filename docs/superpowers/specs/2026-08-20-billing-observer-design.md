@@ -53,23 +53,41 @@ typed field on events, so the observer correlates:
   canonical request JSON's top-level `"model"` string member (if present).
   Non-model effects are ignored for origin tracking (tool/context effects can
   still complete with usage; they aggregate with `model: None`).
-- On `EffectCompleted` / `EffectFailed` / `EffectDeferred`: remove the pending
-  origin entry (completed consumes it for attribution; failed/deferred just
-  clean up — `EffectFailed` carries usage too and is aggregated the same way).
+- On `EffectCompleted` / `EffectFailed`: remove the pending origin entry
+  (settlement consumes it for attribution — `EffectFailed` carries usage too
+  and is aggregated the same way).
+- On `EffectCancelled`: remove the pending origin entry (the effect will never
+  settle, so nothing should keep referencing it).
+- On `EffectDeferred`: the pending origin entry is **kept**, not removed.
+  Deferral followed by eventual completion under the same `EffectId` is the
+  kernel's intended lifecycle for long-running effects — the origin recorded
+  at request time must still be present when the deferred effect finally
+  settles.
 
 The pending-origin map is bounded (`MAX_PENDING_EFFECTS = 4096`). When full, a
-new model effect's origin is not tracked and a `billing_pending_saturated`
-diagnostic is stored; its eventual completion aggregates under `model: None`
-and bumps `unattributed_effects`.
+new model effect's origin still gets tracked: the **oldest** pending entry is
+evicted first (`EffectId` is UUIDv7-shaped, so map order approximates
+insertion time) to make room, and a `billing_pending_saturated` diagnostic is
+stored. The evicted entry's eventual completion aggregates under `model: None`
+and bumps `unattributed_effects`; no origin request is ever silently dropped
+on arrival.
 
 `unattributed_effects` counts only **model** effects (output contract kind
 `ModelResponse`) that settle (`EffectCompleted`/`EffectFailed`) without a
 tracked pending origin — whether because the origin was never recorded (no
-matching `EffectRequested`, or the pending map was saturated) or because it
-was deferred and later completed. Non-model (tool, context) effects settling
-with no pending origin is expected by design — they are never
-origin-tracked — so it never bumps `unattributed_effects`; they still
-aggregate usage/effects/uncosted under `(session, run, None)` per §3.2.
+matching `EffectRequested`) or because its pending entry was evicted to make
+room under the bound. Non-model (tool, context) effects settling with no
+pending origin is expected by design — they are never origin-tracked — so it
+never bumps `unattributed_effects`; they still aggregate usage/effects/
+uncosted under `(session, run, None)` per §3.2.
+
+A model request whose canonical JSON has no usable top-level `"model"` string
+(missing, empty, oversized, or containing a NUL byte, per the kernel's shared
+label validity rule) still gets a pending entry — with `model: None` — and a
+`billing_model_name_invalid` diagnostic is stored. Its eventual settlement
+aggregates under `model: None` like any other effect with no model name; this
+is not counted as unattributed, since the origin (including its `None`
+provider/model) was tracked.
 
 ### 3.2 Aggregation
 
@@ -82,7 +100,9 @@ On `EffectCompleted` (and `EffectFailed`) with `usage`:
 - If `usage.cost()` is `Some(cost)`: the spend cell
   `(unit, pricing_policy_version)` under that key gets
   `micros += u128::from(cost.micros())`, `costed_effects += 1`. The provider
-  `ComponentRef` seen first for the key is retained for reporting.
+  `ComponentRef` seen first for the key is retained for reporting — spend from
+  the same `(session, run, model)` key later served by a different provider is
+  still attributed to that first provider (first-provider-wins).
 - Else: `uncosted_effects += 1` on the key.
 
 The attribution map is bounded (`max_entries`, constructor argument, clamped to
@@ -113,7 +133,7 @@ a billing projection must not silently lose committed spend for keys it has.
 ```rust
 pub enum BillingObserverError { Configuration { reason: &'static str } }
 
-pub struct BillingObserver { /* descriptor, queue, Mutex<LedgerState>, AtomicU64 dropped, Mutex<Option<ObserverDiagnostic>> */ }
+pub struct BillingObserver { /* descriptor, queue, Mutex<LedgerState>, max_entries, Mutex<Option<ObserverDiagnostic>> */ }
 
 impl BillingObserver {
     /// queue_capacity, backpressure as the metrics leaf; max_entries bounds distinct
@@ -128,14 +148,15 @@ impl BillingObserver {
 impl Observer for BillingObserver { /* descriptor(), observe() — sync ingest under mutex, Box::pin(async Ok) */ }
 
 pub const BILLING_LEDGER_SATURATED: ObserverDiagnostic; // code "billing_ledger_saturated"
-pub const BILLING_PENDING_SATURATED: ObserverDiagnostic; // code "billing_pending_saturated"
+pub const BILLING_PENDING_SATURATED: ObserverDiagnostic; // code "billing_pending_saturated" (oldest pending origin evicted)
+pub const BILLING_MODEL_NAME_INVALID: ObserverDiagnostic; // code "billing_model_name_invalid"
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendEntry {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub model: Option<Arc<str>>,
-    pub provider: Option<ComponentRef>,
+    pub provider: Option<ComponentRef>, // first provider seen for the key (first-provider-wins)
     pub unit: Arc<str>,
     pub pricing_policy_version: Arc<str>,
     pub micros: u128,

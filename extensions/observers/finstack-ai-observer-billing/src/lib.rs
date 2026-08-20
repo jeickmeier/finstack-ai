@@ -23,12 +23,11 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     ComponentId, ComponentRef, EffectId, EffectInput, EffectKind, EffectOutputKind, Metadata,
-    RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version,
+    RunEvent, RunEventBody, RunEventKind, RunId, SessionId, Usage, Version, label_is_valid,
 };
 use finstack_ai_runtime::{
     OBSERVER_QUEUE_OVERFLOW, Observer, ObserverBackpressure, ObserverDescriptor,
@@ -43,19 +42,23 @@ pub const BILLING_LEDGER_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
     detail: "billing ledger entry bound reached; new attribution keys dropped",
 };
 
-/// Diagnostic stored when the pending-attribution bound rejects tracking a
-/// new model effect.
+/// Diagnostic stored when the pending-attribution bound evicts the oldest
+/// tracked model effect to make room for a new one.
 pub const BILLING_PENDING_SATURATED: ObserverDiagnostic = ObserverDiagnostic {
     code: "billing_pending_saturated",
-    detail: "billing pending-attribution bound reached; new model effects will aggregate unattributed",
+    detail: "billing pending-attribution bound reached; oldest pending origins are evicted",
+};
+
+/// Diagnostic stored when a model request yields no usable model name.
+pub const BILLING_MODEL_NAME_INVALID: ObserverDiagnostic = ObserverDiagnostic {
+    code: "billing_model_name_invalid",
+    detail: "model request had no usable top-level model name; spend will aggregate under model none",
 };
 
 /// Maximum distinct attribution keys accepted by the ledger.
 const MAX_ENTRIES_CEILING: usize = 1_000_000;
 /// Pending model effects tracked for attribution.
 const MAX_PENDING_EFFECTS: usize = 4096;
-/// Longest model-name string accepted from a request payload.
-const MAX_MODEL_NAME_BYTES: usize = 256;
 
 /// Billing-observer construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -113,7 +116,10 @@ pub struct SpendEntry {
     pub run_id: RunId,
     /// Model name parsed from the model request, when known.
     pub model: Option<Arc<str>>,
-    /// Provider component, when known.
+    /// Provider component, when known. This is the FIRST provider seen for
+    /// this attribution key: spend from the same (session, run, model) later
+    /// served by a different provider is still attributed to the first
+    /// provider observed.
     pub provider: Option<ComponentRef>,
     /// Cost unit (for example an ISO currency code).
     pub unit: Arc<str>,
@@ -170,7 +176,6 @@ pub struct BillingObserver {
     queue: ObserverQueue<()>,
     state: Mutex<LedgerState>,
     max_entries: usize,
-    dropped: AtomicU64,
     diagnostic: Mutex<Option<ObserverDiagnostic>>,
 }
 
@@ -220,15 +225,15 @@ impl BillingObserver {
             })?,
             state: Mutex::new(LedgerState::default()),
             max_entries,
-            dropped: AtomicU64::new(0),
             diagnostic: Mutex::new(None),
         })
     }
 
-    /// Cumulative adapter-queue drops.
+    /// Cumulative adapter-queue drops. The queue counts every drop, including
+    /// disconnected/poisoned pushes.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed) + self.queue.dropped()
+        self.queue.dropped()
     }
 
     /// Last overflow or saturation diagnostic.
@@ -325,6 +330,29 @@ impl BillingObserver {
     }
 
     fn ingest(&self, event: &RunEvent) {
+        // Compute the EffectRequested origin (provider + model name) before
+        // taking the state lock; the parse work does not need the lock held.
+        let mut model_name_invalid = false;
+        let requested_origin =
+            if let (RunEventKind::EffectRequested, RunEventBody::EffectRequested(body)) =
+                (event.kind(), event.body())
+                && body.kind() == EffectKind::Model
+            {
+                let provider = body.component().map(|invocation| {
+                    ComponentRef::new(invocation.component.clone(), Some(invocation.version))
+                });
+                let model = match body.input() {
+                    EffectInput::Model { request } => parse_model_name(request.as_str()),
+                    _ => None,
+                };
+                if model.is_none() {
+                    model_name_invalid = true;
+                }
+                Some((body.effect_id(), EffectOrigin { provider, model }))
+            } else {
+                None
+            };
+
         let Ok(mut state) = self.state.lock() else {
             return;
         };
@@ -345,23 +373,12 @@ impl BillingObserver {
                 }
             }
             RunEventKind::EffectRequested => {
-                if let RunEventBody::EffectRequested(body) = event.body()
-                    && body.kind() == EffectKind::Model
-                {
+                if let Some((effect_id, origin)) = requested_origin {
                     if state.pending.len() >= MAX_PENDING_EFFECTS {
                         pending_saturated = true;
-                    } else {
-                        let provider = body.component().map(|invocation| {
-                            ComponentRef::new(invocation.component.clone(), Some(invocation.version))
-                        });
-                        let model = match body.input() {
-                            EffectInput::Model { request } => parse_model_name(request.as_str()),
-                            _ => None,
-                        };
-                        state
-                            .pending
-                            .insert(body.effect_id(), EffectOrigin { provider, model });
+                        state.pending.pop_first();
                     }
+                    state.pending.insert(effect_id, origin);
                 }
             }
             RunEventKind::EffectFailed => {
@@ -377,11 +394,14 @@ impl BillingObserver {
                     );
                 }
             }
-            RunEventKind::EffectDeferred | RunEventKind::EffectCancelled => {
+            RunEventKind::EffectCancelled => {
                 if let Some(effect_id) = event.effect_id() {
                     state.pending.remove(&effect_id);
                 }
             }
+            // `EffectDeferred` intentionally falls through here: deferral
+            // then completion under the same EffectId is the kernel's
+            // intended lifecycle, so the pending origin must survive it.
             _ => {}
         }
         drop(state);
@@ -391,25 +411,14 @@ impl BillingObserver {
         if pending_saturated && let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(BILLING_PENDING_SATURATED);
         }
-    }
-
-    /// Record a drop already counted by `self.queue.dropped()`. Only the
-    /// diagnostic is latched here; counting it again would double the total
-    /// returned by [`Self::dropped`].
-    fn record_overflow(&self) {
-        if let Ok(mut slot) = self.diagnostic.lock() {
-            *slot = Some(OBSERVER_QUEUE_OVERFLOW);
+        if model_name_invalid && let Ok(mut slot) = self.diagnostic.lock() {
+            *slot = Some(BILLING_MODEL_NAME_INVALID);
         }
     }
 
-    /// Record a drop the queue does not count itself: [`ObserverQueue::push`]
-    /// only increments its own counter on [`ObserverQueuePush::Dropped`] and
-    /// on [`ObserverError::CapacityExceeded`] (the `Disconnect` policy); an
-    /// [`ObserverError::Unavailable`] push (already disconnected, or a
-    /// poisoned lock) never touches the queue's counter, so the adapter must
-    /// count it to keep `dropped()` accurate.
-    fn record_uncounted_drop(&self) {
-        self.dropped.fetch_add(1, Ordering::Relaxed);
+    /// Record a drop already counted by `self.queue.dropped()`. Only the
+    /// diagnostic is latched here; the queue counts every drop itself.
+    fn record_overflow(&self) {
         if let Ok(mut slot) = self.diagnostic.lock() {
             *slot = Some(OBSERVER_QUEUE_OVERFLOW);
         }
@@ -432,7 +441,7 @@ impl Observer for BillingObserver {
                     return Box::pin(async move { Err(ObserverError::CapacityExceeded) });
                 }
                 Err(error) => {
-                    self.record_uncounted_drop();
+                    self.record_overflow();
                     return Box::pin(async move { Err(error) });
                 }
             }
@@ -540,7 +549,7 @@ fn push_line(out: &mut String, value: &serde_json::Value) {
 fn parse_model_name(request: &str) -> Option<Arc<str>> {
     let value: serde_json::Value = serde_json::from_str(request).ok()?;
     let name = value.get("model")?.as_str()?;
-    if name.is_empty() || name.len() > MAX_MODEL_NAME_BYTES {
+    if !label_is_valid(name) {
         return None;
     }
     Some(Arc::from(name))

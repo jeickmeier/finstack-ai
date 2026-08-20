@@ -292,6 +292,10 @@ async fn oversized_or_missing_model_names_fall_back_to_none() {
     assert!(snapshot.usage[0].model.is_none());
     assert_eq!(snapshot.usage[0].effects, 2);
     assert_eq!(snapshot.unattributed_effects, 0);
+    assert_eq!(
+        billing.last_diagnostic().expect("diagnostic").code,
+        "billing_model_name_invalid"
+    );
 }
 
 fn session_event(session: u64, sequence: u64, effect: u64, body: RunEventBody) -> RunEvent {
@@ -396,14 +400,15 @@ async fn export_jsonl_renders_decimal_strings_and_no_payloads() {
 }
 
 #[tokio::test]
-async fn pending_map_saturation_is_diagnosed_and_new_origins_are_unattributed() {
+async fn pending_map_saturation_evicts_oldest_and_new_origins_still_attribute() {
     let billing =
         BillingObserver::try_new(16_384, ObserverBackpressure::DropProgress, 1_000_000)
             .expect("billing");
     // Fill the pending-attribution bound (4096) with distinct model-effect
-    // requests that never settle, then request one more to trip saturation.
+    // requests that never settle, then request one more to trip eviction.
     let mut events = Vec::with_capacity(4_100);
     let mut sequence = 1_u64;
+    let oldest_effect = 1_u64;
     for effect in 1..=4_096_u64 {
         events.push(model_event(
             sequence,
@@ -412,7 +417,8 @@ async fn pending_map_saturation_is_diagnosed_and_new_origins_are_unattributed() 
         ));
         sequence += 1;
     }
-    // This 4097th request finds the pending map full and is rejected.
+    // This 4097th request finds the pending map full: the oldest entry
+    // (effect 1) is evicted to make room, and this origin is tracked.
     let over_cap_effect = 5_000_u64;
     events.push(model_event(
         sequence,
@@ -428,27 +434,41 @@ async fn pending_map_saturation_is_diagnosed_and_new_origins_are_unattributed() 
         billing.last_diagnostic().expect("diagnostic").code,
         "billing_pending_saturated"
     );
-    // The rejected effect's completion lands with no attributed origin.
+    // The evicted oldest effect settles unattributed; the over-cap effect
+    // settles with its tracked attribution.
     billing
-        .observe(Arc::from([model_event(
-            sequence,
-            over_cap_effect,
-            completed(over_cap_effect, Some(usage(1, 1, None))),
-        )]))
+        .observe(Arc::from([
+            model_event(
+                sequence,
+                oldest_effect,
+                completed(oldest_effect, Some(usage(1, 1, None))),
+            ),
+            model_event(
+                sequence + 1,
+                over_cap_effect,
+                completed(over_cap_effect, Some(usage(1, 1, None))),
+            ),
+        ]))
         .await
         .expect("observe");
     let snapshot = billing.snapshot();
     assert_eq!(snapshot.unattributed_effects, 1);
-    let row = snapshot
+    let unattributed_row = snapshot
         .usage
         .iter()
         .find(|row| row.model.is_none())
         .expect("unattributed usage row");
-    assert_eq!(row.effects, 1);
+    assert_eq!(unattributed_row.effects, 1);
+    let attributed_row = snapshot
+        .usage
+        .iter()
+        .find(|row| row.model.as_deref() == Some("demo-model-1"))
+        .expect("attributed usage row");
+    assert_eq!(attributed_row.effects, 1);
 }
 
 #[tokio::test]
-async fn deferred_model_effect_still_settles_as_unattributed() {
+async fn deferred_model_effect_keeps_attribution() {
     let billing =
         BillingObserver::try_new(64, ObserverBackpressure::DropProgress, 64).expect("billing");
     billing
@@ -461,8 +481,8 @@ async fn deferred_model_effect_still_settles_as_unattributed() {
         .expect("observe");
     let snapshot = billing.snapshot();
     let row = snapshot.usage.first().expect("usage row");
-    assert!(row.model.is_none());
-    assert_eq!(snapshot.unattributed_effects, 1);
+    assert_eq!(row.model.as_deref(), Some("demo-model-1"));
+    assert_eq!(snapshot.unattributed_effects, 0);
 }
 
 #[tokio::test]
