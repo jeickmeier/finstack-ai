@@ -33,7 +33,10 @@ routes through `WorkflowSession::complete_external`. Python exposes the
 same child-run and completion surfaces. WASM `Lane.run` is exposed;
 `suspend` / `resume` stay unsupported. Isolated WASM `start_child` remains
 a residual because wasm-host has no park/respawn path. `RemoteChildSession`
-dispatch stays excluded.
+dispatch through the facade stays excluded; external peer products attach
+through dedicated invokers instead (see `finstack-ai-codex-child`, which
+runs OpenAI Codex as a child via `codex exec --json` with construction-frozen
+sandbox flags).
 
 ## Starters
 

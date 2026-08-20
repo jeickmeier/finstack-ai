@@ -1,0 +1,66 @@
+pub mod finstack_ai_store_common
+pub struct finstack_ai_store_common::AppendIdentity
+pub finstack_ai_store_common::AppendIdentity::batch_id: [u8; 16]
+pub finstack_ai_store_common::AppendIdentity::draft_cbor: alloc::vec::Vec<alloc::vec::Vec<u8>>
+pub finstack_ai_store_common::AppendIdentity::expected_sequence: u64
+pub finstack_ai_store_common::AppendIdentity::session_id: [u8; 16]
+impl core::clone::Clone for finstack_ai_store_common::AppendIdentity
+pub fn finstack_ai_store_common::AppendIdentity::clone(&self) -> finstack_ai_store_common::AppendIdentity
+impl core::cmp::Eq for finstack_ai_store_common::AppendIdentity
+impl core::cmp::PartialEq for finstack_ai_store_common::AppendIdentity
+pub fn finstack_ai_store_common::AppendIdentity::eq(&self, &finstack_ai_store_common::AppendIdentity) -> bool
+impl core::fmt::Debug for finstack_ai_store_common::AppendIdentity
+pub fn finstack_ai_store_common::AppendIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_store_common::AppendIdentity
+impl serde_core::ser::Serialize for finstack_ai_store_common::AppendIdentity
+pub fn finstack_ai_store_common::AppendIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_store_common::AppendIdentity
+pub fn finstack_ai_store_common::AppendIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_store_common::SessionUsage
+pub finstack_ai_store_common::SessionUsage::batches: usize
+pub finstack_ai_store_common::SessionUsage::records: usize
+impl core::clone::Clone for finstack_ai_store_common::SessionUsage
+pub fn finstack_ai_store_common::SessionUsage::clone(&self) -> finstack_ai_store_common::SessionUsage
+impl core::cmp::Eq for finstack_ai_store_common::SessionUsage
+impl core::cmp::PartialEq for finstack_ai_store_common::SessionUsage
+pub fn finstack_ai_store_common::SessionUsage::eq(&self, &finstack_ai_store_common::SessionUsage) -> bool
+impl core::fmt::Debug for finstack_ai_store_common::SessionUsage
+pub fn finstack_ai_store_common::SessionUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_common::SessionUsage
+impl core::marker::StructuralPartialEq for finstack_ai_store_common::SessionUsage
+pub struct finstack_ai_store_common::WindowCodes
+pub finstack_ai_store_common::WindowCodes::checksum: &'static str
+pub finstack_ai_store_common::WindowCodes::gap: &'static str
+pub finstack_ai_store_common::WindowCodes::split: &'static str
+impl core::clone::Clone for finstack_ai_store_common::WindowCodes
+pub fn finstack_ai_store_common::WindowCodes::clone(&self) -> finstack_ai_store_common::WindowCodes
+impl core::cmp::Eq for finstack_ai_store_common::WindowCodes
+impl core::cmp::PartialEq for finstack_ai_store_common::WindowCodes
+pub fn finstack_ai_store_common::WindowCodes::eq(&self, &finstack_ai_store_common::WindowCodes) -> bool
+impl core::fmt::Debug for finstack_ai_store_common::WindowCodes
+pub fn finstack_ai_store_common::WindowCodes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_store_common::WindowCodes
+impl core::marker::StructuralPartialEq for finstack_ai_store_common::WindowCodes
+pub const finstack_ai_store_common::FROM_SEQUENCE_WINDOW: finstack_ai_store_common::WindowCodes
+pub const finstack_ai_store_common::SNAPSHOT_WINDOW: finstack_ai_store_common::WindowCodes
+pub fn finstack_ai_store_common::accelerated_from(&finstack_ai_runtime::ports::journal::OpaqueSnapshot) -> core::option::Option<finstack_ai_runtime::ports::journal::AcceleratedRestore>
+pub fn finstack_ai_store_common::admit_append_limits(finstack_ai_runtime::ports::journal::StoreLimits, usize, core::option::Option<finstack_ai_store_common::SessionUsage>, usize) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::admit_prune_snapshot(u64, u64) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::admit_snapshot_sequence(u64, u64, core::option::Option<u64>) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::build_committed_batch(&finstack_ai_kernel::records::append::AppendRequest, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>) -> core::result::Result<finstack_ai_kernel::reducer::decision::CommittedBatch, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::check_append_sequence(u64, u64) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::check_batch_alignment(finstack_ai_kernel::primitives::ids::AppendBatchId, core::option::Option<finstack_ai_kernel::primitives::ids::AppendBatchId>, finstack_ai_store_common::WindowCodes) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::check_snapshot_size(usize, usize) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::classify_record_reuse(&[finstack_ai_kernel::primitives::ids::AppendBatchId], usize) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::ids::AppendBatchId>, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::encode_state_request(&finstack_ai_runtime::ports::journal::StateSnapshotRequest, usize) -> core::result::Result<finstack_ai_runtime::ports::journal::OpaqueSnapshot, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::outstanding_count(&finstack_ai_runtime::ports::journal::AcceleratedRestore) -> u64
+pub fn finstack_ai_store_common::protocol_error(finstack_ai_protocol::error::ProtocolError) -> finstack_ai_runtime::ports::journal::StoreError
+pub fn finstack_ai_store_common::request_cbor(&finstack_ai_kernel::records::append::AppendRequest) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::request_identity(&finstack_ai_kernel::records::append::AppendRequest) -> core::result::Result<finstack_ai_store_common::AppendIdentity, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::scan_next_sequence(&[finstack_ai_kernel::records::envelope::RecordEnvelope], bool) -> core::option::Option<u64>
+pub const fn finstack_ai_store_common::scan_start(u64) -> u64
+pub fn finstack_ai_store_common::select_tail_batches(&[finstack_ai_kernel::reducer::decision::CommittedBatch], u64, finstack_ai_store_common::WindowCodes) -> core::result::Result<&[finstack_ai_kernel::reducer::decision::CommittedBatch], finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::tombstone_count(&finstack_ai_runtime::ports::journal::AcceleratedRestore) -> u64
+pub fn finstack_ai_store_common::validate_scan_limit(u32) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::verify_full_head(&[finstack_ai_kernel::records::envelope::RecordEnvelope], core::option::Option<finstack_ai_kernel::primitives::digest::Digest>) -> core::result::Result<core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_runtime::ports::journal::StoreError>
+pub fn finstack_ai_store_common::verify_tail_records(&[finstack_ai_kernel::records::envelope::RecordEnvelope], u64, finstack_ai_kernel::primitives::digest::Digest, u64, core::option::Option<finstack_ai_kernel::primitives::digest::Digest>, finstack_ai_store_common::WindowCodes) -> core::result::Result<(), finstack_ai_runtime::ports::journal::StoreError>

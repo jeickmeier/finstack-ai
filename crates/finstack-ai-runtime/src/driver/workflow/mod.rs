@@ -379,6 +379,7 @@ pub struct WorkflowSession {
     approval_grant: ApprovalGrantMode,
     owner: Option<RunTaskOwner>,
     last_state: KernelState,
+    drive_timeout: Duration,
 }
 
 impl WorkflowSession {
@@ -429,6 +430,7 @@ impl WorkflowSession {
             approval_grant: ApprovalGrantMode::PerCall,
             owner: None,
             last_state: coordinator.state().clone(),
+            drive_timeout: Duration::from_secs(2),
         })
     }
 
@@ -500,6 +502,19 @@ impl WorkflowSession {
         self
     }
 
+    /// Override the [`Self::drive_until_wait`] poll bound. Default is 2 s.
+    #[must_use]
+    pub const fn with_drive_timeout(mut self, timeout: Duration) -> Self {
+        self.drive_timeout = timeout;
+        self
+    }
+
+    /// Current [`Self::drive_until_wait`] poll bound.
+    #[must_use]
+    pub const fn drive_timeout(&self) -> Duration {
+        self.drive_timeout
+    }
+
     /// Durable locator captured from the session handle.
     #[must_use]
     pub fn locator(&self) -> &OperationLocator {
@@ -530,7 +545,7 @@ impl WorkflowSession {
     ///
     /// Returns recover, spawn, port, or poll-bound failures.
     pub async fn drive_until_wait(&mut self) -> Result<WorkflowWait, WorkflowDriverError> {
-        tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::time::timeout(self.drive_timeout, async {
             loop {
                 self.refresh_state().await?;
                 if let Some(wait) = classify_wait(&self.last_state) {

@@ -6,6 +6,7 @@ use finstack_ai_runtime::{
     ScanPage, ScanRequest, SnapshotReceipt, SnapshotRequest, StateSnapshotRequest, StoreError,
     WriteMetadataRequest,
 };
+use finstack_ai_store_common::{admit_prune_snapshot, admit_snapshot_sequence, check_snapshot_size};
 use rusqlite::{Transaction, TransactionBehavior, params};
 
 use crate::append::append_in_transaction;
@@ -326,31 +327,18 @@ impl WorkerCtx {
         &mut self,
         request: &SnapshotRequest,
     ) -> Result<SnapshotReceipt, StoreError> {
-        if request.snapshot.bytes().len() > self.limits.snapshot_bytes {
-            return Err(StoreError::LimitExceeded {
-                resource: "snapshot_bytes",
-                limit: self.limits.snapshot_bytes,
-            });
-        }
+        check_snapshot_size(request.snapshot.bytes().len(), self.limits.snapshot_bytes)?;
         self.with_immediate(|transaction| {
             let session = load_session_row(transaction, request.session_id)?.ok_or(
                 StoreError::InvalidRequest {
                     reason_code: "snapshot_session_not_found",
                 },
             )?;
-            if request.snapshot.sequence() > session.current_sequence {
-                return Err(StoreError::InvalidRequest {
-                    reason_code: "snapshot_ahead_of_journal",
-                });
-            }
-            if session
-                .snapshot_sequence
-                .is_some_and(|current| current > request.snapshot.sequence())
-            {
-                return Err(StoreError::InvalidRequest {
-                    reason_code: "snapshot_sequence_regression",
-                });
-            }
+            admit_snapshot_sequence(
+                request.snapshot.sequence(),
+                session.current_sequence,
+                session.snapshot_sequence,
+            )?;
             let receipt = SnapshotReceipt {
                 session_id: request.session_id,
                 sequence: request.snapshot.sequence(),
@@ -408,11 +396,10 @@ impl WorkerCtx {
                     reason_code: "prune_requires_snapshot",
                 },
             )?;
-            if snapshot.sequence() == 0 || snapshot.sequence() > session.current_sequence {
-                return Err(StoreError::InvalidRequest {
-                    reason_code: "prune_snapshot_not_aligned",
-                });
-            }
+            admit_prune_snapshot(snapshot.sequence(), session.current_sequence)?;
+            // Alignment rule twin: the memory store enforces the same
+            // "snapshot ends exactly at a batch's last_sequence" predicate over
+            // its in-memory batch list (lib.rs prune_sync); change both together.
             let aligned: i64 = transaction
                 .query_row(
                     "SELECT COUNT(*) FROM batches

@@ -96,6 +96,13 @@ unpublished.
   Modality support differs by provider: OpenRouter and OpenAI accept
   images, files, and audio; Anthropic accepts images and documents but
   not audio; Ollama accepts base64 images only.
+- Add `finstack-ai-store-common`: shared journal-store semantics (append
+  admission, snapshot/prune admission, chain and window verification, scan
+  validation) now used by both the memory and sqlite stores.
+- Fix the sqlite store to reject tail-window loads that start mid-batch
+  (`load_from_splits_batch` / `snapshot_splits_batch`) instead of returning a
+  reconstructed batch that splits a committed one; unify the memory store's
+  hole-at-start code to the `gap` reason codes.
 
 ### Changed
 

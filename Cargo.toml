@@ -9,6 +9,7 @@ members = [
     "crates/finstack-ai-test",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
+    "extensions/stores/finstack-ai-store-common",
     "extensions/stores/finstack-ai-store-memory",
     "extensions/stores/finstack-ai-store-sqlite",
     "extensions/stores/finstack-ai-store-object-s3",
@@ -35,11 +36,15 @@ members = [
     "extensions/middleware/finstack-ai-middleware-compaction",
     "extensions/middleware/finstack-ai-middleware-verify",
     "extensions/middleware/finstack-ai-middleware-document-ingest",
+    "extensions/middleware/finstack-ai-middleware-redaction",
     "extensions/observers/finstack-ai-observer-log",
     "extensions/observers/finstack-ai-observer-otel",
     "extensions/observers/finstack-ai-observer-metrics",
+    "extensions/observers/finstack-ai-observer-notify",
+    "extensions/interop/finstack-ai-codex-child",
     "extensions/interop/finstack-ai-remote-child",
     "extensions/workflow/finstack-ai-workflow-local",
+    "extensions/workflow/finstack-ai-workflow-worker",
     "examples/rust-minimal",
     "examples/durable-interaction",
     "fixtures/ci/model-port-leaf",
@@ -113,6 +118,7 @@ finstack-ai-server = { path = "crates/finstack-ai-server", version = "1.0.0" }
 rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "1.0.0" }
+finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "1.0.0" }
 finstack-ai-store-memory = { path = "extensions/stores/finstack-ai-store-memory", version = "1.0.0" }
 finstack-ai-store-sqlite = { path = "extensions/stores/finstack-ai-store-sqlite", version = "1.0.0" }
 finstack-ai-store-object-s3 = { path = "extensions/stores/finstack-ai-store-object-s3", version = "1.0.0" }
@@ -143,11 +149,16 @@ finstack-ai-context-repository = { path = "extensions/context/finstack-ai-contex
 finstack-ai-middleware-compaction = { path = "extensions/middleware/finstack-ai-middleware-compaction", version = "1.0.0" }
 finstack-ai-middleware-verify = { path = "extensions/middleware/finstack-ai-middleware-verify", version = "1.0.0" }
 finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstack-ai-middleware-document-ingest", version = "1.0.0" }
+finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "1.0.0" }
+# ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
+regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "1.0.0" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "1.0.0" }
 finstack-ai-observer-metrics = { path = "extensions/observers/finstack-ai-observer-metrics", version = "1.0.0" }
+finstack-ai-observer-notify = { path = "extensions/observers/finstack-ai-observer-notify", version = "1.0.0" }
 finstack-ai-remote-child = { path = "extensions/interop/finstack-ai-remote-child", version = "1.0.0" }
 finstack-ai-workflow-local = { path = "extensions/workflow/finstack-ai-workflow-local", version = "1.0.0" }
+finstack-ai-workflow-worker = { path = "extensions/workflow/finstack-ai-workflow-worker", version = "1.0.0" }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.32.0", default-features = false, features = ["trace"] }
 finstack-ai-wit = { path = "plugins/finstack-ai-wit", version = "1.0.0" }

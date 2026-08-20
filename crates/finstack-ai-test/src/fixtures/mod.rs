@@ -6,4 +6,5 @@ pub(crate) mod kernel;
 pub(crate) mod message;
 pub(crate) mod public_api;
 pub(crate) mod records;
+pub mod store;
 pub(crate) mod trace;

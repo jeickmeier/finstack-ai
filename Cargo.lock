@@ -1090,6 +1090,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-codex-child"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-context-repository"
 version = "1.0.0"
 dependencies = [
@@ -1191,6 +1205,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-middleware-redaction"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "thiserror",
+]
+
+[[package]]
 name = "finstack-ai-middleware-verify"
 version = "1.0.0"
 dependencies = [
@@ -1252,6 +1279,20 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-observer-notify"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "reqwest",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -1471,12 +1512,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-store-common"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-protocol",
+ "finstack-ai-runtime",
+ "finstack-ai-test",
+ "serde",
+]
+
+[[package]]
 name = "finstack-ai-store-memory"
 version = "1.0.0"
 dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
+ "finstack-ai-test",
 ]
 
 [[package]]
@@ -1517,6 +1571,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-protocol",
  "finstack-ai-runtime",
+ "finstack-ai-store-common",
  "finstack-ai-test",
  "rusqlite",
  "serde",
@@ -1773,6 +1828,24 @@ dependencies = [
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "rusqlite",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-workflow-worker"
+version = "1.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "finstack-ai-workflow-local",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

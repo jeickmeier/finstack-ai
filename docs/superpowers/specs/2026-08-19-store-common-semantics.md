@@ -71,7 +71,10 @@ mechanism and must pass unchanged (with one deliberate exception below).
      unchanged.
   2. *Mid-batch start*: the requested start falls strictly inside a stored
      batch (the record at `start - 1` belongs to the same batch). Memory
-     errors with the `split` code; sqlite today silently returns a
+     errors with the `split` code — except when the start falls inside the
+     *last* committed batch, where memory's `position()` search found no
+     batch and fell through to the `gap` code; that sub-case also unifies to
+     `split`. Sqlite today silently returns a
      reconstructed batch that splits the stored one, violating the port
      contract ("`from_sequence` must land on a batch boundary") and the
      runtime default impl. Unify to the `split` error; this fixes a sqlite

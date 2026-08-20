@@ -1,0 +1,112 @@
+pub mod finstack_ai_codex_child
+pub enum finstack_ai_codex_child::CodexChildError
+pub finstack_ai_codex_child::CodexChildError::Configuration
+pub finstack_ai_codex_child::CodexChildError::Configuration::reason: &'static str
+impl core::clone::Clone for finstack_ai_codex_child::CodexChildError
+pub fn finstack_ai_codex_child::CodexChildError::clone(&self) -> finstack_ai_codex_child::CodexChildError
+impl core::cmp::Eq for finstack_ai_codex_child::CodexChildError
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexChildError
+pub fn finstack_ai_codex_child::CodexChildError::eq(&self, &finstack_ai_codex_child::CodexChildError) -> bool
+impl core::error::Error for finstack_ai_codex_child::CodexChildError
+impl core::fmt::Debug for finstack_ai_codex_child::CodexChildError
+pub fn finstack_ai_codex_child::CodexChildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_codex_child::CodexChildError
+pub fn finstack_ai_codex_child::CodexChildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexChildError
+pub enum finstack_ai_codex_child::CodexRunStatus
+pub finstack_ai_codex_child::CodexRunStatus::Cancelled
+pub finstack_ai_codex_child::CodexRunStatus::Completed
+pub finstack_ai_codex_child::CodexRunStatus::Failed
+pub finstack_ai_codex_child::CodexRunStatus::Running
+impl core::clone::Clone for finstack_ai_codex_child::CodexRunStatus
+pub fn finstack_ai_codex_child::CodexRunStatus::clone(&self) -> finstack_ai_codex_child::CodexRunStatus
+impl core::cmp::Eq for finstack_ai_codex_child::CodexRunStatus
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexRunStatus
+pub fn finstack_ai_codex_child::CodexRunStatus::eq(&self, &finstack_ai_codex_child::CodexRunStatus) -> bool
+impl core::fmt::Debug for finstack_ai_codex_child::CodexRunStatus
+pub fn finstack_ai_codex_child::CodexRunStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_codex_child::CodexRunStatus
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexRunStatus
+pub enum finstack_ai_codex_child::CodexSandboxMode
+pub finstack_ai_codex_child::CodexSandboxMode::DangerFullAccess
+pub finstack_ai_codex_child::CodexSandboxMode::ReadOnly
+pub finstack_ai_codex_child::CodexSandboxMode::WorkspaceWrite
+impl finstack_ai_codex_child::CodexSandboxMode
+pub const fn finstack_ai_codex_child::CodexSandboxMode::flag(self) -> &'static str
+impl core::clone::Clone for finstack_ai_codex_child::CodexSandboxMode
+pub fn finstack_ai_codex_child::CodexSandboxMode::clone(&self) -> finstack_ai_codex_child::CodexSandboxMode
+impl core::cmp::Eq for finstack_ai_codex_child::CodexSandboxMode
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexSandboxMode
+pub fn finstack_ai_codex_child::CodexSandboxMode::eq(&self, &finstack_ai_codex_child::CodexSandboxMode) -> bool
+impl core::fmt::Debug for finstack_ai_codex_child::CodexSandboxMode
+pub fn finstack_ai_codex_child::CodexSandboxMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_codex_child::CodexSandboxMode
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexSandboxMode
+pub struct finstack_ai_codex_child::CodexChildInvoker
+impl finstack_ai_codex_child::CodexChildInvoker
+pub fn finstack_ai_codex_child::CodexChildInvoker::run_status(&self, &finstack_ai_kernel::primitives::ids::RunId) -> core::option::Option<finstack_ai_codex_child::CodexRunReport>
+pub fn finstack_ai_codex_child::CodexChildInvoker::try_new(finstack_ai_codex_child::CodexExecConfig) -> core::result::Result<Self, finstack_ai_codex_child::CodexChildError>
+impl core::fmt::Debug for finstack_ai_codex_child::CodexChildInvoker
+pub fn finstack_ai_codex_child::CodexChildInvoker::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_runtime::services::agent_invoker::AgentInvoker for finstack_ai_codex_child::CodexChildInvoker
+pub fn finstack_ai_codex_child::CodexChildInvoker::cancel(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::services::agent_invoker::AgentInvokeError>>
+pub fn finstack_ai_codex_child::CodexChildInvoker::start_or_attach(&self, finstack_ai_runtime::services::agent_invoker::ChildRunContext, finstack_ai_runtime::services::agent_invoker::ChildRunRequest) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::services::agent_invoker::ChildRunHandle, finstack_ai_runtime::services::agent_invoker::AgentInvokeError>>
+pub struct finstack_ai_codex_child::CodexExecConfig
+pub finstack_ai_codex_child::CodexExecConfig::binary: std::path::PathBuf
+pub finstack_ai_codex_child::CodexExecConfig::extra_args: alloc::vec::Vec<alloc::string::String>
+pub finstack_ai_codex_child::CodexExecConfig::sandbox: finstack_ai_codex_child::CodexSandboxMode
+pub finstack_ai_codex_child::CodexExecConfig::skip_git_repo_check: bool
+pub finstack_ai_codex_child::CodexExecConfig::workspace_root: std::path::PathBuf
+impl core::clone::Clone for finstack_ai_codex_child::CodexExecConfig
+pub fn finstack_ai_codex_child::CodexExecConfig::clone(&self) -> finstack_ai_codex_child::CodexExecConfig
+impl core::cmp::Eq for finstack_ai_codex_child::CodexExecConfig
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexExecConfig
+pub fn finstack_ai_codex_child::CodexExecConfig::eq(&self, &finstack_ai_codex_child::CodexExecConfig) -> bool
+impl core::fmt::Debug for finstack_ai_codex_child::CodexExecConfig
+pub fn finstack_ai_codex_child::CodexExecConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexExecConfig
+pub struct finstack_ai_codex_child::CodexRunReport
+pub finstack_ai_codex_child::CodexRunReport::exit_code: core::option::Option<i32>
+pub finstack_ai_codex_child::CodexRunReport::last_message: core::option::Option<alloc::string::String>
+pub finstack_ai_codex_child::CodexRunReport::status: finstack_ai_codex_child::CodexRunStatus
+pub finstack_ai_codex_child::CodexRunReport::stderr_tail: core::option::Option<alloc::string::String>
+pub finstack_ai_codex_child::CodexRunReport::thread_id: core::option::Option<alloc::string::String>
+pub finstack_ai_codex_child::CodexRunReport::usage: core::option::Option<finstack_ai_codex_child::CodexUsage>
+impl core::clone::Clone for finstack_ai_codex_child::CodexRunReport
+pub fn finstack_ai_codex_child::CodexRunReport::clone(&self) -> finstack_ai_codex_child::CodexRunReport
+impl core::cmp::Eq for finstack_ai_codex_child::CodexRunReport
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexRunReport
+pub fn finstack_ai_codex_child::CodexRunReport::eq(&self, &finstack_ai_codex_child::CodexRunReport) -> bool
+impl core::fmt::Debug for finstack_ai_codex_child::CodexRunReport
+pub fn finstack_ai_codex_child::CodexRunReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexRunReport
+pub struct finstack_ai_codex_child::CodexToolset
+impl finstack_ai_codex_child::CodexToolset
+pub fn finstack_ai_codex_child::CodexToolset::try_new(alloc::sync::Arc<finstack_ai_codex_child::CodexChildInvoker>) -> core::result::Result<Self, finstack_ai_codex_child::CodexChildError>
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_codex_child::CodexToolset
+pub fn finstack_ai_codex_child::CodexToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_codex_child::CodexToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_codex_child::CodexToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_codex_child::CodexUsage
+pub finstack_ai_codex_child::CodexUsage::cached_input_tokens: u64
+pub finstack_ai_codex_child::CodexUsage::input_tokens: u64
+pub finstack_ai_codex_child::CodexUsage::output_tokens: u64
+impl core::clone::Clone for finstack_ai_codex_child::CodexUsage
+pub fn finstack_ai_codex_child::CodexUsage::clone(&self) -> finstack_ai_codex_child::CodexUsage
+impl core::cmp::Eq for finstack_ai_codex_child::CodexUsage
+impl core::cmp::PartialEq for finstack_ai_codex_child::CodexUsage
+pub fn finstack_ai_codex_child::CodexUsage::eq(&self, &finstack_ai_codex_child::CodexUsage) -> bool
+impl core::default::Default for finstack_ai_codex_child::CodexUsage
+pub fn finstack_ai_codex_child::CodexUsage::default() -> finstack_ai_codex_child::CodexUsage
+impl core::fmt::Debug for finstack_ai_codex_child::CodexUsage
+pub fn finstack_ai_codex_child::CodexUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_codex_child::CodexUsage
+impl core::marker::StructuralPartialEq for finstack_ai_codex_child::CodexUsage
+impl serde_core::ser::Serialize for finstack_ai_codex_child::CodexUsage
+pub fn finstack_ai_codex_child::CodexUsage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub const finstack_ai_codex_child::CODEX_CHILD_NOT_FOUND: &str
+pub const finstack_ai_codex_child::CODEX_CONFIGURATION_INVALID: &str
+pub const finstack_ai_codex_child::CODEX_INVALID_ARGUMENTS: &str
+pub const finstack_ai_codex_child::CODEX_PEER_AGENT_ID: &str
+pub fn finstack_ai_codex_child::codex_agent_ref() -> core::result::Result<finstack_ai_runtime::services::agent_invoker::AgentRef, finstack_ai_codex_child::CodexChildError>
+pub fn finstack_ai_codex_child::codex_route_ref() -> core::result::Result<finstack_ai_kernel::records::run::child::RemoteRouteRef, finstack_ai_codex_child::CodexChildError>

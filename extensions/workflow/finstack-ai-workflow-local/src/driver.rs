@@ -93,6 +93,12 @@ impl LocalWorkflowDriver {
         &mut self.session
     }
 
+    /// Unwrap the inner session, dropping adapter cron state.
+    #[must_use]
+    pub fn into_session(self) -> WorkflowSession {
+        self.session
+    }
+
     /// Catch-up fires recorded by the last [`Self::attach`].
     #[must_use]
     pub fn catch_up_fires(&self) -> &[CronFire] {

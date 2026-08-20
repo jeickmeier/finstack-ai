@@ -3784,6 +3784,7 @@ pub fn finstack_ai_runtime::WorkflowSession::abort_owner(&mut self)
 pub async fn finstack_ai_runtime::WorkflowSession::attach(alloc::sync::Arc<dyn finstack_ai_runtime::JournalStore>, finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai_runtime::ExternalClock, u64, alloc::sync::Arc<finstack_ai_runtime::SecurityAuditGate>) -> core::result::Result<Self, finstack_ai_runtime::WorkflowDriverError>
 pub fn finstack_ai_runtime::WorkflowSession::clock(&self) -> &finstack_ai_runtime::ExternalClock
 pub async fn finstack_ai_runtime::WorkflowSession::complete_external(&self, finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<finstack_ai_runtime::ExternalRouteOutcome, finstack_ai_runtime::WorkflowDriverError>
+pub const fn finstack_ai_runtime::WorkflowSession::drive_timeout(&self) -> core::time::Duration
 pub async fn finstack_ai_runtime::WorkflowSession::drive_until_wait(&mut self) -> core::result::Result<finstack_ai_runtime::WorkflowWait, finstack_ai_runtime::WorkflowDriverError>
 pub async fn finstack_ai_runtime::WorkflowSession::ensure_owner(&mut self) -> core::result::Result<(), finstack_ai_runtime::WorkflowDriverError>
 pub const fn finstack_ai_runtime::WorkflowSession::last_state(&self) -> &finstack_ai_kernel::state::KernelState
@@ -3799,6 +3800,7 @@ pub async fn finstack_ai_runtime::WorkflowSession::trusted(alloc::sync::Arc<dyn 
 pub fn finstack_ai_runtime::WorkflowSession::with_approval_grant(self, finstack_ai_runtime::ApprovalGrantMode) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_capability_owners(self, alloc::sync::Arc<alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::ids::CapabilityId>>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_context_providers(self, alloc::sync::Arc<[alloc::sync::Arc<dyn finstack_ai_runtime::ContextProvider>]>) -> Self
+pub const fn finstack_ai_runtime::WorkflowSession::with_drive_timeout(self, core::time::Duration) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_middleware_chain(self, alloc::sync::Arc<finstack_ai_runtime::ResolvedMiddlewareChain>) -> Self
 pub fn finstack_ai_runtime::WorkflowSession::with_ports(self, alloc::sync::Arc<dyn finstack_ai_runtime::Model>, finstack_ai_runtime::LockedModelContextProfile, core::option::Option<alloc::sync::Arc<finstack_ai_runtime::ResolvedToolCatalog>>) -> Self
 pub struct finstack_ai_runtime::WriteMetadataRequest
