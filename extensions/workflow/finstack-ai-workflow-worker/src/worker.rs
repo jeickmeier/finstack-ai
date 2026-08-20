@@ -17,8 +17,8 @@ use finstack_ai_kernel::{
     Timestamp, UNIX_EPOCH,
 };
 use finstack_ai_runtime::{
-    Clock, ExternalClock, JournalStore, WorkflowDriverError, WorkflowSession, WorkflowWait,
-    classify_wait,
+    Clock, ExternalClock, JournalStore, SystemClock, WorkflowDriverError, WorkflowSession,
+    WorkflowWait, classify_wait,
 };
 use finstack_ai_workflow_local::{CronFire, CronSchedule, CronScheduleStore};
 use serde::Serialize;
@@ -597,5 +597,51 @@ impl WorkflowWorker {
         let retry_at = lease_deadline(now, backoff_ms)?;
         self.wake
             .record_failure(row.tenant_scope.as_ref(), row.session_id, retry_at)
+    }
+
+    /// Run the tick loop every `poll_interval`, pumping the clock from
+    /// [`SystemClock`] before each tick.
+    ///
+    /// Each iteration reads the wall clock and feeds it to [`Self::clock`];
+    /// a clock read failure skips that tick rather than aborting the loop.
+    /// [`Self::tick`] already isolates per-item failures, so a tick error is
+    /// likewise swallowed: the loop itself never panics or exits early.
+    #[must_use]
+    pub fn spawn(self: Arc<Self>, poll_interval: Duration) -> WorkerHandle {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        let join = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(poll_interval);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Ok(now) = SystemClock.now() {
+                            self.clock.set(now);
+                            let _ = self.tick().await;
+                        }
+                    }
+                    _ = shutdown_rx.changed() => break,
+                }
+            }
+        });
+        WorkerHandle {
+            shutdown: shutdown_tx,
+            join,
+        }
+    }
+}
+
+/// Handle to a spawned worker loop.
+pub struct WorkerHandle {
+    /// Signals the loop to stop after its current tick.
+    shutdown: tokio::sync::watch::Sender<bool>,
+    /// Join handle for the spawned loop task.
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl WorkerHandle {
+    /// Signal shutdown and wait for the loop to finish the current tick.
+    pub async fn shutdown(self) {
+        let _ = self.shutdown.send(true);
+        let _ = self.join.await;
     }
 }

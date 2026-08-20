@@ -13,19 +13,23 @@ readme = "README.md"
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
+finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-workflow-local = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "sync", "time"] }
 
 [dev-dependencies]
 finstack-ai-store-memory = { workspace = true }
-finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-test = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "sync", "time"] }
+
+[[bin]]
+name = "finstack_workflow_worker"
+path = "src/bin/finstack_workflow_worker.rs"
 
 [lints]
 workspace = true

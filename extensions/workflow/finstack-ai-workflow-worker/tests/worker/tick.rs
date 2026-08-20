@@ -284,3 +284,25 @@ async fn tick_keeps_the_inbox_entry_when_the_resume_cannot_park() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].attempts, 2, "a second attempt was recorded");
 }
+
+/// `spawn` runs the tick loop on a real interval and `shutdown` returns once
+/// the current tick has finished, without hanging.
+#[tokio::test]
+async fn spawn_ticks_and_shuts_down_cleanly() {
+    let journal = memory_store();
+    let cron = Arc::new(MemoryCronStore::new());
+    let store = Arc::new(MemoryWorkerStore::new());
+    let worker = Arc::new(
+        WorkerBuilder::new(
+            journal,
+            cron,
+            Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+            Arc::clone(&store) as Arc<dyn FireStore>,
+            Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .build(),
+    );
+    let handle = Arc::clone(&worker).spawn(Duration::from_millis(5));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    handle.shutdown().await;
+}

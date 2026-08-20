@@ -20,4 +20,6 @@ pub use memory::MemoryWorkerStore;
 pub use park::park;
 pub use sqlite::SqliteWorkerStore;
 pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
-pub use worker::{PortsFactory, RunStarter, StartedRun, TickReport, WorkerBuilder, WorkflowWorker};
+pub use worker::{
+    PortsFactory, RunStarter, StartedRun, TickReport, WorkerBuilder, WorkerHandle, WorkflowWorker,
+};
